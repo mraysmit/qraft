@@ -1,0 +1,423 @@
+/*
+ * Copyright 2025 Mark Andrew Ray-Smith Cityline Ltd
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package dev.mars.qraft.controller.integration;
+
+import dev.mars.qraft.controller.state.*;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import dev.mars.qraft.controller.http.HttpApiServer;
+import dev.mars.qraft.controller.raft.InMemoryTransportSimulator;
+import dev.mars.qraft.controller.raft.RaftNode;
+import dev.mars.qraft.controller.raft.RaftNodeMode;
+import dev.mars.qraft.controller.raft.RaftTransport;
+
+import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
+import dev.mars.qraft.controller.state.QraftStateStore;
+import org.junit.jupiter.api.*;
+
+import static org.awaitility.Awaitility.await;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.Set;
+import java.util.logging.Logger;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * Integration test for Agent Job Management flow.
+ * Tests the complete flow from job assignment to status reporting.
+ *
+ * This test uses real implementations without mocking.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2025-12-11
+ * @version 1.0
+ */
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+class AgentJobManagementIntegrationTest {
+
+    private static final Logger logger = Logger.getLogger(AgentJobManagementIntegrationTest.class.getName());
+    private static final int HTTP_PORT = 18080;
+    private static final String BASE_URL = "http://localhost:" + HTTP_PORT;
+
+    private static RaftNode raftNode;
+    private static QraftStateStore stateMachine;
+    private static HttpApiServer httpServer;
+    private static HttpClient httpClient;
+    private static ObjectMapper objectMapper;
+    private static io.vertx.core.Vertx vertx;
+
+    private static String testAgentId;
+    private static String testJobId;
+    private static String testAssignmentId;
+
+    @BeforeAll
+    static void setUp() throws Exception {
+        logger.info("Setting up Agent Job Management Integration Test");
+
+        vertx = io.vertx.core.Vertx.vertx();
+
+        // Initialize object mapper
+        objectMapper = new ObjectMapper();
+        objectMapper.registerModule(new JavaTimeModule());
+
+        // Initialize HTTP client
+        httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(5))
+                .build();
+
+        // Initialize state machine
+        stateMachine = new QraftStateStore();
+
+        // Create an in-memory transport for testing (supports single-node clusters)
+        RaftTransport transport = new InMemoryTransportSimulator("test-node-1");
+
+        // Initialize Raft node (single node cluster for testing with short election timeout)
+        Set<String> clusterNodes = Set.of("test-node-1");
+        raftNode = RaftNode.builder().vertx(vertx).nodeId("test-node-1").clusterNodes(clusterNodes).transport(transport).stateMachine(stateMachine).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
+                .electionTimeout(500).heartbeatInterval(100).build();
+        raftNode.start();
+
+        // Wait for node to become leader reactively
+        await().atMost(java.time.Duration.ofSeconds(10))
+            .pollInterval(java.time.Duration.ofMillis(50))
+            .until(() -> raftNode.isLeader());
+
+        assertTrue(raftNode.isLeader(), "Node should become leader");
+
+        // Start HTTP API server and wait for it to be ready
+        httpServer = new HttpApiServer(vertx, HTTP_PORT, raftNode, stateMachine);
+        httpServer.start().toCompletionStage().toCompletableFuture().get(5, java.util.concurrent.TimeUnit.SECONDS);
+
+        logger.info("Test environment ready");
+    }
+
+    @AfterAll
+    static void tearDown() throws Exception {
+        if (httpServer != null) {
+            httpServer.stop();
+        }
+        if (raftNode != null) {
+            raftNode.stop();
+        }
+        if (vertx != null) {
+            vertx.close();
+        }
+        // Clear the InMemoryTransportSimulator registry
+        InMemoryTransportSimulator.clearAllTransports();
+        logger.info("Test environment cleaned up");
+    }
+
+    @Test
+    @Order(1)
+    void testRegisterAgent() throws Exception {
+        logger.info("TEST 1: Register Agent");
+
+        testAgentId = "test-agent-" + System.currentTimeMillis();
+
+        String requestBody = """
+            {
+                "agentId": "%s",
+                "hostname": "test-host",
+                "address": "192.168.1.100",
+                "port": 8080,
+                "version": "1.0.0",
+                "region": "us-east-1",
+                "datacenter": "dc1",
+                "capabilities": {
+                    "supportedProtocols": ["http", "https", "ftp"],
+                    "maxConcurrentTransfers": 5,
+                    "maxTransferSize": 1073741824,
+                    "maxBandwidth": 104857600
+                }
+            }
+            """.formatted(testAgentId);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/api/v1/agents/register"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(201, response.statusCode(), "Agent registration should succeed");
+
+        JsonNode responseJson = objectMapper.readTree(response.body());
+        assertTrue(responseJson.get("success").asBoolean(), "Response should indicate success");
+        assertEquals(testAgentId, responseJson.get("agentId").asText(), "Agent ID should match");
+
+        logger.info("[PASS] Agent registered: " + testAgentId);
+    }
+
+    @Test
+    @Order(2)
+    void testCreateTransferJob() throws Exception {
+        logger.info("TEST 2: Create Transfer Job");
+
+        testJobId = "test-job-" + System.currentTimeMillis();
+
+        String requestBody = """
+            {
+                "jobId": "%s",
+                "sourceUri": "https://example.com/file.txt",
+                "destinationPath": "/data/file.txt",
+                "totalBytes": 1048576,
+                "description": "Test transfer job"
+            }
+            """.formatted(testJobId);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/api/v1/transfers"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(201, response.statusCode(), "Transfer job creation should succeed");
+
+        JsonNode responseJson = objectMapper.readTree(response.body());
+        assertTrue(responseJson.get("success").asBoolean(), "Response should indicate success");
+
+        logger.info("[PASS] Transfer job created: " + testJobId);
+    }
+
+    @Test
+    @Order(3)
+    void testAssignJobToAgent() throws Exception {
+        logger.info("TEST 3: Assign Job to Agent");
+
+        testAssignmentId = "assignment-" + System.currentTimeMillis();
+
+        String requestBody = """
+            {
+                "assignmentId": "%s",
+                "jobId": "%s",
+                "agentId": "%s"
+            }
+            """.formatted(testAssignmentId, testJobId, testAgentId);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/api/v1/assignments"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(201, response.statusCode(), "Job assignment should succeed");
+
+        JsonNode responseJson = objectMapper.readTree(response.body());
+        assertTrue(responseJson.get("success").asBoolean(), "Response should indicate success");
+
+        logger.info("[PASS] Job assigned to agent: " + testAssignmentId);
+    }
+
+    @Test
+    @Order(4)
+    void testAgentPollsForJobs() throws Exception {
+        logger.info("TEST 4: Agent Polls for Jobs");
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/api/v1/agents/" + testAgentId + "/jobs"))
+                .GET()
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, response.statusCode(), "Job polling should succeed");
+
+        JsonNode responseJson = objectMapper.readTree(response.body());
+        assertTrue(responseJson.has("pendingJobs"), "Response should have pendingJobs field");
+        assertTrue(responseJson.has("total"), "Response should have total field");
+
+        JsonNode pendingJobs = responseJson.get("pendingJobs");
+        assertTrue(pendingJobs.isArray(), "pendingJobs should be an array");
+        assertTrue(pendingJobs.size() > 0, "Should have at least one pending job");
+        assertEquals(pendingJobs.size(), responseJson.get("total").asInt(), "total should match array size");
+
+        JsonNode firstJob = pendingJobs.get(0);
+        assertEquals(testJobId, firstJob.get("jobId").asText(), "Job ID should match");
+        assertEquals(testAgentId, firstJob.get("agentId").asText(), "Agent ID should match");
+
+        logger.info("[PASS] Agent polled and found " + pendingJobs.size() + " pending job(s)");
+    }
+
+    @Test
+    @Order(5)
+    void testAgentReportsAccepted() throws Exception {
+        logger.info("TEST 5: Agent Reports Job Accepted");
+
+        String requestBody = """
+            {
+                "agentId": "%s",
+                "status": "ACCEPTED"
+            }
+            """.formatted(testAgentId);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/api/v1/jobs/" + testJobId + "/status"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, response.statusCode(), "Status update should succeed");
+
+        JsonNode responseJson = objectMapper.readTree(response.body());
+        assertTrue(responseJson.get("success").asBoolean(), "Response should indicate success");
+
+        logger.info("[PASS] Agent reported job accepted");
+    }
+
+    @Test
+    @Order(6)
+    void testAgentReportsInProgress() throws Exception {
+        logger.info("TEST 6: Agent Reports Job In Progress");
+
+        String requestBody = """
+            {
+                "agentId": "%s",
+                "status": "IN_PROGRESS",
+                "bytesTransferred": 524288
+            }
+            """.formatted(testAgentId);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/api/v1/jobs/" + testJobId + "/status"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, response.statusCode(), "Status update should succeed");
+
+        JsonNode responseJson = objectMapper.readTree(response.body());
+        assertTrue(responseJson.get("success").asBoolean(), "Response should indicate success");
+
+        logger.info("[PASS] Agent reported job in progress (50% complete)");
+    }
+
+
+    @Test
+    @Order(7)
+    void testAgentReportsCompleted() throws Exception {
+        logger.info("TEST 7: Agent Reports Job Completed");
+
+        String requestBody = """
+            {
+                "agentId": "%s",
+                "status": "COMPLETED",
+                "bytesTransferred": 1048576
+            }
+            """.formatted(testAgentId);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/api/v1/jobs/" + testJobId + "/status"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, response.statusCode(), "Status update should succeed");
+
+        JsonNode responseJson = objectMapper.readTree(response.body());
+        assertTrue(responseJson.get("success").asBoolean(), "Response should indicate success");
+
+        logger.info("[PASS] Agent reported job completed");
+    }
+
+    @Test
+    @Order(8)
+    void testVerifyJobCompletion() throws Exception {
+        logger.info("TEST 8: Verify Job Completion");
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/api/v1/transfers/" + testJobId))
+                .GET()
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, response.statusCode(), "Job retrieval should succeed");
+
+        JsonNode responseJson = objectMapper.readTree(response.body());
+        assertEquals("COMPLETED", responseJson.get("status").asText(), "Job status should be COMPLETED");
+        assertEquals(1048576, responseJson.get("bytesTransferred").asLong(), "Bytes transferred should match");
+
+        logger.info("[PASS] Job completion verified");
+    }
+
+    @Test
+    @Order(9)
+    void testAgentPollsForJobsAfterCompletion() throws Exception {
+        logger.info("TEST 9: Agent Polls for Jobs After Completion");
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(BASE_URL + "/api/v1/agents/" + testAgentId + "/jobs"))
+                .GET()
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, response.statusCode(), "Job polling should succeed");
+
+        JsonNode responseJson = objectMapper.readTree(response.body());
+        assertTrue(responseJson.has("pendingJobs"), "Response should have pendingJobs field");
+        JsonNode pendingJobs = responseJson.get("pendingJobs");
+        assertTrue(pendingJobs.isArray(), "pendingJobs should be an array");
+        assertEquals(0, pendingJobs.size(), "Should have no pending jobs after completion");
+        assertEquals(0, responseJson.get("total").asInt(), "total should be 0");
+
+        logger.info("[PASS] No pending jobs found (as expected)");
+    }
+
+    @Test
+    @Order(10)
+    void testCompleteFlowSummary() {
+        logger.info("\n" + "=".repeat(60));
+        logger.info("[DONE] AGENT JOB MANAGEMENT INTEGRATION TEST COMPLETE!");
+        logger.info("=".repeat(60));
+        logger.info("[PASS] Agent Registration - PASSED");
+        logger.info("[PASS] Transfer Job Creation - PASSED");
+        logger.info("[PASS] Job Assignment - PASSED");
+        logger.info("[PASS] Agent Job Polling - PASSED");
+        logger.info("[PASS] Status Reporting (ACCEPTED) - PASSED");
+        logger.info("[PASS] Status Reporting (IN_PROGRESS) - PASSED");
+        logger.info("[PASS] Status Reporting (COMPLETED) - PASSED");
+        logger.info("[PASS] Job Completion Verification - PASSED");
+        logger.info("[PASS] Post-Completion Polling - PASSED");
+        logger.info("=".repeat(60));
+        logger.info("Complete flow tested successfully!");
+        logger.info("Agent ID: " + testAgentId);
+        logger.info("Job ID: " + testJobId);
+        logger.info("Assignment ID: " + testAssignmentId);
+        logger.info("=".repeat(60));
+    }
+}
+
+

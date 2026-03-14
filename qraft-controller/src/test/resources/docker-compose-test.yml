@@ -1,0 +1,90 @@
+version: '3.8'
+
+# Qraft Controller Cluster for Testcontainers Integration Testing
+# NOTE: container_name removed for Testcontainers compatibility
+
+services:
+  controller1:
+    build:
+      context: ../../../..
+      dockerfile: qraft-controller/Dockerfile
+      additional_contexts:
+        m2cache: ${M2_REPO:-~/.m2/repository}/dev/mars
+    hostname: controller1
+    environment:
+      - QRAFT_NODE_ID=controller1
+      - QRAFT_RAFT_HOST=0.0.0.0
+      - QRAFT_RAFT_PORT=9080
+      - QRAFT_HTTP_PORT=8080
+      - QRAFT_CLUSTER_NODES=controller1=controller1:9080,controller2=controller2:9080,controller3=controller3:9080
+      - QRAFT_RAFT_ELECTION_TIMEOUT_MS=3000
+      - QRAFT_RAFT_HEARTBEAT_INTERVAL_MS=500
+      - JAVA_OPTS=-Xmx256m -Xms128m
+    ports:
+      - "8080"
+    networks:
+      - raft-cluster
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  controller2:
+    build:
+      context: ../../../..
+      dockerfile: qraft-controller/Dockerfile
+      additional_contexts:
+        m2cache: ${M2_REPO:-~/.m2/repository}/dev/mars
+    hostname: controller2
+    environment:
+      - QRAFT_NODE_ID=controller2
+      - QRAFT_RAFT_HOST=0.0.0.0
+      - QRAFT_RAFT_PORT=9080
+      - QRAFT_HTTP_PORT=8080
+      - QRAFT_CLUSTER_NODES=controller1=controller1:9080,controller2=controller2:9080,controller3=controller3:9080
+      - QRAFT_RAFT_ELECTION_TIMEOUT_MS=3000
+      - QRAFT_RAFT_HEARTBEAT_INTERVAL_MS=500
+      - JAVA_OPTS=-Xmx256m -Xms128m
+    ports:
+      - "8080"
+    networks:
+      - raft-cluster
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  controller3:
+    build:
+      context: ../../../..
+      dockerfile: qraft-controller/Dockerfile
+      additional_contexts:
+        m2cache: ${M2_REPO:-~/.m2/repository}/dev/mars
+    hostname: controller3
+    environment:
+      - QRAFT_NODE_ID=controller3
+      - QRAFT_RAFT_HOST=0.0.0.0
+      - QRAFT_RAFT_PORT=9080
+      - QRAFT_HTTP_PORT=8080
+      - QRAFT_CLUSTER_NODES=controller1=controller1:9080,controller2=controller2:9080,controller3=controller3:9080
+      - QRAFT_RAFT_ELECTION_TIMEOUT_MS=3000
+      - QRAFT_RAFT_HEARTBEAT_INTERVAL_MS=500
+      - JAVA_OPTS=-Xmx256m -Xms128m
+    ports:
+      - "8080"
+    networks:
+      - raft-cluster
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+networks:
+  raft-cluster:
+    driver: bridge

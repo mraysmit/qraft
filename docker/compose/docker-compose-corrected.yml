@@ -1,0 +1,57 @@
+# Qraft Single-Node Development Configuration
+# The controller is embedded within the API service
+# For production, multiple API instances would form a Raft cluster
+
+services:
+  # Single API service with embedded Raft controller
+  api:
+    build:
+      context: ../..
+      dockerfile: qraft-api/Dockerfile
+    container_name: qraft-api
+    hostname: api
+    environment:
+      - QUARKUS_HTTP_HOST=0.0.0.0
+      - QUARKUS_HTTP_PORT=8080
+      - JAVA_OPTS=-Xmx512m -Xms256m
+      # Raft configuration for single-node cluster
+      - QRAFT_RAFT_NODE_ID=api-node
+      - QRAFT_RAFT_CLUSTER_NODES=api-node=api:8080
+      - QRAFT_RAFT_ELECTION_TIMEOUT_MS=1000
+      - QRAFT_RAFT_HEARTBEAT_INTERVAL_MS=200
+    ports:
+      - "8080:8080"
+    networks:
+      qraft-network:
+        ipv4_address: 172.20.0.10
+    volumes:
+      - api-data:/app/data
+      - api-logs:/app/logs
+    labels:
+      - "logging=promtail"
+      - "service=qraft-api"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+networks:
+  qraft-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  api-data:
+    driver: local
+  api-logs:
+    driver: local

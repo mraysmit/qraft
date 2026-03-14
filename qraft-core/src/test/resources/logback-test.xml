@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    
+    <!-- Console appender with DEBUG level for tests.
+         %ex{short} truncates stack traces to first few frames to reduce noise
+         from JUnit/Surefire internals while keeping exception type and source visible.
+         Full stack traces are still available in the FILE appender for detailed debugging. -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n%ex{short}</pattern>
+        </encoder>
+    </appender>
+    
+    <!-- Consolidated file appender: all modules write to one file at project root.
+         testRunTimestamp is passed as a system property from Maven surefire (parent pom.xml)
+         so all modules share the same timestamp. prudent=true enables cross-JVM file locking. -->
+    <appender name="FILE" class="ch.qos.logback.core.FileAppender">
+        <file>../test-logs/qraft-test-${testRunTimestamp}.log</file>
+        <append>true</append>
+        <prudent>true</prudent>
+        <encoder>
+            <!-- Include simulator and test context from MDC when available -->
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{simulator}/%X{testMethod}] %logger{40} - %msg%n</pattern>
+        </encoder>
+    </appender>
+    
+    <!-- SimulatorTestRunner at DEBUG level for test context -->
+    <!-- Set to TRACE to also see OS/environment details (hostname, Java version, etc.) -->
+    <logger name="SimulatorTestRunner" level="DEBUG"/>
+    
+    <!-- Qraft simulator packages at DEBUG level -->
+    <logger name="dev.mars.qraft.simulator" level="DEBUG"/>
+    
+    <!-- Qraft packages at DEBUG level -->
+    <logger name="dev.mars.qraft" level="DEBUG"/>
+    
+    <!-- Reduce noise from third-party libraries -->
+    <logger name="org.apache" level="WARN"/>
+    <logger name="io.vertx" level="WARN"/>
+    <logger name="io.netty" level="WARN"/>
+    
+    <root level="INFO">
+        <!-- Output to both console AND file -->
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE"/>
+    </root>
+    
+</configuration>

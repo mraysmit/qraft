@@ -1,0 +1,102 @@
+# syntax=docker/dockerfile:1.4
+# Multi-stage build for Qraft Controller
+# Requires Docker BuildKit (DOCKER_BUILDKIT=1)
+#
+# BUILD COMMAND (uses additional build context for local Maven artifacts):
+#   docker build --build-context m2cache=$HOME/.m2/repository \
+#                -f qraft-controller/Dockerfile -t qraft-controller .
+#
+# This eliminates the need for an m2-repo directory in the build context.
+# The raftlog-core dependency (not on Maven Central) is pulled from your
+# local Maven cache via BuildKit's named context feature.
+
+ARG BUILDER_IMAGE=maven:3.9.11-eclipse-temurin-25
+ARG RUNTIME_IMAGE=eclipse-temurin:25-jre-alpine
+
+FROM ${BUILDER_IMAGE} AS builder
+
+# Set working directory
+WORKDIR /app
+
+# Copy parent pom and module poms first for better layer caching
+COPY pom.xml .
+COPY qraft-core/pom.xml qraft-core/
+COPY qraft-workflow/pom.xml qraft-workflow/
+COPY qraft-tenant/pom.xml qraft-tenant/
+COPY qraft-controller/pom.xml qraft-controller/
+
+# Create empty stub poms for modules not needed for controller build
+RUN mkdir -p qraft-integration-examples && echo '<?xml version="1.0" encoding="UTF-8"?><project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"><modelVersion>4.0.0</modelVersion><parent><groupId>dev.mars</groupId><artifactId>qraft</artifactId><version>1.0-SNAPSHOT</version></parent><artifactId>qraft-integration-examples</artifactId><packaging>pom</packaging></project>' > qraft-integration-examples/pom.xml
+
+RUN mkdir -p qraft-agent && echo '<?xml version="1.0" encoding="UTF-8"?><project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"><modelVersion>4.0.0</modelVersion><parent><groupId>dev.mars</groupId><artifactId>qraft</artifactId><version>1.0-SNAPSHOT</version></parent><artifactId>qraft-agent</artifactId><packaging>pom</packaging></project>' > qraft-agent/pom.xml
+
+RUN mkdir -p qraft-api && echo '<?xml version="1.0" encoding="UTF-8"?><project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd"><modelVersion>4.0.0</modelVersion><parent><groupId>dev.mars</groupId><artifactId>qraft</artifactId><version>1.0-SNAPSHOT</version></parent><artifactId>qraft-api</artifactId><packaging>pom</packaging></project>' > qraft-api/pom.xml
+
+# Copy local Maven artifacts from named build context (raftlog-core not on Maven Central)
+# BuildKit pulls these from host's ~/.m2/repository/dev/mars via --build-context m2cache=...
+# Context is pointed directly at dev/mars to avoid transferring the entire Maven cache
+COPY --from=m2cache / /root/.m2/repository/dev/mars
+
+# Download dependencies (cached via Docker BuildKit cache mount)
+RUN --mount=type=cache,target=/root/.m2/repository/org \
+    --mount=type=cache,target=/root/.m2/repository/io \
+    --mount=type=cache,target=/root/.m2/repository/com \
+    --mount=type=cache,target=/root/.m2/repository/net \
+    mvn dependency:go-offline -pl qraft-controller -am -Dsilent=true || true
+
+# Copy source code (changes here don't invalidate dependency layer)
+COPY qraft-core/src qraft-core/src
+COPY qraft-workflow/src qraft-workflow/src
+COPY qraft-tenant/src qraft-tenant/src
+COPY qraft-controller/src qraft-controller/src
+
+# Build the application
+# -U flag removed: no longer needed since raftlog is properly available
+RUN --mount=type=cache,target=/root/.m2/repository/org \
+    --mount=type=cache,target=/root/.m2/repository/io \
+    --mount=type=cache,target=/root/.m2/repository/com \
+    --mount=type=cache,target=/root/.m2/repository/net \
+    mvn package -pl qraft-controller -am -DskipTests
+
+# Runtime stage
+FROM ${RUNTIME_IMAGE}
+
+# Install curl for health checks
+RUN apk add --no-cache curl
+
+# Create app user
+RUN addgroup -g 1001 qraft && \
+    adduser -D -s /bin/sh -u 1001 -G qraft qraft
+
+# Set working directory
+WORKDIR /app
+
+# Copy the built JAR
+COPY --from=builder /app/qraft-controller/target/qraft-controller-*.jar app.jar
+
+# Create directories for logs and data
+RUN mkdir -p /app/logs /app/data && \
+    chown -R qraft:qraft /app
+
+# Switch to non-root user
+USER qraft
+
+# Expose the Raft communication port
+EXPOSE 8080
+
+# Environment variables for Qraft Controller
+ENV JAVA_OPTS="-Xmx512m -Xms256m" \
+    NODE_ID="" \
+    CLUSTER_NODES="" \
+    RAFT_PORT=8080 \
+    RAFT_HOST=0.0.0.0 \
+    HTTP_PORT=8080 \
+    ELECTION_TIMEOUT_MS=5000 \
+    HEARTBEAT_INTERVAL_MS=1000
+
+# Health check using controller's health endpoint
+HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:${HTTP_PORT}/health || exit 1
+
+# Run the Qraft Controller application
+CMD ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

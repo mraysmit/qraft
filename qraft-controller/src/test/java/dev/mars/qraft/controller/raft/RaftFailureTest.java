@@ -1,0 +1,424 @@
+/*
+ * Copyright 2025 Mark Andrew Ray-Smith Cityline Ltd
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package dev.mars.qraft.controller.raft;
+
+import dev.mars.qraft.controller.state.*;
+
+import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
+import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
+import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
+import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
+import io.vertx.core.Future;
+import dev.mars.qraft.controller.raft.grpc.VoteRequest;
+import dev.mars.qraft.controller.raft.grpc.VoteResponse;
+
+import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
+
+import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
+import dev.mars.qraft.controller.state.RaftCommand;
+import dev.mars.qraft.controller.state.CommandResult;
+import dev.mars.qraft.distributedstate.DistributedStateCommand;
+import org.awaitility.Awaitility;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.time.Duration;
+import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * Tests for Raft failure scenarios and edge cases.
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @version 1.0
+ * @since 2025-08-20
+ */
+class RaftFailureTest {
+
+    private RaftNode node1;
+    private RaftNode node2;
+    private RaftNode node3;
+    private InMemoryTransportSimulator transport1;
+    private InMemoryTransportSimulator transport2;
+    private InMemoryTransportSimulator transport3;
+    private io.vertx.core.Vertx vertx;
+
+    @BeforeEach
+    void setUp() {
+        vertx = io.vertx.core.Vertx.vertx();
+        InMemoryTransportSimulator.clearAllTransports();
+
+        Set<String> clusterNodes = Set.of("node1", "node2", "node3");
+
+        transport1 = new InMemoryTransportSimulator("node1");
+        transport2 = new InMemoryTransportSimulator("node2");
+        transport3 = new InMemoryTransportSimulator("node3");
+
+        node1 = RaftNode.builder().vertx(vertx).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(new QraftStateStore()).mode(RaftNodeMode.volatileMode()).electionTimeout(600).heartbeatInterval(120).commandCodec(new ProtobufRaftCommandCodec()).build();
+        node2 = RaftNode.builder().vertx(vertx).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(new QraftStateStore()).mode(RaftNodeMode.volatileMode()).electionTimeout(600).heartbeatInterval(120).commandCodec(new ProtobufRaftCommandCodec()).build();
+        node3 = RaftNode.builder().vertx(vertx).nodeId("node3").clusterNodes(clusterNodes).transport(transport3).stateMachine(new QraftStateStore()).mode(RaftNodeMode.volatileMode()).electionTimeout(600).heartbeatInterval(120).commandCodec(new ProtobufRaftCommandCodec()).build();
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (node1 != null) node1.stop();
+        if (node2 != null) node2.stop();
+        if (node3 != null) node3.stop();
+        if (vertx != null) vertx.close();
+        InMemoryTransportSimulator.clearAllTransports();
+    }
+
+    @Test
+    void testCommandSubmissionToFollower() {
+        node1.start();
+        
+        // Node starts as follower
+        assertEquals(RaftNode.State.FOLLOWER, node1.getState());
+        
+        // Try to submit command to follower
+        RaftCommand command = distributedPut("key", "value");
+        Future<CommandResult<?>> future = node1.submitCommand(command);
+        
+        // Should fail
+        ExecutionException exception = assertThrows(ExecutionException.class, () -> {
+            future.toCompletionStage().toCompletableFuture().get(1, TimeUnit.SECONDS);
+        });
+        
+        assertTrue(exception.getCause() instanceof IllegalStateException);
+        assertTrue(exception.getCause().getMessage().contains("Not the leader"));
+    }
+
+    private static RaftCommand distributedPut(String key, String value) {
+        return new DistributedStateRaftCommand(DistributedStateCommand.put(key, value));
+    }
+
+    @Test
+    void testDoubleStartStop() {
+        // Test double start
+        node1.start().toCompletionStage().toCompletableFuture().join();
+        assertTrue(transport1.isRunning());
+        
+        // Second start should be safe
+        node1.start().toCompletionStage().toCompletableFuture().join();
+        assertTrue(transport1.isRunning());
+        
+        // Test double stop
+        node1.stop().toCompletionStage().toCompletableFuture().join();
+        assertFalse(transport1.isRunning());
+        
+        // Second stop should be safe
+        node1.stop().toCompletionStage().toCompletableFuture().join();
+        assertFalse(transport1.isRunning());
+    }
+
+    @Test
+    void testLeaderFailureAndRecovery() {
+        // Start all nodes
+        node1.start().toCompletionStage().toCompletableFuture().join();
+        node2.start().toCompletionStage().toCompletableFuture().join();
+        node3.start().toCompletionStage().toCompletableFuture().join();
+        
+        // Wait for leader election
+        Awaitility.await()
+                .atMost(Duration.ofSeconds(3))
+                .until(() -> Set.of(node1, node2, node3).stream()
+                        .anyMatch(RaftNode::isLeader));
+        
+        // Find and stop the leader
+        RaftNode leader = Set.of(node1, node2, node3).stream()
+                .filter(RaftNode::isLeader)
+                .findFirst()
+                .orElse(null);
+        
+        assertNotNull(leader);
+        leader.stop().toCompletionStage().toCompletableFuture().join();
+        
+        // Wait for new leader election among remaining nodes
+        Set<RaftNode> remainingNodes = Set.of(node1, node2, node3).stream()
+                .filter(node -> node != leader)
+                .collect(java.util.stream.Collectors.toSet());
+        
+        Awaitility.await()
+                .atMost(Duration.ofSeconds(4))
+                .until(() -> remainingNodes.stream()
+                        .anyMatch(RaftNode::isLeader));
+        
+        // Verify exactly one new leader
+        long leaderCount = remainingNodes.stream()
+                .mapToLong(node -> node.isLeader() ? 1 : 0)
+                .sum();
+        assertEquals(1, leaderCount);
+    }
+
+    @Test
+    void testNetworkPartition() {
+        // Start all nodes
+        node1.start().toCompletionStage().toCompletableFuture().join();
+        node2.start().toCompletionStage().toCompletableFuture().join();
+        node3.start().toCompletionStage().toCompletableFuture().join();
+        
+        // Wait for initial leader
+        Awaitility.await()
+                .atMost(Duration.ofSeconds(3))
+                .until(() -> Set.of(node1, node2, node3).stream()
+                        .anyMatch(RaftNode::isLeader));
+        
+        // Simulate network partition by stopping one node
+        node3.stop().toCompletionStage().toCompletableFuture().join();
+        
+        // Remaining nodes should still have a leader (majority)
+        Awaitility.await()
+                .atMost(Duration.ofSeconds(3))
+                .until(() -> Set.of(node1, node2).stream()
+                        .anyMatch(RaftNode::isLeader));
+        
+        long leaderCount = Set.of(node1, node2).stream()
+                .mapToLong(node -> node.isLeader() ? 1 : 0)
+                .sum();
+        assertEquals(1, leaderCount);
+    }
+
+    @Test
+    void testInvalidClusterConfiguration() {
+        // Test empty cluster - should not throw exception but should handle gracefully
+        RaftNode emptyClusterNode = RaftNode.builder().vertx(vertx).nodeId("test").clusterNodes(Set.of()).transport(transport1).stateMachine(new QraftStateStore()).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec()).build();
+        assertNotNull(emptyClusterNode);
+        assertEquals("test", emptyClusterNode.getNodeId());
+        assertEquals(RaftNode.State.FOLLOWER, emptyClusterNode.getState());
+    }
+
+    @Test
+    void testTransportFailures() {
+        // Test transport that fails to start
+        RaftTransport failingTransport = new RaftTransport() {
+            @Override
+            public void start(java.util.function.Consumer<RaftMessage> messageHandler) {
+                throw new RuntimeException("Transport failed to start");
+            }
+            
+            @Override
+            public void stop() {}
+            
+            @Override
+            public Future<VoteResponse> sendVoteRequest(String nodeId, VoteRequest request) {
+                return Future.failedFuture(new RuntimeException("Network error"));
+            }
+            
+            @Override
+            public Future<AppendEntriesResponse> sendAppendEntries(String nodeId, AppendEntriesRequest request) {
+                return Future.failedFuture(new RuntimeException("Network error"));
+            }
+
+            @Override
+            public Future<InstallSnapshotResponse> sendInstallSnapshot(String nodeId, InstallSnapshotRequest request) {
+                return Future.failedFuture(new RuntimeException("Network error"));
+            }
+            
+            public String getLocalNodeId() {
+                return "failing";
+            }
+            
+            public boolean isRunning() {
+                return false;
+            }
+        };
+        
+        RaftNode failingNode = RaftNode.builder().vertx(vertx).nodeId("failing").clusterNodes(Set.of("failing"))
+                .transport(failingTransport).stateMachine(new QraftStateStore()).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec()).build();
+        
+        // Should handle transport failure gracefully
+        Future<Void> future = failingNode.start();
+        
+        ExecutionException exception = assertThrows(ExecutionException.class, () -> {
+            future.toCompletionStage().toCompletableFuture().get(1, TimeUnit.SECONDS);
+        });
+        
+        assertTrue(exception.getCause() instanceof RuntimeException);
+        assertEquals("Transport failed to start", exception.getCause().getMessage());
+        logExpectedFailure("transport start failure", exception.getCause());
+    }
+
+    @Test
+    void testStateMachineFailures() {
+        // Test state machine that throws exceptions
+        RaftLogApplicator failingStateMachine = new RaftLogApplicator() {
+            @Override
+            public CommandResult<?> apply(RaftCommand command) {
+                throw new RuntimeException("State machine error");
+            }
+            
+            @Override
+            public byte[] takeSnapshot() {
+                throw new RuntimeException("Snapshot error");
+            }
+            
+            @Override
+            public void restoreSnapshot(byte[] snapshot) {
+                throw new RuntimeException("Restore error");
+            }
+            
+            @Override
+            public long getLastAppliedIndex() {
+                return 0;
+            }
+
+            @Override
+            public void setLastAppliedIndex(long index) {
+                throw new RuntimeException("Set index error");
+            }
+
+            @Override
+            public void reset() {
+                throw new RuntimeException("Reset error");
+            }
+        };
+        
+        // Test snapshot failure
+        RuntimeException snapshotFailure = assertThrows(RuntimeException.class, () -> {
+            failingStateMachine.takeSnapshot();
+        });
+        logExpectedFailure("state-machine snapshot failure", snapshotFailure);
+        
+        // Test restore failure
+        RuntimeException restoreFailure = assertThrows(RuntimeException.class, () -> {
+            failingStateMachine.restoreSnapshot(new byte[0]);
+        });
+        logExpectedFailure("state-machine restore failure", restoreFailure);
+        
+        // Test reset failure
+        RuntimeException resetFailure = assertThrows(RuntimeException.class, () -> {
+            failingStateMachine.reset();
+        });
+        logExpectedFailure("state-machine reset failure", resetFailure);
+    }
+
+    private static void logExpectedFailure(String scenario, Throwable failure) {
+        System.out.println("[EXPECTED-TEST-FAILURE] Scenario=" + scenario + " message=" + failure.getMessage());
+    }
+
+    @Test
+    void testConcurrentElections() {
+        // Start nodes with very short election timeouts to force concurrent elections
+        Set<String> clusterNodes = Set.of("fast1", "fast2", "fast3");
+        
+        RaftNode fast1 = RaftNode.builder().vertx(vertx).nodeId("fast1").clusterNodes(clusterNodes)
+                .transport(new InMemoryTransportSimulator("fast1")).stateMachine(new QraftStateStore()).mode(RaftNodeMode.volatileMode()).electionTimeout(100).heartbeatInterval(50).commandCodec(new ProtobufRaftCommandCodec()).build();
+        RaftNode fast2 = RaftNode.builder().vertx(vertx).nodeId("fast2").clusterNodes(clusterNodes)
+                .transport(new InMemoryTransportSimulator("fast2")).stateMachine(new QraftStateStore()).mode(RaftNodeMode.volatileMode()).electionTimeout(100).heartbeatInterval(50).commandCodec(new ProtobufRaftCommandCodec()).build();
+        RaftNode fast3 = RaftNode.builder().vertx(vertx).nodeId("fast3").clusterNodes(clusterNodes)
+                .transport(new InMemoryTransportSimulator("fast3")).stateMachine(new QraftStateStore()).mode(RaftNodeMode.volatileMode()).electionTimeout(100).heartbeatInterval(50).commandCodec(new ProtobufRaftCommandCodec()).build();
+        
+        try {
+            // Start all nodes simultaneously
+            fast1.start();
+            fast2.start();
+            fast3.start();
+            
+            // Eventually should converge to one leader
+            Awaitility.await()
+                    .atMost(Duration.ofSeconds(5))
+                    .until(() -> {
+                        long leaderCount = Set.of(fast1, fast2, fast3).stream()
+                                .mapToLong(node -> node.isLeader() ? 1 : 0)
+                                .sum();
+                        return leaderCount == 1;
+                    });
+            
+            // Verify exactly one leader
+            long finalLeaderCount = Set.of(fast1, fast2, fast3).stream()
+                    .mapToLong(node -> node.isLeader() ? 1 : 0)
+                    .sum();
+            assertEquals(1, finalLeaderCount);
+            
+        } finally {
+            fast1.stop();
+            fast2.stop();
+            fast3.stop();
+        }
+    }
+
+    @Test
+    void testMessageValidation() {
+        // Test vote request validation
+        VoteRequest voteRequest = VoteRequest.newBuilder()
+                .setTerm(1)
+                .setCandidateId("candidate")
+                .setLastLogIndex(0)
+                .setLastLogTerm(0)
+                .build();
+        assertNotNull(voteRequest.toString());
+        assertEquals(1, voteRequest.getTerm());
+        assertEquals("candidate", voteRequest.getCandidateId());
+        
+        // Test vote response validation
+        VoteResponse voteResponse = VoteResponse.newBuilder()
+                .setTerm(1)
+                .setVoteGranted(true)
+                .build();
+        assertNotNull(voteResponse.toString());
+        assertEquals(1, voteResponse.getTerm());
+        assertTrue(voteResponse.getVoteGranted());
+        
+        // Test append entries request validation
+        AppendEntriesRequest appendRequest = AppendEntriesRequest.newBuilder()
+                .setTerm(1)
+                .setLeaderId("leader")
+                .setPrevLogIndex(0)
+                .setPrevLogTerm(0)
+                .setLeaderCommit(0)
+                .build();
+        assertNotNull(appendRequest.toString());
+        assertEquals(0, appendRequest.getEntriesCount());
+        
+        // Test append entries response validation
+        AppendEntriesResponse appendResponse = AppendEntriesResponse.newBuilder()
+                .setTerm(1)
+                .setSuccess(true)
+                .setMatchIndex(0)
+                .build();
+        assertNotNull(appendResponse.toString());
+        assertTrue(appendResponse.getSuccess());
+    }
+
+    @Test
+    void testNodeIdValidation() {
+        assertEquals("node1", node1.getNodeId());
+        assertEquals("node2", node2.getNodeId());
+        assertEquals("node3", node3.getNodeId());
+        
+        // Test leader ID when not leader
+        assertNull(node1.getLeaderId()); // Not leader initially
+        
+        // Test single node becoming leader
+        Set<String> singleNode = Set.of("single");
+        RaftNode single = RaftNode.builder().vertx(vertx).nodeId("single").clusterNodes(singleNode)
+                .transport(new InMemoryTransportSimulator("single")).stateMachine(new QraftStateStore()).mode(RaftNodeMode.volatileMode()).electionTimeout(300).heartbeatInterval(100).commandCodec(new ProtobufRaftCommandCodec()).build();
+        
+        single.start();
+        
+        Awaitility.await()
+                .atMost(Duration.ofSeconds(2))
+                .until(single::isLeader);
+        
+        assertEquals("single", single.getLeaderId());
+        
+        single.stop();
+    }
+}

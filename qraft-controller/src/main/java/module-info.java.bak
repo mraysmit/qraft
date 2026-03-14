@@ -1,0 +1,39 @@
+module dev.mars.qraft.controller {
+    requires java.logging;
+    requires java.net.http;
+    requires jdk.httpserver;
+
+    requires com.fasterxml.jackson.annotation;
+    requires com.fasterxml.jackson.databind;
+    requires com.fasterxml.jackson.datatype.jsr310;
+
+    requires io.vertx.core;
+    requires io.vertx.web;
+    requires io.vertx.grpc.client;
+    requires io.vertx.grpc.server;
+
+    requires org.slf4j;
+    requires org.apache.httpcomponents.client5.httpclient5;
+    requires org.apache.httpcomponents.core5.http;
+    requires io.grpc;
+    requires io.grpc.stub;
+    requires io.grpc.protobuf;
+    requires io.grpc.netty;
+    requires com.google.common;
+    requires protobuf.java;
+    requires protobuf.java.util;
+    requires java.annotation;
+
+    requires dev.mars.qraft.core;
+    requires dev.mars.qraft.workflow;
+    requires dev.mars.qraft.tenant;
+
+    exports dev.mars.qraft.controller;
+    exports dev.mars.qraft.controller.raft;
+    exports dev.mars.qraft.controller.state;
+    exports dev.mars.qraft.controller.service;
+
+    opens dev.mars.qraft.controller to com.fasterxml.jackson.databind;
+    opens dev.mars.qraft.controller.state to com.fasterxml.jackson.databind;
+    opens dev.mars.qraft.controller.raft to com.fasterxml.jackson.databind;
+}

@@ -1,0 +1,258 @@
+/*
+ * Copyright 2025 Mark Andrew Ray-Smith Cityline Ltd
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package dev.mars.qraft.controller.raft;
+
+import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
+import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
+import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
+import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
+import dev.mars.qraft.controller.raft.grpc.RaftServiceGrpc;
+import dev.mars.qraft.controller.raft.grpc.VoteRequest;
+import dev.mars.qraft.controller.raft.grpc.VoteResponse;
+import io.grpc.BindableService;
+import io.grpc.Server;
+import io.grpc.ServerBuilder;
+import io.grpc.stub.StreamObserver;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.SpanKind;
+import io.opentelemetry.api.trace.StatusCode;
+import io.opentelemetry.api.trace.Tracer;
+import io.vertx.core.Future;
+import io.vertx.core.Promise;
+import io.vertx.core.Vertx;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
+
+import java.io.IOException;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * gRPC server implementation for Raft inter-node communication.
+ * Handles incoming RequestVote and AppendEntries RPC calls from peer nodes.
+ * 
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @version 1.0
+ * @since 2026-01-08
+ */
+public class GrpcRaftServer {
+
+    private static final Logger logger = LoggerFactory.getLogger(GrpcRaftServer.class);
+    private static final Tracer tracer = GlobalOpenTelemetry.getTracer("qraft-controller");
+
+    private final Vertx vertx;
+    private final int port;
+    private final RaftNode raftNode;
+    private final BindableService[] extraServices;
+    private Server server;
+
+    public GrpcRaftServer(Vertx vertx, int port, RaftNode raftNode) {
+        this(vertx, port, raftNode, new BindableService[0]);
+    }
+
+    public GrpcRaftServer(Vertx vertx, int port, RaftNode raftNode, BindableService... extraServices) {
+        this.vertx = vertx;
+        this.port = port;
+        this.raftNode = raftNode;
+        this.extraServices = extraServices != null ? extraServices : new BindableService[0];
+    }
+
+    /**
+     * Start the gRPC server.
+     * 
+     * @return Future that completes when server is started
+     */
+    public Future<Void> start() {
+        Promise<Void> promise = Promise.promise();
+
+        vertx.executeBlocking(() -> {
+            try {
+            ServerBuilder<?> builder = ServerBuilder.forPort(port)
+                .addService(new RaftServiceImpl());
+
+            for (BindableService service : extraServices) {
+                builder.addService(service);
+            }
+
+            server = builder.build().start();
+                logger.info("gRPC Raft server started on port {}", port);
+                return null;
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to start gRPC server on port " + port, e);
+            }
+        }).onSuccess(v -> promise.complete())
+          .onFailure(promise::fail);
+
+        return promise.future();
+    }
+
+    /**
+     * Stop the gRPC server gracefully.
+     * 
+     * @return Future that completes when server is stopped
+     */
+    public Future<Void> stop() {
+        Promise<Void> promise = Promise.promise();
+
+        if (server == null) {
+            promise.complete();
+            return promise.future();
+        }
+
+        vertx.executeBlocking(() -> {
+            try {
+                server.shutdown();
+                if (!server.awaitTermination(5, TimeUnit.SECONDS)) {
+                    server.shutdownNow();
+                    if (!server.awaitTermination(5, TimeUnit.SECONDS)) {
+                        logger.warn("gRPC server did not terminate cleanly");
+                    }
+                }
+                logger.info("gRPC Raft server stopped");
+                return null;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                server.shutdownNow();
+                throw new RuntimeException("Interrupted while stopping gRPC server", e);
+            }
+        }).onSuccess(v -> promise.complete())
+          .onFailure(promise::fail);
+
+        return promise.future();
+    }
+
+    /**
+     * Implementation of the RaftService gRPC service.
+     * Delegates all calls to the RaftNode's handlers.
+     */
+    private class RaftServiceImpl extends RaftServiceGrpc.RaftServiceImplBase {
+
+        @Override
+        public void requestVote(VoteRequest request, StreamObserver<VoteResponse> responseObserver) {
+            MDC.put("nodeId", raftNode.getNodeId());
+            MDC.put("rpcType", "RequestVote");
+            Span span = tracer.spanBuilder("raft.RequestVote")
+                    .setSpanKind(SpanKind.SERVER)
+                    .setAttribute("rpc.system", "grpc")
+                    .setAttribute("rpc.method", "RequestVote")
+                    .setAttribute("raft.candidate", request.getCandidateId())
+                    .setAttribute("raft.term", request.getTerm())
+                    .startSpan();
+            try {
+            logger.debug("Received RequestVote from {} for term {}", 
+                    request.getCandidateId(), request.getTerm());
+
+            raftNode.handleVoteRequest(request)
+                    .onSuccess(response -> {
+                        span.setAttribute("raft.vote_granted", response.getVoteGranted());
+                        span.end();
+                        logger.debug("Responding to RequestVote: granted={}, term={}", 
+                                response.getVoteGranted(), response.getTerm());
+                        responseObserver.onNext(response);
+                        responseObserver.onCompleted();
+                    })
+                    .onFailure(e -> {
+                        span.setStatus(StatusCode.ERROR, e.getMessage());
+                        span.recordException(e);
+                        span.end();
+                        logger.error("Error handling RequestVote: {}", e.getMessage());
+                        logger.debug("Stack trace for RequestVote handling error", e);
+                        responseObserver.onError(e);
+                    });
+            } finally {
+                MDC.remove("rpcType");
+            }
+        }
+
+        @Override
+        public void appendEntries(AppendEntriesRequest request, StreamObserver<AppendEntriesResponse> responseObserver) {
+            MDC.put("nodeId", raftNode.getNodeId());
+            MDC.put("rpcType", "AppendEntries");
+            Span span = tracer.spanBuilder("raft.AppendEntries")
+                    .setSpanKind(SpanKind.SERVER)
+                    .setAttribute("rpc.system", "grpc")
+                    .setAttribute("rpc.method", "AppendEntries")
+                    .setAttribute("raft.leader", request.getLeaderId())
+                    .setAttribute("raft.term", request.getTerm())
+                    .setAttribute("raft.entries_count", request.getEntriesCount())
+                    .startSpan();
+            try {
+            logger.debug("Received AppendEntries from {} for term {}, entries={}", 
+                    request.getLeaderId(), request.getTerm(), request.getEntriesCount());
+
+            raftNode.handleAppendEntriesRequest(request)
+                    .onSuccess(response -> {
+                        span.setAttribute("raft.success", response.getSuccess());
+                        span.end();
+                        logger.debug("Responding to AppendEntries: success={}, term={}", 
+                                response.getSuccess(), response.getTerm());
+                        responseObserver.onNext(response);
+                        responseObserver.onCompleted();
+                    })
+                    .onFailure(e -> {
+                        span.setStatus(StatusCode.ERROR, e.getMessage());
+                        span.recordException(e);
+                        span.end();
+                        logger.error("Error handling AppendEntries: {}", e.getMessage());
+                        logger.debug("Stack trace for AppendEntries handling error", e);
+                        responseObserver.onError(e);
+                    });
+            } finally {
+                MDC.remove("rpcType");
+            }
+        }
+
+        @Override
+        public void installSnapshot(InstallSnapshotRequest request, StreamObserver<InstallSnapshotResponse> responseObserver) {
+            MDC.put("nodeId", raftNode.getNodeId());
+            MDC.put("rpcType", "InstallSnapshot");
+            Span span = tracer.spanBuilder("raft.InstallSnapshot")
+                    .setSpanKind(SpanKind.SERVER)
+                    .setAttribute("rpc.system", "grpc")
+                    .setAttribute("rpc.method", "InstallSnapshot")
+                    .setAttribute("raft.leader", request.getLeaderId())
+                    .setAttribute("raft.term", request.getTerm())
+                    .startSpan();
+            try {
+            logger.debug("Received InstallSnapshot from {} for term {}, lastIncludedIndex={}, chunk {}/{}",
+                    request.getLeaderId(), request.getTerm(),
+                    request.getLastIncludedIndex(), request.getChunkIndex() + 1, request.getTotalChunks());
+
+            raftNode.handleInstallSnapshot(request)
+                    .onSuccess(response -> {
+                        span.setAttribute("raft.success", response.getSuccess());
+                        span.end();
+                        logger.debug("Responding to InstallSnapshot: success={}, term={}",
+                                response.getSuccess(), response.getTerm());
+                        responseObserver.onNext(response);
+                        responseObserver.onCompleted();
+                    })
+                    .onFailure(e -> {
+                        span.setStatus(StatusCode.ERROR, e.getMessage());
+                        span.recordException(e);
+                        span.end();
+                        logger.error("Error handling InstallSnapshot: {}", e.getMessage());
+                        logger.debug("Stack trace for InstallSnapshot handling error", e);
+                        responseObserver.onError(e);
+                    });
+            } finally {
+                MDC.remove("rpcType");
+            }
+        }
+    }
+}

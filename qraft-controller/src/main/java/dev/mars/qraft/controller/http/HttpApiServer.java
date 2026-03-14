@@ -1,0 +1,214 @@
+/*
+ * Copyright 2025 Mark Andrew Ray-Smith Cityline Ltd
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package dev.mars.qraft.controller.http;
+
+import dev.mars.qraft.controller.http.handlers.*;
+import dev.mars.qraft.controller.raft.RaftNode;
+import dev.mars.qraft.controller.state.GenericStateStore;
+import dev.mars.qraft.controller.state.QraftStateStore;
+import io.vertx.core.Future;
+import io.vertx.core.Vertx;
+import io.vertx.core.http.HttpServer;
+import io.vertx.ext.web.Router;
+import io.vertx.ext.web.handler.BodyHandler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Reactive HTTP API Server using Vert.x Web.
+ *
+ * <p>Single Responsibility: This class owns only server lifecycle (start/stop)
+ * and route wiring. All request handling is delegated to dedicated handler classes:</p>
+ * <ul>
+ *   <li>{@link CorrelationIdHandler} — request ID propagation</li>
+ *   <li>{@link DrainModeHandler} — graceful shutdown gating</li>
+ *   <li>{@link LeaderGuardHandler} — Raft leader enforcement for writes</li>
+ *   <li>{@link GlobalErrorHandler} — consistent error envelope</li>
+ *   <li>Domain handlers in {@code handlers/} package — per-resource CRUD</li>
+ * </ul>
+ *
+ * <p>Open/Closed: New endpoints can be added by creating new handler classes
+ * and registering routes here — no modification to existing handlers required.</p>
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @version 2.0
+ * @since 2025-08-26
+ */
+public class HttpApiServer {
+
+    private static final Logger logger = LoggerFactory.getLogger(HttpApiServer.class);
+    private static final String VERSION = "1.0.0-alpha";
+
+    private final Vertx vertx;
+    private final int port;
+    private final RaftNode raftNode;
+    private final GenericStateStore stateStore;
+    private final QraftStateStore qraftStateStore;
+    private final int prometheusPort;
+    private final DrainModeHandler drainModeHandler;
+    private HealthHandler healthHandler;
+    private HttpServer httpServer;
+
+    /**
+     * Creates an HttpApiServer with default Prometheus port from configuration.
+     */
+    public HttpApiServer(Vertx vertx, int port, RaftNode raftNode, GenericStateStore stateStore) {
+        this(vertx, port, raftNode, stateStore, -1);
+    }
+
+    /**
+     * Creates an HttpApiServer with a specific Prometheus port.
+     *
+     * @param prometheusPort the port where Prometheus metrics are exposed, or -1 to use config default
+     */
+    public HttpApiServer(Vertx vertx, int port, RaftNode raftNode, GenericStateStore stateStore, int prometheusPort) {
+        this.vertx = vertx;
+        this.port = port;
+        this.raftNode = raftNode;
+        this.stateStore = stateStore;
+        this.qraftStateStore = null;
+        this.prometheusPort = prometheusPort;
+        this.drainModeHandler = new DrainModeHandler();
+    }
+
+    // Compatibility constructors for legacy tests that still build with QraftStateStore.
+    public HttpApiServer(Vertx vertx, int port, RaftNode raftNode, QraftStateStore stateStore) {
+        this(vertx, port, raftNode, stateStore, -1);
+    }
+
+    public HttpApiServer(Vertx vertx, int port, RaftNode raftNode, QraftStateStore stateStore, int prometheusPort) {
+        this.vertx = vertx;
+        this.port = port;
+        this.raftNode = raftNode;
+        this.stateStore = new GenericStateStore(stateStore.getSystemMetadata());
+        this.qraftStateStore = stateStore;
+        this.prometheusPort = prometheusPort;
+        this.drainModeHandler = new DrainModeHandler();
+    }
+
+    public Future<Void> start() {
+        Router router = Router.router(vertx);
+
+        // ==================== Middleware Pipeline ====================
+        router.route().handler(BodyHandler.create());
+        router.route().handler(new CorrelationIdHandler());
+        router.route().handler(drainModeHandler);
+        router.route().handler(new LeaderGuardHandler(raftNode));
+        router.route().failureHandler(new GlobalErrorHandler());
+        router.errorHandler(404, new GlobalErrorHandler());
+        router.errorHandler(405, new GlobalErrorHandler());
+
+        // ==================== Infrastructure Endpoints ====================
+        if (prometheusPort > 0) {
+            router.get("/metrics").handler(new MetricsHandler(vertx, prometheusPort));
+        } else {
+            router.get("/metrics").handler(new MetricsHandler(vertx));
+        }
+
+        // ==================== Health Endpoints ====================
+        this.healthHandler = new HealthHandler(raftNode, VERSION);
+        healthHandler.startPeriodicChecks(vertx);
+        router.get("/health/live").handler(new LivenessHandler());
+        router.get("/health/ready").handler(new ReadinessHandler(raftNode));
+        router.get("/health").handler(healthHandler);
+        router.get("/status").handler(new StatusHandler(raftNode));
+
+        // ==================== Cluster / Info Endpoints ====================
+        router.get("/raft/status").handler(new ClusterHandler(raftNode));
+        router.get("/api/v1/info").handler(new InfoHandler(raftNode, VERSION));
+
+        // ==================== Generic Replicated State Endpoints ====================
+        DistributedStateHandler stateHandler = new DistributedStateHandler(raftNode, stateStore);
+        router.get("/api/v1/state").handler(stateHandler.handleList());
+        router.get("/api/v1/state/:key").handler(stateHandler.handleGet());
+        router.put("/api/v1/state/:key").handler(stateHandler.handlePut());
+        router.delete("/api/v1/state/:key").handler(stateHandler.handleDelete());
+
+        // ==================== Qraft Domain Endpoints ====================
+        if (qraftStateStore != null) {
+            RouteHandler routeHandler = new RouteHandler(raftNode, qraftStateStore);
+            router.post("/api/v1/routes").handler(routeHandler.handleCreate());
+            router.get("/api/v1/routes").handler(routeHandler.handleList());
+            router.get("/api/v1/routes/:routeId").handler(routeHandler.handleGet());
+            router.put("/api/v1/routes/:routeId").handler(routeHandler.handleUpdate());
+            router.delete("/api/v1/routes/:routeId").handler(routeHandler.handleDelete());
+            router.put("/api/v1/routes/:routeId/suspend").handler(routeHandler.handleSuspend());
+            router.put("/api/v1/routes/:routeId/resume").handler(routeHandler.handleResume());
+
+            JobAssignmentHandler assignmentHandler = new JobAssignmentHandler(raftNode, qraftStateStore);
+            router.post("/api/v1/assignments").handler(assignmentHandler.handleAssign());
+            router.get("/api/v1/assignments").handler(assignmentHandler.handleList());
+            router.get("/api/v1/assignments/:assignmentId").handler(assignmentHandler.handleGet());
+            router.put("/api/v1/assignments/:assignmentId/accept").handler(assignmentHandler.handleAccept());
+            router.put("/api/v1/assignments/:assignmentId/reject").handler(assignmentHandler.handleReject());
+            router.put("/api/v1/assignments/:assignmentId/status").handler(assignmentHandler.handleUpdateStatus());
+            router.put("/api/v1/assignments/:assignmentId/cancel").handler(assignmentHandler.handleCancel());
+            router.delete("/api/v1/assignments/:assignmentId").handler(assignmentHandler.handleRemove());
+
+            router.post("/api/v1/agents/register").handler(new AgentRegistrationHandler(raftNode));
+            router.get("/api/v1/agents").handler(new AgentListHandler(qraftStateStore));
+            router.post("/api/v1/agents/heartbeat").handler(new HeartbeatHandler(raftNode, qraftStateStore));
+            router.get("/api/v1/agents/:agentId/jobs").handler(new AgentJobsHandler(qraftStateStore));
+
+            TransferLifecycleHandler transferHandler = new TransferLifecycleHandler(raftNode, qraftStateStore);
+            router.post("/api/v1/transfers").handler(transferHandler.handleCreateTransfer());
+            router.get("/api/v1/transfers/:jobId").handler(transferHandler.handleGetTransfer());
+            router.post("/api/v1/jobs/:jobId/status").handler(transferHandler.handleUpdateJobStatus());
+        }
+
+        httpServer = vertx.createHttpServer()
+                .requestHandler(router);
+
+        return httpServer.listen(port)
+                .onSuccess(server -> logger.info("HTTP API Server listening on port {}", port))
+                .onFailure(err -> {
+                    logger.error("Failed to start HTTP API Server: {}", err.getMessage());
+                    logger.debug("Stack trace for HTTP API Server start failure", err);
+                })
+                .mapEmpty();
+    }
+
+    public Future<Void> stop() {
+        if (healthHandler != null) {
+            healthHandler.stopPeriodicChecks(vertx);
+        }
+        if (httpServer != null) {
+            return httpServer.close()
+                    .onSuccess(v -> logger.info("HTTP API Server stopped"));
+        }
+        return Future.succeededFuture();
+    }
+
+    /**
+     * Enters drain mode — stops accepting new API requests but allows health probes.
+     *
+     * @return a Future that completes immediately when drain mode is activated
+     */
+    public Future<Void> enterDrainMode() {
+        drainModeHandler.enterDrainMode();
+        return Future.succeededFuture();
+    }
+
+    /**
+     * Checks if the server is in drain mode.
+     *
+     * @return true if drain mode is active
+     */
+    public boolean isDraining() {
+        return drainModeHandler.isDraining();
+    }
+}

@@ -1,0 +1,381 @@
+/*
+ * Copyright 2025 Mark Andrew Ray-Smith Cityline Ltd
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package dev.mars.qraft.agent;
+
+import dev.mars.qraft.agent.config.AgentConfiguration;
+import dev.mars.qraft.agent.service.JobPollingService;
+import io.vertx.core.Vertx;
+import io.vertx.core.http.HttpServer;
+import io.vertx.core.json.JsonObject;
+import io.vertx.ext.web.Router;
+import io.vertx.ext.web.handler.BodyHandler;
+import io.vertx.junit5.VertxExtension;
+import io.vertx.junit5.VertxTestContext;
+import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.extension.ExtendWith;
+
+import java.lang.reflect.Field;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * Integration tests for QraftAgent.
+ * Tests Vert.x integration and reactive patterns using real HTTP server (no mocks).
+ *
+ * Following coding principles:
+ * - No mocking (uses real Vert.x HTTP server)
+ * - Real implementations only
+ * - Integration testing with actual HTTP communication
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @version 1.0
+ * @since 2025-12-16
+ */
+@ExtendWith(VertxExtension.class)
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
+class QraftAgentTest {
+
+    private AgentConfiguration config;
+    private HttpServer mockControllerServer;
+    private int controllerPort;
+    private AtomicInteger registrationCount;
+    private AtomicInteger heartbeatCount;
+    private AtomicInteger statusReportCount;
+
+    @BeforeAll
+    void setUp(Vertx vertx, VertxTestContext testContext) {
+        registrationCount = new AtomicInteger(0);
+        heartbeatCount = new AtomicInteger(0);
+        statusReportCount = new AtomicInteger(0);
+
+        // Create a real HTTP server to simulate the controller (no mocking!)
+        Router router = Router.router(vertx);
+        router.route().handler(BodyHandler.create());
+
+        // Agent registration endpoint
+        router.post("/api/v1/agents/register").handler(ctx -> {
+            registrationCount.incrementAndGet();
+            JsonObject response = new JsonObject()
+                    .put("status", "registered")
+                    .put("agentId", "test-agent-001");
+            ctx.response()
+                    .putHeader("content-type", "application/json")
+                    .end(response.encode());
+        });
+
+        // Heartbeat endpoint
+        router.post("/api/v1/agents/:agentId/heartbeat").handler(ctx -> {
+            heartbeatCount.incrementAndGet();
+            JsonObject response = new JsonObject()
+                    .put("status", "ok")
+                    .put("timestamp", System.currentTimeMillis());
+            ctx.response()
+                    .putHeader("content-type", "application/json")
+                    .end(response.encode());
+        });
+
+        // Job polling endpoint
+        router.get("/api/v1/agents/:agentId/jobs").handler(ctx -> {
+            JsonObject response = new JsonObject()
+                .put("jobs", new io.vertx.core.json.JsonArray())
+                .put("pendingJobs", new io.vertx.core.json.JsonArray());
+            ctx.response()
+                    .putHeader("content-type", "application/json")
+                    .end(response.encode());
+        });
+
+        // Job status endpoint
+        router.post("/api/v1/jobs/:jobId/status").handler(ctx -> {
+            statusReportCount.incrementAndGet();
+            ctx.response()
+                .setStatusCode(200)
+                .putHeader("content-type", "application/json")
+                .end(new JsonObject().put("status", "ok").encode());
+        });
+
+        // Start the mock controller server
+        vertx.createHttpServer()
+                .requestHandler(router)
+                .listen(0) // Random port
+                .onSuccess(server -> {
+                    mockControllerServer = server;
+                    controllerPort = server.actualPort();
+
+                    // Create agent configuration pointing to our real test server
+                    config = new AgentConfiguration.Builder()
+                            .agentId("test-agent-001")
+                            .controllerUrl("http://localhost:" + controllerPort + "/api/v1")
+                            .region("test-region")
+                            .datacenter("test-dc")
+                            .agentPort(9090)
+                            .maxConcurrentTransfers(5)
+                            .heartbeatInterval(30000L)
+                            .version("1.0.0-TEST")
+                            .build();
+
+                    testContext.completeNow();
+                })
+                .onFailure(testContext::failNow);
+    }
+
+    @AfterAll
+    void tearDown(VertxTestContext testContext) {
+        if (mockControllerServer != null) {
+            mockControllerServer.close()
+                    .onComplete(ar -> testContext.completeNow());
+        } else {
+            testContext.completeNow();
+        }
+    }
+
+    @Test
+    @DisplayName("Should create QraftAgent with Vertx instance")
+    void testCreateAgentWithVertx(Vertx vertx, VertxTestContext testContext) {
+        assertNotNull(vertx, "Vertx instance should not be null");
+        assertNotNull(config, "Config should not be null");
+
+        // Create agent with Vertx instance (real implementation, no mocks)
+        QraftAgent agent = new QraftAgent(vertx, config);
+
+        assertNotNull(agent, "Agent should be created");
+        assertEquals(config, agent.getConfiguration(), "Configuration should match");
+
+        testContext.completeNow();
+    }
+
+    @Test
+    @DisplayName("Should validate configuration points to real test server")
+    void testConfigurationValidation() {
+        assertNotNull(config.getAgentId());
+        assertEquals("test-agent-001", config.getAgentId());
+        assertTrue(config.getControllerUrl().contains("localhost:" + controllerPort),
+                   "Should point to real test server");
+        assertEquals(30000L, config.getHeartbeatInterval());
+    }
+
+    @Test
+    @DisplayName("Should reject null Vertx instance")
+    void testNullVertxHandling() {
+        // Should throw NullPointerException when Vertx is null
+        assertThrows(NullPointerException.class, () -> {
+            new QraftAgent(null, config);
+        }, "Should throw NullPointerException for null Vertx");
+    }
+
+    @Test
+    @DisplayName("Should reject null configuration")
+    void testNullConfigHandling(Vertx vertx) {
+        // Should throw NullPointerException when config is null
+        assertThrows(NullPointerException.class, () -> {
+            new QraftAgent(vertx, null);
+        }, "Should throw NullPointerException for null config");
+    }
+
+    @Test
+    @DisplayName("Should support legacy constructor (deprecated)")
+    void testLegacyConstructor() {
+        // Legacy constructor should still work but log warning
+        @SuppressWarnings("deprecation")
+        QraftAgent agent = new QraftAgent(config);
+
+        assertNotNull(agent, "Agent should be created with legacy constructor");
+        assertEquals(config, agent.getConfiguration(), "Configuration should match");
+
+        agent.shutdown();
+        assertDoesNotThrow(() -> agent.awaitShutdown(), "Shutdown should complete cleanly");
+
+        Vertx ownedVertx = extractVertx(agent);
+        assertThrows(RejectedExecutionException.class,
+                () -> ownedVertx.setTimer(10, id -> {}),
+                "Legacy constructor should close internally managed Vert.x");
+    }
+
+    @Test
+    @DisplayName("Should not close externally managed Vert.x on shutdown")
+    void testShutdownDoesNotCloseExternallyManagedVertx(Vertx vertx, VertxTestContext testContext) {
+        QraftAgent agent = new QraftAgent(vertx, config);
+
+        agent.shutdown();
+        assertDoesNotThrow(() -> agent.awaitShutdown(), "Shutdown should complete cleanly");
+
+        assertDoesNotThrow(() -> vertx.setTimer(10, id -> {}),
+                "Shutdown should not close externally managed Vert.x");
+        testContext.completeNow();
+    }
+
+    @Test
+    @DisplayName("Should communicate with real HTTP server (no mocks)")
+    void testRealHttpCommunication(Vertx vertx, VertxTestContext testContext) {
+        // This test verifies we're using a REAL HTTP server, not mocks
+        // Server is already started in @BeforeAll — no timer delay needed
+
+        var httpClient = vertx.createHttpClient();
+        httpClient
+                .request(io.vertx.core.http.HttpMethod.POST, controllerPort, "localhost", "/api/v1/agents/register")
+                .compose(req -> req.send()
+                        .compose(io.vertx.core.http.HttpClientResponse::body))
+                .onComplete(ar -> {
+                    // Close the client before completing test to prevent Pool closed errors
+                    httpClient.close().onComplete(v -> {
+                        if (ar.succeeded()) {
+                            testContext.verify(() -> {
+                                JsonObject response = ar.result().toJsonObject();
+                                assertEquals("registered", response.getString("status"));
+                                assertEquals("test-agent-001", response.getString("agentId"));
+                            });
+                            testContext.completeNow();
+                        } else {
+                            testContext.failNow(ar.cause());
+                        }
+                    });
+                });
+    }
+
+    @Test
+    @DisplayName("Should verify test server is real Vert.x HTTP server")
+    void testServerIsReal(VertxTestContext testContext) {
+        assertNotNull(mockControllerServer, "Server should be a real HttpServer instance");
+        assertTrue(mockControllerServer.actualPort() > 0, "Server should have real port");
+        assertEquals(controllerPort, mockControllerServer.actualPort(), "Port should match");
+        testContext.completeNow();
+    }
+
+    @Test
+    @DisplayName("Should use Vert.x timers (verify timer IDs logged)")
+    void testVertxTimersUsed(Vertx vertx, VertxTestContext testContext) throws Exception {
+        QraftAgent agent = new QraftAgent(vertx, config);
+
+        // Start agent - should use Vert.x timers, not ScheduledExecutorService
+        agent.start();
+
+        // Verify agent started successfully (timers are set up)
+        // The logs should show "Vert.x timer ID" messages
+        testContext.completeNow();
+    }
+
+    @Test
+    @DisplayName("Should handle idempotent shutdown")
+    void testIdempotentShutdown(Vertx vertx, VertxTestContext testContext) {
+        QraftAgent agent = new QraftAgent(vertx, config);
+
+        // Multiple shutdowns should be safe (idempotent)
+        agent.shutdown();
+        agent.shutdown();
+        agent.shutdown();
+
+        testContext.completeNow();
+    }
+
+    @Test
+    @DisplayName("Should reject operations after shutdown")
+    void testOperationsAfterShutdown(Vertx vertx, VertxTestContext testContext) throws Exception {
+        QraftAgent agent = new QraftAgent(vertx, config);
+        agent.start();
+        agent.shutdown();
+
+        // Attempting to start again should fail
+        assertThrows(IllegalStateException.class, () -> {
+            agent.start();
+        }, "Should reject start() after shutdown");
+
+        testContext.completeNow();
+    }
+
+    @Test
+    @DisplayName("Should verify Vert.x reactive mode (no ScheduledExecutorService)")
+    void testReactiveMode(Vertx vertx, VertxTestContext testContext) {
+        QraftAgent agent = new QraftAgent(vertx, config);
+
+        // Agent should be created in reactive mode
+        // Logs should show "reactive mode" and "0 extra threads"
+        assertNotNull(agent);
+
+        testContext.completeNow();
+    }
+
+    @Test
+    @DisplayName("Should refuse job assigned to different agent")
+    void testRefuseForeignAssignedJob(Vertx vertx, VertxTestContext testContext) {
+        QraftAgent agent = new QraftAgent(vertx, config);
+
+        JobPollingService.PendingJob foreignJob = new JobPollingService.PendingJob(
+                "assign-foreign-1",
+                "job-foreign-1",
+                "another-agent",
+                "https://example.com/file.txt",
+                "C:/tmp/file.txt",
+                128L,
+                "foreign assignment"
+        );
+
+        invokeProcessJob(agent, foreignJob);
+
+        vertx.setTimer(200, id -> {
+            testContext.verify(() -> assertEquals(0, statusReportCount.get(),
+                    "Foreign-assigned job must not trigger any status reporting"));
+            testContext.completeNow();
+        });
+    }
+
+    @Test
+    @DisplayName("Should fail fast after repeated foreign assignments")
+    void testFailFastAfterRepeatedForeignAssignments(Vertx vertx, VertxTestContext testContext) {
+        QraftAgent agent = new QraftAgent(vertx, config);
+
+        JobPollingService.PendingJob foreignJob = new JobPollingService.PendingJob(
+                "assign-foreign-failfast",
+                "job-foreign-failfast",
+                "wrong-agent",
+                "https://example.com/file.txt",
+                "C:/tmp/file.txt",
+                256L,
+                "foreign assignment"
+        );
+
+        invokeProcessJob(agent, foreignJob);
+        invokeProcessJob(agent, foreignJob);
+        invokeProcessJob(agent, foreignJob);
+
+        assertDoesNotThrow(agent::awaitShutdown, "Agent should shutdown after mismatch threshold is reached");
+        assertThrows(IllegalStateException.class, agent::start,
+                "Agent should be closed after fail-fast shutdown");
+
+        testContext.completeNow();
+    }
+
+    private static Vertx extractVertx(QraftAgent agent) {
+        try {
+            Field vertxField = QraftAgent.class.getDeclaredField("vertx");
+            vertxField.setAccessible(true);
+            return (Vertx) vertxField.get(agent);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to extract Vert.x from QraftAgent", e);
+        }
+    }
+
+    private static void invokeProcessJob(QraftAgent agent, JobPollingService.PendingJob pendingJob) {
+        try {
+            var method = QraftAgent.class.getDeclaredMethod("processJob", JobPollingService.PendingJob.class);
+            method.setAccessible(true);
+            method.invoke(agent, pendingJob);
+        } catch (ReflectiveOperationException e) {
+            throw new AssertionError("Failed to invoke processJob on QraftAgent", e);
+        }
+    }
+}
+

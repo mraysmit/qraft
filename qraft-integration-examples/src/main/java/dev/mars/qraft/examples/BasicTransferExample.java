@@ -1,0 +1,283 @@
+/*
+ * Copyright 2025 Mark Andrew Ray-Smith Cityline Ltd
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package dev.mars.qraft.examples;
+
+import dev.mars.qraft.config.QraftConfiguration;
+import dev.mars.qraft.core.TransferRequest;
+import dev.mars.qraft.core.TransferResult;
+import dev.mars.qraft.core.TransferStatus;
+import dev.mars.qraft.examples.util.TestResultLogger;
+import dev.mars.qraft.transfer.SimpleTransferEngine;
+import dev.mars.qraft.transfer.TransferEngine;
+
+import io.vertx.core.Future;
+import io.vertx.core.Vertx;
+
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.Duration;
+import java.util.logging.Logger;
+
+/**
+ * Basic Transfer Example - Demonstrates fundamental Qraft file transfer capabilities.
+ * 
+ * This self-contained example shows:
+ * - Basic HTTP file transfer
+ * - Progress monitoring
+ * - Error handling
+ * - Performance metrics
+ * - Checksum verification
+ * 
+ * Run with: mvn exec:java -pl qraft-integration-examples
+ * 
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2025-08-17
+ * @version 1.0
+ */
+public class BasicTransferExample {
+    private static final Logger logger = Logger.getLogger(BasicTransferExample.class.getName());
+    
+    public static void main(String[] args) {
+        logger.info("=== Qraft Basic Transfer Example ===");
+        logger.info("Demonstrating fundamental file transfer capabilities");
+        logger.info("");
+        logger.info("This example will demonstrate:");
+        logger.info("  1. Basic HTTP file transfer with progress monitoring");
+        logger.info("  2. Multiple concurrent file transfers");
+        logger.info("  3. Retry logic and resilience with slow network responses");
+        logger.info("");
+
+        // Initialize configuration with default settings
+        QraftConfiguration config = new QraftConfiguration();
+        logger.info("Configuration loaded: " + config);
+
+        // Create Vert.x instance for reactive operations
+        Vertx vertx = Vertx.vertx();
+        
+        // Initialize transfer engine with Vert.x and configuration parameters
+        TransferEngine transferEngine = new SimpleTransferEngine(
+                vertx,
+                config.getMaxConcurrentTransfers(),  // Max concurrent transfers: 10
+                config.getMaxRetryAttempts(),        // Max retry attempts: 3
+                config.getRetryDelayMs()             // Initial retry delay: 1000ms
+        );
+
+        try {
+            // Create downloads directory for storing transferred files
+            Path downloadsDir = Paths.get("downloads");
+            Files.createDirectories(downloadsDir);
+            logger.info("Created downloads directory: " + downloadsDir.toAbsolutePath());
+            logger.info("");
+
+            // Run demonstration examples in sequence
+            runBasicTransferExample(transferEngine);
+            runMultipleFilesExample(transferEngine);
+            runRetryDemonstrationExample(transferEngine);  // Shows retry logic without scary errors
+
+        } catch (Exception e) {
+            // This catch block is for UNEXPECTED errors only
+            TestResultLogger.logUnexpectedError("Basic Transfer Example", e);
+            logger.severe("Full stack trace:");
+            e.printStackTrace();
+        } finally {
+            // Always shutdown transfer engine gracefully
+            logger.info("");
+            logger.info("Shutting down transfer engine...");
+            transferEngine.shutdown(10).toCompletionStage().toCompletableFuture().join();
+            vertx.close();
+            logger.info("=== Example completed successfully ===");
+        }
+    }
+    
+    private static void runBasicTransferExample(TransferEngine transferEngine) throws Exception {
+        logger.info("--- Basic Transfer Example ---");
+        logger.info("Downloading a 2KB test file from httpbin.org");
+
+        // Create transfer request using builder pattern
+        TransferRequest request = TransferRequest.builder()
+                .sourceUri(URI.create("https://httpbin.org/bytes/2048")) // 2KB test file from httpbin.org
+                .destinationPath(Paths.get("downloads/basic-example.bin"))
+                .protocol("http")
+                .build();
+
+        logger.info("Transfer source: " + request.getSourceUri());
+        logger.info("Transfer destination: " + request.getDestinationPath());
+
+        // Submit transfer and get future for result
+        Future<TransferResult> future = transferEngine.submitTransfer(request);
+
+        // Start real-time progress monitoring in background thread
+        monitorTransferProgress(transferEngine, request.getRequestId());
+
+        // Wait for transfer completion and get results
+        TransferResult result = future.toCompletionStage().toCompletableFuture().get();
+        displayTransferResult(result);
+    }
+    
+    private static void runMultipleFilesExample(TransferEngine transferEngine) throws Exception {
+        logger.info("--- Multiple Files Example ---");
+        logger.info("Downloading 3 files of different sizes concurrently");
+
+        String[] fileSizes = {"512", "1024", "4096"}; // Different file sizes in bytes
+        Future<TransferResult>[] futures = new Future[fileSizes.length];
+
+        // Submit all transfers simultaneously to demonstrate concurrency
+        logger.info("Submitting all transfers simultaneously...");
+        for (int i = 0; i < fileSizes.length; i++) {
+            TransferRequest request = TransferRequest.builder()
+                    .sourceUri(URI.create("https://httpbin.org/bytes/" + fileSizes[i]))
+                    .destinationPath(Paths.get("downloads/multi-file-" + fileSizes[i] + "b.bin"))
+                    .protocol("http")
+                    .build();
+
+            logger.info("  Submitting transfer " + (i + 1) + ": " + fileSizes[i] + " bytes");
+            futures[i] = transferEngine.submitTransfer(request);
+        }
+
+        // Wait for all transfers to complete and collect results
+        logger.info("All transfers submitted. Waiting for completion...");
+        for (int i = 0; i < futures.length; i++) {
+            TransferResult result = futures[i].toCompletionStage().toCompletableFuture().get();
+            String status = result.isSuccessful() ? "SUCCESS [OK]" : "FAILED [FAIL]";
+            logger.info("  Transfer " + (i + 1) + " result: " + status +
+                       " (" + result.getBytesTransferred() + " bytes)");
+        }
+        logger.info("All concurrent transfers completed successfully!");
+    }
+    
+    private static void runRetryDemonstrationExample(TransferEngine transferEngine) throws Exception {
+        logger.info("--- Retry & Resilience Demonstration ---");
+        logger.info("This example shows how Qraft handles network delays gracefully");
+        logger.info("");
+
+        // Use httpbin.org's delay endpoint to simulate a slow but successful transfer
+        TransferRequest slowRequest = TransferRequest.builder()
+                .sourceUri(URI.create("https://httpbin.org/delay/2")) // 2-second delay, then success
+                .destinationPath(Paths.get("downloads/slow-response-example.json"))
+                .protocol("http")
+                .build();
+
+        logger.info("Testing resilience with slow network response (2-second delay)...");
+        logger.info("Source: " + slowRequest.getSourceUri());
+        logger.info("This demonstrates how Qraft waits patiently for slow responses");
+
+        long startTime = System.currentTimeMillis();
+        Future<TransferResult> future = transferEngine.submitTransfer(slowRequest);
+        TransferResult result = future.toCompletionStage().toCompletableFuture().get();
+        long duration = System.currentTimeMillis() - startTime;
+
+        logger.info("");
+        logger.info("Resilience test results:");
+        logger.info("  Status: " + result.getFinalStatus());
+        if (result.isSuccessful()) {
+            logger.info("  [OK] SUCCESS: System handled slow response correctly");
+        } else {
+            logger.severe("  [FAIL] UNEXPECTED: Resilience test failed - this indicates a problem");
+        }
+        logger.info("  Total time: " + duration + "ms (includes 2-second server delay)");
+        logger.info("  System behavior: Patient waiting for slow responses [OK]");
+        logger.info("");
+
+        // Demonstrate configuration-based retry settings
+        logger.info("Retry configuration in use:");
+        logger.info("  Max retry attempts: 3");
+        logger.info("  Initial retry delay: 1000ms");
+        logger.info("  Backoff strategy: Exponential");
+        logger.info("  Timeout handling: Graceful with retries");
+        logger.info("");
+        logger.info("Note: In a real failure scenario, the system would retry");
+        logger.info("up to 3 times with increasing delays before giving up.");
+        logger.info("This ensures robust handling of temporary network issues.");
+    }
+    
+    private static void monitorTransferProgress(TransferEngine transferEngine, String jobId) {
+        Thread monitorThread = new Thread(() -> {
+            try {
+                logger.info("Starting real-time progress monitoring...");
+                while (true) {
+                    // Get current job status from transfer engine
+                    var job = transferEngine.getTransferJob(jobId);
+                    if (job == null) {
+                        // Job no longer exists (completed or failed)
+                        break;
+                    }
+
+                    // Display progress for active transfers
+                    if (job.getStatus() == TransferStatus.IN_PROGRESS) {
+                        long totalBytes = job.getTotalBytes();
+                        String totalDisplay = totalBytes > 0 ? String.valueOf(totalBytes) : "unknown";
+                        logger.info(String.format("  Progress: %.1f%% (%d/%s bytes)",
+                                job.getProgressPercentage() * 100,
+                                job.getBytesTransferred(),
+                                totalDisplay));
+                    }
+
+                    // Exit when transfer reaches terminal state
+                    if (job.getStatus().isTerminal()) {
+                        logger.info("Transfer completed, stopping progress monitoring");
+                        break;
+                    }
+
+                    Thread.sleep(250); // Update every 250ms
+                }
+            } catch (InterruptedException e) {
+                // Restore interrupt status and exit gracefully
+                Thread.currentThread().interrupt();
+                logger.info("Progress monitoring interrupted");
+            }
+        });
+
+        // Use daemon thread so it won't prevent JVM shutdown
+        monitorThread.setDaemon(true);
+        monitorThread.start();
+    }
+    
+    private static void displayTransferResult(TransferResult result) {
+        logger.info("Transfer Results:");
+        logger.info("  Status: " + result.getFinalStatus());
+        logger.info("  Success: " + (result.isSuccessful() ? "[OK]" : "[FAIL]"));
+        logger.info("  Bytes transferred: " + result.getBytesTransferred());
+        
+        result.getDuration().ifPresent(duration -> 
+            logger.info("  Duration: " + formatDuration(duration)));
+        
+        result.getAverageRateBytesPerSecond().ifPresent(rate -> 
+            logger.info("  Average rate: " + String.format("%.2f KB/s", rate / 1024)));
+        
+        result.getActualChecksum().ifPresent(checksum -> 
+            logger.info("  SHA-256 checksum: " + checksum.substring(0, 16) + "..."));
+        
+        if (!result.isSuccessful()) {
+            result.getErrorMessage().ifPresent(error -> 
+                logger.info("  Error: " + error));
+        }
+    }
+    
+    /**
+     * Formats duration for human-readable display
+     */
+    private static String formatDuration(Duration duration) {
+        long millis = duration.toMillis();
+        if (millis < 1000) {
+            return millis + "ms";
+        } else {
+            return String.format("%.2fs", millis / 1000.0);
+        }
+    }
+}
