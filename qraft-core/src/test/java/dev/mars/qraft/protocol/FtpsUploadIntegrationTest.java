@@ -109,15 +109,10 @@ class FtpsUploadIntegrationTest {
         log("checkDockerAvailable", "Checking Docker availability for FTPS integration tests");
         assumeTrue(SharedTestContainers.isDockerAvailable(),
                 "Docker is not available - skipping FTPS integration tests");
-        try {
-            // Start the shared FTPS container (will be reused across tests)
-            SharedTestContainers.getFtpsContainer();
-            waitForFtpsTlsWarmup();
-            log("checkDockerAvailable", "FTPS container started successfully");
-        } catch (RuntimeException e) {
-            assumeTrue(false,
-                    "FTPS test container not ready in this environment - skipping FTPS integration tests: " + e.getMessage());
-        }
+        // Start the shared FTPS container (will be reused across tests)
+        SharedTestContainers.getFtpsContainer();
+        waitForFtpsTlsWarmup();
+        log("checkDockerAvailable", "FTPS container started successfully");
     }
 
     private static void waitForFtpsTlsWarmup() {

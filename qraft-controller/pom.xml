@@ -301,6 +301,7 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.11.0</version>
                 <configuration>
+                    <release>${maven.compiler.release}</release>
                     <source>${maven.compiler.source}</source>
                     <target>${maven.compiler.target}</target>
                     <!-- Make sure JDK modules used by tests (and any main code) are on the module graph during compilation -->
