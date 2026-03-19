@@ -9,19 +9,23 @@
     <version>1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
 
-    <name>Qraft Distributed Services Platform</name>
-    <description>Reusable distributed services platform with Raft consensus and pluggable state machines</description>
+    <name>Qraft Framework</name>
+    <description>Transfer-free core framework with Raft consensus and distributed state primitives</description>
 
     <modules>
-        <module>qraft-core</module>
         <module>qraft-raft-engine</module>
         <module>qraft-distributed-state</module>
-        <module>qraft-workflow</module>
-        <module>qraft-tenant</module>
-        <module>qraft-controller</module>
-        <module>qraft-agent</module>
-        <module>qraft-integration-examples</module>
     </modules>
+
+    <profiles>
+        <profile>
+            <id>integration-examples</id>
+            <modules>
+                <module>qraft-core</module>
+                <module>qraft-integration-examples</module>
+            </modules>
+        </profile>
+    </profiles>
 
     <properties>
         <maven.compiler.release>25</maven.compiler.release>

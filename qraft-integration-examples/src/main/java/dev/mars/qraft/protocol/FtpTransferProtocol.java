@@ -119,30 +119,30 @@ public class FtpTransferProtocol implements TransferProtocol {
             return false;
         }
 
-        // Check for FTP/FTPS download (FTP or FTPS source)
+        // Check for FTP download
         String sourceScheme = request.getSourceUri().getScheme();
         if (isFtpScheme(sourceScheme)) {
-            logger.debug("canHandle: FTP/FTPS download detected, sourceScheme={}", sourceScheme);
+            logger.debug("canHandle: FTP download detected, sourceScheme={}", sourceScheme);
             return true;
         }
 
-        // Check for FTP/FTPS upload (FTP or FTPS destination)
+        // Check for FTP upload
         if (request.getDestinationUri() != null) {
             String destScheme = request.getDestinationUri().getScheme();
             boolean canHandle = isFtpScheme(destScheme);
-            logger.debug("canHandle: FTP/FTPS upload check, destScheme={}, canHandle={}", destScheme, canHandle);
+            logger.debug("canHandle: FTP upload check, destScheme={}, canHandle={}", destScheme, canHandle);
             return canHandle;
         }
 
-        logger.debug("canHandle: Not an FTP/FTPS request");
+        logger.debug("canHandle: Not an FTP request");
         return false;
     }
     
     /**
-     * Returns true if the scheme is ftp or ftps.
+     * Returns true if the scheme is ftp.
      */
     private boolean isFtpScheme(String scheme) {
-        return "ftp".equalsIgnoreCase(scheme) || "ftps".equalsIgnoreCase(scheme);
+        return "ftp".equalsIgnoreCase(scheme);
     }
 
     @Override
@@ -387,10 +387,8 @@ public class FtpTransferProtocol implements TransferProtocol {
     private FtpConnectionInfo parseFtpUri(URI sourceUri) throws TransferException {
         String scheme = sourceUri.getScheme();
         if (!isFtpScheme(scheme)) {
-            throw new TransferException("unknown", "Invalid FTP/FTPS URI scheme: " + scheme);
+            throw new TransferException("unknown", "Invalid FTP URI scheme: " + scheme);
         }
-        
-        boolean isFtps = "ftps".equalsIgnoreCase(scheme);
         
         String host = sourceUri.getHost();
         if (host == null || host.isEmpty()) {
@@ -398,20 +396,9 @@ public class FtpTransferProtocol implements TransferProtocol {
         }
         
         int port = sourceUri.getPort();
-        
-        // Determine FTPS mode based on scheme and port
-        FtpsMode ftpsMode = FtpsMode.NONE;
-        if (isFtps) {
-            if (port == DEFAULT_FTPS_IMPLICIT_PORT) {
-                ftpsMode = FtpsMode.IMPLICIT;
-            } else {
-                // Default FTPS mode is explicit (AUTH TLS on port 21)
-                ftpsMode = FtpsMode.EXPLICIT;
-            }
-        }
-        
+
         if (port == -1) {
-            port = (ftpsMode == FtpsMode.IMPLICIT) ? DEFAULT_FTPS_IMPLICIT_PORT : DEFAULT_FTP_PORT;
+            port = DEFAULT_FTP_PORT;
         }
         
         String path = sourceUri.getPath();
@@ -432,8 +419,8 @@ public class FtpTransferProtocol implements TransferProtocol {
             }
         }
         
-        logger.debug("Parsed URI: scheme={}, host={}, port={}, ftpsMode={}", scheme, host, port, ftpsMode);
-        return new FtpConnectionInfo(host, port, path, username, password, ftpsMode);
+        logger.debug("Parsed URI: scheme={}, host={}, port={}", scheme, host, port);
+        return new FtpConnectionInfo(host, port, path, username, password);
     }
 
     private static class FtpClient {

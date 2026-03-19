@@ -24,20 +24,6 @@
             <version>${project.version}</version>
         </dependency>
 
-        <!-- Qraft Workflow dependency -->
-        <dependency>
-            <groupId>dev.mars</groupId>
-            <artifactId>qraft-workflow</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <!-- Qraft Tenant dependency -->
-        <dependency>
-            <groupId>dev.mars</groupId>
-            <artifactId>qraft-tenant</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
         <!-- Testing dependencies -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>

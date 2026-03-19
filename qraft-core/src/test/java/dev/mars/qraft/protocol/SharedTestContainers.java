@@ -68,10 +68,6 @@ public final class SharedTestContainers {
     private static volatile ComposeContainer ftpContainer;
     private static final Object FTP_LOCK = new Object();
 
-    // FTPS container (delfer/alpine-ftp-server with TLS)
-    private static volatile ComposeContainer ftpsContainer;
-    private static final Object FTPS_LOCK = new Object();
-
     // Track if shutdown hook is registered
     private static volatile boolean shutdownHookRegistered = false;
     private static final Object HOOK_LOCK = new Object();
@@ -184,68 +180,6 @@ public final class SharedTestContainers {
         return ftpContainer != null;
     }
 
-    // Fixed ports for FTPS — avoids Testcontainers socat proxy which breaks
-    // TLS session reuse between control and data channels in FTP passive mode.
-    private static final int FTPS_CONTROL_PORT = 2121;
-    private static final int FTPS_DATA_PORT = 30000;
-
-    /**
-     * Gets the shared FTPS container, starting it if necessary.
-     * Uses delfer/alpine-ftp-server with TLS enabled (explicit FTPS via AUTH TLS).
-     * The container auto-generates a self-signed certificate.
-     * 
-     * <p>Unlike FTP/SFTP containers, the FTPS container uses <b>fixed port mappings</b>
-     * (2121:21 for control, 30000:30000 for passive data) instead of Testcontainers'
-     * socat proxy. This is necessary because FTPS passive mode requires TLS session
-     * reuse between the control and data channels, and the socat proxy breaks this
-     * by introducing a different endpoint for the control channel.
-     * 
-     * @return the FTPS ComposeContainer
-     */
-    public static ComposeContainer getFtpsContainer() {
-        if (ftpsContainer == null) {
-            synchronized (FTPS_LOCK) {
-                if (ftpsContainer == null) {
-                    logger.info("Starting shared FTPS container...");
-
-                    ftpsContainer = new ComposeContainer(
-                            new File("src/test/resources/docker-compose-ftps-test.yml"))
-                            .withBuild(true)
-                            .withStartupTimeout(Duration.ofMinutes(3));
-                    ftpsContainer.start();
-                    registerShutdownHook();
-                    // Wait for the FTP service to fully initialise (DH params, TLS cert, etc.)
-                    waitForFtpReady("localhost", FTPS_CONTROL_PORT, Duration.ofMinutes(2));
-                    logger.info("Shared FTPS container started at {}:{}", getFtpsHost(), getFtpsPort());
-                }
-            }
-        }
-        return ftpsContainer;
-    }
-
-    /**
-     * Gets the FTPS host. Returns localhost since FTPS uses fixed port mapping.
-     */
-    public static String getFtpsHost() {
-        getFtpsContainer(); // Ensure container is started
-        return "localhost";
-    }
-
-    /**
-     * Gets the FTPS control port. Returns the fixed mapped port (2121).
-     */
-    public static int getFtpsPort() {
-        getFtpsContainer(); // Ensure container is started
-        return FTPS_CONTROL_PORT;
-    }
-
-    /**
-     * Checks if the FTPS container is running.
-     */
-    public static boolean isFtpsRunning() {
-        return ftpsContainer != null;
-    }
-
     /**
      * Waits for an FTP service to become ready on the given host:port.
      * Unlike a simple TCP port check, this verifies the FTP daemon responds
@@ -338,14 +272,6 @@ public final class SharedTestContainers {
                 ftpContainer.stop();
             } catch (Exception e) {
                 logger.warn("Error stopping FTP container: {}", e.getMessage());
-            }
-        }
-        if (ftpsContainer != null) {
-            try {
-                logger.info("Stopping shared FTPS container...");
-                ftpsContainer.stop();
-            } catch (Exception e) {
-                logger.warn("Error stopping FTPS container: {}", e.getMessage());
             }
         }
     }
