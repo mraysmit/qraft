@@ -1,17 +1,25 @@
 # Qraft
 
-Qraft is a Java-based distributed systems framework focused on Raft consensus and transfer-free distributed state primitives.
+Qraft is a Java-based distributed control plane built on Raft consensus.
 
-## What "Transfer-Free" Means
+It is designed for systems that need strongly ordered commands, replicated state, agent coordination, workflow execution, and tenant isolation across a cluster.
 
-In Qraft, nodes do not copy full datasets or payloads between each other during normal operation.
+## Core Model
 
-- Each node maintains local state
-- The cluster replicates ordered commands/state changes, not full data transfers
-- Nodes apply the same ordered updates to converge on consistent state
-- Reads are served from local materialized state
+- Controllers accept commands and replicate them through the Raft log
+- Commands are applied deterministically to maintain consistent cluster state
+- Agents register with the control plane, report health, and execute assigned work
+- Tenants provide logical isolation for policies, workflows, and state
+- Workflows coordinate multi-step operations on top of the replicated state model
 
-"Transfer-free" does not mean zero network traffic. It means the system avoids bulk state shipping as its primary consistency mechanism.
+## Good Fit
+
+Qraft is a good fit for:
+
+- Distributed job orchestration
+- Multi-tenant workflow control planes
+- Configuration and policy management
+- Coordination services that need durable ordered state changes
 
 ## Modules
 
