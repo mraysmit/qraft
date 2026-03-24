@@ -1,5 +1,5 @@
 # =============================================================================
-# Docker build context exclusions for Quorus
+# Docker build context exclusions for qraft
 # Reduces context transfer from ~100MB to ~10MB per build.
 # =============================================================================
 

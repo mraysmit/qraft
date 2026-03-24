@@ -38,7 +38,7 @@ import java.util.Properties;
 public final class AppConfig {
 
     private static final Logger logger = LoggerFactory.getLogger(AppConfig.class);
-    private static final String CONFIG_FILE = "quorus-controller.properties";
+    private static final String CONFIG_FILE = "qraft-controller.properties";
     private static final AppConfig INSTANCE = new AppConfig();
 
     private final Properties properties;
