@@ -2,6 +2,17 @@
 
 Qraft is a Java-based distributed systems framework focused on Raft consensus and transfer-free distributed state primitives.
 
+## What "Transfer-Free" Means
+
+In Qraft, nodes do not copy full datasets or payloads between each other during normal operation.
+
+- Each node maintains local state
+- The cluster replicates ordered commands/state changes, not full data transfers
+- Nodes apply the same ordered updates to converge on consistent state
+- Reads are served from local materialized state
+
+"Transfer-free" does not mean zero network traffic. It means the system avoids bulk state shipping as its primary consistency mechanism.
+
 ## Modules
 
 - `qraft-raft-engine`: core Raft consensus implementation
