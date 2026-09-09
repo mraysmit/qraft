@@ -1,6 +1,6 @@
 # Docker Infrastructure for Qraft
 
-This directory contains all Docker-related configuration files, scripts, and test data for the Qraft distributed file transfer system.
+This directory contains all Docker-related configuration files, scripts, and test data for the Qraft distributed control plane and transfer-agent test environments.
 
 ## Directory Structure
 
@@ -34,7 +34,7 @@ docker/
 
 ### Full Network Test Environment
 
-The `docker-compose-full-network.yml` configuration provides a comprehensive test environment that simulates a realistic Qraft file transfer network:
+The `docker-compose-full-network.yml` configuration provides a comprehensive test environment for a realistic Qraft control-plane network with transfer-capable agents:
 
 **Architecture:**
 - **Control Plane**: 3 Raft controllers + API service
@@ -66,7 +66,7 @@ Transfer Servers (172.22.0.0/16)
 # Start the complete test environment
 .\scripts\start-full-network.ps1 -Build
 
-# Test agent registration and transfers
+# Test agent registration and transfer workflows
 .\scripts\test-transfers.ps1
 
 # Monitor the environment

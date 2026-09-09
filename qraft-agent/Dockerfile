@@ -7,15 +7,13 @@ WORKDIR /app
 # Copy parent POM and module POMs first for better layer caching
 COPY pom.xml .
 COPY qraft-core/pom.xml qraft-core/
-COPY qraft-workflow/pom.xml qraft-workflow/
 COPY qraft-agent/pom.xml qraft-agent/
 
 # Download dependencies
-RUN mvn dependency:go-offline -pl qraft-core,qraft-workflow,qraft-agent -am
+RUN mvn dependency:go-offline -pl qraft-core,qraft-agent -am
 
 # Copy source code
 COPY qraft-core/src qraft-core/src
-COPY qraft-workflow/src qraft-workflow/src
 COPY qraft-agent/src qraft-agent/src
 
 # Build the agent and dependencies

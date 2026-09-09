@@ -20,11 +20,7 @@ import dev.mars.qraft.agent.config.AgentConfiguration;
 import io.vertx.core.Vertx;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Field;
-import java.util.concurrent.RejectedExecutionException;
-
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class TransferExecutionServiceTest {
 
@@ -41,20 +37,6 @@ class TransferExecutionServiceTest {
         sharedVertx.close().toCompletionStage().toCompletableFuture().join();
     }
 
-    @Test
-    @SuppressWarnings("deprecation")
-    void testDeprecatedConstructorClosesOwnedVertx() {
-        TransferExecutionService service = new TransferExecutionService(createConfig());
-        Vertx ownedVertx = extractVertx(service);
-
-        service.start();
-        service.shutdown().toCompletionStage().toCompletableFuture().join();
-
-        assertThrows(RejectedExecutionException.class,
-                () -> ownedVertx.setTimer(10, id -> {}),
-                "Deprecated constructor should close internally managed Vert.x");
-    }
-
     private static AgentConfiguration createConfig() {
         return new AgentConfiguration.Builder()
                 .agentId("test-agent")
@@ -65,13 +47,4 @@ class TransferExecutionServiceTest {
                 .build();
     }
 
-    private static Vertx extractVertx(TransferExecutionService service) {
-        try {
-            Field vertxField = TransferExecutionService.class.getDeclaredField("vertx");
-            vertxField.setAccessible(true);
-            return (Vertx) vertxField.get(service);
-        } catch (ReflectiveOperationException e) {
-            throw new AssertionError("Failed to extract Vert.x from TransferExecutionService", e);
-        }
-    }
 }

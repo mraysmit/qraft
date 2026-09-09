@@ -40,7 +40,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * HTTP handler for legacy transfer + job status endpoints used by controller tests.
+ * HTTP handler for transfer and job status endpoints.
  */
 public class TransferLifecycleHandler {
 

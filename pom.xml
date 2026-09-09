@@ -17,23 +17,12 @@
         <module>qraft-distributed-state</module>
     </modules>
 
-    <profiles>
-        <profile>
-            <id>integration-examples</id>
-            <modules>
-                <module>qraft-core</module>
-                <module>qraft-integration-examples</module>
-            </modules>
-        </profile>
-    </profiles>
-
     <properties>
         <maven.compiler.release>25</maven.compiler.release>
         <maven.compiler.source>25</maven.compiler.source>
         <maven.compiler.target>25</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <junit.version>5.14.3</junit.version>
-        <vertx.version>5.0.8</vertx.version>
         <testcontainers.version>2.0.3</testcontainers.version>
         <jacoco.version>0.8.13</jacoco.version>
         <raftlog.version>1.1.0</raftlog.version>
@@ -44,15 +33,6 @@
 
     <dependencyManagement>
         <dependencies>
-            <!-- Vert.x 5 BOM -->
-            <dependency>
-                <groupId>io.vertx</groupId>
-                <artifactId>vertx-dependencies</artifactId>
-                <version>${vertx.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-
             <!-- Testing dependencies -->
             <dependency>
                 <groupId>org.junit.jupiter</groupId>

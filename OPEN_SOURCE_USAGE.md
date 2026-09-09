@@ -2,7 +2,7 @@
 
 ## Overview
 
-PeeGeeQ is an open source project licensed under the **Apache License 2.0**. This document outlines the open source components used, license requirements, and compliance guidelines.
+Qraft is an open source project licensed under the **Apache License 2.0**. This document outlines the open source components used, license requirements, and compliance guidelines.
 
 ## Project License
 
@@ -118,14 +118,14 @@ All Java source files must include the following license header:
 
 **Allowed:**
 - Use in commercial products
-- Sell products containing PeeGeeQ
+- Sell products containing Qraft
 - Modify for commercial purposes
 - Create proprietary derivatives
 
 **Required:**
 - Include license and copyright notices
 - Include NOTICE file in distributions
-- Don't use "PeeGeeQ" trademark without permission
+- Don't use "Qraft" trademark without permission
 
 ### For Modification
 
@@ -141,11 +141,11 @@ All Java source files must include the following license header:
 
 ## Attribution Requirements
 
-When using PeeGeeQ in your project, include:
+When using Qraft in your project, include:
 
 ### In Documentation
 ```
-This product includes PeeGeeQ (https://github.com/your-repo/peegeeq)
+This product includes Qraft (https://github.com/your-org/qraft)
 Copyright 2025 Mark Andrew Ray-Smith Cityline Ltd
 Licensed under the Apache License 2.0
 ```
@@ -189,7 +189,7 @@ Consider adding the Maven License Plugin to your build:
 
 ## Frequently Asked Questions
 
-### Q: Can I use PeeGeeQ in my commercial product?
+### Q: Can I use Qraft in my commercial product?
 **A:** Yes, the Apache License 2.0 explicitly allows commercial use.
 
 ### Q: Do I need to open source my modifications?
@@ -201,7 +201,7 @@ Consider adding the Maven License Plugin to your build:
 ### Q: Do I need to contribute back my changes?
 **A:** No, but contributions are welcome and appreciated.
 
-### Q: Can I use the "PeeGeeQ" name for my product?
+### Q: Can I use the "Qraft" name for my product?
 **A:** The license doesn't grant trademark rights. Contact the copyright holder for trademark usage.
 
 ## Implementation Status

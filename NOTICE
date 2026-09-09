@@ -22,11 +22,6 @@ Jackson JSON Processing (com.fasterxml.jackson.core:jackson-databind:2.15.2)
   Copyright (c) 2007- Tatu Saloranta, tatu.saloranta@iki.fi
   https://github.com/FasterXML/jackson-databind
 
-Eclipse Vert.x (io.vertx:vertx-core:4.5.11)
-  License: Apache License 2.0 and Eclipse Public License 2.0
-  Copyright (c) 2011-2023 The original author or authors
-  https://github.com/eclipse-vertx/vert.x
-
 SLF4J Logging API (org.slf4j:slf4j-api:2.0.9)
   License: MIT License
   Copyright (c) 2004-2023 QOS.ch Sarl (Switzerland)

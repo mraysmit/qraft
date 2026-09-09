@@ -59,16 +59,6 @@ public class ConnectionPoolService {
         logger.debug("ConnectionPoolService initialized with external Vert.x instance");
     }
 
-    /**
-     * Default constructor for backward compatibility (creates internal Vert.x instance).
-     * @deprecated Use {@link #ConnectionPoolService(Vertx)} instead.
-     */
-    @Deprecated
-    public ConnectionPoolService() {
-        this(Vertx.vertx(), true);
-        logger.warn("ConnectionPoolService created with internal Vert.x instance (deprecated)");
-    }
-
     public Pool getOrCreatePool(String serviceId, PgConnectionConfig config, PgPoolConfig poolConfig) {
         logger.debug("Requesting pool for service: serviceId={}, host={}, port={}, database={}",
                     serviceId, config.getHost(), config.getPort(), config.getDatabase());

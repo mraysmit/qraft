@@ -29,8 +29,8 @@ import java.util.Properties;
  * Centralized configuration loader for Qraft Agent.
  * 
  * <p>Loads configuration from application.properties with environment variable override support.
- * Environment variables take precedence using legacy naming convention (AGENT_ID, CONTROLLER_URL, etc.)
- * and new convention (QRAFT_AGENT_ID, QRAFT_AGENT_CONTROLLER_URL, etc.).
+ * Environment variables take precedence using the Qraft naming convention
+ * (QRAFT_AGENT_ID, QRAFT_AGENT_CONTROLLER_URL, etc.).
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-01-28
@@ -64,10 +64,6 @@ public final class AgentConfig {
      */
     public String getAgentId() {
         String agentId = getString("qraft.agent.id", "");
-        if (agentId.isEmpty()) {
-            // Try legacy env var
-            agentId = System.getenv("AGENT_ID");
-        }
         if (agentId == null || agentId.isEmpty()) {
             // Derive from hostname as fallback
             agentId = deriveAgentIdFromHostname();

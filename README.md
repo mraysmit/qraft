@@ -21,6 +21,10 @@ Qraft is a good fit for:
 - Configuration and policy management
 - Coordination services that need durable ordered state changes
 
+### Architecture cleanup note
+
+- Qraft persistence defaults to `raftlog-core` as the production WAL-backed Raft storage implementation.
+
 ## Modules
 
 - `qraft-raft-engine`: core Raft consensus implementation

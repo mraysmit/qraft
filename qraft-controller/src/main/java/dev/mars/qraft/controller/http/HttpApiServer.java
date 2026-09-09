@@ -85,7 +85,7 @@ public class HttpApiServer {
         this.drainModeHandler = new DrainModeHandler();
     }
 
-    // Compatibility constructors for legacy tests that still build with QraftStateStore.
+    // Domain-backed constructors used when registering Qraft routes.
     public HttpApiServer(Vertx vertx, int port, RaftNode raftNode, QraftStateStore stateStore) {
         this(vertx, port, raftNode, stateStore, -1);
     }

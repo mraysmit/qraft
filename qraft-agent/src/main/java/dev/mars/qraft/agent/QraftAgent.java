@@ -55,7 +55,6 @@ public class QraftAgent {
     private static final Logger logger = LoggerFactory.getLogger(QraftAgent.class);
 
     private final Vertx vertx;
-    private final boolean closeVertxOnShutdown;
     private final AgentConfiguration config;
     private final AgentRegistrationService registrationService;
     private final HeartbeatService heartbeatService;
@@ -86,12 +85,7 @@ public class QraftAgent {
      * @throws NullPointerException if vertx or config is null
      */
     public QraftAgent(Vertx vertx, AgentConfiguration config) {
-        this(vertx, config, false);
-    }
-
-    private QraftAgent(Vertx vertx, AgentConfiguration config, boolean closeVertxOnShutdown) {
         this.vertx = Objects.requireNonNull(vertx, "Vertx instance cannot be null");
-        this.closeVertxOnShutdown = closeVertxOnShutdown;
         this.config = Objects.requireNonNull(config, "AgentConfiguration cannot be null");
         this.foreignAssignmentMismatchThreshold = AgentConfig.get().getForeignAssignmentMismatchThreshold();
 
@@ -111,19 +105,6 @@ public class QraftAgent {
 
         logger.info("Qraft Agent initialized: {} (reactive mode with OpenTelemetry)", config.getAgentId());
         logger.info("Foreign-assignment mismatch threshold configured to {}", foreignAssignmentMismatchThreshold);
-    }
-
-    /**
-     * Legacy constructor for backward compatibility.
-     * Creates a new Vert.x instance internally.
-     *
-     * @param config the agent configuration
-     * @deprecated Use {@link #QraftAgent(Vertx, AgentConfiguration)} instead to share Vert.x instance
-     */
-    @Deprecated(since = "1.0", forRemoval = true)
-    public QraftAgent(AgentConfiguration config) {
-        this(Vertx.vertx(), config, true);
-        logger.warn("Using deprecated constructor - consider passing shared Vert.x instance");
     }
     
     private static final String BANNER = """
@@ -346,17 +327,7 @@ public class QraftAgent {
     }
 
     private io.vertx.core.Future<Void> closeOwnedVertxIfNeeded() {
-        if (!closeVertxOnShutdown) {
-            return io.vertx.core.Future.succeededFuture();
-        }
-
-        logger.info("Closing internally managed Vert.x instance for QraftAgent");
-        return vertx.close()
-                .onSuccess(v -> logger.info("Internally managed Vert.x instance closed for QraftAgent"))
-                .recover(err -> {
-                    logger.warn("Failed to close internally managed Vert.x instance: {}", err.getMessage());
-                    return io.vertx.core.Future.succeededFuture();
-                });
+        return io.vertx.core.Future.succeededFuture();
     }
     
     public void awaitShutdown() throws InterruptedException {
