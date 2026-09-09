@@ -15,6 +15,10 @@
     <modules>
         <module>qraft-raft-engine</module>
         <module>qraft-distributed-state</module>
+        <module>qraft-core</module>
+        <module>qraft-agent</module>
+        <module>qraft-tenant</module>
+        <module>qraft-controller</module>
     </modules>
 
     <properties>
@@ -29,6 +33,8 @@
         <required.java.version>[25,)</required.java.version>
         <!-- Shared timestamp for consolidated test log file across all modules -->
         <maven.build.timestamp.format>yyyy-MM-dd_HH-mm-ss</maven.build.timestamp.format>
+        <test.log.directory>${maven.multiModuleProjectDirectory}/test-logs</test.log.directory>
+        <test.log.configuration>${maven.multiModuleProjectDirectory}/config/logback-test.xml</test.log.configuration>
     </properties>
 
     <dependencyManagement>
@@ -79,6 +85,8 @@
                         <systemPropertyVariables>
                             <!-- Shared across all modules so logback writes to one consolidated file -->
                             <testRunTimestamp>${maven.build.timestamp}</testRunTimestamp>
+                            <qraft.test.log.dir>${test.log.directory}</qraft.test.log.dir>
+                            <logback.configurationFile>${test.log.configuration}</logback.configurationFile>
                         </systemPropertyVariables>
                     </configuration>
                 </plugin>
@@ -146,6 +154,9 @@
                         <exclude>java/**</exclude>
                         <exclude>com/sun/**</exclude>
                         <exclude>org/jcp/**</exclude>
+                        <exclude>dev/mars/qraft/controller/**/grpc/**</exclude>
+                        <exclude>dev/mars/qraft/controller/QraftControllerApplication*</exclude>
+                        <exclude>dev/mars/qraft/controller/QraftControllerService*</exclude>
                     </excludes>
                 </configuration>
                 <executions>

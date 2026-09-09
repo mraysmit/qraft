@@ -16,10 +16,10 @@
 
 package dev.mars.qraft.controller.lifecycle;
 
-import io.vertx.core.Future;
-import io.vertx.core.Vertx;
-import io.vertx.junit5.VertxExtension;
-import io.vertx.junit5.VertxTestContext;
+import dev.mars.qraft.controller.runtime.Future;
+import dev.mars.qraft.controller.runtime.JavaRuntime;
+import dev.mars.qraft.controller.support.JavaRuntimeExtension;
+import dev.mars.qraft.controller.support.JavaTestContext;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -38,7 +38,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-01-30
  */
-@ExtendWith(VertxExtension.class)
+@ExtendWith(JavaRuntimeExtension.class)
 @DisplayName("ShutdownCoordinator Tests")
 class ShutdownCoordinatorTest {
 
@@ -48,7 +48,7 @@ class ShutdownCoordinatorTest {
 
         @Test
         @DisplayName("Should start in RUNNING state")
-        void shouldStartInRunningState(Vertx vertx) {
+        void shouldStartInRunningState(JavaRuntime vertx) {
             ShutdownCoordinator coordinator = new ShutdownCoordinator(vertx);
             
             assertEquals(ShutdownCoordinator.State.RUNNING, coordinator.getState());
@@ -58,7 +58,7 @@ class ShutdownCoordinatorTest {
 
         @Test
         @DisplayName("Should transition to DRAINING on shutdown")
-        void shouldTransitionToDrainingOnShutdown(Vertx vertx, VertxTestContext ctx) {
+        void shouldTransitionToDrainingOnShutdown(JavaRuntime vertx, JavaTestContext ctx) {
             ShutdownCoordinator coordinator = new ShutdownCoordinator(vertx, 100, 100);
             
             coordinator.shutdown()
@@ -72,7 +72,7 @@ class ShutdownCoordinatorTest {
 
         @Test
         @DisplayName("Should reject work after shutdown requested")
-        void shouldRejectWorkAfterShutdownRequested(Vertx vertx) {
+        void shouldRejectWorkAfterShutdownRequested(JavaRuntime vertx) {
             ShutdownCoordinator coordinator = new ShutdownCoordinator(vertx);
             
             // Initiate shutdown (don't wait for completion)
@@ -89,7 +89,7 @@ class ShutdownCoordinatorTest {
 
         @Test
         @DisplayName("Should execute drain hooks in order")
-        void shouldExecuteDrainHooksInOrder(Vertx vertx, VertxTestContext ctx) {
+        void shouldExecuteDrainHooksInOrder(JavaRuntime vertx, JavaTestContext ctx) {
             ShutdownCoordinator coordinator = new ShutdownCoordinator(vertx, 5000, 5000);
             List<String> executionOrder = new ArrayList<>();
             
@@ -111,7 +111,7 @@ class ShutdownCoordinatorTest {
 
         @Test
         @DisplayName("Should execute all phases in order")
-        void shouldExecuteAllPhasesInOrder(Vertx vertx, VertxTestContext ctx) {
+        void shouldExecuteAllPhasesInOrder(JavaRuntime vertx, JavaTestContext ctx) {
             ShutdownCoordinator coordinator = new ShutdownCoordinator(vertx, 5000, 5000);
             List<String> executionOrder = new ArrayList<>();
             
@@ -144,7 +144,7 @@ class ShutdownCoordinatorTest {
 
         @Test
         @DisplayName("Should continue on hook failure")
-        void shouldContinueOnHookFailure(Vertx vertx, VertxTestContext ctx) {
+        void shouldContinueOnHookFailure(JavaRuntime vertx, JavaTestContext ctx) {
             ShutdownCoordinator coordinator = new ShutdownCoordinator(vertx, 5000, 5000);
             AtomicInteger callCount = new AtomicInteger(0);
             
@@ -174,7 +174,7 @@ class ShutdownCoordinatorTest {
 
         @Test
         @DisplayName("Should be idempotent - multiple calls return same result")
-        void shouldBeIdempotent(Vertx vertx, VertxTestContext ctx) {
+        void shouldBeIdempotent(JavaRuntime vertx, JavaTestContext ctx) {
             ShutdownCoordinator coordinator = new ShutdownCoordinator(vertx, 100, 100);
             AtomicInteger drainCallCount = new AtomicInteger(0);
             
@@ -203,7 +203,7 @@ class ShutdownCoordinatorTest {
 
         @Test
         @DisplayName("Should timeout slow hooks")
-        void shouldTimeoutSlowHooks(Vertx vertx, VertxTestContext ctx) {
+        void shouldTimeoutSlowHooks(JavaRuntime vertx, JavaTestContext ctx) {
             // Very short timeout
             ShutdownCoordinator coordinator = new ShutdownCoordinator(vertx, 50, 50);
             AtomicInteger completedCount = new AtomicInteger(0);
@@ -236,7 +236,7 @@ class ShutdownCoordinatorTest {
 
         @Test
         @DisplayName("Should complete successfully with no hooks registered")
-        void shouldCompleteWithNoHooks(Vertx vertx, VertxTestContext ctx) {
+        void shouldCompleteWithNoHooks(JavaRuntime vertx, JavaTestContext ctx) {
             ShutdownCoordinator coordinator = new ShutdownCoordinator(vertx);
             
             coordinator.shutdown()
@@ -253,7 +253,7 @@ class ShutdownCoordinatorTest {
 
         @Test
         @DisplayName("Should support fluent chaining")
-        void shouldSupportFluentChaining(Vertx vertx) {
+        void shouldSupportFluentChaining(JavaRuntime vertx) {
             ShutdownCoordinator coordinator = new ShutdownCoordinator(vertx)
                     .onDrain("drain", () -> Future.succeededFuture())
                     .onAwaitCompletion("await", () -> Future.succeededFuture())

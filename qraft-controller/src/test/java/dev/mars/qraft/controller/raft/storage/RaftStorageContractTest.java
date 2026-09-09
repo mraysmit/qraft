@@ -19,10 +19,10 @@ package dev.mars.qraft.controller.raft.storage;
 import dev.mars.qraft.controller.raft.storage.RaftStorage.LogEntryData;
 import dev.mars.qraft.controller.raft.storage.RaftStorage.PersistentMeta;
 import dev.mars.qraft.controller.raft.storage.file.FileRaftStorage;
-import io.vertx.core.Vertx;
-import io.vertx.core.WorkerExecutor;
-import io.vertx.junit5.VertxExtension;
-import io.vertx.junit5.VertxTestContext;
+import dev.mars.qraft.controller.runtime.JavaRuntime;
+import dev.mars.qraft.controller.runtime.WorkerExecutor;
+import dev.mars.qraft.controller.support.JavaRuntimeExtension;
+import dev.mars.qraft.controller.support.JavaTestContext;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
@@ -49,30 +49,29 @@ import static org.junit.jupiter.api.Assertions.*;
  * @version 1.0
  * @since 2026-01-29
  */
-@ExtendWith(VertxExtension.class)
+@ExtendWith(JavaRuntimeExtension.class)
 class RaftStorageContractTest {
 
     @TempDir
     Path tempDir;
 
-    private Vertx vertx;
+    private JavaRuntime vertx;
     private WorkerExecutor executor;
     private RaftStorage storage;
 
     @BeforeEach
-    void setUp(Vertx vertx, VertxTestContext ctx) {
+    void setUp(JavaRuntime vertx) throws Exception {
         this.vertx = vertx;
         this.executor = vertx.createSharedWorkerExecutor("wal-test", 1);
         this.storage = new FileRaftStorage(vertx, executor);
 
-        storage.open(tempDir)
-                .onComplete(ctx.succeedingThenComplete());
+        storage.open(tempDir).toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
     }
 
     @AfterEach
-    void tearDown() {
+    void tearDown() throws Exception {
         if (storage != null) {
-            storage.close();
+            storage.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
         if (executor != null) {
             executor.close();
@@ -85,7 +84,7 @@ class RaftStorageContractTest {
 
     @Test
     @DisplayName("loadMetadata returns empty on fresh storage")
-    void loadMetadata_freshStorage_returnsEmpty(VertxTestContext ctx) {
+    void loadMetadata_freshStorage_returnsEmpty(JavaTestContext ctx) {
         storage.loadMetadata()
                 .onComplete(ctx.succeeding(meta -> {
                     assertEquals(0L, meta.currentTerm());
@@ -96,7 +95,7 @@ class RaftStorageContractTest {
 
     @Test
     @DisplayName("updateMetadata persists term and votedFor")
-    void updateMetadata_persistsData(VertxTestContext ctx) {
+    void updateMetadata_persistsData(JavaTestContext ctx) {
         storage.updateMetadata(5L, Optional.of("node-1"))
                 .compose(v -> storage.loadMetadata())
                 .onComplete(ctx.succeeding(meta -> {
@@ -108,7 +107,7 @@ class RaftStorageContractTest {
 
     @Test
     @DisplayName("updateMetadata with empty votedFor clears previous vote")
-    void updateMetadata_emptyVote_clearsPreviousVote(VertxTestContext ctx) {
+    void updateMetadata_emptyVote_clearsPreviousVote(JavaTestContext ctx) {
         storage.updateMetadata(5L, Optional.of("node-1"))
                 .compose(v -> storage.updateMetadata(6L, Optional.empty()))
                 .compose(v -> storage.loadMetadata())
@@ -121,7 +120,7 @@ class RaftStorageContractTest {
 
     @Test
     @DisplayName("metadata survives close and reopen")
-    void metadata_survivesReopen(VertxTestContext ctx) {
+    void metadata_survivesReopen(JavaTestContext ctx) {
         storage.updateMetadata(10L, Optional.of("leader-node"))
                 .compose(v -> {
                     storage.close();
@@ -143,7 +142,7 @@ class RaftStorageContractTest {
 
     @Test
     @DisplayName("appendEntries stores entries that can be replayed")
-    void appendEntries_storesEntries(VertxTestContext ctx) {
+    void appendEntries_storesEntries(JavaTestContext ctx) {
         List<LogEntryData> entries = List.of(
                 new LogEntryData(1, 1, "command-1".getBytes(StandardCharsets.UTF_8)),
                 new LogEntryData(2, 1, "command-2".getBytes(StandardCharsets.UTF_8)),
@@ -170,7 +169,7 @@ class RaftStorageContractTest {
 
     @Test
     @DisplayName("appendEntries with empty list is no-op")
-    void appendEntries_emptyList_isNoOp(VertxTestContext ctx) {
+    void appendEntries_emptyList_isNoOp(JavaTestContext ctx) {
         storage.appendEntries(List.of())
                 .compose(v -> storage.replayLog())
                 .onComplete(ctx.succeeding(replayed -> {
@@ -180,16 +179,42 @@ class RaftStorageContractTest {
     }
 
     @Test
+    @DisplayName("appendEntries rejects use before open")
+    void appendEntries_beforeOpen_isRejected() {
+        RaftStorage unopened = new FileRaftStorage(vertx, executor);
+        List<LogEntryData> entries = List.of(new LogEntryData(1, 1, "command".getBytes()));
+
+        Exception failure = assertThrows(Exception.class,
+                () -> unopened.appendEntries(entries).toCompletionStage().toCompletableFuture()
+                        .get(5, TimeUnit.SECONDS));
+
+        assertInstanceOf(IllegalStateException.class, failure.getCause());
+    }
+
+    @Test
+    @DisplayName("appendEntries rejects use after close")
+    void appendEntries_afterClose_isRejected() throws Exception {
+        storage.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        List<LogEntryData> entries = List.of(new LogEntryData(1, 1, "command".getBytes()));
+
+        Exception failure = assertThrows(Exception.class,
+                () -> storage.appendEntries(entries).toCompletionStage().toCompletableFuture()
+                        .get(5, TimeUnit.SECONDS));
+
+        assertInstanceOf(IllegalStateException.class, failure.getCause());
+    }
+
+    @Test
     @DisplayName("entries survive close and reopen")
-    void entries_surviveReopen(VertxTestContext ctx) {
+    void entries_surviveReopen(JavaTestContext ctx) {
         List<LogEntryData> entries = List.of(
                 new LogEntryData(1, 5, "persistent-data".getBytes(StandardCharsets.UTF_8))
         );
 
         storage.appendEntries(entries)
                 .compose(v -> storage.sync())
+                .compose(v -> storage.close())
                 .compose(v -> {
-                    storage.close();
                     RaftStorage newStorage = new FileRaftStorage(vertx, executor);
                     return newStorage.open(tempDir)
                             .compose(v2 -> newStorage.replayLog())
@@ -210,7 +235,7 @@ class RaftStorageContractTest {
 
     @Test
     @DisplayName("truncateSuffix removes entries at and after index")
-    void truncateSuffix_removesEntries(VertxTestContext ctx) {
+    void truncateSuffix_removesEntries(JavaTestContext ctx) {
         List<LogEntryData> entries = List.of(
                 new LogEntryData(1, 1, "keep".getBytes()),
                 new LogEntryData(2, 1, "keep".getBytes()),
@@ -233,7 +258,7 @@ class RaftStorageContractTest {
 
     @Test
     @DisplayName("truncateSuffix then append replaces entries")
-    void truncateSuffix_thenAppend_replacesEntries(VertxTestContext ctx) {
+    void truncateSuffix_thenAppend_replacesEntries(JavaTestContext ctx) {
         List<LogEntryData> original = List.of(
                 new LogEntryData(1, 1, "original-1".getBytes()),
                 new LogEntryData(2, 1, "original-2".getBytes()),
@@ -277,7 +302,7 @@ class RaftStorageContractTest {
 
     @Test
     @DisplayName("replayLog recovers from torn write (corrupt tail)")
-    void replayLog_recoversFromTornWrite(VertxTestContext ctx) throws Exception {
+    void replayLog_recoversFromTornWrite(JavaTestContext ctx) throws Exception {
         // Step 1: Write valid entries
         List<LogEntryData> entries = List.of(
                 new LogEntryData(1, 1, "valid-1".getBytes()),
@@ -286,11 +311,10 @@ class RaftStorageContractTest {
 
         storage.appendEntries(entries)
                 .compose(v -> storage.sync())
+                .compose(v -> storage.close())
                 .onComplete(ctx.succeeding(v -> {
                     try {
-                        // Step 2: Close storage and corrupt the file
-                        storage.close();
-
+                        // Step 2: Corrupt the closed file
                         Path logPath = tempDir.resolve("raft.log");
                         
                         // Append partial/corrupt data (incomplete record)

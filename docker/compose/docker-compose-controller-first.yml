@@ -36,7 +36,7 @@ services:
         ipv4_address: 172.20.0.11
     volumes:
       - controller1-data:/app/data
-      - controller1-logs:/app/logs
+      - ../../logs:/app/logs
     labels:
       - "logging=promtail"
       - "service=qraft-controller1"
@@ -81,7 +81,7 @@ services:
         ipv4_address: 172.20.0.12
     volumes:
       - controller2-data:/app/data
-      - controller2-logs:/app/logs
+      - ../../logs:/app/logs
     labels:
       - "logging=promtail"
       - "service=qraft-controller2"
@@ -128,7 +128,7 @@ services:
         ipv4_address: 172.20.0.13
     volumes:
       - controller3-data:/app/data
-      - controller3-logs:/app/logs
+      - ../../logs:/app/logs
     labels:
       - "logging=promtail"
       - "service=qraft-controller3"
@@ -189,13 +189,10 @@ networks:
 volumes:
   controller1-data:
     driver: local
-  controller1-logs:
     driver: local
   controller2-data:
     driver: local
-  controller2-logs:
     driver: local
   controller3-data:
     driver: local
-  controller3-logs:
     driver: local

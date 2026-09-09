@@ -22,6 +22,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetAddress;
+import java.net.URI;
 import java.net.UnknownHostException;
 import java.util.Properties;
 
@@ -42,6 +43,7 @@ public final class AppConfig {
     private static final AppConfig INSTANCE = new AppConfig();
 
     private final Properties properties;
+    private volatile String resolvedNodeId;
 
     private AppConfig() {
         this.properties = new Properties();
@@ -67,7 +69,8 @@ public final class AppConfig {
      * @return the node ID
      * @throws IllegalStateException if node ID is not set in a multi-node cluster
      */
-    public String getNodeId() {
+    public synchronized String getNodeId() {
+        if (resolvedNodeId != null) return resolvedNodeId;
         String nodeId = getString("qraft.node.id", "");
         if (nodeId.isEmpty()) {
             if (isMultiNodeCluster()) {
@@ -80,7 +83,8 @@ public final class AppConfig {
             nodeId = deriveNodeIdFromHostname();
             logger.warn("Using hostname '{}' as node ID. Set qraft.node.id explicitly for production.", nodeId);
         }
-        return nodeId;
+        resolvedNodeId = nodeId;
+        return resolvedNodeId;
     }
 
     /**
@@ -211,6 +215,16 @@ public final class AppConfig {
         return getString("qraft.telemetry.otlp.endpoint", "http://localhost:4317");
     }
 
+    public String getRedactedOtlpEndpoint() {
+        try {
+            URI endpoint = URI.create(getOtlpEndpoint());
+            return new URI(endpoint.getScheme(), null, endpoint.getHost(), endpoint.getPort(),
+                    endpoint.getPath(), null, null).toString();
+        } catch (Exception ignored) {
+            return "<invalid endpoint>";
+        }
+    }
+
     public int getPrometheusPort() {
         return getInt("qraft.telemetry.prometheus.port", 9464);
     }
@@ -239,24 +253,6 @@ public final class AppConfig {
      */
     public int getRaftIoQueueSize() {
         return getInt("qraft.raft.io.queue-size", 1000);
-    }
-
-    // ==================== Job Assignment Configuration ====================
-
-    public long getAssignmentInitialDelayMs() {
-        return getLong("qraft.jobs.assignment.initial-delay-ms", 5000);
-    }
-
-    public long getAssignmentIntervalMs() {
-        return getLong("qraft.jobs.assignment.interval-ms", 10000);
-    }
-
-    public long getTimeoutInitialDelayMs() {
-        return getLong("qraft.jobs.timeout.initial-delay-ms", 30000);
-    }
-
-    public long getTimeoutIntervalMs() {
-        return getLong("qraft.jobs.timeout.interval-ms", 30000);
     }
 
     // ==================== Application Info ====================
@@ -391,16 +387,6 @@ public final class AppConfig {
                     "Raft I/O queue size must be between 10 and 100000, got: " + queueSize);
         }
 
-        // Validate positive intervals
-        if (getAssignmentIntervalMs() <= 0) {
-            throw new IllegalStateException(
-                    "Assignment interval must be positive, got: " + getAssignmentIntervalMs());
-        }
-        if (getTimeoutIntervalMs() <= 0) {
-            throw new IllegalStateException(
-                    "Timeout interval must be positive, got: " + getTimeoutIntervalMs());
-        }
-
         // Validate snapshot threshold
         if (getSnapshotThreshold() < 1) {
             throw new IllegalStateException(
@@ -430,37 +416,20 @@ public final class AppConfig {
                 logger.warn("Configuration file {} not found, using defaults", CONFIG_FILE);
             }
         } catch (IOException e) {
-            logger.error("Error loading configuration file: {}", e.getMessage());
-            logger.debug("Stack trace for configuration load error", e);
+            logger.error("Error loading configuration file", e);
         }
     }
 
     private void logConfiguration() {
-        logger.info("=== Qraft Controller Configuration ===");
-        logger.info("  Node ID:              {}", getNodeId());
-        logger.info("  HTTP Host:            {}", getHttpHost());
-        logger.info("  HTTP Port:            {}", getHttpPort());
-        logger.info("  Raft Port:            {}", getRaftPort());
-        logger.info("  API gRPC Port:        {}", getApiGrpcPort());
-        logger.info("  Cluster Nodes:        {}", getClusterNodes());
-        logger.info("  Service Name:         {}", getServiceName());
-        logger.info("  Version:              {}", getVersion());
-        logger.info("  --- Thread Pools ---");
-        logger.info("  Raft I/O Pool Size:   {}", getRaftIoPoolSize());
-        logger.info("  Raft I/O Queue Size:  {}", getRaftIoQueueSize());
-        logger.info("  --- Job Assignment ---");
-        logger.info("  Initial Delay:        {}ms", getAssignmentInitialDelayMs());
-        logger.info("  Assignment Interval:  {}ms", getAssignmentIntervalMs());
-        logger.info("  Timeout Initial:      {}ms", getTimeoutInitialDelayMs());
-        logger.info("  Timeout Interval:     {}ms", getTimeoutIntervalMs());
-        logger.info("  --- Snapshot ---");
-        logger.info("  Enabled:              {}", isSnapshotEnabled());
-        logger.info("  Threshold:            {} entries", getSnapshotThreshold());
-        logger.info("  Check Interval:       {}ms", getSnapshotCheckIntervalMs());
-        logger.info("  --- Telemetry ---");
-        logger.info("  Enabled:              {}", isTelemetryEnabled());
-        logger.info("  OTLP Endpoint:        {}", getOtlpEndpoint());
-        logger.info("  Prometheus Port:      {}", getPrometheusPort());
-        logger.info("========================================");
+        long clusterSize = java.util.Arrays.stream(getClusterNodes().split(","))
+                .map(String::trim).filter(value -> !value.isEmpty()).count();
+        logger.info("Controller configuration: nodeId={}, http={}:{}, raftPort={}, apiGrpcPort={}, "
+                        + "clusterSize={}, service={}, version={}, raftIoPoolSize={}, raftIoQueueSize={}, "
+                        + "snapshotEnabled={}, snapshotThreshold={}, snapshotCheckIntervalMs={}, "
+                        + "telemetryEnabled={}, otlpEndpoint={}, prometheusPort={}",
+                getNodeId(), getHttpHost(), getHttpPort(), getRaftPort(), getApiGrpcPort(), clusterSize,
+                getServiceName(), getVersion(), getRaftIoPoolSize(), getRaftIoQueueSize(),
+                isSnapshotEnabled(), getSnapshotThreshold(), getSnapshotCheckIntervalMs(),
+                isTelemetryEnabled(), getRedactedOtlpEndpoint(), getPrometheusPort());
     }
 }

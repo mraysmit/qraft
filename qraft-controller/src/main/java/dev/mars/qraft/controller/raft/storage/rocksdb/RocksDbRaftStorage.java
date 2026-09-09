@@ -17,9 +17,9 @@
 package dev.mars.qraft.controller.raft.storage.rocksdb;
 
 import dev.mars.qraft.controller.raft.storage.RaftStorage;
-import io.vertx.core.Future;
-import io.vertx.core.Vertx;
-import io.vertx.core.WorkerExecutor;
+import dev.mars.qraft.controller.runtime.Future;
+import dev.mars.qraft.controller.runtime.JavaRuntime;
+import dev.mars.qraft.controller.runtime.WorkerExecutor;
 import org.rocksdb.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -83,7 +83,7 @@ public final class RocksDbRaftStorage implements RaftStorage {
     // Instance State
     // =========================================================================
 
-    private final Vertx vertx;
+    private final JavaRuntime runtime;
     private final WorkerExecutor executor;
     private final boolean fsyncEnabled;
     private final boolean closeExecutorOnClose;
@@ -101,8 +101,8 @@ public final class RocksDbRaftStorage implements RaftStorage {
      * @param vertx    the Vert.x instance
      * @param executor the worker executor for blocking I/O operations
      */
-    public RocksDbRaftStorage(Vertx vertx, WorkerExecutor executor) {
-        this(vertx, executor, null, true, false);
+    public RocksDbRaftStorage(JavaRuntime runtime, WorkerExecutor executor) {
+        this(runtime, executor, null, true, false);
     }
 
     /**
@@ -113,8 +113,8 @@ public final class RocksDbRaftStorage implements RaftStorage {
      * @param dataDir      the directory for storage files
      * @param fsyncEnabled whether to fsync on writes
      */
-    public RocksDbRaftStorage(Vertx vertx, WorkerExecutor executor, Path dataDir, boolean fsyncEnabled) {
-        this(vertx, executor, dataDir, fsyncEnabled, false);
+    public RocksDbRaftStorage(JavaRuntime runtime, WorkerExecutor executor, Path dataDir, boolean fsyncEnabled) {
+        this(runtime, executor, dataDir, fsyncEnabled, false);
     }
 
     /**
@@ -126,9 +126,9 @@ public final class RocksDbRaftStorage implements RaftStorage {
      * @param fsyncEnabled whether to fsync on writes
      * @param closeExecutorOnClose true when storage should close the supplied executor
      */
-    public RocksDbRaftStorage(Vertx vertx, WorkerExecutor executor, Path dataDir,
+    public RocksDbRaftStorage(JavaRuntime runtime, WorkerExecutor executor, Path dataDir,
                               boolean fsyncEnabled, boolean closeExecutorOnClose) {
-        this.vertx = vertx;
+        this.runtime = runtime;
         this.executor = executor;
         this.dataDir = dataDir;
         this.fsyncEnabled = fsyncEnabled;
@@ -155,7 +155,7 @@ public final class RocksDbRaftStorage implements RaftStorage {
 
     @Override
     public Future<Void> open(Path dataDir) {
-        return vertx.executeBlocking(() -> {
+        return runtime.executeBlocking(() -> {
             dbOptions = new Options()
                     .setCreateIfMissing(true)
                     .setWriteBufferSize(64 * 1024 * 1024)  // 64MB write buffer
@@ -179,7 +179,7 @@ public final class RocksDbRaftStorage implements RaftStorage {
 
     @Override
     public Future<Void> close() {
-        return vertx.executeBlocking(() -> {
+        return runtime.executeBlocking(() -> {
             opened = false;
 
             if (syncWriteOptions != null) {
@@ -214,7 +214,7 @@ public final class RocksDbRaftStorage implements RaftStorage {
 
     @Override
     public Future<Void> updateMetadata(long currentTerm, Optional<String> votedFor) {
-        return vertx.executeBlocking(() -> {
+        return runtime.executeBlocking(() -> {
             try (WriteBatch batch = new WriteBatch()) {
                 // Write term
                 ByteBuffer termBuf = ByteBuffer.allocate(8);
@@ -238,7 +238,7 @@ public final class RocksDbRaftStorage implements RaftStorage {
 
     @Override
     public Future<PersistentMeta> loadMetadata() {
-        return vertx.executeBlocking(() -> {
+        return runtime.executeBlocking(() -> {
             byte[] termBytes = db.get(KEY_TERM);
             byte[] voteBytes = db.get(KEY_VOTED_FOR);
 
@@ -267,7 +267,7 @@ public final class RocksDbRaftStorage implements RaftStorage {
             return Future.succeededFuture();
         }
 
-        return vertx.executeBlocking(() -> {
+        return runtime.executeBlocking(() -> {
             try (WriteBatch batch = new WriteBatch()) {
                 for (LogEntryData entry : entries) {
                     byte[] key = logKey(entry.index());
@@ -284,7 +284,7 @@ public final class RocksDbRaftStorage implements RaftStorage {
 
     @Override
     public Future<Void> truncateSuffix(long fromIndex) {
-        return vertx.executeBlocking(() -> {
+        return runtime.executeBlocking(() -> {
             // RocksDB range delete: [fromIndex, MAX_LONG)
             byte[] startKey = logKey(fromIndex);
             byte[] endKey = logKey(Long.MAX_VALUE);
@@ -304,7 +304,7 @@ public final class RocksDbRaftStorage implements RaftStorage {
             logger.trace("RocksDB sync skipped (fsync disabled)");
             return Future.succeededFuture();
         }
-        return vertx.executeBlocking(() -> {
+        return runtime.executeBlocking(() -> {
             // Force WAL sync in RocksDB
             try (FlushOptions flushOptions = new FlushOptions().setWaitForFlush(true)) {
                 db.flush(flushOptions);
@@ -316,7 +316,7 @@ public final class RocksDbRaftStorage implements RaftStorage {
 
     @Override
     public Future<List<LogEntryData>> replayLog() {
-        return vertx.executeBlocking(() -> {
+        return runtime.executeBlocking(() -> {
             List<LogEntryData> entries = new ArrayList<>();
 
             byte[] prefix = LOG_PREFIX.getBytes(StandardCharsets.UTF_8);
@@ -365,7 +365,7 @@ public final class RocksDbRaftStorage implements RaftStorage {
 
     @Override
     public Future<Void> saveSnapshot(byte[] data, long lastIncludedIndex, long lastIncludedTerm) {
-        return vertx.executeBlocking(() -> {
+        return runtime.executeBlocking(() -> {
             try (WriteBatch batch = new WriteBatch();
                  WriteOptions opts = new WriteOptions().setSync(true)) {
                 batch.put(SNAPSHOT_KEY.getBytes(StandardCharsets.UTF_8), data);
@@ -383,7 +383,7 @@ public final class RocksDbRaftStorage implements RaftStorage {
 
     @Override
     public Future<Optional<SnapshotData>> loadSnapshot() {
-        return vertx.executeBlocking(() -> {
+        return runtime.executeBlocking(() -> {
             byte[] data = db.get(SNAPSHOT_KEY.getBytes(StandardCharsets.UTF_8));
             if (data == null) {
                 return Optional.<SnapshotData>empty();
@@ -403,7 +403,7 @@ public final class RocksDbRaftStorage implements RaftStorage {
 
     @Override
     public Future<Void> truncatePrefix(long toIndex) {
-        return vertx.executeBlocking(() -> {
+        return runtime.executeBlocking(() -> {
             byte[] startKey = logKey(0);
             byte[] endKey = logKey(toIndex + 1);
             try {

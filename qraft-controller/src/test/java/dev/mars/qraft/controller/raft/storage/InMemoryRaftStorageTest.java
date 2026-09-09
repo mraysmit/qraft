@@ -17,8 +17,8 @@
 package dev.mars.qraft.controller.raft.storage;
 
 import dev.mars.qraft.controller.raft.storage.RaftStorage.LogEntryData;
-import io.vertx.junit5.VertxExtension;
-import io.vertx.junit5.VertxTestContext;
+import dev.mars.qraft.controller.support.JavaRuntimeExtension;
+import dev.mars.qraft.controller.support.JavaTestContext;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 
@@ -38,13 +38,13 @@ import static org.junit.jupiter.api.Assertions.*;
  * @version 1.0
  * @since 2026-01-29
  */
-@ExtendWith(VertxExtension.class)
+@ExtendWith(JavaRuntimeExtension.class)
 class InMemoryRaftStorageTest {
 
     private InMemoryRaftStorage storage;
 
     @BeforeEach
-    void setUp(VertxTestContext ctx) {
+    void setUp(JavaTestContext ctx) {
         storage = new InMemoryRaftStorage();
         storage.open(Path.of("/dummy/path"))
                 .onComplete(ctx.succeedingThenComplete());
@@ -63,7 +63,7 @@ class InMemoryRaftStorageTest {
 
     @Test
     @DisplayName("metadata operations work correctly")
-    void metadataOperations(VertxTestContext ctx) {
+    void metadataOperations(JavaTestContext ctx) {
         storage.updateMetadata(10L, Optional.of("candidate-1"))
                 .compose(v -> storage.loadMetadata())
                 .onComplete(ctx.succeeding(meta -> {
@@ -75,7 +75,7 @@ class InMemoryRaftStorageTest {
 
     @Test
     @DisplayName("log operations work correctly")
-    void logOperations(VertxTestContext ctx) {
+    void logOperations(JavaTestContext ctx) {
         List<LogEntryData> entries = List.of(
                 new LogEntryData(1, 1, "cmd-1".getBytes()),
                 new LogEntryData(2, 1, "cmd-2".getBytes())
@@ -93,7 +93,7 @@ class InMemoryRaftStorageTest {
 
     @Test
     @DisplayName("truncateSuffix removes correct entries")
-    void truncateSuffix(VertxTestContext ctx) {
+    void truncateSuffix(JavaTestContext ctx) {
         List<LogEntryData> entries = List.of(
                 new LogEntryData(1, 1, "keep".getBytes()),
                 new LogEntryData(2, 1, "remove".getBytes()),
@@ -116,7 +116,7 @@ class InMemoryRaftStorageTest {
 
     @Test
     @DisplayName("setFailOnSync causes sync to fail")
-    void setFailOnSync_causesSyncFailure(VertxTestContext ctx) {
+    void setFailOnSync_causesSyncFailure(JavaTestContext ctx) {
         storage.setFailOnSync(true);
 
         storage.sync()
@@ -129,7 +129,7 @@ class InMemoryRaftStorageTest {
 
     @Test
     @DisplayName("setFailOnAppend causes append to fail")
-    void setFailOnAppend_causesAppendFailure(VertxTestContext ctx) {
+    void setFailOnAppend_causesAppendFailure(JavaTestContext ctx) {
         storage.setFailOnAppend(true);
 
         storage.appendEntries(List.of(new LogEntryData(1, 1, "test".getBytes())))
@@ -142,7 +142,7 @@ class InMemoryRaftStorageTest {
 
     @Test
     @DisplayName("setFailOnMetadataUpdate causes metadata update to fail")
-    void setFailOnMetadataUpdate_causesMetadataFailure(VertxTestContext ctx) {
+    void setFailOnMetadataUpdate_causesMetadataFailure(JavaTestContext ctx) {
         storage.setFailOnMetadataUpdate(true);
 
         storage.updateMetadata(5L, Optional.of("node-1"))
@@ -159,7 +159,7 @@ class InMemoryRaftStorageTest {
 
     @Test
     @DisplayName("getLog returns unmodifiable view")
-    void getLog_returnsUnmodifiableView(VertxTestContext ctx) {
+    void getLog_returnsUnmodifiableView(JavaTestContext ctx) {
         List<LogEntryData> entries = List.of(new LogEntryData(1, 1, "test".getBytes()));
 
         storage.appendEntries(entries)
@@ -177,7 +177,7 @@ class InMemoryRaftStorageTest {
 
     @Test
     @DisplayName("reset clears all state")
-    void reset_clearsAllState(VertxTestContext ctx) {
+    void reset_clearsAllState(JavaTestContext ctx) {
         storage.updateMetadata(10L, Optional.of("node-1"))
                 .compose(v -> storage.appendEntries(List.of(new LogEntryData(1, 1, "test".getBytes()))))
                 .onComplete(ctx.succeeding(v -> {
@@ -208,7 +208,7 @@ class InMemoryRaftStorageTest {
 
     @Test
     @DisplayName("operations fail after close")
-    void operations_failAfterClose(VertxTestContext ctx) {
+    void operations_failAfterClose(JavaTestContext ctx) {
         storage.close();
 
         storage.appendEntries(List.of(new LogEntryData(1, 1, "test".getBytes())))
@@ -221,7 +221,7 @@ class InMemoryRaftStorageTest {
 
     @Test
     @DisplayName("saveSnapshot and loadSnapshot round-trip")
-    void saveAndLoadSnapshot(VertxTestContext ctx) {
+    void saveAndLoadSnapshot(JavaTestContext ctx) {
         byte[] data = "snapshot-data-payload".getBytes();
         storage.saveSnapshot(data, 42, 3)
                 .compose(v -> storage.loadSnapshot())
@@ -237,7 +237,7 @@ class InMemoryRaftStorageTest {
 
     @Test
     @DisplayName("loadSnapshot returns empty when no snapshot saved")
-    void loadSnapshotEmpty(VertxTestContext ctx) {
+    void loadSnapshotEmpty(JavaTestContext ctx) {
         storage.loadSnapshot()
                 .onComplete(ctx.succeeding(opt -> {
                     assertTrue(opt.isEmpty(), "No snapshot should be present initially");
@@ -247,7 +247,7 @@ class InMemoryRaftStorageTest {
 
     @Test
     @DisplayName("truncatePrefix removes entries up to given index")
-    void truncatePrefix(VertxTestContext ctx) {
+    void truncatePrefix(JavaTestContext ctx) {
         storage.appendEntries(List.of(
                 new LogEntryData(1, 1, "a".getBytes()),
                 new LogEntryData(2, 1, "b".getBytes()),
@@ -270,7 +270,7 @@ class InMemoryRaftStorageTest {
 
     @Test
     @DisplayName("reset clears snapshot state")
-    void resetClearsSnapshot(VertxTestContext ctx) {
+    void resetClearsSnapshot(JavaTestContext ctx) {
         storage.saveSnapshot("data".getBytes(), 10, 2)
                 .onComplete(ctx.succeeding(v -> {
                     storage.reset();

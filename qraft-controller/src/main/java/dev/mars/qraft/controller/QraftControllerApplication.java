@@ -18,8 +18,7 @@ package dev.mars.qraft.controller;
 
 import dev.mars.qraft.controller.config.AppConfig;
 import dev.mars.qraft.controller.observability.TelemetryConfig;
-import io.vertx.core.Vertx;
-import io.vertx.core.VertxOptions;
+import dev.mars.qraft.controller.runtime.JavaRuntime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.bridge.SLF4JBridgeHandler;
@@ -27,7 +26,7 @@ import org.slf4j.bridge.SLF4JBridgeHandler;
 /**
  * Main application class for Qraft Controller.
  *
- * Bootstraps the Vert.x reactive runtime with OpenTelemetry tracing and deploys the main Verticle.
+ * Bootstraps the Java 25 runtime and controller services.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2025-08-26
@@ -53,41 +52,35 @@ public class QraftControllerApplication {
     public static void main(String[] args) {
         configureJulToSlf4jBridge();
         System.out.println(BANNER);
-        logger.info("Initializing Qraft Controller with OpenTelemetry (Vert.x 5)...");
+        logger.info("Initializing Qraft Controller with OpenTelemetry (Java 25 runtime)...");
 
         // Load and validate configuration (fail fast on misconfiguration)
         AppConfig config = AppConfig.get();
         config.validate();
 
-        // Create Vert.x instance with OpenTelemetry tracing enabled
-        VertxOptions options = new VertxOptions();
-        options = TelemetryConfig.configure(options);
-        Vertx vertx = Vertx.vertx(options);
+        TelemetryConfig.configure();
+        JavaRuntime runtime = JavaRuntime.create();
         
         if (config.isTelemetryEnabled()) {
             logger.info("OpenTelemetry tracing enabled - OTLP endpoint: {}, Prometheus metrics port: {}",
-                    TelemetryConfig.getOtlpEndpoint(), TelemetryConfig.getPrometheusPort());
+                    config.getRedactedOtlpEndpoint(), TelemetryConfig.getPrometheusPort());
         }
 
-        // Deploy the main verticle
-        vertx.deployVerticle(new QraftControllerVerticle())
-                .onSuccess(id -> {
-                    logger.info("QraftControllerVerticle deployed successfully (Deployment ID: {})", id);
-                })
+        QraftControllerService controller = new QraftControllerService(runtime);
+        controller.start()
+                .onSuccess(ignored -> logger.info("Qraft controller started successfully"))
                 .onFailure(err -> {
-                    logger.error("Failed to deploy QraftControllerVerticle: {}", err.getMessage());
-                    logger.debug("Stack trace for QraftControllerVerticle deployment failure", err);
+                    logger.error("Failed to start Qraft controller: {}", err.getMessage(), err);
                     System.exit(1);
                 });
 
         // Add shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            logger.info("Shutdown signal received, closing Vert.x...");
-            vertx.close()
-                    .onSuccess(v -> logger.info("Vert.x closed successfully"))
+            logger.info("Shutdown signal received, stopping controller...");
+            controller.stop().eventually(runtime::shutdown)
+                    .onSuccess(v -> logger.info("Controller runtime closed successfully"))
                     .onFailure(err -> {
-                        logger.error("Error closing Vert.x: {}", err.getMessage());
-                        logger.debug("Stack trace for Vert.x close failure", err);
+                        logger.error("Error closing controller runtime: {}", err.getMessage(), err);
                     });
         }));
     }

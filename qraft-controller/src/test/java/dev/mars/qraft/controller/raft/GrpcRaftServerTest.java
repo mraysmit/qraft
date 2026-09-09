@@ -28,7 +28,7 @@ import dev.mars.qraft.controller.raft.grpc.VoteResponse;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import io.grpc.*;
 import io.grpc.stub.StreamObserver;
-import io.vertx.core.Vertx;
+import dev.mars.qraft.controller.runtime.JavaRuntime;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
@@ -62,9 +62,10 @@ import static org.junit.jupiter.api.Assertions.*;
  * @since 2026-01-08
  */
 @Execution(ExecutionMode.SAME_THREAD)
+@Timeout(value = 90, unit = TimeUnit.SECONDS)
 class GrpcRaftServerTest {
 
-    private Vertx vertx;
+    private JavaRuntime vertx;
     private RaftNode raftNode;
     private GrpcRaftServer grpcServer;
     private ManagedChannel channel;
@@ -74,14 +75,14 @@ class GrpcRaftServerTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        vertx = Vertx.vertx();
+        vertx = JavaRuntime.create();
         serverPort = findAvailablePort();
         
         // Create a minimal RaftNode for testing
         Set<String> clusterNodes = Set.of("node1");
         InMemoryTransportSimulator transport = new InMemoryTransportSimulator("node1");
         QraftStateStore stateMachine = new QraftStateStore();
-        raftNode = RaftNode.builder().vertx(vertx)
+        raftNode = RaftNode.builder().runtime(vertx)
             .nodeId("node1")
             .clusterNodes(clusterNodes)
             .transport(transport)
@@ -127,7 +128,8 @@ class GrpcRaftServerTest {
         channel = ManagedChannelBuilder.forAddress("localhost", serverPort)
                 .usePlaintext()
                 .build();
-        blockingStub = RaftServiceGrpc.newBlockingStub(channel);
+        blockingStub = RaftServiceGrpc.newBlockingStub(channel)
+                .withDeadlineAfter(5, TimeUnit.SECONDS);
         asyncStub = RaftServiceGrpc.newStub(channel);
     }
 
@@ -395,15 +397,19 @@ class GrpcRaftServerTest {
                 .addEntries(entry)
                 .build();
         
-        // Server may reject due to deserialization issues for non-Java-serialized data
-        // The important thing is that it handles this gracefully
-        try {
-            AppendEntriesResponse response = blockingStub.appendEntries(request);
-            assertNotNull(response);
-        } catch (io.grpc.StatusRuntimeException e) {
-            // Expected - server may fail to deserialize the non-serialized entry
-            // This is correct behavior - we're testing the server doesn't crash
-        }
+        StatusRuntimeException failure = assertThrows(StatusRuntimeException.class,
+                () -> blockingStub.withDeadlineAfter(2, TimeUnit.SECONDS).appendEntries(request));
+        assertEquals(Status.Code.INVALID_ARGUMENT, failure.getStatus().getCode());
+
+        AppendEntriesRequest heartbeat = AppendEntriesRequest.newBuilder()
+                .setTerm(1)
+                .setLeaderId("leader1")
+                .setPrevLogIndex(0)
+                .setPrevLogTerm(0)
+                .setLeaderCommit(0)
+                .build();
+        AppendEntriesResponse response = blockingStub.appendEntries(heartbeat);
+        assertTrue(response.getSuccess(), "Server must remain usable after rejecting malformed log data");
     }
 
     @Test
@@ -937,8 +943,8 @@ class GrpcRaftServerTest {
         QraftStateStore sm1 = new QraftStateStore();
         QraftStateStore sm2 = new QraftStateStore();
         
-        RaftNode node1 = RaftNode.builder().vertx(vertx).nodeId("nodeA").clusterNodes(cluster1).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).electionTimeout(5000).heartbeatInterval(1000).commandCodec(new ProtobufRaftCommandCodec()).build();
-        RaftNode node2 = RaftNode.builder().vertx(vertx).nodeId("nodeB").clusterNodes(cluster2).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).electionTimeout(5000).heartbeatInterval(1000).commandCodec(new ProtobufRaftCommandCodec()).build();
+        RaftNode node1 = RaftNode.builder().runtime(vertx).nodeId("nodeA").clusterNodes(cluster1).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).electionTimeout(5000).heartbeatInterval(1000).commandCodec(new ProtobufRaftCommandCodec()).build();
+        RaftNode node2 = RaftNode.builder().runtime(vertx).nodeId("nodeB").clusterNodes(cluster2).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).electionTimeout(5000).heartbeatInterval(1000).commandCodec(new ProtobufRaftCommandCodec()).build();
         
         node1.start();
         node2.start();

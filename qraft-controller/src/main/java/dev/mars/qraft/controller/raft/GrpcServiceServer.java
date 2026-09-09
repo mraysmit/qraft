@@ -19,9 +19,9 @@ package dev.mars.qraft.controller.raft;
 import io.grpc.BindableService;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
-import io.vertx.core.Future;
-import io.vertx.core.Promise;
-import io.vertx.core.Vertx;
+import dev.mars.qraft.controller.runtime.Future;
+import dev.mars.qraft.controller.runtime.JavaRuntime;
+import dev.mars.qraft.controller.runtime.Promise;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,13 +35,13 @@ public class GrpcServiceServer {
 
     private static final Logger logger = LoggerFactory.getLogger(GrpcServiceServer.class);
 
-    private final Vertx vertx;
+    private final JavaRuntime runtime;
     private final int port;
     private final BindableService[] services;
     private Server server;
 
-    public GrpcServiceServer(Vertx vertx, int port, BindableService... services) {
-        this.vertx = vertx;
+    public GrpcServiceServer(JavaRuntime runtime, int port, BindableService... services) {
+        this.runtime = runtime;
         this.port = port;
         this.services = services != null ? services : new BindableService[0];
     }
@@ -49,7 +49,7 @@ public class GrpcServiceServer {
     public Future<Void> start() {
         Promise<Void> promise = Promise.promise();
 
-        vertx.executeBlocking(() -> {
+        runtime.executeBlocking(() -> {
             try {
                 ServerBuilder<?> builder = ServerBuilder.forPort(port);
                 for (BindableService service : services) {
@@ -75,7 +75,7 @@ public class GrpcServiceServer {
             return promise.future();
         }
 
-        vertx.executeBlocking(() -> {
+        runtime.executeBlocking(() -> {
             try {
                 server.shutdown();
                 if (!server.awaitTermination(5, TimeUnit.SECONDS)) {

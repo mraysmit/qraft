@@ -22,7 +22,7 @@ import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.controller.raft.grpc.VoteRequest;
 import dev.mars.qraft.controller.raft.grpc.VoteResponse;
-import io.vertx.core.Future;
+import dev.mars.qraft.controller.runtime.Future;
 
 import java.util.function.Consumer;
 

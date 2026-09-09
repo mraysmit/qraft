@@ -35,7 +35,7 @@ services:
         ipv4_address: 172.21.0.20
     volumes:
       - controller1-data:/app/data
-      - controller1-logs:/app/logs
+      - ../../logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s
@@ -68,7 +68,7 @@ services:
         ipv4_address: 172.20.0.11
     volumes:
       - controller2-data:/app/data
-      - controller2-logs:/app/logs
+      - ../../logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s
@@ -103,7 +103,7 @@ services:
         ipv4_address: 172.20.0.12
     volumes:
       - controller3-data:/app/data
-      - controller3-logs:/app/logs
+      - ../../logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s
@@ -142,7 +142,7 @@ services:
         ipv4_address: 172.22.0.100
     volumes:
       - agent-nyc-data:/app/data
-      - agent-nyc-logs:/app/logs
+      - ../../logs:/app/logs
       - shared-files:/shared
     restart: unless-stopped
     depends_on:
@@ -171,7 +171,7 @@ services:
         ipv4_address: 172.22.0.101
     volumes:
       - agent-london-data:/app/data
-      - agent-london-logs:/app/logs
+      - ../../logs:/app/logs
       - shared-files:/shared
     restart: unless-stopped
     depends_on:
@@ -200,7 +200,7 @@ services:
         ipv4_address: 172.22.0.102
     volumes:
       - agent-tokyo-data:/app/data
-      - agent-tokyo-logs:/app/logs
+      - ../../logs:/app/logs
       - shared-files:/shared
     restart: unless-stopped
     depends_on:
@@ -319,20 +319,12 @@ networks:
 volumes:
   # Controller data
   controller1-data:
-  controller1-logs:
   controller2-data:
-  controller2-logs:
   controller3-data:
-  controller3-logs:
-  
   # Agent data
   agent-nyc-data:
-  agent-nyc-logs:
   agent-london-data:
-  agent-london-logs:
   agent-tokyo-data:
-  agent-tokyo-logs:
-  
   # Transfer server data
   ftp-data:
   sftp-data:

@@ -1,32 +1,35 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
+    <property name="LOG_DIR" value="${LOG_DIR:-logs}"/>
+    <property name="INSTANCE_ID" value="${QRAFT_NODE_ID:-${NODE_ID:-${HOSTNAME:-local}}}"/>
+    <property name="LOG_BASE" value="${LOG_DIR}/qraft-controller-${INSTANCE_ID}"/>
     
     <!-- Console appender with MDC context for Docker logs -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36}%replace( [%X{nodeId}]){' \[\]', ''}%replace( [%X{raftRole}/%X{raftTerm}]){' \[/\]', ''}%replace( [%X{requestId}]){' \[\]', ''}%replace( [%X{rpcType}]){' \[\]', ''} - %msg%n</pattern>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{48}%replace( [%X{nodeId}]){' \[\]', ''}%replace( [%X{raftRole}/%X{raftTerm}]){' \[/\]', ''}%replace( [%X{requestId}]){' \[\]', ''}%replace( [%X{rpcType}]){' \[\]', ''} - %msg%n</pattern>
         </encoder>
     </appender>
     
     <!-- File appender for persistent logs -->
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>/app/logs/controller.log</file>
-        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>/app/logs/controller.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+        <file>${LOG_BASE}.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/archive/qraft-controller-${INSTANCE_ID}.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
             <maxFileSize>100MB</maxFileSize>
             <maxHistory>30</maxHistory>
             <totalSizeCap>1GB</totalSizeCap>
         </rollingPolicy>
         <encoder>
-            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36}%replace( [%X{nodeId}]){' \[\]', ''}%replace( [%X{raftRole}/%X{raftTerm}]){' \[/\]', ''}%replace( [%X{requestId}]){' \[\]', ''}%replace( [%X{rpcType}]){' \[\]', ''} - %msg%n</pattern>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{48}%replace( [%X{nodeId}]){' \[\]', ''}%replace( [%X{raftRole}/%X{raftTerm}]){' \[/\]', ''}%replace( [%X{requestId}]){' \[\]', ''}%replace( [%X{rpcType}]){' \[\]', ''} - %msg%n</pattern>
         </encoder>
     </appender>
     
     <!-- JSON appender for structured logging (includes MDC fields automatically) -->
     <appender name="JSON" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>/app/logs/controller.json</file>
-        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>/app/logs/controller.%d{yyyy-MM-dd}.%i.json</fileNamePattern>
+        <file>${LOG_BASE}.json</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/archive/qraft-controller-${INSTANCE_ID}.%d{yyyy-MM-dd}.%i.json.gz</fileNamePattern>
             <maxFileSize>100MB</maxFileSize>
             <maxHistory>30</maxHistory>
             <totalSizeCap>1GB</totalSizeCap>
@@ -54,12 +57,12 @@
     <logger name="dev.mars.qraft" level="INFO"/>
     <logger name="io.grpc" level="WARN"/>
     <logger name="io.netty" level="WARN"/>
-    <logger name="io.vertx" level="WARN"/>
     
     <!-- Root logger -->
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
         <appender-ref ref="FILE"/>
+        <appender-ref ref="JSON"/>
         <appender-ref ref="OTEL"/>
     </root>
     

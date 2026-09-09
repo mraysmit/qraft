@@ -36,14 +36,14 @@ import static java.util.Objects.requireNonNull;
  * <pre>{@code
  * // Volatile mode (tests)
  * RaftNode.builder()
- *         .vertx(vertx).nodeId(id).clusterNodes(nodes)
+ *         .runtime(runtime).nodeId(id).clusterNodes(nodes)
  *         .transport(transport).stateMachine(sm)
  *         .mode(RaftNodeMode.volatileMode())
  *         .electionTimeout(1000).heartbeatInterval(200).build();
  *
  * // Durable mode (production)
  * RaftNode.builder()
- *         .vertx(vertx).nodeId(id).clusterNodes(nodes)
+ *         .runtime(runtime).nodeId(id).clusterNodes(nodes)
  *         .transport(transport).stateMachine(sm)
  *         .mode(RaftNodeMode.durable(storage))
  *         .electionTimeout(1000).heartbeatInterval(200).build();

@@ -153,13 +153,8 @@ final class AgentCodec {
 
     private static AgentCapabilitiesProto toProto(AgentCapabilities caps) {
         AgentCapabilitiesProto.Builder builder = AgentCapabilitiesProto.newBuilder()
-                .setMaxConcurrentTransfers(caps.getMaxConcurrentTransfers())
-                .setMaxTransferSize(caps.getMaxTransferSize())
-                .setMaxBandwidth(caps.getMaxBandwidth());
-        Optional.ofNullable(caps.getSupportedProtocols()).ifPresent(builder::addAllSupportedProtocols);
+                .addAllSupportedServices(caps.getSupportedServices());
         Optional.ofNullable(caps.getAvailableRegions()).ifPresent(builder::addAllAvailableRegions);
-        Optional.ofNullable(caps.getSupportedCompressionTypes()).ifPresent(builder::addAllSupportedCompressionTypes);
-        Optional.ofNullable(caps.getSupportedEncryptionTypes()).ifPresent(builder::addAllSupportedEncryptionTypes);
         Optional.ofNullable(caps.getCustomCapabilities()).ifPresent(cc ->
                 cc.forEach((k, v) -> builder.putCustomCapabilities(k, v != null ? v.toString() : "")));
         Optional.ofNullable(caps.getSystemInfo()).ifPresent(si -> builder.setSystemInfo(toProto(si)));
@@ -169,13 +164,8 @@ final class AgentCodec {
 
     private static AgentCapabilities fromProto(AgentCapabilitiesProto proto) {
         AgentCapabilities caps = new AgentCapabilities();
-        caps.setSupportedProtocols(new HashSet<>(proto.getSupportedProtocolsList()));
-        caps.setMaxConcurrentTransfers(proto.getMaxConcurrentTransfers());
-        caps.setMaxTransferSize(proto.getMaxTransferSize());
-        caps.setMaxBandwidth(proto.getMaxBandwidth());
+        caps.setSupportedServices(new HashSet<>(proto.getSupportedServicesList()));
         caps.setAvailableRegions(new HashSet<>(proto.getAvailableRegionsList()));
-        caps.setSupportedCompressionTypes(new HashSet<>(proto.getSupportedCompressionTypesList()));
-        caps.setSupportedEncryptionTypes(new HashSet<>(proto.getSupportedEncryptionTypesList()));
         if (proto.getCustomCapabilitiesCount() > 0) {
             caps.setCustomCapabilities(new HashMap<>(proto.getCustomCapabilitiesMap()));
         }

@@ -30,9 +30,6 @@ import dev.mars.qraft.controller.raft.grpc.*;
  * <ul>
  *   <li>{@link AgentCodec} — {@link AgentCommand}, AgentInfo, AgentCapabilities, AgentStatus</li>
  *   <li>Inline mapping — {@link DistributedStateRaftCommand} via SystemMetadata protobuf envelope</li>
- *   <li>{@link JobAssignmentCodec} — {@link JobAssignmentCommand}, JobAssignment, JobAssignmentStatus</li>
- *   <li>{@link JobQueueCodec} — {@link JobQueueCommand}, QueuedJob, JobRequirements, JobPriority</li>
- *   <li>{@link RouteCodec} — {@link RouteCommand}, RouteConfiguration, TriggerConfiguration, RouteStatus</li>
  * </ul>
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
@@ -60,12 +57,6 @@ public final class ProtobufCommandCodec {
                     .setAgentCommand(AgentCodec.toProto(cmd)).build();
             case DistributedStateRaftCommand cmd -> RaftCommandMessage.newBuilder()
                 .setSystemMetadataCommand(toSystemMetadataProto(cmd.delegate())).build();
-            case JobAssignmentCommand cmd -> RaftCommandMessage.newBuilder()
-                    .setJobAssignmentCommand(JobAssignmentCodec.toProto(cmd)).build();
-            case JobQueueCommand cmd -> RaftCommandMessage.newBuilder()
-                    .setJobQueueCommand(JobQueueCodec.toProto(cmd)).build();
-            case RouteCommand cmd -> RaftCommandMessage.newBuilder()
-                    .setRouteCommand(RouteCodec.toProto(cmd)).build();
                 default -> throw new IllegalArgumentException(
                     "Unsupported RaftCommand type for protobuf codec: " + command.getClass().getName());
         };
@@ -85,9 +76,6 @@ public final class ProtobufCommandCodec {
             return switch (raftMessage.getCommandCase()) {
                 case AGENT_COMMAND -> AgentCodec.fromProto(raftMessage.getAgentCommand());
                 case SYSTEM_METADATA_COMMAND -> fromSystemMetadataProto(raftMessage.getSystemMetadataCommand());
-                case JOB_ASSIGNMENT_COMMAND -> JobAssignmentCodec.fromProto(raftMessage.getJobAssignmentCommand());
-                case JOB_QUEUE_COMMAND -> JobQueueCodec.fromProto(raftMessage.getJobQueueCommand());
-                case ROUTE_COMMAND -> RouteCodec.fromProto(raftMessage.getRouteCommand());
                 case COMMAND_NOT_SET -> null; // No-op entry
                 default -> throw new IllegalArgumentException(
                         "Unsupported protobuf command case: " + raftMessage.getCommandCase());

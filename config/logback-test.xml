@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <property name="TEST_LOG_DIR" value="${qraft.test.log.dir:-test-logs}"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{48}%replace( [%X{nodeId}]){' \[\]', ''}%replace( [%X{agentId}]){' \[\]', ''}%replace( [%X{raftRole}/%X{raftTerm}]){' \[/\]', ''}%replace( [%X{requestId}]){' \[\]', ''}%replace( [%X{rpcType}]){' \[\]', ''} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <appender name="FILE" class="ch.qos.logback.core.FileAppender">
+        <file>${TEST_LOG_DIR}/qraft-test-${testRunTimestamp:-local}.log</file>
+        <append>true</append>
+        <prudent>true</prudent>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{48}%replace( [%X{nodeId}]){' \[\]', ''}%replace( [%X{agentId}]){' \[\]', ''}%replace( [%X{raftRole}/%X{raftTerm}]){' \[/\]', ''}%replace( [%X{requestId}]){' \[\]', ''}%replace( [%X{rpcType}]){' \[\]', ''} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <logger name="dev.mars.qraft" level="DEBUG"/>
+    <logger name="org.apache" level="WARN"/>
+    <logger name="io.netty" level="WARN"/>
+    <logger name="io.grpc" level="WARN"/>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE"/>
+    </root>
+</configuration>

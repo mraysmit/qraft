@@ -22,8 +22,8 @@ import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.controller.raft.grpc.VoteRequest;
 import dev.mars.qraft.controller.raft.grpc.VoteResponse;
-import io.vertx.core.Future;
-import io.vertx.core.Promise;
+import dev.mars.qraft.controller.runtime.Future;
+import dev.mars.qraft.controller.runtime.Promise;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

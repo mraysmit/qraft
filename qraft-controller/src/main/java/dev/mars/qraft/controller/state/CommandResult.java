@@ -56,7 +56,7 @@ public sealed interface CommandResult<T>
      * The target entity was not found in the state store.
      *
      * @param id         the entity identifier that was looked up
-     * @param entityType a human-readable entity type name (e.g. "TransferJob", "Agent")
+     * @param entityType a human-readable entity type name (for example, "Agent" or "Metadata")
      * @param <T>        entity type (phantom — no entity is available)
      */
     record NotFound<T>(String id, String entityType) implements CommandResult<T> {

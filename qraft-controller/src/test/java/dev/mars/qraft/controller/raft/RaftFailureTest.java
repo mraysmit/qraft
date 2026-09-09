@@ -22,7 +22,8 @@ import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
-import io.vertx.core.Future;
+import dev.mars.qraft.controller.runtime.Future;
+import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.raft.grpc.VoteRequest;
 import dev.mars.qraft.controller.raft.grpc.VoteResponse;
 
@@ -58,11 +59,11 @@ class RaftFailureTest {
     private InMemoryTransportSimulator transport1;
     private InMemoryTransportSimulator transport2;
     private InMemoryTransportSimulator transport3;
-    private io.vertx.core.Vertx vertx;
+    private JavaRuntime vertx;
 
     @BeforeEach
     void setUp() {
-        vertx = io.vertx.core.Vertx.vertx();
+        vertx = JavaRuntime.create();
         InMemoryTransportSimulator.clearAllTransports();
 
         Set<String> clusterNodes = Set.of("node1", "node2", "node3");
@@ -71,9 +72,9 @@ class RaftFailureTest {
         transport2 = new InMemoryTransportSimulator("node2");
         transport3 = new InMemoryTransportSimulator("node3");
 
-        node1 = RaftNode.builder().vertx(vertx).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(new QraftStateStore()).mode(RaftNodeMode.volatileMode()).electionTimeout(600).heartbeatInterval(120).commandCodec(new ProtobufRaftCommandCodec()).build();
-        node2 = RaftNode.builder().vertx(vertx).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(new QraftStateStore()).mode(RaftNodeMode.volatileMode()).electionTimeout(600).heartbeatInterval(120).commandCodec(new ProtobufRaftCommandCodec()).build();
-        node3 = RaftNode.builder().vertx(vertx).nodeId("node3").clusterNodes(clusterNodes).transport(transport3).stateMachine(new QraftStateStore()).mode(RaftNodeMode.volatileMode()).electionTimeout(600).heartbeatInterval(120).commandCodec(new ProtobufRaftCommandCodec()).build();
+        node1 = RaftNode.builder().runtime(vertx).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(new QraftStateStore()).mode(RaftNodeMode.volatileMode()).electionTimeout(600).heartbeatInterval(120).commandCodec(new ProtobufRaftCommandCodec()).build();
+        node2 = RaftNode.builder().runtime(vertx).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(new QraftStateStore()).mode(RaftNodeMode.volatileMode()).electionTimeout(600).heartbeatInterval(120).commandCodec(new ProtobufRaftCommandCodec()).build();
+        node3 = RaftNode.builder().runtime(vertx).nodeId("node3").clusterNodes(clusterNodes).transport(transport3).stateMachine(new QraftStateStore()).mode(RaftNodeMode.volatileMode()).electionTimeout(600).heartbeatInterval(120).commandCodec(new ProtobufRaftCommandCodec()).build();
     }
 
     @AfterEach
@@ -198,7 +199,7 @@ class RaftFailureTest {
     @Test
     void testInvalidClusterConfiguration() {
         // Test empty cluster - should not throw exception but should handle gracefully
-        RaftNode emptyClusterNode = RaftNode.builder().vertx(vertx).nodeId("test").clusterNodes(Set.of()).transport(transport1).stateMachine(new QraftStateStore()).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec()).build();
+        RaftNode emptyClusterNode = RaftNode.builder().runtime(vertx).nodeId("test").clusterNodes(Set.of()).transport(transport1).stateMachine(new QraftStateStore()).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec()).build();
         assertNotNull(emptyClusterNode);
         assertEquals("test", emptyClusterNode.getNodeId());
         assertEquals(RaftNode.State.FOLLOWER, emptyClusterNode.getState());
@@ -240,7 +241,7 @@ class RaftFailureTest {
             }
         };
         
-        RaftNode failingNode = RaftNode.builder().vertx(vertx).nodeId("failing").clusterNodes(Set.of("failing"))
+        RaftNode failingNode = RaftNode.builder().runtime(vertx).nodeId("failing").clusterNodes(Set.of("failing"))
                 .transport(failingTransport).stateMachine(new QraftStateStore()).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec()).build();
         
         // Should handle transport failure gracefully
@@ -318,11 +319,11 @@ class RaftFailureTest {
         // Start nodes with very short election timeouts to force concurrent elections
         Set<String> clusterNodes = Set.of("fast1", "fast2", "fast3");
         
-        RaftNode fast1 = RaftNode.builder().vertx(vertx).nodeId("fast1").clusterNodes(clusterNodes)
+        RaftNode fast1 = RaftNode.builder().runtime(vertx).nodeId("fast1").clusterNodes(clusterNodes)
                 .transport(new InMemoryTransportSimulator("fast1")).stateMachine(new QraftStateStore()).mode(RaftNodeMode.volatileMode()).electionTimeout(100).heartbeatInterval(50).commandCodec(new ProtobufRaftCommandCodec()).build();
-        RaftNode fast2 = RaftNode.builder().vertx(vertx).nodeId("fast2").clusterNodes(clusterNodes)
+        RaftNode fast2 = RaftNode.builder().runtime(vertx).nodeId("fast2").clusterNodes(clusterNodes)
                 .transport(new InMemoryTransportSimulator("fast2")).stateMachine(new QraftStateStore()).mode(RaftNodeMode.volatileMode()).electionTimeout(100).heartbeatInterval(50).commandCodec(new ProtobufRaftCommandCodec()).build();
-        RaftNode fast3 = RaftNode.builder().vertx(vertx).nodeId("fast3").clusterNodes(clusterNodes)
+        RaftNode fast3 = RaftNode.builder().runtime(vertx).nodeId("fast3").clusterNodes(clusterNodes)
                 .transport(new InMemoryTransportSimulator("fast3")).stateMachine(new QraftStateStore()).mode(RaftNodeMode.volatileMode()).electionTimeout(100).heartbeatInterval(50).commandCodec(new ProtobufRaftCommandCodec()).build();
         
         try {
@@ -408,7 +409,7 @@ class RaftFailureTest {
         
         // Test single node becoming leader
         Set<String> singleNode = Set.of("single");
-        RaftNode single = RaftNode.builder().vertx(vertx).nodeId("single").clusterNodes(singleNode)
+        RaftNode single = RaftNode.builder().runtime(vertx).nodeId("single").clusterNodes(singleNode)
                 .transport(new InMemoryTransportSimulator("single")).stateMachine(new QraftStateStore()).mode(RaftNodeMode.volatileMode()).electionTimeout(300).heartbeatInterval(100).commandCodec(new ProtobufRaftCommandCodec()).build();
         
         single.start();

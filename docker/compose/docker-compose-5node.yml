@@ -24,7 +24,7 @@ services:
       - raft-cluster-5
     volumes:
       - controller1-data:/app/data
-      - controller1-logs:/app/logs
+      - ../../logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s
@@ -55,7 +55,7 @@ services:
       - raft-cluster-5
     volumes:
       - controller2-data:/app/data
-      - controller2-logs:/app/logs
+      - ../../logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s
@@ -86,7 +86,7 @@ services:
       - raft-cluster-5
     volumes:
       - controller3-data:/app/data
-      - controller3-logs:/app/logs
+      - ../../logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s
@@ -117,7 +117,7 @@ services:
       - raft-cluster-5
     volumes:
       - controller4-data:/app/data
-      - controller4-logs:/app/logs
+      - ../../logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s
@@ -148,7 +148,7 @@ services:
       - raft-cluster-5
     volumes:
       - controller5-data:/app/data
-      - controller5-logs:/app/logs
+      - ../../logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s
@@ -167,21 +167,16 @@ networks:
 volumes:
   controller1-data:
     driver: local
-  controller1-logs:
     driver: local
   controller2-data:
     driver: local
-  controller2-logs:
     driver: local
   controller3-data:
     driver: local
-  controller3-logs:
     driver: local
   controller4-data:
     driver: local
-  controller4-logs:
     driver: local
   controller5-data:
     driver: local
-  controller5-logs:
     driver: local

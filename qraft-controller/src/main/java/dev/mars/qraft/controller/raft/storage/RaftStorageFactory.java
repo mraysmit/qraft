@@ -17,9 +17,9 @@
 package dev.mars.qraft.controller.raft.storage;
 
 import dev.mars.qraft.controller.raft.storage.file.FileRaftStorage;
-import io.vertx.core.Future;
-import io.vertx.core.Vertx;
-import io.vertx.core.WorkerExecutor;
+import dev.mars.qraft.controller.runtime.Future;
+import dev.mars.qraft.controller.runtime.JavaRuntime;
+import dev.mars.qraft.controller.runtime.WorkerExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -81,7 +81,7 @@ public final class RaftStorageFactory {
      * @param fsync       whether to fsync after writes (ignored for memory)
      * @return a Future completing with the opened RaftStorage
      */
-    public static Future<RaftStorage> create(Vertx vertx, String storageType, 
+    public static Future<RaftStorage> create(JavaRuntime runtime, String storageType, 
                                               Path storagePath, boolean fsync) {
         StorageType type = parseStorageType(storageType);
         
@@ -94,21 +94,21 @@ public final class RaftStorageFactory {
                         .dataDir(storagePath)
                         .syncEnabled(fsync)
                         .build();
-                RaftLogStorageAdapter storage = new RaftLogStorageAdapter(vertx, config);
+                RaftLogStorageAdapter storage = new RaftLogStorageAdapter(runtime, config);
                 yield storage.open(storagePath).map(v -> (RaftStorage) storage);
             }
             case FILE -> {
                 // Create a dedicated single-threaded executor for serialized WAL I/O
-                WorkerExecutor executor = vertx.createSharedWorkerExecutor(
+                WorkerExecutor executor = runtime.createSharedWorkerExecutor(
                         "raft-wal-executor", 1, 60_000_000_000L); // 60s max exec time
-                FileRaftStorage storage = new FileRaftStorage(vertx, executor, storagePath, fsync, true);
+                FileRaftStorage storage = new FileRaftStorage(runtime, executor, storagePath, fsync, true);
                 yield storage.open(storagePath).map(v -> (RaftStorage) storage);
             }
             case ROCKSDB -> {
                 validateRocksDbAvailable();
-                WorkerExecutor executor = vertx.createSharedWorkerExecutor(
+                WorkerExecutor executor = runtime.createSharedWorkerExecutor(
                         "raft-rocksdb-executor", 1, 60_000_000_000L);
-                yield createRocksDbStorageAsync(vertx, executor, storagePath, fsync);
+                yield createRocksDbStorageAsync(runtime, executor, storagePath, fsync);
             }
             case MEMORY -> {
                 logger.warn("Using InMemoryRaftStorage - DATA WILL NOT SURVIVE RESTART!");
@@ -134,9 +134,9 @@ public final class RaftStorageFactory {
      * @throws IllegalArgumentException if the storage type is unknown
      * @throws IllegalStateException if RocksDB is requested but not on classpath
      */
-    public static RaftStorage create(Vertx vertx, WorkerExecutor executor) {
+    public static RaftStorage create(JavaRuntime runtime, WorkerExecutor executor) {
         String storageType = getConfiguredStorageType();
-        return create(vertx, executor, storageType);
+        return create(runtime, executor, storageType);
     }
 
     /**
@@ -149,9 +149,9 @@ public final class RaftStorageFactory {
      * @throws IllegalArgumentException if the storage type is unknown
      * @throws IllegalStateException if RocksDB is requested but not on classpath
      */
-    public static RaftStorage create(Vertx vertx, WorkerExecutor executor, String storageType) {
+    public static RaftStorage create(JavaRuntime runtime, WorkerExecutor executor, String storageType) {
         StorageType type = parseStorageType(storageType);
-        return create(vertx, executor, type);
+        return create(runtime, executor, type);
     }
 
     /**
@@ -163,22 +163,22 @@ public final class RaftStorageFactory {
      * @return the requested RaftStorage implementation
      * @throws IllegalStateException if RocksDB is requested but not on classpath
      */
-    public static RaftStorage create(Vertx vertx, WorkerExecutor executor, StorageType type) {
+    public static RaftStorage create(JavaRuntime runtime, WorkerExecutor executor, StorageType type) {
         logger.info("Creating RaftStorage: type={}", type);
 
         return switch (type) {
             case RAFTLOG -> {
                 logger.info("Using RaftLogStorageAdapter (raftlog-core library)");
-                yield new RaftLogStorageAdapter(vertx);
+                yield new RaftLogStorageAdapter(runtime);
             }
             case FILE -> {
                 logger.info("Using FileRaftStorage (custom WAL, zero dependencies)");
-                yield new FileRaftStorage(vertx, executor);
+                yield new FileRaftStorage(runtime, executor);
             }
             case ROCKSDB -> {
                 validateRocksDbAvailable();
                 logger.info("Using RocksDbRaftStorage (high-performance key-value store)");
-                yield createRocksDbStorage(vertx, executor);
+                yield createRocksDbStorage(runtime, executor);
             }
             case MEMORY -> {
                 logger.warn("Using InMemoryRaftStorage - DATA WILL NOT SURVIVE RESTART!");
@@ -250,14 +250,14 @@ public final class RaftStorageFactory {
         }
     }
 
-    private static RaftStorage createRocksDbStorage(Vertx vertx, WorkerExecutor executor) {
+    private static RaftStorage createRocksDbStorage(JavaRuntime runtime, WorkerExecutor executor) {
         // Use reflection to avoid compile-time dependency on RocksDB
         try {
             Class<?> clazz = Class.forName(
                     "dev.mars.qraft.controller.raft.storage.rocksdb.RocksDbRaftStorage");
             return (RaftStorage) clazz
-                    .getConstructor(Vertx.class, WorkerExecutor.class)
-                    .newInstance(vertx, executor);
+                    .getConstructor(JavaRuntime.class, WorkerExecutor.class)
+                    .newInstance(runtime, executor);
         } catch (ClassNotFoundException e) {
             throw new IllegalStateException(
                     "RocksDbRaftStorage class not found. Ensure qraft-controller is compiled " +
@@ -267,15 +267,15 @@ public final class RaftStorageFactory {
         }
     }
 
-    private static Future<RaftStorage> createRocksDbStorageAsync(Vertx vertx, WorkerExecutor executor,
+    private static Future<RaftStorage> createRocksDbStorageAsync(JavaRuntime runtime, WorkerExecutor executor,
                                                                   Path storagePath, boolean fsync) {
         // Use reflection to avoid compile-time dependency on RocksDB
         try {
             Class<?> clazz = Class.forName(
                     "dev.mars.qraft.controller.raft.storage.rocksdb.RocksDbRaftStorage");
             RaftStorage storage = (RaftStorage) clazz
-                .getConstructor(Vertx.class, WorkerExecutor.class, Path.class, boolean.class, boolean.class)
-                .newInstance(vertx, executor, storagePath, fsync, true);
+                .getConstructor(JavaRuntime.class, WorkerExecutor.class, Path.class, boolean.class, boolean.class)
+                .newInstance(runtime, executor, storagePath, fsync, true);
             return storage.open(storagePath).map(v -> storage);
         } catch (ClassNotFoundException e) {
             return Future.failedFuture(new IllegalStateException(

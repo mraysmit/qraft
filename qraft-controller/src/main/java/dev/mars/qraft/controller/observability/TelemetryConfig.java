@@ -8,8 +8,6 @@ import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
 import io.opentelemetry.exporter.otlp.trace.OtlpGrpcSpanExporter;
 import io.opentelemetry.exporter.prometheus.PrometheusHttpServer;
-import io.vertx.core.VertxOptions;
-import io.vertx.tracing.opentelemetry.OpenTelemetryOptions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,12 +20,12 @@ public class TelemetryConfig {
     private static int configuredPrometheusPort;
     private static String configuredOtlpEndpoint;
 
-    public static VertxOptions configure(VertxOptions options) {
+    public static void configure() {
         AppConfig config = AppConfig.get();
         
         if (!config.isTelemetryEnabled()) {
             logger.info("Telemetry is disabled");
-            return options;
+            return;
         }
 
         configuredPrometheusPort = config.getPrometheusPort();
@@ -68,8 +66,6 @@ public class TelemetryConfig {
         logger.info("OpenTelemetry configured: service={}, otlp={}, prometheus={}",
                 serviceName, configuredOtlpEndpoint, configuredPrometheusPort);
 
-        // 5. Configure Vert.x Options (picks up globally registered SDK)
-        return options.setTracingOptions(new OpenTelemetryOptions());
     }
 
     /**

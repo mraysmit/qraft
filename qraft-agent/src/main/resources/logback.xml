@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
+    <property name="LOG_DIR" value="${LOG_DIR:-logs}"/>
+    <property name="INSTANCE_ID" value="${AGENT_ID:-${HOSTNAME:-local}}"/>
+    <property name="LOG_BASE" value="${LOG_DIR}/qraft-agent-${INSTANCE_ID}"/>
     
     <!-- Console appender for Docker logs -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
@@ -10,9 +13,9 @@
     
     <!-- File appender for persistent logs -->
     <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>/app/logs/agent.log</file>
-        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>/app/logs/agent.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
+        <file>${LOG_BASE}.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/archive/qraft-agent-${INSTANCE_ID}.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
             <maxFileSize>100MB</maxFileSize>
             <maxHistory>30</maxHistory>
             <totalSizeCap>1GB</totalSizeCap>
@@ -24,9 +27,9 @@
     
     <!-- JSON appender for structured logging -->
     <appender name="JSON" class="ch.qos.logback.core.rolling.RollingFileAppender">
-        <file>/app/logs/agent.json</file>
-        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-            <fileNamePattern>/app/logs/agent.%d{yyyy-MM-dd}.%i.json</fileNamePattern>
+        <file>${LOG_BASE}.json</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_DIR}/archive/qraft-agent-${INSTANCE_ID}.%d{yyyy-MM-dd}.%i.json.gz</fileNamePattern>
             <maxFileSize>100MB</maxFileSize>
             <maxHistory>30</maxHistory>
             <totalSizeCap>1GB</totalSizeCap>
@@ -59,6 +62,7 @@
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
         <appender-ref ref="FILE"/>
+        <appender-ref ref="JSON"/>
         <appender-ref ref="OTEL"/>
     </root>
     

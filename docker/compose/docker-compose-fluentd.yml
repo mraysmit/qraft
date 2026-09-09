@@ -49,5 +49,4 @@ networks:
 volumes:
   elasticsearch-data:
     driver: local
-  fluentd-logs:
     driver: local

@@ -65,9 +65,6 @@ All Java source files must include the following license header:
 - **Jackson Databind** (2.15.2) - Apache License 2.0
 
 #### Reactive & Async Processing
-- **Eclipse Vert.x Core** (4.5.11) - Apache License 2.0 / EPL 2.0
-- **Vert.x PostgreSQL Client** (4.5.11) - Apache License 2.0 / EPL 2.0
-- **Vert.x SQL Client** (4.5.11) - Apache License 2.0 / EPL 2.0
 
 #### Logging
 - **SLF4J API** (2.0.9) - MIT License

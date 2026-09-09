@@ -17,10 +17,10 @@ import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.controller.raft.grpc.VoteRequest;
 import dev.mars.qraft.controller.raft.grpc.VoteResponse;
-import io.vertx.core.Future;
-import io.vertx.core.Vertx;
-import io.vertx.junit5.VertxExtension;
-import io.vertx.junit5.VertxTestContext;
+import dev.mars.qraft.controller.runtime.Future;
+import dev.mars.qraft.controller.runtime.JavaRuntime;
+import dev.mars.qraft.controller.support.JavaRuntimeExtension;
+import dev.mars.qraft.controller.support.JavaTestContext;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
@@ -33,21 +33,21 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-@ExtendWith(VertxExtension.class)
+@ExtendWith(JavaRuntimeExtension.class)
 public class RaftNodeIntegrationTest {
 
-    private Vertx vertx;
+    private JavaRuntime vertx;
 
     @BeforeAll
-    void setUp(Vertx vertx) {
+    void setUp(JavaRuntime vertx) {
         this.vertx = vertx;
     }
 
     @Test
-    void testRaftNodeStartStop(VertxTestContext testContext) {
+    void testRaftNodeStartStop(JavaTestContext testContext) {
         TestRaftTransport transport = new TestRaftTransport();
         TestRaftLogApplicator stateMachine = new TestRaftLogApplicator();
-        RaftNode node = RaftNode.builder().vertx(vertx).nodeId("node1").clusterNodes(Set.of("node1")).transport(transport).stateMachine(stateMachine).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec()).build();
+        RaftNode node = RaftNode.builder().runtime(vertx).nodeId("node1").clusterNodes(Set.of("node1")).transport(transport).stateMachine(stateMachine).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec()).build();
 
         node.start()
             .onComplete(testContext.succeeding(v -> {
@@ -65,10 +65,10 @@ public class RaftNodeIntegrationTest {
     }
 
     @Test
-    void testTimerCleanup(VertxTestContext testContext) {
+    void testTimerCleanup(JavaTestContext testContext) {
         TestRaftTransport transport = new TestRaftTransport();
         TestRaftLogApplicator stateMachine = new TestRaftLogApplicator();
-        RaftNode node = RaftNode.builder().vertx(vertx).nodeId("node1").clusterNodes(Set.of("node1")).transport(transport).stateMachine(stateMachine).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec()).build();
+        RaftNode node = RaftNode.builder().runtime(vertx).nodeId("node1").clusterNodes(Set.of("node1")).transport(transport).stateMachine(stateMachine).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec()).build();
 
         node.start()
             .onComplete(testContext.succeeding(v -> {

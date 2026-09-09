@@ -27,8 +27,8 @@ import dev.mars.qraft.controller.raft.grpc.VoteResponse;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import io.grpc.*;
-import io.vertx.core.Future;
-import io.vertx.core.Vertx;
+import dev.mars.qraft.controller.runtime.Future;
+import dev.mars.qraft.controller.runtime.JavaRuntime;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
@@ -62,21 +62,21 @@ import static org.junit.jupiter.api.Assertions.*;
 @Execution(ExecutionMode.SAME_THREAD)
 class GrpcRaftTransportTest {
 
-    private Vertx vertx;
+    private JavaRuntime vertx;
     private GrpcRaftServer targetServer;
     private RaftNode targetNode;
     private int targetPort;
 
     @BeforeEach
     void setUp() throws Exception {
-        vertx = Vertx.vertx();
+        vertx = JavaRuntime.create();
         targetPort = findAvailablePort();
         
         // Set up a target server to receive requests
         Set<String> clusterNodes = Set.of("target");
         InMemoryTransportSimulator transport = new InMemoryTransportSimulator("target");
         QraftStateStore stateMachine = new QraftStateStore();
-        targetNode = RaftNode.builder().vertx(vertx).nodeId("target").clusterNodes(clusterNodes).transport(transport).stateMachine(stateMachine).mode(RaftNodeMode.volatileMode()).electionTimeout(5000).heartbeatInterval(1000).commandCodec(new ProtobufRaftCommandCodec()).build();
+        targetNode = RaftNode.builder().runtime(vertx).nodeId("target").clusterNodes(clusterNodes).transport(transport).stateMachine(stateMachine).mode(RaftNodeMode.volatileMode()).electionTimeout(5000).heartbeatInterval(1000).commandCodec(new ProtobufRaftCommandCodec()).build();
         targetNode.start();
         await().atMost(Duration.ofSeconds(5))
             .pollInterval(Duration.ofMillis(10))
@@ -361,7 +361,7 @@ class GrpcRaftTransportTest {
         Set<String> cluster2 = Set.of("target2");
         InMemoryTransportSimulator transport2 = new InMemoryTransportSimulator("target2");
         QraftStateStore sm2 = new QraftStateStore();
-        RaftNode node2 = RaftNode.builder().vertx(vertx).nodeId("target2").clusterNodes(cluster2).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).electionTimeout(5000).heartbeatInterval(1000).commandCodec(new ProtobufRaftCommandCodec()).build();
+        RaftNode node2 = RaftNode.builder().runtime(vertx).nodeId("target2").clusterNodes(cluster2).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).electionTimeout(5000).heartbeatInterval(1000).commandCodec(new ProtobufRaftCommandCodec()).build();
         node2.start();
         await().atMost(Duration.ofSeconds(5))
             .pollInterval(Duration.ofMillis(10))

@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.controller.raft.storage;
 
-import io.vertx.core.Future;
+import dev.mars.qraft.controller.runtime.Future;
 
 import java.nio.file.Path;
 import java.util.List;

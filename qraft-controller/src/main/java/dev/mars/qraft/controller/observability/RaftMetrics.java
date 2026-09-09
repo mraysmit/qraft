@@ -134,20 +134,22 @@ public class RaftMetrics {
      * 
      * @param executor the thread pool to monitor
      */
-    public void registerThreadPool(ThreadPoolExecutor executor) {
+    public void registerThreadPool(String nodeId, ThreadPoolExecutor executor) {
         threadPoolRef.set(executor);
-        logger.debug("Registered ThreadPoolExecutor for Raft metrics monitoring");
+        logger.trace("Registered Raft metrics thread pool: nodeId={}, corePoolSize={}, maximumPoolSize={}, queueCapacity={}",
+                nodeId, executor.getCorePoolSize(), executor.getMaximumPoolSize(),
+                executor.getQueue().remainingCapacity() + executor.getQueue().size());
     }
 
     /**
      * Unregisters the current ThreadPoolExecutor.
      */
-    public void unregisterThreadPool() {
+    public void unregisterThreadPool(String nodeId) {
         threadPoolRef.set(null);
         activeThreads.set(0);
         queuedTasks.set(0);
         poolSize.set(0);
-        logger.debug("Unregistered ThreadPoolExecutor from Raft metrics");
+        logger.trace("Unregistered Raft metrics thread pool: nodeId={}", nodeId);
     }
 
     private void updateFromThreadPool() {

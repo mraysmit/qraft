@@ -29,19 +29,27 @@ import dev.mars.qraft.controller.raft.grpc.VoteResponse;
 import dev.mars.qraft.controller.observability.RaftMetrics;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
+import io.grpc.Metadata;
+import io.grpc.stub.MetadataUtils;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
-import io.vertx.core.Future;
-import io.vertx.core.Promise;
-import io.vertx.core.Vertx;
+import io.opentelemetry.context.Scope;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.context.propagation.TextMapSetter;
+import dev.mars.qraft.controller.runtime.Future;
+import dev.mars.qraft.controller.runtime.JavaRuntime;
+import dev.mars.qraft.controller.runtime.Promise;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 import java.net.SocketAddress;
+import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -60,9 +68,13 @@ public class GrpcRaftTransport implements RaftTransport {
 
     private static final Logger logger = LoggerFactory.getLogger(GrpcRaftTransport.class);
     private static final String THREAD_NAME_PREFIX = "raft-grpc-io-";
+    private static final Metadata.Key<String> REQUEST_ID_HEADER =
+            Metadata.Key.of("x-request-id", Metadata.ASCII_STRING_MARSHALLER);
+    private static final TextMapSetter<Metadata> METADATA_SETTER = (carrier, key, value) ->
+            carrier.put(Metadata.Key.of(key, Metadata.ASCII_STRING_MARSHALLER), value);
     private static final Tracer tracer = GlobalOpenTelemetry.getTracer("qraft-controller");
 
-    private final Vertx vertx;
+    private final JavaRuntime runtime;
     private final String selfId;
     private final Map<String, String> clusterNodes; // nodeId -> host:port
     private final Map<String, RaftServiceGrpc.RaftServiceFutureStub> clients = new ConcurrentHashMap<>();
@@ -80,8 +92,8 @@ public class GrpcRaftTransport implements RaftTransport {
      * @param selfId this node's ID
      * @param clusterNodes map of nodeId to host:port
      */
-    public GrpcRaftTransport(Vertx vertx, String selfId, Map<String, String> clusterNodes) {
-        this(vertx, selfId, clusterNodes, 10, 1000);
+    public GrpcRaftTransport(JavaRuntime runtime, String selfId, Map<String, String> clusterNodes) {
+        this(runtime, selfId, clusterNodes, 10, 1000);
     }
 
     /**
@@ -93,9 +105,9 @@ public class GrpcRaftTransport implements RaftTransport {
      * @param poolSize maximum number of worker threads for gRPC callbacks
      * @param queueSize maximum number of queued tasks before back-pressure
      */
-    public GrpcRaftTransport(Vertx vertx, String selfId, Map<String, String> clusterNodes,
+    public GrpcRaftTransport(JavaRuntime runtime, String selfId, Map<String, String> clusterNodes,
                               int poolSize, int queueSize) {
-        this.vertx = vertx;
+        this.runtime = runtime;
         this.selfId = selfId;
         this.clusterNodes = clusterNodes;
         this.poolSize = poolSize;
@@ -118,7 +130,7 @@ public class GrpcRaftTransport implements RaftTransport {
         this.executor = threadPool;
         
         // Register with metrics for monitoring
-        RaftMetrics.getInstance().registerThreadPool(threadPool);
+        RaftMetrics.getInstance().registerThreadPool(selfId, threadPool);
         
         logger.debug("GrpcRaftTransport created with bounded ThreadPoolExecutor (poolSize={}, queueSize={})",
                 poolSize, queueSize);
@@ -155,55 +167,41 @@ public class GrpcRaftTransport implements RaftTransport {
 
     @Override
     public void stop() {
-        // Unregister from metrics
-        RaftMetrics.getInstance().unregisterThreadPool();
-        
-        // Clean up stubs immediately; channel and executor shutdown is handled asynchronously below.
+        RaftMetrics.getInstance().unregisterThreadPool(selfId);
         clients.clear();
-
-        // Avoid blocking the Vert.x event loop during shutdown.
-        vertx.executeBlocking(() -> {
-            for (ManagedChannel channel : channels.values()) {
-                channel.shutdown();
-            }
-
-            for (Map.Entry<String, ManagedChannel> entry : channels.entrySet()) {
-                ManagedChannel channel = entry.getValue();
-                try {
-                    if (!channel.awaitTermination(5, TimeUnit.SECONDS)) {
-                        channel.shutdownNow();
-                        logger.warn("Forced gRPC channel shutdown for peer: {}", entry.getKey());
-                    }
-                } catch (InterruptedException e) {
+        for (ManagedChannel channel : channels.values()) {
+            channel.shutdown();
+        }
+        for (Map.Entry<String, ManagedChannel> entry : channels.entrySet()) {
+            ManagedChannel channel = entry.getValue();
+            try {
+                if (!channel.awaitTermination(5, TimeUnit.SECONDS)) {
                     channel.shutdownNow();
-                    Thread.currentThread().interrupt();
+                    logger.warn("Forced gRPC channel shutdown for peer: {}", entry.getKey());
                 }
+            } catch (InterruptedException e) {
+                channel.shutdownNow();
+                Thread.currentThread().interrupt();
             }
-            channels.clear();
-
-            if (executor != null) {
-                executor.shutdown();
-                try {
-                    if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
-                        executor.shutdownNow();
-                        logger.warn("GrpcRaftTransport executor forced shutdown for node: {}", selfId);
-                    }
-                } catch (InterruptedException e) {
-                    executor.shutdownNow();
-                    Thread.currentThread().interrupt();
-                }
-                logger.debug("GrpcRaftTransport executor closed for node: {}", selfId);
+        }
+        channels.clear();
+        executor.shutdown();
+        try {
+            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+                logger.warn("GrpcRaftTransport executor forced shutdown for node: {}", selfId);
             }
-
-            return null;
-        }, false).onFailure(err -> {
-            logger.warn("Error during GrpcRaftTransport shutdown: {}", err.getMessage());
-            logger.debug("Stack trace for GrpcRaftTransport shutdown failure", err);
-        });
+        } catch (InterruptedException e) {
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        logger.debug("GrpcRaftTransport executor closed for node: {}", selfId);
     }
 
     @Override
     public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
+        requireKnownTarget(targetId);
+        String requestId = requestId();
         Span span = tracer.spanBuilder("raft.RequestVote")
                 .setSpanKind(SpanKind.CLIENT)
                 .setAttribute("rpc.system", "grpc")
@@ -212,7 +210,9 @@ public class GrpcRaftTransport implements RaftTransport {
                 .setAttribute("raft.term", request.getTerm())
                 .setAttribute("raft.candidate", request.getCandidateId())
                 .startSpan();
-        return toVertxFuture(getStub(targetId).requestVote(request))
+        try (MDC.MDCCloseable ignoredMdc = MDC.putCloseable("requestId", requestId);
+             Scope ignoredSpan = span.makeCurrent()) {
+        return toFuture(correlatedStub(targetId, requestId).requestVote(request))
                 .onSuccess(r -> {
                     span.setAttribute("raft.vote_granted", r.getVoteGranted());
                     span.end();
@@ -222,10 +222,16 @@ public class GrpcRaftTransport implements RaftTransport {
                     span.recordException(e);
                     span.end();
                 });
+        } catch (Throwable error) {
+            finishSpanWithError(span, error);
+            return Future.failedFuture(error);
+        }
     }
 
     @Override
     public Future<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
+        requireKnownTarget(targetId);
+        String requestId = requestId();
         Span span = tracer.spanBuilder("raft.AppendEntries")
                 .setSpanKind(SpanKind.CLIENT)
                 .setAttribute("rpc.system", "grpc")
@@ -234,7 +240,9 @@ public class GrpcRaftTransport implements RaftTransport {
                 .setAttribute("raft.term", request.getTerm())
                 .setAttribute("raft.entries_count", request.getEntriesCount())
                 .startSpan();
-        return toVertxFuture(getStub(targetId).appendEntries(request))
+        try (MDC.MDCCloseable ignoredMdc = MDC.putCloseable("requestId", requestId);
+             Scope ignoredSpan = span.makeCurrent()) {
+        return toFuture(correlatedStub(targetId, requestId).appendEntries(request))
                 .onSuccess(r -> {
                     span.setAttribute("raft.success", r.getSuccess());
                     span.end();
@@ -244,10 +252,16 @@ public class GrpcRaftTransport implements RaftTransport {
                     span.recordException(e);
                     span.end();
                 });
+        } catch (Throwable error) {
+            finishSpanWithError(span, error);
+            return Future.failedFuture(error);
+        }
     }
 
     @Override
     public Future<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
+        requireKnownTarget(targetId);
+        String requestId = requestId();
         Span span = tracer.spanBuilder("raft.InstallSnapshot")
                 .setSpanKind(SpanKind.CLIENT)
                 .setAttribute("rpc.system", "grpc")
@@ -255,7 +269,9 @@ public class GrpcRaftTransport implements RaftTransport {
                 .setAttribute("raft.target", targetId)
                 .setAttribute("raft.term", request.getTerm())
                 .startSpan();
-        return toVertxFuture(getStub(targetId).installSnapshot(request))
+        try (MDC.MDCCloseable ignoredMdc = MDC.putCloseable("requestId", requestId);
+             Scope ignoredSpan = span.makeCurrent()) {
+        return toFuture(correlatedStub(targetId, requestId).installSnapshot(request))
                 .onSuccess(r -> {
                     span.setAttribute("raft.success", r.getSuccess());
                     span.end();
@@ -265,6 +281,10 @@ public class GrpcRaftTransport implements RaftTransport {
                     span.recordException(e);
                     span.end();
                 });
+        } catch (Throwable error) {
+            finishSpanWithError(span, error);
+            return Future.failedFuture(error);
+        }
     }
 
     private RaftServiceGrpc.RaftServiceFutureStub getStub(String targetId) {
@@ -285,19 +305,59 @@ public class GrpcRaftTransport implements RaftTransport {
         });
     }
 
-    private <T> Future<T> toVertxFuture(ListenableFuture<T> listenableFuture) {
+    private RaftServiceGrpc.RaftServiceFutureStub correlatedStub(String targetId, String requestId) {
+        Metadata headers = new Metadata();
+        headers.put(REQUEST_ID_HEADER, requestId);
+        GlobalOpenTelemetry.getPropagators().getTextMapPropagator()
+                .inject(Context.current(), headers, METADATA_SETTER);
+        return getStub(targetId).withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers));
+    }
+
+    private void requireKnownTarget(String targetId) {
+        if (!clusterNodes.containsKey(targetId)) {
+            throw new IllegalArgumentException("Unknown node: " + targetId);
+        }
+    }
+
+    private static String requestId() {
+        String current = MDC.get("requestId");
+        return current == null || current.isBlank() ? UUID.randomUUID().toString() : current;
+    }
+
+    private static void finishSpanWithError(Span span, Throwable error) {
+        span.setStatus(StatusCode.ERROR, error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage());
+        span.recordException(error);
+        span.end();
+    }
+
+    private <T> Future<T> toFuture(ListenableFuture<T> listenableFuture) {
         Promise<T> promise = Promise.promise();
+        Map<String, String> currentContext = MDC.getCopyOfContextMap();
+        Map<String, String> capturedContext = currentContext == null ? Map.of() : new HashMap<>(currentContext);
+        Context telemetryContext = Context.current();
         Futures.addCallback(listenableFuture, new FutureCallback<T>() {
             @Override
             public void onSuccess(T result) {
-                vertx.runOnContext(v -> promise.complete(result));
+                runtime.runOnContext(v -> promise.complete(result));
             }
 
             @Override
             public void onFailure(Throwable t) {
-                vertx.runOnContext(v -> promise.fail(t));
+                runtime.runOnContext(v -> promise.fail(t));
             }
-        }, executor);
+        }, command -> executor.execute(() -> withContext(capturedContext, telemetryContext, command)));
         return promise.future();
+    }
+
+    private static void withContext(Map<String, String> context, Context telemetryContext, Runnable action) {
+        Map<String, String> previous = MDC.getCopyOfContextMap();
+        try (Scope ignored = telemetryContext.makeCurrent()) {
+            if (context.isEmpty()) MDC.clear();
+            else MDC.setContextMap(context);
+            action.run();
+        } finally {
+            if (previous == null || previous.isEmpty()) MDC.clear();
+            else MDC.setContextMap(previous);
+        }
     }
 }

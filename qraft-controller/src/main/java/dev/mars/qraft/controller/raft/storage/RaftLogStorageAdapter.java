@@ -18,8 +18,8 @@ package dev.mars.qraft.controller.raft.storage;
 
 import dev.mars.raftlog.storage.FileRaftStorage;
 import dev.mars.raftlog.storage.RaftStorageConfig;
-import io.vertx.core.Future;
-import io.vertx.core.Vertx;
+import dev.mars.qraft.controller.runtime.Future;
+import dev.mars.qraft.controller.runtime.JavaRuntime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -60,7 +60,7 @@ public final class RaftLogStorageAdapter implements RaftStorage {
 
     private static final Logger logger = LoggerFactory.getLogger(RaftLogStorageAdapter.class);
 
-    private final Vertx vertx;
+    private final JavaRuntime runtime;
     private final dev.mars.raftlog.storage.RaftStorage delegate;
 
     // =========================================================================
@@ -75,8 +75,8 @@ public final class RaftLogStorageAdapter implements RaftStorage {
      *
      * @param vertx the Vert.x instance for Future conversion
      */
-    public RaftLogStorageAdapter(Vertx vertx) {
-        this(vertx, new FileRaftStorage());
+    public RaftLogStorageAdapter(JavaRuntime runtime) {
+        this(runtime, new FileRaftStorage());
     }
 
     /**
@@ -85,8 +85,8 @@ public final class RaftLogStorageAdapter implements RaftStorage {
      * @param vertx  the Vert.x instance for Future conversion
      * @param config the storage configuration
      */
-    public RaftLogStorageAdapter(Vertx vertx, RaftStorageConfig config) {
-        this(vertx, new FileRaftStorage(config));
+    public RaftLogStorageAdapter(JavaRuntime runtime, RaftStorageConfig config) {
+        this(runtime, new FileRaftStorage(config));
     }
 
     /**
@@ -95,8 +95,8 @@ public final class RaftLogStorageAdapter implements RaftStorage {
      * @param vertx       the Vert.x instance for Future conversion
      * @param syncEnabled whether to fsync on writes (false only for testing)
      */
-    public RaftLogStorageAdapter(Vertx vertx, boolean syncEnabled) {
-        this(vertx, new FileRaftStorage(syncEnabled));
+    public RaftLogStorageAdapter(JavaRuntime runtime, boolean syncEnabled) {
+        this(runtime, new FileRaftStorage(syncEnabled));
     }
 
     /**
@@ -108,8 +108,8 @@ public final class RaftLogStorageAdapter implements RaftStorage {
      * @param vertx    the Vert.x instance for Future conversion
      * @param delegate the raftlog storage implementation to wrap
      */
-    public RaftLogStorageAdapter(Vertx vertx, dev.mars.raftlog.storage.RaftStorage delegate) {
-        this.vertx = vertx;
+    public RaftLogStorageAdapter(JavaRuntime runtime, dev.mars.raftlog.storage.RaftStorage delegate) {
+        this.runtime = runtime;
         this.delegate = delegate;
         logger.info("RaftLogStorageAdapter created with delegate: {}", delegate.getClass().getSimpleName());
     }
@@ -132,8 +132,7 @@ public final class RaftLogStorageAdapter implements RaftStorage {
             delegate.close();
             return Future.succeededFuture();
         } catch (Exception e) {
-            logger.error("Error closing RaftLog storage: {}", e.getMessage());
-            logger.debug("Stack trace for RaftLog storage close failure", e);
+            logger.error("Error closing RaftLog storage: {}", e.getMessage(), e);
             return Future.failedFuture(e);
         }
     }
@@ -256,6 +255,6 @@ public final class RaftLogStorageAdapter implements RaftStorage {
      * @return a Vert.x Future that completes with the same result
      */
     private <T> Future<T> toVertxFuture(CompletableFuture<T> cf) {
-        return Future.fromCompletionStage(cf, vertx.getOrCreateContext());
+        return Future.fromCompletionStage(cf);
     }
 }

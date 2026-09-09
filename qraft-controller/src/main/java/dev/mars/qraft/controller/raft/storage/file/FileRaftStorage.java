@@ -17,9 +17,9 @@
 package dev.mars.qraft.controller.raft.storage.file;
 
 import dev.mars.qraft.controller.raft.storage.RaftStorage;
-import io.vertx.core.Future;
-import io.vertx.core.Vertx;
-import io.vertx.core.WorkerExecutor;
+import dev.mars.qraft.controller.runtime.Future;
+import dev.mars.qraft.controller.runtime.JavaRuntime;
+import dev.mars.qraft.controller.runtime.WorkerExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -98,14 +98,14 @@ public final class FileRaftStorage implements RaftStorage {
     // Instance State
     // =========================================================================
 
-    private final Vertx vertx;
+    private final JavaRuntime runtime;
     private final WorkerExecutor executor;
     private final boolean fsyncEnabled;
     private final boolean closeExecutorOnClose;
 
     private Path dataDir;
     private FileChannel logChannel;
-    private boolean opened = false;
+    private volatile boolean opened = false;
 
     /**
      * Creates a new FileRaftStorage with default fsync enabled.
@@ -113,8 +113,8 @@ public final class FileRaftStorage implements RaftStorage {
      * @param vertx    the Vert.x instance
      * @param executor the worker executor for blocking I/O (should have pool size 1)
      */
-    public FileRaftStorage(Vertx vertx, WorkerExecutor executor) {
-        this(vertx, executor, null, true, false);
+    public FileRaftStorage(JavaRuntime runtime, WorkerExecutor executor) {
+        this(runtime, executor, null, true, false);
     }
 
     /**
@@ -125,8 +125,8 @@ public final class FileRaftStorage implements RaftStorage {
      * @param dataDir      the directory for storage files (will be created if not exists)
      * @param fsyncEnabled whether to fsync after writes (true for durability, false for testing)
      */
-    public FileRaftStorage(Vertx vertx, WorkerExecutor executor, Path dataDir, boolean fsyncEnabled) {
-        this(vertx, executor, dataDir, fsyncEnabled, false);
+    public FileRaftStorage(JavaRuntime runtime, WorkerExecutor executor, Path dataDir, boolean fsyncEnabled) {
+        this(runtime, executor, dataDir, fsyncEnabled, false);
     }
 
     /**
@@ -138,9 +138,9 @@ public final class FileRaftStorage implements RaftStorage {
      * @param fsyncEnabled whether to fsync after writes
      * @param closeExecutorOnClose true when storage should close the supplied executor
      */
-    public FileRaftStorage(Vertx vertx, WorkerExecutor executor, Path dataDir,
+    public FileRaftStorage(JavaRuntime runtime, WorkerExecutor executor, Path dataDir,
                            boolean fsyncEnabled, boolean closeExecutorOnClose) {
-        this.vertx = vertx;
+        this.runtime = runtime;
         this.executor = executor;
         this.dataDir = dataDir;
         this.fsyncEnabled = fsyncEnabled;
@@ -175,7 +175,8 @@ public final class FileRaftStorage implements RaftStorage {
     }
 
     private Future<Void> doOpen() {
-        return vertx.executeBlocking(() -> {
+        return executor.executeBlocking(() -> {
+            if (opened) return null;
             Files.createDirectories(dataDir);
 
             Path logPath = dataDir.resolve("raft.log");
@@ -191,20 +192,22 @@ public final class FileRaftStorage implements RaftStorage {
             opened = true;
             logger.info("FileRaftStorage opened: {} (log size: {} bytes)", dataDir, logChannel.size());
             return null;
-        }, false);
+        }, true);
     }
 
     @Override
     public Future<Void> close() {
-        return vertx.executeBlocking(() -> {
+        return executor.executeBlocking(() -> {
+            if (!opened && logChannel == null) return null;
             opened = false;
-            if (logChannel != null) {
+            FileChannel channel = logChannel;
+            logChannel = null;
+            if (channel != null) {
                 try {
-                    logChannel.close();
+                    channel.close();
                     logger.info("FileRaftStorage closed: {}", dataDir);
                 } catch (IOException e) {
-                    logger.warn("Error closing log channel: {}", e.getMessage());
-                    logger.debug("Stack trace for log channel close failure", e);
+                    logger.warn("Error closing log channel: {}", e.getMessage(), e);
                 }
             }
 
@@ -213,7 +216,7 @@ public final class FileRaftStorage implements RaftStorage {
                 logger.debug("Closed owned WorkerExecutor for FileRaftStorage");
             }
             return null;
-        }, false);
+        }, true);
     }
 
     // =========================================================================
@@ -222,7 +225,8 @@ public final class FileRaftStorage implements RaftStorage {
 
     @Override
     public Future<Void> updateMetadata(long currentTerm, Optional<String> votedFor) {
-        return vertx.executeBlocking(() -> {
+        return executor.executeBlocking(() -> {
+            requireOpen();
             Path tmp = dataDir.resolve("meta.dat.tmp");
             Path dst = dataDir.resolve("meta.dat");
 
@@ -268,12 +272,13 @@ public final class FileRaftStorage implements RaftStorage {
 
             logger.debug("Metadata updated: term={}, votedFor={}", currentTerm, votedFor.orElse("(none)"));
             return null;
-        }, false);
+        }, true);
     }
 
     @Override
     public Future<PersistentMeta> loadMetadata() {
-        return vertx.executeBlocking(() -> {
+        return executor.executeBlocking(() -> {
+            requireOpen();
             Path metaPath = dataDir.resolve("meta.dat");
 
             if (!Files.exists(metaPath)) {
@@ -319,7 +324,7 @@ public final class FileRaftStorage implements RaftStorage {
 
             logger.debug("Metadata loaded: term={}, votedFor={}", term, votedFor.orElse("(none)"));
             return new PersistentMeta(term, votedFor);
-        }, false);
+        }, true);
     }
 
     // =========================================================================
@@ -328,31 +333,30 @@ public final class FileRaftStorage implements RaftStorage {
 
     @Override
     public Future<Void> appendEntries(List<LogEntryData> entries) {
-        if (entries.isEmpty()) {
-            return Future.succeededFuture();
-        }
-
-        return vertx.executeBlocking(() -> {
+        return executor.executeBlocking(() -> {
+            requireOpen();
+            if (entries.isEmpty()) return null;
             for (LogEntryData entry : entries) {
                 writeRecord(TYPE_APPEND, entry.index(), entry.term(), entry.payload());
             }
             logger.debug("Appended {} entries to WAL", entries.size());
             return null;
-        }, false);
+        }, true);
     }
 
     @Override
     public Future<Void> truncateSuffix(long fromIndex) {
-        return vertx.executeBlocking(() -> {
+        return executor.executeBlocking(() -> {
             writeRecord(TYPE_TRUNCATE, fromIndex, 0L, new byte[0]);
             logger.debug("Recorded truncation from index {}", fromIndex);
             return null;
-        }, false);
+        }, true);
     }
 
     @Override
     public Future<Void> sync() {
-        return vertx.executeBlocking(() -> {
+        return executor.executeBlocking(() -> {
+            requireOpen();
             if (fsyncEnabled) {
                 logChannel.force(true);
                 logger.trace("WAL synced to disk");
@@ -360,12 +364,13 @@ public final class FileRaftStorage implements RaftStorage {
                 logger.trace("WAL sync skipped (fsync disabled)");
             }
             return null;
-        }, false);
+        }, true);
     }
 
     @Override
     public Future<List<LogEntryData>> replayLog() {
-        return vertx.executeBlocking(() -> {
+        return executor.executeBlocking(() -> {
+            requireOpen();
             Path logPath = dataDir.resolve("raft.log");
 
             if (!Files.exists(logPath)) {
@@ -478,7 +483,7 @@ public final class FileRaftStorage implements RaftStorage {
 
             logger.info("WAL replay complete: {} entries recovered", result.size());
             return result;
-        }, false);
+        }, true);
     }
 
     // =========================================================================
@@ -487,7 +492,8 @@ public final class FileRaftStorage implements RaftStorage {
 
     @Override
     public Future<Void> saveSnapshot(byte[] data, long lastIncludedIndex, long lastIncludedTerm) {
-        return vertx.executeBlocking(() -> {
+        return executor.executeBlocking(() -> {
+            requireOpen();
             Path snapshotPath = dataDir.resolve("snapshot.dat");
             Path tmpPath = dataDir.resolve("snapshot.dat.tmp");
 
@@ -529,12 +535,13 @@ public final class FileRaftStorage implements RaftStorage {
             logger.info("Snapshot saved: lastIncludedIndex={}, lastIncludedTerm={}, size={}bytes",
                     lastIncludedIndex, lastIncludedTerm, data.length);
             return null;
-        }, false);
+        }, true);
     }
 
     @Override
     public Future<Optional<SnapshotData>> loadSnapshot() {
-        return vertx.executeBlocking(() -> {
+        return executor.executeBlocking(() -> {
+            requireOpen();
             Path snapshotPath = dataDir.resolve("snapshot.dat");
 
             if (!Files.exists(snapshotPath)) {
@@ -578,12 +585,13 @@ public final class FileRaftStorage implements RaftStorage {
             logger.info("Snapshot loaded: lastIncludedIndex={}, lastIncludedTerm={}, size={}bytes",
                     lastIncludedIndex, lastIncludedTerm, dataLen);
             return Optional.of(new SnapshotData(data, lastIncludedIndex, lastIncludedTerm));
-        }, false);
+        }, true);
     }
 
     @Override
     public Future<Void> truncatePrefix(long toIndex) {
-        return vertx.executeBlocking(() -> {
+        return executor.executeBlocking(() -> {
+            requireOpen();
             // Prefix truncation in a WAL is achieved by rewriting the log file
             // excluding entries with index <= toIndex.
             // For efficiency, we replay the current log, filter, and rewrite.
@@ -638,7 +646,7 @@ public final class FileRaftStorage implements RaftStorage {
             logger.info("WAL prefix truncation complete: removed {} entries, {} remaining",
                     originalSize - entries.size(), entries.size());
             return null;
-        }, false);
+        }, true);
     }
 
     /**
@@ -740,6 +748,7 @@ public final class FileRaftStorage implements RaftStorage {
      * </pre>
      */
     private void writeRecord(byte type, long index, long term, byte[] payload) throws IOException {
+        requireOpen();
         byte[] safePayload = payload != null ? payload : new byte[0];
         int totalSize = HEADER_SIZE + safePayload.length + CRC_SIZE;
 
@@ -764,6 +773,13 @@ public final class FileRaftStorage implements RaftStorage {
         // Write to channel
         while (buf.hasRemaining()) {
             logChannel.write(buf);
+        }
+    }
+
+    private void requireOpen() {
+        FileChannel channel = logChannel;
+        if (!opened || channel == null || !channel.isOpen()) {
+            throw new IllegalStateException("FileRaftStorage is not open");
         }
     }
 

@@ -52,27 +52,7 @@
             <version>${project.version}</version>
         </dependency>
 
-        <!-- Vert.x 5 Stack -->
-        <dependency>
-            <groupId>io.vertx</groupId>
-            <artifactId>vertx-opentelemetry</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.vertx</groupId>
-            <artifactId>vertx-core</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.vertx</groupId>
-            <artifactId>vertx-web</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.vertx</groupId>
-            <artifactId>vertx-grpc-server</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>io.vertx</groupId>
-            <artifactId>vertx-grpc-client</artifactId>
-        </dependency>
+        <!-- gRPC uses the standard grpc-java Netty transport. -->
 
         <!-- RaftLog WAL - default storage implementation -->
         <dependency>
@@ -111,10 +91,11 @@
         
         <!-- Protobuf -->
         
-        <!-- Jackson (Managed by Vert.x Usually, but keeping strict versions if needed) -->
+        <!-- Jackson -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
+            <version>2.19.4</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.datatype</groupId>
@@ -172,11 +153,6 @@
        
 
         <!-- Testing dependencies -->
-        <dependency>
-            <groupId>io.vertx</groupId>
-            <artifactId>vertx-junit5</artifactId>
-            <scope>test</scope>
-        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
@@ -276,7 +252,7 @@
                     <!-- Avoid JPMS module-path for tests to prevent missing JDK modules in graph -->
                     <useModulePath>false</useModulePath>
                     <!-- Ensure required JDK modules are available at test runtime -->
-                    <argLine>--add-modules java.net.http,java.logging</argLine>
+                    <argLine>@{argLine} --add-modules java.net.http,java.logging</argLine>
                     <!--
                       Exclude heavyweight tests from the default build:
                         docker - requires Docker; starts multi-node Compose clusters

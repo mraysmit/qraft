@@ -24,22 +24,32 @@ import dev.mars.qraft.controller.raft.grpc.RaftServiceGrpc;
 import dev.mars.qraft.controller.raft.grpc.VoteRequest;
 import dev.mars.qraft.controller.raft.grpc.VoteResponse;
 import io.grpc.BindableService;
+import io.grpc.Context;
+import io.grpc.Contexts;
+import io.grpc.Metadata;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
+import io.grpc.ServerCall;
+import io.grpc.ServerCallHandler;
+import io.grpc.ServerInterceptor;
+import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanKind;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
-import io.vertx.core.Future;
-import io.vertx.core.Promise;
-import io.vertx.core.Vertx;
+import io.opentelemetry.context.Scope;
+import io.opentelemetry.context.propagation.TextMapGetter;
+import dev.mars.qraft.controller.runtime.Future;
+import dev.mars.qraft.controller.runtime.JavaRuntime;
+import dev.mars.qraft.controller.runtime.Promise;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 
 import java.io.IOException;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -54,19 +64,35 @@ public class GrpcRaftServer {
 
     private static final Logger logger = LoggerFactory.getLogger(GrpcRaftServer.class);
     private static final Tracer tracer = GlobalOpenTelemetry.getTracer("qraft-controller");
+    private static final Metadata.Key<String> REQUEST_ID_HEADER =
+            Metadata.Key.of("x-request-id", Metadata.ASCII_STRING_MARSHALLER);
+    private static final Context.Key<String> REQUEST_ID_CONTEXT = Context.key("qraft-request-id");
+    private static final Context.Key<io.opentelemetry.context.Context> TELEMETRY_CONTEXT =
+            Context.key("qraft-telemetry-context");
+    private static final TextMapGetter<Metadata> METADATA_GETTER = new TextMapGetter<>() {
+        @Override
+        public Iterable<String> keys(Metadata carrier) {
+            return carrier.keys();
+        }
 
-    private final Vertx vertx;
+        @Override
+        public String get(Metadata carrier, String key) {
+            return carrier == null ? null : carrier.get(Metadata.Key.of(key, Metadata.ASCII_STRING_MARSHALLER));
+        }
+    };
+
+    private final JavaRuntime runtime;
     private final int port;
     private final RaftNode raftNode;
     private final BindableService[] extraServices;
     private Server server;
 
-    public GrpcRaftServer(Vertx vertx, int port, RaftNode raftNode) {
-        this(vertx, port, raftNode, new BindableService[0]);
+    public GrpcRaftServer(JavaRuntime runtime, int port, RaftNode raftNode) {
+        this(runtime, port, raftNode, new BindableService[0]);
     }
 
-    public GrpcRaftServer(Vertx vertx, int port, RaftNode raftNode, BindableService... extraServices) {
-        this.vertx = vertx;
+    public GrpcRaftServer(JavaRuntime runtime, int port, RaftNode raftNode, BindableService... extraServices) {
+        this.runtime = runtime;
         this.port = port;
         this.raftNode = raftNode;
         this.extraServices = extraServices != null ? extraServices : new BindableService[0];
@@ -80,9 +106,10 @@ public class GrpcRaftServer {
     public Future<Void> start() {
         Promise<Void> promise = Promise.promise();
 
-        vertx.executeBlocking(() -> {
+        runtime.executeBlocking(() -> {
             try {
             ServerBuilder<?> builder = ServerBuilder.forPort(port)
+                .intercept(new CorrelationIdServerInterceptor())
                 .addService(new RaftServiceImpl());
 
             for (BindableService service : extraServices) {
@@ -114,7 +141,7 @@ public class GrpcRaftServer {
             return promise.future();
         }
 
-        vertx.executeBlocking(() -> {
+        runtime.executeBlocking(() -> {
             try {
                 server.shutdown();
                 if (!server.awaitTermination(5, TimeUnit.SECONDS)) {
@@ -144,8 +171,10 @@ public class GrpcRaftServer {
 
         @Override
         public void requestVote(VoteRequest request, StreamObserver<VoteResponse> responseObserver) {
-            MDC.put("nodeId", raftNode.getNodeId());
-            MDC.put("rpcType", "RequestVote");
+            try (Scope remoteContext = telemetryContext().makeCurrent();
+                 MDC.MDCCloseable nodeContext = MDC.putCloseable("nodeId", raftNode.getNodeId());
+                 MDC.MDCCloseable rpcContext = MDC.putCloseable("rpcType", "RequestVote");
+                 MDC.MDCCloseable requestContext = MDC.putCloseable("requestId", requestId())) {
             Span span = tracer.spanBuilder("raft.RequestVote")
                     .setSpanKind(SpanKind.SERVER)
                     .setAttribute("rpc.system", "grpc")
@@ -153,10 +182,8 @@ public class GrpcRaftServer {
                     .setAttribute("raft.candidate", request.getCandidateId())
                     .setAttribute("raft.term", request.getTerm())
                     .startSpan();
-            try {
-            logger.debug("Received RequestVote from {} for term {}", 
-                    request.getCandidateId(), request.getTerm());
-
+            try (Scope ignored = span.makeCurrent()) {
+            logger.debug("Received RequestVote from {} for term {}", request.getCandidateId(), request.getTerm());
             raftNode.handleVoteRequest(request)
                     .onSuccess(response -> {
                         span.setAttribute("raft.vote_granted", response.getVoteGranted());
@@ -167,22 +194,20 @@ public class GrpcRaftServer {
                         responseObserver.onCompleted();
                     })
                     .onFailure(e -> {
-                        span.setStatus(StatusCode.ERROR, e.getMessage());
-                        span.recordException(e);
-                        span.end();
-                        logger.error("Error handling RequestVote: {}", e.getMessage());
-                        logger.debug("Stack trace for RequestVote handling error", e);
-                        responseObserver.onError(e);
+                        failRpc("RequestVote", span, e, responseObserver);
                     });
-            } finally {
-                MDC.remove("rpcType");
+            } catch (Throwable error) {
+                failRpc("RequestVote", span, error, responseObserver);
+            }
             }
         }
 
         @Override
         public void appendEntries(AppendEntriesRequest request, StreamObserver<AppendEntriesResponse> responseObserver) {
-            MDC.put("nodeId", raftNode.getNodeId());
-            MDC.put("rpcType", "AppendEntries");
+            try (Scope remoteContext = telemetryContext().makeCurrent();
+                 MDC.MDCCloseable nodeContext = MDC.putCloseable("nodeId", raftNode.getNodeId());
+                 MDC.MDCCloseable rpcContext = MDC.putCloseable("rpcType", "AppendEntries");
+                 MDC.MDCCloseable requestContext = MDC.putCloseable("requestId", requestId())) {
             Span span = tracer.spanBuilder("raft.AppendEntries")
                     .setSpanKind(SpanKind.SERVER)
                     .setAttribute("rpc.system", "grpc")
@@ -191,36 +216,31 @@ public class GrpcRaftServer {
                     .setAttribute("raft.term", request.getTerm())
                     .setAttribute("raft.entries_count", request.getEntriesCount())
                     .startSpan();
-            try {
-            logger.debug("Received AppendEntries from {} for term {}, entries={}", 
-                    request.getLeaderId(), request.getTerm(), request.getEntriesCount());
-
+            try (Scope ignored = span.makeCurrent()) {
+            logAppendEntriesRequest(request);
             raftNode.handleAppendEntriesRequest(request)
                     .onSuccess(response -> {
                         span.setAttribute("raft.success", response.getSuccess());
                         span.end();
-                        logger.debug("Responding to AppendEntries: success={}, term={}", 
-                                response.getSuccess(), response.getTerm());
+                        logAppendEntriesResponse(request, response);
                         responseObserver.onNext(response);
                         responseObserver.onCompleted();
                     })
                     .onFailure(e -> {
-                        span.setStatus(StatusCode.ERROR, e.getMessage());
-                        span.recordException(e);
-                        span.end();
-                        logger.error("Error handling AppendEntries: {}", e.getMessage());
-                        logger.debug("Stack trace for AppendEntries handling error", e);
-                        responseObserver.onError(e);
+                        failRpc("AppendEntries", span, e, responseObserver);
                     });
-            } finally {
-                MDC.remove("rpcType");
+            } catch (Throwable error) {
+                failRpc("AppendEntries", span, error, responseObserver);
+            }
             }
         }
 
         @Override
         public void installSnapshot(InstallSnapshotRequest request, StreamObserver<InstallSnapshotResponse> responseObserver) {
-            MDC.put("nodeId", raftNode.getNodeId());
-            MDC.put("rpcType", "InstallSnapshot");
+            try (Scope remoteContext = telemetryContext().makeCurrent();
+                 MDC.MDCCloseable nodeContext = MDC.putCloseable("nodeId", raftNode.getNodeId());
+                 MDC.MDCCloseable rpcContext = MDC.putCloseable("rpcType", "InstallSnapshot");
+                 MDC.MDCCloseable requestContext = MDC.putCloseable("requestId", requestId())) {
             Span span = tracer.spanBuilder("raft.InstallSnapshot")
                     .setSpanKind(SpanKind.SERVER)
                     .setAttribute("rpc.system", "grpc")
@@ -228,11 +248,10 @@ public class GrpcRaftServer {
                     .setAttribute("raft.leader", request.getLeaderId())
                     .setAttribute("raft.term", request.getTerm())
                     .startSpan();
-            try {
+            try (Scope ignored = span.makeCurrent()) {
             logger.debug("Received InstallSnapshot from {} for term {}, lastIncludedIndex={}, chunk {}/{}",
-                    request.getLeaderId(), request.getTerm(),
-                    request.getLastIncludedIndex(), request.getChunkIndex() + 1, request.getTotalChunks());
-
+                    request.getLeaderId(), request.getTerm(), request.getLastIncludedIndex(),
+                    request.getChunkIndex() + 1, request.getTotalChunks());
             raftNode.handleInstallSnapshot(request)
                     .onSuccess(response -> {
                         span.setAttribute("raft.success", response.getSuccess());
@@ -243,16 +262,70 @@ public class GrpcRaftServer {
                         responseObserver.onCompleted();
                     })
                     .onFailure(e -> {
-                        span.setStatus(StatusCode.ERROR, e.getMessage());
-                        span.recordException(e);
-                        span.end();
-                        logger.error("Error handling InstallSnapshot: {}", e.getMessage());
-                        logger.debug("Stack trace for InstallSnapshot handling error", e);
-                        responseObserver.onError(e);
+                        failRpc("InstallSnapshot", span, e, responseObserver);
                     });
-            } finally {
-                MDC.remove("rpcType");
+            } catch (Throwable error) {
+                failRpc("InstallSnapshot", span, error, responseObserver);
             }
+            }
+        }
+    }
+
+    private static String requestId() {
+        String requestId = REQUEST_ID_CONTEXT.get();
+        return requestId == null || requestId.isBlank() ? UUID.randomUUID().toString() : requestId;
+    }
+
+    private static io.opentelemetry.context.Context telemetryContext() {
+        io.opentelemetry.context.Context context = TELEMETRY_CONTEXT.get();
+        return context == null ? io.opentelemetry.context.Context.current() : context;
+    }
+
+    private static void logAppendEntriesRequest(AppendEntriesRequest request) {
+        if (request.getEntriesCount() == 0) {
+            logger.trace("Received AppendEntries heartbeat from {} for term {}", request.getLeaderId(), request.getTerm());
+        } else {
+            logger.debug("Received AppendEntries from {} for term {}, entries={}",
+                    request.getLeaderId(), request.getTerm(), request.getEntriesCount());
+        }
+    }
+
+    private static void logAppendEntriesResponse(AppendEntriesRequest request, AppendEntriesResponse response) {
+        if (request.getEntriesCount() == 0 && response.getSuccess()) {
+            logger.trace("Responding to AppendEntries heartbeat: success=true, term={}", response.getTerm());
+        } else {
+            logger.debug("Responding to AppendEntries: success={}, term={}", response.getSuccess(), response.getTerm());
+        }
+    }
+
+    private static void failRpc(String rpcType, Span span, Throwable error, StreamObserver<?> observer) {
+        span.setStatus(StatusCode.ERROR, error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage());
+        span.recordException(error);
+        span.end();
+        Status status;
+        if (error instanceof IllegalArgumentException) {
+            status = Status.INVALID_ARGUMENT;
+            logger.warn("Rejected invalid {} request: {}", rpcType, error.getMessage());
+        } else {
+            status = Status.INTERNAL;
+            logger.error("Failure handling {}", rpcType, error);
+        }
+        observer.onError(status.withDescription(rpcType + " failed").withCause(error).asRuntimeException());
+    }
+
+    private static final class CorrelationIdServerInterceptor implements ServerInterceptor {
+        @Override
+        public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
+                ServerCall<ReqT, RespT> call, Metadata headers, ServerCallHandler<ReqT, RespT> next) {
+            String requestId = headers.get(REQUEST_ID_HEADER);
+            if (requestId == null || requestId.isBlank()) requestId = UUID.randomUUID().toString();
+            io.opentelemetry.context.Context remoteTelemetryContext =
+                    GlobalOpenTelemetry.getPropagators().getTextMapPropagator()
+                            .extract(io.opentelemetry.context.Context.current(), headers, METADATA_GETTER);
+            Context grpcContext = Context.current()
+                    .withValue(REQUEST_ID_CONTEXT, requestId)
+                    .withValue(TELEMETRY_CONTEXT, remoteTelemetryContext);
+            return Contexts.interceptCall(grpcContext, call, headers, next);
         }
     }
 }

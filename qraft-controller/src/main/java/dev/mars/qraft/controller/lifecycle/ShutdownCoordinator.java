@@ -16,8 +16,8 @@
 
 package dev.mars.qraft.controller.lifecycle;
 
-import io.vertx.core.Future;
-import io.vertx.core.Vertx;
+import dev.mars.qraft.controller.runtime.Future;
+import dev.mars.qraft.controller.runtime.JavaRuntime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -78,7 +79,7 @@ public class ShutdownCoordinator {
         STOPPED
     }
     
-    private final Vertx vertx;
+    private final JavaRuntime runtime;
     private final long drainTimeoutMs;
     private final long shutdownTimeoutMs;
     
@@ -97,8 +98,8 @@ public class ShutdownCoordinator {
      * @param drainTimeoutMs maximum time to wait for drain (stop accepting new work)
      * @param shutdownTimeoutMs maximum time to wait for active operations to complete
      */
-    public ShutdownCoordinator(Vertx vertx, long drainTimeoutMs, long shutdownTimeoutMs) {
-        this.vertx = Objects.requireNonNull(vertx, "vertx must not be null");
+    public ShutdownCoordinator(JavaRuntime runtime, long drainTimeoutMs, long shutdownTimeoutMs) {
+        this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
         this.drainTimeoutMs = drainTimeoutMs;
         this.shutdownTimeoutMs = shutdownTimeoutMs;
     }
@@ -108,8 +109,8 @@ public class ShutdownCoordinator {
      *
      * @param vertx the Vert.x instance
      */
-    public ShutdownCoordinator(Vertx vertx) {
-        this(vertx, 5000, 30000);
+    public ShutdownCoordinator(JavaRuntime runtime) {
+        this(runtime, 5000, 30000);
     }
     
     /**
@@ -215,8 +216,7 @@ public class ShutdownCoordinator {
                 })
                 .onFailure(err -> {
                     state.set(State.STOPPED);
-                    logger.warn("Shutdown completed with errors: {}", err.getMessage());
-                    logger.debug("Stack trace for graceful shutdown errors", err);
+                    logger.warn("Shutdown completed with errors: {}", err.getMessage(), err);
                 });
     }
     
@@ -270,7 +270,11 @@ public class ShutdownCoordinator {
                 .onSuccess(v -> logger.debug("Hook completed: {}", hook.name()))
                 .recover(err -> {
                     // Log failure but continue shutdown - don't fail the whole sequence
-                    logger.warn("Hook failed: {} - {}", hook.name(), err.getMessage());
+                    if (err instanceof TimeoutException) {
+                        logger.warn("Shutdown hook '{}' timed out after {} ms", hook.name(), timeoutMs);
+                    } else {
+                        logger.warn("Shutdown hook '{}' failed with {}", hook.name(), err.getClass().getSimpleName(), err);
+                    }
                     return Future.succeededFuture();
                 });
     }
@@ -281,7 +285,7 @@ public class ShutdownCoordinator {
             return Future.succeededFuture();
         }
         
-        return vertx.timer(100).compose(v -> awaitShutdownComplete());
+        return runtime.timer(100).compose(v -> awaitShutdownComplete());
     }
     
     /**

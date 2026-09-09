@@ -22,7 +22,7 @@ import dev.mars.qraft.controller.raft.grpc.*;
 
 
 import dev.mars.qraft.controller.state.QraftStateStore;
-import io.vertx.core.Vertx;
+import dev.mars.qraft.controller.runtime.JavaRuntime;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
@@ -54,7 +54,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @Execution(ExecutionMode.SAME_THREAD)
 class GrpcRaftIntegrationTest {
 
-    private Vertx vertx;
+    private JavaRuntime vertx;
     private List<TestNode> nodes = new ArrayList<>();
 
     private static class TestNode {
@@ -84,7 +84,7 @@ class GrpcRaftIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        vertx = Vertx.vertx();
+        vertx = JavaRuntime.create();
         nodes.clear();
     }
 
@@ -118,7 +118,7 @@ class GrpcRaftIntegrationTest {
         QraftStateStore stateMachine = new QraftStateStore();
         
         // Use shorter timeouts for faster tests
-        RaftNode raftNode = RaftNode.builder().vertx(vertx).nodeId(nodeId).clusterNodes(clusterNodes).transport(transport).stateMachine(stateMachine).mode(RaftNodeMode.volatileMode()).electionTimeout(1000).heartbeatInterval(200).commandCodec(new ProtobufRaftCommandCodec()).build();
+        RaftNode raftNode = RaftNode.builder().runtime(vertx).nodeId(nodeId).clusterNodes(clusterNodes).transport(transport).stateMachine(stateMachine).mode(RaftNodeMode.volatileMode()).electionTimeout(1000).heartbeatInterval(200).commandCodec(new ProtobufRaftCommandCodec()).build();
         transport.setRaftNode(raftNode);
         
         GrpcRaftServer grpcServer = new GrpcRaftServer(vertx, port, raftNode);

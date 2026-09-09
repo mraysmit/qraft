@@ -18,9 +18,9 @@ package dev.mars.qraft.controller.raft.storage;
 
 import dev.mars.qraft.controller.raft.storage.file.FileRaftStorage;
 import dev.mars.raftlog.storage.RaftStorageConfig;
-import io.vertx.core.Vertx;
-import io.vertx.junit5.VertxExtension;
-import io.vertx.junit5.VertxTestContext;
+import dev.mars.qraft.controller.runtime.JavaRuntime;
+import dev.mars.qraft.controller.support.JavaRuntimeExtension;
+import dev.mars.qraft.controller.support.JavaTestContext;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
@@ -28,6 +28,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -37,7 +38,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * <p>These tests run with {@code syncEnabled=true} (production configuration)
  * to ensure the fsync path is properly tested.</p>
  */
-@ExtendWith(VertxExtension.class)
+@ExtendWith(JavaRuntimeExtension.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class RaftLogStorageAdapterTest {
 
@@ -47,7 +48,7 @@ class RaftLogStorageAdapterTest {
     private RaftLogStorageAdapter storage;
 
     @BeforeEach
-    void setUp(Vertx vertx, VertxTestContext ctx) {
+    void setUp(JavaRuntime vertx) throws Exception {
         // Use production config with fsync ENABLED
         RaftStorageConfig config = RaftStorageConfig.builder()
                 .dataDir(tempDir)
@@ -55,22 +56,20 @@ class RaftLogStorageAdapterTest {
                 .build();
         
         storage = new RaftLogStorageAdapter(vertx, config);
-        storage.open(tempDir)
-                .onComplete(ctx.succeedingThenComplete());
+        storage.open(tempDir).toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
     }
 
     @AfterEach
-    void tearDown(VertxTestContext ctx) {
+    void tearDown() throws Exception {
         if (storage != null) {
-            storage.close()
-                    .onComplete(ctx.succeedingThenComplete());
+            storage.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
     }
 
     @Test
     @Order(1)
     @DisplayName("Should persist and load metadata")
-    void testMetadataPersistence(VertxTestContext ctx) {
+    void testMetadataPersistence(JavaTestContext ctx) {
         storage.updateMetadata(5, Optional.of("node-2"))
                 .compose(v -> storage.loadMetadata())
                 .onComplete(ctx.succeeding(meta -> {
@@ -85,7 +84,7 @@ class RaftLogStorageAdapterTest {
     @Test
     @Order(2)
     @DisplayName("Should append and replay log entries")
-    void testAppendAndReplay(VertxTestContext ctx) {
+    void testAppendAndReplay(JavaTestContext ctx) {
         List<RaftStorage.LogEntryData> entries = List.of(
                 new RaftStorage.LogEntryData(1, 1, "cmd1".getBytes()),
                 new RaftStorage.LogEntryData(2, 1, "cmd2".getBytes()),
@@ -110,7 +109,7 @@ class RaftLogStorageAdapterTest {
     @Test
     @Order(3)
     @DisplayName("Should truncate log suffix")
-    void testTruncateSuffix(VertxTestContext ctx) {
+    void testTruncateSuffix(JavaTestContext ctx) {
         List<RaftStorage.LogEntryData> entries = List.of(
                 new RaftStorage.LogEntryData(1, 1, "a".getBytes()),
                 new RaftStorage.LogEntryData(2, 1, "b".getBytes()),
@@ -134,7 +133,7 @@ class RaftLogStorageAdapterTest {
     @Test
     @Order(4)
     @DisplayName("Should return empty metadata when no state exists")
-    void testEmptyMetadata(Vertx vertx, VertxTestContext ctx) {
+    void testEmptyMetadata(JavaRuntime vertx, JavaTestContext ctx) {
         // Create new storage in a fresh directory with production settings
         Path freshDir = tempDir.resolve("fresh");
         RaftStorageConfig config = RaftStorageConfig.builder()
@@ -158,7 +157,7 @@ class RaftLogStorageAdapterTest {
     @Test
     @Order(5)
     @DisplayName("Factory should create RaftLogStorageAdapter with fsync enabled")
-    void testFactoryCreatesRaftLogWithFsync(Vertx vertx, VertxTestContext ctx) {
+    void testFactoryCreatesRaftLogWithFsync(JavaRuntime vertx, JavaTestContext ctx) {
         Path factoryDir = tempDir.resolve("factory");
         
         // Test with fsync=true (production setting)
@@ -175,7 +174,7 @@ class RaftLogStorageAdapterTest {
     @Test
     @Order(6)
     @DisplayName("Factory should default to FileRaftStorage with fsync when no type specified")
-    void testFactoryDefaultsToFileRaftStorageWithFsync(Vertx vertx, VertxTestContext ctx) {
+    void testFactoryDefaultsToFileRaftStorageWithFsync(JavaRuntime vertx, JavaTestContext ctx) {
         Path factoryDir = tempDir.resolve("default");
         
         // Pass empty type and fsync=true to test production default behavior
@@ -205,29 +204,29 @@ class RaftLogStorageAdapterTest {
         private RaftLogStorageAdapter noSyncStorage;
 
         @BeforeEach
-        void setUp(Vertx vertx, VertxTestContext ctx) {
+        void setUp(JavaRuntime vertx) throws Exception {
             RaftStorageConfig config = RaftStorageConfig.builder()
                     .dataDir(noSyncTempDir)
                     .syncEnabled(false)  // Test the no-fsync path
                     .build();
 
             noSyncStorage = new RaftLogStorageAdapter(vertx, config);
-            noSyncStorage.open(noSyncTempDir)
-                    .onComplete(ctx.succeedingThenComplete());
+            noSyncStorage.open(noSyncTempDir).toCompletionStage().toCompletableFuture()
+                    .get(5, TimeUnit.SECONDS);
         }
 
         @AfterEach
-        void tearDown(VertxTestContext ctx) {
+        void tearDown() throws Exception {
             if (noSyncStorage != null) {
-                noSyncStorage.close()
-                        .onComplete(ctx.succeedingThenComplete());
+                noSyncStorage.close().toCompletionStage().toCompletableFuture()
+                        .get(5, TimeUnit.SECONDS);
             }
         }
 
         @Test
         @Order(1)
         @DisplayName("Should persist and load metadata without fsync")
-        void testMetadataPersistenceNoSync(VertxTestContext ctx) {
+        void testMetadataPersistenceNoSync(JavaTestContext ctx) {
             noSyncStorage.updateMetadata(10, Optional.of("node-x"))
                     .compose(v -> noSyncStorage.loadMetadata())
                     .onComplete(ctx.succeeding(meta -> {
@@ -242,7 +241,7 @@ class RaftLogStorageAdapterTest {
         @Test
         @Order(2)
         @DisplayName("Should append and replay entries without fsync")
-        void testAppendAndReplayNoSync(VertxTestContext ctx) {
+        void testAppendAndReplayNoSync(JavaTestContext ctx) {
             List<RaftStorage.LogEntryData> entries = List.of(
                     new RaftStorage.LogEntryData(1, 1, "fast1".getBytes()),
                     new RaftStorage.LogEntryData(2, 1, "fast2".getBytes())
@@ -264,7 +263,7 @@ class RaftLogStorageAdapterTest {
         @Test
         @Order(3)
         @DisplayName("Factory should create storage with fsync disabled")
-        void testFactoryWithFsyncDisabled(Vertx vertx, VertxTestContext ctx) {
+        void testFactoryWithFsyncDisabled(JavaRuntime vertx, JavaTestContext ctx) {
             Path factoryDir = noSyncTempDir.resolve("factory-nosync");
 
             RaftStorageFactory.create(vertx, "raftlog", factoryDir, false)
