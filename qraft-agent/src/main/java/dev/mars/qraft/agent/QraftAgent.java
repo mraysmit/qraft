@@ -40,9 +40,13 @@ public final class QraftAgent implements AutoCloseable {
         agent.setRegion(config.getRegion());
         agent.setDatacenter(config.getDatacenter());
         return registrationClient.register(agent).thenApply(registered -> {
-            if (registered) scheduler.scheduleAtFixedRate(heartbeatService::sendHeartbeat,
-                    config.getHeartbeatInterval(), config.getHeartbeatInterval(), TimeUnit.MILLISECONDS);
-            else stopLocal();
+            healthService.setReady(registered);
+            if (registered) {
+                scheduler.scheduleAtFixedRate(heartbeatService::sendHeartbeat,
+                        config.getHeartbeatInterval(), config.getHeartbeatInterval(), TimeUnit.MILLISECONDS);
+            } else {
+                stopLocal();
+            }
             return registered;
         });
     }

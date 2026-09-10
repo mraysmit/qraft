@@ -1,12 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
-    <property name="LOG_DIR" value="${LOG_DIR:-logs}"/>
+    <statusListener class="ch.qos.logback.core.status.OnConsoleStatusListener"/>
+
+    <property name="LOG_DIR" value="${QRAFT_LOG_DIR:-${user.dir}/logs}"/>
     <property name="INSTANCE_ID" value="${QRAFT_NODE_ID:-${NODE_ID:-${HOSTNAME:-local}}}"/>
     <property name="LOG_BASE" value="${LOG_DIR}/qraft-controller-${INSTANCE_ID}"/>
     
     <!-- Console appender with MDC context for Docker logs -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
+            <charset>UTF-8</charset>
             <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{48}%replace( [%X{nodeId}]){' \[\]', ''}%replace( [%X{raftRole}/%X{raftTerm}]){' \[/\]', ''}%replace( [%X{requestId}]){' \[\]', ''}%replace( [%X{rpcType}]){' \[\]', ''} - %msg%n</pattern>
         </encoder>
     </appender>
@@ -21,6 +24,7 @@
             <totalSizeCap>1GB</totalSizeCap>
         </rollingPolicy>
         <encoder>
+            <charset>UTF-8</charset>
             <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{48}%replace( [%X{nodeId}]){' \[\]', ''}%replace( [%X{raftRole}/%X{raftTerm}]){' \[/\]', ''}%replace( [%X{requestId}]){' \[\]', ''}%replace( [%X{rpcType}]){' \[\]', ''} - %msg%n</pattern>
         </encoder>
     </appender>

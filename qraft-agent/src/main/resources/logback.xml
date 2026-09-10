@@ -1,12 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
-    <property name="LOG_DIR" value="${LOG_DIR:-logs}"/>
+    <statusListener class="ch.qos.logback.core.status.OnConsoleStatusListener"/>
+
+    <property name="LOG_DIR" value="${QRAFT_LOG_DIR:-${user.dir}/logs}"/>
     <property name="INSTANCE_ID" value="${AGENT_ID:-${HOSTNAME:-local}}"/>
     <property name="LOG_BASE" value="${LOG_DIR}/qraft-agent-${INSTANCE_ID}"/>
     
     <!-- Console appender for Docker logs -->
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
+            <charset>UTF-8</charset>
             <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36}%replace( [%X{agentId}]){' \[\]', ''}%replace( [%X{requestId}]){' \[\]', ''} - %msg%n</pattern>
         </encoder>
     </appender>
@@ -21,6 +24,7 @@
             <totalSizeCap>1GB</totalSizeCap>
         </rollingPolicy>
         <encoder>
+            <charset>UTF-8</charset>
             <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36}%replace( [%X{agentId}]){' \[\]', ''}%replace( [%X{requestId}]){' \[\]', ''} - %msg%n</pattern>
         </encoder>
     </appender>
@@ -47,12 +51,6 @@
         </encoder>
     </appender>
     
-    <!-- OpenTelemetry log bridge appender -->
-    <appender name="OTEL" class="io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender">
-        <captureExperimentalAttributes>true</captureExperimentalAttributes>
-        <captureMdcAttributes>*</captureMdcAttributes>
-    </appender>
-    
     <!-- Logger configurations -->
     <logger name="dev.mars.qraft" level="INFO"/>
     <logger name="org.apache.hc" level="WARN"/>
@@ -63,7 +61,6 @@
         <appender-ref ref="CONSOLE"/>
         <appender-ref ref="FILE"/>
         <appender-ref ref="JSON"/>
-        <appender-ref ref="OTEL"/>
     </root>
     
 </configuration>

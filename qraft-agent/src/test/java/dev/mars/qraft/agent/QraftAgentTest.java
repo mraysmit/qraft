@@ -6,6 +6,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -37,7 +38,7 @@ class QraftAgentTest {
                 .agentId("agent-1")
                 .hostname("host")
                 .address("127.0.0.1")
-                .agentPort(8080)
+                .agentPort(freePort())
                 .controllerUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000)
                 .build();
@@ -49,5 +50,11 @@ class QraftAgentTest {
         assertTrue(agent.shutdown().join());
         assertFalse(agent.isRunning());
         assertFalse(agent.healthService().isHealthy());
+    }
+
+    private static int freePort() throws Exception {
+        try (ServerSocket socket = new ServerSocket(0)) {
+            return socket.getLocalPort();
+        }
     }
 }

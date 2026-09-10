@@ -137,7 +137,6 @@
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
-            <version>2.0.17</version>
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
@@ -168,7 +167,10 @@
         <dependency>
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-classic</artifactId>
-            <version>1.5.32</version>
+        </dependency>
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
             <scope>runtime</scope>
         </dependency>
 
@@ -252,7 +254,7 @@
                     <!-- Avoid JPMS module-path for tests to prevent missing JDK modules in graph -->
                     <useModulePath>false</useModulePath>
                     <!-- Ensure required JDK modules are available at test runtime -->
-                    <argLine>@{argLine} --add-modules java.net.http,java.logging</argLine>
+                    <argLine>@{argLine} --add-modules java.net.http,java.logging --enable-native-access=ALL-UNNAMED</argLine>
                     <!--
                       Exclude heavyweight tests from the default build:
                         docker - requires Docker; starts multi-node Compose clusters

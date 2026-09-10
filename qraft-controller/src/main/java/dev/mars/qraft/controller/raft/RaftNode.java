@@ -938,7 +938,7 @@ public class RaftNode {
                 // Using transport (Wait for Future integration)
                 transport.sendVoteRequest(peerId, request)
                         .onSuccess(response -> runOnContext(v -> handleVoteResponse(response, term, voteCount)))
-                        .onFailure(e -> logger.warn("Failed to retrieve vote from {}", peerId));
+                        .onFailure(e -> logger.error("Failed to retrieve vote from {}", peerId, e));
 
                 // Record edge metric for nodeGraph visualization
                 rpcCounter.add(1, Attributes.of(
@@ -1440,7 +1440,7 @@ public class RaftNode {
                 }))
                 .onFailure(error -> runOnContext(v -> {
                     if (unavailablePeers.add(target)) {
-                        logger.warn("Raft peer {} became unreachable during AppendEntries", target, error);
+                        logger.error("Raft peer {} became unreachable during AppendEntries", target, error);
                     } else {
                         logger.debug("Raft peer {} remains unreachable during AppendEntries: {}", target, error.toString());
                     }
@@ -1768,7 +1768,7 @@ public class RaftNode {
                     }
                 }))
                 .onFailure(err -> {
-                    logger.warn("Failed to send InstallSnapshot chunk {}/{} to {}: {}",
+                    logger.error("Failed to send InstallSnapshot chunk {}/{} to {}: {}",
                             chunkIndex + 1, totalChunks, target, err.getMessage());
                     installSnapshotInProgress.remove(target);
                 });

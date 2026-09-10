@@ -271,9 +271,9 @@ public class ShutdownCoordinator {
                 .recover(err -> {
                     // Log failure but continue shutdown - don't fail the whole sequence
                     if (err instanceof TimeoutException) {
-                        logger.warn("Shutdown hook '{}' timed out after {} ms", hook.name(), timeoutMs);
+                        logger.error("Shutdown hook '{}' timed out after {} ms", hook.name(), timeoutMs);
                     } else {
-                        logger.warn("Shutdown hook '{}' failed with {}", hook.name(), err.getClass().getSimpleName(), err);
+                        logger.error("Shutdown hook '{}' failed with {}", hook.name(), err.getClass().getSimpleName(), err);
                     }
                     return Future.succeededFuture();
                 });

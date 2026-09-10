@@ -46,6 +46,40 @@ The active Maven build is Java-native. The controller uses Java 25 concurrency p
 7. Remove Vert.x dependencies and configuration from all Maven modules.
 8. Remove obsolete reactive integration tests and examples.
 
+### Single-binary runtime and startup modes
+
+Qraft will be distributed as one executable runtime and one container image. The
+runtime will select its role at startup rather than requiring separate controller
+and agent distributions:
+
+```text
+qraft server
+qraft client
+```
+
+- `server` starts the controller runtime, participates in the Raft quorum, owns replicated state, and exposes the control-plane APIs.
+- `client` starts the agent runtime, represents a managed node or service, registers with a controller, reports health, and sends heartbeats.
+- Client mode never participates in the Raft quorum.
+- `QRAFT_MODE=server|client` may be supported for container and service-manager deployments where an argument is inconvenient.
+- Mode-specific configuration must be validated before background services start.
+- Both modes share configuration conventions, logging, metrics, signal handling, and graceful shutdown.
+
+The Maven modules remain separated for dependency and ownership boundaries, but
+they become libraries behind a thin executable runtime module. The runtime module
+owns mode selection and lifecycle orchestration; `qraft-controller` and
+`qraft-agent` are not separate production deployment artifacts.
+
+The container image must support both modes without rebuilding the application:
+
+```text
+qraft-image server   # controller/Raft server
+qraft-image client   # node/service agent
+```
+
+Client mode must expose real local liveness and readiness endpoints. Maintaining
+only an in-memory health flag is not sufficient for container health checks or
+orchestration readiness.
+
 ## 4. Architectural Boundaries
 
 ### Core modules
@@ -55,6 +89,7 @@ The active Maven build is Java-native. The controller uses Java 25 concurrency p
 - `qraft-distributed-state`: replicated key/value state
 - `qraft-controller`: cluster coordination, state ownership, and HTTP APIs
 - `qraft-agent`: node identity, service registration, heartbeats, and local checks
+- `qraft-runtime`: single executable launcher, `server`/`client` mode selection, shared lifecycle, configuration, logging, metrics, and health wiring
 - `qraft-api`: public API contracts and client-facing representations
 
 ### Design principles
@@ -63,6 +98,8 @@ The active Maven build is Java-native. The controller uses Java 25 concurrency p
 - Reads must expose explicit consistency behavior.
 - Agents own local health observations.
 - Controllers own the replicated service catalog.
+- Only server mode participates in Raft consensus; client mode is an outbound control-plane participant.
+- One runtime image must be deployable in either mode without rebuilding the application.
 - Service discovery must not depend on transfer or workflow concepts.
 - Durable state must use the RaftLog/WAL implementation.
 
@@ -76,6 +113,9 @@ The active Maven build is Java-native. The controller uses Java 25 concurrency p
 - Define interfaces for replicated state, service catalog, health checks, and sessions.
 - Remove Vert.x from module dependencies and public APIs.
 - Establish shared Java 25 executors, virtual-thread policies, and shutdown conventions.
+- Add the unified runtime launcher with explicit `server` and `client` startup modes.
+- Define mode-specific configuration validation and common lifecycle ownership.
+- Add client liveness and readiness HTTP endpoints and connect them to container health checks.
 
 ### Phase 2: Distributed key/value store
 
@@ -122,8 +162,14 @@ The agent will be responsible for:
 - HTTP health checks.
 - Automatic deregistration after expiry.
 - Qraft-prefixed configuration.
+- Running as the `client` mode of the unified Qraft runtime.
+- Serving local liveness and readiness endpoints for orchestration.
 
 The agent will not poll for jobs or execute transfers.
+
+Client mode is not a Raft node. It communicates with the controller cluster and
+reports local observations; the controller cluster remains responsible for
+replicating the resulting catalog and health state.
 
 ### Phase 5: Sessions and distributed locks
 
@@ -176,6 +222,7 @@ Add:
 - Health aggregation.
 - Structured error responses.
 - Configuration reference.
+- One container image and deployment examples for both `server` and `client` modes.
 - Docker examples for a three-node cluster.
 - Optional DNS discovery interface.
 
@@ -183,11 +230,12 @@ Add:
 
 The first delivery should establish the basic Consul-like behavior:
 
-1. Remove remaining transfer/job references from active controller and agent code.
-2. Introduce `ServiceRegistration` and `ServiceInstance`.
-3. Implement service registration and deregistration through Raft.
-4. Expose catalog and health endpoints.
-5. Add one end-to-end multi-node registration flow.
+1. Add the unified executable runtime with `server` and `client` modes.
+2. Remove remaining transfer/job references from active controller and agent code.
+3. Introduce `ServiceRegistration` and `ServiceInstance`.
+4. Implement service registration and deregistration through Raft.
+5. Expose controller catalog/health APIs and client liveness/readiness APIs.
+6. Add one end-to-end multi-node registration flow using one image in both modes.
 
 This slice should be complete before implementing sessions, ACLs, or DNS.
 
@@ -196,6 +244,8 @@ This slice should be complete before implementing sessions, ACLs, or DNS.
 The implementation will be considered aligned with the target design when:
 
 - No transfer or workflow classes remain in the active build.
+- One binary and container image start successfully in both `server` and `client` modes.
+- Client mode exposes working liveness and readiness endpoints.
 - Agents register services and report health.
 - Controllers replicate catalog mutations through Raft.
 - KV operations support versioning and CAS semantics.
@@ -203,3 +253,33 @@ The implementation will be considered aligned with the target design when:
 - Sessions and locks have deterministic expiration behavior.
 - Operational state is exposed through health and metrics endpoints.
 - No Vert.x dependencies, types, timers, event loops, or framework futures remain.
+## Implementation Checklist
+
+### Runtime and deployment foundation
+
+- [x] Add the `qraft-runtime` module to the Maven reactor.
+- [x] Provide one executable runtime entry point.
+- [x] Support `server` and `client` startup modes.
+- [x] Resolve the mode from a command-line argument or `QRAFT_MODE`.
+- [x] Package one Docker image with a mode-aware entrypoint.
+- [x] Compile and test the runtime module with its controller and agent dependencies.
+
+### Health and lifecycle foundation
+
+- [x] Expose client liveness and readiness endpoints.
+- [x] Mark the client ready only after successful controller registration.
+- [x] Start and stop the controller HTTP health server with the controller lifecycle.
+- [x] Add real HTTP tests for client health transitions.
+- [x] Add runtime mode-resolution tests.
+
+### Remaining implementation work
+
+- [ ] Complete server-mode configuration and bootstrap behavior.
+- [ ] Complete client-mode configuration and controller discovery behavior.
+- [ ] Implement agent membership and failure detection semantics.
+- [ ] Implement service registration, catalog replication, and query behavior.
+- [ ] Implement health checks and health-state propagation through Raft.
+- [ ] Implement namespaces and tenancy isolation end to end.
+- [ ] Add snapshot, restore, upgrade, and operational recovery workflows.
+- [ ] Add multi-node integration and failure-injection coverage.
+- [ ] Run the complete reactor test suite and review the resulting log.

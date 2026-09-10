@@ -8,6 +8,7 @@ import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
 import io.opentelemetry.exporter.otlp.trace.OtlpGrpcSpanExporter;
 import io.opentelemetry.exporter.prometheus.PrometheusHttpServer;
+import io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -58,10 +59,14 @@ public class TelemetryConfig {
                 .build();
 
         // 4. Initialize OpenTelemetry SDK (registered globally)
-        OpenTelemetrySdk.builder()
+        OpenTelemetrySdk openTelemetry = OpenTelemetrySdk.builder()
                 .setTracerProvider(tracerProvider)
                 .setMeterProvider(meterProvider)
                 .buildAndRegisterGlobal();
+
+        // The Logback appender is intentionally installed only after the SDK is
+        // fully configured, so log records use the same resource and exporters.
+        OpenTelemetryAppender.install(openTelemetry);
 
         logger.info("OpenTelemetry configured: service={}, otlp={}, prometheus={}",
                 serviceName, configuredOtlpEndpoint, configuredPrometheusPort);

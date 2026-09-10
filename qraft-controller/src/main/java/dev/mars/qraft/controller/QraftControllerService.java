@@ -34,6 +34,7 @@ import dev.mars.qraft.controller.raft.storage.RaftStorage;
 import dev.mars.qraft.controller.raft.storage.RaftStorageFactory;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommandCodec;
 import dev.mars.qraft.controller.state.GenericStateStore;
+import dev.mars.qraft.controller.http.HttpApiServer;
 
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -60,6 +61,7 @@ public class QraftControllerService {
     private RaftStorage raftStorage;
     private Optional<GrpcRaftServer> raftGrpcServer = Optional.empty();
     private Optional<GrpcServiceServer> apiGrpcServer = Optional.empty();
+    private Optional<HttpApiServer> httpApiServer = Optional.empty();
     private Optional<ShutdownCoordinator> shutdownCoordinator = Optional.empty();
 
     public QraftControllerService(JavaRuntime runtime) {
@@ -169,6 +171,8 @@ public class QraftControllerService {
             DistributedStateGrpcService distributedStateService = new DistributedStateGrpcService(node, stateMachine);
             GrpcServiceServer externalApiServer = new GrpcServiceServer(runtime, apiGrpcPort, distributedStateService);
             this.apiGrpcServer = Optional.of(externalApiServer);
+            HttpApiServer healthServer = new HttpApiServer(config.getHttpPort());
+            this.httpApiServer = Optional.of(healthServer);
 
             internalRaftServer.start().compose(v1 -> {
                 logger.info("Internal Raft gRPC server started on port {}", raftPort);
@@ -176,14 +180,21 @@ public class QraftControllerService {
             }).onSuccess(v2 -> {
                 logger.info("External API gRPC server started on port {}", apiGrpcPort);
 
-                // 7. Start Raft (includes recovery from WAL)
-                node.start().onSuccess(v3 -> {
-                    // 8. Setup shutdown coordinator for graceful shutdown
-                    setupShutdownCoordinator();
+                try {
+                    healthServer.start();
+                    node.start().onSuccess(v3 -> {
+                        logger.info("HTTP health server started on port {}", config.getHttpPort());
 
-                    logger.info("QraftControllerService started successfully (split gRPC mode)");
-                    startPromise.complete();
-                }).onFailure(startPromise::fail);
+                        // 7. Start Raft (includes recovery from WAL)
+                        // 8. Setup shutdown coordinator for graceful shutdown
+                        setupShutdownCoordinator();
+
+                        logger.info("QraftControllerService started successfully (gRPC and HTTP health mode)");
+                        startPromise.complete();
+                    }).onFailure(startPromise::fail);
+                } catch (Exception e) {
+                    startPromise.fail(e);
+                }
             }).onFailure(startPromise::fail);
 
         } catch (Exception e) {
@@ -210,8 +221,6 @@ public class QraftControllerService {
         ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime, drainTimeoutMs, shutdownTimeoutMs);
         this.shutdownCoordinator = Optional.of(coordinator);
         
-        // No HTTP server in gRPC core mode.
-        
         // Phase 2: AWAIT_COMPLETION - No active jobs tracked at controller level yet
         // (Agents track their own transfers - controller just routes requests)
         
@@ -223,6 +232,7 @@ public class QraftControllerService {
         coordinator.onServiceStop("grpc-server-stop", () -> {
             Future<Void> raftStop = raftGrpcServer.map(GrpcRaftServer::stop).orElseGet(Future::succeededFuture);
             Future<Void> apiStop = apiGrpcServer.map(GrpcServiceServer::stop).orElseGet(Future::succeededFuture);
+            httpApiServer.ifPresent(HttpApiServer::stop);
             return Future.all(raftStop, apiStop).mapEmpty();
         });
         
@@ -258,6 +268,7 @@ public class QraftControllerService {
                     Future<Void> raftStop = raftNode.map(RaftNode::stop).orElseGet(Future::succeededFuture);
                     Future<Void> internalGrpcStop = raftGrpcServer.map(GrpcRaftServer::stop).orElseGet(Future::succeededFuture);
                     Future<Void> externalGrpcStop = apiGrpcServer.map(GrpcServiceServer::stop).orElseGet(Future::succeededFuture);
+                    httpApiServer.ifPresent(HttpApiServer::stop);
 
                     Future.all(raftStop, internalGrpcStop, externalGrpcStop)
                             .onSuccess(v -> {

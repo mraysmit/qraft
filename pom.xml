@@ -19,6 +19,7 @@
         <module>qraft-agent</module>
         <module>qraft-tenant</module>
         <module>qraft-controller</module>
+        <module>qraft-runtime</module>
     </modules>
 
     <properties>
@@ -30,12 +31,23 @@
         <testcontainers.version>2.0.3</testcontainers.version>
         <jacoco.version>0.8.13</jacoco.version>
         <raftlog.version>1.1.0</raftlog.version>
+        <slf4j.version>2.0.17</slf4j.version>
+        <logback.version>1.5.32</logback.version>
+        <logstash.logback.encoder.version>8.1</logstash.logback.encoder.version>
         <required.java.version>[25,)</required.java.version>
-        <!-- Shared timestamp for consolidated test log file across all modules -->
-        <maven.build.timestamp.format>yyyy-MM-dd_HH-mm-ss</maven.build.timestamp.format>
-        <test.log.directory>${maven.multiModuleProjectDirectory}/test-logs</test.log.directory>
+        <test.log.directory>${maven.multiModuleProjectDirectory}/logs</test.log.directory>
         <test.log.configuration>${maven.multiModuleProjectDirectory}/config/logback-test.xml</test.log.configuration>
     </properties>
+
+    <dependencies>
+        <!-- Make the shared reactor Logback test configuration effective in every module. -->
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>${logback.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
 
     <dependencyManagement>
         <dependencies>
@@ -45,6 +57,22 @@
                 <artifactId>junit-jupiter</artifactId>
                 <version>${junit.version}</version>
                 <scope>test</scope>
+            </dependency>
+
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>slf4j-api</artifactId>
+                <version>${slf4j.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ch.qos.logback</groupId>
+                <artifactId>logback-classic</artifactId>
+                <version>${logback.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>net.logstash.logback</groupId>
+                <artifactId>logstash-logback-encoder</artifactId>
+                <version>${logstash.logback.encoder.version}</version>
             </dependency>
             
             <!-- RaftLog WAL - default storage implementation -->
@@ -83,8 +111,6 @@
                     <version>3.2.2</version>
                     <configuration>
                         <systemPropertyVariables>
-                            <!-- Shared across all modules so logback writes to one consolidated file -->
-                            <testRunTimestamp>${maven.build.timestamp}</testRunTimestamp>
                             <qraft.test.log.dir>${test.log.directory}</qraft.test.log.dir>
                             <logback.configurationFile>${test.log.configuration}</logback.configurationFile>
                         </systemPropertyVariables>
