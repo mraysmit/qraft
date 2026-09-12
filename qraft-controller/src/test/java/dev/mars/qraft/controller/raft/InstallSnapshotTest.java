@@ -20,7 +20,6 @@ import dev.mars.qraft.controller.state.*;
 
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
-import dev.mars.qraft.controller.raft.storage.InMemoryRaftStorage;
 
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
@@ -57,8 +56,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class InstallSnapshotTest {
 
     private JavaRuntime vertx;
-    private InMemoryRaftStorage leaderStorage;
-    private InMemoryRaftStorage followerStorage;
+    private TestRaftStorage leaderStorage;
+    private TestRaftStorage followerStorage;
 
     @BeforeEach
     void setUp(JavaRuntime vertx) {
@@ -81,9 +80,9 @@ class InstallSnapshotTest {
      */
     @Test
     void testLeaderSendsSnapshotToLaggingFollower(JavaTestContext ctx) throws Throwable {
-        leaderStorage = new InMemoryRaftStorage();
-        followerStorage = new InMemoryRaftStorage();
-        InMemoryRaftStorage node2Storage = new InMemoryRaftStorage();
+        leaderStorage = new TestRaftStorage();
+        followerStorage = new TestRaftStorage();
+        TestRaftStorage node2Storage = new TestRaftStorage();
 
         Set<String> cluster = Set.of("node1", "node2", "node3");
 
@@ -95,13 +94,13 @@ class InstallSnapshotTest {
         QraftStateStore sm2 = new QraftStateStore();
         QraftStateStore sm3 = new QraftStateStore();
 
-        RaftNode node1 = RaftNode.builder().runtime(vertx).nodeId("node1").clusterNodes(cluster).transport(t1).stateMachine(sm1).mode(RaftNodeMode.durable(leaderStorage)).commandCodec(new ProtobufRaftCommandCodec())
+        RaftNode node1 = RaftNode.builder().runtime(vertx).nodeId("node1").clusterNodes(cluster).transport(t1).stateMachine(sm1).mode(RaftNodeMode.durable(leaderStorage, leaderStorage)).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1000).heartbeatInterval(200)
                 .snapshotEnabled(true).snapshotThreshold(5).snapshotCheckInterval(300).build();
-        RaftNode node2 = RaftNode.builder().runtime(vertx).nodeId("node2").clusterNodes(cluster).transport(t2).stateMachine(sm2).mode(RaftNodeMode.durable(node2Storage)).commandCodec(new ProtobufRaftCommandCodec())
+        RaftNode node2 = RaftNode.builder().runtime(vertx).nodeId("node2").clusterNodes(cluster).transport(t2).stateMachine(sm2).mode(RaftNodeMode.durable(node2Storage, node2Storage)).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1500).heartbeatInterval(200)
                 .snapshotEnabled(true).snapshotThreshold(5).snapshotCheckInterval(300).build();
-        RaftNode node3 = RaftNode.builder().runtime(vertx).nodeId("node3").clusterNodes(cluster).transport(t3).stateMachine(sm3).mode(RaftNodeMode.durable(followerStorage)).commandCodec(new ProtobufRaftCommandCodec())
+        RaftNode node3 = RaftNode.builder().runtime(vertx).nodeId("node3").clusterNodes(cluster).transport(t3).stateMachine(sm3).mode(RaftNodeMode.durable(followerStorage, followerStorage)).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(15000).heartbeatInterval(200)
                 .snapshotEnabled(true).snapshotThreshold(5).snapshotCheckInterval(300).build();
 
@@ -111,11 +110,9 @@ class InstallSnapshotTest {
         InMemoryTransportSimulator.createPartition(Set.of("node1", "node2"), Set.of("node3"));
 
         leaderStorage.open(Path.of("/tmp/t1-1"))
-                .compose(v -> node2Storage.open(Path.of("/tmp/t1-2")))
-                .compose(v -> followerStorage.open(Path.of("/tmp/t1-3")))
-                .compose(v -> node1.start())
-                .compose(v -> node2.start())
-                .compose(v -> node3.start());
+                .thenCompose(v -> node2Storage.open(Path.of("/tmp/t1-2")))
+                .thenCompose(v -> followerStorage.open(Path.of("/tmp/t1-3"))).join();
+        node1.start().compose(v -> node2.start()).compose(v -> node3.start());
 
         // Phase 1: Wait for leader election on TEST thread (not event loop)
         await().atMost(12, TimeUnit.SECONDS).pollInterval(200, TimeUnit.MILLISECONDS)
@@ -166,9 +163,9 @@ class InstallSnapshotTest {
      */
     @Test
     void testFollowerStateMachineRestoredBySnapshot(JavaTestContext ctx) throws Throwable {
-        leaderStorage = new InMemoryRaftStorage();
-        followerStorage = new InMemoryRaftStorage();
-        InMemoryRaftStorage node2Storage = new InMemoryRaftStorage();
+        leaderStorage = new TestRaftStorage();
+        followerStorage = new TestRaftStorage();
+        TestRaftStorage node2Storage = new TestRaftStorage();
 
         Set<String> cluster = Set.of("node1", "node2", "node3");
 
@@ -180,13 +177,13 @@ class InstallSnapshotTest {
         QraftStateStore sm2 = new QraftStateStore();
         QraftStateStore sm3 = new QraftStateStore();
 
-        RaftNode node1 = RaftNode.builder().runtime(vertx).nodeId("node1").clusterNodes(cluster).transport(t1).stateMachine(sm1).mode(RaftNodeMode.durable(leaderStorage)).commandCodec(new ProtobufRaftCommandCodec())
+        RaftNode node1 = RaftNode.builder().runtime(vertx).nodeId("node1").clusterNodes(cluster).transport(t1).stateMachine(sm1).mode(RaftNodeMode.durable(leaderStorage, leaderStorage)).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1000).heartbeatInterval(200)
                 .snapshotEnabled(true).snapshotThreshold(5).snapshotCheckInterval(300).build();
-        RaftNode node2 = RaftNode.builder().runtime(vertx).nodeId("node2").clusterNodes(cluster).transport(t2).stateMachine(sm2).mode(RaftNodeMode.durable(node2Storage)).commandCodec(new ProtobufRaftCommandCodec())
+        RaftNode node2 = RaftNode.builder().runtime(vertx).nodeId("node2").clusterNodes(cluster).transport(t2).stateMachine(sm2).mode(RaftNodeMode.durable(node2Storage, node2Storage)).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1500).heartbeatInterval(200)
                 .snapshotEnabled(true).snapshotThreshold(5).snapshotCheckInterval(300).build();
-        RaftNode node3 = RaftNode.builder().runtime(vertx).nodeId("node3").clusterNodes(cluster).transport(t3).stateMachine(sm3).mode(RaftNodeMode.durable(followerStorage)).commandCodec(new ProtobufRaftCommandCodec())
+        RaftNode node3 = RaftNode.builder().runtime(vertx).nodeId("node3").clusterNodes(cluster).transport(t3).stateMachine(sm3).mode(RaftNodeMode.durable(followerStorage, followerStorage)).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(15000).heartbeatInterval(200)
                 .snapshotEnabled(true).snapshotThreshold(5).snapshotCheckInterval(300).build();
 
@@ -194,11 +191,9 @@ class InstallSnapshotTest {
         InMemoryTransportSimulator.createPartition(Set.of("node1", "node2"), Set.of("node3"));
 
         leaderStorage.open(Path.of("/tmp/t2-1"))
-                .compose(v -> node2Storage.open(Path.of("/tmp/t2-2")))
-                .compose(v -> followerStorage.open(Path.of("/tmp/t2-3")))
-                .compose(v -> node1.start())
-                .compose(v -> node2.start())
-                .compose(v -> node3.start());
+                .thenCompose(v -> node2Storage.open(Path.of("/tmp/t2-2")))
+                .thenCompose(v -> followerStorage.open(Path.of("/tmp/t2-3"))).join();
+        node1.start().compose(v -> node2.start()).compose(v -> node3.start());
 
         // Wait for leader election
         await().atMost(12, TimeUnit.SECONDS).pollInterval(200, TimeUnit.MILLISECONDS)
@@ -256,9 +251,9 @@ class InstallSnapshotTest {
      */
     @Test
     void testLeaderUpdatesIndicesAfterSnapshotInstall(JavaTestContext ctx) throws Throwable {
-        leaderStorage = new InMemoryRaftStorage();
-        followerStorage = new InMemoryRaftStorage();
-        InMemoryRaftStorage node2Storage = new InMemoryRaftStorage();
+        leaderStorage = new TestRaftStorage();
+        followerStorage = new TestRaftStorage();
+        TestRaftStorage node2Storage = new TestRaftStorage();
 
         Set<String> cluster = Set.of("node1", "node2", "node3");
 
@@ -270,24 +265,22 @@ class InstallSnapshotTest {
         QraftStateStore sm2 = new QraftStateStore();
         QraftStateStore sm3 = new QraftStateStore();
 
-        RaftNode node1 = RaftNode.builder().runtime(vertx).nodeId("node1").clusterNodes(cluster).transport(t1).stateMachine(sm1).mode(RaftNodeMode.durable(leaderStorage)).commandCodec(new ProtobufRaftCommandCodec())
+        RaftNode node1 = RaftNode.builder().runtime(vertx).nodeId("node1").clusterNodes(cluster).transport(t1).stateMachine(sm1).mode(RaftNodeMode.durable(leaderStorage, leaderStorage)).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1000).heartbeatInterval(200)
                 .snapshotEnabled(true).snapshotThreshold(5).snapshotCheckInterval(300).build();
-        RaftNode node2 = RaftNode.builder().runtime(vertx).nodeId("node2").clusterNodes(cluster).transport(t2).stateMachine(sm2).mode(RaftNodeMode.durable(node2Storage)).commandCodec(new ProtobufRaftCommandCodec())
+        RaftNode node2 = RaftNode.builder().runtime(vertx).nodeId("node2").clusterNodes(cluster).transport(t2).stateMachine(sm2).mode(RaftNodeMode.durable(node2Storage, node2Storage)).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1500).heartbeatInterval(200)
                 .snapshotEnabled(true).snapshotThreshold(5).snapshotCheckInterval(300).build();
-        RaftNode node3 = RaftNode.builder().runtime(vertx).nodeId("node3").clusterNodes(cluster).transport(t3).stateMachine(sm3).mode(RaftNodeMode.durable(followerStorage)).commandCodec(new ProtobufRaftCommandCodec())
+        RaftNode node3 = RaftNode.builder().runtime(vertx).nodeId("node3").clusterNodes(cluster).transport(t3).stateMachine(sm3).mode(RaftNodeMode.durable(followerStorage, followerStorage)).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(15000).heartbeatInterval(200)
                 .snapshotEnabled(true).snapshotThreshold(5).snapshotCheckInterval(300).build();
 
         InMemoryTransportSimulator.createPartition(Set.of("node1", "node2"), Set.of("node3"));
 
         leaderStorage.open(Path.of("/tmp/t3-1"))
-                .compose(v -> node2Storage.open(Path.of("/tmp/t3-2")))
-                .compose(v -> followerStorage.open(Path.of("/tmp/t3-3")))
-                .compose(v -> node1.start())
-                .compose(v -> node2.start())
-                .compose(v -> node3.start());
+                .thenCompose(v -> node2Storage.open(Path.of("/tmp/t3-2")))
+                .thenCompose(v -> followerStorage.open(Path.of("/tmp/t3-3"))).join();
+        node1.start().compose(v -> node2.start()).compose(v -> node3.start());
 
         // Wait for leader election
         await().atMost(12, TimeUnit.SECONDS).pollInterval(200, TimeUnit.MILLISECONDS)
@@ -337,16 +330,16 @@ class InstallSnapshotTest {
      */
     @Test
     void testFollowerRejectsStaleTermSnapshot(JavaTestContext ctx) throws Throwable {
-        InMemoryRaftStorage storage = new InMemoryRaftStorage();
+        TestRaftStorage storage = new TestRaftStorage();
         InMemoryTransportSimulator transport = new InMemoryTransportSimulator("node1");
         QraftStateStore sm = new QraftStateStore();
         Set<String> cluster = Set.of("node1");
 
-        RaftNode node = RaftNode.builder().runtime(vertx).nodeId("node1").clusterNodes(cluster).transport(transport).stateMachine(sm).mode(RaftNodeMode.durable(storage)).commandCodec(new ProtobufRaftCommandCodec())
+        RaftNode node = RaftNode.builder().runtime(vertx).nodeId("node1").clusterNodes(cluster).transport(transport).stateMachine(sm).mode(RaftNodeMode.durable(storage, storage)).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1000).heartbeatInterval(200)
                 .snapshotEnabled(false).snapshotThreshold(100).snapshotCheckInterval(5000).build();
 
-        storage.open(Path.of("/tmp/stale-test")).onComplete(ctx.succeeding(v -> {
+        Future.fromCompletionStage(storage.open(Path.of("/tmp/stale-test"))).onComplete(ctx.succeeding(v -> {
             node.start().onComplete(ctx.succeeding(v2 -> {
                 node.awaitState(RaftNode.State.LEADER, 5000).onComplete(ctx.succeeding(state -> {
 
@@ -434,16 +427,16 @@ class InstallSnapshotTest {
      */
     @Test
     void testFollowerPersistsInstalledSnapshot(JavaTestContext ctx) throws Throwable {
-        InMemoryRaftStorage storage = new InMemoryRaftStorage();
+        TestRaftStorage storage = new TestRaftStorage();
         InMemoryTransportSimulator transport = new InMemoryTransportSimulator("follower-persist");
         QraftStateStore sm = new QraftStateStore();
         Set<String> cluster = Set.of("follower-persist");
 
-        RaftNode node = RaftNode.builder().runtime(vertx).nodeId("follower-persist").clusterNodes(cluster).transport(transport).stateMachine(sm).mode(RaftNodeMode.durable(storage)).commandCodec(new ProtobufRaftCommandCodec())
+        RaftNode node = RaftNode.builder().runtime(vertx).nodeId("follower-persist").clusterNodes(cluster).transport(transport).stateMachine(sm).mode(RaftNodeMode.durable(storage, storage)).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(15000).heartbeatInterval(200)
                 .snapshotEnabled(false).snapshotThreshold(100).snapshotCheckInterval(5000).build();
 
-        storage.open(Path.of("/tmp/persist-test")).onComplete(ctx.succeeding(v -> {
+        Future.fromCompletionStage(storage.open(Path.of("/tmp/persist-test"))).onComplete(ctx.succeeding(v -> {
             node.start().onComplete(ctx.succeeding(v2 -> {
 
                 // Build a realistic snapshot: serialize some state machine data
@@ -470,7 +463,7 @@ class InstallSnapshotTest {
                     });
 
                     // Verify snapshot was persisted in storage
-                    storage.loadSnapshot().onComplete(ctx.succeeding(snapshotOpt -> {
+                    Future.fromCompletionStage(storage.loadLatest()).onComplete(ctx.succeeding(snapshotOpt -> {
                         ctx.verify(() -> {
                             assertTrue(snapshotOpt.isPresent(), "Snapshot should be saved in follower's storage");
                             var saved = snapshotOpt.get();

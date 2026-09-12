@@ -22,9 +22,11 @@ import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.controller.raft.grpc.VoteRequest;
 import dev.mars.qraft.controller.raft.grpc.VoteResponse;
-import dev.mars.qraft.controller.raft.storage.RaftStorage;
-import dev.mars.qraft.controller.raft.storage.RaftStorage.LogEntryData;
-import dev.mars.qraft.controller.raft.storage.RaftStorage.SnapshotData;
+import dev.mars.raftlog.storage.RaftStorage;
+import dev.mars.raftlog.storage.RaftStorage.LogEntryData;
+import dev.mars.raftlog.storage.AppendPlan;
+import dev.mars.qraft.raft.api.SnapshotStore;
+import dev.mars.qraft.raft.api.SnapshotStore.SnapshotData;
 import dev.mars.qraft.controller.state.CommandResult;
 import dev.mars.qraft.controller.state.RaftCommand;
 import dev.mars.qraft.raft.api.CommandCodec;
@@ -44,6 +46,7 @@ import io.opentelemetry.api.metrics.Meter;
 import org.slf4j.MDC;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 import static java.util.Objects.requireNonNull;
@@ -83,7 +86,8 @@ public class RaftNode {
     private final RaftTransport transport;
     private final RaftLogApplicator stateMachine;
     private final CommandCodec<RaftCommand> commandCodec;
-    private final Optional<RaftStorage> storage;  // WAL storage for durability (empty for volatile mode)
+    private final Optional<RaftStorage> storage;  // External WAL storage (empty for volatile mode)
+    private final Optional<SnapshotStore> snapshotStore;
 
     // ========== PERSISTENT STATE ==========
     private volatile long currentTerm = 0;
@@ -174,7 +178,7 @@ public class RaftNode {
      *     .clusterNodes(cluster)
      *     .transport(transport)
      *     .stateMachine(sm)
-     *     .mode(RaftNodeMode.durable(storage))
+     *     .mode(RaftNodeMode.durable(wal, snapshots))
      *     .electionTimeout(5000)
      *     .heartbeatInterval(1000)
      *     .snapshotEnabled(true)
@@ -289,6 +293,7 @@ public class RaftNode {
         this.stateMachine = stateMachine;
         this.commandCodec = commandCodec;
         this.storage = requireNonNull(mode, "mode").storage();
+        this.snapshotStore = mode.snapshots();
         this.electionTimeoutMs = electionTimeoutMs;
         this.heartbeatIntervalMs = heartbeatIntervalMs;
         this.snapshotEnabled = snapshotEnabled && this.storage.isPresent();
@@ -432,16 +437,17 @@ public class RaftNode {
         }
 
         RaftStorage store = storage.get();
+        SnapshotStore snapshots = snapshotStore.orElseThrow();
         logger.info("Recovering Raft state from storage...");
 
-        return store.loadMetadata()
+        return toFuture(store.loadMetadata())
             .compose(meta -> {
                 this.currentTerm = meta.currentTerm();
                 this.votedFor = meta.votedFor().orElse(null);
                 logger.info("Recovered metadata: term={}, votedFor={}", currentTerm, votedFor);
 
                 // Try to load snapshot
-                return store.loadSnapshot();
+                return toFuture(snapshots.loadLatest());
             })
             .compose(snapshotOpt -> {
                 if (snapshotOpt.isPresent()) {
@@ -465,7 +471,7 @@ public class RaftNode {
                     logger.info("No snapshot found, will rebuild from full log replay");
                 }
 
-                return store.replayLog();
+                return toFuture(store.replayLog());
             })
             .compose(entries -> {
                 if (snapshotLastIndex > 0) {
@@ -551,9 +557,8 @@ public class RaftNode {
                 cancelTimers();
                 transport.stop();
                 
-                // Close storage
-                storage.map(RaftStorage::close)
-                    .orElseGet(Future::succeededFuture)
+                // Close application snapshots before the WAL. Both are owned by durable mode.
+                closeDurableStorage()
                     .onSuccess(v2 -> {
                         logger.info("Raft node stopped: {}", nodeId);
                         promise.complete();
@@ -630,8 +635,8 @@ public class RaftNode {
             ByteString serialized = serialize(entry.getCommand());
             LogEntryData entryData = new LogEntryData(entry.getIndex(), entry.getTerm(), serialized.toByteArray());
 
-            return s.appendEntries(List.of(entryData))
-                .compose(v -> s.sync());  // Durability barrier
+            return toFuture(s.appendEntries(List.of(entryData)))
+                .compose(v -> toFuture(s.sync()));  // Durability barrier
         }).orElseGet(Future::succeededFuture);  // Volatile mode
     }
 
@@ -1211,7 +1216,7 @@ public class RaftNode {
             logger.debug("Persisting raft metadata: term={}, votedForPresent={}, votedFor={}",
                     term, votedForCandidate.isPresent(), votedForCandidate.orElse("<none>"));
         }
-        return storage.map(s -> s.updateMetadata(term, votedForCandidate))
+        return storage.map(s -> toFuture(s.updateMetadata(term, votedForCandidate)))
             .orElseGet(Future::succeededFuture);  // Volatile mode
     }
 
@@ -1294,29 +1299,19 @@ public class RaftNode {
             return;
         }
 
-        // Step 4: Prepare entries for persistence (handle conflicts)
+        // Step 4: Decode the request, then delegate conflict planning to RaftLog.
         long startIndex = request.getPrevLogIndex() + 1;
-        List<LogEntry> entriesToPersist = new ArrayList<>();
-        Long truncateFromIndex = null;
+        List<LogEntry> incomingEntries = new ArrayList<>();
+        List<LogEntryData> incomingEntryData = new ArrayList<>();
 
         long currentIndex = startIndex;
         try {
             for (dev.mars.qraft.controller.raft.grpc.LogEntry entryProto : request.getEntriesList()) {
                 RaftCommand command = deserialize(entryProto.getData());
                 LogEntry newEntry = new LogEntry(entryProto.getTerm(), currentIndex, command);
-
-                if (hasLogEntry(currentIndex)) {
-                    if (log.get(toArrayIndex(currentIndex)).getTerm() != entryProto.getTerm()) {
-                        // Conflict detected - need to truncate
-                        if (truncateFromIndex == null) {
-                            truncateFromIndex = currentIndex;
-                        }
-                        entriesToPersist.add(newEntry);
-                    }
-                    // Else matches, skip (idempotent)
-                } else {
-                    entriesToPersist.add(newEntry);
-                }
+                incomingEntries.add(newEntry);
+                incomingEntryData.add(new LogEntryData(
+                        currentIndex, entryProto.getTerm(), entryProto.getData().toByteArray()));
                 currentIndex++;
             }
         } catch (RuntimeException error) {
@@ -1326,6 +1321,24 @@ public class RaftNode {
                     "Invalid command payload at log index " + currentIndex, error));
             return;
         }
+
+        // AppendPlan uses one-based positions. Exclude Qraft's snapshot sentinel and
+        // translate the request into coordinates relative to the compacted prefix.
+        List<LogEntryData> currentEntryData = log.stream().skip(1)
+                .map(entry -> new LogEntryData(entry.getIndex(), entry.getTerm(),
+                        serialize(entry.getCommand()).toByteArray()))
+                .toList();
+        long relativeStartIndex = startIndex - snapshotLastIndex;
+        AppendPlan appendPlan = AppendPlan.from(relativeStartIndex, incomingEntryData, currentEntryData);
+        Long truncateFromIndex = appendPlan.truncateFromIndex() == null
+                ? null
+                : appendPlan.truncateFromIndex() + snapshotLastIndex;
+        Set<Long> indicesToAppend = appendPlan.entriesToAppend().stream()
+                .map(LogEntryData::index)
+                .collect(java.util.stream.Collectors.toSet());
+        List<LogEntry> entriesToPersist = incomingEntries.stream()
+                .filter(entry -> indicesToAppend.contains(entry.getIndex()))
+                .toList();
 
         // Step 5: Persist to WAL (Durability Barrier)
         final Long finalTruncateFrom = truncateFromIndex;
@@ -1386,7 +1399,7 @@ public class RaftNode {
 
         // Truncate if needed
         if (truncateFromIndex != null) {
-            f = f.compose(v -> s.truncateSuffix(truncateFromIndex));
+            f = f.compose(v -> toFuture(s.truncateSuffix(truncateFromIndex)));
         }
 
         // Append entries
@@ -1395,11 +1408,11 @@ public class RaftNode {
                 .map(e -> new LogEntryData(e.getIndex(), e.getTerm(), 
                                            serialize(e.getCommand()).toByteArray()))
                 .toList();
-            f = f.compose(v -> s.appendEntries(entryDataList));
+            f = f.compose(v -> toFuture(s.appendEntries(entryDataList)));
         }
 
         // Sync for durability
-        return f.compose(v -> s.sync());
+        return f.compose(v -> toFuture(s.sync()));
     }
 
     private void sendAppendEntries(String target, boolean heartbeat) {
@@ -1587,6 +1600,7 @@ public class RaftNode {
         }
 
         RaftStorage store = storage.get();
+        SnapshotStore snapshots = snapshotStore.orElseThrow();
         long snapshotIndex = lastApplied;
         if (snapshotIndex <= snapshotLastIndex) {
             logger.debug("No new entries to snapshot (lastApplied={}, snapshotLastIndex={})",
@@ -1618,10 +1632,10 @@ public class RaftNode {
                 snapshotIndex - snapshotLastIndex);
 
         // Step 2: Persist snapshot to storage (async)
-        return store.saveSnapshot(snapshotData, snapshotIndex, snapshotTerm)
+        return toFuture(snapshots.saveAtomically(new SnapshotData(snapshotData, snapshotIndex, snapshotTerm)))
                 .compose(v -> {
                     // Step 3: Truncate log prefix in storage
-                    return store.truncatePrefix(snapshotIndex);
+                    return toFuture(store.truncatePrefix(snapshotIndex));
                 })
                 .compose(v -> {
                     // Step 4: Trim in-memory log
@@ -1694,7 +1708,7 @@ public class RaftNode {
         logger.info("Sending InstallSnapshot to lagging follower {} (nextIndex={}, snapshotLastIndex={})",
                 target, nextIndex.getOrDefault(target, 1L), snapshotLastIndex);
 
-        storage.get().loadSnapshot()
+        toFuture(snapshotStore.orElseThrow().loadLatest())
                 .onSuccess(snapshotOpt -> {
                     if (snapshotOpt.isEmpty()) {
                         logger.warn("No snapshot available to send to {}", target);
@@ -1912,14 +1926,15 @@ public class RaftNode {
                         snapshotData.length, lastIncludedIndex, lastIncludedTerm);
 
                 // Step 7: Persist snapshot and restore state
-                Future<Void> saveFuture = storage
-                        .map(s -> s.saveSnapshot(snapshotData, lastIncludedIndex, lastIncludedTerm))
+                Future<Void> saveFuture = snapshotStore
+                        .map(s -> toFuture(s.saveAtomically(
+                                new SnapshotData(snapshotData, lastIncludedIndex, lastIncludedTerm))))
                         .orElseGet(Future::succeededFuture);
 
                 saveFuture
                     .compose(v2 -> {
                         // Truncate old log entries from storage
-                        return storage.map(s -> s.truncatePrefix(lastIncludedIndex))
+                        return storage.map(s -> toFuture(s.truncatePrefix(lastIncludedIndex)))
                                 .orElseGet(Future::succeededFuture);
                     })
                     .onSuccess(v2 -> {
@@ -2003,6 +2018,26 @@ public class RaftNode {
     }
 
     // ========== SERIALIZATION ==========
+
+    private Future<Void> closeDurableStorage() {
+        Throwable failure = null;
+        try {
+            if (snapshotStore.isPresent()) snapshotStore.get().close();
+        } catch (Throwable error) {
+            failure = error;
+        }
+        try {
+            if (storage.isPresent()) storage.get().close();
+        } catch (Throwable error) {
+            if (failure == null) failure = error;
+            else failure.addSuppressed(error);
+        }
+        return failure == null ? Future.succeededFuture() : Future.failedFuture(failure);
+    }
+
+    private static <T> Future<T> toFuture(CompletableFuture<T> future) {
+        return Future.fromCompletionStage(future);
+    }
 
     private ByteString serialize(RaftCommand cmd) {
         return ByteString.copyFrom(commandCodec.serialize(cmd));

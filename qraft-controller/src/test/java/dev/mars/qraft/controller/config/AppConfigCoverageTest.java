@@ -8,7 +8,8 @@ import static org.junit.jupiter.api.Assertions.*;
 class AppConfigCoverageTest {
 
     private static final String[] KEYS = {
-            "qraft.test.string", "qraft.test.int", "qraft.test.long", "qraft.test.boolean"
+            "qraft.test.string", "qraft.test.int", "qraft.test.long", "qraft.test.boolean",
+            "qraft.raft.storage.type", "qraft.raft.storage.fsync"
     };
 
     @AfterEach
@@ -52,5 +53,27 @@ class AppConfigCoverageTest {
         assertFalse(config.getServiceName().isBlank());
         assertTrue(config.getRaftIoPoolSize() > 0);
         assertTrue(config.getRaftIoQueueSize() > 0);
+    }
+
+    @Test
+    void acceptsOnlyTheExternalWalStorageType() {
+        AppConfig config = AppConfig.get();
+
+        System.setProperty("qraft.raft.storage.type", "raftlog");
+        assertDoesNotThrow(config::validate);
+
+        System.setProperty("qraft.raft.storage.type", "file");
+        IllegalStateException failure = assertThrows(IllegalStateException.class, config::validate);
+        assertTrue(failure.getMessage().contains("raftlog"));
+    }
+
+    @Test
+    void rejectsDisablingWalDurability() {
+        AppConfig config = AppConfig.get();
+        System.setProperty("qraft.raft.storage.type", "raftlog");
+        System.setProperty("qraft.raft.storage.fsync", "false");
+
+        IllegalStateException failure = assertThrows(IllegalStateException.class, config::validate);
+        assertTrue(failure.getMessage().contains("fsync"));
     }
 }

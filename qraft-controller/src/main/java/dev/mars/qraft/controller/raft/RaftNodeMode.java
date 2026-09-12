@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.controller.raft.storage.RaftStorage;
+import dev.mars.qraft.raft.api.SnapshotStore;
 
 import java.util.Optional;
 
@@ -28,7 +28,8 @@ import static java.util.Objects.requireNonNull;
  * <ul>
  *   <li>{@link Volatile} — in-memory only; all state is lost on restart.
  *       Suitable for tests and single-node development.</li>
- *   <li>{@link Durable} — backed by a WAL ({@link RaftStorage});
+ *   <li>{@link Durable} — backed by the external WAL contract and a separate
+ *       application snapshot store;
  *       state survives restarts. Required for production.</li>
  * </ul>
  *
@@ -45,7 +46,7 @@ import static java.util.Objects.requireNonNull;
  * RaftNode.builder()
  *         .runtime(runtime).nodeId(id).clusterNodes(nodes)
  *         .transport(transport).stateMachine(sm)
- *         .mode(RaftNodeMode.durable(storage))
+ *         .mode(RaftNodeMode.durable(wal, snapshots))
  *         .electionTimeout(1000).heartbeatInterval(200).build();
  * }</pre>
  *
@@ -64,9 +65,11 @@ public sealed interface RaftNodeMode {
      *
      * @param raftStorage the WAL storage implementation (never null)
      */
-    record Durable(RaftStorage raftStorage) implements RaftNodeMode {
+    record Durable(dev.mars.raftlog.storage.RaftStorage raftStorage,
+                   SnapshotStore snapshotStore) implements RaftNodeMode {
         public Durable {
             requireNonNull(raftStorage, "raftStorage must not be null");
+            requireNonNull(snapshotStore, "snapshotStore must not be null");
         }
     }
 
@@ -78,16 +81,25 @@ public sealed interface RaftNodeMode {
     }
 
     /** Creates a durable mode backed by the given WAL storage. */
-    static RaftNodeMode durable(RaftStorage storage) {
-        return new Durable(storage);
+    static RaftNodeMode durable(dev.mars.raftlog.storage.RaftStorage storage,
+                                SnapshotStore snapshotStore) {
+        return new Durable(storage, snapshotStore);
     }
 
     // ── Query methods ────────────────────────────────────────────────
 
     /** Returns the storage if this is a durable mode, empty otherwise. */
-    default Optional<RaftStorage> storage() {
+    default Optional<dev.mars.raftlog.storage.RaftStorage> storage() {
         return switch (this) {
             case Durable d -> Optional.of(d.raftStorage());
+            case Volatile v -> Optional.empty();
+        };
+    }
+
+    /** Returns the application snapshot store in durable mode. */
+    default Optional<SnapshotStore> snapshots() {
+        return switch (this) {
+            case Durable d -> Optional.of(d.snapshotStore());
             case Volatile v -> Optional.empty();
         };
     }
@@ -96,4 +108,5 @@ public sealed interface RaftNodeMode {
     default boolean isDurable() {
         return this instanceof Durable;
     }
+
 }

@@ -143,10 +143,10 @@ public final class AppConfig {
 
     /**
      * Gets the Raft storage backend type.
-     * Supported values: "file" (default), "rocksdb", "memory" (testing only).
+     * The external WAL is the only supported backend.
      */
     public String getRaftStorageType() {
-        return getString("qraft.raft.storage.type", "file");
+        return getString("qraft.raft.storage.type", "raftlog");
     }
 
     /**
@@ -160,7 +160,7 @@ public final class AppConfig {
 
     /**
      * Whether to fsync after each WAL write.
-     * Defaults to true for durability; set to false only for testing.
+     * This must remain enabled because acknowledged Raft state must be durable.
      */
     public boolean getRaftStorageFsync() {
         return getBoolean("qraft.raft.storage.fsync", true);
@@ -397,11 +397,13 @@ public final class AppConfig {
                     "Snapshot check interval must be at least 1000ms, got: " + getSnapshotCheckIntervalMs());
         }
 
-        // Validate storage type
         String storageType = getRaftStorageType();
-        if (!storageType.equals("raftlog") && !storageType.equals("file") && !storageType.equals("memory")) {
+        if (!storageType.equalsIgnoreCase("raftlog") && !storageType.equalsIgnoreCase("wal")) {
             throw new IllegalStateException(
-                    "Raft storage type must be 'raftlog', 'file', or 'memory', got: " + storageType);
+                    "Raft storage type must be 'raftlog', got: " + storageType);
+        }
+        if (!getRaftStorageFsync()) {
+            throw new IllegalStateException("Raft WAL fsync must be enabled for durability");
         }
 
         logger.info("Controller configuration validated successfully");

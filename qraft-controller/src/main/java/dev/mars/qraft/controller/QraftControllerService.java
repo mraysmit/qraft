@@ -30,7 +30,6 @@ import dev.mars.qraft.controller.raft.RaftTransport;
 import dev.mars.qraft.controller.raft.GrpcServiceServer;
 import dev.mars.qraft.controller.raft.GrpcRaftTransport;
 import dev.mars.qraft.controller.raft.GrpcRaftServer;
-import dev.mars.qraft.controller.raft.storage.RaftStorage;
 import dev.mars.qraft.controller.raft.storage.RaftStorageFactory;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
@@ -58,7 +57,7 @@ public class QraftControllerService {
 
     private RaftTransport transport;
     private Optional<RaftNode> raftNode = Optional.empty();
-    private RaftStorage raftStorage;
+    private RaftStorageFactory.DurableStorage raftStorage;
     private Optional<GrpcRaftServer> raftGrpcServer = Optional.empty();
     private Optional<GrpcServiceServer> apiGrpcServer = Optional.empty();
     private Optional<HttpApiServer> httpApiServer = Optional.empty();
@@ -116,7 +115,12 @@ public class QraftControllerService {
                        storageType, storagePath, fsyncEnabled);
 
             // Create storage via factory
-            RaftStorageFactory.create(runtime, storageType, storagePath, fsyncEnabled)
+            if (!"raftlog".equalsIgnoreCase(storageType) && !"wal".equalsIgnoreCase(storageType)) {
+                startPromise.fail(new IllegalArgumentException(
+                        "Unsupported Raft storage type '" + storageType + "'; only the external WAL is supported"));
+                return;
+            }
+            RaftStorageFactory.createDurable(storagePath, fsyncEnabled)
                 .onSuccess(storage -> {
                     this.raftStorage = storage;
                     continueStartup(startPromise, config, nodeId, raftPort, apiGrpcPort, clusterNodeIds);
@@ -152,7 +156,7 @@ public class QraftControllerService {
                     .transport(transport)
                     .stateMachine(stateMachine)
                     .commandCodec(new ProtobufRaftCommandCodec())
-                    .mode(RaftNodeMode.durable(raftStorage))
+                    .mode(RaftNodeMode.durable(raftStorage.wal(), raftStorage.snapshots()))
                     .electionTimeout(5000)
                     .heartbeatInterval(1000)
                     .snapshotEnabled(config.isSnapshotEnabled())
