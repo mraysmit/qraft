@@ -35,6 +35,10 @@ import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.controller.state.RaftCommand;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
+import dev.mars.qraft.distributedstate.DistributedStateCommandCodec;
+import dev.mars.qraft.catalog.ServiceHealth;
+import dev.mars.qraft.catalog.ServiceInstance;
+import dev.mars.qraft.controller.state.CatalogCommand;
 import org.awaitility.Awaitility;
 import static org.awaitility.Awaitility.await;
 import org.junit.jupiter.api.AfterEach;
@@ -45,6 +49,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Optional;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -177,6 +183,129 @@ class RaftNodeTest {
         Set.of(node1, node2, node3).forEach(node -> {
             assertNotNull(node.getState(), "Node state should not be null");
         });
+    }
+
+    @Test
+    void replicatesCatalogRegistrationAndDeregistrationAcrossThreeNodes() throws Exception {
+        node1.start();
+        node2.start();
+        node3.start();
+        Set<RaftNode> nodes = Set.of(node1, node2, node3);
+        await().atMost(Duration.ofSeconds(10))
+                .until(() -> nodes.stream().filter(RaftNode::isLeader).count() == 1);
+        RaftNode leader = nodes.stream().filter(RaftNode::isLeader).findFirst().orElseThrow();
+        ServiceInstance instance = new ServiceInstance("catalog-1", "catalog", "node-1",
+                "127.0.0.1", 8080, List.of("v1"), Map.of(), ServiceHealth.PASSING);
+
+        CommandResult<?> registered = leader.submitCommand(CatalogCommand.register(instance))
+                .toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+
+        assertInstanceOf(CommandResult.Success.class, registered);
+        await().atMost(Duration.ofSeconds(5)).until(() ->
+                List.of(stateMachine1, stateMachine2, stateMachine3).stream()
+                        .allMatch(store -> store.getServiceCatalog().instances("catalog").equals(List.of(instance))));
+
+        CommandResult<?> deregistered = leader.submitCommand(CatalogCommand.deregister("catalog-1"))
+                .toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+
+        assertInstanceOf(CommandResult.Success.class, deregistered);
+        await().atMost(Duration.ofSeconds(5)).until(() ->
+                List.of(stateMachine1, stateMachine2, stateMachine3).stream()
+                        .allMatch(store -> store.getServiceCatalog().instances("catalog").isEmpty()));
+    }
+
+    @Test
+    void majorityCatalogValueWinsWhenAnIsolatedLeaderHasAnUncommittedReplacement() throws Exception {
+        node1.start();
+        node2.start();
+        node3.start();
+        List<RaftNode> nodes = List.of(node1, node2, node3);
+        await().atMost(Duration.ofSeconds(10))
+                .until(() -> nodes.stream().filter(RaftNode::isLeader).count() == 1);
+        RaftNode isolatedLeader = nodes.stream().filter(RaftNode::isLeader).findFirst().orElseThrow();
+        Set<String> majorityIds = nodes.stream()
+                .filter(node -> node != isolatedLeader)
+                .map(RaftNode::getNodeId)
+                .collect(java.util.stream.Collectors.toSet());
+        InMemoryTransportSimulator.createPartition(Set.of(isolatedLeader.getNodeId()), majorityIds);
+
+        ServiceInstance losingValue = serviceInstance("partitioned-1", 8080);
+        Future<CommandResult<?>> uncertainWrite = isolatedLeader.submitCommand(CatalogCommand.register(losingValue));
+        await().atMost(Duration.ofSeconds(10)).until(() -> nodes.stream()
+                .filter(node -> node != isolatedLeader).anyMatch(RaftNode::isLeader));
+        RaftNode majorityLeader = nodes.stream()
+                .filter(node -> node != isolatedLeader && node.isLeader()).findFirst().orElseThrow();
+        ServiceInstance winningValue = serviceInstance("partitioned-1", 9090);
+
+        assertInstanceOf(CommandResult.Success.class, majorityLeader.submitCommand(CatalogCommand.register(winningValue))
+                .toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS));
+        InMemoryTransportSimulator.healPartitions();
+
+        await().atMost(Duration.ofSeconds(10)).until(() ->
+                List.of(stateMachine1, stateMachine2, stateMachine3).stream()
+                        .allMatch(store -> store.getServiceCatalog().instances("catalog").equals(List.of(winningValue))));
+        assertThrows(Exception.class,
+                () -> uncertainWrite.toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void recoversCatalogSnapshotAndPostSnapshotCommandsFromDurableStorage() throws Exception {
+        Path storageDir = tempDir.resolve("catalog-snapshot-recovery");
+        WorkerExecutor writerExecutor = vertx.createSharedWorkerExecutor("catalog-snapshot-writer", 1);
+        RaftStorage writerStorage = new FileRaftStorage(vertx, writerExecutor);
+        writerStorage.open(storageDir).toCompletionStage().toCompletableFuture().join();
+        QraftStateStore originalStore = new QraftStateStore();
+        RaftNode original = durableSingleNode("catalog-durable", originalStore, writerStorage);
+        original.start().toCompletionStage().toCompletableFuture().join();
+        await().atMost(Duration.ofSeconds(3)).until(original::isLeader);
+        ServiceInstance snapshotted = serviceInstance("snapshot-1", 8080);
+        ServiceInstance afterSnapshot = serviceInstance("snapshot-2", 8081);
+        original.submitCommand(CatalogCommand.register(snapshotted)).toCompletionStage().toCompletableFuture().join();
+        original.takeSnapshot().toCompletionStage().toCompletableFuture().join();
+        original.submitCommand(CatalogCommand.register(afterSnapshot)).toCompletionStage().toCompletableFuture().join();
+        original.stop().toCompletionStage().toCompletableFuture().join();
+        writerExecutor.close();
+
+        WorkerExecutor recoveryExecutor = vertx.createSharedWorkerExecutor("catalog-snapshot-reader", 1);
+        RaftStorage recoveryStorage = new FileRaftStorage(vertx, recoveryExecutor);
+        recoveryStorage.open(storageDir).toCompletionStage().toCompletableFuture().join();
+        QraftStateStore recoveredStore = new QraftStateStore();
+        RaftNode recovered = durableSingleNode("catalog-durable", recoveredStore, recoveryStorage);
+        recovered.start().toCompletionStage().toCompletableFuture().join();
+
+        assertEquals(List.of(snapshotted, afterSnapshot), recoveredStore.getServiceCatalog().instances("catalog"));
+        recovered.stop().toCompletionStage().toCompletableFuture().join();
+        recoveryExecutor.close();
+    }
+
+    @Test
+    void replaysMixedLegacyJsonAndProtobufWalEntries() {
+        Path storageDir = tempDir.resolve("catalog-mixed-codec-recovery");
+        WorkerExecutor writerExecutor = vertx.createSharedWorkerExecutor("catalog-mixed-writer", 1);
+        RaftStorage writerStorage = new FileRaftStorage(vertx, writerExecutor);
+        writerStorage.open(storageDir).toCompletionStage().toCompletableFuture().join();
+        byte[] legacy = new DistributedStateCommandCodec()
+                .serialize(DistributedStateCommand.put("legacy-key", "legacy-value"));
+        ProtobufRaftCommandCodec codec = new ProtobufRaftCommandCodec();
+        ServiceInstance instance = serviceInstance("mixed-1", 8080);
+        byte[] protobuf = codec.serialize(CatalogCommand.register(instance));
+        writerStorage.appendEntries(List.of(new RaftStorage.LogEntryData(1, 1, legacy),
+                        new RaftStorage.LogEntryData(2, 1, protobuf)))
+                .compose(ignored -> writerStorage.sync()).toCompletionStage().toCompletableFuture().join();
+        writerStorage.close().toCompletionStage().toCompletableFuture().join();
+        writerExecutor.close();
+
+        WorkerExecutor recoveryExecutor = vertx.createSharedWorkerExecutor("catalog-mixed-reader", 1);
+        RaftStorage recoveryStorage = new FileRaftStorage(vertx, recoveryExecutor);
+        recoveryStorage.open(storageDir).toCompletionStage().toCompletableFuture().join();
+        QraftStateStore recoveredStore = new QraftStateStore();
+        RaftNode recovered = durableSingleNode("catalog-mixed", recoveredStore, recoveryStorage);
+        recovered.start().toCompletionStage().toCompletableFuture().join();
+
+        assertEquals("legacy-value", recoveredStore.getMetadata("legacy-key"));
+        assertEquals(List.of(instance), recoveredStore.getServiceCatalog().instances("catalog"));
+        recovered.stop().toCompletionStage().toCompletableFuture().join();
+        recoveryExecutor.close();
     }
 
     @Test
@@ -796,6 +925,25 @@ class RaftNodeTest {
             }
         };
         }
+
+    private RaftNode durableSingleNode(String nodeId, QraftStateStore store, RaftStorage storage) {
+        return RaftNode.builder()
+                .runtime(vertx)
+                .nodeId(nodeId)
+                .clusterNodes(Set.of(nodeId))
+                .transport(new InMemoryTransportSimulator(nodeId))
+                .stateMachine(store)
+                .commandCodec(new ProtobufRaftCommandCodec())
+                .mode(RaftNodeMode.durable(storage))
+                .electionTimeout(500)
+                .heartbeatInterval(100)
+                .build();
+    }
+
+    private static ServiceInstance serviceInstance(String serviceId, int port) {
+        return new ServiceInstance(serviceId, "catalog", "node-1", "127.0.0.1", port,
+                List.of("v1"), Map.of("team", "platform"), ServiceHealth.PASSING);
+    }
 
     private static RaftCommand distributedPut(String key, String value) {
         return new DistributedStateRaftCommand(DistributedStateCommand.put(key, value));

@@ -103,9 +103,33 @@ message SystemMetadataCommandProto {
   string value = 3;
 }
 
+enum CatalogCommandType {
+  CATALOG_CMD_UNSPECIFIED = 0;
+  CATALOG_CMD_REGISTER = 1;
+  CATALOG_CMD_DEREGISTER = 2;
+}
+
+message ServiceInstanceProto {
+  string service_id = 1;
+  string service_name = 2;
+  string node_id = 3;
+  string address = 4;
+  int32 port = 5;
+  repeated string tags = 6;
+  map<string, string> metadata = 7;
+  string health = 8;
+}
+
+message CatalogCommandProto {
+  CatalogCommandType type = 1;
+  string service_id = 2;
+  ServiceInstanceProto instance = 3;
+}
+
 message RaftCommandMessage {
   oneof command {
     AgentCommandProto agent_command = 1;
     SystemMetadataCommandProto system_metadata_command = 2;
+    CatalogCommandProto catalog_command = 3;
   }
 }

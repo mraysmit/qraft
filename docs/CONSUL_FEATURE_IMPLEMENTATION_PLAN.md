@@ -277,9 +277,9 @@ The implementation will be considered aligned with the target design when:
 - [ ] Complete server-mode configuration and bootstrap behavior.
 - [ ] Complete client-mode configuration and controller discovery behavior.
 - [ ] Implement agent membership and failure detection semantics.
-- [ ] Implement service registration, catalog replication, and query behavior.
+- [x] Implement service registration, catalog replication, and query behavior.
 - [ ] Implement health checks and health-state propagation through Raft.
 - [ ] Implement namespaces and tenancy isolation end to end.
 - [ ] Add snapshot, restore, upgrade, and operational recovery workflows.
 - [ ] Add multi-node integration and failure-injection coverage.
-- [ ] Run the complete reactor test suite and review the resulting log.
+- [x] Run the complete reactor test suite and review the resulting log.

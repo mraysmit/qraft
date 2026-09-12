@@ -32,8 +32,8 @@ import dev.mars.qraft.controller.raft.GrpcRaftTransport;
 import dev.mars.qraft.controller.raft.GrpcRaftServer;
 import dev.mars.qraft.controller.raft.storage.RaftStorage;
 import dev.mars.qraft.controller.raft.storage.RaftStorageFactory;
-import dev.mars.qraft.controller.state.DistributedStateRaftCommandCodec;
-import dev.mars.qraft.controller.state.GenericStateStore;
+import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
+import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.controller.http.HttpApiServer;
 
 import java.nio.file.Path;
@@ -142,7 +142,7 @@ public class QraftControllerService {
             Map<String, String> initialMetadata = new HashMap<>();
             initialMetadata.put("version", config.getVersion());
 
-            GenericStateStore stateMachine = new GenericStateStore(initialMetadata);
+            QraftStateStore stateMachine = new QraftStateStore(initialMetadata);
 
             // Use the builder with storage and snapshot configuration
             RaftNode node = RaftNode.builder()
@@ -151,7 +151,7 @@ public class QraftControllerService {
                     .clusterNodes(clusterNodeIds)
                     .transport(transport)
                     .stateMachine(stateMachine)
-                    .commandCodec(new DistributedStateRaftCommandCodec())
+                    .commandCodec(new ProtobufRaftCommandCodec())
                     .mode(RaftNodeMode.durable(raftStorage))
                     .electionTimeout(5000)
                     .heartbeatInterval(1000)
@@ -171,7 +171,7 @@ public class QraftControllerService {
             DistributedStateGrpcService distributedStateService = new DistributedStateGrpcService(node, stateMachine);
             GrpcServiceServer externalApiServer = new GrpcServiceServer(runtime, apiGrpcPort, distributedStateService);
             this.apiGrpcServer = Optional.of(externalApiServer);
-            HttpApiServer healthServer = new HttpApiServer(config.getHttpPort());
+            HttpApiServer healthServer = new HttpApiServer(config.getHttpPort(), node, stateMachine);
             this.httpApiServer = Optional.of(healthServer);
 
             internalRaftServer.start().compose(v1 -> {

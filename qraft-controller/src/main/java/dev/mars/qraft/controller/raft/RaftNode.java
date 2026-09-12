@@ -1028,6 +1028,8 @@ public class RaftNode {
             MDC.put("raftRole", "FOLLOWER");
             MDC.put("raftTerm", String.valueOf(currentTerm));
             notifyStateChangeListeners(State.FOLLOWER);
+            failPendingCommands(new IllegalStateException(
+                    "Leadership lost before command commit; outcome may be unknown"));
 
             cancelTimers();
             resetElectionTimer();
@@ -1039,6 +1041,11 @@ public class RaftNode {
         }
 
         return Future.succeededFuture();
+    }
+
+    private void failPendingCommands(Throwable cause) {
+        pendingCommands.values().forEach(promise -> promise.tryFail(cause));
+        pendingCommands.clear();
     }
 
     // Message Handlers running on Event Loop
@@ -1419,8 +1426,9 @@ public class RaftNode {
                 .setPrevLogTerm(prevLogTerm)
                 .setLeaderCommit(commitIndex);
 
-        if (!heartbeat) {
-            long lastIdx = lastLogIndex();
+        long lastIdx = lastLogIndex();
+        boolean includeEntries = !heartbeat || nextIdx <= lastIdx;
+        if (includeEntries) {
             for (long i = nextIdx; i <= lastIdx; i++) {
                 if (hasLogEntry(i)) {
                     LogEntry entry = log.get(toArrayIndex(i));
@@ -1450,7 +1458,7 @@ public class RaftNode {
         rpcCounter.add(1, Attributes.of(
                 AttributeKey.stringKey("source"), nodeId,
                 AttributeKey.stringKey("target"), target,
-                AttributeKey.stringKey("type"), heartbeat ? "heartbeat" : "append_entries"
+                AttributeKey.stringKey("type"), includeEntries ? "append_entries" : "heartbeat"
         ));
     }
 

@@ -19,6 +19,8 @@ package dev.mars.qraft.controller.state;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
+import dev.mars.qraft.catalog.ServiceHealth;
+import dev.mars.qraft.catalog.ServiceInstance;
 import dev.mars.qraft.controller.raft.grpc.*;
 
 /**
@@ -57,6 +59,8 @@ public final class ProtobufCommandCodec {
                     .setAgentCommand(AgentCodec.toProto(cmd)).build();
             case DistributedStateRaftCommand cmd -> RaftCommandMessage.newBuilder()
                 .setSystemMetadataCommand(toSystemMetadataProto(cmd.delegate())).build();
+            case CatalogCommand cmd -> RaftCommandMessage.newBuilder()
+                    .setCatalogCommand(toCatalogProto(cmd)).build();
                 default -> throw new IllegalArgumentException(
                     "Unsupported RaftCommand type for protobuf codec: " + command.getClass().getName());
         };
@@ -76,6 +80,7 @@ public final class ProtobufCommandCodec {
             return switch (raftMessage.getCommandCase()) {
                 case AGENT_COMMAND -> AgentCodec.fromProto(raftMessage.getAgentCommand());
                 case SYSTEM_METADATA_COMMAND -> fromSystemMetadataProto(raftMessage.getSystemMetadataCommand());
+                case CATALOG_COMMAND -> fromCatalogProto(raftMessage.getCatalogCommand());
                 case COMMAND_NOT_SET -> null; // No-op entry
                 default -> throw new IllegalArgumentException(
                         "Unsupported protobuf command case: " + raftMessage.getCommandCase());
@@ -105,5 +110,47 @@ public final class ProtobufCommandCodec {
             default -> throw new IllegalArgumentException("Unknown SystemMetadataCommandType: " + proto.getType());
         };
         return new DistributedStateRaftCommand(delegate);
+    }
+
+    private static CatalogCommandProto toCatalogProto(CatalogCommand command) {
+        var builder = CatalogCommandProto.newBuilder();
+        return switch (command) {
+            case CatalogCommand.Register register -> builder
+                    .setType(CatalogCommandType.CATALOG_CMD_REGISTER)
+                    .setServiceId(register.instance().serviceId())
+                    .setInstance(toServiceInstanceProto(register.instance()))
+                    .build();
+            case CatalogCommand.Deregister deregister -> builder
+                    .setType(CatalogCommandType.CATALOG_CMD_DEREGISTER)
+                    .setServiceId(deregister.serviceId())
+                    .build();
+        };
+    }
+
+    private static CatalogCommand fromCatalogProto(CatalogCommandProto proto) {
+        return switch (proto.getType()) {
+            case CATALOG_CMD_REGISTER -> CatalogCommand.register(fromServiceInstanceProto(proto.getInstance()));
+            case CATALOG_CMD_DEREGISTER -> CatalogCommand.deregister(proto.getServiceId());
+            default -> throw new IllegalArgumentException("Unknown CatalogCommandType: " + proto.getType());
+        };
+    }
+
+    private static ServiceInstanceProto toServiceInstanceProto(ServiceInstance instance) {
+        return ServiceInstanceProto.newBuilder()
+                .setServiceId(instance.serviceId())
+                .setServiceName(instance.serviceName())
+                .setNodeId(instance.nodeId())
+                .setAddress(instance.address())
+                .setPort(instance.port())
+                .addAllTags(instance.tags())
+                .putAllMetadata(instance.metadata())
+                .setHealth(instance.health().name())
+                .build();
+    }
+
+    private static ServiceInstance fromServiceInstanceProto(ServiceInstanceProto proto) {
+        return new ServiceInstance(proto.getServiceId(), proto.getServiceName(), proto.getNodeId(),
+                proto.getAddress(), proto.getPort(), proto.getTagsList(), proto.getMetadataMap(),
+                ServiceHealth.valueOf(proto.getHealth()));
     }
 }

@@ -5,8 +5,8 @@ import dev.mars.qraft.controller.raft.InMemoryTransportSimulator;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.raft.RaftNodeMode;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
-import dev.mars.qraft.controller.state.DistributedStateRaftCommandCodec;
-import dev.mars.qraft.controller.state.GenericStateStore;
+import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
+import dev.mars.qraft.controller.state.QraftStateStore;
 import io.grpc.stub.StreamObserver;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,7 +22,7 @@ class DistributedStateGrpcServiceTest {
 
     private JavaRuntime runtime;
     private RaftNode node;
-    private GenericStateStore store;
+    private QraftStateStore store;
     private DistributedStateGrpcService service;
 
     @BeforeEach
@@ -30,14 +30,14 @@ class DistributedStateGrpcServiceTest {
         runtime = JavaRuntime.create();
         InMemoryTransportSimulator.clearAllTransports();
         InMemoryTransportSimulator transport = new InMemoryTransportSimulator("single");
-        store = new GenericStateStore();
+        store = new QraftStateStore();
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("single")
                 .clusterNodes(Set.of("single"))
                 .transport(transport)
                 .stateMachine(store)
-                .commandCodec(new DistributedStateRaftCommandCodec())
+                .commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.volatileMode())
                 .electionTimeout(50)
                 .heartbeatInterval(20)
@@ -69,7 +69,9 @@ class DistributedStateGrpcServiceTest {
 
         RecordingObserver<ListResponse> list = new RecordingObserver<>();
         service.list(ListRequest.getDefaultInstance(), list);
-        assertEquals(1, list.await().getEntriesCount());
+        ListResponse listed = list.await();
+        assertTrue(listed.getEntriesList().stream()
+                .anyMatch(entry -> entry.getKey().equals("service/api") && entry.getValue().equals("healthy")));
 
         RecordingObserver<DeleteResponse> delete = new RecordingObserver<>();
         service.delete(DeleteRequest.newBuilder().setKey("service/api").build(), delete);

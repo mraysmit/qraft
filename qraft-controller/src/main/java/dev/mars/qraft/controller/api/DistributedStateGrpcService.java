@@ -13,7 +13,7 @@ import dev.mars.qraft.controller.api.grpc.PutResponse;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.state.CommandResult;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
-import dev.mars.qraft.controller.state.GenericStateStore;
+import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import io.grpc.stub.StreamObserver;
 
@@ -25,9 +25,9 @@ import java.util.Map;
 public class DistributedStateGrpcService extends DistributedStateServiceGrpc.DistributedStateServiceImplBase {
 
     private final RaftNode raftNode;
-    private final GenericStateStore stateStore;
+    private final QraftStateStore stateStore;
 
-    public DistributedStateGrpcService(RaftNode raftNode, GenericStateStore stateStore) {
+    public DistributedStateGrpcService(RaftNode raftNode, QraftStateStore stateStore) {
         this.raftNode = raftNode;
         this.stateStore = stateStore;
     }

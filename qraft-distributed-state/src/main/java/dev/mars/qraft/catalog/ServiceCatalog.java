@@ -55,4 +55,22 @@ public final class ServiceCatalog {
                 .sorted(INSTANCE_ORDER)
                 .toList();
     }
+
+    /** Returns every registration in deterministic service-id order. */
+    public List<ServiceInstance> instances() {
+        return instances.values().stream()
+                .sorted(INSTANCE_ORDER)
+                .toList();
+    }
+
+    /** Replaces the catalog contents, primarily when restoring a Raft snapshot. */
+    public void replaceAll(List<ServiceInstance> restoredInstances) {
+        Objects.requireNonNull(restoredInstances, "restoredInstances");
+        instances.clear();
+        restoredInstances.forEach(this::register);
+    }
+
+    public void clear() {
+        instances.clear();
+    }
 }

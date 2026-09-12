@@ -4,10 +4,13 @@ import dev.mars.qraft.agent.AgentCapabilities;
 import dev.mars.qraft.agent.AgentInfo;
 import dev.mars.qraft.agent.AgentStatus;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
+import dev.mars.qraft.catalog.ServiceHealth;
+import dev.mars.qraft.catalog.ServiceInstance;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.Map;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -84,6 +87,38 @@ class ControllerStateStoreTest {
         store.reset();
         assertEquals("3.0", store.getMetadata("version"));
         assertEquals(0, store.getLastAppliedIndex());
+    }
+
+    @Test
+    void controllerStoreReplicatesCatalogAndIncludesItInSnapshots() {
+        QraftStateStore store = new QraftStateStore();
+        ServiceInstance instance = new ServiceInstance("payments-1", "payments", "node-1",
+                "127.0.0.1", 8080, List.of("v1"), Map.of("team", "platform"), ServiceHealth.PASSING);
+
+        assertInstanceOf(CommandResult.Success.class, store.apply(CatalogCommand.register(instance)));
+        assertEquals(List.of(instance), store.getServiceCatalog().instances("payments"));
+        byte[] snapshot = store.takeSnapshot();
+        assertInstanceOf(CommandResult.Success.class, store.apply(CatalogCommand.deregister("payments-1")));
+        assertInstanceOf(CommandResult.NotFound.class, store.apply(CatalogCommand.deregister("payments-1")));
+
+        store.restoreSnapshot(snapshot);
+        assertEquals(List.of(instance), store.getServiceCatalog().instances("payments"));
+        store.reset();
+        assertTrue(store.getServiceCatalog().instances().isEmpty());
+    }
+
+    @Test
+    void restoresSnapshotsWrittenBeforeCatalogStateWasAdded() {
+        QraftStateStore store = new QraftStateStore();
+        byte[] legacySnapshot = """
+                {"agents":{},"metadata":{"version":"2.0","feature":"enabled"},"lastAppliedIndex":17}
+                """.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+        store.restoreSnapshot(legacySnapshot);
+
+        assertEquals("enabled", store.getMetadata("feature"));
+        assertEquals(17, store.getLastAppliedIndex());
+        assertTrue(store.getServiceCatalog().instances().isEmpty());
     }
 
     private static DistributedStateRaftCommand command(DistributedStateCommand command) {

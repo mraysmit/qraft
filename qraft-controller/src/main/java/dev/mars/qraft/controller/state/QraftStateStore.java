@@ -6,6 +6,8 @@ import dev.mars.qraft.agent.AgentInfo;
 import dev.mars.qraft.agent.AgentStatus;
 import dev.mars.qraft.controller.raft.RaftLogApplicator;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
+import dev.mars.qraft.catalog.ServiceCatalog;
+import dev.mars.qraft.catalog.ServiceInstance;
 
 import java.io.IOException;
 import java.util.Map;
@@ -18,6 +20,7 @@ public final class QraftStateStore implements RaftLogApplicator {
     private static final String DEFAULT_VERSION = "3.0";
     private final Map<String, AgentInfo> agents = new ConcurrentHashMap<>();
     private final Map<String, String> metadata = new ConcurrentHashMap<>();
+    private final ServiceCatalog serviceCatalog = new ServiceCatalog();
     private final AtomicLong lastAppliedIndex = new AtomicLong();
     private final ObjectMapper objectMapper = new ObjectMapper()
             .findAndRegisterModules()
@@ -42,8 +45,21 @@ public final class QraftStateStore implements RaftLogApplicator {
         return switch (command) {
             case AgentCommand agentCommand -> applyAgentCommand(agentCommand);
             case DistributedStateRaftCommand stateCommand -> applyMetadataCommand(stateCommand.delegate());
+            case CatalogCommand catalogCommand -> applyCatalogCommand(catalogCommand);
             default -> throw new IllegalArgumentException("Unsupported controller command: "
                     + command.getClass().getName());
+        };
+    }
+
+    private CommandResult<?> applyCatalogCommand(CatalogCommand command) {
+        return switch (command) {
+            case CatalogCommand.Register register -> {
+                serviceCatalog.register(register.instance());
+                yield new CommandResult.Success<>(register.instance());
+            }
+            case CatalogCommand.Deregister deregister -> serviceCatalog.deregister(deregister.serviceId())
+                    ? new CommandResult.Success<>(deregister.serviceId())
+                    : new CommandResult.NotFound<>(deregister.serviceId(), "ServiceInstance");
         };
     }
 
@@ -119,7 +135,7 @@ public final class QraftStateStore implements RaftLogApplicator {
     public byte[] takeSnapshot() {
         try {
             return objectMapper.writeValueAsBytes(new Snapshot(Map.copyOf(agents), Map.copyOf(metadata),
-                    lastAppliedIndex.get()));
+                    serviceCatalog.instances(), lastAppliedIndex.get()));
         } catch (IOException e) {
             throw new IllegalStateException("Failed to serialize controller snapshot", e);
         }
@@ -133,6 +149,7 @@ public final class QraftStateStore implements RaftLogApplicator {
             agents.putAll(snapshot.agents());
             metadata.clear();
             metadata.putAll(snapshot.metadata());
+            serviceCatalog.replaceAll(snapshot.services() == null ? java.util.List.of() : snapshot.services());
             lastAppliedIndex.set(snapshot.lastAppliedIndex());
         } catch (IOException e) {
             throw new IllegalStateException("Failed to restore controller snapshot", e);
@@ -154,6 +171,7 @@ public final class QraftStateStore implements RaftLogApplicator {
         agents.clear();
         metadata.clear();
         metadata.put("version", DEFAULT_VERSION);
+        serviceCatalog.clear();
         lastAppliedIndex.set(0);
     }
 
@@ -177,6 +195,11 @@ public final class QraftStateStore implements RaftLogApplicator {
         return Map.copyOf(metadata);
     }
 
-    private record Snapshot(Map<String, AgentInfo> agents, Map<String, String> metadata, long lastAppliedIndex) {
+    public ServiceCatalog getServiceCatalog() {
+        return serviceCatalog;
+    }
+
+    private record Snapshot(Map<String, AgentInfo> agents, Map<String, String> metadata,
+                            java.util.List<ServiceInstance> services, long lastAppliedIndex) {
     }
 }
