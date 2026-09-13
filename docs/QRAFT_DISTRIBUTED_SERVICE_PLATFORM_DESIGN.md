@@ -468,6 +468,70 @@ domain logic to `qraft-runtime`: the runtime carries the assets, while
 `qraft-controller` owns the HTTP routes, authentication, authorization, cache
 policy, and lifecycle of the serving endpoint.
 
+#### 13.4.1 Build and executable packaging
+
+The administrative frontend is compiled before the Java packaging phase into a
+static distribution containing `index.html`, hashed JavaScript and CSS bundles,
+fonts, images, and an asset manifest. The frontend source remains part of the
+controller source tree rather than becoming an independently released Maven
+module. Tool versions and frontend dependencies are locked so a clean build is
+reproducible.
+
+Maven stages the completed distribution as generated controller resources under
+`META-INF/qraft/ui/`. The existing `qraft-runtime` shade build then copies those
+resources, together with the controller classes, into the executable runtime
+JAR. A packaged server therefore contains everything required to serve the
+interface. The container image continues to contain the same runtime artifact
+and does not copy a separate web distribution into the image.
+
+The production server reads assets through `ClassLoader` resource streams. It
+must not convert resource URLs to `Path` or use `Files`, because resources inside
+the shaded JAR are ZIP entries rather than ordinary filesystem files. Assets are
+served by the existing JDK HTTP server and share its listener, TLS configuration,
+authentication boundary, request limits, and lifecycle:
+
+```text
+qraft-runtime executable JAR
+|-- Java classes
+`-- META-INF/qraft/ui/
+    |-- index.html
+    |-- asset-manifest.json
+    `-- assets/<content-hashed files>
+
+server process
+|-- /v1/...   authenticated control-plane APIs
+`-- /ui/...   embedded administrative assets
+```
+
+The `/ui/` handler strips only the configured administrative path prefix before
+performing a classpath lookup. A request for `/` may redirect to `/ui/` when the
+interface is enabled. An unknown extensionless `GET` below `/ui/` falls back to
+`index.html` for client-side routing. Missing named assets return `404`; API,
+metrics, health, and debugging paths must never fall back to the frontend.
+
+At request time, the server renders a small non-cacheable `index.html` template
+with a safely JSON-encoded bootstrap object containing public runtime settings,
+such as the API base path, administrative content path, enabled feature flags,
+and authentication mode. Secrets and bearer credentials are never included.
+Content-hashed assets are immutable and may receive long-lived cache headers;
+`index.html` and the asset manifest require revalidation so upgrades do not leave
+the browser pointing at removed bundles.
+
+Responses set an explicit content type, `X-Content-Type-Options: nosniff`, a
+restrictive content security policy, and the same configured security headers as
+the API server. Compressed variants may be packaged and selected from
+`Accept-Encoding`, but the uncompressed resource remains the canonical fallback.
+
+Production uses embedded resources exclusively. A filesystem resource directory
+may be supported as an explicit development-only override for rapid frontend
+iteration. Startup validation rejects a missing directory, an absent
+`index.html`, ambiguous embedded-plus-external configuration, or a content path
+that overlaps `/v1/`, health, metrics, or debugging endpoints.
+
+Disabling the interface prevents route registration but does not produce a
+different executable. This preserves one build artifact while allowing operators
+to reduce the exposed HTTP surface.
+
 The supported capabilities are:
 
 - inspect cluster membership, peer reachability, current leader, server role,
@@ -844,6 +908,11 @@ body, timeout, response parsing, failure classification, and resource cleanup.
 Controller HTTP tests run against a real bound port and a real single-node Raft
 state machine.
 
+Administrative-resource tests run against the same real HTTP server and verify
+classpath loading from the packaged JAR, content types, cache and security
+headers, path-prefix stripping, client-route fallback, API-route isolation,
+disabled-route behavior, bootstrap escaping, and missing-asset responses.
+
 ### 20.4 Lifecycle tests
 
 Purpose-built fakes may represent the catalog-client boundary, scheduler trigger,
@@ -868,6 +937,11 @@ Tagged tests build one image, start it in both modes, register a service, query 
 through multiple servers, change leadership, and verify graceful and automatic
 deregistration. These tests are separate from the fast default reactor but run in
 continuous integration with Docker available.
+
+The packaged-artifact acceptance test starts the shaded runtime JAR without a
+frontend directory on disk, fetches `index.html` and a manifest-listed hashed
+asset from the server, and verifies that client mode and disabled server mode do
+not expose the administrative routes.
 
 ## 21. Test-first delivery sequence
 
@@ -942,6 +1016,8 @@ The first complete service-discovery slice is accepted when:
 - Catalog data survives restart and snapshot recovery.
 - Leadership can change without losing committed registrations.
 - Graceful deregistration is bounded and automatic expiry handles crashes.
+- The shaded runtime artifact serves the embedded administrative interface in
+  server mode without external asset files or an additional process.
 - The full default reactor and tagged container acceptance suite pass.
 
 ## 23. Open decisions
