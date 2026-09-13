@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-09-12
+**Last updated:** 2026-09-13
 
 ## 1. Purpose
 
@@ -40,8 +40,8 @@ coverage configuration, and build-wide engineering rules.
 | `qraft-core` | Contains shared Java 25 discovery, health, node, and agent domain types, together with some inherited domain code awaiting removal. | Own small, transport-neutral value types shared between server and client. Service definitions and common identity types belong here; Raft implementation and HTTP DTOs do not. |
 | `qraft-agent` | Implements client identity, outbound registration, heartbeat scheduling, and local liveness/readiness HTTP endpoints. | Implement client-mode reconciliation, controller-seed failover, local health checks, TTL renewal, and explicit ownership of client resources. It never participates in Raft. |
 | `qraft-tenant` | Implements the current namespace lifecycle abstraction and its in-memory implementation. | Own tenant and namespace policy, validation, and lifecycle contracts. Replicated persistence is performed through distributed-state commands rather than hidden local mutation. |
-| `qraft-controller` | Contains the server application, Raft node implementation, transports, durable storage adapters, replicated state host, HTTP and gRPC APIs, snapshots, and graceful shutdown. | Operate one server member: participate in quorum, host authoritative replicated state, enforce request identity and policy, expose control-plane APIs, and own server lifecycle. |
-| `qraft-runtime` | Packages controller and agent dependencies behind one executable entry point and one container image. | Remain a thin composition root that validates mode-specific configuration, constructs either server or client mode, installs process shutdown handling, and contains no domain logic. |
+| `qraft-controller` | Contains the server application, Raft node implementation, transports, durable storage adapters, replicated state host, HTTP and gRPC APIs, snapshots, and graceful shutdown. | Operate one server member: participate in quorum, host authoritative replicated state, enforce request identity and policy, expose control-plane APIs and the built-in administrative interface, and own server lifecycle. |
+| `qraft-runtime` | Packages controller and agent dependencies behind one executable entry point and one container image. | Remain a thin composition root that validates mode-specific configuration, constructs either server or client mode, installs process shutdown handling, and packages the built-in administrative assets into the same executable artifact without owning domain logic. |
 
 The intended high-level dependency direction is:
 
@@ -87,6 +87,8 @@ shared value types; the mutable replicated catalog remains server-side.
 - Preserve deterministic state-machine behavior across every server.
 - Survive leader changes, network partitions, process restarts, and rolling upgrades.
 - Expose explicit read consistency and write-failure behavior.
+- Provide a built-in administrative interface for inspecting and operating the
+  platform without requiring a separate management product.
 - Provide testable lifecycle ownership with bounded startup and shutdown.
 - Use Java 25 platform APIs without a framework-managed event loop.
 
@@ -450,6 +452,61 @@ Clients branch on `code` and `retryable`, never on human-readable messages.
 Reads expose the applied state index in a response header. Blocking-query clients
 send their last observed index and a bounded wait duration. Indexes are monotonic
 for a given committed history and are not wall-clock timestamps.
+
+### 13.4 Built-in administrative capabilities
+
+The server provides a built-in administrative interface backed exclusively by
+the same authenticated, authorized APIs available to other clients. It must not
+read or mutate controller implementation objects directly, and it must not
+introduce an alternate consistency or persistence path.
+
+The interface is part of the main executable artifact. Its static assets are
+embedded at build time and served by the server-mode process; it is not a
+separate module, service, container, installation, or deployment. Client mode
+does not start the administrative listener. Packaging the interface must not add
+domain logic to `qraft-runtime`: the runtime carries the assets, while
+`qraft-controller` owns the HTTP routes, authentication, authorization, cache
+policy, and lifecycle of the serving endpoint.
+
+The supported capabilities are:
+
+- inspect cluster membership, peer reachability, current leader, server role,
+  current term, commit index, applied index, and replication lag;
+- inspect storage and recovery state, including WAL size, snapshot boundary and
+  age, last successful snapshot, and reported persistence or recovery failures;
+- browse services by tenant, namespace, service name, node, tags, metadata, and
+  authoritative health state;
+- inspect service instances, their owning agents, configured checks, latest
+  observations, failure reasons, and registration or renewal status;
+- register, update, and deregister services when the authenticated principal has
+  permission, using the normal replicated command path;
+- inspect agents and nodes, including identity, metadata, advertised addresses,
+  owned services, last successful reconciliation, and liveness status;
+- browse key/value entries by tenant, namespace, and prefix, including creation
+  and modification indexes, flags, and session ownership;
+- create, compare-and-set, update, and delete key/value entries through normal
+  Raft-backed APIs, subject to authorization and value-redaction policy;
+- inspect, create, renew, and destroy sessions, and inspect lock ownership and
+  contention without bypassing session ownership rules;
+- inspect and administer tenants and namespaces, including enabled state,
+  policy assignments, and quotas where those features are supported;
+- inspect active configuration with secrets redacted and distinguish static
+  configuration from dynamically replicated state;
+- inspect health, metrics summaries, recent operational events, and audit
+  records using bounded queries that cannot create unbounded in-memory history;
+- expose explicit read-consistency selection and applied-index metadata for
+  administrative reads;
+- return structured leader hints, retryability, authorization failures, and
+  unknown-outcome errors for administrative mutations exactly as the public API
+  does.
+
+Administrative mutations are auditable and carry the authenticated principal,
+tenant, namespace, request ID, operation, target identity, result, and committed
+index where applicable. Secrets, raw credentials, sensitive health output, and
+protected key/value contents are never exposed without an explicit permission.
+
+This section defines capabilities only. Presentation layout, navigation,
+interaction patterns, and visual design are intentionally outside this document.
 
 ## 14. Consistency model
 

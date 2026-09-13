@@ -344,8 +344,8 @@ focused tests and the existing non-heavy controller suite pass.
 
 | Phase | Scope | Status |
 |---|---|---|
-| 1 | Per-node transition sequencer: state-loop execution, whole-transition ordering, bounded admission, failure policy, fencing, and drain semantics. | Implemented; focused tests pass. Not yet connected to `RaftNode`. |
-| 2 | Term and vote transitions, including concurrent same-term votes and higher-term persistence. | Not started. |
+| 1 | Per-node transition sequencer: state-loop execution, whole-transition ordering, bounded admission, failure policy, fencing, and drain semantics. | Implemented and connected to `RaftNode`; focused tests pass. |
+| 2 | Term and vote transitions, including concurrent same-term votes and higher-term persistence. | Implemented. Election self-votes, incoming votes, and higher-term step-downs share the sequencer; focused and default non-heavy tests pass. |
 | 3 | Leader append and follower suffix-replacement transitions. | Not started. |
 | 4 | Local snapshot capture, publication, WAL compaction, and boundary application. | Not started. |
 | 5 | Installed snapshots, timer events, and transport completions with term or leadership-generation fencing. | Not started. |
@@ -354,6 +354,20 @@ focused tests and the existing non-heavy controller suite pass.
 Each integration phase starts with a deterministic failing test that holds the
 current durable operation at a named gate. Production wiring follows only after
 the test proves the unsafe interleaving in the previous implementation.
+
+Phase 2 establishes these additional rules:
+
+- election state and a self-vote are applied only after their single metadata
+  write succeeds;
+- vote decisions are prepared from the state left by the previous completed
+  metadata transition, so concurrent candidates cannot both observe an empty
+  vote;
+- higher terms learned through any RPC path use the same serialized step-down
+  transition and cannot overtake an in-flight vote;
+- a metadata-write failure has an uncertain durability outcome, so the node is
+  fenced and does not attempt a compensating metadata write;
+- a rejection after failed higher-term persistence reports the last durable
+  local term, never the unpersisted observed term.
 
 ### 8.1 Deterministic adversarial test harness
 

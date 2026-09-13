@@ -88,6 +88,7 @@ public class RaftNode {
     private final CommandCodec<RaftCommand> commandCodec;
     private final Optional<RaftStorage> storage;  // External WAL storage (empty for volatile mode)
     private final Optional<SnapshotStore> snapshotStore;
+    private final RaftTransitionSequencer transitionSequencer;
 
     // ========== PERSISTENT STATE ==========
     private volatile long currentTerm = 0;
@@ -294,6 +295,7 @@ public class RaftNode {
         this.commandCodec = commandCodec;
         this.storage = requireNonNull(mode, "mode").storage();
         this.snapshotStore = mode.snapshots();
+        this.transitionSequencer = new RaftTransitionSequencer(runtime, 1024);
         this.electionTimeoutMs = electionTimeoutMs;
         this.heartbeatIntervalMs = heartbeatIntervalMs;
         this.snapshotEnabled = snapshotEnabled && this.storage.isPresent();
@@ -881,41 +883,43 @@ public class RaftNode {
     }
 
     private void startElection() {
-        if (!running)
-            return;
+        transitionSequencer.submit(
+                        "start-election",
+                        RaftTransitionSequencer.FailurePolicy.FENCE,
+                        this::prepareAndPersistElection,
+                        this::applyElection)
+                .onFailure(error -> logger.error(
+                        "Failed to start election because metadata durability is uncertain: {}",
+                        error.getMessage(), error));
+    }
 
-        logger.info("Starting election for node: {}", nodeId);
+    private Future<ElectionDecision> prepareAndPersistElection() {
+        if (!running || state == State.LEADER) {
+            return Future.succeededFuture(new ElectionDecision(false, currentTerm));
+        }
+
+        long electionTerm = currentTerm + 1;
+        logger.info("Preparing election for node {} at term {}", nodeId, electionTerm);
+        return persistMetadata(electionTerm, Optional.of(nodeId))
+                .map(ignored -> new ElectionDecision(true, electionTerm));
+    }
+
+    private Void applyElection(ElectionDecision decision) {
+        if (!decision.start() || !running) return null;
 
         state = State.CANDIDATE;
         currentLeaderId = null;
-        currentTerm++;
+        currentTerm = decision.term();
         votedFor = nodeId;
-        long electionTerm = currentTerm;
         MDC.put("raftRole", "CANDIDATE");
         MDC.put("raftTerm", String.valueOf(currentTerm));
         notifyStateChangeListeners(State.CANDIDATE);
-
-        // Persist term + self vote before sending RequestVote RPCs.
-        persistMetadata(currentTerm, Optional.of(nodeId))
-                .onSuccess(v -> {
-                    if (state != State.CANDIDATE || currentTerm != electionTerm || !running) {
-                        return;
-                    }
-                    resetElectionTimer();
-                    requestVotes();
-                })
-                .onFailure(err -> {
-                    logger.error("Failed to persist election metadata for term {}: {}", electionTerm, err.getMessage(), err);
-
-                    // Fall back to follower and retry via election timer.
-                    state = State.FOLLOWER;
-                    votedFor = null;
-                    MDC.put("raftRole", "FOLLOWER");
-                    MDC.put("raftTerm", String.valueOf(currentTerm));
-                    notifyStateChangeListeners(State.FOLLOWER);
-                    resetElectionTimer();
-                });
+        resetElectionTimer();
+        requestVotes();
+        return null;
     }
+
+    private record ElectionDecision(boolean start, long term) {}
 
     private void requestVotes() {
         long term = currentTerm;
@@ -1020,33 +1024,41 @@ public class RaftNode {
     private void stepDown(long newTerm) {
         stepDown(newTerm, true)
                 .onFailure(err -> {
-                    logger.error("Failed to persist step-down metadata for term {}: {}", currentTerm, err.getMessage(), err);
+                    logger.error("Failed to persist step-down metadata for term {}: {}", newTerm, err.getMessage(), err);
                 });
     }
 
     private Future<Void> stepDown(long newTerm, boolean persistMetadataRequired) {
-        if (newTerm > currentTerm) {
-            currentTerm = newTerm;
-            votedFor = null;
-            state = State.FOLLOWER;
-            currentLeaderId = null;
-            MDC.put("raftRole", "FOLLOWER");
-            MDC.put("raftTerm", String.valueOf(currentTerm));
-            notifyStateChangeListeners(State.FOLLOWER);
-            failPendingCommands(new IllegalStateException(
-                    "Leadership lost before command commit; outcome may be unknown"));
-
-            cancelTimers();
-            resetElectionTimer();
-            logger.info("Stepped down to FOLLOWER. Term: {}", currentTerm);
-
-            if (persistMetadataRequired) {
-                return persistMetadata(currentTerm, Optional.empty());
-            }
-        }
-
-        return Future.succeededFuture();
+        RaftTransitionSequencer.FailurePolicy failurePolicy = persistMetadataRequired
+                ? RaftTransitionSequencer.FailurePolicy.FENCE
+                : RaftTransitionSequencer.FailurePolicy.CONTINUE;
+        return transitionSequencer.submit(
+                "step-down:" + newTerm,
+                failurePolicy,
+                () -> prepareAndPersistStepDown(newTerm, persistMetadataRequired),
+                this::applyStepDown);
     }
+
+    private Future<StepDownDecision> prepareAndPersistStepDown(
+            long newTerm, boolean persistMetadataRequired) {
+        if (newTerm <= currentTerm) {
+            return Future.succeededFuture(new StepDownDecision(false, currentTerm));
+        }
+        if (!persistMetadataRequired) {
+            return Future.succeededFuture(new StepDownDecision(true, newTerm));
+        }
+        return persistMetadata(newTerm, Optional.empty())
+                .map(ignored -> new StepDownDecision(true, newTerm));
+    }
+
+    private Void applyStepDown(StepDownDecision decision) {
+        if (decision.apply()) {
+            applyDurableHigherTerm(decision.term(), null);
+        }
+        return null;
+    }
+
+    private record StepDownDecision(boolean apply, long term) {}
 
     private void failPendingCommands(Throwable cause) {
         pendingCommands.values().forEach(promise -> promise.tryFail(cause));
@@ -1085,123 +1097,83 @@ public class RaftNode {
      * </ul>
      */
     public Future<VoteResponse> handleVoteRequest(VoteRequest request) {
-        Promise<VoteResponse> promise = Promise.promise();
-        runOnContext(v -> {
-            try {
-                long reqTerm = request.getTerm();
-                boolean higherTermObserved = reqTerm > currentTerm;
-
-                logger.debug("Handling vote request: candidateId={}, requestTerm={}, localTerm={}, localVotedFor={}, candidateLastLogTerm={}, candidateLastLogIndex={}",
-                        request.getCandidateId(), reqTerm, currentTerm, votedFor,
-                        request.getLastLogTerm(), request.getLastLogIndex());
-
-                // Step 1: Reject if stale term
-                if (reqTerm < currentTerm) {
-                    logger.debug("Rejecting vote: stale term {} < {}", reqTerm, currentTerm);
-                    promise.complete(VoteResponse.newBuilder()
-                            .setTerm(currentTerm)
-                            .setVoteGranted(false)
-                            .build());
-                    return;
-                }
-
-                // Step 2: Step down if higher term
-                if (reqTerm > currentTerm) {
-                    // Vote path persists metadata explicitly via persistVote().
-                    // Avoid racing an empty-vote persistence from stepDown.
-                    logger.debug("Higher term observed in vote request: requestTerm={} > localTerm={}. Stepping down without immediate metadata persistence.",
-                            reqTerm, currentTerm);
-                    stepDown(reqTerm, false);
-                }
-
-                // Step 3: Check if we can grant vote
-                boolean canGrantVoteForCandidate = (votedFor == null || votedFor.equals(request.getCandidateId()));
-                boolean candidateLogUpToDate = isCandidateLogUpToDate(request.getLastLogTerm(), request.getLastLogIndex());
-                boolean canGrant = canGrantVoteForCandidate && candidateLogUpToDate;
-
-                logger.debug("Vote decision inputs: canGrantVoteForCandidate={}, candidateLogUpToDate={}, canGrant={}, effectiveLocalTerm={}",
-                    canGrantVoteForCandidate, candidateLogUpToDate, canGrant, currentTerm);
-
-                if (canGrant) {
-                    // Step 4: Persist metadata BEFORE granting vote (Persist-before-Grant)
-                    persistVote(reqTerm, request.getCandidateId())
-                        .onSuccess(v2 -> {
-                            // Step 5: Update in-memory state AFTER durability confirmed
-                            votedFor = request.getCandidateId();
-                            resetElectionTimer();
-                            
-                            logger.info("Vote granted to {} for term {}", request.getCandidateId(), reqTerm);
-                            promise.complete(VoteResponse.newBuilder()
-                                    .setTerm(currentTerm)
-                                    .setVoteGranted(true)
-                                    .build());
-                        })
-                        .onFailure(err -> {
-                            logger.error("Failed to persist vote metadata: {}", err.getMessage(), err);
-
-                            // Even if voting fails, persist the higher term to avoid term regression after restart.
-                            persistMetadata(reqTerm, Optional.empty())
-                                .onSuccess(v3 -> promise.complete(VoteResponse.newBuilder()
-                                    .setTerm(currentTerm)
-                                    .setVoteGranted(false)
-                                    .build()))
-                                .onFailure(termPersistErr -> {
-                                logger.error("Failed to persist higher term {} after vote persist failure: {}",
-                                    reqTerm, termPersistErr.getMessage());
-                                logger.debug("Stack trace for higher-term persist failure", termPersistErr);
-                                promise.complete(VoteResponse.newBuilder()
-                                    .setTerm(currentTerm)
-                                    .setVoteGranted(false)
-                                    .build());
-                                });
-                        });
-                } else {
-                    if (!canGrantVoteForCandidate) {
-                        logger.debug("Vote rejected: already voted for {} in term {}", votedFor, currentTerm);
-                    } else {
-                        logger.debug("Vote rejected: candidate log is not up-to-date (candidateTerm={}, candidateIndex={}, localTerm={}, localIndex={})",
-                                request.getLastLogTerm(), request.getLastLogIndex(), getLastLogTerm(), getLastLogIndex());
-                    }
-
-                    // If a higher term was observed, persist it even when rejecting the vote.
-                    // This prevents term regression after restart.
-                    if (higherTermObserved) {
-                        logger.debug("Persisting higher observed term {} with empty vote before rejecting vote request from candidate {}",
-                                reqTerm, request.getCandidateId());
-                        persistMetadata(reqTerm, Optional.empty())
-                            .onSuccess(v3 -> promise.complete(VoteResponse.newBuilder()
-                                .setTerm(currentTerm)
-                                .setVoteGranted(false)
-                                .build()))
-                            .onFailure(termPersistErr -> {
-                                logger.error("Failed to persist higher term {} on vote rejection: {}",
-                                    reqTerm, termPersistErr.getMessage());
-                                logger.debug("Stack trace for higher-term persist failure on vote rejection", termPersistErr);
-                                // Fail closed: a higher-term transition must be durable before responding.
-                                promise.fail(termPersistErr);
-                            });
-                    } else {
-                        promise.complete(VoteResponse.newBuilder()
-                                .setTerm(currentTerm)
-                                .setVoteGranted(false)
-                                .build());
-                    }
-                }
-            } catch (Exception e) {
-                logger.error("Error handling vote request: {}", e.getMessage(), e);
-                promise.fail(e);
-            }
-        });
-        return promise.future();
+        requireNonNull(request, "request");
+        return transitionSequencer.submit(
+                "request-vote:" + request.getCandidateId() + ":" + request.getTerm(),
+                RaftTransitionSequencer.FailurePolicy.FENCE,
+                () -> prepareAndPersistVote(request),
+                this::applyVoteDecision);
     }
 
-    /**
-     * Persists vote metadata to WAL.
-     */
-    private Future<Void> persistVote(long term, String candidateId) {
-        logger.debug("Persisting granted vote metadata: term={}, candidateId={}", term, candidateId);
-        return persistMetadata(term, Optional.of(candidateId));
+    private Future<VoteDecision> prepareAndPersistVote(VoteRequest request) {
+        long requestedTerm = request.getTerm();
+        logger.debug("Handling vote request: candidateId={}, requestTerm={}, localTerm={}, localVotedFor={}, candidateLastLogTerm={}, candidateLastLogIndex={}",
+                request.getCandidateId(), requestedTerm, currentTerm, votedFor,
+                request.getLastLogTerm(), request.getLastLogIndex());
+
+        if (requestedTerm < currentTerm) {
+            logger.debug("Rejecting vote: stale term {} < {}", requestedTerm, currentTerm);
+            return Future.succeededFuture(new VoteDecision(
+                    currentTerm, null, false, false));
+        }
+
+        boolean higherTerm = requestedTerm > currentTerm;
+        String effectiveVotedFor = higherTerm ? null : votedFor;
+        boolean candidateAvailable = effectiveVotedFor == null
+                || effectiveVotedFor.equals(request.getCandidateId());
+        boolean candidateLogUpToDate = isCandidateLogUpToDate(
+                request.getLastLogTerm(), request.getLastLogIndex());
+        boolean grant = candidateAvailable && candidateLogUpToDate;
+
+        logger.debug("Vote decision inputs: candidateAvailable={}, candidateLogUpToDate={}, grant={}, effectiveTerm={}",
+                candidateAvailable, candidateLogUpToDate, grant, requestedTerm);
+
+        if (!grant && !higherTerm) {
+            return Future.succeededFuture(new VoteDecision(
+                    currentTerm, votedFor, false, false));
+        }
+
+        Optional<String> durableVote = grant
+                ? Optional.of(request.getCandidateId())
+                : Optional.empty();
+        return persistMetadata(requestedTerm, durableVote)
+                .map(ignored -> new VoteDecision(
+                        requestedTerm, durableVote.orElse(null), grant, higherTerm));
     }
+
+    private VoteResponse applyVoteDecision(VoteDecision decision) {
+        if (decision.higherTerm()) {
+            applyDurableHigherTerm(decision.term(), decision.votedFor());
+        } else if (decision.granted()) {
+            votedFor = decision.votedFor();
+        }
+
+        if (decision.granted()) {
+            resetElectionTimer();
+            logger.info("Vote granted to {} for term {}", decision.votedFor(), decision.term());
+        }
+        return VoteResponse.newBuilder()
+                .setTerm(currentTerm)
+                .setVoteGranted(decision.granted())
+                .build();
+    }
+
+    private void applyDurableHigherTerm(long newTerm, String durableVote) {
+        currentTerm = newTerm;
+        votedFor = durableVote;
+        state = State.FOLLOWER;
+        currentLeaderId = null;
+        MDC.put("raftRole", "FOLLOWER");
+        MDC.put("raftTerm", String.valueOf(currentTerm));
+        notifyStateChangeListeners(State.FOLLOWER);
+        failPendingCommands(new IllegalStateException(
+                "Leadership lost before command commit; outcome may be unknown"));
+        cancelTimers();
+        if (running) resetElectionTimer();
+        logger.info("Applied durable higher term {}; node is FOLLOWER", currentTerm);
+    }
+
+    private record VoteDecision(long term, String votedFor, boolean granted, boolean higherTerm) {}
 
     private boolean isCandidateLogUpToDate(long candidateLastLogTerm, long candidateLastLogIndex) {
         long localLastLogTerm = getLastLogTerm();

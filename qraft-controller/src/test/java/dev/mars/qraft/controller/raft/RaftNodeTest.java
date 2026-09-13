@@ -610,7 +610,7 @@ class RaftNodeTest {
         }
 
         @Test
-        void testHigherTermIsPersistedWhenVotePersistenceFails() {
+        void testUncertainVotePersistenceFailureFencesMetadataTransitions() {
         TestRaftStorage delegate = new TestRaftStorage();
         RaftStorage flakyMetadataStorage = oneShotMetadataFailureStorage(delegate);
 
@@ -630,16 +630,25 @@ class RaftNodeTest {
             .setLastLogTerm(99)
             .build();
 
-        VoteResponse response = durableNode.handleVoteRequest(voteRequest)
-            .toCompletionStage().toCompletableFuture().join();
-
-        assertFalse(response.getVoteGranted(), "Vote should be rejected when metadata persistence fails");
-        assertEquals(7, response.getTerm(), "Response should still reflect higher observed term");
+        var persistenceFailure = assertThrows(java.util.concurrent.CompletionException.class,
+            () -> durableNode.handleVoteRequest(voteRequest)
+                .toCompletionStage().toCompletableFuture().join());
+        assertEquals("Simulated one-shot metadata failure", persistenceFailure.getCause().getMessage());
 
         RaftStorage.PersistentMeta persistedMeta = flakyMetadataStorage.loadMetadata().join();
-        assertEquals(7, persistedMeta.currentTerm(), "Higher term must be persisted to avoid term regression after restart");
-        assertEquals(Optional.empty(), persistedMeta.votedFor(), "No vote should be persisted when vote write failed");
-        logExpectedFailure("vote-grant metadata persistence one-shot failure fallback", new IllegalStateException("Simulated one-shot metadata failure"));
+        assertEquals(0, persistedMeta.currentTerm(),
+            "A failed write must not be followed by an unsafely assumed term-only write");
+        assertEquals(Optional.empty(), persistedMeta.votedFor());
+        assertEquals(1, ((MetadataFailureStorage) flakyMetadataStorage).updateCalls(),
+            "The node must not issue a compensating metadata write after an uncertain failure");
+
+        var fencedFailure = assertThrows(java.util.concurrent.CompletionException.class,
+            () -> durableNode.handleVoteRequest(voteRequest.toBuilder().setCandidateId("candidate-y").build())
+                .toCompletionStage().toCompletableFuture().join());
+        assertInstanceOf(RaftTransitionSequencer.FencedException.class, fencedFailure.getCause());
+        assertEquals(1, ((MetadataFailureStorage) flakyMetadataStorage).updateCalls(),
+            "A fenced node must not execute a later metadata transition");
+        logExpectedFailure("vote metadata persistence fenced node", persistenceFailure.getCause());
 
         durableNode.stop().toCompletionStage().toCompletableFuture().join();
         }
@@ -812,7 +821,9 @@ class RaftNodeTest {
             .toCompletionStage().toCompletableFuture().join();
 
         assertFalse(response.getSuccess(), "AppendEntries must be rejected if higher-term metadata cannot be durably persisted first");
-        assertEquals(9, response.getTerm());
+        assertEquals(0, response.getTerm(),
+            "A rejection must report the last durable local term, not the unpersisted observed term");
+        assertEquals(0, flakyMetadataStorage.loadMetadata().join().currentTerm());
         logExpectedFailure("append-entries higher-term metadata persistence", new IllegalStateException("Injected one-shot metadata failure expected by test"));
 
         durableNode.stop().toCompletionStage().toCompletableFuture().join();
@@ -845,7 +856,9 @@ class RaftNodeTest {
             .toCompletionStage().toCompletableFuture().join();
 
         assertFalse(response.getSuccess(), "InstallSnapshot must be rejected if higher-term metadata cannot be durably persisted first");
-        assertEquals(11, response.getTerm());
+        assertEquals(0, response.getTerm(),
+            "A rejection must report the last durable local term, not the unpersisted observed term");
+        assertEquals(0, flakyMetadataStorage.loadMetadata().join().currentTerm());
         logExpectedFailure("install-snapshot higher-term metadata persistence", new IllegalStateException("Injected one-shot metadata failure expected by test"));
 
         durableNode.stop().toCompletionStage().toCompletableFuture().join();
@@ -881,6 +894,8 @@ class RaftNodeTest {
         }
 
         boolean hasFailed() { return failed; }
+
+        int updateCalls() { return calls; }
 
         @Override public CompletableFuture<Void> open(Path dataDir) { return delegate.open(dataDir); }
 

@@ -25,6 +25,7 @@ import java.util.ArrayDeque;
 import java.util.Objects;
 import java.util.Queue;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -83,11 +84,19 @@ final class RaftTransitionSequencer {
     }
 
     <T> Future<T> submit(String name, FailurePolicy failurePolicy, Supplier<Future<T>> action) {
+        return submit(name, failurePolicy, action, Function.identity());
+    }
+
+    <P, T> Future<T> submit(String name, FailurePolicy failurePolicy,
+                            Supplier<Future<P>> prepareAndPersist,
+                            Function<? super P, ? extends T> apply) {
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(failurePolicy, "failurePolicy");
-        Objects.requireNonNull(action, "action");
+        Objects.requireNonNull(prepareAndPersist, "prepareAndPersist");
+        Objects.requireNonNull(apply, "apply");
 
-        Transition<T> transition = new Transition<>(name, failurePolicy, action);
+        Transition<T> transition = new Transition<>(name, failurePolicy,
+                prepareAndPersist, value -> apply.apply(cast(value)));
         dispatch(() -> admit(transition), transition.result);
         return transition.result.future();
     }
@@ -144,7 +153,7 @@ final class RaftTransitionSequencer {
     }
 
     private <T> void start(Transition<T> transition) {
-        Future<T> operation;
+        Future<?> operation;
         try {
             operation = Objects.requireNonNull(
                     transition.action.get(), "transition action returned null");
@@ -156,14 +165,19 @@ final class RaftTransitionSequencer {
                 () -> finish(transition, result.result(), result.cause()), transition.result));
     }
 
-    private <T> void finish(Transition<T> transition, T value, Throwable error) {
+    private <T> void finish(Transition<T> transition, Object value, Throwable error) {
         assertStateLoop();
         if (active != transition) return;
 
         active = null;
         if (error == null) {
-            transition.result.tryComplete(value);
-        } else {
+            try {
+                transition.result.tryComplete(transition.apply.apply(value));
+            } catch (Throwable applyError) {
+                error = applyError;
+            }
+        }
+        if (error != null) {
             if (transition.failurePolicy == FailurePolicy.FENCE) {
                 fenceQueuedTransitions(error);
             }
@@ -211,16 +225,24 @@ final class RaftTransitionSequencer {
         else target.tryFail(source.cause());
     }
 
+    @SuppressWarnings("unchecked")
+    private static <T> T cast(Object value) {
+        return (T) value;
+    }
+
     private static final class Transition<T> {
         private final String name;
         private final FailurePolicy failurePolicy;
-        private final Supplier<Future<T>> action;
+        private final Supplier<? extends Future<?>> action;
+        private final Function<Object, T> apply;
         private final Promise<T> result = Promise.promise();
 
-        private Transition(String name, FailurePolicy failurePolicy, Supplier<Future<T>> action) {
+        private Transition(String name, FailurePolicy failurePolicy,
+                           Supplier<? extends Future<?>> action, Function<Object, T> apply) {
             this.name = name;
             this.failurePolicy = failurePolicy;
             this.action = action;
+            this.apply = apply;
         }
 
         @Override
