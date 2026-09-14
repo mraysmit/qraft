@@ -103,7 +103,7 @@ public final class Future<T> implements AsyncResult<T> {
     }
 
     public Future<T> timeout(long timeout, TimeUnit unit) {
-        return new Future<>(delegate.orTimeout(timeout, unit));
+        return new Future<>(delegate.copy().orTimeout(timeout, unit));
     }
 
     public Future<T> onSuccess(Consumer<? super T> action) {

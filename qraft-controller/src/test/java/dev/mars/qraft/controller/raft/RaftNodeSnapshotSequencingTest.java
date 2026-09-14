@@ -25,6 +25,8 @@ import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.controller.state.RaftCommand;
 import dev.mars.qraft.controller.state.RaftCommandResult;
+import dev.mars.qraft.controller.testsupport.RemediationTest;
+import dev.mars.qraft.controller.testsupport.RemediationTestExtension;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import dev.mars.qraft.raft.api.SnapshotStore;
 import dev.mars.raftlog.storage.RaftStorage;
@@ -49,6 +51,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@RemediationTest(phase = "4", scenarioPrefix = "RAFT-SNAPSHOT")
 class RaftNodeSnapshotSequencingTest {
     private JavaRuntime runtime;
     private GatedSnapshotStorage storage;
@@ -234,6 +237,8 @@ class RaftNodeSnapshotSequencingTest {
     @Test
     void publicationFailureLeavesWalAndMemoryUnchangedAndAllowsLaterWork() {
         storage.failNextSnapshotPublication();
+        RemediationTestExtension.logExpectedFailure(
+                "local-snapshot-publication", storage.publicationFailure);
 
         CompletionException failure = assertThrows(CompletionException.class,
                 () -> await(node.takeSnapshot()));
@@ -252,6 +257,8 @@ class RaftNodeSnapshotSequencingTest {
     @Test
     void uncertainCompactionFailureLeavesMemoryUntrimmedAndFencesLaterWork() {
         storage.failNextPrefixCompaction();
+        RemediationTestExtension.logExpectedFailure(
+                "local-snapshot-prefix-compaction", storage.compactionFailure);
 
         CompletionException failure = assertThrows(CompletionException.class,
                 () -> await(node.takeSnapshot()));

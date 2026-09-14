@@ -19,6 +19,7 @@ package dev.mars.qraft.controller.raft;
 import dev.mars.qraft.controller.runtime.Future;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.runtime.Promise;
+import dev.mars.qraft.controller.testsupport.RemediationTest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -40,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@RemediationTest(phase = "1", scenarioPrefix = "RAFT-SEQUENCER")
 class RaftTransitionSequencerTest {
     private JavaRuntime runtime;
 
@@ -60,21 +62,24 @@ class RaftTransitionSequencerTest {
         List<String> history = Collections.synchronizedList(new ArrayList<>());
         AtomicBoolean firstCompletionOnStateLoop = new AtomicBoolean();
 
-        Future<String> first = sequencer.submit("first", () -> {
-            history.add("first-start");
-            assertSame(runtime, JavaRuntime.currentContext());
-            return firstGate.future();
-        });
+        Future<String> first = sequencer.submit(
+                "first",
+                RaftTransitionSequencer.FailurePolicy.CONTINUE,
+                () -> {
+                    history.add("first-start");
+                    assertSame(runtime, JavaRuntime.currentContext());
+                    return firstGate.future();
+                },
+                result -> {
+                    firstCompletionOnStateLoop.set(JavaRuntime.currentContext() == runtime);
+                    history.add("first-complete");
+                    return result;
+                });
         Future<String> second = sequencer.submit("second", () -> {
             history.add("second-start");
             assertSame(runtime, JavaRuntime.currentContext());
             return Future.succeededFuture("second-result");
         });
-        first.onSuccess(ignored -> {
-            firstCompletionOnStateLoop.set(JavaRuntime.currentContext() == runtime);
-            history.add("first-complete");
-        });
-
         awaitHistory(history, List.of("first-start"));
         assertFalse(second.isComplete(), "second transition started while the first was in flight");
 

@@ -72,6 +72,22 @@ class FutureTest {
     }
 
     @Test
+    void timeoutDoesNotCompleteOrFailTheSourceFuture() {
+        Promise<Void> source = Promise.promise();
+
+        CompletionException error = assertThrows(CompletionException.class,
+                () -> source.future().timeout(25, TimeUnit.MILLISECONDS)
+                        .toCompletionStage().toCompletableFuture().join());
+
+        assertInstanceOf(TimeoutException.class, error.getCause());
+        assertFalse(source.future().isComplete(),
+                "observing a timeout must not mutate the shared source future");
+
+        source.complete();
+        assertTrue(source.future().succeeded());
+    }
+
+    @Test
     void eventuallyRunsCleanupAndPreservesValue() {
         AtomicBoolean cleaned = new AtomicBoolean();
 

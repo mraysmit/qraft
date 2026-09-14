@@ -77,11 +77,15 @@ public class QraftControllerApplication {
         // Add shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             logger.info("Shutdown signal received, stopping controller...");
-            controller.stop().eventually(runtime::shutdown)
-                    .onSuccess(v -> logger.info("Controller runtime closed successfully"))
-                    .onFailure(err -> {
-                        logger.error("Error closing controller runtime: {}", err.getMessage(), err);
-                    });
+            try {
+                controller.stop().toCompletionStage().toCompletableFuture().join();
+                runtime.shutdown().toCompletionStage().toCompletableFuture().join();
+                logger.info("Controller runtime closed successfully");
+            } catch (Throwable error) {
+                Throwable cause = error.getCause() == null ? error : error.getCause();
+                logger.error("Controller did not shut down safely; runtime was left open: {}",
+                        cause.getMessage(), cause);
+            }
         }));
     }
 

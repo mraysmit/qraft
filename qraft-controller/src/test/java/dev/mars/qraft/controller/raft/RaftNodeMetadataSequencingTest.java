@@ -16,6 +16,8 @@
 
 package dev.mars.qraft.controller.raft;
 
+import dev.mars.qraft.controller.testsupport.RemediationTest;
+
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.controller.raft.grpc.VoteRequest;
@@ -47,6 +49,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@RemediationTest(phase = "2", scenarioPrefix = "RAFT-METADATA")
 class RaftNodeMetadataSequencingTest {
     private JavaRuntime runtime;
     private GatedMetadataStorage storage;

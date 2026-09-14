@@ -229,15 +229,15 @@ public class QraftControllerService {
         // (Agents track their own transfers - controller just routes requests)
         
         // Phase 3: STOP_SERVICES - Stop in reverse order of startup
-        coordinator.onServiceStop("raft-node-stop", () -> {
-            return raftNode.map(RaftNode::stop).orElseGet(Future::succeededFuture);
-        });
-        
         coordinator.onServiceStop("grpc-server-stop", () -> {
             Future<Void> raftStop = raftGrpcServer.map(GrpcRaftServer::stop).orElseGet(Future::succeededFuture);
             Future<Void> apiStop = apiGrpcServer.map(GrpcServiceServer::stop).orElseGet(Future::succeededFuture);
             httpApiServer.ifPresent(HttpApiServer::stop);
             return Future.all(raftStop, apiStop).mapEmpty();
+        });
+
+        coordinator.onCriticalServiceStop("raft-node-stop", () -> {
+            return raftNode.map(RaftNode::stop).orElseGet(Future::succeededFuture);
         });
         
         // Phase 4: CLOSE_RESOURCES - Storage is closed by raftNode.stop()
@@ -262,9 +262,8 @@ public class QraftControllerService {
                         stopPromise.complete();
                     })
                     .onFailure(err -> {
-                        logger.warn("Error during graceful shutdown: {}", err.getMessage(), err);
-                        // Still complete - we tried our best
-                        stopPromise.complete();
+                        logger.error("Graceful shutdown could not complete safely: {}", err.getMessage(), err);
+                        stopPromise.fail(err);
                     }),
             () -> {
                 // Fallback to immediate shutdown if coordinator wasn't initialized
@@ -281,11 +280,11 @@ public class QraftControllerService {
                             })
                             .onFailure(err -> {
                                 logger.warn("Error during immediate shutdown: {}", err.getMessage(), err);
-                                stopPromise.complete();
+                                stopPromise.fail(err);
                             });
                 } catch (Exception e) {
                     logger.warn("Error during shutdown: {}", e.getMessage(), e);
-                    stopPromise.complete();
+                    stopPromise.fail(e);
                 }
             }
         );

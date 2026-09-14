@@ -16,6 +16,8 @@
 
 package dev.mars.qraft.controller.raft;
 
+import dev.mars.qraft.controller.testsupport.RemediationTest;
+
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
@@ -27,11 +29,17 @@ import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.runtime.Promise;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
+import dev.mars.qraft.raft.api.SnapshotStore;
+import dev.mars.raftlog.storage.RaftStorage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -39,6 +47,7 @@ import java.util.function.Consumer;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@RemediationTest(phase = "5", scenarioPrefix = "RAFT-TRANSPORT-GENERATION")
 class RaftNodeTransportGenerationTest {
     private JavaRuntime runtime;
     private RaftNode node;
@@ -94,6 +103,53 @@ class RaftNodeTransportGenerationTest {
                 "a completion from an earlier leadership must be ignored");
     }
 
+    @Test
+    void grantedVoteCannotOvertakeBlockedHigherTermTransition() throws Exception {
+        runtime = JavaRuntime.create();
+        GatedMetadataStorage storage = new GatedMetadataStorage();
+        storage.open(null).join();
+        ControlledTransport transport = new ControlledTransport(true);
+        node = RaftNode.builder()
+                .runtime(runtime)
+                .nodeId("node-1")
+                .clusterNodes(Set.of("node-1", "peer-1"))
+                .transport(transport)
+                .stateMachine(new QraftStateStore())
+                .commandCodec(new ProtobufRaftCommandCodec())
+                .mode(RaftNodeMode.durable(storage, storage))
+                .snapshotEnabled(false)
+                .electionTimeout(100)
+                .heartbeatInterval(10_000)
+                .build();
+        await(node.start());
+
+        PendingVote oldElection = transport.takeVote();
+        long oldTerm = oldElection.request().getTerm();
+        storage.blockNextMetadataUpdate();
+        Future<VoteResponse> higherTermVote = node.handleVoteRequest(VoteRequest.newBuilder()
+                .setTerm(oldTerm + 1)
+                .setCandidateId("peer-1")
+                .setLastLogIndex(0)
+                .setLastLogTerm(0)
+                .build());
+        storage.awaitBlockedMetadataUpdate();
+
+        oldElection.response().complete(VoteResponse.newBuilder()
+                .setTerm(oldTerm)
+                .setVoteGranted(true)
+                .build());
+        awaitStateLoop();
+
+        assertEquals(RaftNode.State.CANDIDATE, node.getState(),
+                "a vote completion must wait behind the active durable transition");
+        assertEquals(oldTerm, node.getCurrentTerm());
+
+        storage.releaseBlockedMetadataUpdate();
+        assertTrue(await(higherTermVote).getVoteGranted());
+        assertEquals(RaftNode.State.FOLLOWER, node.getState());
+        assertEquals(oldTerm + 1, node.getCurrentTerm());
+    }
+
     private void awaitLeaderAtOrAboveTerm(long minimumTerm) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
         while ((!node.isLeader() || node.getCurrentTerm() < minimumTerm)
@@ -116,9 +172,20 @@ class RaftNodeTransportGenerationTest {
     }
 
     private record PendingAppend(AppendEntriesRequest request, Promise<AppendEntriesResponse> response) {}
+    private record PendingVote(VoteRequest request, Promise<VoteResponse> response) {}
 
     private static final class ControlledTransport implements RaftTransport {
         private final BlockingQueue<PendingAppend> appends = new LinkedBlockingQueue<>();
+        private final BlockingQueue<PendingVote> votes = new LinkedBlockingQueue<>();
+        private final boolean holdVotes;
+
+        private ControlledTransport() {
+            this(false);
+        }
+
+        private ControlledTransport(boolean holdVotes) {
+            this.holdVotes = holdVotes;
+        }
 
         PendingAppend takeAppend() throws InterruptedException {
             PendingAppend append = appends.poll(2, TimeUnit.SECONDS);
@@ -126,9 +193,20 @@ class RaftNodeTransportGenerationTest {
             return append;
         }
 
+        PendingVote takeVote() throws InterruptedException {
+            PendingVote vote = votes.poll(2, TimeUnit.SECONDS);
+            if (vote == null) throw new AssertionError("candidate did not request a vote");
+            return vote;
+        }
+
         @Override public void start(Consumer<RaftMessage> messageHandler) {}
         @Override public void stop() {}
         @Override public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
+            if (holdVotes) {
+                Promise<VoteResponse> response = Promise.promise();
+                votes.add(new PendingVote(request, response));
+                return response.future();
+            }
             return Future.succeededFuture(VoteResponse.newBuilder()
                     .setTerm(request.getTerm()).setVoteGranted(true).build());
         }
@@ -144,5 +222,49 @@ class RaftNodeTransportGenerationTest {
                     .setTerm(request.getTerm()).setSuccess(true)
                     .setNextChunkIndex(request.getTotalChunks()).build());
         }
+    }
+
+    private static final class GatedMetadataStorage implements RaftStorage, SnapshotStore {
+        private final TestRaftStorage delegate = new TestRaftStorage();
+        private volatile CompletableFuture<Void> nextMetadataGate;
+        private volatile CompletableFuture<Void> blockedMetadataGate;
+        private volatile CompletableFuture<Void> metadataUpdateEntered;
+
+        void blockNextMetadataUpdate() {
+            nextMetadataGate = new CompletableFuture<>();
+            metadataUpdateEntered = new CompletableFuture<>();
+        }
+
+        void awaitBlockedMetadataUpdate() throws Exception {
+            metadataUpdateEntered.get(2, TimeUnit.SECONDS);
+        }
+
+        void releaseBlockedMetadataUpdate() {
+            blockedMetadataGate.complete(null);
+        }
+
+        @Override public CompletableFuture<Void> open(Path dataDir) { return delegate.open(dataDir); }
+
+        @Override
+        public CompletableFuture<Void> updateMetadata(long term, Optional<String> votedFor) {
+            CompletableFuture<Void> gate = nextMetadataGate;
+            if (gate != null) {
+                nextMetadataGate = null;
+                blockedMetadataGate = gate;
+                metadataUpdateEntered.complete(null);
+                return gate.thenCompose(ignored -> delegate.updateMetadata(term, votedFor));
+            }
+            return delegate.updateMetadata(term, votedFor);
+        }
+
+        @Override public CompletableFuture<PersistentMeta> loadMetadata() { return delegate.loadMetadata(); }
+        @Override public CompletableFuture<Void> appendEntries(List<LogEntryData> entries) { return delegate.appendEntries(entries); }
+        @Override public CompletableFuture<Void> truncateSuffix(long fromIndex) { return delegate.truncateSuffix(fromIndex); }
+        @Override public CompletableFuture<Void> truncatePrefix(long toIndex) { return delegate.truncatePrefix(toIndex); }
+        @Override public CompletableFuture<Void> sync() { return delegate.sync(); }
+        @Override public CompletableFuture<List<LogEntryData>> replayLog() { return delegate.replayLog(); }
+        @Override public CompletableFuture<Void> saveAtomically(SnapshotData snapshot) { return delegate.saveAtomically(snapshot); }
+        @Override public CompletableFuture<Optional<SnapshotData>> loadLatest() { return delegate.loadLatest(); }
+        @Override public void close() { delegate.close(); }
     }
 }

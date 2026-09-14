@@ -7,7 +7,7 @@
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
             <charset>UTF-8</charset>
-            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{48}%replace( [%X{nodeId}]){' \[\]', ''}%replace( [%X{agentId}]){' \[\]', ''}%replace( [%X{raftRole}/%X{raftTerm}]){' \[/\]', ''}%replace( [%X{requestId}]){' \[\]', ''}%replace( [%X{rpcType}]){' \[\]', ''} - %msg%n</pattern>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{48}%replace( [%X{remediationId}]){' \[\]', ''}%replace( [%X{nodeId}]){' \[\]', ''}%replace( [%X{agentId}]){' \[\]', ''}%replace( [%X{raftRole}/%X{raftTerm}]){' \[/\]', ''}%replace( [%X{requestId}]){' \[\]', ''}%replace( [%X{rpcType}]){' \[\]', ''} - %msg%n</pattern>
         </encoder>
     </appender>
 
@@ -17,7 +17,7 @@
         <prudent>true</prudent>
         <encoder>
             <charset>UTF-8</charset>
-            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{48}%replace( [%X{nodeId}]){' \[\]', ''}%replace( [%X{agentId}]){' \[\]', ''}%replace( [%X{raftRole}/%X{raftTerm}]){' \[/\]', ''}%replace( [%X{requestId}]){' \[\]', ''}%replace( [%X{rpcType}]){' \[\]', ''} - %msg%n</pattern>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{48}%replace( [%X{remediationId}]){' \[\]', ''}%replace( [%X{nodeId}]){' \[\]', ''}%replace( [%X{agentId}]){' \[\]', ''}%replace( [%X{raftRole}/%X{raftTerm}]){' \[/\]', ''}%replace( [%X{requestId}]){' \[\]', ''}%replace( [%X{rpcType}]){' \[\]', ''} - %msg%n</pattern>
         </encoder>
     </appender>
 

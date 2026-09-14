@@ -18,6 +18,7 @@ package dev.mars.qraft.controller.lifecycle;
 
 import dev.mars.qraft.controller.runtime.Future;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
+import dev.mars.qraft.controller.runtime.Promise;
 import dev.mars.qraft.controller.support.JavaRuntimeExtension;
 import dev.mars.qraft.controller.support.JavaTestContext;
 import org.junit.jupiter.api.DisplayName;
@@ -28,6 +29,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -187,6 +189,9 @@ class ShutdownCoordinatorTest {
             Future<Void> first = coordinator.shutdown();
             Future<Void> second = coordinator.shutdown();
             Future<Void> third = coordinator.shutdown();
+
+            assertSame(first, second);
+            assertSame(first, third);
             
             Future.all(first, second, third)
                     .onComplete(ctx.succeeding(v -> ctx.verify(() -> {
@@ -227,6 +232,83 @@ class ShutdownCoordinatorTest {
                         assertEquals(1, completedCount.get());
                         ctx.completeNow();
                     })));
+        }
+
+        @Test
+        @DisplayName("Timing out a hook must not complete its source operation")
+        void timeoutDoesNotMutateSourceHookFuture(JavaRuntime vertx, JavaTestContext ctx) {
+            ShutdownCoordinator coordinator = new ShutdownCoordinator(vertx, 50, 50);
+            Promise<Void> sourceOperation = Promise.promise();
+            AtomicInteger laterHooks = new AtomicInteger();
+
+            coordinator.onDrain("slow", sourceOperation::future);
+            coordinator.onDrain("later", () -> {
+                laterHooks.incrementAndGet();
+                return Future.succeededFuture();
+            });
+
+            coordinator.shutdown()
+                    .onComplete(ctx.succeeding(v -> ctx.verify(() -> {
+                        assertEquals(ShutdownCoordinator.State.STOPPED, coordinator.getState());
+                        assertEquals(1, laterHooks.get());
+                        assertFalse(sourceOperation.future().isComplete(),
+                                "coordinator timeout must not corrupt the hook's shared completion state");
+                        sourceOperation.complete();
+                        assertTrue(sourceOperation.future().succeeded());
+                        ctx.completeNow();
+                    })));
+        }
+
+        @Test
+        @DisplayName("A critical service timeout must fail shutdown without closing later resources")
+        void criticalServiceTimeoutStopsShutdownProgression(JavaRuntime vertx, JavaTestContext ctx) {
+            ShutdownCoordinator coordinator = new ShutdownCoordinator(vertx, 50, 50);
+            Promise<Void> nodeStop = Promise.promise();
+            AtomicInteger laterServiceStops = new AtomicInteger();
+            AtomicInteger resourceCloses = new AtomicInteger();
+
+            coordinator.onCriticalServiceStop("node-stop", nodeStop::future);
+            coordinator.onServiceStop("later-service", () -> {
+                laterServiceStops.incrementAndGet();
+                return Future.succeededFuture();
+            });
+            coordinator.onResourceClose("storage", () -> {
+                resourceCloses.incrementAndGet();
+                return Future.succeededFuture();
+            });
+
+            Future<Void> shutdown = coordinator.shutdown();
+            assertSame(shutdown, coordinator.shutdown(),
+                    "all callers must observe the same critical shutdown outcome");
+            shutdown.onComplete(ctx.failing(error -> ctx.verify(() -> {
+                assertInstanceOf(TimeoutException.class, error);
+                assertEquals(ShutdownCoordinator.State.FAILED, coordinator.getState());
+                assertEquals(0, laterServiceStops.get());
+                assertEquals(0, resourceCloses.get(),
+                        "resource closure is unsafe while the node may still own persistence work");
+                assertFalse(nodeStop.future().isComplete());
+                nodeStop.complete();
+                ctx.completeNow();
+            })));
+        }
+
+        @Test
+        @DisplayName("A synchronously throwing critical hook must become the shared shutdown failure")
+        void synchronousCriticalHookFailureIsReportedAsynchronously(JavaRuntime vertx, JavaTestContext ctx) {
+            ShutdownCoordinator coordinator = new ShutdownCoordinator(vertx, 50, 50);
+            IllegalStateException failure = new IllegalStateException("node stop failed before returning");
+
+            coordinator.onCriticalServiceStop("node-stop", () -> {
+                throw failure;
+            });
+
+            Future<Void> shutdown = assertDoesNotThrow(coordinator::shutdown);
+            shutdown.onComplete(ctx.failing(error -> ctx.verify(() -> {
+                assertSame(failure, error);
+                assertEquals(ShutdownCoordinator.State.FAILED, coordinator.getState());
+                assertSame(shutdown, coordinator.shutdown());
+                ctx.completeNow();
+            })));
         }
     }
 

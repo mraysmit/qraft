@@ -1,14 +1,15 @@
 # Snapshot Serialization Review Postmortem
 
 **Date:** 2026-09-13  
-**Status:** Open correctness issue  
+**Status:** Remediation in progress; shutdown sequencing and recovery callback
+affinity implemented, final Phase 6 verification remains open
 **Scope:** Raft persistence sequencing, snapshot publication, WAL compaction, and
 in-memory state mutation
 
 ## 1. Executive summary
 
 The storage externalisation work was incorrectly declared complete even though
-Qraft does not provide a single serialization boundary across its Raft state,
+Qraft did not provide a single serialization boundary across its Raft state,
 WAL operations, snapshot operations, and shutdown lifecycle.
 
 This was a serious review failure. The issue was missed during the initial
@@ -18,14 +19,14 @@ was given that described the intended ordering inside one snapshot workflow as i
 it were a system-wide concurrency guarantee. The implementation does not provide
 that guarantee.
 
-The current code separately provides:
+At the time of the failed review, the code separately provided:
 
 - serialization inside the external WAL implementation;
 - serialization inside `FileSnapshotStore`;
 - a future chain ordering snapshot publication before WAL prefix truncation for
   one invocation.
 
-It does not provide:
+At that boundary it did not provide:
 
 - mutual exclusion between a snapshot and a concurrent append;
 - mutual exclusion between two snapshot attempts;
@@ -102,9 +103,9 @@ future. There is no in-progress token, generation, or queued-operation ownership
 A later timer firing or direct call can begin another snapshot before the first
 one finishes.
 
-### 3.4 Shutdown is not sequenced behind persistence
+### 3.4 Shutdown was not sequenced behind persistence
 
-Shutdown can close the snapshot store and WAL without first joining a single
+Shutdown could close the snapshot store and WAL without first joining a single
 queue of accepted persistence transitions. Storage may therefore be closed while
 a snapshot, append, metadata update, or compaction workflow remains in flight.
 
@@ -348,8 +349,8 @@ focused tests and the existing non-heavy controller suite pass.
 | 2 | Term and vote transitions, including concurrent same-term votes and higher-term persistence. | Implemented. Election self-votes, incoming votes, and higher-term step-downs share the sequencer; focused and default non-heavy tests pass. |
 | 3 | Leader append and follower suffix-replacement transitions. | Implemented. Append, truncate, and sync gates prove whole-transition ordering; uncertain write outcomes fence later work. Focused tests and the default non-heavy controller suite pass. |
 | 4 | Local snapshot capture, publication, WAL compaction, and boundary application. | Implemented. Capture, publication, prefix compaction, and memory-boundary application are one serialized transition; focused and default non-heavy tests pass. |
-| 5 | Installed snapshots, timer events, and transport completions with term or leadership-generation fencing. | In progress. Follower installation and AppendEntries response/failure fencing are implemented; timer admission and vote/outbound-snapshot completions remain. |
-| 6 | Shutdown integration, real-storage recovery matrix, structural bypass checks, and model-based histories. | Not started. |
+| 5 | Installed snapshots, timer events, and transport completions with term or leadership-generation fencing. | Implemented. Incoming and outgoing snapshot work, AppendEntries and vote responses, and all Raft timers are sequenced and fenced by immutable ownership tokens; focused and default non-heavy tests pass. |
+| 6 | Shutdown integration, real-storage recovery matrix, structural bypass checks, and model-based histories. | In progress. Shutdown admission, drain, terminal lifecycle, asynchronous-operation ownership, ordered off-loop resource closure, recovery callback affinity, and the real-storage suffix-replacement and local-snapshot restart matrices are implemented and tested. Installed-snapshot and drain interruption points, structural bypass checks, and model-based histories remain open. |
 
 Each integration phase starts with a deterministic failing test that holds the
 current durable operation at a named gate. Production wiring follows only after
@@ -428,7 +429,7 @@ Together, the Phase 1--4 focused regression tranche contains 52 tests. The full
 default non-heavy controller suite at that boundary passed all 198 tests with no
 failures or errors.
 
-The completed portion of Phase 5 establishes these additional rules:
+Phase 5 establishes these additional rules:
 
 - every incoming snapshot chunk is handled as a sequenced transition, including
   higher-term metadata persistence, assembler application, final publication,
@@ -456,14 +457,177 @@ The completed portion of Phase 5 establishes these additional rules:
   re-election;
 - a higher term in an AppendEntries response is still durably applied even when
   the response belongs to a stale leadership generation.
+- every vote response is admitted through the transition sequencer; a granted
+  vote from an older election cannot promote a candidate while a higher-term
+  metadata transition is in flight;
+- a higher term learned from a vote response is persisted before the node
+  applies follower state, even if the response no longer belongs to the active
+  election;
+- every election, heartbeat, and scheduled-snapshot callback carries the timer
+  generation that created it and is admitted through the transition sequencer;
+- cancelling or replacing a timer advances its generation, so an expired
+  election callback cannot start a new term after a vote or leader message has
+  reset the election timeout;
+- heartbeat and scheduled-snapshot callbacks also carry the originating term
+  and leadership generation, and recheck ownership only when their transition
+  becomes active;
+- periodic heartbeat and snapshot callbacks are coalesced while one transition
+  is pending, preventing a blocked durability operation from filling the
+  transition queue;
+- a scheduled snapshot cannot capture, publish, or compact after a queued
+  higher-term transition has removed leadership;
+- every outbound snapshot transfer has a unique identity containing its target,
+  originating term, leadership generation, and monotonic transfer sequence;
+- snapshot-load success and failure, chunk responses, and transport failures
+  all re-enter the transition sequencer before observing or mutating Raft state;
+- a stale load cannot send a snapshot, and a stale acknowledgement or failure
+  cannot rewrite peer indexes or remove the transfer owned by the current
+  leadership;
+- a higher term in an outbound snapshot response is still durably applied even
+  when the response belongs to an obsolete transfer.
 
 The installed-snapshot fixture has ten deterministic tests. The initial red run
 failed all six foundational cases; expansion then exposed the separate
 same-term competing-leader defect. The transport fixture deterministically
 holds an AppendEntries response across step-down and re-election; its red run
-advanced `nextIndex` to 101 before generation fencing was added. The current
-Phase 1--5 focused tranche contains 63 passing tests. The full default non-heavy
-controller suite passes all 209 tests with no failures or errors.
+advanced `nextIndex` to 101 before generation fencing was added. It also holds
+an old granted vote while a higher-term metadata write is blocked; the red run
+incorrectly promoted the candidate before that write completed. The current
+timer fixture has three deterministic tests. Before timer sequencing was added,
+all three failed: an expired election timer started a new term after a granted
+vote reset it, heartbeats were emitted while a WAL transition was blocked, and
+a queued scheduled snapshot published after higher-term step-down. The outbound
+snapshot fixture has five deterministic tests covering delayed load, delayed
+acknowledgement, stale transport failure against a replacement transfer, a
+higher-term response from an obsolete transfer, and shutdown while a snapshot
+load is in flight. Its initial red run transmitted a snapshot from the former
+leadership and allowed an old acknowledgement to rewrite the new leader's peer
+index. The Phase 1--5 focused tranche contained 71 passing tests. The
+pre-existing seven-test InstallSnapshot protocol fixture also passed. The full
+default non-heavy controller suite at that boundary passed all 217 tests with no
+failures or errors.
+
+The shutdown slice of Phase 6 establishes these additional rules:
+
+- the first shutdown request creates one terminal, shared completion; concurrent
+  and later callers observe the same result and resources close at most once;
+- beginning shutdown rejects new sequenced work, cancels and invalidates timers,
+  and waits for every previously accepted transition to reach its defined
+  terminal state;
+- asynchronous operations owned by the node but deliberately performed outside
+  the transition queue, currently recovery and outbound snapshot loading, have a
+  separate admission-and-drain count so their storage access cannot outlive
+  storage closure;
+- a local snapshot already admitted before shutdown completes publication, WAL
+  prefix compaction, and state-loop boundary application before resources close;
+- publication and prefix compaction are gated independently in the shutdown
+  fixture, proving that storage remains open specifically after durable snapshot
+  publication and until the following WAL prefix compaction completes;
+- a stop racing recovery waits for recovery I/O, prevents transport and timer
+  startup, and leaves the node terminal; later `start()` calls are rejected;
+- recovery or a partially successful transport start that later throws makes
+  startup terminal and performs the same ordered transport-then-storage cleanup
+  before the failed `start()` future completes;
+- pending client commands that cannot reach a known committed result are failed
+  explicitly with an unknown-outcome message rather than being abandoned;
+- late transport completions re-enter the drained sequencer and cannot mutate
+  peer replication indexes or restore a prior role;
+- transport closure precedes storage closure, both execute off the Raft state
+  loop, and one object implementing both storage contracts is closed once;
+- every close is attempted, with the first failure reported and later failures
+  attached as suppressed causes.
+- applying a timeout to an operation creates a derived observation and never
+  completes or fails the shared source future;
+- the controller treats node stop as a critical shutdown hook: its failure or
+  timeout prevents later service/resource phases, produces a shared failed
+  shutdown result, and does not actively close the runtime underneath a node
+  that may still own persistence work;
+- the executable's JVM shutdown hook waits for the bounded controller result
+  instead of launching asynchronous cleanup and returning; request ingress is
+  stopped before the critical node-stop barrier;
+- follower response completion and outbound snapshot-load ownership accounting
+  are explicitly returned to the Raft state loop, even when their prerequisite
+  future completes on a storage or transport thread;
+- recovery metadata, snapshot, and WAL-replay completions are explicitly
+  returned to the Raft state loop before the next recovery operation is started
+  or any Raft/state-machine field is mutated;
+- recovery's state-loop hand-offs preserve the remediation MDC and tracing
+  context captured by the initiating operation, even when storage completes on
+  a foreign platform thread.
+
+The first red shutdown run proved that the old implementation completed
+shutdown and closed storage while a gated WAL sync was still active. It also
+proved that two simultaneous `stop()` calls returned unrelated futures. A
+separate red run closed storage while an outbound snapshot load was held, and a
+start/stop race closed storage underneath recovery. Production lifecycle wiring
+was changed only after these failures were reproduced deterministically.
+
+The dedicated shutdown fixture now has ten passing tests covering an active and
+queued WAL transition, repeated shutdown, independently gated snapshot
+publication and post-publication compaction, recovery, partial-start rollback,
+late replication responses, stop before start, off-loop ordered closure, close
+de-duplication, and combined close failure reporting. Coordinator and runtime
+tests additionally cover non-mutating timeout observation, shared terminal
+shutdown results, and critical-hook failure/timeout behavior. The current
+sequencing and recovery tranche contains 94 passing tests. The complete
+controller suite passes all 244 tests with no failures, errors, or skips.
+
+The recovery intermediate-callback tranche is now implemented. Its two
+deterministic tests complete metadata loading, snapshot loading, and WAL replay
+from a named foreign platform thread. They prove that snapshot loading and WAL
+replay are initiated from the owning state loop, and that state-machine reset,
+snapshot restore, entry application, and recovered-boundary updates are all
+state-loop-affine. The initial red run exposed both the off-loop snapshot-load
+invocation and off-loop state-machine restore before production code changed.
+
+The first real-storage recovery tranche uses a separate JVM and
+`Runtime.halt`, deliberately avoiding orderly WAL closure. It interrupts the
+real external WAL after suffix truncation, after replacement append, and after
+the final sync at the boundary preceding a caller response. Each directory is
+reopened twice: first to assert the durable term and vote plus the exact recovered
+indexes and terms, then through a new durable Raft node to assert snapshot
+boundary zero, reconstructed application state, last-applied index, readiness,
+and permanent absence of the obsolete suffix. The pre-sync cases prove process
+restart behavior, not power-loss durability; only successful `sync()` establishes
+that guarantee. These tests distinguish real process restart from the manually
+completed future fixtures used for sequencing.
+
+The local-snapshot real-storage tranche adds a package-private persistence
+observer to `FileSnapshotStore`; the public API and default production behavior
+are unchanged. A separate JVM now halts before temporary-file creation, after
+the temporary write, after file force, after atomic publication, after completed
+publication before compaction, and after WAL prefix compaction. Reopening proves
+that temporary snapshots never become authoritative, the previously published
+snapshot remains valid before rename, the new snapshot becomes authoritative
+after rename, an untrimmed covered WAL prefix is safely ignored, and a compacted
+WAL suffix reconstructs exactly the same application state. The initial red run
+failed at compilation because the required production checkpoint seam did not
+exist; it was added only after the test contract was fixed.
+
+A seventh case covers interruption of the first snapshot, where no previously
+published `snapshot.dat` exists. Startup fences and preserves the unpublished
+temporary file instead of silently treating the node as snapshot-free. Its red
+run exposed a separate cleanup defect: durable-storage creation handled the open
+failure on the snapshot executor and called the blocking executor `close()` from
+that same thread, deadlocking until the caller timed out. `FileSnapshotStore`
+now initiates non-blocking executor shutdown; normal node shutdown already drains
+accepted snapshot work before closing, while failed-open cleanup can propagate
+the original preservation error without waiting on itself.
+
+This is not completion of Phase 6. The installed-snapshot and shutdown-drain
+portions of the real-storage interruption matrix, the structural bypass rule,
+and reproducible model histories remain mandatory.
+
+Remediation suites now use a shared `@RemediationTest` test extension. Each test
+has a stable scenario identifier formed from its phase-specific suite prefix and
+method name, and emits searchable `START`, `PASS`, `FAIL`, or `ABORT` lifecycle
+events. The identifier is installed in MDC before fixture setup, so state-loop,
+worker, transport, WAL, and snapshot logs inherit the same attribution. Fault
+injection tests emit an `EXPECTED_FAILURE` event with a named checkpoint before
+the deliberate failure occurs. Normal rejection of late work by a draining
+sequencer is debug lifecycle information, not an error. The verified remediation
+run contains 68 starts, 68 passes, nineteen expected-failure markers, no failure
+events, and no draining exceptions logged at error level.
 
 ### 8.1 Deterministic adversarial test harness
 
@@ -781,6 +945,25 @@ For every recovered directory, assert the exact snapshot boundary, WAL suffix,
 term, vote, reconstructed application state, and readiness/fencing result. The
 test matrix must state which interruption points require injected storage faults
 and which can be exercised with real process restart.
+
+Current suffix-replacement coverage:
+
+| Interruption point | Mechanism | Verified restart result |
+|---|---|---|
+| After suffix truncation, before replacement append | Separate JVM halted without closing the real WAL | The retained prefix is recovered; the obsolete suffix and replacement are absent; the node starts at the recovered boundary. |
+| After replacement append, before sync | Separate JVM halted without closing the real WAL | The structurally complete replacement is recovered after process restart; the test makes no power-loss durability claim. |
+| After sync, before response | Separate JVM halted without closing the real WAL | The durable replacement, term, vote, application state, and ready node boundary are recovered exactly. |
+| Before snapshot temporary-file creation | Snapshot persistence observer halts a separate JVM | The existing published snapshot and full WAL remain authoritative. |
+| After snapshot temporary-file write, before force | Snapshot persistence observer halts a separate JVM | The temporary file is discarded on open; the existing published snapshot and full WAL rebuild the state. |
+| After snapshot force, before atomic publication | Snapshot persistence observer halts a separate JVM | The forced but unpublished temporary file is discarded; the existing published snapshot remains authoritative. |
+| After first-snapshot force, with no published snapshot | Snapshot persistence observer halts a separate JVM | Startup is fenced, the temporary file is preserved for diagnosis, and the intact WAL remains independently recoverable. |
+| After atomic snapshot publication, before directory force | Snapshot persistence observer halts a separate JVM | The newly published snapshot is selected on process restart; this checkpoint makes no power-loss rename claim. |
+| After completed snapshot publication, before WAL prefix compaction | Separate JVM halted after `saveAtomically` | The new snapshot is authoritative and the untrimmed covered WAL prefix is ignored during reconstruction. |
+| After WAL prefix compaction, before in-memory boundary application | Separate JVM halted after real prefix compaction | The new snapshot plus the exact retained WAL suffix reconstruct the application and start a ready node. |
+
+Installed-snapshot publication and shutdown-drain interruption still require a
+supervised process protocol tied to the corresponding Raft transition. Those
+points are not yet claimed as covered.
 
 ### 8.18 Structural and model-based verification
 

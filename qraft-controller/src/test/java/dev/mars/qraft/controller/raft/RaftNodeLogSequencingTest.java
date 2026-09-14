@@ -16,6 +16,9 @@
 
 package dev.mars.qraft.controller.raft;
 
+import dev.mars.qraft.controller.testsupport.RemediationTest;
+import dev.mars.qraft.controller.testsupport.RemediationTestExtension;
+
 import com.google.protobuf.ByteString;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
@@ -48,6 +51,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@RemediationTest(phase = "3", scenarioPrefix = "RAFT-LOG")
 class RaftNodeLogSequencingTest {
     private JavaRuntime runtime;
     private GatedRaftStorage storage;
@@ -139,6 +143,8 @@ class RaftNodeLogSequencingTest {
     @Test
     void uncertainLeaderSyncFailureFencesLaterAppend() {
         storage.failNextSync();
+        RemediationTestExtension.logExpectedFailure(
+                "leader-sync", storage.syncFailure);
 
         CompletionException failedSync = assertThrows(CompletionException.class,
                 () -> await(node.submitCommand(put("first", "uncertain"))));
@@ -252,6 +258,8 @@ class RaftNodeLogSequencingTest {
         assertTrue(await(node.handleAppendEntriesRequest(appendRequest(
                 1, 0, 0, grpcEntry(1, "seed", "original")))).getSuccess());
         storage.failNextTruncate();
+        RemediationTestExtension.logExpectedFailure(
+                "follower-suffix-truncate", storage.truncateFailure);
 
         AppendEntriesResponse failed = await(node.handleAppendEntriesRequest(appendRequest(
                 1, 0, 0, grpcEntry(2, "seed", "replacement"))));

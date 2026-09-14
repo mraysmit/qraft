@@ -18,6 +18,7 @@ package dev.mars.qraft.controller.lifecycle;
 
 import dev.mars.qraft.controller.runtime.Future;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
+import dev.mars.qraft.controller.runtime.Promise;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -76,7 +77,9 @@ public class ShutdownCoordinator {
         /** Shutting down services */
         SHUTTING_DOWN,
         /** Shutdown complete */
-        STOPPED
+        STOPPED,
+        /** Shutdown could not complete without violating a critical component boundary */
+        FAILED
     }
     
     private final JavaRuntime runtime;
@@ -85,6 +88,7 @@ public class ShutdownCoordinator {
     
     private final AtomicReference<State> state = new AtomicReference<>(State.RUNNING);
     private final AtomicBoolean shutdownRequested = new AtomicBoolean(false);
+    private final Promise<Void> shutdownCompletion = Promise.promise();
     
     private final List<ShutdownHook> drainHooks = new ArrayList<>();
     private final List<ShutdownHook> completionHooks = new ArrayList<>();
@@ -149,7 +153,7 @@ public class ShutdownCoordinator {
      * @return this coordinator for chaining
      */
     public ShutdownCoordinator onDrain(String name, Supplier<Future<Void>> hook) {
-        drainHooks.add(new ShutdownHook(name, hook));
+        drainHooks.add(new ShutdownHook(name, hook, false));
         return this;
     }
     
@@ -162,7 +166,7 @@ public class ShutdownCoordinator {
      * @return this coordinator for chaining
      */
     public ShutdownCoordinator onAwaitCompletion(String name, Supplier<Future<Void>> hook) {
-        completionHooks.add(new ShutdownHook(name, hook));
+        completionHooks.add(new ShutdownHook(name, hook, false));
         return this;
     }
     
@@ -174,7 +178,20 @@ public class ShutdownCoordinator {
      * @return this coordinator for chaining
      */
     public ShutdownCoordinator onServiceStop(String name, Supplier<Future<Void>> hook) {
-        serviceStopHooks.add(new ShutdownHook(name, hook));
+        serviceStopHooks.add(new ShutdownHook(name, hook, false));
+        return this;
+    }
+
+    /**
+     * Registers a service stop whose failure or timeout makes it unsafe to
+     * continue to later service and resource-close hooks.
+     *
+     * @param name descriptive name for logging
+     * @param hook the hook to execute
+     * @return this coordinator for chaining
+     */
+    public ShutdownCoordinator onCriticalServiceStop(String name, Supplier<Future<Void>> hook) {
+        serviceStopHooks.add(new ShutdownHook(name, hook, true));
         return this;
     }
     
@@ -186,7 +203,7 @@ public class ShutdownCoordinator {
      * @return this coordinator for chaining
      */
     public ShutdownCoordinator onResourceClose(String name, Supplier<Future<Void>> hook) {
-        resourceCloseHooks.add(new ShutdownHook(name, hook));
+        resourceCloseHooks.add(new ShutdownHook(name, hook, false));
         return this;
     }
     
@@ -200,24 +217,29 @@ public class ShutdownCoordinator {
     public Future<Void> shutdown() {
         if (!shutdownRequested.compareAndSet(false, true)) {
             logger.info("Shutdown already requested, waiting for completion");
-            return awaitShutdownComplete();
+            return shutdownCompletion.future();
         }
         
         logger.info("Initiating graceful shutdown (drain={}ms, timeout={}ms)", 
                 drainTimeoutMs, shutdownTimeoutMs);
         
-        return executeDrainPhase()
+        executeDrainPhase()
                 .compose(v -> executeAwaitCompletionPhase())
                 .compose(v -> executeServiceStopPhase())
                 .compose(v -> executeResourceClosePhase())
-                .onSuccess(v -> {
-                    state.set(State.STOPPED);
-                    logger.info("Graceful shutdown completed");
-                })
-                .onFailure(err -> {
-                    state.set(State.STOPPED);
-                    logger.warn("Shutdown completed with errors: {}", err.getMessage(), err);
+                .onComplete(result -> {
+                    if (result.succeeded()) {
+                        state.set(State.STOPPED);
+                        logger.info("Graceful shutdown completed");
+                        shutdownCompletion.tryComplete();
+                    } else {
+                        state.set(State.FAILED);
+                        logger.error("Shutdown failed before resources could be closed safely: {}",
+                                result.cause().getMessage(), result.cause());
+                        shutdownCompletion.tryFail(result.cause());
+                    }
                 });
+        return shutdownCompletion.future();
     }
     
     private Future<Void> executeDrainPhase() {
@@ -264,33 +286,39 @@ public class ShutdownCoordinator {
     
     private Future<Void> executeHookWithTimeout(ShutdownHook hook, long timeoutMs) {
         logger.debug("Executing shutdown hook: {}", hook.name());
-        
-        return hook.hook().get()
+
+        Future<Void> operation;
+        try {
+            operation = Objects.requireNonNull(hook.hook().get(),
+                    "shutdown hook returned null: " + hook.name());
+        } catch (Throwable error) {
+            operation = Future.failedFuture(error);
+        }
+
+        Future<Void> timed = operation
                 .timeout(timeoutMs, TimeUnit.MILLISECONDS)
                 .onSuccess(v -> logger.debug("Hook completed: {}", hook.name()))
-                .recover(err -> {
-                    // Log failure but continue shutdown - don't fail the whole sequence
-                    if (err instanceof TimeoutException) {
-                        logger.error("Shutdown hook '{}' timed out after {} ms", hook.name(), timeoutMs);
-                    } else {
-                        logger.error("Shutdown hook '{}' failed with {}", hook.name(), err.getClass().getSimpleName(), err);
-                    }
-                    return Future.succeededFuture();
-                });
-    }
-    
-    private Future<Void> awaitShutdownComplete() {
-        // Poll until shutdown is complete
-        if (state.get() == State.STOPPED) {
-            return Future.succeededFuture();
+                .onFailure(err -> logHookFailure(hook, timeoutMs, err));
+        if (hook.critical()) {
+            return timed;
         }
-        
-        return runtime.timer(100).compose(v -> awaitShutdownComplete());
+        return timed.recover(err -> Future.succeededFuture());
+    }
+
+    private void logHookFailure(ShutdownHook hook, long timeoutMs, Throwable error) {
+        if (error instanceof TimeoutException) {
+            logger.error("{} shutdown hook '{}' timed out after {} ms",
+                    hook.critical() ? "Critical" : "Best-effort", hook.name(), timeoutMs);
+        } else {
+            logger.error("{} shutdown hook '{}' failed with {}",
+                    hook.critical() ? "Critical" : "Best-effort", hook.name(),
+                    error.getClass().getSimpleName(), error);
+        }
     }
     
     /**
      * Represents a named shutdown hook.
      */
-    private record ShutdownHook(String name, Supplier<Future<Void>> hook) {
+    private record ShutdownHook(String name, Supplier<Future<Void>> hook, boolean critical) {
     }
 }

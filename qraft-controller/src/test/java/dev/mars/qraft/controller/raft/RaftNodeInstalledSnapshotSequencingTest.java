@@ -16,6 +16,9 @@
 
 package dev.mars.qraft.controller.raft;
 
+import dev.mars.qraft.controller.testsupport.RemediationTest;
+import dev.mars.qraft.controller.testsupport.RemediationTestExtension;
+
 import com.google.protobuf.ByteString;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
@@ -49,6 +52,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@RemediationTest(phase = "5", scenarioPrefix = "RAFT-INSTALLED-SNAPSHOT")
 class RaftNodeInstalledSnapshotSequencingTest {
     private JavaRuntime runtime;
     private GatedStorage storage;
@@ -181,6 +185,9 @@ class RaftNodeInstalledSnapshotSequencingTest {
     @Test
     void uncertainCompactionFailureFencesLaterWalMutation() {
         storage.failNextPrefixCompaction();
+        RemediationTestExtension.logExpectedFailure(
+                "installed-snapshot-prefix-compaction", "IllegalStateException",
+                "uncertain installed-snapshot compaction outcome");
 
         InstallSnapshotResponse failed = await(node.handleInstallSnapshot(
                 installRequest(1, 5, 3, 0, 1, snapshotBytes(5, "fenced", "snapshot"), true)));
@@ -198,6 +205,9 @@ class RaftNodeInstalledSnapshotSequencingTest {
     @Test
     void publicationFailureCleansAssemblerAndAllowsRetry() {
         storage.failNextSnapshotPublication();
+        RemediationTestExtension.logExpectedFailure(
+                "installed-snapshot-publication", "IllegalStateException",
+                "installed snapshot publication failed");
         InstallSnapshotRequest request = installRequest(
                 1, 5, 3, 0, 1, snapshotBytes(5, "retried", "yes"), true);
 
@@ -247,6 +257,9 @@ class RaftNodeInstalledSnapshotSequencingTest {
     @Test
     void restorationFailureAfterCompactionFencesLaterWalMutation() {
         stateMachine.failNextRestore();
+        RemediationTestExtension.logExpectedFailure(
+                "installed-snapshot-state-restoration", "IllegalStateException",
+                "installed snapshot restoration failed");
 
         InstallSnapshotResponse failed = await(node.handleInstallSnapshot(
                 installRequest(1, 5, 3, 0, 1, snapshotBytes(5, "restore", "fails"), true)));

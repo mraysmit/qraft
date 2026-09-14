@@ -18,6 +18,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.zip.CRC32C;
 
+import static java.util.Objects.requireNonNull;
+
 /** Atomic, checksummed file storage for application-owned Raft snapshots. */
 public final class FileSnapshotStore implements SnapshotStore {
 
@@ -30,11 +32,20 @@ public final class FileSnapshotStore implements SnapshotStore {
     private static final String SNAPSHOT_FILE = "snapshot.dat";
     private static final String TEMP_FILE = "snapshot.dat.tmp";
 
+    private final PersistenceObserver persistenceObserver;
     private final ExecutorService executor = Executors.newSingleThreadExecutor(
             Thread.ofVirtual().name("qraft-snapshot-store").factory());
     private volatile Path directory;
     private volatile boolean opened;
     private volatile boolean closed;
+
+    public FileSnapshotStore() {
+        this(checkpoint -> { });
+    }
+
+    FileSnapshotStore(PersistenceObserver persistenceObserver) {
+        this.persistenceObserver = requireNonNull(persistenceObserver, "persistenceObserver");
+    }
 
     @Override
     public CompletableFuture<Void> open(Path directory) {
@@ -62,17 +73,22 @@ public final class FileSnapshotStore implements SnapshotStore {
             byte[] encoded = encode(snapshot);
             Path temporary = directory.resolve(TEMP_FILE);
             Path published = directory.resolve(SNAPSHOT_FILE);
+            persistenceObserver.reached(PersistenceCheckpoint.BEFORE_TEMPORARY_CREATE);
             try (FileChannel channel = FileChannel.open(temporary,
                     StandardOpenOption.CREATE,
                     StandardOpenOption.TRUNCATE_EXISTING,
                     StandardOpenOption.WRITE)) {
                 writeFully(channel, ByteBuffer.wrap(encoded));
+                persistenceObserver.reached(PersistenceCheckpoint.AFTER_TEMPORARY_WRITE);
                 channel.force(true);
+                persistenceObserver.reached(PersistenceCheckpoint.AFTER_TEMPORARY_FORCE);
             }
             Files.move(temporary, published,
                     StandardCopyOption.ATOMIC_MOVE,
                     StandardCopyOption.REPLACE_EXISTING);
+            persistenceObserver.reached(PersistenceCheckpoint.AFTER_ATOMIC_PUBLICATION);
             forceDirectory(directory);
+            persistenceObserver.reached(PersistenceCheckpoint.AFTER_DIRECTORY_FORCE);
         });
     }
 
@@ -94,7 +110,12 @@ public final class FileSnapshotStore implements SnapshotStore {
         if (closed) return;
         closed = true;
         opened = false;
-        executor.close();
+        // Completion callbacks can invoke cleanup on this executor's own thread
+        // (for example when open fails during durable-storage creation). A
+        // blocking ExecutorService.close() would then wait for itself forever.
+        // Node shutdown drains admitted snapshot operations before calling close,
+        // so non-blocking shutdown preserves the lifecycle ordering contract.
+        executor.shutdown();
     }
 
     private static byte[] encode(SnapshotData snapshot) {
@@ -208,5 +229,18 @@ public final class FileSnapshotStore implements SnapshotStore {
     @FunctionalInterface
     private interface IoSupplier<T> {
         T get() throws IOException;
+    }
+
+    enum PersistenceCheckpoint {
+        BEFORE_TEMPORARY_CREATE,
+        AFTER_TEMPORARY_WRITE,
+        AFTER_TEMPORARY_FORCE,
+        AFTER_ATOMIC_PUBLICATION,
+        AFTER_DIRECTORY_FORCE
+    }
+
+    @FunctionalInterface
+    interface PersistenceObserver {
+        void reached(PersistenceCheckpoint checkpoint);
     }
 }

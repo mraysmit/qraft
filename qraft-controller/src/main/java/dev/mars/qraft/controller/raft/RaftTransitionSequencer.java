@@ -103,13 +103,15 @@ final class RaftTransitionSequencer {
 
     Future<Void> drain() {
         Promise<Void> requested = Promise.promise();
-        dispatch(() -> {
+        Runnable beginDrain = () -> {
             if (drainPromise == null) drainPromise = Promise.promise();
             Future<Void> sharedDrain = drainPromise.future();
             sharedDrain.onComplete(result -> completeFrom(result, requested));
             if (state == State.OPEN) state = State.DRAINING;
             completeDrainIfIdle();
-        }, requested);
+        };
+        if (JavaRuntime.currentContext() == runtime) beginDrain.run();
+        else dispatch(beginDrain, requested);
         return requested.future();
     }
 

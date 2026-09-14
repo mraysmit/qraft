@@ -49,6 +49,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 import static java.util.Objects.requireNonNull;
 
 /**
@@ -120,8 +121,19 @@ public class RaftNode {
 
     // ========== TIMING AND CONTROL ==========
     private volatile boolean running = false;
+    private final Object stopLock = new Object();
+    private Promise<Void> startPromise;
+    private Promise<Void> stopPromise;
+    private int ownedAsyncOperations;
+    private boolean ownedAsyncDraining;
+    private Promise<Void> ownedAsyncDrainPromise;
     private long electionTimerId = -1;
     private long heartbeatTimerId = -1;
+    private long electionTimerGeneration = 0;
+    private long heartbeatTimerGeneration = 0;
+    private long snapshotTimerGeneration = 0;
+    private boolean heartbeatTimerTransitionPending = false;
+    private boolean snapshotTimerTransitionPending = false;
     private final java.util.Set<String> unavailablePeers = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     // ========== STATE CHANGE LISTENERS ==========
@@ -143,8 +155,9 @@ public class RaftNode {
     static final int SNAPSHOT_CHUNK_SIZE = 1024 * 1024;
     /** Tracks in-progress snapshot installs from a leader (follower side). */
     private final Map<String, SnapshotChunkAssembler> pendingInstalls = new HashMap<>();
-    /** Tracks in-progress snapshot sends to followers (leader side). */
-    private final Set<String> installSnapshotInProgress = new HashSet<>();
+    /** Tracks uniquely owned snapshot sends to followers (leader side). */
+    private final Map<String, OutboundSnapshotTransfer> outboundSnapshotTransfers = new HashMap<>();
+    private long outboundSnapshotTransferSequence = 0;
 
     // ========== SNAPSHOT METRICS ==========
     private LongCounter snapshotCounter;
@@ -381,53 +394,77 @@ public class RaftNode {
     }
 
     public Future<Void> start() {
-        Promise<Void> promise = Promise.promise();
-        runOnContext(v -> {
-            try {
-                if (running) {
-                    promise.complete();
-                    return;
-                }
-
-                logger.info("Starting Raft node: {}", nodeId);
-
-                // Set initial Raft MDC context
-                MDC.put("raftRole", "FOLLOWER");
-                MDC.put("raftTerm", String.valueOf(currentTerm));
-
-                // Set reference to this node in transport
-                transport.setRaftNode(this);
-
-                // Recover state from WAL if storage is configured
-                recoverFromStorage()
-                    .onSuccess(v2 -> {
-                        try {
-                            // Start transport listener
-                            transport.start(this::handleMessage);
-
-                            // Start election timer
-                            resetElectionTimer();
-
-                            running = true;
-                            logger.info("Raft node {} started successfully (term={}, logSize={})",
-                                        nodeId, currentTerm, log.size());
-                            promise.complete();
-                        } catch (Exception e) {
-                            logger.error("Failed to start Raft transport: {}", e.getMessage(), e);
-                            promise.fail(e);
-                        }
-                    })
-                    .onFailure(err -> {
-                        logger.error("Failed to recover Raft state from storage: {}", err.getMessage(), err);
-                        promise.fail(err);
-                    });
-
-            } catch (Exception e) {
-                logger.error("Failed to start Raft node: {}", e.getMessage(), e);
-                promise.fail(e);
+        Promise<Void> shared;
+        synchronized (stopLock) {
+            if (stopPromise != null) {
+                return Future.failedFuture(new RaftTransitionSequencer.DrainingException());
             }
+            if (startPromise != null) return startPromise.future();
+            startPromise = Promise.promise();
+            shared = startPromise;
+        }
+
+        try {
+            runOnContext(v -> beginStart(shared));
+        } catch (Throwable error) {
+            shared.tryFail(error);
+        }
+        return shared.future();
+    }
+
+    private void beginStart(Promise<Void> completion) {
+        if (!beginOwnedAsyncOperation()) {
+            completion.tryFail(new RaftTransitionSequencer.DrainingException());
+            return;
+        }
+        try {
+            logger.info("Starting Raft node: {}", nodeId);
+            MDC.put("raftRole", "FOLLOWER");
+            MDC.put("raftTerm", String.valueOf(currentTerm));
+            transport.setRaftNode(this);
+            recoverFromStorage().onComplete(result ->
+                    runOnContext(v -> finishStart(result, completion)));
+        } catch (Throwable error) {
+            finishOwnedAsyncOperation();
+            completion.tryFail(error);
+        }
+    }
+
+    private void finishStart(
+            dev.mars.qraft.controller.runtime.AsyncResult<Void> recovery,
+            Promise<Void> completion) {
+        Throwable startupFailure = null;
+        try {
+            if (recovery.failed()) {
+                logger.error("Failed to recover Raft state from storage: {}",
+                        recovery.cause().getMessage(), recovery.cause());
+                startupFailure = recovery.cause();
+            } else if (ownedAsyncDraining) {
+                completion.tryFail(new RaftTransitionSequencer.DrainingException());
+            } else {
+                transport.start(this::handleMessage);
+                resetElectionTimer();
+                running = true;
+                logger.info("Raft node {} started successfully (term={}, logSize={})",
+                        nodeId, currentTerm, log.size());
+                completion.tryComplete();
+            }
+        } catch (Throwable error) {
+            logger.error("Failed to start Raft transport: {}", error.getMessage(), error);
+            startupFailure = error;
+        } finally {
+            finishOwnedAsyncOperation();
+        }
+        if (startupFailure != null) {
+            rollbackFailedStart(completion, startupFailure);
+        }
+    }
+
+    private void rollbackFailedStart(Promise<Void> completion, Throwable startupFailure) {
+        stop().onComplete(rollback -> {
+            Throwable combined = combineFailures(startupFailure, rollback.cause());
+            completion.tryFail(combined);
         });
-        return promise.future();
     }
 
     /**
@@ -444,16 +481,16 @@ public class RaftNode {
         SnapshotStore snapshots = snapshotStore.orElseThrow();
         logger.info("Recovering Raft state from storage...");
 
-        return toFuture(store.loadMetadata())
-            .compose(meta -> {
+        Future<Optional<SnapshotData>> snapshotLoad =
+                composeOnStateLoop(toFuture(store.loadMetadata()), meta -> {
                 this.currentTerm = meta.currentTerm();
                 this.votedFor = meta.votedFor().orElse(null);
                 logger.info("Recovered metadata: term={}, votedFor={}", currentTerm, votedFor);
 
                 // Try to load snapshot
                 return toFuture(snapshots.loadLatest());
-            })
-            .compose(snapshotOpt -> {
+            });
+        Future<List<LogEntryData>> replay = composeOnStateLoop(snapshotLoad, snapshotOpt -> {
                 if (snapshotOpt.isPresent()) {
                     SnapshotData snapshot = snapshotOpt.get();
                     logger.info("Restoring from snapshot: lastIncludedIndex={}, lastIncludedTerm={}",
@@ -476,8 +513,8 @@ public class RaftNode {
                 }
 
                 return toFuture(store.replayLog());
-            })
-            .compose(entries -> {
+            });
+        Future<Void> recovered = composeOnStateLoop(replay, entries -> {
                 if (snapshotLastIndex > 0) {
                     // Snapshot recovery: only replay entries AFTER the snapshot
                     int replayedCount = 0;
@@ -513,8 +550,9 @@ public class RaftNode {
                 }
 
                 return Future.<Void>succeededFuture();
-            })
-            .onSuccess(v -> logger.info("Recovery complete: term={}, logSize={}, lastApplied={}, snapshotLastIndex={}",
+            });
+        return recovered.onSuccess(v -> logger.info(
+                                "Recovery complete: term={}, logSize={}, lastApplied={}, snapshotLastIndex={}",
                                         currentTerm, log.size(), lastApplied, snapshotLastIndex))
             .onFailure(err -> {
                 logger.error("Recovery failed: {}", err.getMessage(), err);
@@ -547,36 +585,46 @@ public class RaftNode {
     }
 
     public Future<Void> stop() {
-        Promise<Void> promise = Promise.promise();
-        runOnContext(v -> {
-            try {
-                if (!running) {
-                    promise.complete();
-                    return;
-                }
-                running = false;
-                state = State.FOLLOWER;
-                currentLeaderId = null;
+        Promise<Void> shared;
+        synchronized (stopLock) {
+            if (stopPromise != null) return stopPromise.future();
+            stopPromise = Promise.promise();
+            shared = stopPromise;
+        }
 
-                cancelTimers();
-                transport.stop();
-                
-                // Close application snapshots before the WAL. Both are owned by durable mode.
-                closeDurableStorage()
-                    .onSuccess(v2 -> {
-                        logger.info("Raft node stopped: {}", nodeId);
-                        promise.complete();
-                    })
-                    .onFailure(err -> {
-                        logger.warn("Error closing storage during shutdown: {}", err.getMessage(), err);
-                        promise.complete(); // Still complete, just log the warning
-                    });
-            } catch (Exception e) {
-                logger.error("Failed to stop Raft node: {}", e.getMessage(), e);
-                promise.fail(e);
-            }
+        try {
+            runOnContext(v -> beginShutdown(shared));
+        } catch (Throwable error) {
+            shared.tryFail(error);
+        }
+        return shared.future();
+    }
+
+    private void beginShutdown(Promise<Void> completion) {
+        running = false;
+        cancelTimers();
+
+        Future.all(transitionSequencer.drain(), drainOwnedAsyncOperations()).onComplete(drainResult -> {
+            state = State.FOLLOWER;
+            currentLeaderId = null;
+            failPendingCommands(new IllegalStateException(
+                    "Node stopped before command commitment; outcome may be unknown"));
+            pendingInstalls.clear();
+            outboundSnapshotTransfers.clear();
+
+            closeNodeResources().onComplete(closeResult -> {
+                Throwable failure = combineFailures(
+                        drainResult.cause(), closeResult.cause());
+                if (failure == null) {
+                    logger.info("Raft node stopped: {}", nodeId);
+                    completion.tryComplete();
+                } else {
+                    logger.warn("Raft node shutdown completed with errors: {}",
+                            failure.getMessage(), failure);
+                    completion.tryFail(failure);
+                }
+            });
         });
-        return promise.future();
     }
 
     public Future<RaftCommandResult<?>> submitCommand(RaftCommand command) {
@@ -589,7 +637,12 @@ public class RaftNode {
                         () -> prepareAndPersistLeaderAppend(command),
                         decision -> applyLeaderAppend(decision, promise))
                 .onFailure(error -> {
-                    logger.error("Failed to persist command to WAL: {}", error.getMessage(), error);
+                    if (error instanceof RaftTransitionSequencer.DrainingException) {
+                        logger.debug("Command rejected while Raft transitions are draining: {}",
+                                error.getMessage());
+                    } else {
+                        logger.error("Failed to persist command to WAL: {}", error.getMessage(), error);
+                    }
                     promise.tryFail(error);
                 });
 
@@ -879,37 +932,59 @@ public class RaftNode {
     }
 
     private void cancelTimers() {
-        if (electionTimerId != -1)
-            runtime.cancelTimer(electionTimerId);
-        if (heartbeatTimerId != -1)
-            runtime.cancelTimer(heartbeatTimerId);
-        if (snapshotTimerId != -1)
-            runtime.cancelTimer(snapshotTimerId);
+        cancelElectionTimer();
+        cancelHeartbeatTimer();
+        cancelSnapshotTimer();
+        outboundSnapshotTransfers.clear();
+    }
+
+    private void cancelElectionTimer() {
+        if (electionTimerId != -1) runtime.cancelTimer(electionTimerId);
+        electionTimerId = -1;
+        electionTimerGeneration++;
+    }
+
+    private void cancelHeartbeatTimer() {
+        if (heartbeatTimerId != -1) runtime.cancelTimer(heartbeatTimerId);
+        heartbeatTimerId = -1;
+        heartbeatTimerGeneration++;
+    }
+
+    private void cancelSnapshotTimer() {
+        if (snapshotTimerId != -1) runtime.cancelTimer(snapshotTimerId);
+        snapshotTimerId = -1;
+        snapshotTimerGeneration++;
     }
 
     private void resetElectionTimer() {
-        if (electionTimerId != -1) {
-            runtime.cancelTimer(electionTimerId);
-        }
+        cancelElectionTimer();
 
         long timeout = electionTimeoutMs + (long) (Math.random() * electionTimeoutMs);
+        long timerGeneration = electionTimerGeneration;
 
-        electionTimerId = setTimer(timeout, id -> startElection());
+        electionTimerId = setTimer(timeout, id -> onElectionTimer(id, timerGeneration));
     }
 
-    private void startElection() {
+    private void onElectionTimer(long timerId, long timerGeneration) {
+        if (timerId != electionTimerId || timerGeneration != electionTimerGeneration) return;
+        electionTimerId = -1;
+        startElection(timerGeneration);
+    }
+
+    private void startElection(long timerGeneration) {
         transitionSequencer.submit(
                         "start-election",
                         RaftTransitionSequencer.FailurePolicy.FENCE,
-                        this::prepareAndPersistElection,
+                        () -> prepareAndPersistElection(timerGeneration),
                         this::applyElection)
                 .onFailure(error -> logger.error(
                         "Failed to start election because metadata durability is uncertain: {}",
                         error.getMessage(), error));
     }
 
-    private Future<ElectionDecision> prepareAndPersistElection() {
-        if (!running || state == State.LEADER) {
+    private Future<ElectionDecision> prepareAndPersistElection(long timerGeneration) {
+        if (!running || state == State.LEADER
+                || timerGeneration != electionTimerGeneration) {
             return Future.succeededFuture(new ElectionDecision(false, currentTerm));
         }
 
@@ -961,7 +1036,7 @@ public class RaftNode {
 
                 // Using transport (Wait for Future integration)
                 transport.sendVoteRequest(peerId, request)
-                        .onSuccess(response -> runOnContext(v -> handleVoteResponse(response, term, voteCount)))
+                        .onSuccess(response -> sequenceVoteResponse(response, term, voteCount))
                         .onFailure(e -> logger.error("Failed to retrieve vote from {}", peerId, e));
 
                 // Record edge metric for nodeGraph visualization
@@ -974,27 +1049,52 @@ public class RaftNode {
         }
     }
 
-    private void handleVoteResponse(VoteResponse response, long electionTerm, AtomicLong voteCount) {
-        if (state != State.CANDIDATE || currentTerm != electionTerm)
-            return;
+    private void sequenceVoteResponse(
+            VoteResponse response, long electionTerm, AtomicLong voteCount) {
+        transitionSequencer.submit(
+                        "vote-response:" + electionTerm + ":" + response.getTerm(),
+                        RaftTransitionSequencer.FailurePolicy.FENCE,
+                        () -> prepareVoteResponse(response),
+                        decision -> applyVoteResponse(decision, electionTerm, voteCount))
+                .onFailure(error -> logger.error(
+                        "Failed to process vote response for election term {}: {}",
+                        electionTerm, error.getMessage(), error));
+    }
 
-        if (response.getTerm() > currentTerm) {
-            stepDown(response.getTerm());
-            return;
+    private Future<VoteResponseDecision> prepareVoteResponse(VoteResponse response) {
+        if (response.getTerm() <= currentTerm) {
+            return Future.succeededFuture(new VoteResponseDecision(response, false));
         }
+        return persistMetadata(response.getTerm(), Optional.empty())
+                .map(ignored -> new VoteResponseDecision(response, true));
+    }
 
+    private Void applyVoteResponse(
+            VoteResponseDecision decision, long electionTerm, AtomicLong voteCount) {
+        VoteResponse response = decision.response();
+        if (decision.higherTerm()) {
+            applyDurableHigherTerm(response.getTerm(), null);
+            return null;
+        }
+        if (state != State.CANDIDATE || currentTerm != electionTerm) {
+            return null;
+        }
         if (response.getVoteGranted()) {
             long votes = voteCount.incrementAndGet();
             if (votes > clusterNodes.size() / 2) {
                 becomeLeader();
             }
         }
+        return null;
     }
+
+    private record VoteResponseDecision(VoteResponse response, boolean higherTerm) {}
 
     private void becomeLeader() {
         if (state != State.CANDIDATE)
             return;
 
+        outboundSnapshotTransfers.clear();
         state = State.LEADER;
         leadershipGeneration++;
         currentLeaderId = nodeId;
@@ -1003,8 +1103,7 @@ public class RaftNode {
         logger.info("Node {} became LEADER for term {}", nodeId, currentTerm);
         notifyStateChangeListeners(State.LEADER);
 
-        if (electionTimerId != -1)
-            runtime.cancelTimer(electionTimerId);
+        cancelElectionTimer();
 
         initializeLeaderState();
         startHeartbeats();
@@ -1023,8 +1122,47 @@ public class RaftNode {
     }
 
     private void startHeartbeats() {
-        heartbeatTimerId = setPeriodic(heartbeatIntervalMs, id -> sendHeartbeats());
+        cancelHeartbeatTimer();
+        long timerGeneration = heartbeatTimerGeneration;
+        long term = currentTerm;
+        long leaderGeneration = leadershipGeneration;
+        heartbeatTimerId = setPeriodic(heartbeatIntervalMs,
+                id -> onHeartbeatTimer(id, timerGeneration, term, leaderGeneration));
     }
+
+    private void onHeartbeatTimer(
+            long timerId, long timerGeneration, long term, long leaderGeneration) {
+        if (timerId != heartbeatTimerId
+                || timerGeneration != heartbeatTimerGeneration
+                || heartbeatTimerTransitionPending) {
+            return;
+        }
+        heartbeatTimerTransitionPending = true;
+        transitionSequencer.submit(
+                        "heartbeat-timer:" + term + ":" + leaderGeneration,
+                        RaftTransitionSequencer.FailurePolicy.CONTINUE,
+                        () -> Future.succeededFuture(new HeartbeatTimerDecision(
+                                timerGeneration, term, leaderGeneration)),
+                        this::applyHeartbeatTimer)
+                .onComplete(result -> {
+                    heartbeatTimerTransitionPending = false;
+                    if (result.failed()) {
+                        logger.debug("Could not admit heartbeat timer event: {}",
+                                result.cause().toString());
+                    }
+                });
+    }
+
+    private Void applyHeartbeatTimer(HeartbeatTimerDecision decision) {
+        if (decision.timerGeneration() == heartbeatTimerGeneration
+                && isCurrentLeadership(decision.term(), decision.leaderGeneration())) {
+            sendHeartbeats();
+        }
+        return null;
+    }
+
+    private record HeartbeatTimerDecision(
+            long timerGeneration, long term, long leaderGeneration) {}
 
     private void sendHeartbeats() {
         if (state != State.LEADER)
@@ -1222,26 +1360,26 @@ public class RaftNode {
     public Future<AppendEntriesResponse> handleAppendEntriesRequest(AppendEntriesRequest request) {
         requireNonNull(request, "request");
         Promise<AppendEntriesResponse> response = Promise.promise();
-        transitionSequencer.submit(
+        Future<FollowerAppendResult> transition = transitionSequencer.submit(
                         "append-entries:" + request.getLeaderId() + ":" + request.getTerm(),
                         RaftTransitionSequencer.FailurePolicy.FENCE,
                         () -> prepareAndPersistFollowerAppend(request),
-                        this::applyFollowerAppend)
-                .onComplete(result -> {
-                    if (result.failed()) {
-                        Throwable error = result.cause();
-                        logger.error("AppendEntries failed during durable transition: {}",
-                                error.getMessage(), error);
-                        response.tryComplete(AppendEntriesResponse.newBuilder()
-                                .setTerm(currentTerm)
-                                .setSuccess(false)
-                                .build());
-                    } else if (result.result().requestFailure() != null) {
-                        response.tryFail(result.result().requestFailure());
-                    } else {
-                        response.tryComplete(result.result().response());
-                    }
-                });
+                        this::applyFollowerAppend);
+        onStateLoopComplete(transition, result -> {
+            if (result.failed()) {
+                Throwable error = result.cause();
+                logger.error("AppendEntries failed during durable transition: {}",
+                        error.getMessage(), error);
+                response.tryComplete(AppendEntriesResponse.newBuilder()
+                        .setTerm(currentTerm)
+                        .setSuccess(false)
+                        .build());
+            } else if (result.result().requestFailure() != null) {
+                response.tryFail(result.result().requestFailure());
+            } else {
+                response.tryComplete(result.result().response());
+            }
+        });
         return response.future();
     }
 
@@ -1329,10 +1467,8 @@ public class RaftNode {
             MDC.put("raftRole", "FOLLOWER");
             MDC.put("raftTerm", String.valueOf(currentTerm));
             notifyStateChangeListeners(State.FOLLOWER);
-            if (heartbeatTimerId != -1) {
-                runtime.cancelTimer(heartbeatTimerId);
-                heartbeatTimerId = -1;
-            }
+            cancelHeartbeatTimer();
+            cancelSnapshotTimer();
         }
         currentLeaderId = request.getLeaderId();
         resetElectionTimer();
@@ -1516,9 +1652,15 @@ public class RaftNode {
                         () -> prepareAppendEntriesResponse(
                                 peerId, response, originatingTerm, originatingGeneration),
                         this::applyAppendEntriesResponse)
-                .onFailure(error -> logger.error(
-                        "Failed to process AppendEntries response from {}: {}",
-                        peerId, error.getMessage(), error));
+                .onFailure(error -> {
+                    if (error instanceof RaftTransitionSequencer.DrainingException) {
+                        logger.debug("Ignoring AppendEntries response from {} while draining: {}",
+                                peerId, error.getMessage());
+                    } else {
+                        logger.error("Failed to process AppendEntries response from {}: {}",
+                                peerId, error.getMessage(), error);
+                    }
+                });
     }
 
     private Future<AppendResponseDecision> prepareAppendEntriesResponse(
@@ -1658,10 +1800,12 @@ public class RaftNode {
         if (!snapshotEnabled) {
             return;
         }
-        if (snapshotTimerId != -1) {
-            runtime.cancelTimer(snapshotTimerId);
-        }
-        snapshotTimerId = setPeriodic(snapshotCheckIntervalMs, id -> checkAndTakeSnapshot());
+        cancelSnapshotTimer();
+        long timerGeneration = snapshotTimerGeneration;
+        long term = currentTerm;
+        long leaderGeneration = leadershipGeneration;
+        snapshotTimerId = setPeriodic(snapshotCheckIntervalMs,
+                id -> onSnapshotTimer(id, timerGeneration, term, leaderGeneration));
         logger.info("Snapshot scheduler started: threshold={}, checkInterval={}ms",
                 snapshotThreshold, snapshotCheckIntervalMs);
     }
@@ -1670,21 +1814,49 @@ public class RaftNode {
      * Checks whether a snapshot is needed and takes one if the threshold is reached.
      * Only the leader takes snapshots to avoid redundant work.
      */
-    private void checkAndTakeSnapshot() {
-        if (state != State.LEADER || !snapshotEnabled) {
+    private void onSnapshotTimer(
+            long timerId, long timerGeneration, long term, long leaderGeneration) {
+        if (timerId != snapshotTimerId
+                || timerGeneration != snapshotTimerGeneration
+                || snapshotTimerTransitionPending) {
             return;
+        }
+        snapshotTimerTransitionPending = true;
+        transitionSequencer.submit(
+                        "snapshot-timer:" + term + ":" + leaderGeneration,
+                        RaftTransitionSequencer.FailurePolicy.FENCE,
+                        () -> prepareScheduledSnapshot(timerGeneration, term, leaderGeneration),
+                        this::applyLocalSnapshot)
+                .onComplete(result -> {
+                    snapshotTimerTransitionPending = false;
+                    if (result.failed()) {
+                        logger.error("Scheduled snapshot failed: {}",
+                                result.cause().getMessage(), result.cause());
+                    } else if (result.result().failure() != null) {
+                        logger.error("Scheduled snapshot failed: {}",
+                                result.result().failure().getMessage(), result.result().failure());
+                    }
+                });
+    }
+
+    private Future<LocalSnapshotDecision> prepareScheduledSnapshot(
+            long timerGeneration, long term, long leaderGeneration) {
+        if (!snapshotEnabled
+                || timerGeneration != snapshotTimerGeneration
+                || !isCurrentLeadership(term, leaderGeneration)) {
+            return Future.succeededFuture(LocalSnapshotDecision.skipped());
         }
 
         long entriesSinceSnapshot = lastApplied - snapshotLastIndex;
         if (entriesSinceSnapshot < snapshotThreshold) {
             logger.debug("Snapshot check: {} entries since last snapshot (threshold: {})",
                     entriesSinceSnapshot, snapshotThreshold);
-            return;
+            return Future.succeededFuture(LocalSnapshotDecision.skipped());
         }
 
         logger.info("Snapshot threshold reached: {} entries since last snapshot, triggering snapshot",
                 entriesSinceSnapshot);
-        takeSnapshot();
+        return preparePublishAndCompactLocalSnapshot();
     }
 
     /**
@@ -1836,7 +2008,7 @@ public class RaftNode {
      */
     private void sendInstallSnapshot(String target) {
         // Prevent concurrent snapshot installs to the same follower
-        if (installSnapshotInProgress.contains(target)) {
+        if (outboundSnapshotTransfers.containsKey(target)) {
             logger.debug("InstallSnapshot already in progress for {}, skipping", target);
             return;
         }
@@ -1845,41 +2017,124 @@ public class RaftNode {
             return;
         }
 
-        installSnapshotInProgress.add(target);
+        OutboundSnapshotTransfer transfer = new OutboundSnapshotTransfer(
+                target, currentTerm, leadershipGeneration, ++outboundSnapshotTransferSequence);
+        if (!beginOwnedAsyncOperation()) return;
+        outboundSnapshotTransfers.put(target, transfer);
         logger.info("Sending InstallSnapshot to lagging follower {} (nextIndex={}, snapshotLastIndex={})",
                 target, nextIndex.getOrDefault(target, 1L), snapshotLastIndex);
 
-        toFuture(snapshotStore.orElseThrow().loadLatest())
-                .onSuccess(snapshotOpt -> {
-                    if (snapshotOpt.isEmpty()) {
-                        logger.warn("No snapshot available to send to {}", target);
-                        installSnapshotInProgress.remove(target);
-                        return;
-                    }
-                    SnapshotData snapshot = snapshotOpt.get();
-                    byte[] data = snapshot.data();
-                    int totalChunks = Math.max(1, (int) Math.ceil((double) data.length / SNAPSHOT_CHUNK_SIZE));
+        Future<Optional<SnapshotData>> load;
+        try {
+            load = toFuture(snapshotStore.orElseThrow().loadLatest());
+        } catch (Throwable error) {
+            sequenceOutboundSnapshotLoad(transfer, Optional.empty(), error);
+            return;
+        }
+        onStateLoopComplete(load, result -> sequenceOutboundSnapshotLoad(
+                transfer,
+                result.succeeded() ? result.result() : Optional.empty(),
+                result.cause()));
+    }
 
-                    logger.info("Sending snapshot to {}: {} bytes in {} chunk(s), lastIncludedIndex={}, lastIncludedTerm={}",
-                            target, data.length, totalChunks, snapshot.lastIncludedIndex(), snapshot.lastIncludedTerm());
+    private void sequenceOutboundSnapshotLoad(
+            OutboundSnapshotTransfer transfer,
+            Optional<SnapshotData> snapshot,
+            Throwable error) {
+        Future<Void> transition = transitionSequencer.submit(
+                        "snapshot-load:" + transfer.target() + ":" + transfer.sequence(),
+                        RaftTransitionSequencer.FailurePolicy.CONTINUE,
+                        () -> Future.succeededFuture(
+                                new OutboundSnapshotLoadDecision(transfer, snapshot, error)),
+                        this::applyOutboundSnapshotLoad);
+        onStateLoopComplete(transition, result -> {
+            finishOwnedAsyncOperation();
+            if (result.failed()) {
+                removeOutboundSnapshotTransfer(transfer);
+                logger.debug("Could not admit snapshot load completion for {}: {}",
+                        transfer.target(), result.cause().toString());
+            }
+        });
+    }
 
-                    sendSnapshotChunk(target, snapshot, data, 0, totalChunks);
-                })
-                .onFailure(err -> {
-                    logger.error("Failed to load snapshot for InstallSnapshot to {}: {}", target, err.getMessage());
-                    installSnapshotInProgress.remove(target);
-                });
+    private boolean beginOwnedAsyncOperation() {
+        if (ownedAsyncDraining) {
+            logger.debug("Rejecting new owned asynchronous operation while draining");
+            return false;
+        }
+        ownedAsyncOperations++;
+        return true;
+    }
+
+    private void finishOwnedAsyncOperation() {
+        if (ownedAsyncOperations <= 0) {
+            throw new IllegalStateException("Owned asynchronous operation completed without admission");
+        }
+        ownedAsyncOperations--;
+        completeOwnedAsyncDrainIfIdle();
+    }
+
+    private Future<Void> drainOwnedAsyncOperations() {
+        ownedAsyncDraining = true;
+        if (ownedAsyncDrainPromise == null) ownedAsyncDrainPromise = Promise.promise();
+        completeOwnedAsyncDrainIfIdle();
+        return ownedAsyncDrainPromise.future();
+    }
+
+    private void completeOwnedAsyncDrainIfIdle() {
+        if (ownedAsyncDrainPromise != null && ownedAsyncOperations == 0) {
+            ownedAsyncDrainPromise.tryComplete();
+        }
+    }
+
+    private Void applyOutboundSnapshotLoad(OutboundSnapshotLoadDecision decision) {
+        OutboundSnapshotTransfer transfer = decision.transfer();
+        if (!isCurrentOutboundTransfer(transfer)) return null;
+        if (!isCurrentLeadership(transfer.term(), transfer.leaderGeneration())) {
+            removeOutboundSnapshotTransfer(transfer);
+            return null;
+        }
+        if (decision.error() != null) {
+            logger.error("Failed to load snapshot for InstallSnapshot to {}: {}",
+                    transfer.target(), decision.error().getMessage(), decision.error());
+            removeOutboundSnapshotTransfer(transfer);
+            return null;
+        }
+        if (decision.snapshot().isEmpty()) {
+            logger.warn("No snapshot available to send to {}", transfer.target());
+            removeOutboundSnapshotTransfer(transfer);
+            return null;
+        }
+
+        SnapshotData snapshot = decision.snapshot().orElseThrow();
+        byte[] data = snapshot.data();
+        int totalChunks = Math.max(1,
+                (int) Math.ceil((double) data.length / SNAPSHOT_CHUNK_SIZE));
+        logger.info("Sending snapshot to {}: {} bytes in {} chunk(s), lastIncludedIndex={}, lastIncludedTerm={}",
+                transfer.target(), data.length, totalChunks,
+                snapshot.lastIncludedIndex(), snapshot.lastIncludedTerm());
+        sendSnapshotChunk(transfer, snapshot, data, 0, totalChunks);
+        return null;
     }
 
     /**
      * Sends a single snapshot chunk sequentially. On success, sends the next chunk
      * or completes the install if this was the last chunk.
      */
-    private void sendSnapshotChunk(String target, SnapshotData snapshot, byte[] data,
+    private void sendSnapshotChunk(OutboundSnapshotTransfer transfer,
+                                    SnapshotData snapshot, byte[] data,
                                     int chunkIndex, int totalChunks) {
-        if (state != State.LEADER) {
-            logger.debug("No longer leader, aborting InstallSnapshot to {}", target);
-            installSnapshotInProgress.remove(target);
+        String target = transfer.target();
+        if (!isCurrentOutboundTransfer(transfer)
+                || !isCurrentLeadership(transfer.term(), transfer.leaderGeneration())) {
+            logger.debug("Leadership ownership changed, aborting InstallSnapshot to {}", target);
+            removeOutboundSnapshotTransfer(transfer);
+            return;
+        }
+        if (chunkIndex < 0 || chunkIndex >= totalChunks) {
+            logger.warn("Invalid InstallSnapshot chunk {} of {} for {}",
+                    chunkIndex, totalChunks, target);
+            removeOutboundSnapshotTransfer(transfer);
             return;
         }
 
@@ -1888,7 +2143,7 @@ public class RaftNode {
         boolean isLast = (chunkIndex == totalChunks - 1);
 
         InstallSnapshotRequest request = InstallSnapshotRequest.newBuilder()
-                .setTerm(currentTerm)
+                .setTerm(transfer.term())
                 .setLeaderId(nodeId)
                 .setLastIncludedIndex(snapshot.lastIncludedIndex())
                 .setLastIncludedTerm(snapshot.lastIncludedTerm())
@@ -1901,40 +2156,10 @@ public class RaftNode {
         installSnapshotSent.add(1);
 
         transport.sendInstallSnapshot(target, request)
-                .onSuccess(response -> runOnContext(v -> {
-                    if (response.getTerm() > currentTerm) {
-                        stepDown(response.getTerm());
-                        installSnapshotInProgress.remove(target);
-                        return;
-                    }
-
-                    if (!response.getSuccess()) {
-                        logger.warn("InstallSnapshot chunk {}/{} rejected by {}, retrying from chunk {}",
-                                chunkIndex + 1, totalChunks, target, response.getNextChunkIndex());
-                        // Retry from the chunk the follower expects
-                        sendSnapshotChunk(target, snapshot, data, response.getNextChunkIndex(), totalChunks);
-                        return;
-                    }
-
-                    if (isLast) {
-                        // Snapshot fully installed — update follower tracking
-                        long snapIdx = snapshot.lastIncludedIndex();
-                        nextIndex.put(target, snapIdx + 1);
-                        matchIndex.put(target, snapIdx);
-                        installSnapshotInProgress.remove(target);
-                        logger.info("InstallSnapshot to {} complete: nextIndex={}, matchIndex={}",
-                                target, snapIdx + 1, snapIdx);
-                        updateCommitIndex();
-                    } else {
-                        // Send next chunk
-                        sendSnapshotChunk(target, snapshot, data, chunkIndex + 1, totalChunks);
-                    }
-                }))
-                .onFailure(err -> {
-                    logger.error("Failed to send InstallSnapshot chunk {}/{} to {}: {}",
-                            chunkIndex + 1, totalChunks, target, err.getMessage());
-                    installSnapshotInProgress.remove(target);
-                });
+                .onSuccess(response -> sequenceOutboundSnapshotResponse(
+                        transfer, snapshot, data, chunkIndex, totalChunks, isLast, response))
+                .onFailure(error -> sequenceOutboundSnapshotFailure(
+                        transfer, chunkIndex, totalChunks, error));
 
         rpcCounter.add(1, Attributes.of(
                 AttributeKey.stringKey("source"), nodeId,
@@ -1942,6 +2167,137 @@ public class RaftNode {
                 AttributeKey.stringKey("type"), "install_snapshot"
         ));
     }
+
+    private void sequenceOutboundSnapshotResponse(
+            OutboundSnapshotTransfer transfer, SnapshotData snapshot, byte[] data,
+            int chunkIndex, int totalChunks, boolean last,
+            InstallSnapshotResponse response) {
+        transitionSequencer.submit(
+                        "snapshot-response:" + transfer.target() + ":" + transfer.sequence()
+                                + ":" + chunkIndex,
+                        RaftTransitionSequencer.FailurePolicy.FENCE,
+                        () -> prepareOutboundSnapshotResponse(
+                                transfer, snapshot, data, chunkIndex, totalChunks, last, response),
+                        this::applyOutboundSnapshotResponse)
+                .onFailure(error -> logger.error(
+                        "Failed to process InstallSnapshot response from {}: {}",
+                        transfer.target(), error.getMessage(), error));
+    }
+
+    private Future<OutboundSnapshotResponseDecision> prepareOutboundSnapshotResponse(
+            OutboundSnapshotTransfer transfer, SnapshotData snapshot, byte[] data,
+            int chunkIndex, int totalChunks, boolean last,
+            InstallSnapshotResponse response) {
+        OutboundSnapshotResponseDecision decision = new OutboundSnapshotResponseDecision(
+                transfer, snapshot, data, chunkIndex, totalChunks, last, response,
+                response.getTerm() > currentTerm);
+        if (!decision.higherTerm()) return Future.succeededFuture(decision);
+        return persistMetadata(response.getTerm(), Optional.empty()).map(decision);
+    }
+
+    private Void applyOutboundSnapshotResponse(OutboundSnapshotResponseDecision decision) {
+        InstallSnapshotResponse response = decision.response();
+        if (decision.higherTerm()) {
+            applyDurableHigherTerm(response.getTerm(), null);
+            return null;
+        }
+
+        OutboundSnapshotTransfer transfer = decision.transfer();
+        if (!isCurrentOutboundTransfer(transfer)
+                || !isCurrentLeadership(transfer.term(), transfer.leaderGeneration())) {
+            return null;
+        }
+
+        if (!response.getSuccess()) {
+            int retryChunk = response.getNextChunkIndex();
+            if (retryChunk < 0 || retryChunk >= decision.totalChunks()) {
+                logger.warn("InstallSnapshot response from {} requested invalid chunk {} of {}",
+                        transfer.target(), retryChunk, decision.totalChunks());
+                removeOutboundSnapshotTransfer(transfer);
+                return null;
+            }
+            logger.warn("InstallSnapshot chunk {}/{} rejected by {}, retrying from chunk {}",
+                    decision.chunkIndex() + 1, decision.totalChunks(),
+                    transfer.target(), retryChunk);
+            sendSnapshotChunk(transfer, decision.snapshot(), decision.data(),
+                    retryChunk, decision.totalChunks());
+            return null;
+        }
+
+        if (decision.last()) {
+            long snapshotIndex = decision.snapshot().lastIncludedIndex();
+            nextIndex.put(transfer.target(), snapshotIndex + 1);
+            matchIndex.put(transfer.target(), snapshotIndex);
+            removeOutboundSnapshotTransfer(transfer);
+            logger.info("InstallSnapshot to {} complete: nextIndex={}, matchIndex={}",
+                    transfer.target(), snapshotIndex + 1, snapshotIndex);
+            updateCommitIndex();
+        } else {
+            sendSnapshotChunk(transfer, decision.snapshot(), decision.data(),
+                    decision.chunkIndex() + 1, decision.totalChunks());
+        }
+        return null;
+    }
+
+    private void sequenceOutboundSnapshotFailure(
+            OutboundSnapshotTransfer transfer,
+            int chunkIndex, int totalChunks, Throwable error) {
+        transitionSequencer.submit(
+                        "snapshot-failure:" + transfer.target() + ":" + transfer.sequence()
+                                + ":" + chunkIndex,
+                        RaftTransitionSequencer.FailurePolicy.CONTINUE,
+                        () -> Future.succeededFuture(new OutboundSnapshotFailureDecision(
+                                transfer, chunkIndex, totalChunks, error)),
+                        this::applyOutboundSnapshotFailure)
+                .onFailure(rejected -> logger.debug(
+                        "Could not admit InstallSnapshot failure for {}: {}",
+                        transfer.target(), rejected.toString()));
+    }
+
+    private Void applyOutboundSnapshotFailure(OutboundSnapshotFailureDecision decision) {
+        OutboundSnapshotTransfer transfer = decision.transfer();
+        if (!isCurrentOutboundTransfer(transfer)
+                || !isCurrentLeadership(transfer.term(), transfer.leaderGeneration())) {
+            return null;
+        }
+        logger.error("Failed to send InstallSnapshot chunk {}/{} to {}: {}",
+                decision.chunkIndex() + 1, decision.totalChunks(), transfer.target(),
+                decision.error().getMessage(), decision.error());
+        removeOutboundSnapshotTransfer(transfer);
+        return null;
+    }
+
+    private boolean isCurrentOutboundTransfer(OutboundSnapshotTransfer transfer) {
+        return outboundSnapshotTransfers.get(transfer.target()) == transfer;
+    }
+
+    private void removeOutboundSnapshotTransfer(OutboundSnapshotTransfer transfer) {
+        outboundSnapshotTransfers.remove(transfer.target(), transfer);
+    }
+
+    private record OutboundSnapshotTransfer(
+            String target, long term, long leaderGeneration, long sequence) {}
+
+    private record OutboundSnapshotLoadDecision(
+            OutboundSnapshotTransfer transfer,
+            Optional<SnapshotData> snapshot,
+            Throwable error) {}
+
+    private record OutboundSnapshotResponseDecision(
+            OutboundSnapshotTransfer transfer,
+            SnapshotData snapshot,
+            byte[] data,
+            int chunkIndex,
+            int totalChunks,
+            boolean last,
+            InstallSnapshotResponse response,
+            boolean higherTerm) {}
+
+    private record OutboundSnapshotFailureDecision(
+            OutboundSnapshotTransfer transfer,
+            int chunkIndex,
+            int totalChunks,
+            Throwable error) {}
 
     // ========== INSTALL SNAPSHOT (Follower Side) ==========
 
@@ -1956,26 +2312,26 @@ public class RaftNode {
     public Future<InstallSnapshotResponse> handleInstallSnapshot(InstallSnapshotRequest request) {
         requireNonNull(request, "request");
         Promise<InstallSnapshotResponse> promise = Promise.promise();
-        transitionSequencer.submit(
+        Future<InstallSnapshotResponse> transition = transitionSequencer.submit(
                         "install-snapshot:" + request.getLeaderId() + ":" + request.getTerm()
                                 + ":" + request.getChunkIndex(),
                         RaftTransitionSequencer.FailurePolicy.FENCE,
                         () -> prepareAndPersistInstalledSnapshot(request),
-                        this::applyInstalledSnapshot)
-                .onComplete(result -> {
-                    if (result.succeeded()) {
-                        promise.tryComplete(result.result());
-                    } else {
-                        Throwable error = result.cause();
-                        logger.error("InstallSnapshot durable transition failed: {}",
-                                error.getMessage(), error);
-                        promise.tryComplete(InstallSnapshotResponse.newBuilder()
-                                .setTerm(currentTerm)
-                                .setSuccess(false)
-                                .setNextChunkIndex(0)
-                                .build());
-                    }
-                });
+                        this::applyInstalledSnapshot);
+        onStateLoopComplete(transition, result -> {
+            if (result.succeeded()) {
+                promise.tryComplete(result.result());
+            } else {
+                Throwable error = result.cause();
+                logger.error("InstallSnapshot durable transition failed: {}",
+                        error.getMessage(), error);
+                promise.tryComplete(InstallSnapshotResponse.newBuilder()
+                        .setTerm(currentTerm)
+                        .setSuccess(false)
+                        .setNextChunkIndex(0)
+                        .build());
+            }
+        });
         return promise.future();
     }
 
@@ -2110,10 +2466,8 @@ public class RaftNode {
             notifyStateChangeListeners(State.FOLLOWER);
             failPendingCommands(new IllegalStateException(
                     "Leadership lost before command commit; outcome may be unknown"));
-            if (heartbeatTimerId != -1) {
-                runtime.cancelTimer(heartbeatTimerId);
-                heartbeatTimerId = -1;
-            }
+            cancelHeartbeatTimer();
+            cancelSnapshotTimer();
         }
         if (plan.clearAssemblers()) pendingInstalls.clear();
         currentLeaderId = request.getLeaderId();
@@ -2286,20 +2640,43 @@ public class RaftNode {
 
     // ========== SERIALIZATION ==========
 
-    private Future<Void> closeDurableStorage() {
-        Throwable failure = null;
-        try {
-            if (snapshotStore.isPresent()) snapshotStore.get().close();
-        } catch (Throwable error) {
-            failure = error;
-        }
-        try {
-            if (storage.isPresent()) storage.get().close();
-        } catch (Throwable error) {
-            if (failure == null) failure = error;
-            else failure.addSuppressed(error);
-        }
-        return failure == null ? Future.succeededFuture() : Future.failedFuture(failure);
+    private Future<Void> closeNodeResources() {
+        return runtime.executeBlocking(() -> {
+            Throwable failure = null;
+            try {
+                transport.stop();
+            } catch (Throwable error) {
+                failure = error;
+            }
+
+            Object snapshots = snapshotStore.orElse(null);
+            Object wal = storage.orElse(null);
+            if (snapshots != null) {
+                try {
+                    ((SnapshotStore) snapshots).close();
+                } catch (Throwable error) {
+                    failure = combineFailures(failure, error);
+                }
+            }
+            if (wal != null && wal != snapshots) {
+                try {
+                    ((RaftStorage) wal).close();
+                } catch (Throwable error) {
+                    failure = combineFailures(failure, error);
+                }
+            }
+
+            if (failure instanceof Exception exception) throw exception;
+            if (failure instanceof Error error) throw error;
+            if (failure != null) throw new IllegalStateException(failure);
+            return null;
+        });
+    }
+
+    private static Throwable combineFailures(Throwable first, Throwable second) {
+        if (first == null) return second;
+        if (second != null && second != first) first.addSuppressed(second);
+        return first;
     }
 
     private static <T> Future<T> toFuture(CompletableFuture<T> future) {
@@ -2312,6 +2689,81 @@ public class RaftNode {
 
     private void runOnContext(java.util.function.Consumer<Void> action) {
         runtime.runOnContext(ignored -> withLoggingContext(() -> action.accept(null)));
+    }
+
+    private <T> void onStateLoopComplete(
+            Future<T> future,
+            java.util.function.Consumer<dev.mars.qraft.controller.runtime.AsyncResult<T>> action) {
+        future.onComplete(result -> {
+            if (JavaRuntime.currentContext() == runtime) {
+                action.accept(result);
+            } else {
+                runOnContext(ignored -> action.accept(result));
+            }
+        });
+    }
+
+    private <T, U> Future<U> composeOnStateLoop(
+            Future<T> source,
+            Function<? super T, Future<U>> continuation) {
+        Promise<U> result = Promise.promise();
+        Map<String, String> capturedMdc = Optional.ofNullable(MDC.getCopyOfContextMap())
+                .map(HashMap::new)
+                .orElseGet(HashMap::new);
+        io.opentelemetry.context.Context capturedTrace = io.opentelemetry.context.Context.current();
+        source.onComplete(sourceResult -> dispatchRecoveryContinuation(() -> {
+            if (sourceResult.failed()) {
+                result.tryFail(sourceResult.cause());
+                return;
+            }
+
+            Future<U> next;
+            try {
+                next = requireNonNull(continuation.apply(sourceResult.result()),
+                        "recovery continuation returned null");
+            } catch (Throwable error) {
+                result.tryFail(error);
+                return;
+            }
+
+            next.onComplete(nextResult -> dispatchRecoveryContinuation(() -> {
+                if (nextResult.succeeded()) result.tryComplete(nextResult.result());
+                else result.tryFail(nextResult.cause());
+            }, result, capturedMdc, capturedTrace));
+        }, result, capturedMdc, capturedTrace));
+        return result.future();
+    }
+
+    private void dispatchRecoveryContinuation(
+            Runnable action,
+            Promise<?> rejectionTarget,
+            Map<String, String> capturedMdc,
+            io.opentelemetry.context.Context capturedTrace) {
+        if (JavaRuntime.currentContext() == runtime) {
+            runWithCapturedContext(action, capturedMdc, capturedTrace);
+            return;
+        }
+        try {
+            runWithCapturedContext(
+                    () -> runOnContext(ignored -> action.run()), capturedMdc, capturedTrace);
+        } catch (Throwable error) {
+            rejectionTarget.tryFail(error);
+        }
+    }
+
+    private void runWithCapturedContext(
+            Runnable action,
+            Map<String, String> capturedMdc,
+            io.opentelemetry.context.Context capturedTrace) {
+        Map<String, String> previousMdc = MDC.getCopyOfContextMap();
+        try (io.opentelemetry.context.Scope ignored = capturedTrace.makeCurrent()) {
+            if (capturedMdc.isEmpty()) MDC.clear();
+            else MDC.setContextMap(capturedMdc);
+            action.run();
+        } finally {
+            if (previousMdc == null || previousMdc.isEmpty()) MDC.clear();
+            else MDC.setContextMap(previousMdc);
+        }
     }
 
     private long setTimer(long delayMs, java.util.function.Consumer<Long> action) {
