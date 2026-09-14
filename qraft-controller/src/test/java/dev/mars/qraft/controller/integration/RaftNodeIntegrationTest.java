@@ -10,7 +10,7 @@ import dev.mars.qraft.controller.raft.RaftTransport;
 
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.RaftCommand;
-import dev.mars.qraft.controller.state.CommandResult;
+import dev.mars.qraft.controller.state.RaftCommandResult;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
@@ -117,8 +117,8 @@ public class RaftNodeIntegrationTest {
 
     static class TestRaftLogApplicator implements RaftLogApplicator {
         @Override
-        public CommandResult<?> apply(RaftCommand command) {
-            return new CommandResult.NoOp<>();
+        public RaftCommandResult<?> apply(RaftCommand command) {
+            return new RaftCommandResult.NoOp<>();
         }
 
         @Override

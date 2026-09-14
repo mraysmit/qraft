@@ -22,7 +22,7 @@ import java.util.Objects;
  * Algebraic data type for the result of applying a {@link RaftCommand} to the state machine.
  *
  * <p>Replaces the previous {@code Object} return (which used {@code null} to signal
- * "entity not found") with an explicit sum type. Callers pattern-match on the three
+ * "entity not found") with an explicit sum type. Callers pattern-match on the four
  * permitted subtypes instead of null-checking or {@code instanceof}-casting.
  *
  * <h3>Permitted subtypes</h3>
@@ -30,6 +30,7 @@ import java.util.Objects;
  *   <li>{@link Success} — command applied; carries the resulting entity</li>
  *   <li>{@link NotFound} — the target entity does not exist in the state store</li>
  *   <li>{@link NoOp} — command was a no-op (e.g., null command, delete of absent metadata)</li>
+ *   <li>{@link CasMismatch} — a compare-and-swap precondition did not match</li>
  * </ul>
  *
  * @param <T> the type of entity produced on success
@@ -37,11 +38,11 @@ import java.util.Objects;
  * @version 1.0
  * @since 2025-10-28
  */
-public sealed interface CommandResult<T>
-        permits CommandResult.Success,
-                CommandResult.NotFound,
-                CommandResult.NoOp,
-                CommandResult.CasMismatch {
+public sealed interface RaftCommandResult<T>
+        permits RaftCommandResult.Success,
+                RaftCommandResult.NotFound,
+                RaftCommandResult.NoOp,
+                RaftCommandResult.CasMismatch {
 
     /**
      * The command was applied successfully.
@@ -49,7 +50,7 @@ public sealed interface CommandResult<T>
      * @param entity the resulting entity (may be null for metadata deletes that return the old value)
      * @param <T>    entity type
      */
-    record Success<T>(T entity) implements CommandResult<T> {
+    record Success<T>(T entity) implements RaftCommandResult<T> {
     }
 
     /**
@@ -59,7 +60,7 @@ public sealed interface CommandResult<T>
      * @param entityType a human-readable entity type name (for example, "Agent" or "Metadata")
      * @param <T>        entity type (phantom — no entity is available)
      */
-    record NotFound<T>(String id, String entityType) implements CommandResult<T> {
+    record NotFound<T>(String id, String entityType) implements RaftCommandResult<T> {
         public NotFound {
             Objects.requireNonNull(id, "id");
             Objects.requireNonNull(entityType, "entityType");
@@ -71,7 +72,7 @@ public sealed interface CommandResult<T>
      *
      * @param <T> entity type (phantom)
      */
-    record NoOp<T>() implements CommandResult<T> {
+    record NoOp<T>() implements RaftCommandResult<T> {
     }
 
     /**
@@ -85,7 +86,7 @@ public sealed interface CommandResult<T>
      * @param entity the entity in its current (mismatched) state
      * @param <T>    entity type
      */
-    record CasMismatch<T>(T entity) implements CommandResult<T> {
+    record CasMismatch<T>(T entity) implements RaftCommandResult<T> {
         public CasMismatch {
             Objects.requireNonNull(entity, "entity");
         }

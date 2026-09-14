@@ -390,12 +390,15 @@ class InstallSnapshotTest {
         // Split into 4 chunks of 64 bytes
         int chunkSize = 64;
         int totalChunks = 4;
-        RaftNode.SnapshotChunkAssembler assembler = new RaftNode.SnapshotChunkAssembler(totalChunks);
+        InstallSnapshotRequest identity = InstallSnapshotRequest.newBuilder()
+                .setTerm(1).setLeaderId("leader").setLastIncludedIndex(10)
+                .setLastIncludedTerm(1).setTotalChunks(totalChunks).build();
+        RaftNode.SnapshotChunkAssembler assembler = new RaftNode.SnapshotChunkAssembler(identity);
 
         for (int i = 0; i < totalChunks; i++) {
             byte[] chunk = new byte[chunkSize];
             System.arraycopy(original, i * chunkSize, chunk, 0, chunkSize);
-            assembler.addChunk(i, chunk);
+            assembler = assembler.withChunk(i, chunk);
             assertEquals(i + 1, assembler.getNextExpectedChunk());
         }
 
@@ -409,10 +412,13 @@ class InstallSnapshotTest {
     @Test
     void testChunkAssemblerSingleChunk() {
         byte[] data = "snapshot-data-content".getBytes();
-        RaftNode.SnapshotChunkAssembler assembler = new RaftNode.SnapshotChunkAssembler(1);
+        InstallSnapshotRequest identity = InstallSnapshotRequest.newBuilder()
+                .setTerm(1).setLeaderId("leader").setLastIncludedIndex(10)
+                .setLastIncludedTerm(1).setTotalChunks(1).build();
+        RaftNode.SnapshotChunkAssembler assembler = new RaftNode.SnapshotChunkAssembler(identity);
         assertEquals(0, assembler.getNextExpectedChunk());
 
-        assembler.addChunk(0, data);
+        assembler = assembler.withChunk(0, data);
         assertEquals(1, assembler.getNextExpectedChunk());
 
         byte[] result = assembler.assemble();

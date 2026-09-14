@@ -31,7 +31,7 @@ import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.RaftCommand;
-import dev.mars.qraft.controller.state.CommandResult;
+import dev.mars.qraft.controller.state.RaftCommandResult;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
@@ -95,7 +95,7 @@ class RaftFailureTest {
         
         // Try to submit command to follower
         RaftCommand command = distributedPut("key", "value");
-        Future<CommandResult<?>> future = node1.submitCommand(command);
+        Future<RaftCommandResult<?>> future = node1.submitCommand(command);
         
         // Should fail
         ExecutionException exception = assertThrows(ExecutionException.class, () -> {
@@ -261,7 +261,7 @@ class RaftFailureTest {
         // Test state machine that throws exceptions
         RaftLogApplicator failingStateMachine = new RaftLogApplicator() {
             @Override
-            public CommandResult<?> apply(RaftCommand command) {
+            public RaftCommandResult<?> apply(RaftCommand command) {
                 throw new RuntimeException("State machine error");
             }
             

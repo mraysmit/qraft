@@ -6,7 +6,7 @@ import com.sun.net.httpserver.HttpServer;
 import dev.mars.qraft.catalog.ServiceInstance;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.state.CatalogCommand;
-import dev.mars.qraft.controller.state.CommandResult;
+import dev.mars.qraft.controller.state.RaftCommandResult;
 import dev.mars.qraft.controller.state.QraftStateStore;
 
 import java.io.IOException;
@@ -107,9 +107,9 @@ public final class HttpApiServer implements AutoCloseable {
         if (!prepareCatalogRequest(exchange, "PUT")) return;
         try {
             ServiceInstance instance = objectMapper.readValue(exchange.getRequestBody(), ServiceInstance.class);
-            CommandResult<?> result = submit(CatalogCommand.register(instance));
-            respondJson(exchange, result instanceof CommandResult.Success<?> ? 200 : 409,
-                    Map.of("registered", result instanceof CommandResult.Success<?>, "serviceId", instance.serviceId()));
+            RaftCommandResult<?> result = submit(CatalogCommand.register(instance));
+            respondJson(exchange, result instanceof RaftCommandResult.Success<?> ? 200 : 409,
+                    Map.of("registered", result instanceof RaftCommandResult.Success<?>, "serviceId", instance.serviceId()));
         } catch (IllegalArgumentException | com.fasterxml.jackson.core.JacksonException e) {
             respondJson(exchange, 400, Map.of("error", "invalid_registration", "message", safeMessage(e)));
         } catch (CompletionException e) {
@@ -125,8 +125,8 @@ public final class HttpApiServer implements AutoCloseable {
             return;
         }
         try {
-            CommandResult<?> result = submit(CatalogCommand.deregister(serviceId));
-            int status = result instanceof CommandResult.NotFound<?> ? 404 : 200;
+            RaftCommandResult<?> result = submit(CatalogCommand.deregister(serviceId));
+            int status = result instanceof RaftCommandResult.NotFound<?> ? 404 : 200;
             respondJson(exchange, status, Map.of("deregistered", status == 200, "serviceId", serviceId));
         } catch (CompletionException e) {
             respondUnavailable(exchange, e);
@@ -171,7 +171,7 @@ public final class HttpApiServer implements AutoCloseable {
         return true;
     }
 
-    private CommandResult<?> submit(CatalogCommand command) {
+    private RaftCommandResult<?> submit(CatalogCommand command) {
         return raftNode.submitCommand(command).toCompletionStage().toCompletableFuture().join();
     }
 

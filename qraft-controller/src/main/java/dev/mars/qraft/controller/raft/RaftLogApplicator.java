@@ -17,7 +17,7 @@
 package dev.mars.qraft.controller.raft;
 
 import dev.mars.qraft.raft.api.ReplicatedStateMachine;
-import dev.mars.qraft.controller.state.CommandResult;
+import dev.mars.qraft.controller.state.RaftCommandResult;
 import dev.mars.qraft.controller.state.RaftCommand;
 
 /**
@@ -28,7 +28,7 @@ import dev.mars.qraft.controller.state.RaftCommand;
  * @since 2025-08-20
  */
 
-public interface RaftLogApplicator extends ReplicatedStateMachine<RaftCommand, CommandResult<?>> {
+public interface RaftLogApplicator extends ReplicatedStateMachine<RaftCommand, RaftCommandResult<?>> {
 
     /**
      * Reset the state machine to initial state.

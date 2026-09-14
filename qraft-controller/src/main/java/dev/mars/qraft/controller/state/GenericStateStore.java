@@ -49,23 +49,23 @@ public class GenericStateStore implements RaftLogApplicator {
     }
 
     @Override
-    public CommandResult<?> apply(RaftCommand command) {
+    public RaftCommandResult<?> apply(RaftCommand command) {
         if (command == null) {
-            return new CommandResult.NoOp<>();
+            return new RaftCommandResult.NoOp<>();
         }
 
         return switch (command) {
             case DistributedStateRaftCommand wrapped -> switch (wrapped.delegate()) {
                 case DistributedStateCommand.Put put -> {
                     metadata.put(put.key(), put.value());
-                    yield new CommandResult.Success<>(put.value());
+                    yield new RaftCommandResult.Success<>(put.value());
                 }
                 case DistributedStateCommand.Delete delete -> {
                     String removed = metadata.remove(delete.key());
                     if (removed == null) {
-                        yield new CommandResult.NotFound<>(delete.key(), "SystemMetadata");
+                        yield new RaftCommandResult.NotFound<>(delete.key(), "SystemMetadata");
                     }
-                    yield new CommandResult.Success<>(removed);
+                    yield new RaftCommandResult.Success<>(removed);
                 }
             };
             default -> {

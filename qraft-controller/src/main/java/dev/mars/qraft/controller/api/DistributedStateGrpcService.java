@@ -11,7 +11,7 @@ import dev.mars.qraft.controller.api.grpc.ListResponse;
 import dev.mars.qraft.controller.api.grpc.PutRequest;
 import dev.mars.qraft.controller.api.grpc.PutResponse;
 import dev.mars.qraft.controller.raft.RaftNode;
-import dev.mars.qraft.controller.state.CommandResult;
+import dev.mars.qraft.controller.state.RaftCommandResult;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
@@ -37,7 +37,7 @@ public class DistributedStateGrpcService extends DistributedStateServiceGrpc.Dis
         DistributedStateCommand command = DistributedStateCommand.put(request.getKey(), request.getValue());
         raftNode.submitCommand(new DistributedStateRaftCommand(command))
                 .onSuccess(result -> {
-                    boolean accepted = result instanceof CommandResult.Success<?>;
+                    boolean accepted = result instanceof RaftCommandResult.Success<?>;
                     responseObserver.onNext(PutResponse.newBuilder().setAccepted(accepted).build());
                     responseObserver.onCompleted();
                 })
@@ -61,7 +61,7 @@ public class DistributedStateGrpcService extends DistributedStateServiceGrpc.Dis
         DistributedStateCommand command = DistributedStateCommand.delete(request.getKey());
         raftNode.submitCommand(new DistributedStateRaftCommand(command))
                 .onSuccess(result -> {
-                    boolean deleted = result instanceof CommandResult.Success<?>;
+                    boolean deleted = result instanceof RaftCommandResult.Success<?>;
                     responseObserver.onNext(DeleteResponse.newBuilder().setDeleted(deleted).build());
                     responseObserver.onCompleted();
                 })

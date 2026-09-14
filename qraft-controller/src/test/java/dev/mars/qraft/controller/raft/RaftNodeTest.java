@@ -28,7 +28,7 @@ import dev.mars.qraft.controller.raft.grpc.VoteRequest;
 import dev.mars.qraft.controller.raft.grpc.VoteResponse;
 import dev.mars.qraft.controller.runtime.Future;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
-import dev.mars.qraft.controller.state.CommandResult;
+import dev.mars.qraft.controller.state.RaftCommandResult;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
@@ -197,18 +197,18 @@ class RaftNodeTest {
         ServiceInstance instance = new ServiceInstance("catalog-1", "catalog", "node-1",
                 "127.0.0.1", 8080, List.of("v1"), Map.of(), ServiceHealth.PASSING);
 
-        CommandResult<?> registered = leader.submitCommand(CatalogCommand.register(instance))
+        RaftCommandResult<?> registered = leader.submitCommand(CatalogCommand.register(instance))
                 .toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
 
-        assertInstanceOf(CommandResult.Success.class, registered);
+        assertInstanceOf(RaftCommandResult.Success.class, registered);
         await().atMost(Duration.ofSeconds(5)).until(() ->
                 List.of(stateMachine1, stateMachine2, stateMachine3).stream()
                         .allMatch(store -> store.getServiceCatalog().instances("catalog").equals(List.of(instance))));
 
-        CommandResult<?> deregistered = leader.submitCommand(CatalogCommand.deregister("catalog-1"))
+        RaftCommandResult<?> deregistered = leader.submitCommand(CatalogCommand.deregister("catalog-1"))
                 .toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
 
-        assertInstanceOf(CommandResult.Success.class, deregistered);
+        assertInstanceOf(RaftCommandResult.Success.class, deregistered);
         await().atMost(Duration.ofSeconds(5)).until(() ->
                 List.of(stateMachine1, stateMachine2, stateMachine3).stream()
                         .allMatch(store -> store.getServiceCatalog().instances("catalog").isEmpty()));
@@ -230,14 +230,14 @@ class RaftNodeTest {
         InMemoryTransportSimulator.createPartition(Set.of(isolatedLeader.getNodeId()), majorityIds);
 
         ServiceInstance losingValue = serviceInstance("partitioned-1", 8080);
-        Future<CommandResult<?>> uncertainWrite = isolatedLeader.submitCommand(CatalogCommand.register(losingValue));
+        Future<RaftCommandResult<?>> uncertainWrite = isolatedLeader.submitCommand(CatalogCommand.register(losingValue));
         await().atMost(Duration.ofSeconds(10)).until(() -> nodes.stream()
                 .filter(node -> node != isolatedLeader).anyMatch(RaftNode::isLeader));
         RaftNode majorityLeader = nodes.stream()
                 .filter(node -> node != isolatedLeader && node.isLeader()).findFirst().orElseThrow();
         ServiceInstance winningValue = serviceInstance("partitioned-1", 9090);
 
-        assertInstanceOf(CommandResult.Success.class, majorityLeader.submitCommand(CatalogCommand.register(winningValue))
+        assertInstanceOf(RaftCommandResult.Success.class, majorityLeader.submitCommand(CatalogCommand.register(winningValue))
                 .toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS));
         InMemoryTransportSimulator.healPartitions();
 
@@ -304,7 +304,7 @@ class RaftNodeTest {
         // Node starts as follower, command submission should fail
         RaftCommand command = distributedPut("test-key", "test-value");
         
-        Future<CommandResult<?>> future = node1.submitCommand(command);
+        Future<RaftCommandResult<?>> future = node1.submitCommand(command);
         
         // Verify the exception
         assertThrows(Exception.class, () -> {
@@ -322,10 +322,10 @@ class RaftNodeTest {
     void testStateMachineOperations() {
         // Test state machine directly
         RaftCommand setCommand = distributedPut("version", "2.1");
-        CommandResult<?> result = stateMachine1.apply(setCommand);
+        RaftCommandResult<?> result = stateMachine1.apply(setCommand);
         
-        assertInstanceOf(CommandResult.Success.class, result);
-        assertEquals("2.1", ((CommandResult.Success<?>) result).entity());
+        assertInstanceOf(RaftCommandResult.Success.class, result);
+        assertEquals("2.1", ((RaftCommandResult.Success<?>) result).entity());
         assertEquals("2.1", stateMachine1.getMetadata("version"));
         
         // Test snapshot
@@ -590,9 +590,9 @@ class RaftNodeTest {
 
         await().atMost(Duration.ofSeconds(3)).until(singleNode::isLeader);
 
-        CommandResult<?> submitted = singleNode.submitCommand(distributedPut("vote-log-key", "vote-log-value"))
+        RaftCommandResult<?> submitted = singleNode.submitCommand(distributedPut("vote-log-key", "vote-log-value"))
             .toCompletionStage().toCompletableFuture().join();
-        assertInstanceOf(CommandResult.Success.class, submitted);
+        assertInstanceOf(RaftCommandResult.Success.class, submitted);
 
         VoteRequest staleCandidate = VoteRequest.newBuilder()
             .setTerm(singleNode.getCurrentTerm() + 1)
@@ -667,9 +667,9 @@ class RaftNodeTest {
         durableNode.start().toCompletionStage().toCompletableFuture().join();
         await().atMost(Duration.ofSeconds(3)).until(durableNode::isLeader);
 
-        CommandResult<?> submitted = durableNode.submitCommand(distributedPut("vote-log-key", "vote-log-value"))
+        RaftCommandResult<?> submitted = durableNode.submitCommand(distributedPut("vote-log-key", "vote-log-value"))
             .toCompletionStage().toCompletableFuture().join();
-        assertInstanceOf(CommandResult.Success.class, submitted);
+        assertInstanceOf(RaftCommandResult.Success.class, submitted);
 
         long higherTerm = durableNode.getCurrentTerm() + 5;
         VoteRequest staleCandidate = VoteRequest.newBuilder()
@@ -720,9 +720,9 @@ class RaftNodeTest {
         durableNode.start().toCompletionStage().toCompletableFuture().join();
         await().atMost(Duration.ofSeconds(3)).until(durableNode::isLeader);
 
-        CommandResult<?> submitted = durableNode.submitCommand(distributedPut("vote-log-key-2", "vote-log-value-2"))
+        RaftCommandResult<?> submitted = durableNode.submitCommand(distributedPut("vote-log-key-2", "vote-log-value-2"))
             .toCompletionStage().toCompletableFuture().join();
-        assertInstanceOf(CommandResult.Success.class, submitted);
+        assertInstanceOf(RaftCommandResult.Success.class, submitted);
 
         long higherTerm = durableNode.getCurrentTerm() + 7;
         VoteRequest staleCandidate = VoteRequest.newBuilder()
@@ -768,9 +768,9 @@ class RaftNodeTest {
         durableNode.start().toCompletionStage().toCompletableFuture().join();
         await().atMost(Duration.ofSeconds(3)).until(durableNode::isLeader);
 
-        CommandResult<?> submitted = durableNode.submitCommand(distributedPut("stale-check-key", "stale-check-value"))
+        RaftCommandResult<?> submitted = durableNode.submitCommand(distributedPut("stale-check-key", "stale-check-value"))
             .toCompletionStage().toCompletableFuture().join();
-        assertInstanceOf(CommandResult.Success.class, submitted);
+        assertInstanceOf(RaftCommandResult.Success.class, submitted);
 
         VoteRequest staleCandidate = VoteRequest.newBuilder()
             .setTerm(higherTerm)

@@ -19,12 +19,12 @@ class ControllerStateStoreTest {
     @Test
     void genericStoreAppliesCommandsAndRestoresSnapshots() {
         GenericStateStore store = new GenericStateStore(Map.of("seed", "value"));
-        assertInstanceOf(CommandResult.NoOp.class, store.apply(null));
+        assertInstanceOf(RaftCommandResult.NoOp.class, store.apply(null));
         assertEquals("value", store.getMetadata().get("seed"));
 
-        assertInstanceOf(CommandResult.Success.class, store.apply(command(DistributedStateCommand.put("key", "one"))));
-        assertInstanceOf(CommandResult.Success.class, store.apply(command(DistributedStateCommand.delete("key"))));
-        assertInstanceOf(CommandResult.NotFound.class, store.apply(command(DistributedStateCommand.delete("missing"))));
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(command(DistributedStateCommand.put("key", "one"))));
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(command(DistributedStateCommand.delete("key"))));
+        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(command(DistributedStateCommand.delete("missing"))));
         assertThrows(IllegalArgumentException.class, () -> store.apply(AgentCommand.deregister("agent")));
 
         store.apply(command(DistributedStateCommand.put("snap", "saved")));
@@ -46,39 +46,39 @@ class ControllerStateStoreTest {
         AgentInfo agent = new AgentInfo("agent-1", "host", "127.0.0.1", 9000);
         agent.setStatus(AgentStatus.REGISTERING);
 
-        assertInstanceOf(CommandResult.NoOp.class, store.apply(null));
-        assertInstanceOf(CommandResult.Success.class,
+        assertInstanceOf(RaftCommandResult.NoOp.class, store.apply(null));
+        assertInstanceOf(RaftCommandResult.Success.class,
                 store.apply(new AgentCommand.Register("agent-1", agent, now)));
         assertTrue(store.findAgent("agent-1").isPresent());
 
-        assertInstanceOf(CommandResult.CasMismatch.class, store.apply(new AgentCommand.UpdateStatus(
+        assertInstanceOf(RaftCommandResult.CasMismatch.class, store.apply(new AgentCommand.UpdateStatus(
                 "agent-1", AgentStatus.HEALTHY, AgentStatus.ACTIVE, now)));
-        assertInstanceOf(CommandResult.Success.class, store.apply(new AgentCommand.UpdateStatus(
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new AgentCommand.UpdateStatus(
                 "agent-1", AgentStatus.REGISTERING, AgentStatus.ACTIVE, now)));
 
         AgentCapabilities capabilities = new AgentCapabilities();
         capabilities.setSupportedServices(java.util.Set.of("kv"));
-        assertInstanceOf(CommandResult.Success.class, store.apply(new AgentCommand.UpdateCapabilities(
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new AgentCommand.UpdateCapabilities(
                 "agent-1", capabilities, now.plusSeconds(1))));
-        assertInstanceOf(CommandResult.Success.class, store.apply(new AgentCommand.Heartbeat(
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new AgentCommand.Heartbeat(
                 "agent-1", AgentStatus.DEGRADED, now.plusSeconds(2))));
         assertEquals(AgentStatus.DEGRADED, store.findAgent("agent-1").orElseThrow().getStatus());
 
-        assertInstanceOf(CommandResult.NotFound.class, store.apply(AgentCommand.heartbeat("missing")));
-        assertInstanceOf(CommandResult.NotFound.class, store.apply(AgentCommand.updateCapabilities("missing", capabilities)));
-        assertInstanceOf(CommandResult.NotFound.class, store.apply(AgentCommand.updateStatus(
+        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(AgentCommand.heartbeat("missing")));
+        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(AgentCommand.updateCapabilities("missing", capabilities)));
+        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(AgentCommand.updateStatus(
                 "missing", AgentStatus.HEALTHY, AgentStatus.ACTIVE)));
 
         store.apply(command(DistributedStateCommand.put("feature", "enabled")));
         assertEquals("enabled", store.getMetadata("feature"));
         assertEquals("enabled", store.findMetadata("feature").orElseThrow());
-        assertInstanceOf(CommandResult.Success.class, store.apply(command(DistributedStateCommand.delete("feature"))));
-        assertInstanceOf(CommandResult.NotFound.class, store.apply(command(DistributedStateCommand.delete("feature"))));
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(command(DistributedStateCommand.delete("feature"))));
+        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(command(DistributedStateCommand.delete("feature"))));
 
         store.setLastAppliedIndex(21);
         byte[] snapshot = store.takeSnapshot();
-        assertInstanceOf(CommandResult.Success.class, store.apply(AgentCommand.deregister("agent-1")));
-        assertInstanceOf(CommandResult.NotFound.class, store.apply(AgentCommand.deregister("agent-1")));
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(AgentCommand.deregister("agent-1")));
+        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(AgentCommand.deregister("agent-1")));
         store.restoreSnapshot(snapshot);
         assertEquals(21, store.getLastAppliedIndex());
         assertEquals(1, store.getAgents().size());
@@ -95,11 +95,11 @@ class ControllerStateStoreTest {
         ServiceInstance instance = new ServiceInstance("payments-1", "payments", "node-1",
                 "127.0.0.1", 8080, List.of("v1"), Map.of("team", "platform"), ServiceHealth.PASSING);
 
-        assertInstanceOf(CommandResult.Success.class, store.apply(CatalogCommand.register(instance)));
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(CatalogCommand.register(instance)));
         assertEquals(List.of(instance), store.getServiceCatalog().instances("payments"));
         byte[] snapshot = store.takeSnapshot();
-        assertInstanceOf(CommandResult.Success.class, store.apply(CatalogCommand.deregister("payments-1")));
-        assertInstanceOf(CommandResult.NotFound.class, store.apply(CatalogCommand.deregister("payments-1")));
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(CatalogCommand.deregister("payments-1")));
+        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(CatalogCommand.deregister("payments-1")));
 
         store.restoreSnapshot(snapshot);
         assertEquals(List.of(instance), store.getServiceCatalog().instances("payments"));

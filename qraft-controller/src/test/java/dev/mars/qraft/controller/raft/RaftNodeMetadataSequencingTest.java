@@ -155,19 +155,19 @@ class RaftNodeMetadataSequencingTest {
     @Test
     void voteStateAndResponseCompleteOnTheOwningStateLoop() {
         storage.blockNextUpdate();
-        CompletableFuture<Boolean> completionOnStateLoop = new CompletableFuture<>();
+        CompletableFuture<JavaRuntime> completionContext = new CompletableFuture<>();
 
         Future<VoteResponse> response = node.handleVoteRequest(vote(1, "candidate-a"));
-        response.onSuccess(ignored -> completionOnStateLoop.complete(JavaRuntime.currentContext() == runtime));
+        response.onSuccess(ignored -> completionContext.complete(JavaRuntime.currentContext()));
         storage.awaitBlockedUpdate();
         CompletableFuture.runAsync(storage::releaseBlockedUpdate).join();
 
-        assertTrue(await(response).getVoteGranted());
         try {
-            assertTrue(completionOnStateLoop.get(2, TimeUnit.SECONDS));
+            assertSame(runtime, completionContext.get(2, TimeUnit.SECONDS));
         } catch (Exception error) {
             throw new AssertionError("vote completion callback did not run", error);
         }
+        assertTrue(await(response).getVoteGranted());
     }
 
     @Test

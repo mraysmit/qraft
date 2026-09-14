@@ -346,9 +346,9 @@ focused tests and the existing non-heavy controller suite pass.
 |---|---|---|
 | 1 | Per-node transition sequencer: state-loop execution, whole-transition ordering, bounded admission, failure policy, fencing, and drain semantics. | Implemented and connected to `RaftNode`; focused tests pass. |
 | 2 | Term and vote transitions, including concurrent same-term votes and higher-term persistence. | Implemented. Election self-votes, incoming votes, and higher-term step-downs share the sequencer; focused and default non-heavy tests pass. |
-| 3 | Leader append and follower suffix-replacement transitions. | Not started. |
-| 4 | Local snapshot capture, publication, WAL compaction, and boundary application. | Not started. |
-| 5 | Installed snapshots, timer events, and transport completions with term or leadership-generation fencing. | Not started. |
+| 3 | Leader append and follower suffix-replacement transitions. | Implemented. Append, truncate, and sync gates prove whole-transition ordering; uncertain write outcomes fence later work. Focused tests and the default non-heavy controller suite pass. |
+| 4 | Local snapshot capture, publication, WAL compaction, and boundary application. | Implemented. Capture, publication, prefix compaction, and memory-boundary application are one serialized transition; focused and default non-heavy tests pass. |
+| 5 | Installed snapshots, timer events, and transport completions with term or leadership-generation fencing. | In progress. Follower installation and AppendEntries response/failure fencing are implemented; timer admission and vote/outbound-snapshot completions remain. |
 | 6 | Shutdown integration, real-storage recovery matrix, structural bypass checks, and model-based histories. | Not started. |
 
 Each integration phase starts with a deterministic failing test that holds the
@@ -368,6 +368,102 @@ Phase 2 establishes these additional rules:
   fenced and does not attempt a compensating metadata write;
 - a rejection after failed higher-term persistence reports the last durable
   local term, never the unpersisted observed term.
+
+Phase 3 establishes these additional rules:
+
+- a leader command calculates its term and index only after it becomes the
+  active transition;
+- append and sync must both succeed before the leader entry becomes visible in
+  memory, replication begins, or its client promise can complete;
+- a follower calculates consistency and conflict replacement from the exact
+  in-memory log left by the preceding transition;
+- follower truncation, append, and sync form one transition, and the matching
+  immutable replacement plan is applied only after the durability barrier;
+- append, truncate, or sync completion cannot admit the next log transition
+  before the current transition has applied on the state loop;
+- an uncertain truncate or sync failure fences the sequencer, so queued or new
+  work cannot calculate from potentially divergent durable state.
+
+The Phase 3 fixture delegates storage behavior to the concrete in-memory test
+storage and independently gates completion of `appendEntries`,
+`truncateSuffix`, and `sync`. Its seven deterministic tests cover leader append
+and sync ordering, follower truncate/append/sync ordering, state-loop
+completion, and failure fencing.
+
+Phase 4 establishes these additional rules:
+
+- the snapshot boundary, its exact log term, and the application payload are
+  captured on the state loop only after the snapshot transition becomes active;
+- the application state's recorded last-applied index is advanced in the same
+  state-loop step as command application, so the payload boundary agrees with
+  the enclosing snapshot metadata;
+- the term at the snapshot boundary must be present in the in-memory log; the
+  implementation must not substitute the current term when it cannot prove the
+  boundary term;
+- atomic snapshot publication must complete before WAL prefix compaction starts;
+- the in-memory snapshot boundary and compacted log view change only after WAL
+  prefix compaction succeeds;
+- a failure before or during snapshot publication leaves WAL and memory
+  unchanged and is reported to the caller without fencing the node;
+- after publication has succeeded, a failed or uncertain WAL compaction fences
+  the sequencer because durable snapshot and WAL state may no longer have a
+  safely known relationship;
+- a later append or higher-term vote cannot prepare while snapshot publication
+  or compaction is pending;
+- concurrent direct snapshot requests are re-evaluated when they become active,
+  so a completed boundary is not published or compacted a second time.
+
+The Phase 4 fixture delegates WAL behavior to the concrete in-memory test
+storage and independently gates snapshot publication, prefix compaction, and
+sync completion. Its seven deterministic tests cover state-loop capture,
+append and metadata ordering at both snapshot boundaries, capture after an
+in-flight command, duplicate-request suppression, retryable publication
+failure, compaction failure fencing, and agreement between the payload and
+external snapshot boundary. The initial red run exposed four ordering defects;
+an added boundary assertion then exposed that payloads still recorded index zero
+while their enclosing metadata recorded index one or two. Production code was
+changed only after each failure was demonstrated.
+
+Together, the Phase 1--4 focused regression tranche contains 52 tests. The full
+default non-heavy controller suite at that boundary passed all 198 tests with no
+failures or errors.
+
+The completed portion of Phase 5 establishes these additional rules:
+
+- every incoming snapshot chunk is handled as a sequenced transition, including
+  higher-term metadata persistence, assembler application, final publication,
+  WAL prefix compaction, state-machine restoration, and response completion;
+- final publication must finish before prefix compaction, and neither
+  state-machine nor in-memory Raft boundaries change before both succeed;
+- AppendEntries cannot prepare while final publication or compaction is pending;
+- installed boundaries at or below the snapshot, committed, or applied boundary
+  are rejected, except for an exact completed-snapshot duplicate, which is
+  acknowledged without publication or compaction;
+- `done` is accepted only on the final declared chunk, and out-of-order or
+  identity-mismatched chunks cannot be assembled;
+- an assembler identity includes request term, snapshot index, snapshot term,
+  and total chunk count; a higher term invalidates every partial assembler;
+- two leaders in one term cannot maintain simultaneous transfers;
+- a matching local log suffix after the installed boundary is retained, while a
+  non-matching suffix is discarded;
+- state-machine restoration runs on the owning state loop and its applied index
+  is set to the installed boundary;
+- publication failure removes the partial transfer and permits a clean retry;
+  uncertain compaction or restoration failure fences all later WAL mutation;
+- every outgoing AppendEntries completion carries its originating term and a
+  monotonically increasing local leadership generation; a stale success or
+  failure cannot update peer replication or availability state after
+  re-election;
+- a higher term in an AppendEntries response is still durably applied even when
+  the response belongs to a stale leadership generation.
+
+The installed-snapshot fixture has ten deterministic tests. The initial red run
+failed all six foundational cases; expansion then exposed the separate
+same-term competing-leader defect. The transport fixture deterministically
+holds an AppendEntries response across step-down and re-election; its red run
+advanced `nextIndex` to 101 before generation fencing was added. The current
+Phase 1--5 focused tranche contains 63 passing tests. The full default non-heavy
+controller suite passes all 209 tests with no failures or errors.
 
 ### 8.1 Deterministic adversarial test harness
 

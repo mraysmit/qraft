@@ -27,7 +27,7 @@ import dev.mars.raftlog.storage.RaftStorage.LogEntryData;
 import dev.mars.raftlog.storage.AppendPlan;
 import dev.mars.qraft.raft.api.SnapshotStore;
 import dev.mars.qraft.raft.api.SnapshotStore.SnapshotData;
-import dev.mars.qraft.controller.state.CommandResult;
+import dev.mars.qraft.controller.state.RaftCommandResult;
 import dev.mars.qraft.controller.state.RaftCommand;
 import dev.mars.qraft.raft.api.CommandCodec;
 import com.google.protobuf.ByteString;
@@ -114,7 +114,9 @@ public class RaftNode {
     // ========== LEADER STATE ==========
     private final Map<String, Long> nextIndex = new HashMap<>();
     private final Map<String, Long> matchIndex = new HashMap<>();
-    private final Map<Long, Promise<CommandResult<?>>> pendingCommands = new ConcurrentHashMap<>();
+    private final Map<Long, Promise<RaftCommandResult<?>>> pendingCommands = new ConcurrentHashMap<>();
+    /** Monotonically identifies each locally acquired leadership. */
+    private long leadershipGeneration = 0;
 
     // ========== TIMING AND CONTROL ==========
     private volatile boolean running = false;
@@ -577,56 +579,69 @@ public class RaftNode {
         return promise.future();
     }
 
-    public Future<CommandResult<?>> submitCommand(RaftCommand command) {
-        Promise<CommandResult<?>> promise = Promise.promise();
+    public Future<RaftCommandResult<?>> submitCommand(RaftCommand command) {
+        requireNonNull(command, "command");
+        Promise<RaftCommandResult<?>> promise = Promise.promise();
 
-        runOnContext(v -> {
-            if (state != State.LEADER) {
-                promise.fail(
-                        new IllegalStateException("Not the leader. Current state: " + state));
-                return;
-            }
-
-            // Hard limit check - reject if log is at capacity to prevent OOM
-            if (log.size() >= logHardLimit) {
-                logger.warn("Raft log at capacity ({}/{}), rejecting command", log.size(), logHardLimit);
-                promise.fail(new IllegalStateException(
-                        "Raft log at capacity (" + log.size() + "/" + logHardLimit + "). Wait for snapshot."));
-                return;
-            }
-
-            // Create log entry
-            long entryIndex = lastLogIndex() + 1;
-            LogEntry entry = new LogEntry(currentTerm, entryIndex, command);
-
-            // Persist to WAL before adding to in-memory log
-            persistLogEntry(entry)
-                .onSuccess(v2 -> {
-                    // Add to in-memory log AFTER durability confirmed
-                    log.add(entry);
-
-                    // Register promise for completion when committed
-                    pendingCommands.put(entry.getIndex(), promise);
-
-                    logger.info("Command submitted at index {} term {}", entry.getIndex(), entry.getTerm());
-
-                    // Trigger replication
-                    for (String peer : clusterNodes) {
-                        if (!peer.equals(nodeId)) {
-                            sendAppendEntries(peer, false);
-                        }
-                    }
-
-                    // Try to commit immediately (crucial for single-node clusters)
-                    updateCommitIndex();
-                })
-                .onFailure(err -> {
-                    logger.error("Failed to persist command to WAL: {}", err.getMessage(), err);
-                    promise.fail(err);
+        transitionSequencer.submit(
+                        "leader-append",
+                        RaftTransitionSequencer.FailurePolicy.FENCE,
+                        () -> prepareAndPersistLeaderAppend(command),
+                        decision -> applyLeaderAppend(decision, promise))
+                .onFailure(error -> {
+                    logger.error("Failed to persist command to WAL: {}", error.getMessage(), error);
+                    promise.tryFail(error);
                 });
-        });
 
         return promise.future();
+    }
+
+    private Future<LeaderAppendDecision> prepareAndPersistLeaderAppend(RaftCommand command) {
+        if (state != State.LEADER) {
+            return Future.succeededFuture(LeaderAppendDecision.rejected(
+                    new IllegalStateException("Not the leader. Current state: " + state)));
+        }
+
+        if (log.size() >= logHardLimit) {
+            logger.warn("Raft log at capacity ({}/{}), rejecting command", log.size(), logHardLimit);
+            return Future.succeededFuture(LeaderAppendDecision.rejected(
+                    new IllegalStateException(
+                            "Raft log at capacity (" + log.size() + "/" + logHardLimit
+                                    + "). Wait for snapshot.")));
+        }
+
+        LogEntry entry = new LogEntry(currentTerm, lastLogIndex() + 1, command);
+        return persistLogEntry(entry).map(ignored -> LeaderAppendDecision.accepted(entry));
+    }
+
+    private Void applyLeaderAppend(
+            LeaderAppendDecision decision, Promise<RaftCommandResult<?>> commandPromise) {
+        if (decision.rejection() != null) {
+            commandPromise.tryFail(decision.rejection());
+            return null;
+        }
+
+        LogEntry entry = decision.entry();
+        log.add(entry);
+        pendingCommands.put(entry.getIndex(), commandPromise);
+        logger.info("Command submitted at index {} term {}", entry.getIndex(), entry.getTerm());
+
+        for (String peer : clusterNodes) {
+            if (!peer.equals(nodeId)) sendAppendEntries(peer, false);
+        }
+
+        updateCommitIndex();
+        return null;
+    }
+
+    private record LeaderAppendDecision(LogEntry entry, Throwable rejection) {
+        private static LeaderAppendDecision accepted(LogEntry entry) {
+            return new LeaderAppendDecision(entry, null);
+        }
+
+        private static LeaderAppendDecision rejected(Throwable error) {
+            return new LeaderAppendDecision(null, error);
+        }
     }
 
     /**
@@ -981,6 +996,7 @@ public class RaftNode {
             return;
 
         state = State.LEADER;
+        leadershipGeneration++;
         currentLeaderId = nodeId;
         MDC.put("raftRole", "LEADER");
         MDC.put("raftTerm", String.valueOf(currentTerm));
@@ -1204,74 +1220,51 @@ public class RaftNode {
      * </ol>
      */
     public Future<AppendEntriesResponse> handleAppendEntriesRequest(AppendEntriesRequest request) {
-        Promise<AppendEntriesResponse> promise = Promise.promise();
-        runOnContext(v -> {
-            try {
-                // Step 1: Term check
-                if (request.getTerm() < currentTerm) {
-                    logger.debug("Rejecting AppendEntries: stale term {} < {}", request.getTerm(), currentTerm);
-                    promise.complete(AppendEntriesResponse.newBuilder()
-                            .setTerm(currentTerm)
-                            .setSuccess(false)
-                            .build());
-                    return;
-                }
-
-                // Step 2: Step down if higher term
-                if (request.getTerm() > currentTerm) {
-                    stepDown(request.getTerm(), true)
-                            .onSuccess(v2 -> continueAppendEntriesAfterTermCheck(request, promise))
-                            .onFailure(err -> {
-                                logger.error("Failed to persist higher term {} before AppendEntries response: {}",
-                                        request.getTerm(), err.getMessage());
-                                logger.debug("Stack trace for AppendEntries higher-term persistence failure", err);
-                                promise.complete(AppendEntriesResponse.newBuilder()
-                                        .setTerm(currentTerm)
-                                        .setSuccess(false)
-                                        .build());
-                            });
-                    return;
-                }
-
-                continueAppendEntriesAfterTermCheck(request, promise);
-
-            } catch (Exception e) {
-                logger.error("Error handling append entries request: {}", e.getMessage(), e);
-                promise.fail(e);
-            }
-        });
-        return promise.future();
+        requireNonNull(request, "request");
+        Promise<AppendEntriesResponse> response = Promise.promise();
+        transitionSequencer.submit(
+                        "append-entries:" + request.getLeaderId() + ":" + request.getTerm(),
+                        RaftTransitionSequencer.FailurePolicy.FENCE,
+                        () -> prepareAndPersistFollowerAppend(request),
+                        this::applyFollowerAppend)
+                .onComplete(result -> {
+                    if (result.failed()) {
+                        Throwable error = result.cause();
+                        logger.error("AppendEntries failed during durable transition: {}",
+                                error.getMessage(), error);
+                        response.tryComplete(AppendEntriesResponse.newBuilder()
+                                .setTerm(currentTerm)
+                                .setSuccess(false)
+                                .build());
+                    } else if (result.result().requestFailure() != null) {
+                        response.tryFail(result.result().requestFailure());
+                    } else {
+                        response.tryComplete(result.result().response());
+                    }
+                });
+        return response.future();
     }
 
-    private void continueAppendEntriesAfterTermCheck(AppendEntriesRequest request, Promise<AppendEntriesResponse> promise) {
-        if (state != State.FOLLOWER) {
-            state = State.FOLLOWER;
-            MDC.put("raftRole", "FOLLOWER");
-            MDC.put("raftTerm", String.valueOf(currentTerm));
-            notifyStateChangeListeners(State.FOLLOWER);
-            if (heartbeatTimerId != -1) {
-                runtime.cancelTimer(heartbeatTimerId);
-                heartbeatTimerId = -1;
-            }
+    private Future<FollowerAppendDecision> prepareAndPersistFollowerAppend(
+            AppendEntriesRequest request) {
+        if (request.getTerm() < currentTerm) {
+            logger.debug("Rejecting AppendEntries: stale term {} < {}", request.getTerm(), currentTerm);
+            return Future.succeededFuture(FollowerAppendDecision.stale(request));
         }
-        currentLeaderId = request.getLeaderId();
 
-        resetElectionTimer();
+        boolean higherTerm = request.getTerm() > currentTerm;
+        Future<Void> termPersistence = higherTerm
+                ? persistMetadata(request.getTerm(), Optional.empty())
+                : Future.succeededFuture();
 
-        // Step 3: Consistency check
         if (!hasLogEntry(request.getPrevLogIndex()) ||
                 log.get(toArrayIndex(request.getPrevLogIndex())).getTerm() != request.getPrevLogTerm()) {
             logger.debug("Rejecting AppendEntries: log inconsistent at prevLogIndex={}",
-                        request.getPrevLogIndex());
-            promise.complete(AppendEntriesResponse.newBuilder()
-                    .setTerm(currentTerm)
-                    .setSuccess(false)
-                    .setMatchIndex(lastLogIndex()) // Hint for leader
-                    .build());
-            return;
+                    request.getPrevLogIndex());
+            return termPersistence.map(ignored ->
+                    FollowerAppendDecision.inconsistent(request, higherTerm));
         }
 
-        // Step 4: Decode the request, then delegate conflict planning to RaftLog.
         long startIndex = request.getPrevLogIndex() + 1;
         List<LogEntry> incomingEntries = new ArrayList<>();
         List<LogEntryData> incomingEntryData = new ArrayList<>();
@@ -1289,9 +1282,10 @@ public class RaftNode {
         } catch (RuntimeException error) {
             logger.warn("Rejecting AppendEntries with invalid command payload from leader {} at index {}",
                     request.getLeaderId(), currentIndex);
-            promise.fail(new IllegalArgumentException(
-                    "Invalid command payload at log index " + currentIndex, error));
-            return;
+            IllegalArgumentException requestFailure = new IllegalArgumentException(
+                    "Invalid command payload at log index " + currentIndex, error);
+            return termPersistence.map(ignored ->
+                    FollowerAppendDecision.invalid(request, higherTerm, requestFailure));
         }
 
         // AppendPlan uses one-based positions. Exclude Qraft's snapshot sentinel and
@@ -1312,46 +1306,117 @@ public class RaftNode {
                 .filter(entry -> indicesToAppend.contains(entry.getIndex()))
                 .toList();
 
-        // Step 5: Persist to WAL (Durability Barrier)
-        final Long finalTruncateFrom = truncateFromIndex;
-        persistAppendEntries(truncateFromIndex, entriesToPersist)
-            .onSuccess(v2 -> {
-                // Step 6: Apply to in-memory log AFTER durability confirmed
-                if (finalTruncateFrom != null) {
-                    int truncateArrayIdx = toArrayIndex(finalTruncateFrom);
-                    log.subList(truncateArrayIdx, log.size()).clear();
-                }
-                for (LogEntry entry : entriesToPersist) {
-                    if (!hasLogEntry(entry.getIndex())) {
-                        log.add(entry);
-                    }
-                }
+        FollowerAppendDecision decision = FollowerAppendDecision.accepted(
+                request, higherTerm, truncateFromIndex, entriesToPersist);
+        return termPersistence
+                .compose(ignored -> persistAppendEntries(truncateFromIndex, entriesToPersist))
+                .map(decision);
+    }
 
-                // Step 7: Update commit index and apply
-                if (request.getLeaderCommit() > commitIndex) {
-                    commitIndex = Math.min(request.getLeaderCommit(), lastLogIndex());
-                    applyLog();
-                }
+    private FollowerAppendResult applyFollowerAppend(FollowerAppendDecision decision) {
+        AppendEntriesRequest request = decision.request();
+        if (!decision.termAccepted()) {
+            return FollowerAppendResult.response(AppendEntriesResponse.newBuilder()
+                    .setTerm(currentTerm)
+                    .setSuccess(false)
+                    .build());
+        }
 
-                if (request.getEntriesCount() == 0) {
-                    logger.trace("AppendEntries heartbeat accepted: commitIndex={}", commitIndex);
-                } else {
-                    logger.debug("AppendEntries success: entries={}, logSize={}, commitIndex={}",
-                            request.getEntriesCount(), log.size(), commitIndex);
-                }
-                promise.complete(AppendEntriesResponse.newBuilder()
-                        .setTerm(currentTerm)
-                        .setSuccess(true)
-                        .setMatchIndex(lastLogIndex())
-                        .build());
-            })
-            .onFailure(err -> {
-                logger.error("AppendEntries failed during WAL persist: {}", err.getMessage(), err);
-                promise.complete(AppendEntriesResponse.newBuilder()
-                        .setTerm(currentTerm)
-                        .setSuccess(false)
-                        .build());
-            });
+        if (decision.higherTerm()) {
+            applyDurableHigherTerm(request.getTerm(), null);
+        } else if (state != State.FOLLOWER) {
+            state = State.FOLLOWER;
+            MDC.put("raftRole", "FOLLOWER");
+            MDC.put("raftTerm", String.valueOf(currentTerm));
+            notifyStateChangeListeners(State.FOLLOWER);
+            if (heartbeatTimerId != -1) {
+                runtime.cancelTimer(heartbeatTimerId);
+                heartbeatTimerId = -1;
+            }
+        }
+        currentLeaderId = request.getLeaderId();
+        resetElectionTimer();
+
+        if (decision.requestFailure() != null) {
+            return FollowerAppendResult.failure(decision.requestFailure());
+        }
+        if (!decision.logAccepted()) {
+            return FollowerAppendResult.response(AppendEntriesResponse.newBuilder()
+                    .setTerm(currentTerm)
+                    .setSuccess(false)
+                    .setMatchIndex(lastLogIndex())
+                    .build());
+        }
+
+        if (decision.truncateFromIndex() != null) {
+            int truncateArrayIdx = toArrayIndex(decision.truncateFromIndex());
+            log.subList(truncateArrayIdx, log.size()).clear();
+        }
+        for (LogEntry entry : decision.entriesToPersist()) {
+            if (!hasLogEntry(entry.getIndex())) log.add(entry);
+        }
+
+        if (request.getLeaderCommit() > commitIndex) {
+            commitIndex = Math.min(request.getLeaderCommit(), lastLogIndex());
+            applyLog();
+        }
+
+        if (request.getEntriesCount() == 0) {
+            logger.trace("AppendEntries heartbeat accepted: commitIndex={}", commitIndex);
+        } else {
+            logger.debug("AppendEntries success: entries={}, logSize={}, commitIndex={}",
+                    request.getEntriesCount(), log.size(), commitIndex);
+        }
+        return FollowerAppendResult.response(AppendEntriesResponse.newBuilder()
+                .setTerm(currentTerm)
+                .setSuccess(true)
+                .setMatchIndex(lastLogIndex())
+                .build());
+    }
+
+    private record FollowerAppendDecision(
+            AppendEntriesRequest request,
+            boolean termAccepted,
+            boolean higherTerm,
+            boolean logAccepted,
+            Long truncateFromIndex,
+            List<LogEntry> entriesToPersist,
+            Throwable requestFailure) {
+
+        private static FollowerAppendDecision stale(AppendEntriesRequest request) {
+            return new FollowerAppendDecision(request, false, false, false,
+                    null, List.of(), null);
+        }
+
+        private static FollowerAppendDecision inconsistent(
+                AppendEntriesRequest request, boolean higherTerm) {
+            return new FollowerAppendDecision(request, true, higherTerm, false,
+                    null, List.of(), null);
+        }
+
+        private static FollowerAppendDecision invalid(
+                AppendEntriesRequest request, boolean higherTerm, Throwable failure) {
+            return new FollowerAppendDecision(request, true, higherTerm, false,
+                    null, List.of(), failure);
+        }
+
+        private static FollowerAppendDecision accepted(
+                AppendEntriesRequest request, boolean higherTerm,
+                Long truncateFromIndex, List<LogEntry> entriesToPersist) {
+            return new FollowerAppendDecision(request, true, higherTerm, true,
+                    truncateFromIndex, List.copyOf(entriesToPersist), null);
+        }
+    }
+
+    private record FollowerAppendResult(
+            AppendEntriesResponse response, Throwable requestFailure) {
+        private static FollowerAppendResult response(AppendEntriesResponse response) {
+            return new FollowerAppendResult(response, null);
+        }
+
+        private static FollowerAppendResult failure(Throwable error) {
+            return new FollowerAppendResult(null, error);
+        }
     }
 
     /**
@@ -1388,6 +1453,8 @@ public class RaftNode {
     }
 
     private void sendAppendEntries(String target, boolean heartbeat) {
+        long originatingTerm = currentTerm;
+        long originatingGeneration = leadershipGeneration;
         long nextIdx = nextIndex.getOrDefault(target, 1L);
 
         // If the follower needs entries we've already compacted, send a snapshot
@@ -1405,7 +1472,7 @@ public class RaftNode {
         }
 
         AppendEntriesRequest.Builder builder = AppendEntriesRequest.newBuilder()
-                .setTerm(currentTerm)
+                .setTerm(originatingTerm)
                 .setLeaderId(nodeId)
                 .setPrevLogIndex(prevLogIndex)
                 .setPrevLogTerm(prevLogTerm)
@@ -1427,17 +1494,10 @@ public class RaftNode {
         }
 
         transport.sendAppendEntries(target, builder.build())
-                .onSuccess(response -> runOnContext(v -> {
-                    if (unavailablePeers.remove(target)) logger.info("Raft peer {} is reachable again", target);
-                    handleAppendEntriesResponse(target, response);
-                }))
-                .onFailure(error -> runOnContext(v -> {
-                    if (unavailablePeers.add(target)) {
-                        logger.error("Raft peer {} became unreachable during AppendEntries", target, error);
-                    } else {
-                        logger.debug("Raft peer {} remains unreachable during AppendEntries: {}", target, error.toString());
-                    }
-                }));
+                .onSuccess(response -> handleAppendEntriesResponse(
+                        target, response, originatingTerm, originatingGeneration))
+                .onFailure(error -> handleAppendEntriesFailure(
+                        target, error, originatingTerm, originatingGeneration));
 
         // Record edge metric for nodeGraph visualization
         rpcCounter.add(1, Attributes.of(
@@ -1447,27 +1507,95 @@ public class RaftNode {
         ));
     }
 
-    private void handleAppendEntriesResponse(String peerId, AppendEntriesResponse response) {
-        if (state != State.LEADER)
-            return;
+    private void handleAppendEntriesResponse(
+            String peerId, AppendEntriesResponse response,
+            long originatingTerm, long originatingGeneration) {
+        transitionSequencer.submit(
+                        "append-response:" + peerId + ":" + originatingTerm,
+                        RaftTransitionSequencer.FailurePolicy.FENCE,
+                        () -> prepareAppendEntriesResponse(
+                                peerId, response, originatingTerm, originatingGeneration),
+                        this::applyAppendEntriesResponse)
+                .onFailure(error -> logger.error(
+                        "Failed to process AppendEntries response from {}: {}",
+                        peerId, error.getMessage(), error));
+    }
 
+    private Future<AppendResponseDecision> prepareAppendEntriesResponse(
+            String peerId, AppendEntriesResponse response,
+            long originatingTerm, long originatingGeneration) {
         if (response.getTerm() > currentTerm) {
-            stepDown(response.getTerm());
-            return;
+            return persistMetadata(response.getTerm(), Optional.empty())
+                    .map(ignored -> new AppendResponseDecision(
+                            peerId, response, originatingTerm, originatingGeneration, true));
+        }
+        return Future.succeededFuture(new AppendResponseDecision(
+                peerId, response, originatingTerm, originatingGeneration, false));
+    }
+
+    private Void applyAppendEntriesResponse(AppendResponseDecision decision) {
+        AppendEntriesResponse response = decision.response();
+        if (decision.higherTerm()) {
+            applyDurableHigherTerm(response.getTerm(), null);
+            return null;
+        }
+        if (!isCurrentLeadership(decision.originatingTerm(), decision.originatingGeneration())) {
+            logger.debug("Ignoring stale AppendEntries response from {} for term {} generation {}",
+                    decision.peerId(), decision.originatingTerm(), decision.originatingGeneration());
+            return null;
         }
 
+        if (unavailablePeers.remove(decision.peerId())) {
+            logger.info("Raft peer {} is reachable again", decision.peerId());
+        }
         if (response.getSuccess()) {
-            matchIndex.put(peerId, response.getMatchIndex());
-            nextIndex.put(peerId, response.getMatchIndex() + 1);
+            matchIndex.put(decision.peerId(), response.getMatchIndex());
+            nextIndex.put(decision.peerId(), response.getMatchIndex() + 1);
             updateCommitIndex();
         } else {
-            // Backtrack
-            long next = nextIndex.getOrDefault(peerId, 1L);
-            nextIndex.put(peerId, Math.max(1, next - 1));
-            // Retry immediately? Or wait for next heartbeat/trigger?
-            // For simplicity, let next heartbeat handle it or trigger retry
+            long next = nextIndex.getOrDefault(decision.peerId(), 1L);
+            nextIndex.put(decision.peerId(), Math.max(1, next - 1));
         }
+        return null;
     }
+
+    private void handleAppendEntriesFailure(
+            String peerId, Throwable error, long originatingTerm, long originatingGeneration) {
+        transitionSequencer.submit(
+                        "append-failure:" + peerId + ":" + originatingTerm,
+                        RaftTransitionSequencer.FailurePolicy.CONTINUE,
+                        () -> Future.succeededFuture(new AppendFailureDecision(
+                                peerId, error, originatingTerm, originatingGeneration)),
+                        this::applyAppendEntriesFailure)
+                .onFailure(rejected -> logger.debug(
+                        "Could not admit AppendEntries failure notification for {}: {}",
+                        peerId, rejected.toString()));
+    }
+
+    private Void applyAppendEntriesFailure(AppendFailureDecision decision) {
+        if (!isCurrentLeadership(decision.originatingTerm(), decision.originatingGeneration())) {
+            return null;
+        }
+        if (unavailablePeers.add(decision.peerId())) {
+            logger.error("Raft peer {} became unreachable during AppendEntries",
+                    decision.peerId(), decision.error());
+        } else {
+            logger.debug("Raft peer {} remains unreachable during AppendEntries: {}",
+                    decision.peerId(), decision.error().toString());
+        }
+        return null;
+    }
+
+    private boolean isCurrentLeadership(long term, long generation) {
+        return state == State.LEADER && currentTerm == term && leadershipGeneration == generation;
+    }
+
+    private record AppendResponseDecision(
+            String peerId, AppendEntriesResponse response,
+            long originatingTerm, long originatingGeneration, boolean higherTerm) {}
+
+    private record AppendFailureDecision(
+            String peerId, Throwable error, long originatingTerm, long originatingGeneration) {}
 
     private void updateCommitIndex() {
         // If there exists an N such that N > commitIndex, a majority of matchIndex[i]
@@ -1493,21 +1621,22 @@ public class RaftNode {
                 continue;
             }
             LogEntry entry = log.get(toArrayIndex(lastApplied));
-            CommandResult<?> result = null;
+            RaftCommandResult<?> result = null;
             Exception exception = null;
 
-            if (entry.getCommand() != null) {
-                try {
+            try {
+                if (entry.getCommand() != null) {
                     result = stateMachine.apply(entry.getCommand());
-                } catch (Exception e) {
-                    logger.error("Failed to apply command at index {}: {}", lastApplied, e.getMessage());
-                    logger.debug("Stack trace for command apply failure at index {}", lastApplied, e);
-                    exception = e;
                 }
+                stateMachine.setLastAppliedIndex(lastApplied);
+            } catch (Exception e) {
+                logger.error("Failed to apply command at index {}: {}", lastApplied, e.getMessage());
+                logger.debug("Stack trace for command apply failure at index {}", lastApplied, e);
+                exception = e;
             }
 
             // Complete future if this node is leader
-            Promise<CommandResult<?>> promise = pendingCommands.remove(lastApplied);
+            Promise<RaftCommandResult<?>> promise = pendingCommands.remove(lastApplied);
             if (promise != null) {
                 if (exception != null) {
                     promise.fail(exception);
@@ -1571,80 +1700,120 @@ public class RaftNode {
             return Future.failedFuture(new IllegalStateException("Cannot take snapshot in volatile mode"));
         }
 
-        RaftStorage store = storage.get();
-        SnapshotStore snapshots = snapshotStore.orElseThrow();
+        return transitionSequencer.submit(
+                        "local-snapshot",
+                        RaftTransitionSequencer.FailurePolicy.FENCE,
+                        this::preparePublishAndCompactLocalSnapshot,
+                        this::applyLocalSnapshot)
+                .compose(result -> result.failure() == null
+                        ? Future.<Void>succeededFuture()
+                        : Future.<Void>failedFuture(result.failure()))
+                .onFailure(err -> logger.error("Snapshot failed: {}", err.getMessage(), err));
+    }
+
+    private Future<LocalSnapshotDecision> preparePublishAndCompactLocalSnapshot() {
         long snapshotIndex = lastApplied;
         if (snapshotIndex <= snapshotLastIndex) {
             logger.debug("No new entries to snapshot (lastApplied={}, snapshotLastIndex={})",
                     lastApplied, snapshotLastIndex);
-            return Future.succeededFuture();
+            return Future.succeededFuture(LocalSnapshotDecision.skipped());
         }
 
-        // Capture the term of the entry at lastApplied
-        long snapshotTerm;
-        if (hasLogEntry(snapshotIndex)) {
-            snapshotTerm = log.get(toArrayIndex(snapshotIndex)).getTerm();
-        } else {
-            snapshotTerm = currentTerm;
+        if (!hasLogEntry(snapshotIndex)) {
+            return Future.succeededFuture(LocalSnapshotDecision.failedBeforePublication(
+                    new IllegalStateException("Cannot resolve exact term for snapshot boundary "
+                            + snapshotIndex + " (snapshotLastIndex=" + snapshotLastIndex
+                            + ", lastLogIndex=" + lastLogIndex() + ")")));
         }
+        long snapshotTerm = log.get(toArrayIndex(snapshotIndex)).getTerm();
 
         long startTime = System.currentTimeMillis();
-
-        // Step 1: Take state machine snapshot (synchronous - on event loop)
-        byte[] snapshotData;
+        SnapshotData snapshot;
         try {
-            snapshotData = stateMachine.takeSnapshot();
-        } catch (Exception e) {
-            logger.error("Failed to take state machine snapshot: {}", e.getMessage(), e);
-            return Future.failedFuture(e);
+            snapshot = new SnapshotData(
+                    stateMachine.takeSnapshot(), snapshotIndex, snapshotTerm);
+        } catch (RuntimeException error) {
+            return Future.succeededFuture(
+                    LocalSnapshotDecision.failedBeforePublication(error));
         }
 
         logger.info("Snapshot taken at index={}, term={}, size={}bytes, compacting {} entries",
-                snapshotIndex, snapshotTerm, snapshotData.length,
+                snapshotIndex, snapshotTerm, snapshot.data().length,
                 snapshotIndex - snapshotLastIndex);
 
-        // Step 2: Persist snapshot to storage (async)
-        return toFuture(snapshots.saveAtomically(new SnapshotData(snapshotData, snapshotIndex, snapshotTerm)))
-                .compose(v -> {
-                    // Step 3: Truncate log prefix in storage
-                    return toFuture(store.truncatePrefix(snapshotIndex));
-                })
-                .compose(v -> {
-                    // Step 4: Trim in-memory log
-                    long entriesToRemove = snapshotIndex - snapshotLastIndex;
-                    if (entriesToRemove > 0 && toArrayIndex(snapshotIndex) < log.size()) {
-                        // Remove entries from front of list, keep entries after snapshotIndex
-                        int removeCount = toArrayIndex(snapshotIndex);
-                        if (removeCount > 0) {
-                            log.subList(0, removeCount).clear();
-                        }
-                    }
+        LocalSnapshotDecision captured = LocalSnapshotDecision.captured(
+                snapshot, snapshotLastIndex, startTime);
+        Future<LocalSnapshotDecision> publication;
+        try {
+            publication = toFuture(snapshotStore.orElseThrow().saveAtomically(snapshot))
+                    .map(ignored -> captured)
+                    .recover(error -> Future.succeededFuture(
+                            LocalSnapshotDecision.failedBeforePublication(error)));
+        } catch (RuntimeException error) {
+            publication = Future.succeededFuture(
+                    LocalSnapshotDecision.failedBeforePublication(error));
+        }
 
-                    // Step 5: Update snapshot state
-                    long previousSnapshotIndex = snapshotLastIndex;
-                    snapshotLastIndex = snapshotIndex;
-                    snapshotLastTerm = snapshotTerm;
-
-                    // Update sentinel entry at new position 0
-                    if (!log.isEmpty()) {
-                        log.set(0, new LogEntry(snapshotTerm, snapshotIndex, null));
-                    }
-
-                    long duration = System.currentTimeMillis() - startTime;
-
-                    // Record metrics
-                    snapshotCounter.add(1);
-                    snapshotDuration.record(duration);
-                    logCompactedEntries.add(snapshotIndex - previousSnapshotIndex);
-
-                    logger.info("Snapshot complete: snapshotIndex={}, logSize={}, duration={}ms",
-                            snapshotIndex, log.size(), duration);
-                    return Future.<Void>succeededFuture();
-                })
-                .onFailure(err -> {
-                    logger.error("Snapshot failed: {}", err.getMessage(), err);
-                });
+        return publication.compose(decision -> {
+            if (decision.failure() != null) return Future.succeededFuture(decision);
+            return toFuture(storage.orElseThrow().truncatePrefix(snapshotIndex)).map(decision);
+        });
     }
+
+    private LocalSnapshotResult applyLocalSnapshot(LocalSnapshotDecision decision) {
+        if (decision.noOp() || decision.failure() != null) {
+            return new LocalSnapshotResult(decision.failure());
+        }
+
+        SnapshotData snapshot = decision.snapshot();
+        long snapshotIndex = snapshot.lastIncludedIndex();
+        long snapshotTerm = snapshot.lastIncludedTerm();
+        if (snapshotLastIndex != decision.previousSnapshotIndex()
+                || !hasLogEntry(snapshotIndex)
+                || log.get(toArrayIndex(snapshotIndex)).getTerm() != snapshotTerm) {
+            throw new IllegalStateException("Snapshot boundary changed before application: index="
+                    + snapshotIndex + ", term=" + snapshotTerm);
+        }
+
+        int removeCount = toArrayIndex(snapshotIndex);
+        if (removeCount > 0) log.subList(0, removeCount).clear();
+        snapshotLastIndex = snapshotIndex;
+        snapshotLastTerm = snapshotTerm;
+        log.set(0, new LogEntry(snapshotTerm, snapshotIndex, null));
+
+        long duration = System.currentTimeMillis() - decision.startTime();
+        snapshotCounter.add(1);
+        snapshotDuration.record(duration);
+        logCompactedEntries.add(snapshotIndex - decision.previousSnapshotIndex());
+
+        logger.info("Snapshot complete: snapshotIndex={}, logSize={}, duration={}ms",
+                snapshotIndex, log.size(), duration);
+        return new LocalSnapshotResult(null);
+    }
+
+    private record LocalSnapshotDecision(
+            SnapshotData snapshot,
+            long previousSnapshotIndex,
+            long startTime,
+            boolean noOp,
+            Throwable failure) {
+
+        private static LocalSnapshotDecision captured(
+                SnapshotData snapshot, long previousSnapshotIndex, long startTime) {
+            return new LocalSnapshotDecision(
+                    snapshot, previousSnapshotIndex, startTime, false, null);
+        }
+
+        private static LocalSnapshotDecision skipped() {
+            return new LocalSnapshotDecision(null, 0, 0, true, null);
+        }
+
+        private static LocalSnapshotDecision failedBeforePublication(Throwable error) {
+            return new LocalSnapshotDecision(null, 0, 0, false, error);
+        }
+    }
+
+    private record LocalSnapshotResult(Throwable failure) {}
 
     /**
      * Returns whether snapshot scheduling is enabled for this node.
@@ -1785,163 +1954,268 @@ public class RaftNode {
      * @return Future containing the response
      */
     public Future<InstallSnapshotResponse> handleInstallSnapshot(InstallSnapshotRequest request) {
+        requireNonNull(request, "request");
         Promise<InstallSnapshotResponse> promise = Promise.promise();
-        runOnContext(v -> {
-            try {
-                installSnapshotReceived.add(1);
-
-                // Step 1: Term check
-                if (request.getTerm() < currentTerm) {
-                    logger.debug("Rejecting InstallSnapshot: stale term {} < {}",
-                            request.getTerm(), currentTerm);
-                    promise.complete(InstallSnapshotResponse.newBuilder()
-                            .setTerm(currentTerm)
-                            .setSuccess(false)
-                            .setNextChunkIndex(0)
-                            .build());
-                    return;
-                }
-
-                // Step 2: Step down if higher or equal term (we're receiving from a leader)
-                if (request.getTerm() > currentTerm) {
-                    stepDown(request.getTerm(), true)
-                            .onSuccess(v2 -> continueInstallSnapshotAfterTermCheck(request, promise))
-                            .onFailure(err -> {
-                                logger.error("Failed to persist higher term {} before InstallSnapshot response: {}",
-                                        request.getTerm(), err.getMessage());
-                                logger.debug("Stack trace for InstallSnapshot higher-term persistence failure", err);
-                                promise.complete(InstallSnapshotResponse.newBuilder()
-                                        .setTerm(currentTerm)
-                                        .setSuccess(false)
-                                        .setNextChunkIndex(0)
-                                        .build());
-                            });
-                    return;
-                }
-
-                continueInstallSnapshotAfterTermCheck(request, promise);
-
-            } catch (Exception e) {
-                logger.error("Error handling InstallSnapshot: {}", e.getMessage(), e);
-                promise.fail(e);
-            }
-        });
+        transitionSequencer.submit(
+                        "install-snapshot:" + request.getLeaderId() + ":" + request.getTerm()
+                                + ":" + request.getChunkIndex(),
+                        RaftTransitionSequencer.FailurePolicy.FENCE,
+                        () -> prepareAndPersistInstalledSnapshot(request),
+                        this::applyInstalledSnapshot)
+                .onComplete(result -> {
+                    if (result.succeeded()) {
+                        promise.tryComplete(result.result());
+                    } else {
+                        Throwable error = result.cause();
+                        logger.error("InstallSnapshot durable transition failed: {}",
+                                error.getMessage(), error);
+                        promise.tryComplete(InstallSnapshotResponse.newBuilder()
+                                .setTerm(currentTerm)
+                                .setSuccess(false)
+                                .setNextChunkIndex(0)
+                                .build());
+                    }
+                });
         return promise.future();
     }
 
-    private void continueInstallSnapshotAfterTermCheck(InstallSnapshotRequest request, Promise<InstallSnapshotResponse> promise) {
-        if (state != State.FOLLOWER) {
+    private Future<InstalledSnapshotPlan> prepareAndPersistInstalledSnapshot(
+            InstallSnapshotRequest request) {
+        installSnapshotReceived.add(1);
+        if (request.getTerm() < currentTerm) {
+            logger.debug("Rejecting InstallSnapshot: stale term {} < {}",
+                    request.getTerm(), currentTerm);
+            return Future.succeededFuture(
+                    InstalledSnapshotPlan.rejectedWithoutStateChange(request));
+        }
+
+        boolean higherTerm = request.getTerm() > currentTerm;
+        InstalledSnapshotPlan plan = planInstalledSnapshot(request, higherTerm);
+        Future<Void> termPersistence = higherTerm
+                ? persistMetadata(request.getTerm(), Optional.empty())
+                : Future.succeededFuture();
+        return termPersistence.compose(ignored -> persistInstalledSnapshot(plan));
+    }
+
+    private InstalledSnapshotPlan planInstalledSnapshot(
+            InstallSnapshotRequest request, boolean higherTerm) {
+        String leaderId = request.getLeaderId();
+        int chunkIndex = request.getChunkIndex();
+        int totalChunks = request.getTotalChunks();
+        boolean clearAssemblers = higherTerm;
+
+        logger.debug("InstallSnapshot from {}: chunk {}/{}, lastIncludedIndex={}",
+                leaderId, chunkIndex + 1, totalChunks, request.getLastIncludedIndex());
+
+        if (!higherTerm && currentLeaderId != null && !currentLeaderId.equals(leaderId)) {
+            logger.warn("Rejecting same-term InstallSnapshot from {} while following {}",
+                    leaderId, currentLeaderId);
+            return InstalledSnapshotPlan.rejectedWithoutStateChange(request);
+        }
+
+        if (totalChunks <= 0 || chunkIndex < 0 || chunkIndex >= totalChunks
+                || request.getDone() != (chunkIndex == totalChunks - 1)) {
+            return InstalledSnapshotPlan.rejected(
+                    request, higherTerm, clearAssemblers, true, 0);
+        }
+
+        if (snapshotLastIndex > 0
+                && request.getLastIncludedIndex() == snapshotLastIndex
+                && request.getLastIncludedTerm() == snapshotLastTerm) {
+            return InstalledSnapshotPlan.duplicate(
+                    request, higherTerm, clearAssemblers, totalChunks);
+        }
+
+        long protectedIndex = Math.max(snapshotLastIndex, Math.max(lastApplied, commitIndex));
+        if (request.getLastIncludedIndex() <= protectedIndex) {
+            logger.warn("Rejecting stale InstallSnapshot boundary {} at or below protected index {}",
+                    request.getLastIncludedIndex(), protectedIndex);
+            return InstalledSnapshotPlan.rejected(
+                    request, higherTerm, clearAssemblers, true, 0);
+        }
+
+        SnapshotChunkAssembler assembler = higherTerm ? null : pendingInstalls.get(leaderId);
+        if (assembler != null && !assembler.matches(request)) {
+            if (chunkIndex != 0) {
+                return InstalledSnapshotPlan.rejected(
+                        request, higherTerm, clearAssemblers, true, 0);
+            }
+            assembler = null;
+        }
+        if (assembler == null) {
+            if (chunkIndex != 0) {
+                return InstalledSnapshotPlan.rejected(
+                        request, higherTerm, clearAssemblers, true, 0);
+            }
+            assembler = new SnapshotChunkAssembler(request);
+        }
+        if (chunkIndex != assembler.getNextExpectedChunk()) {
+            logger.warn("Out-of-order snapshot chunk: expected {}, got {}",
+                    assembler.getNextExpectedChunk(), chunkIndex);
+            return InstalledSnapshotPlan.rejected(request, higherTerm, clearAssemblers,
+                    false, assembler.getNextExpectedChunk());
+        }
+
+        SnapshotChunkAssembler advanced = assembler.withChunk(
+                chunkIndex, request.getData().toByteArray());
+        if (!request.getDone()) {
+            return InstalledSnapshotPlan.acceptedChunk(
+                    request, higherTerm, clearAssemblers, advanced);
+        }
+
+        SnapshotData snapshot = new SnapshotData(
+                advanced.assemble(), request.getLastIncludedIndex(), request.getLastIncludedTerm());
+        logger.info("InstallSnapshot complete: assembling {} bytes at index={}, term={}",
+                snapshot.data().length, snapshot.lastIncludedIndex(), snapshot.lastIncludedTerm());
+        return InstalledSnapshotPlan.completed(
+                request, higherTerm, clearAssemblers, snapshot);
+    }
+
+    private Future<InstalledSnapshotPlan> persistInstalledSnapshot(InstalledSnapshotPlan plan) {
+        if (plan.snapshot() == null) return Future.succeededFuture(plan);
+
+        Future<Void> publication;
+        try {
+            publication = snapshotStore
+                    .map(store -> toFuture(store.saveAtomically(plan.snapshot())))
+                    .orElseGet(Future::succeededFuture);
+        } catch (RuntimeException error) {
+            return Future.succeededFuture(plan.publicationFailed(error));
+        }
+
+        return publication
+                .map(ignored -> plan)
+                .recover(error -> Future.succeededFuture(plan.publicationFailed(error)))
+                .compose(published -> {
+                    if (published.failure() != null) return Future.succeededFuture(published);
+                    return storage
+                            .map(store -> toFuture(store.truncatePrefix(
+                                    published.snapshot().lastIncludedIndex())).map(published))
+                            .orElseGet(() -> Future.succeededFuture(published));
+                });
+    }
+
+    private InstallSnapshotResponse applyInstalledSnapshot(InstalledSnapshotPlan plan) {
+        InstallSnapshotRequest request = plan.request();
+        if (!plan.termAccepted()) {
+            return installSnapshotResponse(false, 0);
+        }
+
+        if (plan.higherTerm()) {
+            applyDurableHigherTerm(request.getTerm(), null);
+        } else if (state != State.FOLLOWER) {
             state = State.FOLLOWER;
             MDC.put("raftRole", "FOLLOWER");
             MDC.put("raftTerm", String.valueOf(currentTerm));
             notifyStateChangeListeners(State.FOLLOWER);
+            failPendingCommands(new IllegalStateException(
+                    "Leadership lost before command commit; outcome may be unknown"));
             if (heartbeatTimerId != -1) {
                 runtime.cancelTimer(heartbeatTimerId);
                 heartbeatTimerId = -1;
             }
         }
+        if (plan.clearAssemblers()) pendingInstalls.clear();
         currentLeaderId = request.getLeaderId();
-
         resetElectionTimer();
 
-                String leaderId = request.getLeaderId();
-                int chunkIndex = request.getChunkIndex();
-                int totalChunks = request.getTotalChunks();
+        if (plan.removeAssembler()) pendingInstalls.remove(request.getLeaderId());
+        if (plan.assemblerToStore() != null) {
+            pendingInstalls.put(request.getLeaderId(), plan.assemblerToStore());
+        }
+        if (plan.failure() != null) {
+            logger.error("Failed to publish installed snapshot: {}",
+                    plan.failure().getMessage(), plan.failure());
+            return installSnapshotResponse(false, 0);
+        }
+        if (plan.snapshot() == null) {
+            return installSnapshotResponse(plan.success(), plan.nextChunkIndex());
+        }
 
-                logger.debug("InstallSnapshot from {}: chunk {}/{}, lastIncludedIndex={}",
-                        leaderId, chunkIndex + 1, totalChunks, request.getLastIncludedIndex());
+        SnapshotData snapshot = plan.snapshot();
+        long lastIncludedIndex = snapshot.lastIncludedIndex();
+        long lastIncludedTerm = snapshot.lastIncludedTerm();
 
-                // Step 3: Get or create chunk assembler
-                SnapshotChunkAssembler assembler = pendingInstalls.computeIfAbsent(leaderId,
-                        k -> new SnapshotChunkAssembler(totalChunks));
+        List<LogEntry> retainedSuffix = List.of();
+        if (hasLogEntry(lastIncludedIndex)
+                && log.get(toArrayIndex(lastIncludedIndex)).getTerm() == lastIncludedTerm) {
+            int suffixStart = toArrayIndex(lastIncludedIndex) + 1;
+            retainedSuffix = new ArrayList<>(log.subList(suffixStart, log.size()));
+        }
 
-                // Reset if a new snapshot transfer starts
-                if (assembler.getTotalChunks() != totalChunks
-                        || assembler.getLastIncludedIndex() != request.getLastIncludedIndex()) {
-                    assembler = new SnapshotChunkAssembler(totalChunks);
-                    pendingInstalls.put(leaderId, assembler);
-                }
-                assembler.setLastIncludedIndex(request.getLastIncludedIndex());
+        stateMachine.restoreSnapshot(snapshot.data());
+        stateMachine.setLastAppliedIndex(lastIncludedIndex);
+        log.clear();
+        log.add(new LogEntry(lastIncludedTerm, lastIncludedIndex, null));
+        log.addAll(retainedSuffix);
+        snapshotLastIndex = lastIncludedIndex;
+        snapshotLastTerm = lastIncludedTerm;
+        lastApplied = lastIncludedIndex;
+        commitIndex = Math.max(commitIndex, lastIncludedIndex);
 
-                // Step 4: Validate chunk sequence
-                if (chunkIndex != assembler.getNextExpectedChunk()) {
-                    logger.warn("Out-of-order chunk: expected {}, got {}",
-                            assembler.getNextExpectedChunk(), chunkIndex);
-                    promise.complete(InstallSnapshotResponse.newBuilder()
-                            .setTerm(currentTerm)
-                            .setSuccess(false)
-                            .setNextChunkIndex(assembler.getNextExpectedChunk())
-                            .build());
-                    return;
-                }
+        logger.info("Snapshot installed: snapshotLastIndex={}, snapshotLastTerm={}, commitIndex={}",
+                snapshotLastIndex, snapshotLastTerm, commitIndex);
+        return installSnapshotResponse(true, request.getTotalChunks());
+    }
 
-                // Step 5: Accept chunk
-                assembler.addChunk(chunkIndex, request.getData().toByteArray());
+    private InstallSnapshotResponse installSnapshotResponse(boolean success, int nextChunkIndex) {
+        return InstallSnapshotResponse.newBuilder()
+                .setTerm(currentTerm)
+                .setSuccess(success)
+                .setNextChunkIndex(nextChunkIndex)
+                .build();
+    }
 
-                if (!request.getDone()) {
-                    // More chunks expected
-                    promise.complete(InstallSnapshotResponse.newBuilder()
-                            .setTerm(currentTerm)
-                            .setSuccess(true)
-                            .setNextChunkIndex(chunkIndex + 1)
-                            .build());
-                    return;
-                }
+    private record InstalledSnapshotPlan(
+            InstallSnapshotRequest request,
+            boolean termAccepted,
+            boolean higherTerm,
+            boolean clearAssemblers,
+            boolean removeAssembler,
+            SnapshotChunkAssembler assemblerToStore,
+            SnapshotData snapshot,
+            boolean success,
+            int nextChunkIndex,
+            Throwable failure) {
 
-                // Step 6: All chunks received — assemble and apply
-                byte[] snapshotData = assembler.assemble();
-                long lastIncludedIndex = request.getLastIncludedIndex();
-                long lastIncludedTerm = request.getLastIncludedTerm();
-                pendingInstalls.remove(leaderId);
+        private static InstalledSnapshotPlan rejectedWithoutStateChange(
+                InstallSnapshotRequest request) {
+            return new InstalledSnapshotPlan(request, false, false, false, false,
+                    null, null, false, 0, null);
+        }
 
-                logger.info("InstallSnapshot complete: assembling {} bytes at index={}, term={}",
-                        snapshotData.length, lastIncludedIndex, lastIncludedTerm);
+        private static InstalledSnapshotPlan rejected(
+                InstallSnapshotRequest request, boolean higherTerm,
+                boolean clearAssemblers, boolean removeAssembler, int nextChunkIndex) {
+            return new InstalledSnapshotPlan(request, true, higherTerm, clearAssemblers,
+                    removeAssembler, null, null, false, nextChunkIndex, null);
+        }
 
-                // Step 7: Persist snapshot and restore state
-                Future<Void> saveFuture = snapshotStore
-                        .map(s -> toFuture(s.saveAtomically(
-                                new SnapshotData(snapshotData, lastIncludedIndex, lastIncludedTerm))))
-                        .orElseGet(Future::succeededFuture);
+        private static InstalledSnapshotPlan duplicate(
+                InstallSnapshotRequest request, boolean higherTerm,
+                boolean clearAssemblers, int nextChunkIndex) {
+            return new InstalledSnapshotPlan(request, true, higherTerm, clearAssemblers,
+                    true, null, null, true, nextChunkIndex, null);
+        }
 
-                saveFuture
-                    .compose(v2 -> {
-                        // Truncate old log entries from storage
-                        return storage.map(s -> toFuture(s.truncatePrefix(lastIncludedIndex)))
-                                .orElseGet(Future::succeededFuture);
-                    })
-                    .onSuccess(v2 -> {
-                        // Step 8: Restore state machine
-                        stateMachine.restoreSnapshot(snapshotData);
+        private static InstalledSnapshotPlan acceptedChunk(
+                InstallSnapshotRequest request, boolean higherTerm,
+                boolean clearAssemblers, SnapshotChunkAssembler assembler) {
+            return new InstalledSnapshotPlan(request, true, higherTerm, clearAssemblers,
+                    false, assembler, null, true, assembler.getNextExpectedChunk(), null);
+        }
 
-                        // Step 9: Reset in-memory log to snapshot boundary
-                        log.clear();
-                        log.add(new LogEntry(lastIncludedTerm, lastIncludedIndex, null));
+        private static InstalledSnapshotPlan completed(
+                InstallSnapshotRequest request, boolean higherTerm,
+                boolean clearAssemblers, SnapshotData snapshot) {
+            return new InstalledSnapshotPlan(request, true, higherTerm, clearAssemblers,
+                    true, null, snapshot, true, request.getTotalChunks(), null);
+        }
 
-                        // Step 10: Update snapshot and index tracking
-                        snapshotLastIndex = lastIncludedIndex;
-                        snapshotLastTerm = lastIncludedTerm;
-                        lastApplied = lastIncludedIndex;
-                        commitIndex = Math.max(commitIndex, lastIncludedIndex);
-
-                        logger.info("Snapshot installed: snapshotLastIndex={}, snapshotLastTerm={}, commitIndex={}",
-                                snapshotLastIndex, snapshotLastTerm, commitIndex);
-
-                        promise.complete(InstallSnapshotResponse.newBuilder()
-                                .setTerm(currentTerm)
-                                .setSuccess(true)
-                                .setNextChunkIndex(totalChunks)
-                                .build());
-                    })
-                    .onFailure(err -> {
-                        logger.error("Failed to persist installed snapshot: {}", err.getMessage(), err);
-                        pendingInstalls.remove(leaderId);
-                        promise.complete(InstallSnapshotResponse.newBuilder()
-                                .setTerm(currentTerm)
-                                .setSuccess(false)
-                                .setNextChunkIndex(0)
-                                .build());
-                    });
-
+        private InstalledSnapshotPlan publicationFailed(Throwable error) {
+            return new InstalledSnapshotPlan(request, termAccepted, higherTerm, clearAssemblers,
+                    true, null, snapshot, false, 0, error);
+        }
     }
 
     // ========== SNAPSHOT CHUNK ASSEMBLER ==========
@@ -1952,19 +2226,41 @@ public class RaftNode {
      * snapshot byte array when all chunks are present.
      */
     static class SnapshotChunkAssembler {
+        private final long requestTerm;
+        private final long lastIncludedIndex;
+        private final long lastIncludedTerm;
         private final int totalChunks;
         private final byte[][] chunks;
-        private int nextExpectedChunk = 0;
-        private long lastIncludedIndex = 0;
+        private final int nextExpectedChunk;
 
-        SnapshotChunkAssembler(int totalChunks) {
-            this.totalChunks = totalChunks;
-            this.chunks = new byte[totalChunks][];
+        SnapshotChunkAssembler(InstallSnapshotRequest request) {
+            this(request.getTerm(), request.getLastIncludedIndex(), request.getLastIncludedTerm(),
+                    request.getTotalChunks(), new byte[request.getTotalChunks()][], 0);
         }
 
-        void addChunk(int index, byte[] data) {
-            chunks[index] = data;
-            nextExpectedChunk = index + 1;
+        private SnapshotChunkAssembler(
+                long requestTerm, long lastIncludedIndex, long lastIncludedTerm,
+                int totalChunks, byte[][] chunks, int nextExpectedChunk) {
+            this.requestTerm = requestTerm;
+            this.lastIncludedIndex = lastIncludedIndex;
+            this.lastIncludedTerm = lastIncludedTerm;
+            this.totalChunks = totalChunks;
+            this.chunks = chunks;
+            this.nextExpectedChunk = nextExpectedChunk;
+        }
+
+        boolean matches(InstallSnapshotRequest request) {
+            return requestTerm == request.getTerm()
+                    && lastIncludedIndex == request.getLastIncludedIndex()
+                    && lastIncludedTerm == request.getLastIncludedTerm()
+                    && totalChunks == request.getTotalChunks();
+        }
+
+        SnapshotChunkAssembler withChunk(int index, byte[] data) {
+            byte[][] advanced = chunks.clone();
+            advanced[index] = data.clone();
+            return new SnapshotChunkAssembler(requestTerm, lastIncludedIndex, lastIncludedTerm,
+                    totalChunks, advanced, index + 1);
         }
 
         byte[] assemble() {
@@ -1986,7 +2282,6 @@ public class RaftNode {
         int getTotalChunks() { return totalChunks; }
         int getNextExpectedChunk() { return nextExpectedChunk; }
         long getLastIncludedIndex() { return lastIncludedIndex; }
-        void setLastIncludedIndex(long idx) { this.lastIncludedIndex = idx; }
     }
 
     // ========== SERIALIZATION ==========

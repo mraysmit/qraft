@@ -38,9 +38,9 @@ public final class QraftStateStore implements RaftLogApplicator {
     }
 
     @Override
-    public CommandResult<?> apply(RaftCommand command) {
+    public RaftCommandResult<?> apply(RaftCommand command) {
         if (command == null) {
-            return new CommandResult.NoOp<>();
+            return new RaftCommandResult.NoOp<>();
         }
         return switch (command) {
             case AgentCommand agentCommand -> applyAgentCommand(agentCommand);
@@ -51,58 +51,58 @@ public final class QraftStateStore implements RaftLogApplicator {
         };
     }
 
-    private CommandResult<?> applyCatalogCommand(CatalogCommand command) {
+    private RaftCommandResult<?> applyCatalogCommand(CatalogCommand command) {
         return switch (command) {
             case CatalogCommand.Register register -> {
                 serviceCatalog.register(register.instance());
-                yield new CommandResult.Success<>(register.instance());
+                yield new RaftCommandResult.Success<>(register.instance());
             }
             case CatalogCommand.Deregister deregister -> serviceCatalog.deregister(deregister.serviceId())
-                    ? new CommandResult.Success<>(deregister.serviceId())
-                    : new CommandResult.NotFound<>(deregister.serviceId(), "ServiceInstance");
+                    ? new RaftCommandResult.Success<>(deregister.serviceId())
+                    : new RaftCommandResult.NotFound<>(deregister.serviceId(), "ServiceInstance");
         };
     }
 
-    private CommandResult<?> applyAgentCommand(AgentCommand command) {
+    private RaftCommandResult<?> applyAgentCommand(AgentCommand command) {
         return switch (command) {
             case AgentCommand.Register register -> {
                 agents.put(register.agentId(), register.agentInfo());
-                yield new CommandResult.Success<>(register.agentInfo());
+                yield new RaftCommandResult.Success<>(register.agentInfo());
             }
             case AgentCommand.Deregister deregister -> {
                 AgentInfo removed = agents.remove(deregister.agentId());
-                yield removed == null ? new CommandResult.NotFound<>(deregister.agentId(), "Agent")
-                        : new CommandResult.Success<>(removed);
+                yield removed == null ? new RaftCommandResult.NotFound<>(deregister.agentId(), "Agent")
+                        : new RaftCommandResult.Success<>(removed);
             }
             case AgentCommand.UpdateStatus update -> {
                 AgentInfo current = agents.get(update.agentId());
                 if (current == null) {
-                    yield new CommandResult.NotFound<>(update.agentId(), "Agent");
+                    yield new RaftCommandResult.NotFound<>(update.agentId(), "Agent");
                 }
                 if (current.getStatus() != update.expectedStatus()) {
-                    yield new CommandResult.CasMismatch<>(current);
+                    yield new RaftCommandResult.CasMismatch<>(current);
                 }
                 AgentInfo changed = AgentInfo.copyOf(current);
                 changed.setStatus(update.newStatus());
                 changed.setLastHeartbeat(update.timestamp());
                 agents.put(update.agentId(), changed);
-                yield new CommandResult.Success<>(changed);
+                yield new RaftCommandResult.Success<>(changed);
             }
             case AgentCommand.UpdateCapabilities update -> {
                 AgentInfo current = agents.get(update.agentId());
                 if (current == null) {
-                    yield new CommandResult.NotFound<>(update.agentId(), "Agent");
+                    yield new RaftCommandResult.NotFound<>(update.agentId(), "Agent");
                 }
                 AgentInfo changed = AgentInfo.copyOf(current);
                 changed.setCapabilities(update.newCapabilities());
                 changed.setLastHeartbeat(update.timestamp());
                 agents.put(update.agentId(), changed);
-                yield new CommandResult.Success<>(changed);
+                yield new RaftCommandResult.Success<>(changed);
             }
             case AgentCommand.Heartbeat heartbeat -> {
                 AgentInfo current = agents.get(heartbeat.agentId());
                 if (current == null) {
-                    yield new CommandResult.NotFound<>(heartbeat.agentId(), "Agent");
+                    yield new RaftCommandResult.NotFound<>(heartbeat.agentId(), "Agent");
                 }
                 AgentInfo changed = AgentInfo.copyOf(current);
                 changed.setLastHeartbeat(heartbeat.timestamp());
@@ -112,21 +112,21 @@ public final class QraftStateStore implements RaftLogApplicator {
                     changed.setStatus(AgentStatus.HEALTHY);
                 }
                 agents.put(heartbeat.agentId(), changed);
-                yield new CommandResult.Success<>(changed);
+                yield new RaftCommandResult.Success<>(changed);
             }
         };
     }
 
-    private CommandResult<?> applyMetadataCommand(DistributedStateCommand command) {
+    private RaftCommandResult<?> applyMetadataCommand(DistributedStateCommand command) {
         return switch (command) {
             case DistributedStateCommand.Put put -> {
                 metadata.put(put.key(), put.value());
-                yield new CommandResult.Success<>(put.value());
+                yield new RaftCommandResult.Success<>(put.value());
             }
             case DistributedStateCommand.Delete delete -> {
                 String removed = metadata.remove(delete.key());
-                yield removed == null ? new CommandResult.NotFound<>(delete.key(), "Metadata")
-                        : new CommandResult.Success<>(removed);
+                yield removed == null ? new RaftCommandResult.NotFound<>(delete.key(), "Metadata")
+                        : new RaftCommandResult.Success<>(removed);
             }
         };
     }
