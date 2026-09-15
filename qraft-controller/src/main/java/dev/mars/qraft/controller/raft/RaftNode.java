@@ -701,6 +701,7 @@ public class RaftNode {
      * Persists a log entry to the WAL with sync barrier.
      */
     private Future<Void> persistLogEntry(LogEntry entry) {
+        transitionSequencer.assertActiveTransition();
         return storage.map(s -> {
             ByteString serialized = serialize(entry.getCommand());
             LogEntryData entryData = new LogEntryData(entry.getIndex(), entry.getTerm(), serialized.toByteArray());
@@ -1338,6 +1339,7 @@ public class RaftNode {
     }
 
     private Future<Void> persistMetadata(long term, Optional<String> votedForCandidate) {
+        transitionSequencer.assertActiveTransition();
         if (logger.isDebugEnabled()) {
             logger.debug("Persisting raft metadata: term={}, votedForPresent={}, votedFor={}",
                     term, votedForCandidate.isPresent(), votedForCandidate.orElse("<none>"));
@@ -1559,6 +1561,7 @@ public class RaftNode {
      * Persists append entries to WAL with optional truncation.
      */
     private Future<Void> persistAppendEntries(Long truncateFromIndex, List<LogEntry> entries) {
+        transitionSequencer.assertActiveTransition();
         if (storage.isEmpty()) {
             return Future.succeededFuture();  // Volatile mode
         }
@@ -1884,6 +1887,7 @@ public class RaftNode {
     }
 
     private Future<LocalSnapshotDecision> preparePublishAndCompactLocalSnapshot() {
+        transitionSequencer.assertActiveTransition();
         long snapshotIndex = lastApplied;
         if (snapshotIndex <= snapshotLastIndex) {
             logger.debug("No new entries to snapshot (lastApplied={}, snapshotLastIndex={})",
@@ -2428,6 +2432,7 @@ public class RaftNode {
     }
 
     private Future<InstalledSnapshotPlan> persistInstalledSnapshot(InstalledSnapshotPlan plan) {
+        transitionSequencer.assertActiveTransition();
         if (plan.snapshot() == null) return Future.succeededFuture(plan);
 
         Future<Void> publication;

@@ -1,8 +1,8 @@
 # Snapshot Serialization Review Postmortem
 
 **Date:** 2026-09-13  
-**Status:** Remediation in progress; shutdown sequencing and recovery callback
-affinity implemented, final Phase 6 verification remains open
+**Status:** Remediation complete; all six implementation and verification phases
+are implemented and pass the full non-heavy controller suite
 **Scope:** Raft persistence sequencing, snapshot publication, WAL compaction, and
 in-memory state mutation
 
@@ -350,7 +350,7 @@ focused tests and the existing non-heavy controller suite pass.
 | 3 | Leader append and follower suffix-replacement transitions. | Implemented. Append, truncate, and sync gates prove whole-transition ordering; uncertain write outcomes fence later work. Focused tests and the default non-heavy controller suite pass. |
 | 4 | Local snapshot capture, publication, WAL compaction, and boundary application. | Implemented. Capture, publication, prefix compaction, and memory-boundary application are one serialized transition; focused and default non-heavy tests pass. |
 | 5 | Installed snapshots, timer events, and transport completions with term or leadership-generation fencing. | Implemented. Incoming and outgoing snapshot work, AppendEntries and vote responses, and all Raft timers are sequenced and fenced by immutable ownership tokens; focused and default non-heavy tests pass. |
-| 6 | Shutdown integration, real-storage recovery matrix, structural bypass checks, and model-based histories. | In progress. Shutdown admission, drain, terminal lifecycle, asynchronous-operation ownership, ordered off-loop resource closure, recovery callback affinity, and the real-storage suffix-replacement and local-snapshot restart matrices are implemented and tested. Installed-snapshot and drain interruption points, structural bypass checks, and model-based histories remain open. |
+| 6 | Shutdown integration, real-storage recovery matrix, structural bypass checks, and model-based histories. | Implemented. Shutdown admission and drain, terminal lifecycle, asynchronous-operation ownership, ordered off-loop resource closure, recovery callback affinity, the complete real-storage interruption matrix, executable persistence-ownership enforcement, structural bypass checks, and reproducible model histories are tested. |
 
 Each integration phase starts with a deterministic failing test that holds the
 current durable operation at a named gate. Production wiring follows only after
@@ -569,8 +569,8 @@ late replication responses, stop before start, off-loop ordered closure, close
 de-duplication, and combined close failure reporting. Coordinator and runtime
 tests additionally cover non-mutating timeout observation, shared terminal
 shutdown results, and critical-hook failure/timeout behavior. The current
-sequencing and recovery tranche contains 94 passing tests. The complete
-controller suite passes all 244 tests with no failures, errors, or skips.
+sequencing and recovery tranche contains 99 passing tests. The complete
+controller suite passes all 249 tests with no failures, errors, or skips.
 
 The recovery intermediate-callback tranche is now implemented. Its two
 deterministic tests complete metadata loading, snapshot loading, and WAL replay
@@ -614,9 +614,27 @@ now initiates non-blocking executor shutdown; normal node shutdown already drain
 accepted snapshot work before closing, while failed-open cleanup can propagate
 the original preservation error without waiting on itself.
 
-This is not completion of Phase 6. The installed-snapshot and shutdown-drain
-portions of the real-storage interruption matrix, the structural bypass rule,
-and reproducible model histories remain mandatory.
+The installed-snapshot and shutdown-drain recovery tranche now runs an actual
+follower in a separate JVM with the real snapshot store and WAL. It halts after
+an installed snapshot is durably published but before WAL compaction, and while
+shutdown is draining the same transition after real prefix compaction but before
+in-memory application and response completion. Reopening first verifies the raw
+snapshot, metadata, and exact WAL suffix, then starts a new durable node and
+verifies its reconstructed application state and ready boundary.
+
+Persistence gateways now assert that they are entered by the active transition
+on the owning state loop. A structural repository test inventories every raw WAL
+and snapshot mutation in `RaftNode` and fails if one appears outside those
+guarded gateways. The check exposed the separate leader single-entry persistence
+gateway during its first run; that gateway now carries the same ownership
+assertion.
+
+The model-history test generates bounded command, vote, higher-term, follower
+replacement, snapshot, and timer combinations, completes persistence from
+foreign threads, and compares every preparation and application event with a
+serialized reference model. Shutdown drains the generated prefix and rejects a
+generated suffix. Four stable regression seeds run by default, and every failure
+reports the exact `qraft.model.seed` value required for reproduction.
 
 Remediation suites now use a shared `@RemediationTest` test extension. Each test
 has a stable scenario identifier formed from its phase-specific suite prefix and
@@ -626,8 +644,8 @@ worker, transport, WAL, and snapshot logs inherit the same attribution. Fault
 injection tests emit an `EXPECTED_FAILURE` event with a named checkpoint before
 the deliberate failure occurs. Normal rejection of late work by a draining
 sequencer is debug lifecycle information, not an error. The verified remediation
-run contains 68 starts, 68 passes, nineteen expected-failure markers, no failure
-events, and no draining exceptions logged at error level.
+run contains 73 starts, 73 passes, twenty-one expected-failure markers, no
+failure events, and no draining exceptions logged at error level.
 
 ### 8.1 Deterministic adversarial test harness
 
@@ -960,10 +978,8 @@ Current suffix-replacement coverage:
 | After atomic snapshot publication, before directory force | Snapshot persistence observer halts a separate JVM | The newly published snapshot is selected on process restart; this checkpoint makes no power-loss rename claim. |
 | After completed snapshot publication, before WAL prefix compaction | Separate JVM halted after `saveAtomically` | The new snapshot is authoritative and the untrimmed covered WAL prefix is ignored during reconstruction. |
 | After WAL prefix compaction, before in-memory boundary application | Separate JVM halted after real prefix compaction | The new snapshot plus the exact retained WAL suffix reconstruct the application and start a ready node. |
-
-Installed-snapshot publication and shutdown-drain interruption still require a
-supervised process protocol tied to the corresponding Raft transition. Those
-points are not yet claimed as covered.
+| During installed-snapshot publication, after directory force and before WAL prefix compaction | Separate JVM halted from the real snapshot-store persistence observer while the follower transition is active | The installed snapshot is authoritative; the untrimmed covered WAL prefix is ignored and the retained suffix is replayed exactly. |
+| While shutdown drains an installed-snapshot transition after real WAL prefix compaction and before in-memory application or response | Separate JVM starts shutdown, proves late transition rejection, and halts while the compacted transition remains active | The installed snapshot plus the exact retained WAL suffix reconstruct the application and start a ready node; no uncommitted in-memory completion is required for recovery. |
 
 ### 8.18 Structural and model-based verification
 
@@ -1029,5 +1045,6 @@ The snapshot and WAL integration must not be considered complete until:
 - the observed histories satisfy the defined linearization points;
 - a structural review confirms that no persistence path bypasses the sequencer.
 
-Until those conditions are met, storage delegation may be structurally complete,
-but snapshot correctness and node-level persistence serialization are not.
+The Phase 6 recovery, ownership, structural, and model-history evidence now
+satisfies these completion conditions. Storage delegation, snapshot correctness,
+and node-level persistence serialization are complete for the reviewed scope.

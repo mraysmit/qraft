@@ -123,6 +123,18 @@ final class RaftTransitionSequencer {
         return state == State.FENCED;
     }
 
+    /**
+     * Enforces that a persistence gateway is being entered by the transition
+     * that currently owns the complete prepare/persist/apply lifecycle.
+     */
+    void assertActiveTransition() {
+        assertStateLoop();
+        if (active == null) {
+            throw new IllegalStateException(
+                    "Persistent Raft operation attempted without transition ownership");
+        }
+    }
+
     private <T> void admit(Transition<T> transition) {
         assertStateLoop();
         if (state == State.DRAINING) {

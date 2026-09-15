@@ -192,6 +192,30 @@ class RaftTransitionSequencerTest {
         assertEquals(transitionCount, started.get());
     }
 
+    @Test
+    void persistenceOwnershipGuardRejectsBypassAndAcceptsTheActiveTransition() throws Exception {
+        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 4);
+        CompletableFuture<Throwable> bypassFailure = new CompletableFuture<>();
+        runtime.runOnContext(ignored -> {
+            try {
+                sequencer.assertActiveTransition();
+                bypassFailure.complete(null);
+            } catch (Throwable error) {
+                bypassFailure.complete(error);
+            }
+        });
+
+        Throwable rejected = bypassFailure.get(2, TimeUnit.SECONDS);
+        assertInstanceOf(IllegalStateException.class, rejected);
+        assertTrue(rejected.getMessage().contains("without transition ownership"));
+
+        Future<Void> owned = sequencer.submit("owned-persistence", () -> {
+            sequencer.assertActiveTransition();
+            return Future.succeededFuture();
+        });
+        await(owned);
+    }
+
     private static <T> T await(Future<T> future) throws Exception {
         return future.timeout(5, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
     }
