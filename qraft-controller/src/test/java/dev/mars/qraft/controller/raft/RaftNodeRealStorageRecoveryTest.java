@@ -78,7 +78,7 @@ class RaftNodeRealStorageRecoveryTest {
     }
 
     @Test
-    void restartAfterSyncBeforeResponseRecoversTheDurableReplacement() throws Exception {
+    void restartAfterStorageSyncRecoversTheDurableReplacement() throws Exception {
         verifyRecovery(RealStorageCrashWriter.Checkpoint.AFTER_SYNC,
                 List.of(1L, 2L, 3L), List.of(1L, 1L, 2L), 3, true);
     }
@@ -119,6 +119,34 @@ class RaftNodeRealStorageRecoveryTest {
         assertEquals(2, node.getCurrentTerm());
         assertEquals(1, node.getLastLogIndex());
         assertFalse(node.isFenced());
+    }
+
+    @Test
+    void stopCompletionReleasesWalForImmediateReopen() {
+        RaftStorageFactory.DurableStorage durable = await(
+                RaftStorageFactory.createDurable(directory, true));
+        runtime = JavaRuntime.create();
+        node = RaftNode.builder()
+                .runtime(runtime)
+                .nodeId("node-1")
+                .clusterNodes(Set.of("node-1"))
+                .transport(new NoOpTransport())
+                .stateMachine(new QraftStateStore())
+                .commandCodec(CODEC)
+                .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
+                .snapshotEnabled(false)
+                .electionTimeout(60_000)
+                .heartbeatInterval(60_000)
+                .build();
+        await(node.start());
+
+        await(node.stop());
+        node = null;
+
+        RaftStorageFactory.DurableStorage reopened = await(
+                RaftStorageFactory.createDurable(directory, true));
+        reopened.snapshots().closeAsync().join();
+        reopened.wal().closeAsync().join();
     }
 
     private void verifyRecovery(

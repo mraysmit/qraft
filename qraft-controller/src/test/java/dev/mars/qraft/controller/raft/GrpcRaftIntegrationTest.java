@@ -77,7 +77,7 @@ class GrpcRaftIntegrationTest {
                 grpcServer.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
             }
             if (raftNode != null) {
-                raftNode.stop();
+                raftNode.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
             }
         }
     }

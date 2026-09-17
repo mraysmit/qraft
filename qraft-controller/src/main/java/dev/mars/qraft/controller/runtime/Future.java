@@ -107,7 +107,14 @@ public final class Future<T> implements AsyncResult<T> {
     }
 
     public Future<T> onSuccess(Consumer<? super T> action) {
-        delegate.thenAccept(action);
+        delegate.whenComplete((value, error) -> {
+            if (error != null) return;
+            try {
+                action.accept(value);
+            } catch (Throwable callbackFailure) {
+                reportCallbackFailure(callbackFailure);
+            }
+        });
         return this;
     }
 
@@ -163,6 +170,12 @@ public final class Future<T> implements AsyncResult<T> {
 
     private static Throwable unwrap(Throwable error) {
         return error instanceof CompletionException && error.getCause() != null ? error.getCause() : error;
+    }
+
+    private static void reportCallbackFailure(Throwable error) {
+        Thread thread = Thread.currentThread();
+        Thread.UncaughtExceptionHandler handler = thread.getUncaughtExceptionHandler();
+        if (handler != null) handler.uncaughtException(thread, error);
     }
 
     private record CompletedResult<T>(T result, Throwable error) implements AsyncResult<T> {

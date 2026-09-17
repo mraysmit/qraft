@@ -60,7 +60,14 @@ message InstallSnapshotRequest {
 }
 
 message InstallSnapshotResponse {
+  enum RejectionReason {
+    UNSPECIFIED = 0;
+    ASSEMBLER_STATE_LOST = 1;
+    PERSISTENCE_REJECTED = 2;
+  }
+
   int64 term = 1;                    // Follower's currentTerm (for leader to update itself)
   bool success = 2;                  // true if chunk was accepted
   int32 next_chunk_index = 3;       // Next chunk the follower expects (for retries)
+  RejectionReason rejection_reason = 4; // Why a failed response requested this cursor
 }

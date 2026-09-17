@@ -156,7 +156,7 @@ class RaftTransitionSequencerTest {
 
     @Test
     void boundedAdmissionCountsTheActiveTransition() throws Exception {
-        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 2);
+        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 3);
         Promise<Void> gate = Promise.promise();
 
         Future<Void> active = sequencer.submit("active", () -> gate.future());
@@ -170,6 +170,28 @@ class RaftTransitionSequencerTest {
         gate.complete();
         await(active);
         await(queued);
+    }
+
+    @Test
+    void normalTrafficCannotConsumeCapacityReservedForEssentialRaftWork() throws Exception {
+        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 2);
+        Promise<Void> gate = Promise.promise();
+
+        Future<Void> active = sequencer.submit("client-active", () -> gate.future());
+        Future<Void> rejected = sequencer.submit("client-overflow", Future::succeededFuture);
+        Future<String> essential = sequencer.submitEssential(
+                "higher-term-rpc",
+                RaftTransitionSequencer.FailurePolicy.CONTINUE,
+                () -> Future.succeededFuture("accepted"),
+                value -> value);
+
+        assertInstanceOf(RaftTransitionSequencer.QueueFullException.class,
+                assertThrows(CompletionException.class, () -> await(rejected)).getCause());
+        assertFalse(essential.isComplete());
+
+        gate.complete();
+        await(active);
+        assertEquals("accepted", await(essential));
     }
 
     @Test

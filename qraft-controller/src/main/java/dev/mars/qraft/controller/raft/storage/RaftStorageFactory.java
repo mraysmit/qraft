@@ -47,18 +47,38 @@ public final class RaftStorageFactory {
         return Future.fromCompletionStage(wal.open(storagePath))
                 .compose(ignored -> Future.fromCompletionStage(snapshots.open(storagePath)))
                 .map(ignored -> new DurableStorage(wal, snapshots))
-                .recover(error -> {
-                    try {
-                        snapshots.close();
-                    } catch (Exception closeError) {
-                        error.addSuppressed(closeError);
-                    }
-                    try {
-                        wal.close();
-                    } catch (Exception closeError) {
-                        error.addSuppressed(closeError);
-                    }
-                    return Future.failedFuture(error);
-                });
+                .recover(error -> closeAfterOpenFailure(snapshots, wal, error));
+    }
+
+    private static Future<DurableStorage> closeAfterOpenFailure(
+            SnapshotStore snapshots,
+            dev.mars.raftlog.storage.RaftStorage wal,
+            Throwable openingFailure) {
+        return closeSnapshot(snapshots).compose(snapshotFailure ->
+                closeWal(wal).compose(walFailure -> {
+                    addSuppressed(openingFailure, snapshotFailure);
+                    addSuppressed(openingFailure, walFailure);
+                    return Future.failedFuture(openingFailure);
+                }));
+    }
+
+    private static Future<Throwable> closeSnapshot(SnapshotStore snapshots) {
+        return Future.fromCompletionStage(snapshots.closeAsync())
+                .map(ignored -> (Throwable) null)
+                .recover(error -> Future.succeededFuture(error));
+    }
+
+    private static Future<Throwable> closeWal(dev.mars.raftlog.storage.RaftStorage wal) {
+        try {
+            return Future.fromCompletionStage(wal.closeAsync())
+                    .map(ignored -> (Throwable) null)
+                    .recover(error -> Future.succeededFuture(error));
+        } catch (Throwable error) {
+            return Future.succeededFuture(error);
+        }
+    }
+
+    private static void addSuppressed(Throwable primary, Throwable secondary) {
+        if (secondary != null && secondary != primary) primary.addSuppressed(secondary);
     }
 }

@@ -176,6 +176,7 @@ public final class InstalledSnapshotCrashWriter {
         @Override public CompletableFuture<Void> sync() { return delegate.sync(); }
         @Override public CompletableFuture<List<LogEntryData>> replayLog() { return delegate.replayLog(); }
         @Override public void close() { delegate.close(); }
+        @Override public CompletableFuture<Void> closeAsync() { return delegate.closeAsync(); }
     }
 
     private static final class NoOpTransport implements RaftTransport {

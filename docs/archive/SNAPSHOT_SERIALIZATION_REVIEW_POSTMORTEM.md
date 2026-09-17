@@ -1,9 +1,11 @@
 # Snapshot Serialization Review Postmortem
 
+**Archive status:** Closed and archived on 2026-09-17.  
 **Date:** 2026-09-13  
-**Status:** Remediation in progress. The 2026-09-15 post-remediation code review
-found two release-blocking defects and four high-severity gaps. Corrective work
-is implemented and regression verification passes; independent re-review remains.
+**Status:** Remediation complete. The 2026-09-15 post-remediation code review
+found two release-blocking defects and four high-severity gaps. The corrective
+work passed independent re-review on 2026-09-17; its final disposition and
+validation are recorded in `postmortem-changes-code-review.md` Section 7.
 **Scope:** Raft persistence sequencing, snapshot publication, WAL compaction, and
 in-memory state mutation
 
@@ -956,7 +958,7 @@ boundaries:
 - after WAL prefix compaction and before in-memory boundary application;
 - after suffix truncation and before replacement append;
 - after replacement append and before sync;
-- after sync and before peer or client response;
+- after sync at the storage boundary;
 - during snapshot installation publication;
 - while shutdown is draining accepted persistence work.
 
@@ -971,14 +973,14 @@ Current suffix-replacement coverage:
 |---|---|---|
 | After suffix truncation, before replacement append | Separate JVM halted without closing the real WAL | The retained prefix is recovered; the obsolete suffix and replacement are absent; the node starts at the recovered boundary. |
 | After replacement append, before sync | Separate JVM halted without closing the real WAL | The structurally complete replacement is recovered after process restart; the test makes no power-loss durability claim. |
-| After sync, before response | Separate JVM halted without closing the real WAL | The durable replacement, term, vote, application state, and ready node boundary are recovered exactly. |
+| After sync at the storage boundary | Store-level crash writer halts a separate JVM without closing the real WAL; no node response boundary is claimed | The durable replacement, term, vote, application state, and ready node boundary are recovered exactly by a new node. |
 | Before snapshot temporary-file creation | Snapshot persistence observer halts a separate JVM | The existing published snapshot and full WAL remain authoritative. |
 | After snapshot temporary-file write, before force | Snapshot persistence observer halts a separate JVM | The temporary file is discarded on open; the existing published snapshot and full WAL rebuild the state. |
 | After snapshot force, before atomic publication | Snapshot persistence observer halts a separate JVM | The forced but unpublished temporary file is discarded; the existing published snapshot remains authoritative. |
 | After first-snapshot force, with no published snapshot | Snapshot persistence observer halts a separate JVM | Startup is fenced, the temporary file is preserved for diagnosis, and the intact WAL remains independently recoverable. |
 | After atomic snapshot publication, before directory force | Snapshot persistence observer halts a separate JVM | The newly published snapshot is selected on process restart; this checkpoint makes no power-loss rename claim. |
-| After completed snapshot publication, before WAL prefix compaction | Separate JVM halted after `saveAtomically` | The new snapshot is authoritative and the untrimmed covered WAL prefix is ignored during reconstruction. |
-| After WAL prefix compaction, before in-memory boundary application | Separate JVM halted after real prefix compaction | The new snapshot plus the exact retained WAL suffix reconstruct the application and start a ready node. |
+| After completed snapshot publication, before WAL prefix compaction | Store-level crash writer halts a separate JVM after `saveAtomically`; no active node transition is claimed | The new snapshot is authoritative and the untrimmed covered WAL prefix is ignored when a new node reconstructs state. |
+| After WAL prefix compaction at the storage boundary | Store-level crash writer halts a separate JVM after real prefix compaction; no in-memory apply boundary is claimed | The new snapshot plus the exact retained WAL suffix reconstruct the application and start a ready node. |
 | During installed-snapshot publication, after directory force and before WAL prefix compaction | Separate JVM halted from the real snapshot-store persistence observer while the follower transition is active | The installed snapshot is authoritative; the untrimmed covered WAL prefix is ignored and the retained suffix is replayed exactly. |
 | While shutdown drains an installed-snapshot transition after real WAL prefix compaction and before in-memory application or response | Separate JVM starts shutdown, proves late transition rejection, and halts while the compacted transition remains active | The installed snapshot plus the exact retained WAL suffix reconstruct the application and start a ready node; no uncommitted in-memory completion is required for recovery. |
 
@@ -1050,5 +1052,6 @@ The initial Phase 6 evidence did not satisfy these completion conditions. The
 2026-09-15 review in `postmortem-changes-code-review.md` identified off-loop WAL
 continuations, divergent installed-snapshot suffix retention, fenced-node health,
 failure classification, election admission, snapshot retry, and timer-fixture
-gaps. Completion will be re-declared only after independent re-review confirms
-those corrections and their regression evidence.
+gaps. Independent re-review completed on 2026-09-17 and confirmed the corrections,
+their regression evidence, and the narrower claims retained for store-driven
+crash tests. Section 7 of that review records the final disposition.

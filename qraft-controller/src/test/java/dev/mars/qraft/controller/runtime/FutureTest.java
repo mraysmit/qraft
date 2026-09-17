@@ -7,6 +7,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -103,4 +104,23 @@ class FutureTest {
         assertTrue(cleaned.get());
         assertEquals("value", result);
     }
+
+    @Test
+    void onSuccessReportsCallbackFailureToTheExecutingThread() {
+        Thread thread = Thread.currentThread();
+        Thread.UncaughtExceptionHandler original = thread.getUncaughtExceptionHandler();
+        AtomicReference<Throwable> reported = new AtomicReference<>();
+        IllegalStateException failure = new IllegalStateException("callback failed");
+        thread.setUncaughtExceptionHandler((ignored, error) -> reported.set(error));
+        try {
+            Future.succeededFuture("value").onSuccess(ignored -> {
+                throw failure;
+            });
+        } finally {
+            thread.setUncaughtExceptionHandler(original);
+        }
+
+        assertSame(failure, reported.get());
+    }
+
 }

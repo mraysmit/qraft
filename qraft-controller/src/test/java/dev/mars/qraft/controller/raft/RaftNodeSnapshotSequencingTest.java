@@ -29,6 +29,8 @@ import dev.mars.qraft.controller.testsupport.RemediationTest;
 import dev.mars.qraft.controller.testsupport.RemediationTestExtension;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import dev.mars.qraft.raft.api.SnapshotStore;
+import dev.mars.qraft.raft.api.SnapshotStore.PublicationOutcome;
+import dev.mars.qraft.raft.api.SnapshotStore.SnapshotPublicationException;
 import dev.mars.raftlog.storage.RaftStorage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -184,6 +186,7 @@ class RaftNodeSnapshotSequencingTest {
     @Test
     void higherTermVoteCannotOvertakeSnapshotPublication() {
         storage.blockNextSnapshotPublication();
+        storage.completeNextMetadataUpdateOffLoop();
 
         Future<Void> snapshot = node.takeSnapshot();
         storage.awaitBlockedSnapshotPublication();
@@ -252,6 +255,26 @@ class RaftNodeSnapshotSequencingTest {
         assertInstanceOf(RaftCommandResult.Success.class,
                 await(node.submitCommand(put("after", "publication-failure"))));
         storage.assertAppendCount(2);
+    }
+
+    @Test
+    void ambiguousPublicationFailureFencesLaterWork() {
+        storage.failNextSnapshotPublicationAmbiguously();
+
+        CompletionException failure = assertThrows(CompletionException.class,
+                () -> await(node.takeSnapshot()));
+        SnapshotPublicationException publicationFailure = assertInstanceOf(
+                SnapshotPublicationException.class, failure.getCause());
+        assertEquals(PublicationOutcome.PUBLICATION_MAY_HAVE_OCCURRED,
+                publicationFailure.outcome());
+        assertTrue(node.isFenced());
+        assertEquals(0, node.getSnapshotLastIndex());
+        storage.assertPrefixTruncateCount(0);
+
+        CompletionException fenced = assertThrows(CompletionException.class,
+                () -> await(node.submitCommand(put("after", "ambiguous-publication"))));
+        assertInstanceOf(RaftTransitionSequencer.FencedException.class, fenced.getCause());
+        storage.assertAppendCount(1);
     }
 
     @Test
@@ -328,7 +351,9 @@ class RaftNodeSnapshotSequencingTest {
         private volatile CompletableFuture<Void> blockedSyncGate;
         private volatile CompletableFuture<Void> syncEntered;
         private volatile boolean failNextPublication;
+        private volatile boolean failNextPublicationAmbiguously;
         private volatile boolean failNextCompaction;
+        private volatile boolean completeNextMetadataUpdateOffLoop;
 
         void blockNextSnapshotPublication() {
             publicationGate = new CompletableFuture<>();
@@ -352,7 +377,15 @@ class RaftNodeSnapshotSequencingTest {
 
         void failNextSnapshotPublication() { failNextPublication = true; }
 
+        void failNextSnapshotPublicationAmbiguously() {
+            failNextPublicationAmbiguously = true;
+        }
+
         void failNextPrefixCompaction() { failNextCompaction = true; }
+
+        void completeNextMetadataUpdateOffLoop() {
+            completeNextMetadataUpdateOffLoop = true;
+        }
 
         void blockNextSyncCompletion() {
             syncGate = new CompletableFuture<>();
@@ -373,7 +406,16 @@ class RaftNodeSnapshotSequencingTest {
         @Override public CompletableFuture<Void> open(Path dataDir) { return delegate.open(dataDir); }
         @Override public CompletableFuture<Void> updateMetadata(long term, Optional<String> votedFor) {
             metadataUpdateCount.incrementAndGet();
-            return delegate.updateMetadata(term, votedFor);
+            CompletableFuture<Void> persisted = delegate.updateMetadata(term, votedFor);
+            if (!completeNextMetadataUpdateOffLoop) return persisted;
+            completeNextMetadataUpdateOffLoop = false;
+            CompletableFuture<Void> completion = new CompletableFuture<>();
+            Thread.ofPlatform().name("foreign-snapshot-metadata-completion").start(() ->
+                    persisted.whenComplete((ignored, error) -> {
+                        if (error == null) completion.complete(null);
+                        else completion.completeExceptionally(error);
+                    }));
+            return completion;
         }
         @Override public CompletableFuture<PersistentMeta> loadMetadata() { return delegate.loadMetadata(); }
         @Override public CompletableFuture<Void> appendEntries(List<LogEntryData> entries) {
@@ -411,7 +453,17 @@ class RaftNodeSnapshotSequencingTest {
             saveCount.incrementAndGet();
             if (failNextPublication) {
                 failNextPublication = false;
-                return CompletableFuture.failedFuture(publicationFailure);
+                return CompletableFuture.failedFuture(new SnapshotPublicationException(
+                        PublicationOutcome.NOT_PUBLISHED,
+                        "snapshot publication failed before publication",
+                        publicationFailure));
+            }
+            if (failNextPublicationAmbiguously) {
+                failNextPublicationAmbiguously = false;
+                return CompletableFuture.failedFuture(new SnapshotPublicationException(
+                        PublicationOutcome.PUBLICATION_MAY_HAVE_OCCURRED,
+                        "snapshot publication outcome is uncertain",
+                        publicationFailure));
             }
             CompletableFuture<Void> gate = publicationGate;
             if (gate == null) return delegate.saveAtomically(snapshot);
@@ -424,6 +476,7 @@ class RaftNodeSnapshotSequencingTest {
             return delegate.loadLatest();
         }
         @Override public void close() { delegate.close(); }
+        @Override public CompletableFuture<Void> closeAsync() { return SnapshotStore.super.closeAsync(); }
 
         private static void awaitGate(CompletableFuture<Void> entered, String operation) {
             try {

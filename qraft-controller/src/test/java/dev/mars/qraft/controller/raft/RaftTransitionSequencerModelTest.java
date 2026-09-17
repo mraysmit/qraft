@@ -72,7 +72,7 @@ class RaftTransitionSequencerModelTest {
         ModelState reference = ModelState.initial();
         for (Operation operation : operations) {
             expectedBefore.add(reference);
-            reference = operation.apply(reference);
+            reference = applyReference(operation, reference);
             expectedAfter.add(reference);
         }
 
@@ -94,7 +94,7 @@ class RaftTransitionSequencerModelTest {
                         history.add("prepare:" + position + ":" + operation.type());
                         ModelState captured = actual.get();
                         return Future.fromCompletionStage(CompletableFuture.supplyAsync(
-                                () -> operation.apply(captured)));
+                                () -> executeSystemOperation(operation, captured)));
                     },
                     persisted -> {
                         assertSame(runtime, JavaRuntime.currentContext(), "seed=" + seed);
@@ -147,6 +147,64 @@ class RaftTransitionSequencerModelTest {
         return expected;
     }
 
+    private static ModelState applyReference(Operation operation, ModelState state) {
+        int value = operation.value();
+        return switch (operation.type()) {
+            case COMMAND -> new ModelState(state.term(), state.vote(),
+                    state.lastIndex() + value, state.lastIndex() + value,
+                    state.snapshotIndex(), state.timerGeneration());
+            case VOTE -> new ModelState(state.term(), "candidate-" + value,
+                    state.lastIndex(), state.lastApplied(), state.snapshotIndex(),
+                    state.timerGeneration());
+            case HIGHER_TERM -> new ModelState(state.term() + value, null,
+                    state.lastIndex(), state.lastApplied(), state.snapshotIndex(),
+                    state.timerGeneration() + 1);
+            case FOLLOWER_REPLACEMENT -> {
+                long retainedIndex = Math.max(state.snapshotIndex(), state.lastIndex() - value);
+                yield new ModelState(state.term(), state.vote(), retainedIndex, retainedIndex,
+                        state.snapshotIndex(), state.timerGeneration());
+            }
+            case SNAPSHOT -> new ModelState(state.term(), state.vote(),
+                    state.lastIndex(), state.lastApplied(), state.lastApplied(),
+                    state.timerGeneration());
+            case TIMER -> new ModelState(state.term(), state.vote(),
+                    state.lastIndex(), state.lastApplied(), state.snapshotIndex(),
+                    state.timerGeneration() + value);
+        };
+    }
+
+    private static ModelState executeSystemOperation(Operation operation, ModelState state) {
+        return switch (operation.type()) {
+            case COMMAND -> new ModelState(state.term(), state.vote(),
+                    Math.addExact(state.lastIndex(), operation.value()),
+                    Math.addExact(state.lastIndex(), operation.value()),
+                    state.snapshotIndex(), state.timerGeneration());
+            case VOTE -> new ModelState(state.term(), candidateId(operation.value()),
+                    state.lastIndex(), state.lastApplied(), state.snapshotIndex(),
+                    state.timerGeneration());
+            case HIGHER_TERM -> new ModelState(
+                    Math.addExact(state.term(), operation.value()), null,
+                    state.lastIndex(), state.lastApplied(), state.snapshotIndex(),
+                    Math.addExact(state.timerGeneration(), 1));
+            case FOLLOWER_REPLACEMENT -> {
+                long retainedIndex = state.lastIndex() - operation.value();
+                if (retainedIndex < state.snapshotIndex()) retainedIndex = state.snapshotIndex();
+                yield new ModelState(state.term(), state.vote(), retainedIndex, retainedIndex,
+                        state.snapshotIndex(), state.timerGeneration());
+            }
+            case SNAPSHOT -> new ModelState(state.term(), state.vote(),
+                    state.lastIndex(), state.lastApplied(), state.lastApplied(),
+                    state.timerGeneration());
+            case TIMER -> new ModelState(state.term(), state.vote(),
+                    state.lastIndex(), state.lastApplied(), state.snapshotIndex(),
+                    Math.addExact(state.timerGeneration(), operation.value()));
+        };
+    }
+
+    private static String candidateId(int value) {
+        return "candidate-" + value;
+    }
+
     private static <T> T await(Future<T> future) throws Exception {
         return future.timeout(10, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
     }
@@ -160,32 +218,7 @@ class RaftTransitionSequencerModelTest {
         TIMER
     }
 
-    private record Operation(Type type, int value) {
-        ModelState apply(ModelState state) {
-            return switch (type) {
-                case COMMAND -> new ModelState(state.term(), state.vote(),
-                        state.lastIndex() + value, state.lastIndex() + value,
-                        state.snapshotIndex(), state.timerGeneration());
-                case VOTE -> new ModelState(state.term(), "candidate-" + value,
-                        state.lastIndex(), state.lastApplied(), state.snapshotIndex(),
-                        state.timerGeneration());
-                case HIGHER_TERM -> new ModelState(state.term() + value, null,
-                        state.lastIndex(), state.lastApplied(), state.snapshotIndex(),
-                        state.timerGeneration() + 1);
-                case FOLLOWER_REPLACEMENT -> {
-                    long floor = Math.max(state.snapshotIndex(), state.lastIndex() - value);
-                    yield new ModelState(state.term(), state.vote(), floor, floor,
-                            state.snapshotIndex(), state.timerGeneration());
-                }
-                case SNAPSHOT -> new ModelState(state.term(), state.vote(),
-                        state.lastIndex(), state.lastApplied(), state.lastApplied(),
-                        state.timerGeneration());
-                case TIMER -> new ModelState(state.term(), state.vote(),
-                        state.lastIndex(), state.lastApplied(), state.snapshotIndex(),
-                        state.timerGeneration() + value);
-            };
-        }
-    }
+    private record Operation(Type type, int value) {}
 
     private record ModelState(
             long term,

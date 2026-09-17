@@ -144,7 +144,7 @@ class RaftNodeTransportGenerationTest {
                 "a vote completion must wait behind the active durable transition");
         assertEquals(oldTerm, node.getCurrentTerm());
 
-        storage.releaseBlockedMetadataUpdate();
+        storage.releaseBlockedMetadataUpdateOffLoop();
         assertTrue(await(higherTermVote).getVoteGranted());
         assertEquals(RaftNode.State.FOLLOWER, node.getState());
         assertEquals(oldTerm + 1, node.getCurrentTerm());
@@ -243,6 +243,12 @@ class RaftNodeTransportGenerationTest {
             blockedMetadataGate.complete(null);
         }
 
+        void releaseBlockedMetadataUpdateOffLoop() throws InterruptedException {
+            Thread thread = Thread.ofPlatform().name("foreign-generation-metadata-completion")
+                    .start(() -> blockedMetadataGate.complete(null));
+            thread.join();
+        }
+
         @Override public CompletableFuture<Void> open(Path dataDir) { return delegate.open(dataDir); }
 
         @Override
@@ -266,5 +272,6 @@ class RaftNodeTransportGenerationTest {
         @Override public CompletableFuture<Void> saveAtomically(SnapshotData snapshot) { return delegate.saveAtomically(snapshot); }
         @Override public CompletableFuture<Optional<SnapshotData>> loadLatest() { return delegate.loadLatest(); }
         @Override public void close() { delegate.close(); }
+        @Override public CompletableFuture<Void> closeAsync() { return SnapshotStore.super.closeAsync(); }
     }
 }

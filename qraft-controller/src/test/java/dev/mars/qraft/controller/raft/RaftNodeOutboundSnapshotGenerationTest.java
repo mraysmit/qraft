@@ -207,11 +207,32 @@ class RaftNodeOutboundSnapshotGenerationTest {
                 .setTerm(rejected.request().getTerm())
                 .setSuccess(false)
                 .setNextChunkIndex(0)
+                .setRejectionReason(
+                        InstallSnapshotResponse.RejectionReason.PERSISTENCE_REJECTED)
                 .build());
         awaitStateLoop();
 
         assertNull(transport.pollSnapshot(100),
                 "a persistence rejection must not create a tight chunk-zero retry loop");
+    }
+
+    @Test
+    void lostAssemblerRestartsAtChunkZeroWithoutHeartbeatBackoff() throws Exception {
+        triggerSnapshotTransfer();
+        PendingSnapshot rejected = transport.takeSnapshot();
+
+        rejected.response().complete(InstallSnapshotResponse.newBuilder()
+                .setTerm(rejected.request().getTerm())
+                .setSuccess(false)
+                .setNextChunkIndex(0)
+                .setRejectionReason(
+                        InstallSnapshotResponse.RejectionReason.ASSEMBLER_STATE_LOST)
+                .build());
+
+        PendingSnapshot restarted = transport.takeSnapshot();
+        assertEquals(0, restarted.request().getChunkIndex());
+        assertEquals(rejected.request().getLastIncludedIndex(),
+                restarted.request().getLastIncludedIndex());
     }
 
     private void triggerSnapshotTransfer() throws Exception {
@@ -376,5 +397,6 @@ class RaftNodeOutboundSnapshotGenerationTest {
             closeCount.incrementAndGet();
             delegate.close();
         }
+        @Override public CompletableFuture<Void> closeAsync() { return SnapshotStore.super.closeAsync(); }
     }
 }

@@ -92,7 +92,7 @@ class GrpcRaftTransportTest {
             targetServer.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
         if (targetNode != null) {
-            targetNode.stop();
+            targetNode.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
         if (vertx != null) {
             vertx.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
@@ -397,7 +397,7 @@ class GrpcRaftTransportTest {
             transport.stop();
         } finally {
             server2.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-            node2.stop();
+            node2.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
     }
 

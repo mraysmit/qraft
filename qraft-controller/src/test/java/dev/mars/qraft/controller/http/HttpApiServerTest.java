@@ -10,7 +10,7 @@ import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.controller.state.RaftCommand;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
-import dev.mars.qraft.raft.api.CommandCodec;
+import dev.mars.raftlog.storage.RaftStorage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -20,7 +20,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -158,23 +161,15 @@ class HttpApiServerTest {
     void fencedNodeFailsReadinessWhileLivenessRemainsAvailable() throws Exception {
         runtime = JavaRuntime.create();
         QraftStateStore store = new QraftStateStore();
-        ProtobufRaftCommandCodec delegate = new ProtobufRaftCommandCodec();
-        CommandCodec<RaftCommand> failingCodec = new CommandCodec<>() {
-            @Override public byte[] serialize(RaftCommand command) {
-                throw new IllegalStateException("ambiguous persistence preparation failure");
-            }
-            @Override public RaftCommand deserialize(byte[] bytes) {
-                return delegate.deserialize(bytes);
-            }
-        };
         RaftStorageFactory.DurableStorage durable = RaftStorageFactory
                 .createDurable(directory, true).toCompletionStage().toCompletableFuture()
                 .get(5, TimeUnit.SECONDS);
+        RaftStorage ambiguousStorage = new AmbiguousAppendStorage(durable.wal());
         node = RaftNode.builder()
                 .runtime(runtime).nodeId("fenced-node").clusterNodes(Set.of("fenced-node"))
                 .transport(new InMemoryTransportSimulator("fenced-node"))
-                .stateMachine(store).commandCodec(failingCodec)
-                .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
+                .stateMachine(store).commandCodec(new ProtobufRaftCommandCodec())
+                .mode(RaftNodeMode.durable(ambiguousStorage, durable.snapshots()))
                 .snapshotEnabled(false).electionTimeout(25).heartbeatInterval(10_000)
                 .build();
         node.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
@@ -200,6 +195,34 @@ class HttpApiServerTest {
         assertEquals(503, ready.statusCode());
         assertTrue(ready.body().contains("fenced"));
         assertEquals(200, live.statusCode());
+    }
+
+    private static final class AmbiguousAppendStorage implements RaftStorage {
+        private final RaftStorage delegate;
+
+        private AmbiguousAppendStorage(RaftStorage delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override public CompletableFuture<Void> open(Path dataDir) { return delegate.open(dataDir); }
+        @Override public CompletableFuture<Void> updateMetadata(long term, Optional<String> votedFor) {
+            return delegate.updateMetadata(term, votedFor);
+        }
+        @Override public CompletableFuture<PersistentMeta> loadMetadata() { return delegate.loadMetadata(); }
+        @Override public CompletableFuture<Void> appendEntries(List<LogEntryData> entries) {
+            return delegate.appendEntries(entries).thenCompose(ignored -> CompletableFuture.failedFuture(
+                    new IllegalStateException("append persisted before completion failed")));
+        }
+        @Override public CompletableFuture<Void> truncateSuffix(long fromIndex) {
+            return delegate.truncateSuffix(fromIndex);
+        }
+        @Override public CompletableFuture<Void> truncatePrefix(long toIndex) {
+            return delegate.truncatePrefix(toIndex);
+        }
+        @Override public CompletableFuture<Void> sync() { return delegate.sync(); }
+        @Override public CompletableFuture<List<LogEntryData>> replayLog() { return delegate.replayLog(); }
+        @Override public CompletableFuture<Void> closeAsync() { return delegate.closeAsync(); }
+        @Override public void close() { closeAsync(); }
     }
 
     private QraftStateStore startSingleNode() throws Exception {

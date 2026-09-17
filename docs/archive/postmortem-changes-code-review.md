@@ -1,15 +1,27 @@
 # Code Review: Snapshot Serialization Remediation
 
-**Date:** 2026-09-15
-**Reviewed range:** commits `d1319a8` through `91c712a` (Phases 1 to 6 of the
+**Archive status:** Closed and archived on 2026-09-17.  
+**Date:** 2026-09-15; final re-review 2026-09-17
+**Initial reviewed range:** commits `d1319a8` through `91c712a` (Phases 1 to 6 of the
 remediation described in `SNAPSHOT_SERIALIZATION_REVIEW_POSTMORTEM.md`)
+**Final reviewed state:** QRaft `492fd07883fe43cc33afcb0dfd8e4091959fba0c`
+and raftlog `61795fede1f5e9aed120e9c966e61abe2f9a7130`, each plus the
+remediation working-tree changes described and validated in Section 7.
 **Scope:** `RaftNode`, `RaftTransitionSequencer`, `FileSnapshotStore`,
 `ShutdownCoordinator`, controller shutdown wiring, and the remediation test
 tranche in `qraft-controller`
-**Verdict:** Not complete. Two release-blocking defects, four high-severity
+**Current verdict (2026-09-17):** Complete for the declared release scope. The
+initial findings are retained below as the review history; Section 7 records
+their final disposition and validation.
+**Initial verdict (2026-09-15):** Not complete. Two release-blocking defects, four high-severity
 issues, and a test-fixture gap that is the direct cause of the headline defect.
 
-## 1. Summary
+**Reading this review:** Sections 1 through 5 are the historical initial review.
+Section 6 is the historical interim re-review. Section 7 supersedes their status,
+required-action, and remaining-work statements and is the authoritative current
+disposition.
+
+## 1. Initial review summary (historical, 2026-09-15)
 
 The per-node transition sequencer is a sound design and most of the wiring is
 correct. The sequencer's ordering, fencing, and drain logic hold up. Every
@@ -28,10 +40,11 @@ loop during testing and on the WAL executor thread in production.
 A second defect leaves a discarded log suffix in the WAL after snapshot
 installation, which corrupts the index mapping on the next restart.
 
-The postmortem's status line "Remediation complete" should be reverted to
-"in progress" until the items in Section 5 are addressed.
+At the time of the initial review, the postmortem's status line "Remediation
+complete" needed to be reverted to "in progress" until the items in Section 5
+were addressed. Section 7 records their completed disposition.
 
-## 2. Confirmed defects
+## 2. Defects confirmed by the initial review (historical)
 
 Findings are ordered by severity. Line references are to the reviewed commit.
 
@@ -204,7 +217,7 @@ tested; it is neither.
 - `Future.onSuccess` uses `thenAccept`, so exceptions thrown by callbacks are
   silently swallowed. Pre-existing.
 
-## 3. Test suite assessment
+## 3. Initial test-suite assessment (historical)
 
 The 73 remediation tests run in the default build, use no mocking framework, and
 several would genuinely have gone red for the ordering defects the postmortem
@@ -264,7 +277,7 @@ is shown to be fenced.
 - Queue-full behaviour and essential-traffic admission through the node (8.15).
 - Peer work arriving during drain (8.16).
 
-## 4. What checks out
+## 4. What checked out in the initial review (historical)
 
 - `RaftTransitionSequencer` ordering, fencing, drain, and reentrancy handling.
 - Durability barriers: every `appendEntries` and `truncateSuffix` is followed
@@ -282,7 +295,10 @@ is shown to be fenced.
 - `RaftStorageFactory` closes both stores on open failure and there are no
   double-close paths.
 
-## 5. Required actions before re-declaring completion
+## 5. Required actions identified by the initial review (historical)
+
+This list records what the initial review required; it is not a current action
+list. Section 7 records the completed disposition.
 
 1. Fix 2.1 and add a foreign-thread completion variant to every gated fixture.
 2. Fix 2.2 and add a non-matching-suffix installed-snapshot test that restarts
@@ -298,13 +314,13 @@ is shown to be fenced.
 Items 2.7 through 2.11 and Sections 3.3 to 3.7 should be scheduled but need not
 block the status change.
 
-## 6. Re-review of corrective changes (2026-09-15, later the same day)
+## 6. Interim re-review of corrective changes (historical, 2026-09-15)
 
 Uncommitted working-tree changes on top of `91c712a` were reviewed against
 Sections 2 and 3. The full controller suite passes (260 tests, no failures,
 errors, or skips).
 
-### 6.1 Status by finding
+### 6.1 Status by finding at the interim re-review
 
 | Finding | Status |
 |---|---|
@@ -342,7 +358,7 @@ errors, or skips).
 - **3.2.** The manual timer scheduler removes all three sleeps; the tests now
   provide real ordering evidence.
 
-### 6.3 Concerns with the new code
+### 6.3 Concerns recorded at the interim re-review
 
 - **Message-prefix coupling to raftlog.** `isKnownPrewriteRejection` matches
   exception message prefixes from the external WAL. A reworded message reverts
@@ -364,7 +380,7 @@ errors, or skips).
 - **Codec failures still fence the leader.** Nothing is written, so this is
   not ambiguous, but the whitelist only recognises storage exceptions.
 
-### 6.4 Remaining before completion can be re-declared
+### 6.4 Items remaining after the interim re-review (historical)
 
 1. Scope the follower `recover` to the append stage only.
 2. Apply the foreign-thread completion mode to `RaftNodeMetadataSequencingTest`,
@@ -372,3 +388,107 @@ errors, or skips).
 3. Items 2.7, 2.10 (policy), 3.3, 3.4, 3.5, and 3.6 remain as scheduled work.
 
 The two release blockers are resolved with adequate regression evidence.
+
+## 7. Re-review after remaining remediation (2026-09-17)
+
+This section supersedes the status and action statements in Sections 1 through
+6. It is the authoritative disposition for the reviewed remediation.
+
+**Reviewed state:** QRaft commit
+`492fd07883fe43cc33afcb0dfd8e4091959fba0c` plus the remediation working-tree
+diff; raftlog commit `61795fede1f5e9aed120e9c966e61abe2f9a7130` plus its remediation
+working-tree diff.
+
+**Validation commands:** `mvn test` from the QRaft reactor root and
+`mvn clean test` from the raftlog reactor root. Test teardown awaits `RaftNode.stop()`
+before closing its shared runtime, and the in-memory transport fixture drains its
+message executors during stop. Resource-close failures and late callbacks therefore
+cannot be hidden behind a successful test result.
+
+The corrective work was reviewed again across QRaft and the sibling
+`raftlog` project. The release-blocking defects and the production items in
+Section 6.4 are addressed. The review is complete for the declared release
+scope. Store-level crash tests retain their narrower, accurate claims instead
+of being described as live-node response-boundary tests.
+
+### 7.1 Newly resolved
+
+- The follower `recover` is scoped directly to append persistence. A failure
+  from higher-term metadata persistence is no longer converted into an
+  accepted in-memory term transition.
+- Metadata, snapshot, and transport-generation sequencing fixtures now release
+  persistence gates from named foreign platform threads. Continuations return
+  to the state loop before accessing transition-owned state.
+- Transition admission now reserves bounded capacity for essential Raft work:
+  elections and inbound vote, append, and snapshot RPCs. A node-level saturation
+  test proves client traffic cannot consume the reserve needed by a higher-term
+  peer RPC.
+- Fenced election, heartbeat, and snapshot timers stop resubmitting work, and
+  expected fenced/draining rejections no longer produce misleading durability
+  errors.
+- Command serialization failures are classified before WAL mutation. They fail
+  the command without fencing the node; a regression proves that no append was
+  attempted and a later encodable command succeeds.
+- An ambiguous follower mutation now has node-level evidence that work queued
+  before the failure is rejected without a later storage mutation.
+- A stale unpublished first-snapshot temporary is discarded on open. The
+  intact WAL remains authoritative and is verified after restart.
+- `Future.onSuccess` reports callback exceptions to the executing thread's
+  uncaught-exception handler instead of silently discarding the dependent-stage
+  failure.
+- Raftlog exposes typed pre-write rejection categories through its storage API.
+  QRaft no longer depends on exception classes or message text from a concrete
+  WAL implementation when deciding whether a failure is safe to reject without
+  fencing.
+- InstallSnapshot rejection responses distinguish lost follower assembler state
+  from persistence rejection. Lost assembly restarts immediately at chunk zero;
+  publication or WAL failures retain heartbeat-paced retry backoff.
+- The source-text persistence architecture test has been replaced. `RaftNode`
+  now holds a capability-guarded persistence boundary rather than raw stores,
+  and every WAL or snapshot mutation requires the opaque permit of the exact
+  active transition. Permits remain valid across asynchronous continuation
+  threads, expire before transition completion becomes observable, and cannot
+  be reused by later work. Executable tests cover authorized mutation and stale
+  permit rejection.
+- Store-driven crash rows now state their actual injection boundary. They still
+  reopen the directory through a real node and verify reconstructed state, but
+  no longer claim that the halted writer reached a peer-response or in-memory
+  application boundary that only a live node transition could establish.
+- The generated FIFO model no longer calls the same transition function for
+  both expected and actual state. Its reference reducer and asynchronously
+  executed system reducer are independent implementations.
+- A generated node-level model now drives real `RaftNode` vote and append RPCs
+  across reproducible seeded histories. An independent reducer checks terms,
+  votes, stale and inconsistent rejection, uncommitted-log replacement,
+  commit/application state, WAL contents, and ambiguous-sync fencing after
+  every operation. Admission saturation and stale transport callbacks remain
+  covered by their purpose-built concurrency tests, where their controlled
+  overlap is part of the assertion.
+
+### 7.2 Awaitable close is fixed at the owning abstraction
+
+`raftlog` 1.3.0 now exposes `RaftStorage.closeAsync()`. Its compatibility
+default covers synchronous implementations; `FileRaftStorage` overrides it
+with an idempotent future that completes only after queued work has drained,
+the WAL channel has closed, and the exclusive lock has been released. Cleanup
+failures complete the future exceptionally. The raftlog recovery-contract test
+awaits close and immediately reopens the same directory.
+
+QRaft awaits that contract directly during node shutdown and failed durable
+storage construction. `FileSnapshotStore` has the equivalent awaitable close
+contract. The temporary QRaft lock-file polling adapter was removed; QRaft no
+longer depends on `FileRaftStorage` implementation details.
+
+The complete QRaft reactor passes 538 tests with no failures, errors, or skips.
+The complete raftlog reactor passes 349 tests with no failures or errors and
+three intentional skips. The final QRaft log audit contains no
+`RejectedExecutionException`. Its sole "shutdown completed with errors" entry
+is produced by `shutdownAttemptsEveryCloseAndReportsCombinedFailure`, which
+records the injected close failure as expected and passes.
+
+### 7.3 Final remaining-work disposition
+
+No release-scoped remediation item remains. Admission saturation and transport
+generation are intentionally retained as directed concurrency tests rather
+than randomized histories so their required overlap and callback ordering stay
+deterministic and diagnosable.

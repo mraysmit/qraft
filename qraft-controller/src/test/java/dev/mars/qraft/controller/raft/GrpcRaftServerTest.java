@@ -108,7 +108,7 @@ class GrpcRaftServerTest {
             grpcServer.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
         if (raftNode != null) {
-            raftNode.stop();
+            raftNode.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
         if (vertx != null) {
             vertx.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
@@ -986,8 +986,8 @@ class GrpcRaftServerTest {
         } finally {
             server1.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
             server2.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-            node1.stop();
-            node2.stop();
+            node1.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            node2.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
     }
 }

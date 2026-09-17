@@ -58,7 +58,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
 
     private final String nodeId;
     // Use bounded thread pool (T3.2 consistency with production code)
-    private final Executor executor = Executors.newFixedThreadPool(10);
+    private final ExecutorService executor = Executors.newFixedThreadPool(10);
     private volatile Consumer<RaftMessage> messageHandler;
     private volatile boolean running = false;
     private RaftNode raftNode;
@@ -278,10 +278,27 @@ public class InMemoryTransportSimulator implements RaftTransport {
     public void stop() {
         this.running = false;
         transports.remove(nodeId);
-        if (reorderExecutor != null && !reorderExecutor.isShutdown()) {
-            reorderExecutor.shutdown();
+        executor.shutdownNow();
+        if (reorderExecutor != null) {
+            reorderExecutor.shutdownNow();
         }
+        awaitTermination(executor, "transport");
+        awaitTermination(reorderExecutor, "reorder");
         logger.info("Stopped in-memory transport for node: {}", nodeId);
+    }
+
+    private void awaitTermination(ExecutorService service, String executorName) {
+        if (service == null) {
+            return;
+        }
+        try {
+            if (!service.awaitTermination(5, TimeUnit.SECONDS)) {
+                logger.warn("Timed out draining in-memory {} executor for node: {}", executorName, nodeId);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            logger.warn("Interrupted while draining in-memory {} executor for node: {}", executorName, nodeId);
+        }
     }
 
     @Override

@@ -1,6 +1,8 @@
 package dev.mars.qraft.controller.raft.storage.snapshot;
 
 import dev.mars.qraft.raft.api.SnapshotStore;
+import dev.mars.qraft.raft.api.SnapshotStore.PublicationOutcome;
+import dev.mars.qraft.raft.api.SnapshotStore.SnapshotPublicationException;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -16,6 +18,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.CRC32C;
 
 import static java.util.Objects.requireNonNull;
@@ -38,6 +41,7 @@ public final class FileSnapshotStore implements SnapshotStore {
     private volatile Path directory;
     private volatile boolean opened;
     private volatile boolean closed;
+    private CompletableFuture<Void> closeFuture;
 
     public FileSnapshotStore() {
         this(checkpoint -> { });
@@ -54,12 +58,8 @@ public final class FileSnapshotStore implements SnapshotStore {
             if (closed) throw new IllegalStateException("Snapshot store is closed");
             this.directory = directory.toAbsolutePath().normalize();
             Files.createDirectories(this.directory);
-            Path current = this.directory.resolve(SNAPSHOT_FILE);
             Path temporary = this.directory.resolve(TEMP_FILE);
             if (Files.exists(temporary)) {
-                if (!Files.exists(current)) {
-                    throw new IOException("Unpublished snapshot exists without snapshot.dat; preserve directory for recovery");
-                }
                 Files.delete(temporary);
             }
             opened = true;
@@ -68,7 +68,12 @@ public final class FileSnapshotStore implements SnapshotStore {
 
     @Override
     public CompletableFuture<Void> saveAtomically(SnapshotData snapshot) {
-        return run(() -> {
+        return CompletableFuture.runAsync(() -> saveWithPublicationOutcome(snapshot), executor);
+    }
+
+    private void saveWithPublicationOutcome(SnapshotData snapshot) {
+        PublicationOutcome outcome = PublicationOutcome.NOT_PUBLISHED;
+        try {
             requireOpen();
             byte[] encoded = encode(snapshot);
             Path temporary = directory.resolve(TEMP_FILE);
@@ -83,13 +88,20 @@ public final class FileSnapshotStore implements SnapshotStore {
                 channel.force(true);
                 persistenceObserver.reached(PersistenceCheckpoint.AFTER_TEMPORARY_FORCE);
             }
+            outcome = PublicationOutcome.PUBLICATION_MAY_HAVE_OCCURRED;
             Files.move(temporary, published,
                     StandardCopyOption.ATOMIC_MOVE,
                     StandardCopyOption.REPLACE_EXISTING);
             persistenceObserver.reached(PersistenceCheckpoint.AFTER_ATOMIC_PUBLICATION);
             forceDirectory(directory);
             persistenceObserver.reached(PersistenceCheckpoint.AFTER_DIRECTORY_FORCE);
-        });
+        } catch (IOException | RuntimeException error) {
+            if (error instanceof SnapshotPublicationException publicationFailure) {
+                throw publicationFailure;
+            }
+            throw new SnapshotPublicationException(
+                    outcome, "Failed to publish snapshot atomically", error);
+        }
     }
 
     @Override
@@ -106,16 +118,36 @@ public final class FileSnapshotStore implements SnapshotStore {
     }
 
     @Override
-    public void close() {
-        if (closed) return;
+    public synchronized CompletableFuture<Void> closeAsync() {
+        if (closeFuture != null) return closeFuture;
         closed = true;
         opened = false;
-        // Completion callbacks can invoke cleanup on this executor's own thread
-        // (for example when open fails during durable-storage creation). A
-        // blocking ExecutorService.close() would then wait for itself forever.
-        // Node shutdown drains admitted snapshot operations before calling close,
-        // so non-blocking shutdown preserves the lifecycle ordering contract.
-        executor.shutdown();
+        closeFuture = new CompletableFuture<>();
+        CompletableFuture<Void> completion = closeFuture;
+        try {
+            executor.shutdown();
+            Thread.startVirtualThread(() -> {
+                try {
+                    if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                        completion.completeExceptionally(new IllegalStateException(
+                                "Timed out waiting for snapshot store executor shutdown"));
+                    } else {
+                        completion.complete(null);
+                    }
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    completion.completeExceptionally(error);
+                }
+            });
+        } catch (RuntimeException error) {
+            completion.completeExceptionally(error);
+        }
+        return completion;
+    }
+
+    @Override
+    public void close() {
+        closeAsync();
     }
 
     private static byte[] encode(SnapshotData snapshot) {

@@ -632,5 +632,6 @@ class RaftNodeShutdownSequencingTest {
             delegate.close();
             if (closeFailure != null) throw closeFailure;
         }
+        @Override public CompletableFuture<Void> closeAsync() { return SnapshotStore.super.closeAsync(); }
     }
 }

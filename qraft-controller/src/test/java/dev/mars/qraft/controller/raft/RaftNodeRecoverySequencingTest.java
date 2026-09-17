@@ -244,6 +244,7 @@ class RaftNodeRecoverySequencingTest {
             return snapshot;
         }
         @Override public void close() {}
+        @Override public CompletableFuture<Void> closeAsync() { return SnapshotStore.super.closeAsync(); }
     }
 
     private static final class RecoveryTransport implements RaftTransport {

@@ -148,7 +148,7 @@ class RaftNodeTest {
         assertTrue(singleNode.isLeader());
         assertEquals("node1", singleNode.getLeaderId());
         
-        singleNode.stop();
+        singleNode.stop().toCompletionStage().toCompletableFuture().join();
     }
 
     @Test
@@ -426,7 +426,7 @@ class RaftNodeTest {
                 .atMost(Duration.ofSeconds(2))
                 .until(() -> singleNode.getState() == RaftNode.State.LEADER);
         
-        singleNode.stop();
+        singleNode.stop().toCompletionStage().toCompletableFuture().join();
     }
 
         @Test
@@ -920,6 +920,7 @@ class RaftNodeTest {
         @Override public CompletableFuture<Void> sync() { return delegate.sync(); }
         @Override public CompletableFuture<List<LogEntryData>> replayLog() { return delegate.replayLog(); }
         @Override public void close() { delegate.close(); }
+        @Override public CompletableFuture<Void> closeAsync() { return delegate.closeAsync(); }
     }
 
     private RaftNode durableSingleNode(String nodeId, QraftStateStore store,

@@ -65,7 +65,11 @@ class EnhancedInMemoryTransportTest {
     void tearDown() throws Exception {
         InMemoryTransportSimulator.clearAllTransports();
         for (RaftNode node : activeNodes) {
-            try { node.stop(); } catch (Exception ignored) {}
+            try {
+                node.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            } catch (Exception ignored) {
+                // Continue closing the remaining test resources.
+            }
         }
         activeNodes.clear();
         if (vertx != null) {

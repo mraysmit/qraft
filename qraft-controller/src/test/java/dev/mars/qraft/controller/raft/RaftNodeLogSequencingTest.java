@@ -28,7 +28,9 @@ import dev.mars.qraft.controller.state.RaftCommandResult;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
+import dev.mars.qraft.controller.state.RaftCommand;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
+import dev.mars.qraft.raft.api.CommandCodec;
 import dev.mars.qraft.raft.api.SnapshotStore;
 import dev.mars.raftlog.storage.FileRaftStorage;
 import dev.mars.raftlog.storage.RaftStorage;
@@ -43,6 +45,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -114,6 +117,89 @@ class RaftNodeLogSequencingTest {
     }
 
     @Test
+    void commandEncodingFailureDoesNotFenceOrReachTheWal() {
+        await(node.stop());
+        storage = new GatedRaftStorage();
+        storage.open(null).join();
+        AtomicBoolean rejectEncoding = new AtomicBoolean(true);
+        ProtobufRaftCommandCodec delegate = new ProtobufRaftCommandCodec();
+        CommandCodec<RaftCommand> codec = new CommandCodec<>() {
+            @Override public byte[] serialize(RaftCommand command) {
+                if (rejectEncoding.get()) throw new IllegalArgumentException("invalid command encoding");
+                return delegate.serialize(command);
+            }
+            @Override public RaftCommand deserialize(byte[] bytes) { return delegate.deserialize(bytes); }
+        };
+        node = RaftNode.builder()
+                .runtime(runtime)
+                .nodeId("leader-1")
+                .clusterNodes(Set.of("leader-1"))
+                .transport(new InMemoryTransportSimulator("leader-1"))
+                .stateMachine(new QraftStateStore())
+                .commandCodec(codec)
+                .mode(RaftNodeMode.durable(storage, storage))
+                .electionTimeout(25)
+                .heartbeatInterval(10_000)
+                .build();
+        await(node.start());
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (!node.isLeader() && System.nanoTime() < deadline) Thread.onSpinWait();
+        assertTrue(node.isLeader());
+
+        CompletionException failure = assertThrows(CompletionException.class,
+                () -> await(node.submitCommand(put("invalid", "encoding"))));
+        assertInstanceOf(IllegalArgumentException.class, failure.getCause());
+        assertFalse(node.isFenced());
+        storage.assertAppendCount(0);
+
+        rejectEncoding.set(false);
+        assertInstanceOf(RaftCommandResult.Success.class,
+                await(node.submitCommand(put("valid", "encoding"))));
+        storage.assertAppendCount(1);
+    }
+
+    @Test
+    void saturatedClientAdmissionPreservesRoomForHigherTermPeerTraffic() {
+        await(node.stop());
+        storage = new GatedRaftStorage();
+        storage.open(null).join();
+        node = RaftNode.builder()
+                .runtime(runtime)
+                .nodeId("leader-1")
+                .clusterNodes(Set.of("leader-1"))
+                .transport(new InMemoryTransportSimulator("leader-1"))
+                .stateMachine(new QraftStateStore())
+                .commandCodec(new ProtobufRaftCommandCodec())
+                .mode(RaftNodeMode.durable(storage, storage))
+                .transitionQueueCapacity(2)
+                .electionTimeout(25)
+                .heartbeatInterval(10_000)
+                .build();
+        await(node.start());
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (!node.isLeader() && System.nanoTime() < deadline) Thread.onSpinWait();
+        assertTrue(node.isLeader());
+
+        storage.blockNextSyncCompletion();
+        Future<RaftCommandResult<?>> active = node.submitCommand(put("active", "one"));
+        storage.awaitBlockedSync();
+        Future<RaftCommandResult<?>> overflow = node.submitCommand(put("overflow", "rejected"));
+        Future<AppendEntriesResponse> higherTerm = node.handleAppendEntriesRequest(
+                appendRequest(node.getCurrentTerm() + 1, 0, 0));
+
+        CompletionException rejection = assertThrows(CompletionException.class,
+                () -> await(overflow));
+        assertInstanceOf(RaftTransitionSequencer.QueueFullException.class, rejection.getCause());
+        assertFalse(higherTerm.isComplete());
+
+        storage.releaseBlockedSync();
+        assertInstanceOf(RaftCommandResult.Success.class, await(active));
+        assertTrue(await(higherTerm).getSuccess());
+        assertEquals(RaftNode.State.FOLLOWER, node.getState());
+        storage.assertAppendCount(1);
+    }
+
+    @Test
     void higherTermAppendContinuesOnStateLoopAfterForeignMetadataCompletion() {
         storage.completeNextMetadataOffLoop();
 
@@ -146,6 +232,23 @@ class RaftNodeLogSequencingTest {
                 appendRequest(higherTerm, 0, 0)));
         assertTrue(heartbeat.getSuccess());
         assertFalse(node.isFenced());
+    }
+
+    @Test
+    void prewriteShapedMetadataFailureIsNotRecoveredAsAppendRejection() {
+        long originalTerm = node.getCurrentTerm();
+        storage.rejectNextMetadataWithPrewriteShapedFailure();
+
+        AppendEntriesResponse rejected = await(node.handleAppendEntriesRequest(appendRequest(
+                originalTerm + 1, 0, 0, grpcEntry(originalTerm + 1,
+                        "metadata", "must-remain-durable"))));
+
+        assertFalse(rejected.getSuccess());
+        assertEquals(originalTerm, rejected.getTerm());
+        assertEquals(originalTerm, node.getCurrentTerm());
+        assertTrue(node.isFenced());
+        assertTrue(storage.logEntries().isEmpty());
+        storage.assertAppendCount(0);
     }
 
     @Test
@@ -311,6 +414,31 @@ class RaftNodeLogSequencingTest {
     }
 
     @Test
+    void uncertainFollowerFailureFencesWorkThatWasAlreadyQueued() {
+        restartAsFollower();
+        assertTrue(await(node.handleAppendEntriesRequest(appendRequest(
+                1, 0, 0, grpcEntry(1, "seed", "original")))).getSuccess());
+        storage.blockNextTruncateCompletion();
+
+        Future<AppendEntriesResponse> failing = node.handleAppendEntriesRequest(appendRequest(
+                1, 0, 0, grpcEntry(2, "seed", "replacement")));
+        storage.awaitBlockedTruncate();
+        Future<AppendEntriesResponse> queued = node.handleAppendEntriesRequest(appendRequest(
+                1, 1, 1, grpcEntry(1, "queued", "must-not-persist")));
+
+        awaitStateLoop();
+        assertFalse(failing.isComplete());
+        assertFalse(queued.isComplete());
+        storage.failBlockedTruncate();
+
+        assertFalse(await(failing).getSuccess());
+        assertFalse(await(queued).getSuccess());
+        assertTrue(node.isFenced());
+        storage.assertTruncateCount(1);
+        storage.assertAppendCount(1);
+    }
+
+    @Test
     void prewriteAppendRejectionAfterSuffixTruncationFencesNode() {
         restartAsFollower();
         assertTrue(await(node.handleAppendEntriesRequest(appendRequest(
@@ -411,6 +539,7 @@ class RaftNodeLogSequencingTest {
         private volatile boolean failNextSync;
         private volatile boolean failNextTruncate;
         private volatile boolean completeNextMetadataOffLoop;
+        private volatile boolean rejectNextMetadataWithPrewriteShapedFailure;
         private volatile boolean rejectNextAppendBeforeWrite;
 
         void blockNextAppendCompletion() {
@@ -447,6 +576,10 @@ class RaftNodeLogSequencingTest {
             blockedTruncateGate.complete(null);
         }
 
+        void failBlockedTruncate() {
+            blockedTruncateGate.completeExceptionally(truncateFailure);
+        }
+
         void blockNextSyncCompletion() {
             syncCompletionGate = new CompletableFuture<>();
             syncEntered = new CompletableFuture<>();
@@ -470,6 +603,10 @@ class RaftNodeLogSequencingTest {
 
         void completeNextMetadataOffLoop() { completeNextMetadataOffLoop = true; }
 
+        void rejectNextMetadataWithPrewriteShapedFailure() {
+            rejectNextMetadataWithPrewriteShapedFailure = true;
+        }
+
         void rejectNextAppendBeforeWrite() { rejectNextAppendBeforeWrite = true; }
 
         void assertAppendCount(int expected) { assertEquals(expected, appendCount.get()); }
@@ -482,6 +619,13 @@ class RaftNodeLogSequencingTest {
 
         @Override public CompletableFuture<Void> open(Path dataDir) { return delegate.open(dataDir); }
         @Override public CompletableFuture<Void> updateMetadata(long term, Optional<String> votedFor) {
+            if (rejectNextMetadataWithPrewriteShapedFailure) {
+                rejectNextMetadataWithPrewriteShapedFailure = false;
+                return CompletableFuture.failedFuture(
+                        new FileRaftStorage.WriteRejectedException(
+                                dev.mars.raftlog.storage.WriteRejectionReason.PAYLOAD_TOO_LARGE,
+                                "metadata fixture"));
+            }
             CompletableFuture<Void> persisted = delegate.updateMetadata(term, votedFor);
             if (!completeNextMetadataOffLoop) return persisted;
             completeNextMetadataOffLoop = false;
@@ -501,7 +645,9 @@ class RaftNodeLogSequencingTest {
             if (rejectNextAppendBeforeWrite) {
                 rejectNextAppendBeforeWrite = false;
                 return CompletableFuture.failedFuture(
-                        new FileRaftStorage.StorageException("Payload too large: test fixture"));
+                        new FileRaftStorage.WriteRejectedException(
+                                dev.mars.raftlog.storage.WriteRejectionReason.PAYLOAD_TOO_LARGE,
+                                "test fixture"));
             }
             CompletableFuture<Void> persisted = delegate.appendEntries(entries);
             CompletableFuture<Void> gate = appendCompletionGate;
@@ -552,5 +698,6 @@ class RaftNodeLogSequencingTest {
         }
         @Override public CompletableFuture<Optional<SnapshotData>> loadLatest() { return delegate.loadLatest(); }
         @Override public void close() { delegate.close(); }
+        @Override public CompletableFuture<Void> closeAsync() { return SnapshotStore.super.closeAsync(); }
     }
 }

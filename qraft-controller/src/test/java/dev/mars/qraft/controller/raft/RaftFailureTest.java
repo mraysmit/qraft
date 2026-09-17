@@ -78,12 +78,16 @@ class RaftFailureTest {
     }
 
     @AfterEach
-    void tearDown() {
-        if (node1 != null) node1.stop();
-        if (node2 != null) node2.stop();
-        if (node3 != null) node3.stop();
-        if (vertx != null) vertx.close();
-        InMemoryTransportSimulator.clearAllTransports();
+    void tearDown() throws Exception {
+        try {
+            Future.all(node1.stop(), node2.stop(), node3.stop())
+                    .toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        } finally {
+            if (vertx != null) {
+                vertx.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            }
+            InMemoryTransportSimulator.clearAllTransports();
+        }
     }
 
     @Test
@@ -315,7 +319,7 @@ class RaftFailureTest {
     }
 
     @Test
-    void testConcurrentElections() {
+    void testConcurrentElections() throws Exception {
         // Start nodes with very short election timeouts to force concurrent elections
         Set<String> clusterNodes = Set.of("fast1", "fast2", "fast3");
         
@@ -349,9 +353,8 @@ class RaftFailureTest {
             assertEquals(1, finalLeaderCount);
             
         } finally {
-            fast1.stop();
-            fast2.stop();
-            fast3.stop();
+            Future.all(fast1.stop(), fast2.stop(), fast3.stop())
+                    .toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
     }
 
@@ -399,7 +402,7 @@ class RaftFailureTest {
     }
 
     @Test
-    void testNodeIdValidation() {
+    void testNodeIdValidation() throws Exception {
         assertEquals("node1", node1.getNodeId());
         assertEquals("node2", node2.getNodeId());
         assertEquals("node3", node3.getNodeId());
@@ -420,6 +423,6 @@ class RaftFailureTest {
         
         assertEquals("single", single.getLeaderId());
         
-        single.stop();
+        single.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
     }
 }

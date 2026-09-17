@@ -85,7 +85,7 @@ class RaftNodeRealSnapshotRecoveryTest {
     }
 
     @Test
-    void restartWithUnpublishedFirstSnapshotFencesStartupAndPreservesEvidence() throws Exception {
+    void restartWithUnpublishedFirstSnapshotDiscardsTemporaryAndUsesWal() throws Exception {
         seedWal();
         SnapshotStore.SnapshotData replacement = replacementSnapshot();
         String checkpoint = "AFTER_TEMPORARY_FORCE";
@@ -96,20 +96,16 @@ class RaftNodeRealSnapshotRecoveryTest {
 
         assertTrue(Files.exists(directory.resolve("snapshot.dat.tmp")));
         assertFalse(Files.exists(directory.resolve("snapshot.dat")));
-        CompletionException failure = assertThrows(CompletionException.class,
-                () -> await(RaftStorageFactory.createDurable(directory, true)));
-        assertTrue(messageChain(failure).contains(
-                "Unpublished snapshot exists without snapshot.dat; preserve directory for recovery"));
-        assertTrue(Files.exists(directory.resolve("snapshot.dat.tmp")),
-                "failed recovery must preserve the unpublished file for diagnosis");
-
-        try (FileRaftStorage reopened = wal()) {
-            reopened.open(directory).get(5, TimeUnit.SECONDS);
-            assertEquals(new RaftStorage.PersistentMeta(3, Optional.of("node-1")),
-                    reopened.loadMetadata().get(5, TimeUnit.SECONDS));
-            assertEquals(List.of(1L, 2L, 3L, 4L), reopened.replayLog()
-                    .get(5, TimeUnit.SECONDS).stream().map(RaftStorage.LogEntryData::index).toList());
-        }
+        RaftStorageFactory.DurableStorage recovered = await(
+                RaftStorageFactory.createDurable(directory, true));
+        assertFalse(Files.exists(directory.resolve("snapshot.dat.tmp")));
+        assertTrue(recovered.snapshots().loadLatest().get(5, TimeUnit.SECONDS).isEmpty());
+        assertEquals(new RaftStorage.PersistentMeta(3, Optional.of("node-1")),
+                recovered.wal().loadMetadata().get(5, TimeUnit.SECONDS));
+        assertEquals(List.of(1L, 2L, 3L, 4L), recovered.wal().replayLog()
+                .get(5, TimeUnit.SECONDS).stream().map(RaftStorage.LogEntryData::index).toList());
+        recovered.snapshots().closeAsync().get(5, TimeUnit.SECONDS);
+        recovered.wal().closeAsync().get(5, TimeUnit.SECONDS);
     }
 
     @Test

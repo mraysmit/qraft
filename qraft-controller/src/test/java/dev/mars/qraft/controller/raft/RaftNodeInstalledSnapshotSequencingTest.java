@@ -33,6 +33,8 @@ import dev.mars.qraft.controller.state.RaftCommand;
 import dev.mars.qraft.controller.state.RaftCommandResult;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import dev.mars.qraft.raft.api.SnapshotStore;
+import dev.mars.qraft.raft.api.SnapshotStore.PublicationOutcome;
+import dev.mars.qraft.raft.api.SnapshotStore.SnapshotPublicationException;
 import dev.mars.raftlog.storage.RaftStorage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -177,6 +179,8 @@ class RaftNodeInstalledSnapshotSequencingTest {
 
         assertFalse(second.getSuccess());
         assertEquals(0, second.getNextChunkIndex());
+        assertEquals(InstallSnapshotResponse.RejectionReason.ASSEMBLER_STATE_LOST,
+                second.getRejectionReason());
         assertEquals(2, second.getTerm());
         assertEquals(0, storage.saveCount());
         assertEquals(0, node.getSnapshotLastIndex());
@@ -228,6 +232,8 @@ class RaftNodeInstalledSnapshotSequencingTest {
 
         InstallSnapshotResponse failed = await(node.handleInstallSnapshot(request));
         assertFalse(failed.getSuccess());
+        assertEquals(InstallSnapshotResponse.RejectionReason.PERSISTENCE_REJECTED,
+                failed.getRejectionReason());
         assertEquals(0, storage.prefixTruncateCount());
         assertEquals(0, node.getSnapshotLastIndex());
 
@@ -236,6 +242,25 @@ class RaftNodeInstalledSnapshotSequencingTest {
         assertEquals(2, storage.saveCount());
         assertEquals(1, storage.prefixTruncateCount());
         assertEquals("yes", stateMachine.getMetadata("retried"));
+    }
+
+    @Test
+    void ambiguousPublicationFailureFencesLaterWalMutation() {
+        storage.failNextSnapshotPublicationAmbiguously();
+
+        InstallSnapshotResponse failed = await(node.handleInstallSnapshot(
+                installRequest(1, 5, 3, 0, 1,
+                        snapshotBytes(5, "ambiguous", "publication"), true)));
+
+        assertFalse(failed.getSuccess());
+        assertTrue(node.isFenced());
+        assertEquals(0, storage.prefixTruncateCount());
+        assertEquals(0, node.getSnapshotLastIndex());
+
+        AppendEntriesResponse later = await(node.handleAppendEntriesRequest(
+                appendPut(1, 1, "after", "forbidden")));
+        assertFalse(later.getSuccess());
+        assertEquals(0, storage.appendCount());
     }
 
     @Test
@@ -443,6 +468,7 @@ class RaftNodeInstalledSnapshotSequencingTest {
         private volatile CompletableFuture<Void> blockedPublicationGate;
         private volatile CompletableFuture<Void> publicationEntered;
         private volatile boolean failNextPublication;
+        private volatile boolean failNextPublicationAmbiguously;
         private volatile boolean failNextCompaction;
         private volatile boolean completeNextMetadataOffLoop;
 
@@ -461,6 +487,9 @@ class RaftNodeInstalledSnapshotSequencingTest {
 
         void releaseBlockedSnapshotPublication() { blockedPublicationGate.complete(null); }
         void failNextSnapshotPublication() { failNextPublication = true; }
+        void failNextSnapshotPublicationAmbiguously() {
+            failNextPublicationAmbiguously = true;
+        }
         void failNextPrefixCompaction() { failNextCompaction = true; }
         void completeNextMetadataOffLoop() { completeNextMetadataOffLoop = true; }
         int appendCount() { return appendCount.get(); }
@@ -505,8 +534,17 @@ class RaftNodeInstalledSnapshotSequencingTest {
             saveCount.incrementAndGet();
             if (failNextPublication) {
                 failNextPublication = false;
-                return CompletableFuture.failedFuture(
-                        new IllegalStateException("installed snapshot publication failed"));
+                return CompletableFuture.failedFuture(new SnapshotPublicationException(
+                        PublicationOutcome.NOT_PUBLISHED,
+                        "installed snapshot publication failed before publication",
+                        new IllegalStateException("installed snapshot publication failed")));
+            }
+            if (failNextPublicationAmbiguously) {
+                failNextPublicationAmbiguously = false;
+                return CompletableFuture.failedFuture(new SnapshotPublicationException(
+                        PublicationOutcome.PUBLICATION_MAY_HAVE_OCCURRED,
+                        "installed snapshot publication outcome is uncertain",
+                        new IllegalStateException("installed snapshot publication failed")));
             }
             CompletableFuture<Void> gate = publicationGate;
             if (gate == null) return delegate.saveAtomically(snapshot);
@@ -519,5 +557,6 @@ class RaftNodeInstalledSnapshotSequencingTest {
             return delegate.loadLatest();
         }
         @Override public void close() { delegate.close(); }
+        @Override public CompletableFuture<Void> closeAsync() { return SnapshotStore.super.closeAsync(); }
     }
 }

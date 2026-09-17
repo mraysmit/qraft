@@ -103,6 +103,8 @@ final class TestRaftStorage implements RaftStorage, SnapshotStore {
         closed = true;
     }
 
+    @Override public CompletableFuture<Void> closeAsync() { return SnapshotStore.super.closeAsync(); }
+
     void setFailOnSync(boolean fail) { failOnSync = fail; }
     void setFailOnAppend(boolean fail) { failOnAppend = fail; }
     void setFailOnMetadataUpdate(boolean fail) { failOnMetadataUpdate = fail; }

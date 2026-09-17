@@ -18,12 +18,56 @@ public interface SnapshotStore extends AutoCloseable {
 
     CompletableFuture<Void> open(Path directory);
 
+    /**
+     * Publishes a replacement snapshot atomically.
+     *
+     * <p>Failures must complete with {@link SnapshotPublicationException} so callers can
+     * distinguish a snapshot that is definitely unpublished from one whose publication
+     * may have occurred.</p>
+     */
     CompletableFuture<Void> saveAtomically(SnapshotData snapshot);
 
     CompletableFuture<Optional<SnapshotData>> loadLatest();
 
+    /**
+     * Closes the store and completes after its resources have been released.
+     * Implementations with synchronous close semantics may use this default.
+     */
+    default CompletableFuture<Void> closeAsync() {
+        try {
+            close();
+            return CompletableFuture.completedFuture(null);
+        } catch (Throwable error) {
+            return CompletableFuture.failedFuture(error);
+        }
+    }
+
     @Override
     void close();
+
+    /** Whether a failed atomic save can have made the replacement snapshot visible. */
+    enum PublicationOutcome {
+        NOT_PUBLISHED,
+        PUBLICATION_MAY_HAVE_OCCURRED
+    }
+
+    /**
+     * Failure from {@link #saveAtomically(SnapshotData)} with an explicit
+     * publication outcome for callers that must decide whether continuing is safe.
+     */
+    final class SnapshotPublicationException extends RuntimeException {
+        private final PublicationOutcome outcome;
+
+        public SnapshotPublicationException(
+                PublicationOutcome outcome, String message, Throwable cause) {
+            super(message, cause);
+            this.outcome = Objects.requireNonNull(outcome, "outcome");
+        }
+
+        public PublicationOutcome outcome() {
+            return outcome;
+        }
+    }
 
     /** Complete application snapshot and its Raft boundary. */
     record SnapshotData(byte[] data, long lastIncludedIndex, long lastIncludedTerm, int formatVersion) {

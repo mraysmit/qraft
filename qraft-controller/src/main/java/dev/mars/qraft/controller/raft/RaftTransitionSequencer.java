@@ -25,6 +25,7 @@ import java.util.ArrayDeque;
 import java.util.Objects;
 import java.util.Queue;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -38,6 +39,34 @@ import java.util.function.Supplier;
  * on any thread without moving the application step off the state loop.
  */
 final class RaftTransitionSequencer {
+    /** Opaque capability proving ownership of one currently active transition. */
+    static final class Ownership {
+        private final AtomicBoolean active = new AtomicBoolean();
+
+        private Ownership() {}
+
+        void assertActive() {
+            if (!active.get()) {
+                throw new IllegalStateException("Raft transition ownership has expired");
+            }
+        }
+
+        private void activate() {
+            if (!active.compareAndSet(false, true)) {
+                throw new IllegalStateException("Raft transition ownership was already activated");
+            }
+        }
+
+        private void expire() {
+            active.set(false);
+        }
+    }
+
+    enum AdmissionClass {
+        NORMAL,
+        ESSENTIAL
+    }
+
     enum FailurePolicy {
         CONTINUE,
         FENCE
@@ -69,6 +98,7 @@ final class RaftTransitionSequencer {
 
     private final JavaRuntime runtime;
     private final int capacity;
+    private final int normalCapacity;
     private final Queue<Transition<?>> queue = new ArrayDeque<>();
     private volatile State state = State.OPEN;
     private Transition<?> active;
@@ -78,6 +108,8 @@ final class RaftTransitionSequencer {
         this.runtime = Objects.requireNonNull(runtime, "runtime");
         if (capacity < 1) throw new IllegalArgumentException("capacity must be at least one");
         this.capacity = capacity;
+        int essentialReserve = capacity > 1 ? Math.max(1, capacity / 8) : 0;
+        this.normalCapacity = capacity - essentialReserve;
     }
 
     <T> Future<T> submit(String name, Supplier<Future<T>> action) {
@@ -98,13 +130,30 @@ final class RaftTransitionSequencer {
                             Predicate<Throwable> fenceOnFailure,
                             Supplier<Future<P>> prepareAndPersist,
                             Function<? super P, ? extends T> apply) {
+        return submit(name, AdmissionClass.NORMAL, failurePolicy,
+                fenceOnFailure, prepareAndPersist, apply);
+    }
+
+    <P, T> Future<T> submitEssential(String name, FailurePolicy failurePolicy,
+                                     Supplier<Future<P>> prepareAndPersist,
+                                     Function<? super P, ? extends T> apply) {
+        return submit(name, AdmissionClass.ESSENTIAL, failurePolicy,
+                ignored -> true, prepareAndPersist, apply);
+    }
+
+    private <P, T> Future<T> submit(String name, AdmissionClass admissionClass,
+                                    FailurePolicy failurePolicy,
+                                    Predicate<Throwable> fenceOnFailure,
+                                    Supplier<Future<P>> prepareAndPersist,
+                                    Function<? super P, ? extends T> apply) {
         Objects.requireNonNull(name, "name");
+        Objects.requireNonNull(admissionClass, "admissionClass");
         Objects.requireNonNull(failurePolicy, "failurePolicy");
         Objects.requireNonNull(fenceOnFailure, "fenceOnFailure");
         Objects.requireNonNull(prepareAndPersist, "prepareAndPersist");
         Objects.requireNonNull(apply, "apply");
 
-        Transition<T> transition = new Transition<>(name, failurePolicy, fenceOnFailure,
+        Transition<T> transition = new Transition<>(name, admissionClass, failurePolicy, fenceOnFailure,
                 prepareAndPersist, value -> apply.apply(cast(value)));
         dispatch(() -> admit(transition), transition.result);
         return transition.result.future();
@@ -136,12 +185,17 @@ final class RaftTransitionSequencer {
      * Enforces that a persistence gateway is being entered by the transition
      * that currently owns the complete prepare/persist/apply lifecycle.
      */
-    void assertActiveTransition() {
+    Ownership currentOwnership() {
         assertStateLoop();
         if (active == null) {
             throw new IllegalStateException(
                     "Persistent Raft operation attempted without transition ownership");
         }
+        return active.ownership;
+    }
+
+    void assertActiveTransition() {
+        currentOwnership().assertActive();
     }
 
     private <T> void admit(Transition<T> transition) {
@@ -154,7 +208,9 @@ final class RaftTransitionSequencer {
             transition.result.fail(new FencedException(null));
             return;
         }
-        if (outstandingCount() >= capacity) {
+        int admissionLimit = transition.admissionClass == AdmissionClass.ESSENTIAL
+                ? capacity : normalCapacity;
+        if (outstandingCount() >= admissionLimit) {
             transition.result.fail(new QueueFullException(capacity));
             return;
         }
@@ -172,6 +228,7 @@ final class RaftTransitionSequencer {
             return;
         }
         active = next;
+        next.ownership.activate();
         start(next);
     }
 
@@ -192,9 +249,10 @@ final class RaftTransitionSequencer {
         assertStateLoop();
         if (active != transition) return;
 
+        T applied = null;
         if (error == null) {
             try {
-                transition.result.tryComplete(transition.apply.apply(value));
+                applied = transition.apply.apply(value);
             } catch (Throwable applyError) {
                 error = applyError;
             }
@@ -204,10 +262,13 @@ final class RaftTransitionSequencer {
                     && transition.fenceOnFailure.test(error)) {
                 fenceQueuedTransitions(error);
             }
-            transition.result.tryFail(error);
         }
 
+        transition.ownership.expire();
         active = null;
+
+        if (error == null) transition.result.tryComplete(applied);
+        else transition.result.tryFail(error);
 
         completeDrainIfIdle();
         startNextIfIdle();
@@ -257,16 +318,19 @@ final class RaftTransitionSequencer {
 
     private static final class Transition<T> {
         private final String name;
+        private final AdmissionClass admissionClass;
         private final FailurePolicy failurePolicy;
         private final Predicate<Throwable> fenceOnFailure;
         private final Supplier<? extends Future<?>> action;
         private final Function<Object, T> apply;
         private final Promise<T> result = Promise.promise();
+        private final Ownership ownership = new Ownership();
 
-        private Transition(String name, FailurePolicy failurePolicy,
+        private Transition(String name, AdmissionClass admissionClass, FailurePolicy failurePolicy,
                            Predicate<Throwable> fenceOnFailure,
                            Supplier<? extends Future<?>> action, Function<Object, T> apply) {
             this.name = name;
+            this.admissionClass = admissionClass;
             this.failurePolicy = failurePolicy;
             this.fenceOnFailure = fenceOnFailure;
             this.action = action;

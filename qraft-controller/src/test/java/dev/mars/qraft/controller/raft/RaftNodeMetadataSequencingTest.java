@@ -115,7 +115,7 @@ class RaftNodeMetadataSequencingTest {
         awaitStateLoop();
         storage.assertUpdateCount(1);
         assertFalse(termTwo.isComplete());
-        storage.releaseBlockedUpdate();
+        storage.releaseBlockedUpdateOffLoop();
 
         assertTrue(await(termOne).getVoteGranted());
         VoteResponse response = await(termTwo);
@@ -145,7 +145,7 @@ class RaftNodeMetadataSequencingTest {
         storage.assertUpdateCount(1);
         assertFalse(append.isComplete());
 
-        storage.releaseBlockedUpdate();
+        storage.releaseBlockedUpdateOffLoop();
 
         assertTrue(await(vote).getVoteGranted());
         AppendEntriesResponse response = await(append);
@@ -163,7 +163,7 @@ class RaftNodeMetadataSequencingTest {
         Future<VoteResponse> response = node.handleVoteRequest(vote(1, "candidate-a"));
         response.onSuccess(ignored -> completionContext.complete(JavaRuntime.currentContext()));
         storage.awaitBlockedUpdate();
-        CompletableFuture.runAsync(storage::releaseBlockedUpdate).join();
+        storage.releaseBlockedUpdateOffLoop();
 
         try {
             assertSame(runtime, completionContext.get(2, TimeUnit.SECONDS));
@@ -270,6 +270,10 @@ class RaftNodeMetadataSequencingTest {
             blockedUpdateGate.complete(null);
         }
 
+        void releaseBlockedUpdateOffLoop() {
+            completeOffLoop(blockedUpdateGate, "foreign-metadata-completion");
+        }
+
         void failNextUpdate() {
             failNext = true;
         }
@@ -306,5 +310,16 @@ class RaftNodeMetadataSequencingTest {
         @Override public CompletableFuture<Void> saveAtomically(SnapshotData snapshot) { return delegate.saveAtomically(snapshot); }
         @Override public CompletableFuture<Optional<SnapshotData>> loadLatest() { return delegate.loadLatest(); }
         @Override public void close() { delegate.close(); }
+        @Override public CompletableFuture<Void> closeAsync() { return SnapshotStore.super.closeAsync(); }
+
+        private static void completeOffLoop(CompletableFuture<Void> completion, String threadName) {
+            Thread thread = Thread.ofPlatform().name(threadName).start(() -> completion.complete(null));
+            try {
+                thread.join();
+            } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("interrupted while completing metadata off-loop", error);
+            }
+        }
     }
 }

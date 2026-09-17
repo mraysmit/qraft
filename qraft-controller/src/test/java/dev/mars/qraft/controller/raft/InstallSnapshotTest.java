@@ -150,7 +150,7 @@ class InstallSnapshotTest {
                     }
                 });
 
-        node1.stop(); node2.stop(); node3.stop();
+        awaitStops(node1, node2, node3);
         ctx.completeNow();
 
         assertTrue(ctx.awaitCompletion(5, TimeUnit.SECONDS), "Test timed out");
@@ -239,7 +239,7 @@ class InstallSnapshotTest {
                     assertEquals("value8", sm3.getMetadata("key8"), "Post-snapshot replicated data");
                 });
 
-        node1.stop(); node2.stop(); node3.stop();
+        awaitStops(node1, node2, node3);
         ctx.completeNow();
 
         assertTrue(ctx.awaitCompletion(5, TimeUnit.SECONDS), "Test timed out");
@@ -315,7 +315,7 @@ class InstallSnapshotTest {
                                     "nextIdx=" + nextIdx + ", snapIdx=" + leaderSnapIdx);
                 });
 
-        node1.stop(); node2.stop(); node3.stop();
+        awaitStops(node1, node2, node3);
         ctx.completeNow();
 
         assertTrue(ctx.awaitCompletion(5, TimeUnit.SECONDS), "Test timed out");
@@ -363,8 +363,7 @@ class InstallSnapshotTest {
                             assertTrue(response.getTerm() > 0,
                                     "Response should include current term");
                         });
-                        node.stop();
-                        ctx.completeNow();
+                        node.stop().onComplete(ctx.succeeding(v3 -> ctx.completeNow()));
                     }));
                 }));
             }));
@@ -485,8 +484,7 @@ class InstallSnapshotTest {
                             assertEquals(10, node.getSnapshotLastIndex());
                             assertEquals(1, node.getSnapshotLastTerm());
                         });
-                        node.stop();
-                        ctx.completeNow();
+                        node.stop().onComplete(ctx.succeeding(v3 -> ctx.completeNow()));
                     }));
                 }));
             }));
@@ -507,6 +505,12 @@ class InstallSnapshotTest {
                             .mapEmpty());
         }
         return chain;
+    }
+
+    private static void awaitStops(RaftNode... nodes) throws Exception {
+        Future<?>[] stops = new Future<?>[nodes.length];
+        for (int i = 0; i < nodes.length; i++) stops[i] = nodes[i].stop();
+        Future.all(stops).toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
     }
 
         private static DistributedStateRaftCommand distributedPut(String key, String value) {
