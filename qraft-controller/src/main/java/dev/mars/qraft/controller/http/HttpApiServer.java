@@ -48,8 +48,8 @@ public final class HttpApiServer implements AutoCloseable {
         this.executor = Executors.newVirtualThreadPerTaskExecutor();
         server.setExecutor(executor);
         register("/health/live", 200, "{\"status\":\"alive\"}");
-        register("/health/ready", 200, "{\"status\":\"ready\"}");
-        register("/health", 200, "{\"status\":\"passing\"}");
+        registerHealth("/health/ready", "ready");
+        registerHealth("/health", "passing");
         register("/status", 200, "{\"status\":\"running\"}");
         register("/api/v1/info", 200, "{\"version\":\"1.0.0\",\"httpPort\":" + port + "}");
         server.createContext("/v1/agent/service/register", this::registerService);
@@ -93,6 +93,20 @@ public final class HttpApiServer implements AutoCloseable {
                 return;
             }
             respond(exchange, status, body);
+        });
+    }
+
+    private void registerHealth(String path, String healthyStatus) {
+        server.createContext(path, exchange -> {
+            if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+                respond(exchange, 405, "{\"error\":\"method_not_allowed\"}");
+                return;
+            }
+            if (raftNode != null && raftNode.isFenced()) {
+                respond(exchange, 503, "{\"status\":\"fenced\"}");
+                return;
+            }
+            respond(exchange, 200, "{\"status\":\"" + healthyStatus + "\"}");
         });
     }
 

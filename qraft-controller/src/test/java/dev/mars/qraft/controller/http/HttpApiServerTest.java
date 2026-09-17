@@ -3,16 +3,23 @@ package dev.mars.qraft.controller.http;
 import dev.mars.qraft.controller.raft.InMemoryTransportSimulator;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.raft.RaftNodeMode;
+import dev.mars.qraft.controller.raft.storage.RaftStorageFactory;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
+import dev.mars.qraft.controller.state.RaftCommand;
+import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
+import dev.mars.qraft.distributedstate.DistributedStateCommand;
+import dev.mars.qraft.raft.api.CommandCodec;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Path;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -20,6 +27,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HttpApiServerTest {
+    @TempDir
+    Path directory;
     private HttpApiServer server;
     private RaftNode node;
     private JavaRuntime runtime;
@@ -143,6 +152,54 @@ class HttpApiServerTest {
         server.enterDrainMode().join();
         assertEquals(503, request(client, "/v1/catalog/services", "GET").statusCode());
         assertEquals(200, request(client, "/health/live", "GET").statusCode());
+    }
+
+    @Test
+    void fencedNodeFailsReadinessWhileLivenessRemainsAvailable() throws Exception {
+        runtime = JavaRuntime.create();
+        QraftStateStore store = new QraftStateStore();
+        ProtobufRaftCommandCodec delegate = new ProtobufRaftCommandCodec();
+        CommandCodec<RaftCommand> failingCodec = new CommandCodec<>() {
+            @Override public byte[] serialize(RaftCommand command) {
+                throw new IllegalStateException("ambiguous persistence preparation failure");
+            }
+            @Override public RaftCommand deserialize(byte[] bytes) {
+                return delegate.deserialize(bytes);
+            }
+        };
+        RaftStorageFactory.DurableStorage durable = RaftStorageFactory
+                .createDurable(directory, true).toCompletionStage().toCompletableFuture()
+                .get(5, TimeUnit.SECONDS);
+        node = RaftNode.builder()
+                .runtime(runtime).nodeId("fenced-node").clusterNodes(Set.of("fenced-node"))
+                .transport(new InMemoryTransportSimulator("fenced-node"))
+                .stateMachine(store).commandCodec(failingCodec)
+                .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
+                .snapshotEnabled(false).electionTimeout(25).heartbeatInterval(10_000)
+                .build();
+        node.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (!node.isLeader() && System.nanoTime() < deadline) Thread.onSpinWait();
+        assertTrue(node.isLeader());
+
+        try {
+            node.submitCommand(new DistributedStateRaftCommand(
+                            DistributedStateCommand.put("fence", "node")))
+                    .toCompletionStage().toCompletableFuture().join();
+        } catch (java.util.concurrent.CompletionException expected) {
+            // The failed transition is the event that fences the node.
+        }
+        assertTrue(node.isFenced());
+
+        server = new HttpApiServer(0, node, store);
+        server.start().join();
+        HttpClient client = HttpClient.newHttpClient();
+        HttpResponse<String> ready = request(client, "/health/ready", "GET");
+        HttpResponse<String> live = request(client, "/health/live", "GET");
+
+        assertEquals(503, ready.statusCode());
+        assertTrue(ready.body().contains("fenced"));
+        assertEquals(200, live.statusCode());
     }
 
     private QraftStateStore startSingleNode() throws Exception {

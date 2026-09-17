@@ -198,6 +198,22 @@ class RaftNodeOutboundSnapshotGenerationTest {
                 "a transfer invalidated by shutdown must not send after its load completes");
     }
 
+    @Test
+    void persistenceRejectionAbandonsTransferInsteadOfRetryingChunkZeroImmediately() throws Exception {
+        triggerSnapshotTransfer();
+        PendingSnapshot rejected = transport.takeSnapshot();
+
+        rejected.response().complete(InstallSnapshotResponse.newBuilder()
+                .setTerm(rejected.request().getTerm())
+                .setSuccess(false)
+                .setNextChunkIndex(0)
+                .build());
+        awaitStateLoop();
+
+        assertNull(transport.pollSnapshot(100),
+                "a persistence rejection must not create a tight chunk-zero retry loop");
+    }
+
     private void triggerSnapshotTransfer() throws Exception {
         transport.rejectNextAppend();
         node.submitCommand(put("after", "snapshot"));

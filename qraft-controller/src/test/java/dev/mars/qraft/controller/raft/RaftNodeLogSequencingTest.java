@@ -30,6 +30,7 @@ import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import dev.mars.qraft.raft.api.SnapshotStore;
+import dev.mars.raftlog.storage.FileRaftStorage;
 import dev.mars.raftlog.storage.RaftStorage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -110,6 +111,41 @@ class RaftNodeLogSequencingTest {
                 .toList());
         assertEquals(3, node.getLogSize());
         storage.assertSyncCount(2);
+    }
+
+    @Test
+    void higherTermAppendContinuesOnStateLoopAfterForeignMetadataCompletion() {
+        storage.completeNextMetadataOffLoop();
+
+        AppendEntriesResponse response = await(node.handleAppendEntriesRequest(appendRequest(
+                node.getCurrentTerm() + 1, 0, 0, grpcEntry(node.getCurrentTerm() + 1,
+                        "foreign", "completion"))));
+
+        assertTrue(response.getSuccess());
+        assertEquals(2, node.getCurrentTerm());
+        assertFalse(node.isFenced());
+        assertEquals(List.of(1L), storage.logEntries().stream()
+                .map(RaftStorage.LogEntryData::index).toList());
+    }
+
+    @Test
+    void higherTermSafePrewriteRejectionStillAppliesDurableTermWithoutFencing() {
+        long higherTerm = node.getCurrentTerm() + 1;
+        storage.rejectNextAppendBeforeWrite();
+
+        AppendEntriesResponse rejected = await(node.handleAppendEntriesRequest(appendRequest(
+                higherTerm, 0, 0, grpcEntry(higherTerm, "too", "large"))));
+
+        assertFalse(rejected.getSuccess());
+        assertEquals(higherTerm, rejected.getTerm());
+        assertEquals(higherTerm, node.getCurrentTerm());
+        assertFalse(node.isFenced());
+        assertTrue(storage.logEntries().isEmpty());
+
+        AppendEntriesResponse heartbeat = await(node.handleAppendEntriesRequest(
+                appendRequest(higherTerm, 0, 0)));
+        assertTrue(heartbeat.getSuccess());
+        assertFalse(node.isFenced());
     }
 
     @Test
@@ -274,6 +310,29 @@ class RaftNodeLogSequencingTest {
         storage.assertAppendCount(1);
     }
 
+    @Test
+    void prewriteAppendRejectionAfterSuffixTruncationFencesNode() {
+        restartAsFollower();
+        assertTrue(await(node.handleAppendEntriesRequest(appendRequest(
+                1, 0, 0, grpcEntry(1, "seed", "original")))).getSuccess());
+        storage.rejectNextAppendBeforeWrite();
+
+        AppendEntriesResponse failed = await(node.handleAppendEntriesRequest(appendRequest(
+                1, 0, 0, grpcEntry(2, "seed", "oversized-replacement"))));
+
+        assertFalse(failed.getSuccess());
+        assertTrue(node.isFenced(),
+                "The suffix was already truncated before append rejection, so the outcome is partial");
+        storage.assertTruncateCount(1);
+        storage.assertAppendCount(2);
+
+        AppendEntriesResponse fenced = await(node.handleAppendEntriesRequest(
+                appendRequest(1, 0, 0)));
+        assertFalse(fenced.getSuccess());
+        storage.assertTruncateCount(1);
+        storage.assertAppendCount(2);
+    }
+
     private void restartAsFollower() {
         await(node.stop());
         storage = new GatedRaftStorage();
@@ -351,6 +410,8 @@ class RaftNodeLogSequencingTest {
         private volatile CompletableFuture<Void> syncEntered;
         private volatile boolean failNextSync;
         private volatile boolean failNextTruncate;
+        private volatile boolean completeNextMetadataOffLoop;
+        private volatile boolean rejectNextAppendBeforeWrite;
 
         void blockNextAppendCompletion() {
             appendCompletionGate = new CompletableFuture<>();
@@ -407,6 +468,10 @@ class RaftNodeLogSequencingTest {
 
         void failNextTruncate() { failNextTruncate = true; }
 
+        void completeNextMetadataOffLoop() { completeNextMetadataOffLoop = true; }
+
+        void rejectNextAppendBeforeWrite() { rejectNextAppendBeforeWrite = true; }
+
         void assertAppendCount(int expected) { assertEquals(expected, appendCount.get()); }
 
         void assertTruncateCount(int expected) { assertEquals(expected, truncateCount.get()); }
@@ -417,13 +482,27 @@ class RaftNodeLogSequencingTest {
 
         @Override public CompletableFuture<Void> open(Path dataDir) { return delegate.open(dataDir); }
         @Override public CompletableFuture<Void> updateMetadata(long term, Optional<String> votedFor) {
-            return delegate.updateMetadata(term, votedFor);
+            CompletableFuture<Void> persisted = delegate.updateMetadata(term, votedFor);
+            if (!completeNextMetadataOffLoop) return persisted;
+            completeNextMetadataOffLoop = false;
+            CompletableFuture<Void> completion = new CompletableFuture<>();
+            Thread.ofPlatform().name("foreign-metadata-completion").start(() ->
+                    persisted.whenComplete((ignored, error) -> {
+                        if (error == null) completion.complete(null);
+                        else completion.completeExceptionally(error);
+                    }));
+            return completion;
         }
         @Override public CompletableFuture<PersistentMeta> loadMetadata() { return delegate.loadMetadata(); }
 
         @Override
         public CompletableFuture<Void> appendEntries(List<LogEntryData> entries) {
             appendCount.incrementAndGet();
+            if (rejectNextAppendBeforeWrite) {
+                rejectNextAppendBeforeWrite = false;
+                return CompletableFuture.failedFuture(
+                        new FileRaftStorage.StorageException("Payload too large: test fixture"));
+            }
             CompletableFuture<Void> persisted = delegate.appendEntries(entries);
             CompletableFuture<Void> gate = appendCompletionGate;
             if (gate == null) return persisted;

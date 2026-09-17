@@ -183,6 +183,20 @@ class RaftNodeInstalledSnapshotSequencingTest {
     }
 
     @Test
+    void higherTermInstallationContinuesOnStateLoopAfterForeignMetadataCompletion() {
+        storage.completeNextMetadataOffLoop();
+
+        InstallSnapshotResponse response = await(node.handleInstallSnapshot(
+                installRequest(2, 5, 3, 0, 1,
+                        snapshotBytes(5, "foreign", "completion"), true)));
+
+        assertTrue(response.getSuccess());
+        assertEquals(2, node.getCurrentTerm());
+        assertFalse(node.isFenced());
+        assertEquals("completion", stateMachine.getMetadata("foreign"));
+    }
+
+    @Test
     void uncertainCompactionFailureFencesLaterWalMutation() {
         storage.failNextPrefixCompaction();
         RemediationTestExtension.logExpectedFailure(
@@ -192,6 +206,7 @@ class RaftNodeInstalledSnapshotSequencingTest {
         InstallSnapshotResponse failed = await(node.handleInstallSnapshot(
                 installRequest(1, 5, 3, 0, 1, snapshotBytes(5, "fenced", "snapshot"), true)));
         assertFalse(failed.getSuccess());
+        assertTrue(node.isFenced());
         assertEquals(1, storage.saveCount());
         assertEquals(1, storage.prefixTruncateCount());
         assertEquals(0, node.getSnapshotLastIndex());
@@ -235,6 +250,28 @@ class RaftNodeInstalledSnapshotSequencingTest {
         assertTrue(installed.getSuccess());
         assertEquals(3, node.getLastLogIndex());
         assertTrue(await(node.handleAppendEntriesRequest(heartbeat(1, 3, 1))).getSuccess());
+    }
+
+    @Test
+    void nonMatchingSuffixIsRemovedFromMemoryAndWalBeforeNewAppend() {
+        assertTrue(await(node.handleAppendEntriesRequest(appendPut(1, 1, "one", "1"))).getSuccess());
+        assertTrue(await(node.handleAppendEntriesRequest(appendPutUncommitted(1, 2, "two", "2"))).getSuccess());
+        assertTrue(await(node.handleAppendEntriesRequest(appendPutUncommitted(1, 3, "stale", "3"))).getSuccess());
+
+        InstallSnapshotResponse installed = await(node.handleInstallSnapshot(
+                installRequest(1, 2, 99, 0, 1,
+                        snapshotBytes(2, "snapshot", "replacement"), true)));
+
+        assertTrue(installed.getSuccess());
+        assertEquals(2, node.getLastLogIndex());
+        assertEquals(1, storage.suffixTruncateCount());
+        assertEquals(List.of(), storage.logEntries().stream()
+                .map(RaftStorage.LogEntryData::index).toList());
+
+        assertTrue(await(node.handleAppendEntriesRequest(appendPutWithPreviousTerm(
+                1, 3, 99, "fresh", "3"))).getSuccess());
+        assertEquals(List.of(3L), storage.logEntries().stream()
+                .map(RaftStorage.LogEntryData::index).toList());
     }
 
     @Test
@@ -302,6 +339,21 @@ class RaftNodeInstalledSnapshotSequencingTest {
                 .addEntries(dev.mars.qraft.controller.raft.grpc.LogEntry.newBuilder()
                         .setTerm(term)
                         .setData(ByteString.copyFrom(codec.serialize(command)))
+                        .build())
+                .build();
+    }
+
+    private AppendEntriesRequest appendPutWithPreviousTerm(
+            long term, long index, long previousTerm, String key, String value) {
+        return AppendEntriesRequest.newBuilder()
+                .setTerm(term)
+                .setLeaderId("leader-1")
+                .setPrevLogIndex(index - 1)
+                .setPrevLogTerm(previousTerm)
+                .setLeaderCommit(1)
+                .addEntries(dev.mars.qraft.controller.raft.grpc.LogEntry.newBuilder()
+                        .setTerm(term)
+                        .setData(ByteString.copyFrom(codec.serialize(put(key, value))))
                         .build())
                 .build();
     }
@@ -386,11 +438,13 @@ class RaftNodeInstalledSnapshotSequencingTest {
         private final AtomicInteger appendCount = new AtomicInteger();
         private final AtomicInteger saveCount = new AtomicInteger();
         private final AtomicInteger prefixTruncateCount = new AtomicInteger();
+        private final AtomicInteger suffixTruncateCount = new AtomicInteger();
         private volatile CompletableFuture<Void> publicationGate;
         private volatile CompletableFuture<Void> blockedPublicationGate;
         private volatile CompletableFuture<Void> publicationEntered;
         private volatile boolean failNextPublication;
         private volatile boolean failNextCompaction;
+        private volatile boolean completeNextMetadataOffLoop;
 
         void blockNextSnapshotPublication() {
             publicationGate = new CompletableFuture<>();
@@ -408,13 +462,25 @@ class RaftNodeInstalledSnapshotSequencingTest {
         void releaseBlockedSnapshotPublication() { blockedPublicationGate.complete(null); }
         void failNextSnapshotPublication() { failNextPublication = true; }
         void failNextPrefixCompaction() { failNextCompaction = true; }
+        void completeNextMetadataOffLoop() { completeNextMetadataOffLoop = true; }
         int appendCount() { return appendCount.get(); }
         int saveCount() { return saveCount.get(); }
         int prefixTruncateCount() { return prefixTruncateCount.get(); }
+        int suffixTruncateCount() { return suffixTruncateCount.get(); }
+        List<LogEntryData> logEntries() { return delegate.getLog(); }
 
         @Override public CompletableFuture<Void> open(Path dataDir) { return delegate.open(dataDir); }
         @Override public CompletableFuture<Void> updateMetadata(long term, Optional<String> votedFor) {
-            return delegate.updateMetadata(term, votedFor);
+            CompletableFuture<Void> persisted = delegate.updateMetadata(term, votedFor);
+            if (!completeNextMetadataOffLoop) return persisted;
+            completeNextMetadataOffLoop = false;
+            CompletableFuture<Void> completion = new CompletableFuture<>();
+            Thread.ofPlatform().name("foreign-metadata-completion").start(() ->
+                    persisted.whenComplete((ignored, error) -> {
+                        if (error == null) completion.complete(null);
+                        else completion.completeExceptionally(error);
+                    }));
+            return completion;
         }
         @Override public CompletableFuture<PersistentMeta> loadMetadata() { return delegate.loadMetadata(); }
         @Override public CompletableFuture<Void> appendEntries(List<LogEntryData> entries) {
@@ -422,6 +488,7 @@ class RaftNodeInstalledSnapshotSequencingTest {
             return delegate.appendEntries(entries);
         }
         @Override public CompletableFuture<Void> truncateSuffix(long fromIndex) {
+            suffixTruncateCount.incrementAndGet();
             return delegate.truncateSuffix(fromIndex);
         }
         @Override public CompletableFuture<Void> truncatePrefix(long toIndex) {

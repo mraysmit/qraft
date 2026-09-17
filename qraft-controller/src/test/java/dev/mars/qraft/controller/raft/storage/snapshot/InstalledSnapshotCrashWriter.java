@@ -46,6 +46,8 @@ public final class InstalledSnapshotCrashWriter {
             "AFTER_INSTALLED_SNAPSHOT_PUBLICATION";
     public static final String DURING_SHUTDOWN_AFTER_PREFIX_COMPACTION =
             "DURING_SHUTDOWN_AFTER_PREFIX_COMPACTION";
+    public static final String AFTER_DIVERGENT_SUFFIX_INSTALL =
+            "AFTER_DIVERGENT_SUFFIX_INSTALL";
 
     private InstalledSnapshotCrashWriter() {
     }
@@ -95,7 +97,8 @@ public final class InstalledSnapshotCrashWriter {
                         .setTerm(3)
                         .setLeaderId("leader-1")
                         .setLastIncludedIndex(3)
-                        .setLastIncludedTerm(2)
+                        .setLastIncludedTerm(AFTER_DIVERGENT_SUFFIX_INSTALL.equals(checkpoint)
+                                ? 99 : 2)
                         .setChunkIndex(0)
                         .setTotalChunks(1)
                         .setData(ByteString.copyFrom(snapshotBytes()))
@@ -122,7 +125,10 @@ public final class InstalledSnapshotCrashWriter {
             Runtime.getRuntime().halt(HALT_EXIT_CODE);
         }
 
-        await(installation);
+        InstallSnapshotResponse installed = await(installation);
+        if (AFTER_DIVERGENT_SUFFIX_INSTALL.equals(checkpoint) && installed.getSuccess()) {
+            Runtime.getRuntime().halt(HALT_EXIT_CODE);
+        }
         throw new AssertionError("checkpoint was not reached: " + checkpoint);
     }
 

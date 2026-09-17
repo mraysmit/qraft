@@ -38,10 +38,13 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -51,6 +54,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @RemediationTest(phase = "5", scenarioPrefix = "RAFT-TIMER")
 class RaftNodeTimerSequencingTest {
     private JavaRuntime runtime;
+    private ManualTimerScheduler timers;
     private RaftNode node;
 
     @AfterEach
@@ -64,6 +68,7 @@ class RaftNodeTimerSequencingTest {
     @Test
     void expiredElectionTimerCannotStartNewTermAfterVoteResetsIt() throws Exception {
         runtime = JavaRuntime.create();
+        timers = new ManualTimerScheduler(runtime);
         GatedTimerStorage storage = new GatedTimerStorage();
         storage.open(null).join();
         storage.blockNextMetadataUpdate();
@@ -78,7 +83,8 @@ class RaftNodeTimerSequencingTest {
                 .setLastLogTerm(0)
                 .build());
         storage.awaitBlockedMetadataUpdate();
-        awaitRuntimeDelay(450);
+        timers.fireNextOneShot();
+        awaitStateLoop();
 
         storage.releaseBlockedMetadataUpdate();
         assertTrue(await(vote).getVoteGranted());
@@ -92,13 +98,14 @@ class RaftNodeTimerSequencingTest {
     @Test
     void heartbeatTimerCannotSendWhileWalTransitionIsBlocked() throws Exception {
         runtime = JavaRuntime.create();
+        timers = new ManualTimerScheduler(runtime);
         GatedTimerStorage storage = new GatedTimerStorage();
         storage.open(null).join();
         AutoTransport transport = new AutoTransport(true);
         node = newNode(storage, transport,
                 Set.of("node-1", "peer-1"), 25, 200, false, 60_000);
         await(node.start());
-        awaitLeader();
+        electLeader();
         transport.resetAppendCount();
 
         storage.blockNextSync();
@@ -106,7 +113,8 @@ class RaftNodeTimerSequencingTest {
                 DistributedStateCommand.put("blocked", "value")));
         storage.awaitBlockedSync();
         transport.resetAppendCount();
-        awaitRuntimeDelay(450);
+        timers.firePeriodic(200);
+        awaitStateLoop();
 
         assertEquals(0, transport.appendCount(),
                 "timer work must wait behind the active WAL transition");
@@ -118,12 +126,13 @@ class RaftNodeTimerSequencingTest {
     @Test
     void scheduledSnapshotCannotRunAfterQueuedHigherTermStepDown() throws Exception {
         runtime = JavaRuntime.create();
+        timers = new ManualTimerScheduler(runtime);
         GatedTimerStorage storage = new GatedTimerStorage();
         storage.open(null).join();
         node = newNode(storage, new AutoTransport(true),
                 Set.of("node-1"), 1_000, 10_000, true, 200);
         await(node.start());
-        awaitLeader();
+        electLeader();
         await(node.submitCommand(new DistributedStateRaftCommand(
                 DistributedStateCommand.put("snapshot", "candidate"))));
 
@@ -135,16 +144,57 @@ class RaftNodeTimerSequencingTest {
                 .setLastLogTerm(node.getLastLogTerm())
                 .build());
         storage.awaitBlockedMetadataUpdate();
-        awaitRuntimeDelay(450);
+        timers.firePeriodic(200);
+        awaitStateLoop();
 
         storage.releaseBlockedMetadataUpdate();
         assertTrue(await(vote).getVoteGranted());
-        awaitRuntimeDelay(50);
+        awaitStateLoop();
 
         assertEquals(RaftNode.State.FOLLOWER, node.getState());
         assertEquals(0, storage.snapshotSaveCount(),
                 "a leader-owned timer must not publish after leadership is lost");
         assertEquals(0, node.getSnapshotLastIndex());
+    }
+
+    @Test
+    void queueRejectedElectionRearmsTheElectionTimer() throws Exception {
+        runtime = JavaRuntime.create();
+        timers = new ManualTimerScheduler(runtime);
+        GatedTimerStorage storage = new GatedTimerStorage();
+        storage.open(null).join();
+        storage.blockNextMetadataUpdate();
+        node = RaftNode.builder()
+                .runtime(runtime)
+                .nodeId("node-1")
+                .clusterNodes(Set.of("node-1", "peer-1"))
+                .transport(new AutoTransport(false))
+                .stateMachine(new QraftStateStore())
+                .commandCodec(new ProtobufRaftCommandCodec())
+                .mode(RaftNodeMode.durable(storage, storage))
+                .snapshotEnabled(false)
+                .electionTimeout(10_000)
+                .heartbeatInterval(10_000)
+                .timerScheduler(timers)
+                .transitionQueueCapacity(1)
+                .build();
+        await(node.start());
+
+        Future<VoteResponse> vote = node.handleVoteRequest(VoteRequest.newBuilder()
+                .setTerm(1).setCandidateId("peer-1")
+                .setLastLogIndex(0).setLastLogTerm(0).build());
+        storage.awaitBlockedMetadataUpdate();
+
+        timers.fireNextOneShot();
+        awaitStateLoop();
+        awaitStateLoop();
+
+        assertEquals(1, timers.oneShotCount(),
+                "queue rejection must install a replacement election timer");
+        assertEquals(0, node.getCurrentTerm());
+
+        storage.releaseBlockedMetadataUpdate();
+        assertTrue(await(vote).getVoteGranted());
     }
 
     private RaftNode newNode(
@@ -164,17 +214,13 @@ class RaftNodeTimerSequencingTest {
                 .snapshotCheckInterval(snapshotInterval)
                 .electionTimeout(electionTimeout)
                 .heartbeatInterval(heartbeatInterval)
+                .timerScheduler(timers)
                 .build();
     }
 
-    private void awaitLeader() {
+    private void electLeader() {
+        timers.fireNextOneShot();
         await(node.awaitState(RaftNode.State.LEADER, 3_000));
-    }
-
-    private void awaitRuntimeDelay(long delayMs) throws Exception {
-        CompletableFuture<Void> elapsed = new CompletableFuture<>();
-        runtime.setTimer(delayMs, ignored -> elapsed.complete(null));
-        elapsed.get(delayMs + 2_000, TimeUnit.MILLISECONDS);
     }
 
     private void awaitStateLoop() throws Exception {
@@ -226,6 +272,51 @@ class RaftNodeTimerSequencingTest {
                     .setTerm(request.getTerm()).setSuccess(true)
                     .setNextChunkIndex(request.getTotalChunks()).build());
         }
+    }
+
+    private static final class ManualTimerScheduler implements RaftTimerScheduler {
+        private final JavaRuntime runtime;
+        private final AtomicLong ids = new AtomicLong();
+        private final Map<Long, ScheduledAction> oneShots = new ConcurrentHashMap<>();
+        private final Map<Long, ScheduledAction> periodics = new ConcurrentHashMap<>();
+
+        private ManualTimerScheduler(JavaRuntime runtime) { this.runtime = runtime; }
+
+        @Override
+        public long setTimer(long delayMs, Consumer<Long> action) {
+            long id = ids.incrementAndGet();
+            oneShots.put(id, new ScheduledAction(delayMs, action));
+            return id;
+        }
+
+        @Override
+        public long setPeriodic(long periodMs, Consumer<Long> action) {
+            long id = ids.incrementAndGet();
+            periodics.put(id, new ScheduledAction(periodMs, action));
+            return id;
+        }
+
+        @Override
+        public boolean cancelTimer(long id) {
+            return oneShots.remove(id) != null || periodics.remove(id) != null;
+        }
+
+        void fireNextOneShot() {
+            long id = oneShots.keySet().stream().min(Long::compareTo).orElseThrow();
+            ScheduledAction scheduled = oneShots.remove(id);
+            runtime.runOnContext(ignored -> scheduled.action().accept(id));
+        }
+
+        void firePeriodic(long periodMs) {
+            Map.Entry<Long, ScheduledAction> scheduled = periodics.entrySet().stream()
+                    .filter(entry -> entry.getValue().delayMs() == periodMs)
+                    .findFirst().orElseThrow();
+            runtime.runOnContext(ignored -> scheduled.getValue().action().accept(scheduled.getKey()));
+        }
+
+        int oneShotCount() { return oneShots.size(); }
+
+        private record ScheduledAction(long delayMs, Consumer<Long> action) { }
     }
 
     private static final class GatedTimerStorage implements RaftStorage, SnapshotStore {

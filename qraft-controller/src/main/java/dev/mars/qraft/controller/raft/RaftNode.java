@@ -48,6 +48,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import static java.util.Objects.requireNonNull;
@@ -90,6 +91,7 @@ public class RaftNode {
     private final Optional<RaftStorage> storage;  // External WAL storage (empty for volatile mode)
     private final Optional<SnapshotStore> snapshotStore;
     private final RaftTransitionSequencer transitionSequencer;
+    private final RaftTimerScheduler timerScheduler;
 
     // ========== PERSISTENT STATE ==========
     private volatile long currentTerm = 0;
@@ -157,7 +159,10 @@ public class RaftNode {
     private final Map<String, SnapshotChunkAssembler> pendingInstalls = new HashMap<>();
     /** Tracks uniquely owned snapshot sends to followers (leader side). */
     private final Map<String, OutboundSnapshotTransfer> outboundSnapshotTransfers = new HashMap<>();
+    /** Prevents heartbeat-driven retry loops after a follower rejects snapshot persistence. */
+    private final Map<String, Long> outboundSnapshotRetryAfterNanos = new HashMap<>();
     private long outboundSnapshotTransferSequence = 0;
+    private static final long SNAPSHOT_RETRY_BACKOFF_NANOS = TimeUnit.MILLISECONDS.toNanos(250);
 
     // ========== SNAPSHOT METRICS ==========
     private LongCounter snapshotCounter;
@@ -234,6 +239,8 @@ public class RaftNode {
         private long snapshotThreshold = 10000;
         private long snapshotCheckIntervalMs = 60000;
         private long logHardLimit = 100000;
+        private RaftTimerScheduler timerScheduler;
+        private int transitionQueueCapacity = 1024;
 
         private Builder() {}
 
@@ -276,6 +283,17 @@ public class RaftNode {
         /** Maximum in-memory log entries before rejecting commands (default: 100000). */
         public Builder logHardLimit(long limit) { this.logHardLimit = limit; return this; }
 
+        Builder timerScheduler(RaftTimerScheduler timerScheduler) {
+            this.timerScheduler = requireNonNull(timerScheduler, "timerScheduler");
+            return this;
+        }
+
+        Builder transitionQueueCapacity(int capacity) {
+            if (capacity < 1) throw new IllegalArgumentException("capacity must be at least one");
+            this.transitionQueueCapacity = capacity;
+            return this;
+        }
+
         /**
          * Builds the {@link RaftNode}.
          *
@@ -292,7 +310,9 @@ public class RaftNode {
 
             boolean snap = (snapshotEnabled != null) ? snapshotEnabled : mode.isDurable();
             return new RaftNode(runtime, nodeId, clusterNodes, transport, stateMachine,
-                    commandCodec, mode, electionTimeoutMs, heartbeatIntervalMs, snap, snapshotThreshold, snapshotCheckIntervalMs, logHardLimit);
+                    commandCodec, mode, electionTimeoutMs, heartbeatIntervalMs, snap,
+                    snapshotThreshold, snapshotCheckIntervalMs, logHardLimit, timerScheduler,
+                    transitionQueueCapacity);
         }
     }
 
@@ -301,7 +321,9 @@ public class RaftNode {
     private RaftNode(JavaRuntime runtime, String nodeId, Set<String> clusterNodes, RaftTransport transport,
             RaftLogApplicator stateMachine, CommandCodec<RaftCommand> commandCodec,
             RaftNodeMode mode, long electionTimeoutMs, long heartbeatIntervalMs,
-            boolean snapshotEnabled, long snapshotThreshold, long snapshotCheckIntervalMs, long logHardLimit) {
+            boolean snapshotEnabled, long snapshotThreshold, long snapshotCheckIntervalMs,
+            long logHardLimit, RaftTimerScheduler configuredTimerScheduler,
+            int transitionQueueCapacity) {
         this.runtime = runtime;
         this.nodeId = nodeId;
         this.clusterNodes = new HashSet<>(clusterNodes);
@@ -310,7 +332,16 @@ public class RaftNode {
         this.commandCodec = commandCodec;
         this.storage = requireNonNull(mode, "mode").storage();
         this.snapshotStore = mode.snapshots();
-        this.transitionSequencer = new RaftTransitionSequencer(runtime, 1024);
+        this.transitionSequencer = new RaftTransitionSequencer(runtime, transitionQueueCapacity);
+        this.timerScheduler = configuredTimerScheduler == null ? new RaftTimerScheduler() {
+            @Override public long setTimer(long delayMs, java.util.function.Consumer<Long> action) {
+                return runtime.setTimer(delayMs, action);
+            }
+            @Override public long setPeriodic(long periodMs, java.util.function.Consumer<Long> action) {
+                return runtime.setPeriodic(periodMs, action);
+            }
+            @Override public boolean cancelTimer(long id) { return runtime.cancelTimer(id); }
+        } : configuredTimerScheduler;
         this.electionTimeoutMs = electionTimeoutMs;
         this.heartbeatIntervalMs = heartbeatIntervalMs;
         this.snapshotEnabled = snapshotEnabled && this.storage.isPresent();
@@ -518,11 +549,18 @@ public class RaftNode {
                 if (snapshotLastIndex > 0) {
                     // Snapshot recovery: only replay entries AFTER the snapshot
                     int replayedCount = 0;
+                    long expectedIndex = snapshotLastIndex + 1;
                     for (LogEntryData entry : entries) {
                         if (entry.index() > snapshotLastIndex) {
+                            if (entry.index() != expectedIndex) {
+                                return Future.failedFuture(new IllegalStateException(
+                                        "Non-contiguous WAL replay after snapshot: expected index "
+                                                + expectedIndex + " but found " + entry.index()));
+                            }
                             RaftCommand command = deserialize(ByteString.copyFrom(entry.payload()));
                             log.add(new LogEntry(entry.term(), entry.index(), command));
                             replayedCount++;
+                            expectedIndex++;
                         }
                     }
                     logger.info("Replayed {} post-snapshot entries (skipped {} compacted entries)",
@@ -541,9 +579,16 @@ public class RaftNode {
                     // Full rebuild: no snapshot, replay everything
                     log.clear();
                     log.add(new LogEntry(0, 0, null));
+                    long expectedIndex = 1;
                     for (LogEntryData entry : entries) {
+                        if (entry.index() != expectedIndex) {
+                            return Future.failedFuture(new IllegalStateException(
+                                    "Non-contiguous WAL replay: expected index " + expectedIndex
+                                            + " but found " + entry.index()));
+                        }
                         RaftCommand command = deserialize(ByteString.copyFrom(entry.payload()));
                         log.add(new LogEntry(entry.term(), entry.index(), command));
+                        expectedIndex++;
                     }
                     logger.info("Recovered {} log entries from storage", entries.size());
                     return rebuildStateMachine();
@@ -634,6 +679,7 @@ public class RaftNode {
         transitionSequencer.submit(
                         "leader-append",
                         RaftTransitionSequencer.FailurePolicy.FENCE,
+                        RaftNode::isAmbiguousLeaderAppendFailure,
                         () -> prepareAndPersistLeaderAppend(command),
                         decision -> applyLeaderAppend(decision, promise))
                 .onFailure(error -> {
@@ -714,6 +760,10 @@ public class RaftNode {
     // ... Getters ...
     public boolean isRunning() {
         return running;
+    }
+
+    public boolean isFenced() {
+        return transitionSequencer.isFenced();
     }
 
     public String getLeaderId() {
@@ -886,7 +936,7 @@ public class RaftNode {
         // Clean up on completion
         promise.future().onComplete(ar -> {
             removeStateChangeListener(listener);
-            runtime.cancelTimer(timerId);
+            timerScheduler.cancelTimer(timerId);
         });
 
         return promise.future();
@@ -940,19 +990,19 @@ public class RaftNode {
     }
 
     private void cancelElectionTimer() {
-        if (electionTimerId != -1) runtime.cancelTimer(electionTimerId);
+        if (electionTimerId != -1) timerScheduler.cancelTimer(electionTimerId);
         electionTimerId = -1;
         electionTimerGeneration++;
     }
 
     private void cancelHeartbeatTimer() {
-        if (heartbeatTimerId != -1) runtime.cancelTimer(heartbeatTimerId);
+        if (heartbeatTimerId != -1) timerScheduler.cancelTimer(heartbeatTimerId);
         heartbeatTimerId = -1;
         heartbeatTimerGeneration++;
     }
 
     private void cancelSnapshotTimer() {
-        if (snapshotTimerId != -1) runtime.cancelTimer(snapshotTimerId);
+        if (snapshotTimerId != -1) timerScheduler.cancelTimer(snapshotTimerId);
         snapshotTimerId = -1;
         snapshotTimerGeneration++;
     }
@@ -980,7 +1030,14 @@ public class RaftNode {
                         this::applyElection)
                 .onFailure(error -> logger.error(
                         "Failed to start election because metadata durability is uncertain: {}",
-                        error.getMessage(), error));
+                        error.getMessage(), error))
+                .onFailure(error -> {
+                    if (error instanceof RaftTransitionSequencer.QueueFullException
+                            && running && state != State.LEADER
+                            && timerGeneration == electionTimerGeneration) {
+                        resetElectionTimer();
+                    }
+                });
     }
 
     private Future<ElectionDecision> prepareAndPersistElection(long timerGeneration) {
@@ -1176,45 +1233,6 @@ public class RaftNode {
         }
     }
 
-    private void stepDown(long newTerm) {
-        stepDown(newTerm, true)
-                .onFailure(err -> {
-                    logger.error("Failed to persist step-down metadata for term {}: {}", newTerm, err.getMessage(), err);
-                });
-    }
-
-    private Future<Void> stepDown(long newTerm, boolean persistMetadataRequired) {
-        RaftTransitionSequencer.FailurePolicy failurePolicy = persistMetadataRequired
-                ? RaftTransitionSequencer.FailurePolicy.FENCE
-                : RaftTransitionSequencer.FailurePolicy.CONTINUE;
-        return transitionSequencer.submit(
-                "step-down:" + newTerm,
-                failurePolicy,
-                () -> prepareAndPersistStepDown(newTerm, persistMetadataRequired),
-                this::applyStepDown);
-    }
-
-    private Future<StepDownDecision> prepareAndPersistStepDown(
-            long newTerm, boolean persistMetadataRequired) {
-        if (newTerm <= currentTerm) {
-            return Future.succeededFuture(new StepDownDecision(false, currentTerm));
-        }
-        if (!persistMetadataRequired) {
-            return Future.succeededFuture(new StepDownDecision(true, newTerm));
-        }
-        return persistMetadata(newTerm, Optional.empty())
-                .map(ignored -> new StepDownDecision(true, newTerm));
-    }
-
-    private Void applyStepDown(StepDownDecision decision) {
-        if (decision.apply()) {
-            applyDurableHigherTerm(decision.term(), null);
-        }
-        return null;
-    }
-
-    private record StepDownDecision(boolean apply, long term) {}
-
     private void failPendingCommands(Throwable cause) {
         pendingCommands.values().forEach(promise -> promise.tryFail(cause));
         pendingCommands.clear();
@@ -1370,8 +1388,12 @@ public class RaftNode {
         onStateLoopComplete(transition, result -> {
             if (result.failed()) {
                 Throwable error = result.cause();
-                logger.error("AppendEntries failed during durable transition: {}",
-                        error.getMessage(), error);
+                if (error instanceof RaftTransitionSequencer.DrainingException) {
+                    logger.debug("AppendEntries rejected while draining: {}", error.getMessage());
+                } else {
+                    logger.error("AppendEntries failed during durable transition: {}",
+                            error.getMessage(), error);
+                }
                 response.tryComplete(AppendEntriesResponse.newBuilder()
                         .setTerm(currentTerm)
                         .setSuccess(false)
@@ -1448,9 +1470,19 @@ public class RaftNode {
 
         FollowerAppendDecision decision = FollowerAppendDecision.accepted(
                 request, higherTerm, truncateFromIndex, entriesToPersist);
-        return termPersistence
-                .compose(ignored -> persistAppendEntries(truncateFromIndex, entriesToPersist))
-                .map(decision);
+        return composeOnStateLoop(termPersistence,
+                        ignored -> persistAppendEntries(truncateFromIndex, entriesToPersist))
+                .map(decision)
+                .recover(error -> {
+                    if (isAmbiguousFollowerAppendFailure(
+                            error, truncateFromIndex, entriesToPersist.size())) {
+                        return Future.failedFuture(error);
+                    }
+                    logger.warn("Rejecting AppendEntries before a WAL mutation: {}",
+                            error.getMessage());
+                    return Future.succeededFuture(
+                            FollowerAppendDecision.persistenceRejected(request, higherTerm));
+                });
     }
 
     private FollowerAppendResult applyFollowerAppend(FollowerAppendDecision decision) {
@@ -1536,6 +1568,12 @@ public class RaftNode {
                 AppendEntriesRequest request, boolean higherTerm, Throwable failure) {
             return new FollowerAppendDecision(request, true, higherTerm, false,
                     null, List.of(), failure);
+        }
+
+        private static FollowerAppendDecision persistenceRejected(
+                AppendEntriesRequest request, boolean higherTerm) {
+            return new FollowerAppendDecision(request, true, higherTerm, false,
+                    null, List.of(), null);
         }
 
         private static FollowerAppendDecision accepted(
@@ -2011,6 +2049,12 @@ public class RaftNode {
      * @param target the follower node ID
      */
     private void sendInstallSnapshot(String target) {
+        long retryAfter = outboundSnapshotRetryAfterNanos.getOrDefault(target, 0L);
+        if (System.nanoTime() < retryAfter) {
+            logger.debug("InstallSnapshot retry for {} is in backoff", target);
+            return;
+        }
+        outboundSnapshotRetryAfterNanos.remove(target);
         // Prevent concurrent snapshot installs to the same follower
         if (outboundSnapshotTransfers.containsKey(target)) {
             logger.debug("InstallSnapshot already in progress for {}, skipping", target);
@@ -2220,6 +2264,14 @@ public class RaftNode {
                 removeOutboundSnapshotTransfer(transfer);
                 return null;
             }
+            if (retryChunk == 0) {
+                logger.warn("InstallSnapshot persistence rejected by {}; abandoning transfer and backing off",
+                        transfer.target());
+                outboundSnapshotRetryAfterNanos.put(transfer.target(),
+                        System.nanoTime() + SNAPSHOT_RETRY_BACKOFF_NANOS);
+                removeOutboundSnapshotTransfer(transfer);
+                return null;
+            }
             logger.warn("InstallSnapshot chunk {}/{} rejected by {}, retrying from chunk {}",
                     decision.chunkIndex() + 1, decision.totalChunks(),
                     transfer.target(), retryChunk);
@@ -2267,6 +2319,8 @@ public class RaftNode {
         logger.error("Failed to send InstallSnapshot chunk {}/{} to {}: {}",
                 decision.chunkIndex() + 1, decision.totalChunks(), transfer.target(),
                 decision.error().getMessage(), decision.error());
+        outboundSnapshotRetryAfterNanos.put(transfer.target(),
+                System.nanoTime() + SNAPSHOT_RETRY_BACKOFF_NANOS);
         removeOutboundSnapshotTransfer(transfer);
         return null;
     }
@@ -2327,8 +2381,12 @@ public class RaftNode {
                 promise.tryComplete(result.result());
             } else {
                 Throwable error = result.cause();
-                logger.error("InstallSnapshot durable transition failed: {}",
-                        error.getMessage(), error);
+                if (error instanceof RaftTransitionSequencer.DrainingException) {
+                    logger.debug("InstallSnapshot rejected while draining: {}", error.getMessage());
+                } else {
+                    logger.error("InstallSnapshot durable transition failed: {}",
+                            error.getMessage(), error);
+                }
                 promise.tryComplete(InstallSnapshotResponse.newBuilder()
                         .setTerm(currentTerm)
                         .setSuccess(false)
@@ -2354,7 +2412,7 @@ public class RaftNode {
         Future<Void> termPersistence = higherTerm
                 ? persistMetadata(request.getTerm(), Optional.empty())
                 : Future.succeededFuture();
-        return termPersistence.compose(ignored -> persistInstalledSnapshot(plan));
+        return composeOnStateLoop(termPersistence, ignored -> persistInstalledSnapshot(plan));
     }
 
     private InstalledSnapshotPlan planInstalledSnapshot(
@@ -2427,8 +2485,11 @@ public class RaftNode {
                 advanced.assemble(), request.getLastIncludedIndex(), request.getLastIncludedTerm());
         logger.info("InstallSnapshot complete: assembling {} bytes at index={}, term={}",
                 snapshot.data().length, snapshot.lastIncludedIndex(), snapshot.lastIncludedTerm());
+        boolean retainSuffix = hasLogEntry(snapshot.lastIncludedIndex())
+                && log.get(toArrayIndex(snapshot.lastIncludedIndex())).getTerm()
+                        == snapshot.lastIncludedTerm();
         return InstalledSnapshotPlan.completed(
-                request, higherTerm, clearAssemblers, snapshot);
+                request, higherTerm, clearAssemblers, snapshot, retainSuffix);
     }
 
     private Future<InstalledSnapshotPlan> persistInstalledSnapshot(InstalledSnapshotPlan plan) {
@@ -2450,8 +2511,16 @@ public class RaftNode {
                 .compose(published -> {
                     if (published.failure() != null) return Future.succeededFuture(published);
                     return storage
-                            .map(store -> toFuture(store.truncatePrefix(
-                                    published.snapshot().lastIncludedIndex())).map(published))
+                            .map(store -> {
+                                long boundary = published.snapshot().lastIncludedIndex();
+                                Future<Void> durability = published.retainSuffix()
+                                        ? Future.succeededFuture()
+                                        : toFuture(store.truncateSuffix(boundary + 1))
+                                                .compose(ignored -> toFuture(store.sync()));
+                                return durability
+                                        .compose(ignored -> toFuture(store.truncatePrefix(boundary)))
+                                        .map(published);
+                            })
                             .orElseGet(() -> Future.succeededFuture(published));
                 });
     }
@@ -2496,8 +2565,7 @@ public class RaftNode {
         long lastIncludedTerm = snapshot.lastIncludedTerm();
 
         List<LogEntry> retainedSuffix = List.of();
-        if (hasLogEntry(lastIncludedIndex)
-                && log.get(toArrayIndex(lastIncludedIndex)).getTerm() == lastIncludedTerm) {
+        if (plan.retainSuffix()) {
             int suffixStart = toArrayIndex(lastIncludedIndex) + 1;
             retainedSuffix = new ArrayList<>(log.subList(suffixStart, log.size()));
         }
@@ -2533,6 +2601,7 @@ public class RaftNode {
             boolean removeAssembler,
             SnapshotChunkAssembler assemblerToStore,
             SnapshotData snapshot,
+            boolean retainSuffix,
             boolean success,
             int nextChunkIndex,
             Throwable failure) {
@@ -2540,41 +2609,79 @@ public class RaftNode {
         private static InstalledSnapshotPlan rejectedWithoutStateChange(
                 InstallSnapshotRequest request) {
             return new InstalledSnapshotPlan(request, false, false, false, false,
-                    null, null, false, 0, null);
+                    null, null, false, false, 0, null);
         }
 
         private static InstalledSnapshotPlan rejected(
                 InstallSnapshotRequest request, boolean higherTerm,
                 boolean clearAssemblers, boolean removeAssembler, int nextChunkIndex) {
             return new InstalledSnapshotPlan(request, true, higherTerm, clearAssemblers,
-                    removeAssembler, null, null, false, nextChunkIndex, null);
+                    removeAssembler, null, null, false, false, nextChunkIndex, null);
         }
 
         private static InstalledSnapshotPlan duplicate(
                 InstallSnapshotRequest request, boolean higherTerm,
                 boolean clearAssemblers, int nextChunkIndex) {
             return new InstalledSnapshotPlan(request, true, higherTerm, clearAssemblers,
-                    true, null, null, true, nextChunkIndex, null);
+                    true, null, null, false, true, nextChunkIndex, null);
         }
 
         private static InstalledSnapshotPlan acceptedChunk(
                 InstallSnapshotRequest request, boolean higherTerm,
                 boolean clearAssemblers, SnapshotChunkAssembler assembler) {
             return new InstalledSnapshotPlan(request, true, higherTerm, clearAssemblers,
-                    false, assembler, null, true, assembler.getNextExpectedChunk(), null);
+                    false, assembler, null, false, true, assembler.getNextExpectedChunk(), null);
         }
 
         private static InstalledSnapshotPlan completed(
                 InstallSnapshotRequest request, boolean higherTerm,
-                boolean clearAssemblers, SnapshotData snapshot) {
+                boolean clearAssemblers, SnapshotData snapshot, boolean retainSuffix) {
             return new InstalledSnapshotPlan(request, true, higherTerm, clearAssemblers,
-                    true, null, snapshot, true, request.getTotalChunks(), null);
+                    true, null, snapshot, retainSuffix, true, request.getTotalChunks(), null);
         }
 
         private InstalledSnapshotPlan publicationFailed(Throwable error) {
             return new InstalledSnapshotPlan(request, termAccepted, higherTerm, clearAssemblers,
-                    true, null, snapshot, false, 0, error);
+                    true, null, snapshot, retainSuffix, false, 0, error);
         }
+    }
+
+    private static boolean isAmbiguousLeaderAppendFailure(Throwable error) {
+        return !isKnownPrewriteRejection(error);
+    }
+
+    private static boolean isAmbiguousFollowerAppendFailure(
+            Throwable error, Long truncateFromIndex, int entriesToPersist) {
+        if (!isKnownPrewriteRejection(error) || truncateFromIndex != null) {
+            return true;
+        }
+        Throwable cause = unwrapCompletionFailure(error);
+        if (cause.getMessage().startsWith("Insufficient disk space:")) {
+            // FileRaftStorage performs this check per large record. In a batch,
+            // earlier records may already have been written before a later check fails.
+            return entriesToPersist != 1;
+        }
+        // Payload sizes are validated for the complete batch before any record is written.
+        return false;
+    }
+
+    private static boolean isKnownPrewriteRejection(Throwable error) {
+        Throwable cause = unwrapCompletionFailure(error);
+        return cause instanceof dev.mars.raftlog.storage.FileRaftStorage.StorageException
+                && cause.getCause() == null
+                && cause.getMessage() != null
+                && (cause.getMessage().startsWith("Payload too large:")
+                    || cause.getMessage().startsWith("Insufficient disk space:"));
+    }
+
+    private static Throwable unwrapCompletionFailure(Throwable error) {
+        Throwable cause = error;
+        while ((cause instanceof java.util.concurrent.CompletionException
+                || cause instanceof java.util.concurrent.ExecutionException)
+                && cause.getCause() != null) {
+            cause = cause.getCause();
+        }
+        return cause;
     }
 
     // ========== SNAPSHOT CHUNK ASSEMBLER ==========
@@ -2772,11 +2879,11 @@ public class RaftNode {
     }
 
     private long setTimer(long delayMs, java.util.function.Consumer<Long> action) {
-        return runtime.setTimer(delayMs, id -> withLoggingContext(() -> action.accept(id)));
+        return timerScheduler.setTimer(delayMs, id -> withLoggingContext(() -> action.accept(id)));
     }
 
     private long setPeriodic(long periodMs, java.util.function.Consumer<Long> action) {
-        return runtime.setPeriodic(periodMs, id -> withLoggingContext(() -> action.accept(id)));
+        return timerScheduler.setPeriodic(periodMs, id -> withLoggingContext(() -> action.accept(id)));
     }
 
     private void withLoggingContext(Runnable action) {

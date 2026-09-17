@@ -10,6 +10,7 @@
 
 package dev.mars.qraft.controller.raft;
 
+import com.google.protobuf.ByteString;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
@@ -80,6 +81,44 @@ class RaftNodeRealStorageRecoveryTest {
     void restartAfterSyncBeforeResponseRecoversTheDurableReplacement() throws Exception {
         verifyRecovery(RealStorageCrashWriter.Checkpoint.AFTER_SYNC,
                 List.of(1L, 2L, 3L), List.of(1L, 1L, 2L), 3, true);
+    }
+
+    @Test
+    void higherTermAppendCompletesThroughTheRealWalExecutor() throws Exception {
+        RaftStorageFactory.DurableStorage durable = await(
+                RaftStorageFactory.createDurable(directory, true));
+        durable.wal().updateMetadata(1, Optional.empty()).get(5, TimeUnit.SECONDS);
+        runtime = JavaRuntime.create();
+        node = RaftNode.builder()
+                .runtime(runtime)
+                .nodeId("node-1")
+                .clusterNodes(Set.of("node-1", "leader-1"))
+                .transport(new NoOpTransport())
+                .stateMachine(new QraftStateStore())
+                .commandCodec(CODEC)
+                .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
+                .snapshotEnabled(false)
+                .electionTimeout(60_000)
+                .heartbeatInterval(60_000)
+                .build();
+        await(node.start());
+
+        AppendEntriesResponse response = await(node.handleAppendEntriesRequest(
+                AppendEntriesRequest.newBuilder()
+                        .setTerm(2)
+                        .setLeaderId("leader-1")
+                        .setPrevLogIndex(0)
+                        .setPrevLogTerm(0)
+                        .addEntries(dev.mars.qraft.controller.raft.grpc.LogEntry.newBuilder()
+                                .setTerm(2)
+                                .setData(ByteString.copyFrom(encodePut("real-wal", "ok")))
+                                .build())
+                        .build()));
+
+        assertTrue(response.getSuccess());
+        assertEquals(2, node.getCurrentTerm());
+        assertEquals(1, node.getLastLogIndex());
+        assertFalse(node.isFenced());
     }
 
     private void verifyRecovery(

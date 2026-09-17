@@ -135,6 +135,26 @@ class RaftTransitionSequencerTest {
     }
 
     @Test
+    void classifiedPreWriteFailureDoesNotFenceLaterWork() throws Exception {
+        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 4);
+        IllegalStateException rejection = new IllegalStateException("pre-write rejection");
+
+        Future<String> rejected = sequencer.submit(
+                "pre-write",
+                RaftTransitionSequencer.FailurePolicy.FENCE,
+                error -> error != rejection,
+                () -> Future.<String>failedFuture(rejection),
+                value -> value);
+        assertSame(rejection,
+                assertThrows(CompletionException.class, () -> await(rejected)).getCause());
+
+        Future<String> later = sequencer.submit(
+                "later", () -> Future.succeededFuture("accepted"));
+        assertEquals("accepted", await(later));
+        assertFalse(sequencer.isFenced());
+    }
+
+    @Test
     void boundedAdmissionCountsTheActiveTransition() throws Exception {
         RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 2);
         Promise<Void> gate = Promise.promise();

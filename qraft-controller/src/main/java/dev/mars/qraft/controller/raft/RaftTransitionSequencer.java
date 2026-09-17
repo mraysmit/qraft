@@ -26,6 +26,7 @@ import java.util.Objects;
 import java.util.Queue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
@@ -90,12 +91,20 @@ final class RaftTransitionSequencer {
     <P, T> Future<T> submit(String name, FailurePolicy failurePolicy,
                             Supplier<Future<P>> prepareAndPersist,
                             Function<? super P, ? extends T> apply) {
+        return submit(name, failurePolicy, ignored -> true, prepareAndPersist, apply);
+    }
+
+    <P, T> Future<T> submit(String name, FailurePolicy failurePolicy,
+                            Predicate<Throwable> fenceOnFailure,
+                            Supplier<Future<P>> prepareAndPersist,
+                            Function<? super P, ? extends T> apply) {
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(failurePolicy, "failurePolicy");
+        Objects.requireNonNull(fenceOnFailure, "fenceOnFailure");
         Objects.requireNonNull(prepareAndPersist, "prepareAndPersist");
         Objects.requireNonNull(apply, "apply");
 
-        Transition<T> transition = new Transition<>(name, failurePolicy,
+        Transition<T> transition = new Transition<>(name, failurePolicy, fenceOnFailure,
                 prepareAndPersist, value -> apply.apply(cast(value)));
         dispatch(() -> admit(transition), transition.result);
         return transition.result.future();
@@ -183,7 +192,6 @@ final class RaftTransitionSequencer {
         assertStateLoop();
         if (active != transition) return;
 
-        active = null;
         if (error == null) {
             try {
                 transition.result.tryComplete(transition.apply.apply(value));
@@ -192,11 +200,14 @@ final class RaftTransitionSequencer {
             }
         }
         if (error != null) {
-            if (transition.failurePolicy == FailurePolicy.FENCE) {
+            if (transition.failurePolicy == FailurePolicy.FENCE
+                    && transition.fenceOnFailure.test(error)) {
                 fenceQueuedTransitions(error);
             }
             transition.result.tryFail(error);
         }
+
+        active = null;
 
         completeDrainIfIdle();
         startNextIfIdle();
@@ -247,14 +258,17 @@ final class RaftTransitionSequencer {
     private static final class Transition<T> {
         private final String name;
         private final FailurePolicy failurePolicy;
+        private final Predicate<Throwable> fenceOnFailure;
         private final Supplier<? extends Future<?>> action;
         private final Function<Object, T> apply;
         private final Promise<T> result = Promise.promise();
 
         private Transition(String name, FailurePolicy failurePolicy,
+                           Predicate<Throwable> fenceOnFailure,
                            Supplier<? extends Future<?>> action, Function<Object, T> apply) {
             this.name = name;
             this.failurePolicy = failurePolicy;
+            this.fenceOnFailure = fenceOnFailure;
             this.action = action;
             this.apply = apply;
         }

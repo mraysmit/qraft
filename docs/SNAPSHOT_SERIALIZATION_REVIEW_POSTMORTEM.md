@@ -1,8 +1,9 @@
 # Snapshot Serialization Review Postmortem
 
 **Date:** 2026-09-13  
-**Status:** Remediation complete; all six implementation and verification phases
-are implemented and pass the full non-heavy controller suite
+**Status:** Remediation in progress. The 2026-09-15 post-remediation code review
+found two release-blocking defects and four high-severity gaps. Corrective work
+is implemented and regression verification passes; independent re-review remains.
 **Scope:** Raft persistence sequencing, snapshot publication, WAL compaction, and
 in-memory state mutation
 
@@ -570,7 +571,7 @@ de-duplication, and combined close failure reporting. Coordinator and runtime
 tests additionally cover non-mutating timeout observation, shared terminal
 shutdown results, and critical-hook failure/timeout behavior. The current
 sequencing and recovery tranche contains 99 passing tests. The complete
-controller suite passes all 249 tests with no failures, errors, or skips.
+controller suite passes all 260 tests with no failures, errors, or skips.
 
 The recovery intermediate-callback tranche is now implemented. Its two
 deterministic tests complete metadata loading, snapshot loading, and WAL replay
@@ -1045,6 +1046,9 @@ The snapshot and WAL integration must not be considered complete until:
 - the observed histories satisfy the defined linearization points;
 - a structural review confirms that no persistence path bypasses the sequencer.
 
-The Phase 6 recovery, ownership, structural, and model-history evidence now
-satisfies these completion conditions. Storage delegation, snapshot correctness,
-and node-level persistence serialization are complete for the reviewed scope.
+The initial Phase 6 evidence did not satisfy these completion conditions. The
+2026-09-15 review in `postmortem-changes-code-review.md` identified off-loop WAL
+continuations, divergent installed-snapshot suffix retention, fenced-node health,
+failure classification, election admission, snapshot retry, and timer-fixture
+gaps. Completion will be re-declared only after independent re-review confirms
+those corrections and their regression evidence.

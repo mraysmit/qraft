@@ -69,16 +69,24 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
     @Test
     void restartDuringInstalledSnapshotPublicationUsesSnapshotAndUntrimmedWal() throws Exception {
         verifyRecovery(InstalledSnapshotCrashWriter.AFTER_INSTALLED_SNAPSHOT_PUBLICATION,
-                List.of(1L, 2L, 3L, 4L));
+                List.of(1L, 2L, 3L, 4L), 2, 4, true);
     }
 
     @Test
     void restartWhileShutdownDrainsCompactedInstallationUsesExactSuffix() throws Exception {
         verifyRecovery(InstalledSnapshotCrashWriter.DURING_SHUTDOWN_AFTER_PREFIX_COMPACTION,
-                List.of(4L));
+                List.of(4L), 2, 4, true);
     }
 
-    private void verifyRecovery(String checkpoint, List<Long> expectedWalIndexes) throws Exception {
+    @Test
+    void divergentSuffixIsAbsentFromWalAndRecoveryAfterInstallation() throws Exception {
+        verifyRecovery(InstalledSnapshotCrashWriter.AFTER_DIVERGENT_SUFFIX_INSTALL,
+                List.of(), 99, 3, false);
+    }
+
+    private void verifyRecovery(String checkpoint, List<Long> expectedWalIndexes,
+                                long expectedSnapshotTerm, long expectedLastApplied,
+                                boolean expectFourthEntry) throws Exception {
         seedWal();
         RemediationTestExtension.logExpectedFailure(
                 checkpoint, "ProcessHalt", "fixture halts an active installed-snapshot transition");
@@ -90,7 +98,7 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
             SnapshotStore.SnapshotData snapshot = snapshots.loadLatest()
                     .get(5, TimeUnit.SECONDS).orElseThrow();
             assertEquals(3, snapshot.lastIncludedIndex());
-            assertEquals(2, snapshot.lastIncludedTerm());
+            assertEquals(expectedSnapshotTerm, snapshot.lastIncludedTerm());
         }
 
         try (FileRaftStorage wal = wal()) {
@@ -122,11 +130,11 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
         assertTrue(node.isRunning());
         assertEquals(3, node.getCurrentTerm());
         assertEquals(3, node.getSnapshotLastIndex());
-        assertEquals(4, node.getLastApplied());
+        assertEquals(expectedLastApplied, node.getLastApplied());
         assertEquals("one", state.getMetadata("key-1"));
         assertEquals("two", state.getMetadata("key-2"));
         assertEquals("three", state.getMetadata("key-3"));
-        assertEquals("four", state.getMetadata("key-4"));
+        assertEquals(expectFourthEntry ? "four" : null, state.getMetadata("key-4"));
         assertFalse(Files.exists(directory.resolve("snapshot.dat.tmp")));
     }
 
