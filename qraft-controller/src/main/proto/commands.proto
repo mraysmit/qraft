@@ -95,6 +95,8 @@ message AgentCommandProto {
   AgentCapabilitiesProto new_capabilities = 5;
   int64 timestamp_epoch_ms = 6;
   AgentStatusProto expected_status = 7;
+  int64 sequence_number = 8;
+  string registration_id = 9;
 }
 
 message SystemMetadataCommandProto {

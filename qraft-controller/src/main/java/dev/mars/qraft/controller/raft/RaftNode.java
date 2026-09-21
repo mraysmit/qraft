@@ -56,9 +56,8 @@ import java.util.function.Function;
 import static java.util.Objects.requireNonNull;
 
 /**
- * Reactive Raft Node implementation with durable WAL storage.
- * Runs on the Vert.x Event Loop (Single Threaded), removing the need for
- * synchronization.
+ * Raft node implementation with durable WAL storage.
+ * Raft state transitions run on the dedicated Java runtime state loop.
  * 
  * <p>Implements the "Persist-before-response" rule for all state-changing
  * Raft operations:
@@ -245,7 +244,7 @@ public class RaftNode {
 
         private Builder() {}
 
-        /** The Vert.x instance (required). */
+        /** The Java runtime that owns the node state loop (required). */
         public Builder runtime(JavaRuntime runtime) { this.runtime = runtime; return this; }
 
         /** Unique node identifier (required). */
@@ -880,9 +879,8 @@ public class RaftNode {
 
     /**
      * Registers a listener that is notified whenever this node's Raft state changes.
-     * <p>Listeners are invoked on the Vert.x event loop context, making them safe
-     * for use with Vert.x Futures and Promises. This enables reactive test patterns
-     * instead of Thread.sleep polling loops.
+     * <p>Listeners are invoked on the node's Java runtime state-loop context, so
+     * listeners observe serialized Raft state changes.
      *
      * @param listener handler that receives the new {@link State}
      */
@@ -1265,7 +1263,7 @@ public class RaftNode {
      * @param message the incoming RaftMessage
      */
     private void handleMessage(RaftMessage message) {
-        // Ensure we are on the Vert.x Context
+        // Ensure we are on the node's Java runtime state-loop context.
         if (JavaRuntime.currentContext() != runtime) {
             runOnContext(v -> handleMessage(message));
             return;
@@ -1468,17 +1466,15 @@ public class RaftNode {
                     FollowerAppendDecision.invalid(request, higherTerm, requestFailure));
         }
 
-        // AppendPlan uses one-based positions. Exclude Qraft's snapshot sentinel and
-        // translate the request into coordinates relative to the compacted prefix.
+        // Exclude Qraft's in-memory snapshot sentinel. RaftLog receives absolute
+        // indices plus the inclusive snapshot/compaction boundary.
         List<LogEntryData> currentEntryData = log.stream().skip(1)
                 .map(entry -> new LogEntryData(entry.getIndex(), entry.getTerm(),
                         serialize(entry.getCommand()).toByteArray()))
                 .toList();
-        long relativeStartIndex = startIndex - snapshotLastIndex;
-        AppendPlan appendPlan = AppendPlan.from(relativeStartIndex, incomingEntryData, currentEntryData);
-        Long truncateFromIndex = appendPlan.truncateFromIndex() == null
-                ? null
-                : appendPlan.truncateFromIndex() + snapshotLastIndex;
+        AppendPlan appendPlan = AppendPlan.from(
+                startIndex, incomingEntryData, currentEntryData, snapshotLastIndex);
+        Long truncateFromIndex = appendPlan.truncateFromIndex();
         Set<Long> indicesToAppend = appendPlan.entriesToAppend().stream()
                 .map(LogEntryData::index)
                 .collect(java.util.stream.Collectors.toSet());
@@ -2557,7 +2553,8 @@ public class RaftNode {
                     if (published.failure() != null) return Future.succeededFuture(published);
                     if (!persistence.isDurable()) return Future.succeededFuture(published);
                     long boundary = published.snapshot().lastIncludedIndex();
-                    Future<Void> durability = published.retainSuffix()
+                    boolean hasSuffixToRemove = lastLogIndex() >= boundary + 1;
+                    Future<Void> durability = published.retainSuffix() || !hasSuffixToRemove
                             ? Future.succeededFuture()
                             : toFuture(persistence.truncateSuffix(ownership, boundary + 1))
                                     .compose(ignored -> toFuture(persistence.sync(ownership)));

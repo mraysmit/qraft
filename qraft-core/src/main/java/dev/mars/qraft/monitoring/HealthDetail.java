@@ -28,7 +28,7 @@ import java.util.Objects;
  * <p>This record replaces ad-hoc {@code Map<String, Object>} usage in health check responses
  * with a well-defined structure.
  *
- * @param component the name of the component being checked (e.g., "http-protocol", "transfer-engine")
+ * @param component the name of the component being checked (e.g., "raft-storage", "service-catalog")
  * @param status the health status of the component
  * @param message optional human-readable message describing the health state
  * @param metadata additional key-value pairs providing detailed diagnostic information

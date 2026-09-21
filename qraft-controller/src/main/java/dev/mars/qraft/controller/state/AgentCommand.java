@@ -130,14 +130,25 @@ public sealed interface AgentCommand extends RaftCommand
      * @param agentId   the agent identifier
      * @param status    optional status update with heartbeat (may be null)
      * @param timestamp the command timestamp
+     * @param sequenceNumber sender-local ordering value; zero means unsequenced
      */
-    record Heartbeat(String agentId, AgentStatus status, Instant timestamp) implements AgentCommand {
+    record Heartbeat(String agentId, AgentStatus status, Instant timestamp,
+                     long sequenceNumber, String registrationId) implements AgentCommand {
         private static final long serialVersionUID = 1L;
 
         public Heartbeat {
             Objects.requireNonNull(agentId, "agentId");
             Objects.requireNonNull(timestamp, "timestamp");
+            if (sequenceNumber < 0) throw new IllegalArgumentException("sequenceNumber must not be negative");
             // status may be null — heartbeat doesn't always carry a status update
+        }
+
+        public Heartbeat(String agentId, AgentStatus status, Instant timestamp) {
+            this(agentId, status, timestamp, 0, null);
+        }
+
+        public Heartbeat(String agentId, AgentStatus status, Instant timestamp, long sequenceNumber) {
+            this(agentId, status, timestamp, sequenceNumber, null);
         }
     }
 
@@ -179,13 +190,27 @@ public sealed interface AgentCommand extends RaftCommand
      * Create a command to record an agent heartbeat.
      */
     static AgentCommand heartbeat(String agentId) {
-        return new Heartbeat(agentId, null, Instant.now());
+        return new Heartbeat(agentId, null, Instant.now(), 0, null);
     }
 
     /**
      * Create a command to record an agent heartbeat with status.
      */
     static AgentCommand heartbeat(String agentId, AgentStatus status, Instant timestamp) {
-        return new Heartbeat(agentId, status, timestamp != null ? timestamp : Instant.now());
+        return heartbeat(agentId, status, timestamp, 0);
+    }
+
+    /**
+     * Create a sequenced heartbeat command. Sequence zero means the sender does not
+     * participate in ordering; positive values must increase for each agent.
+     */
+    static AgentCommand heartbeat(String agentId, AgentStatus status, Instant timestamp, long sequenceNumber) {
+        return heartbeat(agentId, status, timestamp, sequenceNumber, null);
+    }
+
+    static AgentCommand heartbeat(String agentId, AgentStatus status, Instant timestamp, long sequenceNumber,
+                                  String registrationId) {
+        return new Heartbeat(agentId, status, timestamp != null ? timestamp : Instant.now(), sequenceNumber,
+                registrationId);
     }
 }

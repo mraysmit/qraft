@@ -26,7 +26,6 @@ fi
 export AGENT_REGION=${AGENT_REGION:-default}
 export AGENT_DATACENTER=${AGENT_DATACENTER:-default}
 export SUPPORTED_PROTOCOLS=${SUPPORTED_PROTOCOLS:-HTTP,HTTPS}
-export MAX_CONCURRENT_TRANSFERS=${MAX_CONCURRENT_TRANSFERS:-5}
 export HEARTBEAT_INTERVAL=${HEARTBEAT_INTERVAL:-30000}
 export AGENT_PORT=${AGENT_PORT:-8080}
 export AGENT_VERSION=${AGENT_VERSION:-1.0.0}
@@ -50,14 +49,16 @@ export JAVA_OPTS
 
 echo "Java Options: $JAVA_OPTS"
 echo "Supported Protocols: $SUPPORTED_PROTOCOLS"
-echo "Max Concurrent Transfers: $MAX_CONCURRENT_TRANSFERS"
 echo "Heartbeat Interval: ${HEARTBEAT_INTERVAL}ms"
 
 # Wait for controller to be available
+controller_base=${CONTROLLER_URL%/}
+controller_health_url=${CONTROLLER_HEALTH_URL:-${controller_base%/api/v1}/health}
+echo "Controller health URL: $controller_health_url"
 echo "Waiting for controller to be available..."
 timeout=60
 counter=0
-while ! curl -f "$CONTROLLER_URL/health" >/dev/null 2>&1; do
+while ! curl -f "$controller_health_url" >/dev/null 2>&1; do
     if [ $counter -ge $timeout ]; then
         echo "ERROR: Controller not available after ${timeout} seconds"
         exit 1

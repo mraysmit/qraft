@@ -68,6 +68,8 @@ final class AgentCodec {
             }
             case AgentCommand.Heartbeat h -> {
                 builder.setType(AgentCommandType.AGENT_CMD_HEARTBEAT);
+                builder.setSequenceNumber(h.sequenceNumber());
+                if (h.registrationId() != null) builder.setRegistrationId(h.registrationId());
                 if (h.status() != null) {
                     builder.setNewStatus(toProto(h.status()));
                 }
@@ -94,7 +96,8 @@ final class AgentCodec {
             case AGENT_CMD_UPDATE_CAPABILITIES -> new AgentCommand.UpdateCapabilities(
                     proto.getAgentId(), fromProto(proto.getNewCapabilities()), timestamp);
             case AGENT_CMD_HEARTBEAT -> new AgentCommand.Heartbeat(
-                    proto.getAgentId(), newStatus, timestamp);
+                    proto.getAgentId(), newStatus, timestamp, proto.getSequenceNumber(),
+                    proto.getRegistrationId().isEmpty() ? null : proto.getRegistrationId());
             default -> throw new IllegalArgumentException("Unknown AgentCommandType: " + proto.getType());
         };
     }

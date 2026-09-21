@@ -3,8 +3,11 @@
 # Reduces context transfer from ~100MB to ~10MB per build.
 # =============================================================================
 
-# Build outputs (55MB+ waste — rebuilt inside Docker anyway)
+# Build outputs; the runtime JAR is the sole host-built artifact packaged.
 **/target/
+!qraft-runtime/target/
+qraft-runtime/target/*
+!qraft-runtime/target/qraft-runtime.jar
 
 # Version control
 .git/

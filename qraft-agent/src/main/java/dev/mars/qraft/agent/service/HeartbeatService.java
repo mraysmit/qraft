@@ -11,6 +11,7 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import java.util.HashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -32,15 +33,26 @@ public final class HeartbeatService {
     public CompletableFuture<Boolean> sendHeartbeat() {
         if (!registrationClient.isRegistered()) return CompletableFuture.completedFuture(false);
         try {
-            String body = objectMapper.writeValueAsString(Map.of(
-                    "agentId", config.getAgentId(), "timestamp", Instant.now().toString(),
-                    "sequenceNumber", sequence.incrementAndGet(), "status", "passing"));
+            Map<String, Object> heartbeat = new HashMap<>();
+            heartbeat.put("agentId", config.getAgentId());
+            heartbeat.put("timestamp", Instant.now().toString());
+            heartbeat.put("sequenceNumber", sequence.incrementAndGet());
+            heartbeat.put("status", "passing");
+            String registrationId = registrationClient.registrationId();
+            if (registrationId != null) heartbeat.put("registrationId", registrationId);
+            String body = objectMapper.writeValueAsString(heartbeat);
             HttpRequest request = HttpRequest.newBuilder(URI.create(config.getControllerUrl() + "/agents/heartbeat"))
                     .timeout(Duration.ofMillis(config.getHttpConnectionTimeout()))
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body)).build();
             return httpClient.sendAsync(request, HttpResponse.BodyHandlers.discarding())
-                    .thenApply(response -> response.statusCode() == 200 || response.statusCode() == 204)
+                    .thenApply(response -> {
+                        if (response.statusCode() == 404) {
+                            registrationClient.markRegistrationLost();
+                            return false;
+                        }
+                        return response.statusCode() == 200 || response.statusCode() == 204;
+                    })
                     .exceptionally(error -> false);
         } catch (Exception e) {
             return CompletableFuture.completedFuture(false);

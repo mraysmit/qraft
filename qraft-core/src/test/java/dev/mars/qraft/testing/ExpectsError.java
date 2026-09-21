@@ -34,22 +34,22 @@ import java.lang.annotation.Target;
  * Example output:
  * <pre>
  * ========================================================================
- *   EXPECTED ERROR TEST: testFtpsConnectionTimeout
- *   Reason: Verifies TransferException on connection refused
+ *   EXPECTED ERROR TEST: testUnavailablePeer
+ *   Reason: Verifies connection failure handling for an unavailable Raft peer
  *   Errors below are INTENTIONAL — testing error handling paths
  * ========================================================================
- * ... protocol ERROR logs appear here ...
+ * ... transport ERROR logs appear here ...
  * ========================================================================
- *   END EXPECTED ERROR TEST: testFtpsConnectionTimeout -- PASSED
+ *   END EXPECTED ERROR TEST: testUnavailablePeer -- PASSED
  * ========================================================================
  * </pre>
  * <p>
  * Usage:
  * <pre>
  * {@literal @}Test
- * {@literal @}ExpectsError("Verifies TransferException on connection refused")
- * void testFtpsConnectionTimeout() {
- *     assertThrows(TransferException.class, () -&gt; protocol.transfer(request, context));
+ * {@literal @}ExpectsError("Verifies connection failure handling for an unavailable Raft peer")
+ * void testUnavailablePeer() {
+ *     assertThrows(IllegalStateException.class, () -&gt; transport.connect("missing-peer"));
  * }
  * </pre>
  *

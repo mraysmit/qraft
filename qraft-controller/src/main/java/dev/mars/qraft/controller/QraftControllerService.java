@@ -225,8 +225,7 @@ public class QraftControllerService {
         ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime, drainTimeoutMs, shutdownTimeoutMs);
         this.shutdownCoordinator = Optional.of(coordinator);
         
-        // Phase 2: AWAIT_COMPLETION - No active jobs tracked at controller level yet
-        // (Agents track their own transfers - controller just routes requests)
+        // Phase 2: AWAIT_COMPLETION - no controller-managed work remains after draining.
         
         // Phase 3: STOP_SERVICES - Stop in reverse order of startup
         coordinator.onServiceStop("grpc-server-stop", () -> {

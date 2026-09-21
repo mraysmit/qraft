@@ -10,7 +10,7 @@
     <packaging>pom</packaging>
 
     <name>Qraft Framework</name>
-    <description>Transfer-free core framework with Raft consensus and distributed state primitives</description>
+    <description>Raft consensus framework with distributed state and service discovery primitives</description>
 
     <modules>
         <module>qraft-raft-engine</module>
@@ -30,7 +30,7 @@
         <junit.version>5.14.3</junit.version>
         <testcontainers.version>2.0.3</testcontainers.version>
         <jacoco.version>0.8.13</jacoco.version>
-        <raftlog.version>1.3.0</raftlog.version>
+        <raftlog.version>1.4.0</raftlog.version>
         <slf4j.version>2.0.17</slf4j.version>
         <logback.version>1.5.32</logback.version>
         <logstash.logback.encoder.version>8.1</logstash.logback.encoder.version>

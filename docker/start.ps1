@@ -5,11 +5,13 @@ param(
 
 switch ($Service) {
     "cluster" {
+        & (Join-Path $PSScriptRoot "build-runtime.ps1")
         Write-Host "Starting Qraft single-controller development environment..." -ForegroundColor Green
         docker-compose -f compose/docker-compose-single-controller.yml up -d
         Write-Host "Controller with embedded HTTP API available at http://localhost:8080" -ForegroundColor Cyan
     }
     "multinode" {
+        & (Join-Path $PSScriptRoot "build-runtime.ps1")
         Write-Host "Starting Qraft multi-node cluster..." -ForegroundColor Green
         docker-compose -f compose/docker-compose-cluster.yml up -d
         Write-Host "Multi-node cluster available at:" -ForegroundColor Cyan
@@ -18,6 +20,7 @@ switch ($Service) {
         Write-Host "  - API Node 3: http://localhost:8083" -ForegroundColor White
     }
     "controllers" {
+        & (Join-Path $PSScriptRoot "build-runtime.ps1")
         Write-Host "Starting Qraft controller-first cluster..." -ForegroundColor Green
         docker-compose -f compose/docker-compose-controller-first.yml up -d
         Write-Host "Controller cluster available at:" -ForegroundColor Cyan
@@ -34,7 +37,6 @@ switch ($Service) {
     "stop" {
         Write-Host "Stopping services..." -ForegroundColor Yellow
         docker-compose -f compose/docker-compose-controller-first.yml down 2>$null
-        docker-compose -f compose/docker-compose-corrected.yml down 2>$null
         docker-compose -f compose/docker-compose-cluster.yml down 2>$null
         docker-compose -f compose/docker-compose.yml down 2>$null
         docker-compose -f compose/docker-compose-loki.yml down 2>$null

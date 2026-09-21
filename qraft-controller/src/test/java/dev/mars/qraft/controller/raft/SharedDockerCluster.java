@@ -22,10 +22,16 @@ import org.testcontainers.containers.wait.strategy.Wait;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.InputStreamReader;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.logging.Logger;
+import java.util.stream.Stream;
 
 /**
  * Shared Docker cluster containers for integration tests.
@@ -36,7 +42,8 @@ import java.util.logging.Logger;
  *
  * <h3>Performance impact:</h3>
  * <ul>
- *   <li>Image built ONCE via {@code docker compose build} (not per test class)</li>
+ *   <li>The runtime JAR is built by Maven on the host before these tests run</li>
+ *   <li>Image packaged ONCE via {@code docker compose build} (not per test class)</li>
  *   <li>Clusters started ONCE and reused across DockerRaftClusterTest,
  *       ConfigurableRaftClusterTest, AdvancedNetworkTest, NetworkPartitionTest</li>
  *   <li>Pre-built compose files use {@code image:} -- no build context transfer on start</li>
@@ -118,19 +125,14 @@ public final class SharedDockerCluster {
     }
 
     /**
-     * Builds the qraft-controller:test Docker image using the build compose file,
-     * unless the image already exists locally. On a local Docker Desktop, skipping
-     * a redundant build saves 30–120 seconds.
+     * Packages the host-built runtime JAR as the qraft-runtime:test Docker image.
      */
     private static synchronized void ensureImageBuilt() {
         if (imageBuilt) return;
 
-        // Fast path: skip the build entirely if the image is already cached
-        if (isImageCached("qraft-controller:test")) {
-            logger.info("Docker image qraft-controller:test already exists -- skipping build");
-            imageBuilt = true;
-            return;
-        }
+        Path repositoryRoot = Path.of("..").toAbsolutePath().normalize();
+        Path runtimeJar = repositoryRoot.resolve("qraft-runtime/target/qraft-runtime.jar");
+        assertRuntimeJarIsCurrent(repositoryRoot, runtimeJar);
 
         File buildComposeFile = new File("src/test/resources/docker-compose-build-image.yml");
         if (!buildComposeFile.exists()) {
@@ -166,7 +168,7 @@ public final class SharedDockerCluster {
             }
 
             imageBuilt = true;
-            logger.info("Docker image built successfully: qraft-controller:test");
+            logger.info("Docker image built successfully: qraft-runtime:test");
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
@@ -174,21 +176,58 @@ public final class SharedDockerCluster {
         }
     }
 
-    /**
-     * Returns {@code true} if the named Docker image exists in the local cache.
-     * Uses {@code docker image inspect} which returns exit code 0 when found.
-     */
-    private static boolean isImageCached(String imageName) {
+    static void assertRuntimeJarIsCurrent(Path repositoryRoot, Path runtimeJar) {
+        if (!Files.isRegularFile(runtimeJar)) {
+            throw new IllegalStateException(
+                    "Host-built runtime JAR not found: " + runtimeJar.toAbsolutePath()
+                    + " -- run docker/build-runtime.ps1 or docker/build-runtime.sh "
+                    + "from the repository before Docker integration tests");
+        }
+
         try {
-            Process process = new ProcessBuilder("docker", "image", "inspect", imageName)
-                    .redirectErrorStream(true)
-                    .start();
-            // Drain output to prevent blocking
-            process.getInputStream().readAllBytes();
-            return process.waitFor() == 0;
-        } catch (Exception e) {
-            logger.fine("Could not check for cached image: " + e.getMessage());
-            return false;
+            FileTime jarTime = Files.getLastModifiedTime(runtimeJar);
+            Path newestInput = newestProductionBuildInput(repositoryRoot);
+            if (newestInput != null
+                    && Files.getLastModifiedTime(newestInput).compareTo(jarTime) > 0) {
+                throw new IllegalStateException(
+                        "Host-built runtime JAR is older than build input "
+                        + repositoryRoot.relativize(newestInput)
+                        + " -- rebuild it with docker/build-runtime.ps1 or docker/build-runtime.sh "
+                        + "before Docker integration tests");
+            }
+        } catch (IOException error) {
+            throw new IllegalStateException("Could not verify runtime JAR freshness", error);
+        }
+    }
+
+    private static Path newestProductionBuildInput(Path repositoryRoot) throws IOException {
+        List<Path> candidates = new ArrayList<>();
+        Path rootPom = repositoryRoot.resolve("pom.xml");
+        if (Files.isRegularFile(rootPom)) candidates.add(rootPom);
+
+        try (Stream<Path> children = Files.list(repositoryRoot)) {
+            for (Path module : children.filter(Files::isDirectory).toList()) {
+                Path modulePom = module.resolve("pom.xml");
+                if (Files.isRegularFile(modulePom)) candidates.add(modulePom);
+
+                Path productionSources = module.resolve("src/main");
+                if (!Files.isDirectory(productionSources)) continue;
+                try (Stream<Path> sources = Files.walk(productionSources)) {
+                    sources.filter(Files::isRegularFile).forEach(candidates::add);
+                }
+            }
+        }
+
+        return candidates.stream()
+                .max(Comparator.comparing(path -> lastModifiedTime(path).toInstant()))
+                .orElse(null);
+    }
+
+    private static FileTime lastModifiedTime(Path path) {
+        try {
+            return Files.getLastModifiedTime(path);
+        } catch (IOException error) {
+            throw new IllegalStateException("Could not read build-input timestamp: " + path, error);
         }
     }
 

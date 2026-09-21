@@ -72,17 +72,18 @@ public enum AgentStatus {
     HEALTHY("healthy", "Agent is healthy and available for work", true, true),
 
     /**
-     * Agent is actively processing transfer jobs.
-     * The agent is in good health but currently busy.
+     * Legacy alias retained for persisted-state and wire compatibility.
+     * New agents should report {@link #HEALTHY}.
      */
-    ACTIVE("active", "Agent is actively processing jobs", true, true),
+    @Deprecated(forRemoval = false)
+    ACTIVE("active", "Legacy alias for a healthy agent", true, true),
 
     /**
-     * Agent is healthy but currently idle (no active jobs).
-     * This agent is immediately available for new work and receives the
-     * highest job-assignment priority.
+     * Legacy alias retained for persisted-state and wire compatibility.
+     * New agents should report {@link #HEALTHY}.
      */
-    IDLE("idle", "Agent is idle and ready for work", true, true),
+    @Deprecated(forRemoval = false)
+    IDLE("idle", "Legacy alias for a healthy agent", true, true),
 
     /**
      * Agent is experiencing performance issues but still operational.
@@ -91,10 +92,11 @@ public enum AgentStatus {
     DEGRADED("degraded", "Agent is experiencing performance issues", true, false),
 
     /**
-     * Agent is at or near capacity limits.
-     * The agent should not receive new work until load decreases.
+     * Legacy alias retained for persisted-state and wire compatibility.
+     * New agents should report {@link #DEGRADED}.
      */
-    OVERLOADED("overloaded", "Agent is overloaded and cannot accept new work", true, false),
+    @Deprecated(forRemoval = false)
+    OVERLOADED("overloaded", "Legacy alias for a degraded agent", true, false),
 
     /**
      * Agent is in planned maintenance mode.
@@ -103,10 +105,11 @@ public enum AgentStatus {
     MAINTENANCE("maintenance", "Agent is in maintenance mode", false, false),
 
     /**
-     * Agent is being gracefully shut down.
-     * The agent is draining existing jobs and will not accept new work.
+     * Legacy alias retained for persisted-state and wire compatibility.
+     * New agents should report {@link #MAINTENANCE} before shutdown.
      */
-    DRAINING("draining", "Agent is draining jobs before shutdown", false, false),
+    @Deprecated(forRemoval = false)
+    DRAINING("draining", "Legacy alias for an agent leaving service", false, false),
 
     /**
      * Agent has failed to respond to heartbeat requests.

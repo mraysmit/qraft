@@ -1,11 +1,16 @@
 package dev.mars.qraft.controller.http;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import dev.mars.qraft.agent.AgentInfo;
+import dev.mars.qraft.agent.AgentStatus;
 import dev.mars.qraft.catalog.ServiceInstance;
 import dev.mars.qraft.controller.raft.RaftNode;
+import dev.mars.qraft.controller.state.AgentCommand;
 import dev.mars.qraft.controller.state.CatalogCommand;
+import dev.mars.qraft.controller.state.RaftCommand;
 import dev.mars.qraft.controller.state.RaftCommandResult;
 import dev.mars.qraft.controller.state.QraftStateStore;
 
@@ -13,6 +18,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +27,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Lightweight JDK HTTP API for health and controller discovery endpoints. */
@@ -28,7 +35,9 @@ public final class HttpApiServer implements AutoCloseable {
     private final int port;
     private final HttpServer server;
     private final ExecutorService executor;
-    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+    private final ObjectMapper objectMapper = new ObjectMapper()
+            .findAndRegisterModules()
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     private final RaftNode raftNode;
     private final QraftStateStore stateStore;
     private final AtomicBoolean draining = new AtomicBoolean();
@@ -52,6 +61,9 @@ public final class HttpApiServer implements AutoCloseable {
         registerHealth("/health", "passing");
         register("/status", 200, "{\"status\":\"running\"}");
         register("/api/v1/info", 200, "{\"version\":\"1.0.0\",\"httpPort\":" + port + "}");
+        server.createContext("/api/v1/agents/register", this::registerAgent);
+        server.createContext("/api/v1/agents/heartbeat", this::heartbeatAgent);
+        server.createContext("/api/v1/agents", this::agents);
         server.createContext("/v1/agent/service/register", this::registerService);
         server.createContext("/v1/agent/service/deregister", this::deregisterService);
         server.createContext("/v1/catalog/services", this::listServices);
@@ -131,6 +143,76 @@ public final class HttpApiServer implements AutoCloseable {
         }
     }
 
+    private void registerAgent(HttpExchange exchange) throws IOException {
+        if (!prepareStateRequest(exchange, "POST")) return;
+        try {
+            AgentInfo agent = objectMapper.readValue(exchange.getRequestBody(), AgentInfo.class);
+            if (agent.getAgentId() == null || agent.getAgentId().isBlank()) {
+                throw new IllegalArgumentException("agentId is required");
+            }
+            submit(AgentCommand.register(agent));
+            respondJson(exchange, 201, Map.of("registered", true, "agentId", agent.getAgentId()));
+        } catch (IllegalArgumentException | com.fasterxml.jackson.core.JacksonException e) {
+            respondJson(exchange, 400, Map.of("error", "invalid_agent", "message", safeMessage(e)));
+        } catch (CompletionException e) {
+            respondUnavailable(exchange, e);
+        }
+    }
+
+    private void heartbeatAgent(HttpExchange exchange) throws IOException {
+        if (!prepareStateRequest(exchange, "POST")) return;
+        try {
+            AgentHeartbeat heartbeat = objectMapper.readValue(exchange.getRequestBody(), AgentHeartbeat.class);
+            if (heartbeat.agentId() == null || heartbeat.agentId().isBlank()) {
+                throw new IllegalArgumentException("agentId is required");
+            }
+            AgentStatus status = heartbeat.status() == null || heartbeat.status().isBlank()
+                    ? null : heartbeatStatus(heartbeat.status());
+            Instant timestamp = heartbeat.timestamp() == null ? Instant.now() : heartbeat.timestamp();
+            RaftCommandResult<?> result = submit(AgentCommand.heartbeat(
+                    heartbeat.agentId(), status, timestamp, heartbeat.sequenceNumber(), heartbeat.registrationId()));
+            if (result instanceof RaftCommandResult.NotFound<?>) {
+                respondJson(exchange, 404, Map.of("error", "agent_not_found", "agentId", heartbeat.agentId()));
+                return;
+            }
+            if (result instanceof RaftCommandResult.CasMismatch<?>) {
+                respondJson(exchange, 409, Map.of("error", "stale_heartbeat", "agentId", heartbeat.agentId(),
+                        "sequenceNumber", heartbeat.sequenceNumber()));
+                return;
+            }
+            respondNoContent(exchange);
+        } catch (IllegalArgumentException | com.fasterxml.jackson.core.JacksonException e) {
+            respondJson(exchange, 400, Map.of("error", "invalid_heartbeat", "message", safeMessage(e)));
+        } catch (CompletionException e) {
+            respondUnavailable(exchange, e);
+        }
+    }
+
+    private void agents(HttpExchange exchange) throws IOException {
+        String path = exchange.getRequestURI().getPath();
+        if ("/api/v1/agents".equals(path)) {
+            if (!prepareStateRequest(exchange, "GET")) return;
+            respondJson(exchange, 200, stateStore.getAgents().values());
+            return;
+        }
+        if (!prepareStateRequest(exchange, "DELETE")) return;
+        String agentId = pathParameter(exchange, "/api/v1/agents/");
+        if (agentId == null) {
+            respondJson(exchange, 400, Map.of("error", "agent_id_required"));
+            return;
+        }
+        try {
+            RaftCommandResult<?> result = submit(AgentCommand.deregister(agentId));
+            if (result instanceof RaftCommandResult.NotFound<?>) {
+                respondJson(exchange, 404, Map.of("error", "agent_not_found", "agentId", agentId));
+                return;
+            }
+            respondNoContent(exchange);
+        } catch (CompletionException e) {
+            respondUnavailable(exchange, e);
+        }
+    }
+
     private void deregisterService(HttpExchange exchange) throws IOException {
         if (!prepareCatalogRequest(exchange, "PUT")) return;
         String serviceId = pathParameter(exchange, "/v1/agent/service/deregister/");
@@ -170,6 +252,10 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     private boolean prepareCatalogRequest(HttpExchange exchange, String expectedMethod) throws IOException {
+        return prepareStateRequest(exchange, expectedMethod);
+    }
+
+    private boolean prepareStateRequest(HttpExchange exchange, String expectedMethod) throws IOException {
         if (draining.get()) {
             respond(exchange, 503, "{\"status\":\"draining\"}");
             return false;
@@ -185,8 +271,26 @@ public final class HttpApiServer implements AutoCloseable {
         return true;
     }
 
-    private RaftCommandResult<?> submit(CatalogCommand command) {
-        return raftNode.submitCommand(command).toCompletionStage().toCompletableFuture().join();
+    private RaftCommandResult<?> submit(RaftCommand command) {
+        return raftNode.submitCommand(command).toCompletionStage().toCompletableFuture()
+                .orTimeout(5, TimeUnit.SECONDS)
+                .join();
+    }
+
+    private static AgentStatus heartbeatStatus(String value) {
+        if ("passing".equalsIgnoreCase(value)) return AgentStatus.HEALTHY;
+        AgentStatus status = AgentStatus.fromValue(value);
+        return switch (status) {
+            case ACTIVE, IDLE -> AgentStatus.HEALTHY;
+            case OVERLOADED -> AgentStatus.DEGRADED;
+            case DRAINING -> AgentStatus.MAINTENANCE;
+            default -> status;
+        };
+    }
+
+    private static void respondNoContent(HttpExchange exchange) throws IOException {
+        exchange.sendResponseHeaders(204, -1);
+        exchange.close();
     }
 
     private void respondJson(HttpExchange exchange, int status, Object body) throws IOException {
@@ -195,7 +299,14 @@ public final class HttpApiServer implements AutoCloseable {
 
     private void respondUnavailable(HttpExchange exchange, CompletionException error) throws IOException {
         Throwable cause = error.getCause() == null ? error : error.getCause();
-        respondJson(exchange, 503, Map.of("error", "leader_unavailable", "message", safeMessage(cause)));
+        String leaderId = raftNode == null ? null : raftNode.getLeaderId();
+        if (leaderId == null || leaderId.isBlank()) {
+            respondJson(exchange, 503, Map.of("error", "leader_unavailable", "message", safeMessage(cause)));
+            return;
+        }
+        exchange.getResponseHeaders().set("X-Qraft-Leader-Id", leaderId);
+        respondJson(exchange, 503, Map.of("error", "leader_unavailable", "message", safeMessage(cause),
+                "leaderId", leaderId));
     }
 
     private static String pathParameter(HttpExchange exchange, String prefix) {
@@ -207,5 +318,9 @@ public final class HttpApiServer implements AutoCloseable {
 
     private static String safeMessage(Throwable error) {
         return Objects.toString(error.getMessage(), error.getClass().getSimpleName());
+    }
+
+    private record AgentHeartbeat(String agentId, Instant timestamp, long sequenceNumber, String status,
+                                  String registrationId) {
     }
 }

@@ -40,14 +40,14 @@ public final class AppConfig {
 
     private static final Logger logger = LoggerFactory.getLogger(AppConfig.class);
     private static final String CONFIG_FILE = "qraft-controller.properties";
-    private static final AppConfig INSTANCE = new AppConfig();
+    private static final AppConfig INSTANCE = new AppConfig(AppConfig.class.getClassLoader());
 
     private final Properties properties;
     private volatile String resolvedNodeId;
 
-    private AppConfig() {
+    AppConfig(ClassLoader resourceLoader) {
         this.properties = new Properties();
-        loadProperties();
+        loadProperties(resourceLoader);
         logConfiguration();
     }
 
@@ -155,7 +155,8 @@ public final class AppConfig {
      */
     public String getRaftStoragePath() {
         String defaultPath = "./data/raft/" + getNodeId();
-        return getString("qraft.raft.storage.path", defaultPath);
+        String configuredPath = getString("qraft.raft.storage.path", defaultPath);
+        return configuredPath.isBlank() ? defaultPath : configuredPath;
     }
 
     /**
@@ -409,16 +410,20 @@ public final class AppConfig {
         logger.info("Controller configuration validated successfully");
     }
 
-    private void loadProperties() {
-        try (InputStream input = getClass().getClassLoader().getResourceAsStream(CONFIG_FILE)) {
-            if (input != null) {
-                properties.load(input);
-                logger.info("Loaded configuration from {}", CONFIG_FILE);
-            } else {
-                logger.warn("Configuration file {} not found, using defaults", CONFIG_FILE);
+    private void loadProperties(ClassLoader resourceLoader) {
+        if (resourceLoader == null) {
+            throw new IllegalArgumentException("resourceLoader is required");
+        }
+        try (InputStream input = resourceLoader.getResourceAsStream(CONFIG_FILE)) {
+            if (input == null) {
+                throw new IllegalStateException(
+                        "Required configuration resource " + CONFIG_FILE + " was not found");
             }
-        } catch (IOException e) {
-            logger.error("Error loading configuration file", e);
+            properties.load(input);
+            logger.info("Loaded configuration from {}", CONFIG_FILE);
+        } catch (IOException | IllegalArgumentException e) {
+            throw new IllegalStateException(
+                    "Could not read required configuration resource " + CONFIG_FILE, e);
         }
     }
 

@@ -1,23 +1,22 @@
 # Qraft
 
-Qraft is a Java-based distributed control plane built on Raft consensus.
+Qraft is a Java 25 service-discovery and distributed-coordination platform built on Raft consensus.
 
-It is designed for systems that need strongly ordered commands, replicated state, agent coordination, workflow execution, and tenant isolation across a cluster.
+It is designed for systems that need strongly ordered commands, replicated state, service discovery, health reporting, agent coordination, and tenant isolation across a cluster.
 
 ## Core Model
 
 - Controllers accept commands and replicate them through the Raft log
 - Commands are applied deterministically to maintain consistent cluster state
-- Agents register with the control plane, report health, and execute assigned work
-- Tenants provide logical isolation for policies, workflows, and state
-- Workflows coordinate multi-step operations on top of the replicated state model
+- Agents register with the control plane and report health
+- Tenants and namespaces provide logical isolation for policies and state
 
 ## Good Fit
 
 Qraft is a good fit for:
 
-- Distributed job orchestration
-- Multi-tenant workflow control planes
+- Service discovery and health monitoring
+- Distributed key/value state, sessions, and locks
 - Configuration and policy management
 - Coordination services that need durable ordered state changes
 
@@ -27,18 +26,19 @@ Qraft is a good fit for:
 
 ## Modules
 
-- `qraft-raft-engine`: core Raft consensus implementation
-- `qraft-distributed-state`: distributed state primitives built on Raft
-- `qraft-core` and `qraft-integration-examples`: optional profile modules for integration scenarios
+- `qraft-raft-engine`: implementation-neutral Raft contracts and primitives
+- `qraft-distributed-state`: deterministic replicated-state commands and projections
+- `qraft-core`: shared service-discovery, health, node, and agent domain types
+- `qraft-agent`: client-mode registration, heartbeat, and local health behavior
+- `qraft-tenant`: namespace and tenant management
+- `qraft-controller`: Raft coordination, replicated state, and control-plane APIs
+- `qraft-runtime`: the executable composition root for `server` and `client` modes
 
 ## Quick Start
 
 ```bash
-# Build core modules
+# Build and test the complete reactor
 mvn clean test
-
-# Build integration examples too
-mvn -P integration-examples clean test
 ```
 
 ## Local Cluster and Observability

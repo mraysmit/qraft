@@ -7,11 +7,10 @@ services:
   controller1:
     build:
       context: ../../../..
-      dockerfile: qraft-controller/Dockerfile
-      additional_contexts:
-        m2cache: ${M2_REPO:-~/.m2/repository}/dev/mars
+      dockerfile: qraft-runtime/Dockerfile
     hostname: controller1
     environment:
+      - QRAFT_MODE=server
       - QRAFT_NODE_ID=controller1
       - QRAFT_RAFT_HOST=0.0.0.0
       - QRAFT_RAFT_PORT=9080
@@ -34,11 +33,10 @@ services:
   controller2:
     build:
       context: ../../../..
-      dockerfile: qraft-controller/Dockerfile
-      additional_contexts:
-        m2cache: ${M2_REPO:-~/.m2/repository}/dev/mars
+      dockerfile: qraft-runtime/Dockerfile
     hostname: controller2
     environment:
+      - QRAFT_MODE=server
       - QRAFT_NODE_ID=controller2
       - QRAFT_RAFT_HOST=0.0.0.0
       - QRAFT_RAFT_PORT=9080
@@ -61,11 +59,10 @@ services:
   controller3:
     build:
       context: ../../../..
-      dockerfile: qraft-controller/Dockerfile
-      additional_contexts:
-        m2cache: ${M2_REPO:-~/.m2/repository}/dev/mars
+      dockerfile: qraft-runtime/Dockerfile
     hostname: controller3
     environment:
+      - QRAFT_MODE=server
       - QRAFT_NODE_ID=controller3
       - QRAFT_RAFT_HOST=0.0.0.0
       - QRAFT_RAFT_PORT=9080
@@ -88,11 +85,10 @@ services:
   controller4:
     build:
       context: ../../../..
-      dockerfile: qraft-controller/Dockerfile
-      additional_contexts:
-        m2cache: ${M2_REPO:-~/.m2/repository}/dev/mars
+      dockerfile: qraft-runtime/Dockerfile
     hostname: controller4
     environment:
+      - QRAFT_MODE=server
       - QRAFT_NODE_ID=controller4
       - QRAFT_RAFT_HOST=0.0.0.0
       - QRAFT_RAFT_PORT=9080
@@ -115,11 +111,10 @@ services:
   controller5:
     build:
       context: ../../../..
-      dockerfile: qraft-controller/Dockerfile
-      additional_contexts:
-        m2cache: ${M2_REPO:-~/.m2/repository}/dev/mars
+      dockerfile: qraft-runtime/Dockerfile
     hostname: controller5
     environment:
+      - QRAFT_MODE=server
       - QRAFT_NODE_ID=controller5
       - QRAFT_RAFT_HOST=0.0.0.0
       - QRAFT_RAFT_PORT=9080

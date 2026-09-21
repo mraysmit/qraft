@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class QraftStateStore implements RaftLogApplicator {
     private static final String DEFAULT_VERSION = "3.0";
     private final Map<String, AgentInfo> agents = new ConcurrentHashMap<>();
+    private final Map<String, Long> heartbeatSequences = new ConcurrentHashMap<>();
     private final Map<String, String> metadata = new ConcurrentHashMap<>();
     private final ServiceCatalog serviceCatalog = new ServiceCatalog();
     private final AtomicLong lastAppliedIndex = new AtomicLong();
@@ -66,11 +67,16 @@ public final class QraftStateStore implements RaftLogApplicator {
     private RaftCommandResult<?> applyAgentCommand(AgentCommand command) {
         return switch (command) {
             case AgentCommand.Register register -> {
-                agents.put(register.agentId(), register.agentInfo());
-                yield new RaftCommandResult.Success<>(register.agentInfo());
+                AgentInfo registered = AgentInfo.copyOf(register.agentInfo());
+                registered.setRegistrationTime(register.timestamp());
+                registered.setLastHeartbeat(null);
+                agents.put(register.agentId(), registered);
+                heartbeatSequences.remove(register.agentId());
+                yield new RaftCommandResult.Success<>(registered);
             }
             case AgentCommand.Deregister deregister -> {
                 AgentInfo removed = agents.remove(deregister.agentId());
+                heartbeatSequences.remove(deregister.agentId());
                 yield removed == null ? new RaftCommandResult.NotFound<>(deregister.agentId(), "Agent")
                         : new RaftCommandResult.Success<>(removed);
             }
@@ -104,6 +110,15 @@ public final class QraftStateStore implements RaftLogApplicator {
                 if (current == null) {
                     yield new RaftCommandResult.NotFound<>(heartbeat.agentId(), "Agent");
                 }
+                String currentRegistrationId = current.getMetadata().get(AgentInfo.REGISTRATION_ID_METADATA_KEY);
+                if (heartbeat.registrationId() != null
+                        && !heartbeat.registrationId().equals(currentRegistrationId)) {
+                    yield new RaftCommandResult.CasMismatch<>(current);
+                }
+                long previousSequence = heartbeatSequences.getOrDefault(heartbeat.agentId(), 0L);
+                if (heartbeat.sequenceNumber() > 0 && heartbeat.sequenceNumber() <= previousSequence) {
+                    yield new RaftCommandResult.CasMismatch<>(current);
+                }
                 AgentInfo changed = AgentInfo.copyOf(current);
                 changed.setLastHeartbeat(heartbeat.timestamp());
                 if (heartbeat.status() != null) {
@@ -112,6 +127,9 @@ public final class QraftStateStore implements RaftLogApplicator {
                     changed.setStatus(AgentStatus.HEALTHY);
                 }
                 agents.put(heartbeat.agentId(), changed);
+                if (heartbeat.sequenceNumber() > 0) {
+                    heartbeatSequences.put(heartbeat.agentId(), heartbeat.sequenceNumber());
+                }
                 yield new RaftCommandResult.Success<>(changed);
             }
         };
@@ -134,8 +152,8 @@ public final class QraftStateStore implements RaftLogApplicator {
     @Override
     public byte[] takeSnapshot() {
         try {
-            return objectMapper.writeValueAsBytes(new Snapshot(Map.copyOf(agents), Map.copyOf(metadata),
-                    serviceCatalog.instances(), lastAppliedIndex.get()));
+            return objectMapper.writeValueAsBytes(new Snapshot(Map.copyOf(agents), Map.copyOf(heartbeatSequences),
+                    Map.copyOf(metadata), serviceCatalog.instances(), lastAppliedIndex.get()));
         } catch (IOException e) {
             throw new IllegalStateException("Failed to serialize controller snapshot", e);
         }
@@ -147,6 +165,10 @@ public final class QraftStateStore implements RaftLogApplicator {
             Snapshot snapshot = objectMapper.readValue(snapshotBytes, Snapshot.class);
             agents.clear();
             agents.putAll(snapshot.agents());
+            heartbeatSequences.clear();
+            if (snapshot.heartbeatSequences() != null) {
+                heartbeatSequences.putAll(snapshot.heartbeatSequences());
+            }
             metadata.clear();
             metadata.putAll(snapshot.metadata());
             serviceCatalog.replaceAll(snapshot.services() == null ? java.util.List.of() : snapshot.services());
@@ -169,6 +191,7 @@ public final class QraftStateStore implements RaftLogApplicator {
     @Override
     public void reset() {
         agents.clear();
+        heartbeatSequences.clear();
         metadata.clear();
         metadata.put("version", DEFAULT_VERSION);
         serviceCatalog.clear();
@@ -199,7 +222,8 @@ public final class QraftStateStore implements RaftLogApplicator {
         return serviceCatalog;
     }
 
-    private record Snapshot(Map<String, AgentInfo> agents, Map<String, String> metadata,
+    private record Snapshot(Map<String, AgentInfo> agents, Map<String, Long> heartbeatSequences,
+                            Map<String, String> metadata,
                             java.util.List<ServiceInstance> services, long lastAppliedIndex) {
     }
 }

@@ -45,22 +45,8 @@ $json = @{
     agentId = "demo-agent"
     timestamp = $timestamp
     sequenceNumber = 999
-    status = "active"
-    currentJobs = 1
-    availableCapacity = 5
-    transferMetrics = @{
-        active = 1
-        completed = 100
-        failed = 0
-        successRate = 100.0
-    }
-    healthStatus = @{
-        diskSpace = "healthy"
-        networkConnectivity = "healthy"
-        systemLoad = "normal"
-        overallHealth = "healthy"
-    }
-} | ConvertTo-Json -Depth 3
+    status = "healthy"
+} | ConvertTo-Json
 
 Write-Host "   Sending heartbeat to generate logs..." -ForegroundColor White
 try {

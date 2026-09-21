@@ -98,7 +98,7 @@ public class ShutdownCoordinator {
     /**
      * Creates a shutdown coordinator with specified timeouts.
      *
-     * @param vertx the Vert.x instance
+     * @param runtime the Java runtime instance
      * @param drainTimeoutMs maximum time to wait for drain (stop accepting new work)
      * @param shutdownTimeoutMs maximum time to wait for active operations to complete
      */
@@ -111,7 +111,7 @@ public class ShutdownCoordinator {
     /**
      * Creates a shutdown coordinator with default timeouts (5s drain, 30s shutdown).
      *
-     * @param vertx the Vert.x instance
+     * @param runtime the Java runtime instance
      */
     public ShutdownCoordinator(JavaRuntime runtime) {
         this(runtime, 5000, 30000);

@@ -65,7 +65,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @Timeout(value = 90, unit = TimeUnit.SECONDS)
 class GrpcRaftServerTest {
 
-    private JavaRuntime vertx;
+    private JavaRuntime runtime;
     private RaftNode raftNode;
     private GrpcRaftServer grpcServer;
     private ManagedChannel channel;
@@ -75,14 +75,14 @@ class GrpcRaftServerTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        vertx = JavaRuntime.create();
+        runtime = JavaRuntime.create();
         serverPort = findAvailablePort();
         
         // Create a minimal RaftNode for testing
         Set<String> clusterNodes = Set.of("node1");
         InMemoryTransportSimulator transport = new InMemoryTransportSimulator("node1");
         QraftStateStore stateMachine = new QraftStateStore();
-        raftNode = RaftNode.builder().runtime(vertx)
+        raftNode = RaftNode.builder().runtime(runtime)
             .nodeId("node1")
             .clusterNodes(clusterNodes)
             .transport(transport)
@@ -110,8 +110,8 @@ class GrpcRaftServerTest {
         if (raftNode != null) {
             raftNode.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
-        if (vertx != null) {
-            vertx.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        if (runtime != null) {
+            runtime.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
     }
 
@@ -122,7 +122,7 @@ class GrpcRaftServerTest {
     }
 
     private void startServerAndConnect() throws Exception {
-        grpcServer = new GrpcRaftServer(vertx, serverPort, raftNode);
+        grpcServer = new GrpcRaftServer(runtime, serverPort, raftNode);
         grpcServer.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
         
         channel = ManagedChannelBuilder.forAddress("localhost", serverPort)
@@ -138,7 +138,7 @@ class GrpcRaftServerTest {
     @Test
     @DisplayName("Server should start successfully on available port")
     void testServerStartSuccess() throws Exception {
-        grpcServer = new GrpcRaftServer(vertx, serverPort, raftNode);
+        grpcServer = new GrpcRaftServer(runtime, serverPort, raftNode);
         
         CompletableFuture<Void> startFuture = grpcServer.start()
                 .toCompletionStage().toCompletableFuture();
@@ -150,11 +150,11 @@ class GrpcRaftServerTest {
     @DisplayName("Server should fail to start on occupied port")
     void testServerStartFailsOnOccupiedPort() throws Exception {
         // Start first server
-        grpcServer = new GrpcRaftServer(vertx, serverPort, raftNode);
+        grpcServer = new GrpcRaftServer(runtime, serverPort, raftNode);
         grpcServer.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
         
         // Try to start second server on same port
-        GrpcRaftServer secondServer = new GrpcRaftServer(vertx, serverPort, raftNode);
+        GrpcRaftServer secondServer = new GrpcRaftServer(runtime, serverPort, raftNode);
         
         CompletableFuture<Void> startFuture = secondServer.start()
                 .toCompletionStage().toCompletableFuture();
@@ -190,7 +190,7 @@ class GrpcRaftServerTest {
     @Test
     @DisplayName("Stop on null server should complete successfully")
     void testStopOnNullServer() throws Exception {
-        grpcServer = new GrpcRaftServer(vertx, serverPort, raftNode);
+        grpcServer = new GrpcRaftServer(runtime, serverPort, raftNode);
         // Don't start, just stop
         
         CompletableFuture<Void> stopFuture = grpcServer.stop()
@@ -204,7 +204,7 @@ class GrpcRaftServerTest {
     void testMultipleStartStopCycles() throws Exception {
         for (int i = 0; i < 3; i++) {
             int port = findAvailablePort();
-            GrpcRaftServer server = new GrpcRaftServer(vertx, port, raftNode);
+            GrpcRaftServer server = new GrpcRaftServer(runtime, port, raftNode);
             
             server.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
             
@@ -918,7 +918,7 @@ class GrpcRaftServerTest {
     void testRapidStartStopCycles() throws Exception {
         for (int i = 0; i < 5; i++) {
             int port = findAvailablePort();
-            GrpcRaftServer server = new GrpcRaftServer(vertx, port, raftNode);
+            GrpcRaftServer server = new GrpcRaftServer(runtime, port, raftNode);
             
             server.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
             server.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
@@ -943,8 +943,8 @@ class GrpcRaftServerTest {
         QraftStateStore sm1 = new QraftStateStore();
         QraftStateStore sm2 = new QraftStateStore();
         
-        RaftNode node1 = RaftNode.builder().runtime(vertx).nodeId("nodeA").clusterNodes(cluster1).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).electionTimeout(5000).heartbeatInterval(1000).commandCodec(new ProtobufRaftCommandCodec()).build();
-        RaftNode node2 = RaftNode.builder().runtime(vertx).nodeId("nodeB").clusterNodes(cluster2).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).electionTimeout(5000).heartbeatInterval(1000).commandCodec(new ProtobufRaftCommandCodec()).build();
+        RaftNode node1 = RaftNode.builder().runtime(runtime).nodeId("nodeA").clusterNodes(cluster1).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).electionTimeout(5000).heartbeatInterval(1000).commandCodec(new ProtobufRaftCommandCodec()).build();
+        RaftNode node2 = RaftNode.builder().runtime(runtime).nodeId("nodeB").clusterNodes(cluster2).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).electionTimeout(5000).heartbeatInterval(1000).commandCodec(new ProtobufRaftCommandCodec()).build();
         
         node1.start();
         node2.start();
@@ -952,8 +952,8 @@ class GrpcRaftServerTest {
             .pollInterval(Duration.ofMillis(10))
             .until(() -> node1.isRunning() && node2.isRunning());
         
-        GrpcRaftServer server1 = new GrpcRaftServer(vertx, port1, node1);
-        GrpcRaftServer server2 = new GrpcRaftServer(vertx, port2, node2);
+        GrpcRaftServer server1 = new GrpcRaftServer(runtime, port1, node1);
+        GrpcRaftServer server2 = new GrpcRaftServer(runtime, port2, node2);
         
         server1.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
         server2.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);

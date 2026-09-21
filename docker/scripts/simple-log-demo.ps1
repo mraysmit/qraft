@@ -33,9 +33,7 @@ $json = @{
     agentId = "demo-agent"
     timestamp = $timestamp
     sequenceNumber = 999
-    status = "active"
-    currentJobs = 1
-    availableCapacity = 5
+    status = "healthy"
 } | ConvertTo-Json
 
 try {

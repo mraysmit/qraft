@@ -64,6 +64,16 @@ class ControllerStateStoreTest {
                 "agent-1", AgentStatus.DEGRADED, now.plusSeconds(2))));
         assertEquals(AgentStatus.DEGRADED, store.findAgent("agent-1").orElseThrow().getStatus());
 
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new AgentCommand.Heartbeat(
+                "agent-1", AgentStatus.HEALTHY, now.plusSeconds(3), 2)));
+        byte[] sequencedSnapshot = store.takeSnapshot();
+        assertInstanceOf(RaftCommandResult.CasMismatch.class, store.apply(new AgentCommand.Heartbeat(
+                "agent-1", AgentStatus.DEGRADED, now.plusSeconds(2), 1)));
+        store.restoreSnapshot(sequencedSnapshot);
+        assertInstanceOf(RaftCommandResult.CasMismatch.class, store.apply(new AgentCommand.Heartbeat(
+                "agent-1", AgentStatus.DEGRADED, now.plusSeconds(2), 1)));
+        assertEquals(AgentStatus.HEALTHY, store.findAgent("agent-1").orElseThrow().getStatus());
+
         assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(AgentCommand.heartbeat("missing")));
         assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(AgentCommand.updateCapabilities("missing", capabilities)));
         assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(AgentCommand.updateStatus(
@@ -105,6 +115,31 @@ class ControllerStateStoreTest {
         assertEquals(List.of(instance), store.getServiceCatalog().instances("payments"));
         store.reset();
         assertTrue(store.getServiceCatalog().instances().isEmpty());
+    }
+
+    @Test
+    void lateHeartbeatFromPreviousRegistrationCannotPoisonNewSequenceEpoch() {
+        QraftStateStore store = new QraftStateStore();
+        AgentInfo agent = new AgentInfo("agent-1", "host", "127.0.0.1", 9000);
+        Instant firstRegistration = Instant.parse("2026-09-21T10:00:00Z");
+        Instant secondRegistration = firstRegistration.plusSeconds(10);
+
+        agent.addMetadata(AgentInfo.REGISTRATION_ID_METADATA_KEY, "first");
+        assertInstanceOf(RaftCommandResult.Success.class,
+                store.apply(new AgentCommand.Register("agent-1", agent, firstRegistration)));
+        agent.addMetadata(AgentInfo.REGISTRATION_ID_METADATA_KEY, "second");
+        assertInstanceOf(RaftCommandResult.Success.class,
+                store.apply(new AgentCommand.Register("agent-1", agent, secondRegistration)));
+
+        assertInstanceOf(RaftCommandResult.CasMismatch.class,
+                store.apply(new AgentCommand.Heartbeat("agent-1", AgentStatus.DEGRADED,
+                        firstRegistration.plusSeconds(5), 50, "first")));
+        assertInstanceOf(RaftCommandResult.Success.class,
+                store.apply(new AgentCommand.Heartbeat("agent-1", AgentStatus.HEALTHY,
+                        secondRegistration.plusSeconds(1), 1, "second")));
+        assertEquals(AgentStatus.HEALTHY, store.findAgent("agent-1").orElseThrow().getStatus());
+        assertEquals(secondRegistration.plusSeconds(1),
+                store.findAgent("agent-1").orElseThrow().getLastHeartbeat());
     }
 
     @Test

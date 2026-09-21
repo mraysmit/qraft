@@ -12,22 +12,8 @@ $json = @{
     agentId = $AgentId
     timestamp = $timestamp
     sequenceNumber = $SequenceNumber
-    status = "active"
-    currentJobs = 0
-    availableCapacity = 5
-    transferMetrics = @{
-        active = 0
-        completed = 50
-        failed = 1
-        successRate = 98.0
-    }
-    healthStatus = @{
-        diskSpace = "healthy"
-        networkConnectivity = "healthy"
-        systemLoad = "normal"
-        overallHealth = "healthy"
-    }
-} | ConvertTo-Json -Depth 3
+    status = "healthy"
+} | ConvertTo-Json
 
 Write-Host "Sending heartbeat with timestamp: $timestamp, sequence: $SequenceNumber"
 

@@ -34,6 +34,8 @@ import java.util.Objects;
  */
 public class AgentInfo {
 
+    public static final String REGISTRATION_ID_METADATA_KEY = "qraft.registrationId";
+
     @JsonProperty("agentId")
     private String agentId;
 

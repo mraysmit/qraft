@@ -2,32 +2,26 @@
 # Each controller is a self-contained node with embedded HTTP API
 # This provides natural scaling and fault tolerance
 #
-# Maven Repository for BuildKit:
-#   Set M2_REPO in .env file or environment before running docker-compose.
-#   Windows:   $env:M2_REPO = "$env:USERPROFILE/.m2/repository"
-#   Linux/Mac: export M2_REPO="$HOME/.m2/repository"
+# The executable runtime JAR must be built on the host before Compose runs:
+#   mvn package -pl qraft-runtime -am -DskipTests
 
 services:
   # Controller Node 1
   controller1:
     build:
       context: ../..
-      dockerfile: qraft-controller/Dockerfile
-      args:
-        BUILDER_IMAGE: maven:3.9.11-eclipse-temurin-25
-        RUNTIME_IMAGE: eclipse-temurin:25-jre-alpine
-      additional_contexts:
-        m2cache: ${M2_REPO}/dev/mars
+      dockerfile: qraft-runtime/Dockerfile
     container_name: qraft-controller1
     hostname: controller1
     environment:
+      - QRAFT_MODE=server
       - QRAFT_NODE_ID=controller1
       - QRAFT_RAFT_HOST=0.0.0.0
       - QRAFT_RAFT_PORT=9080
       - QRAFT_HTTP_PORT=8080
       - QRAFT_CLUSTER_NODES=controller1=controller1:9080,controller2=controller2:9080,controller3=controller3:9080
-      - ELECTION_TIMEOUT_MS=3000
-      - HEARTBEAT_INTERVAL_MS=500
+      - QRAFT_RAFT_ELECTION_TIMEOUT_MS=3000
+      - QRAFT_RAFT_HEARTBEAT_INTERVAL_MS=500
       - JAVA_OPTS=-Xmx512m -Xms256m
     ports:
       - "8081:8080"  # HTTP API
@@ -57,22 +51,18 @@ services:
   controller2:
     build:
       context: ../..
-      dockerfile: qraft-controller/Dockerfile
-      args:
-        BUILDER_IMAGE: maven:3.9.11-eclipse-temurin-25
-        RUNTIME_IMAGE: eclipse-temurin:25-jre-alpine
-      additional_contexts:
-        m2cache: ${M2_REPO}/dev/mars
+      dockerfile: qraft-runtime/Dockerfile
     container_name: qraft-controller2
     hostname: controller2
     environment:
+      - QRAFT_MODE=server
       - QRAFT_NODE_ID=controller2
       - QRAFT_RAFT_HOST=0.0.0.0
       - QRAFT_RAFT_PORT=9080
       - QRAFT_HTTP_PORT=8080
       - QRAFT_CLUSTER_NODES=controller1=controller1:9080,controller2=controller2:9080,controller3=controller3:9080
-      - ELECTION_TIMEOUT_MS=3000
-      - HEARTBEAT_INTERVAL_MS=500
+      - QRAFT_RAFT_ELECTION_TIMEOUT_MS=3000
+      - QRAFT_RAFT_HEARTBEAT_INTERVAL_MS=500
       - JAVA_OPTS=-Xmx512m -Xms256m
     ports:
       - "8082:8080"  # HTTP API
@@ -104,22 +94,18 @@ services:
   controller3:
     build:
       context: ../..
-      dockerfile: qraft-controller/Dockerfile
-      args:
-        BUILDER_IMAGE: maven:3.9.11-eclipse-temurin-25
-        RUNTIME_IMAGE: eclipse-temurin:25-jre-alpine
-      additional_contexts:
-        m2cache: ${M2_REPO}/dev/mars
+      dockerfile: qraft-runtime/Dockerfile
     container_name: qraft-controller3
     hostname: controller3
     environment:
+      - QRAFT_MODE=server
       - QRAFT_NODE_ID=controller3
       - QRAFT_RAFT_HOST=0.0.0.0
       - QRAFT_RAFT_PORT=9080
       - QRAFT_HTTP_PORT=8080
       - QRAFT_CLUSTER_NODES=controller1=controller1:9080,controller2=controller2:9080,controller3=controller3:9080
-      - ELECTION_TIMEOUT_MS=3000
-      - HEARTBEAT_INTERVAL_MS=500
+      - QRAFT_RAFT_ELECTION_TIMEOUT_MS=3000
+      - QRAFT_RAFT_HEARTBEAT_INTERVAL_MS=500
       - JAVA_OPTS=-Xmx512m -Xms256m
     ports:
       - "8083:8080"  # HTTP API
@@ -189,10 +175,7 @@ networks:
 volumes:
   controller1-data:
     driver: local
-    driver: local
   controller2-data:
     driver: local
-    driver: local
   controller3-data:
-    driver: local
     driver: local

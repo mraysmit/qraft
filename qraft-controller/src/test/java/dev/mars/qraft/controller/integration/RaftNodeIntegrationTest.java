@@ -36,25 +36,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @ExtendWith(JavaRuntimeExtension.class)
 public class RaftNodeIntegrationTest {
 
-    private JavaRuntime vertx;
+    private JavaRuntime runtime;
 
     @BeforeAll
-    void setUp(JavaRuntime vertx) {
-        this.vertx = vertx;
+    void setUp(JavaRuntime runtime) {
+        this.runtime = runtime;
     }
 
     @Test
     void testRaftNodeStartStop(JavaTestContext testContext) {
         TestRaftTransport transport = new TestRaftTransport();
         TestRaftLogApplicator stateMachine = new TestRaftLogApplicator();
-        RaftNode node = RaftNode.builder().runtime(vertx).nodeId("node1").clusterNodes(Set.of("node1")).transport(transport).stateMachine(stateMachine).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec()).build();
+        RaftNode node = RaftNode.builder().runtime(runtime).nodeId("node1").clusterNodes(Set.of("node1")).transport(transport).stateMachine(stateMachine).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec()).build();
 
         node.start()
             .onComplete(testContext.succeeding(v -> {
                 assertTrue(node.isRunning(), "Node should be running after start()");
 
                 // Wait a bit to let timers fire (if any)
-                vertx.setTimer(500, id -> {
+                runtime.setTimer(500, id -> {
                     node.stop()
                         .onComplete(testContext.succeeding(v2 -> {
                             assertFalse(node.isRunning(), "Node should not be running after stop()");
@@ -68,7 +68,7 @@ public class RaftNodeIntegrationTest {
     void testTimerCleanup(JavaTestContext testContext) {
         TestRaftTransport transport = new TestRaftTransport();
         TestRaftLogApplicator stateMachine = new TestRaftLogApplicator();
-        RaftNode node = RaftNode.builder().runtime(vertx).nodeId("node1").clusterNodes(Set.of("node1")).transport(transport).stateMachine(stateMachine).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec()).build();
+        RaftNode node = RaftNode.builder().runtime(runtime).nodeId("node1").clusterNodes(Set.of("node1")).transport(transport).stateMachine(stateMachine).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec()).build();
 
         node.start()
             .onComplete(testContext.succeeding(v -> {
@@ -80,7 +80,7 @@ public class RaftNodeIntegrationTest {
                         assertFalse(node.isRunning());
                         
                         // Wait to ensure no late timer events cause issues (though hard to assert absence of events without spying)
-                        vertx.setTimer(200, id -> {
+                        runtime.setTimer(200, id -> {
                             testContext.completeNow();
                         });
                     }));

@@ -54,7 +54,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @Execution(ExecutionMode.SAME_THREAD)
 class GrpcRaftIntegrationTest {
 
-    private JavaRuntime vertx;
+    private JavaRuntime runtime;
     private List<TestNode> nodes = new ArrayList<>();
 
     private static class TestNode {
@@ -84,7 +84,7 @@ class GrpcRaftIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        vertx = JavaRuntime.create();
+        runtime = JavaRuntime.create();
         nodes.clear();
     }
 
@@ -99,8 +99,8 @@ class GrpcRaftIntegrationTest {
         }
         nodes.clear();
         
-        if (vertx != null) {
-            vertx.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        if (runtime != null) {
+            runtime.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
     }
 
@@ -114,14 +114,14 @@ class GrpcRaftIntegrationTest {
         int port = Integer.parseInt(clusterConfig.get(nodeId).split(":")[1]);
         Set<String> clusterNodes = clusterConfig.keySet();
         
-        GrpcRaftTransport transport = new GrpcRaftTransport(vertx, nodeId, clusterConfig);
+        GrpcRaftTransport transport = new GrpcRaftTransport(runtime, nodeId, clusterConfig);
         QraftStateStore stateMachine = new QraftStateStore();
         
         // Use shorter timeouts for faster tests
-        RaftNode raftNode = RaftNode.builder().runtime(vertx).nodeId(nodeId).clusterNodes(clusterNodes).transport(transport).stateMachine(stateMachine).mode(RaftNodeMode.volatileMode()).electionTimeout(1000).heartbeatInterval(200).commandCodec(new ProtobufRaftCommandCodec()).build();
+        RaftNode raftNode = RaftNode.builder().runtime(runtime).nodeId(nodeId).clusterNodes(clusterNodes).transport(transport).stateMachine(stateMachine).mode(RaftNodeMode.volatileMode()).electionTimeout(1000).heartbeatInterval(200).commandCodec(new ProtobufRaftCommandCodec()).build();
         transport.setRaftNode(raftNode);
         
-        GrpcRaftServer grpcServer = new GrpcRaftServer(vertx, port, raftNode);
+        GrpcRaftServer grpcServer = new GrpcRaftServer(runtime, port, raftNode);
         
         return new TestNode(nodeId, port, raftNode, grpcServer, transport);
     }

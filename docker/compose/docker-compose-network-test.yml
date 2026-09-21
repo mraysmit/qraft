@@ -5,18 +5,17 @@ services:
   controller1:
     build:
       context: ../..
-      dockerfile: qraft-controller/Dockerfile
-      additional_contexts:
-        m2cache: ${M2_REPO}/dev/mars
+      dockerfile: qraft-runtime/Dockerfile
     container_name: qraft-controller1
     hostname: controller1
     environment:
-      - NODE_ID=controller1
-      - RAFT_HOST=0.0.0.0
-      - RAFT_PORT=8080
-      - CLUSTER_NODES=controller1=172.20.0.10:8080,controller2=172.20.0.11:8080,controller3=172.20.0.12:8080,controller4=172.20.0.13:8080,controller5=172.20.0.14:8080
-      - ELECTION_TIMEOUT_MS=5000
-      - HEARTBEAT_INTERVAL_MS=1000
+      - QRAFT_MODE=server
+      - QRAFT_NODE_ID=controller1
+      - QRAFT_RAFT_HOST=0.0.0.0
+      - QRAFT_RAFT_PORT=9080
+      - QRAFT_CLUSTER_NODES=controller1=172.20.0.10:9080,controller2=172.20.0.11:9080,controller3=172.20.0.12:9080,controller4=172.20.0.13:9080,controller5=172.20.0.14:9080
+      - QRAFT_RAFT_ELECTION_TIMEOUT_MS=5000
+      - QRAFT_RAFT_HEARTBEAT_INTERVAL_MS=1000
       - JAVA_OPTS=-Xmx256m -Xms128m
     ports:
       - "8081:8080"
@@ -39,18 +38,17 @@ services:
   controller2:
     build:
       context: ../..
-      dockerfile: qraft-controller/Dockerfile
-      additional_contexts:
-        m2cache: ${M2_REPO}/dev/mars
+      dockerfile: qraft-runtime/Dockerfile
     container_name: qraft-controller2
     hostname: controller2
     environment:
-      - NODE_ID=controller2
-      - RAFT_HOST=0.0.0.0
-      - RAFT_PORT=8080
-      - CLUSTER_NODES=controller1=172.20.0.10:8080,controller2=172.20.0.11:8080,controller3=172.20.0.12:8080,controller4=172.20.0.13:8080,controller5=172.20.0.14:8080
-      - ELECTION_TIMEOUT_MS=5000
-      - HEARTBEAT_INTERVAL_MS=1000
+      - QRAFT_MODE=server
+      - QRAFT_NODE_ID=controller2
+      - QRAFT_RAFT_HOST=0.0.0.0
+      - QRAFT_RAFT_PORT=9080
+      - QRAFT_CLUSTER_NODES=controller1=172.20.0.10:9080,controller2=172.20.0.11:9080,controller3=172.20.0.12:9080,controller4=172.20.0.13:9080,controller5=172.20.0.14:9080
+      - QRAFT_RAFT_ELECTION_TIMEOUT_MS=5000
+      - QRAFT_RAFT_HEARTBEAT_INTERVAL_MS=1000
       - JAVA_OPTS=-Xmx256m -Xms128m
     ports:
       - "8082:8080"
@@ -73,18 +71,17 @@ services:
   controller3:
     build:
       context: ../..
-      dockerfile: qraft-controller/Dockerfile
-      additional_contexts:
-        m2cache: ${M2_REPO}/dev/mars
+      dockerfile: qraft-runtime/Dockerfile
     container_name: qraft-controller3
     hostname: controller3
     environment:
-      - NODE_ID=controller3
-      - RAFT_HOST=0.0.0.0
-      - RAFT_PORT=8080
-      - CLUSTER_NODES=controller1=172.20.0.10:8080,controller2=172.20.0.11:8080,controller3=172.20.0.12:8080,controller4=172.20.0.13:8080,controller5=172.20.0.14:8080
-      - ELECTION_TIMEOUT_MS=5000
-      - HEARTBEAT_INTERVAL_MS=1000
+      - QRAFT_MODE=server
+      - QRAFT_NODE_ID=controller3
+      - QRAFT_RAFT_HOST=0.0.0.0
+      - QRAFT_RAFT_PORT=9080
+      - QRAFT_CLUSTER_NODES=controller1=172.20.0.10:9080,controller2=172.20.0.11:9080,controller3=172.20.0.12:9080,controller4=172.20.0.13:9080,controller5=172.20.0.14:9080
+      - QRAFT_RAFT_ELECTION_TIMEOUT_MS=5000
+      - QRAFT_RAFT_HEARTBEAT_INTERVAL_MS=1000
       - JAVA_OPTS=-Xmx256m -Xms128m
     ports:
       - "8083:8080"
@@ -107,18 +104,17 @@ services:
   controller4:
     build:
       context: ../..
-      dockerfile: qraft-controller/Dockerfile
-      additional_contexts:
-        m2cache: ${M2_REPO}/dev/mars
+      dockerfile: qraft-runtime/Dockerfile
     container_name: qraft-controller4
     hostname: controller4
     environment:
-      - NODE_ID=controller4
-      - RAFT_HOST=0.0.0.0
-      - RAFT_PORT=8080
-      - CLUSTER_NODES=controller1=172.20.0.10:8080,controller2=172.20.0.11:8080,controller3=172.20.0.12:8080,controller4=172.20.0.13:8080,controller5=172.20.0.14:8080
-      - ELECTION_TIMEOUT_MS=5000
-      - HEARTBEAT_INTERVAL_MS=1000
+      - QRAFT_MODE=server
+      - QRAFT_NODE_ID=controller4
+      - QRAFT_RAFT_HOST=0.0.0.0
+      - QRAFT_RAFT_PORT=9080
+      - QRAFT_CLUSTER_NODES=controller1=172.20.0.10:9080,controller2=172.20.0.11:9080,controller3=172.20.0.12:9080,controller4=172.20.0.13:9080,controller5=172.20.0.14:9080
+      - QRAFT_RAFT_ELECTION_TIMEOUT_MS=5000
+      - QRAFT_RAFT_HEARTBEAT_INTERVAL_MS=1000
       - JAVA_OPTS=-Xmx256m -Xms128m
     ports:
       - "8084:8080"
@@ -141,18 +137,17 @@ services:
   controller5:
     build:
       context: ../..
-      dockerfile: qraft-controller/Dockerfile
-      additional_contexts:
-        m2cache: ${M2_REPO}/dev/mars
+      dockerfile: qraft-runtime/Dockerfile
     container_name: qraft-controller5
     hostname: controller5
     environment:
-      - NODE_ID=controller5
-      - RAFT_HOST=0.0.0.0
-      - RAFT_PORT=8080
-      - CLUSTER_NODES=controller1=172.20.0.10:8080,controller2=172.20.0.11:8080,controller3=172.20.0.12:8080,controller4=172.20.0.13:8080,controller5=172.20.0.14:8080
-      - ELECTION_TIMEOUT_MS=5000
-      - HEARTBEAT_INTERVAL_MS=1000
+      - QRAFT_MODE=server
+      - QRAFT_NODE_ID=controller5
+      - QRAFT_RAFT_HOST=0.0.0.0
+      - QRAFT_RAFT_PORT=9080
+      - QRAFT_CLUSTER_NODES=controller1=172.20.0.10:9080,controller2=172.20.0.11:9080,controller3=172.20.0.12:9080,controller4=172.20.0.13:9080,controller5=172.20.0.14:9080
+      - QRAFT_RAFT_ELECTION_TIMEOUT_MS=5000
+      - QRAFT_RAFT_HEARTBEAT_INTERVAL_MS=1000
       - JAVA_OPTS=-Xmx256m -Xms128m
     ports:
       - "8085:8080"
@@ -235,16 +230,11 @@ networks:
 volumes:
   controller1-data:
     driver: local
-    driver: local
   controller2-data:
-    driver: local
     driver: local
   controller3-data:
     driver: local
-    driver: local
   controller4-data:
     driver: local
-    driver: local
   controller5-data:
-    driver: local
     driver: local

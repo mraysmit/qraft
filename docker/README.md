@@ -1,253 +1,98 @@
-# Docker Infrastructure for Qraft
+# Qraft Docker infrastructure
 
-This directory contains all Docker-related configuration files, scripts, and test data for the Qraft distributed control plane and transfer-agent test environments.
+This directory contains Docker Compose environments for Qraft controller
+clusters and observability.
 
-## Directory Structure
+## Controller clusters
 
-```
-docker/
-├── compose/                          # Docker Compose configurations
-│   ├── docker-compose.yml           # Main 3-node cluster
-│   ├── docker-compose-5node.yml     # 5-node cluster for testing
-│   ├── docker-compose-loki.yml      # Log aggregation stack (Grafana Loki)
-│   ├── docker-compose-elk.yml       # ELK stack alternative
-│   ├── docker-compose-fluentd.yml   # Fluentd alternative
-│   └── docker-compose-network-test.yml # Advanced network testing
-├── logging/                          # Log aggregation configurations
-│   ├── loki/config.yml              # Loki storage configuration
-│   ├── promtail/config.yml          # Log collection configuration
-│   ├── grafana/provisioning/        # Grafana datasources and dashboards
-│   └── prometheus/prometheus.yml    # Metrics collection configuration
-├── scripts/                          # Docker-related automation scripts
-│   ├── setup-logging.ps1           # Automated log aggregation setup
-│   ├── demo-logging.ps1            # Log aggregation demonstration
-│   ├── log-extraction-demo.ps1     # Detailed log pipeline demo
-│   └── simple-log-demo.ps1         # Simple logging demonstration
-└── test-data/                       # Test data and utilities
-    ├── test-heartbeat.json         # Sample heartbeat payload
-    ├── test-registration.json      # Sample agent registration
-    ├── send-heartbeat.ps1          # Heartbeat testing script
-    └── check-agents.ps1            # Agent status checking script
-```
-
-## 🚀 Complete Test Network Environment
-
-### Full Network Test Environment
-
-The `docker-compose-full-network.yml` configuration provides a comprehensive test environment for a realistic Qraft control-plane network with transfer-capable agents:
-
-**Architecture:**
-- **Control Plane**: 3 Raft controllers + API service
-- **Agent Network**: 3 agents in different regions (NYC, London, Tokyo)
-- **File Transfer Servers**: FTP, SFTP, HTTP, and SMB servers
-- **Test Utilities**: File generators and monitoring tools
-
-**Network Topology:**
-```
-Control Plane (172.20.0.0/16)
-├── Controller 1-3 (Raft cluster)
-└── API Service (agent communication)
-
-Agent Network (172.21.0.0/16)
-├── Agent NYC (US East)
-├── Agent London (EU West)
-└── Agent Tokyo (AP Northeast)
-
-Transfer Servers (172.22.0.0/16)
-├── FTP Server (port 21)
-├── SFTP Server (port 2222)
-├── HTTP Server (port 8090)
-└── File Generator (test data)
-```
-
-### Quick Start - Full Network
+Run commands from this directory. The helper script exposes the maintained
+development entry points:
 
 ```powershell
-# Start the complete test environment
-.\scripts\start-full-network.ps1 -Build
-
-# Test agent registration and transfer workflows
-.\scripts\test-transfers.ps1
-
-# Monitor the environment
-docker-compose -f compose/docker-compose-full-network.yml logs -f
-
-# Stop the environment
-docker-compose -f compose/docker-compose-full-network.yml down
+.\start.ps1 cluster       # single-controller development environment
+.\start.ps1 controllers   # three controllers behind a load balancer
+.\start.ps1 status
+.\start.ps1 stop
 ```
 
-### Service Endpoints
+POSIX shell equivalents are provided for Linux, macOS, and WSL:
 
-| Service | URL | Credentials |
-|---------|-----|-------------|
-| API Service | http://localhost:8080 | - |
-| Controller 1 | http://localhost:8081 | - |
-| Controller 2 | http://localhost:8082 | - |
-| Controller 3 | http://localhost:8083 | - |
-| HTTP Server | http://localhost:8090 | - |
-| FTP Server | ftp://localhost:21 | testuser/testpass |
-| SFTP Server | sftp://localhost:2222 | testuser/testpass |
-
-## Quick Start
-
-### 1. Basic Cluster Setup
-
-```bash
-# Start the main 3-node cluster
-cd docker/compose
-docker-compose up -d
-
-# Check cluster health
-curl http://localhost:8081/health
-curl http://localhost:8082/health
-curl http://localhost:8083/health
+```sh
+sh ./start.sh cluster
+sh ./start.sh controllers
+sh ./start.sh status
+sh ./start.sh stop
 ```
 
-### 2. Log Aggregation Setup
+The compose directory also contains dedicated three-node, five-node, and
+network-partition configurations used for distributed testing. These require
+the unified `qraft-runtime` image, launched with `QRAFT_MODE=server`. Compose
+packages the runtime JAR built on the host; it does not run Maven inside
+Docker. The `start.ps1`, `start.sh`, `start-quick.ps1`, and `start-quick.sh`
+helpers run the local build automatically before starting a cluster. To build
+the artifact without starting Docker, run either helper:
 
-```bash
-# Set up log aggregation (from project root)
-cd docker/scripts
-powershell -ExecutionPolicy Bypass -File setup-logging.ps1
-
-# Access Grafana dashboard
-# http://localhost:3000 (admin/admin)
+```powershell
+.\build-runtime.ps1
 ```
 
-### 3. Testing with Sample Data
-
-```bash
-# Register a test agent
-cd docker/test-data
-curl -X POST http://localhost:8080/api/v1/agents/register \
-  -H "Content-Type: application/json" \
-  -d @test-registration.json
-
-# Send heartbeats
-powershell -ExecutionPolicy Bypass -File send-heartbeat.ps1
+```sh
+sh ./build-runtime.sh
 ```
 
-## Available Configurations
+Controller HTTP endpoints are exposed on ports 8080 or 8081-8085, depending
+on the selected topology. Check a running endpoint with:
 
-### Cluster Configurations
-
-| File | Description | Nodes | Use Case |
-|------|-------------|-------|----------|
-| `docker-compose.yml` | Main cluster | 3 | Development, basic testing |
-| `docker-compose-5node.yml` | Extended cluster | 5 | Advanced testing, fault tolerance |
-| `docker-compose-network-test.yml` | Network testing | 5 | Network partition testing |
-
-### Log Aggregation Options
-
-| File | Stack | Description |
-|------|-------|-------------|
-| `docker-compose-loki.yml` | Grafana Loki | **Recommended** - Lightweight, cost-effective |
-| `docker-compose-elk.yml` | ELK Stack | Full-featured, resource intensive |
-| `docker-compose-fluentd.yml` | Fluentd + ELK | CNCF standard, flexible |
-
-## Services and Ports
-
-### Core Services
-- **Qraft API**: http://localhost:8080
-- **Controller 1**: http://localhost:8081
-- **Controller 2**: http://localhost:8082
-- **Controller 3**: http://localhost:8083
-
-### Log Aggregation Services
-- **Grafana**: http://localhost:3000 (admin/admin)
-- **Loki**: http://localhost:3100
-- **Prometheus**: http://localhost:9090
-
-### Extended Cluster (5-node)
-- **Controller 4**: http://localhost:8084
-- **Controller 5**: http://localhost:8085
-
-## Common Commands
-
-### Cluster Management
-```bash
-# Start cluster
-docker-compose -f docker/compose/docker-compose.yml up -d
-
-# Stop cluster
-docker-compose -f docker/compose/docker-compose.yml down
-
-# View logs
-docker-compose -f docker/compose/docker-compose.yml logs -f
-
-# Scale specific service
-docker-compose -f docker/compose/docker-compose.yml up -d --scale controller1=2
+```powershell
+Invoke-RestMethod http://localhost:8080/health
 ```
 
-### Log Aggregation
-```bash
-# Start logging stack
-docker-compose -f docker/compose/docker-compose-loki.yml up -d
+## Agent API checks
 
-# Check log collection
-docker logs qraft-promtail
+With a controller running, `start-quick.ps1 test` uses the JSON payloads and
+PowerShell scripts under `test-data/` to exercise agent registration,
+heartbeat, and listing endpoints.
 
-# Query logs directly
-curl "http://localhost:3100/loki/api/v1/query_range?query={container_name=\"qraft-controller1\"}"
+```powershell
+.\start-quick.ps1 test
 ```
 
-### Testing and Debugging
-```bash
-# Check container status
-docker ps --filter "name=qraft-"
-
-# Inspect networks
-docker network ls | grep qraft
-
-# Execute commands in container
-docker exec -it qraft-controller1 /bin/sh
-
-# Check resource usage
-docker stats --filter "name=qraft-"
+```sh
+sh ./start-quick.sh test
 ```
 
-## Integration with Development
+## Observability
 
-### From Project Root
-```bash
-# Build and start everything
-mvn clean package -DskipTests
-docker-compose -f docker/compose/docker-compose.yml up -d
-docker-compose -f docker/compose/docker-compose-loki.yml up -d
+The maintained observability stack contains OpenTelemetry Collector, Tempo,
+Prometheus, Loki, and Grafana:
 
-# Run integration tests
-mvn test -Dtest=DockerRaftClusterTest
+```powershell
+.\start-observability.ps1
+.\start-observability.ps1 -Status
+.\start-observability.ps1 -Down
 ```
 
-### Environment Variables
-Set these in your shell for easier access:
-```bash
-export QRAFT_DOCKER_DIR="./docker"
-export QRAFT_COMPOSE_DIR="$QRAFT_DOCKER_DIR/compose"
-export QRAFT_SCRIPTS_DIR="$QRAFT_DOCKER_DIR/scripts"
+```sh
+sh ./start-observability.sh
+sh ./start-observability.sh status
+sh ./start-observability.sh down
 ```
 
-## Troubleshooting
+Default local endpoints:
 
-### Common Issues
-1. **Port conflicts**: Check if ports 8080-8085, 3000, 3100, 9090 are available
-2. **Memory issues**: Ensure at least 2GB RAM available for full stack
-3. **Network issues**: Check Docker daemon and network connectivity
+| Service | Endpoint |
+| --- | --- |
+| Grafana | http://localhost:3000 |
+| Prometheus | http://localhost:9090 |
+| Tempo | http://localhost:3200 |
+| Loki | http://localhost:3100 |
+| OTLP gRPC | localhost:4317 |
+| OTLP HTTP | localhost:4318 |
 
-### Debug Commands
-```bash
-# Check Docker daemon
-docker version
+The default Grafana development credentials are `admin` / `admin`.
 
-# Check available resources
-docker system df
-docker system prune  # Clean up if needed
+## Persistent state
 
-# Check specific service logs
-docker-compose -f docker/compose/docker-compose.yml logs controller1
-
-# Network debugging
-docker network inspect qraft_raft-cluster
-```
-
-For detailed documentation, see [README-DOCKER-TESTING.md](../docs/QRAFT-DOCKER-TESTING-README.md).
+Compose environments use named volumes for controller and observability data.
+Use `docker compose down` to retain them or `docker compose down -v` when an
+explicit clean reset is required.

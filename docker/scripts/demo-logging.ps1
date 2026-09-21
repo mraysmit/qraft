@@ -26,22 +26,8 @@ for ($i = 1; $i -le 3; $i++) {
         agentId = "test-agent-002"
         timestamp = $timestamp
         sequenceNumber = $i
-        status = "active"
-        currentJobs = $i
-        availableCapacity = 5
-        transferMetrics = @{
-            active = $i
-            completed = 50 + $i
-            failed = 1
-            successRate = 98.0
-        }
-        healthStatus = @{
-            diskSpace = "healthy"
-            networkConnectivity = "healthy"
-            systemLoad = "normal"
-            overallHealth = "healthy"
-        }
-    } | ConvertTo-Json -Depth 3
+        status = "healthy"
+    } | ConvertTo-Json
 
     $response = Invoke-RestMethod -Uri "http://localhost:8080/api/v1/agents/heartbeat" -Method POST -Body $json -ContentType "application/json" -ErrorAction SilentlyContinue
     if ($response -and $response.success) {

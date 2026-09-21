@@ -11,6 +11,7 @@ import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -23,6 +24,8 @@ public final class QraftAgent implements AutoCloseable {
     private final HealthService healthService;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     private final AtomicBoolean running = new AtomicBoolean();
+    private final AtomicBoolean heartbeatScheduled = new AtomicBoolean();
+    private final AtomicBoolean registrationRetryScheduled = new AtomicBoolean();
 
     public QraftAgent(AgentConfiguration config) {
         this.config = config;
@@ -33,22 +36,50 @@ public final class QraftAgent implements AutoCloseable {
     }
 
     public CompletableFuture<Boolean> start() {
-        if (!running.compareAndSet(false, true)) return CompletableFuture.completedFuture(true);
+        if (!running.compareAndSet(false, true)) {
+            return CompletableFuture.completedFuture(registrationClient.isRegistered());
+        }
         healthService.start();
         AgentInfo agent = new AgentInfo(config.getAgentId(), config.getHostname(), config.getAddress(), config.getAgentPort());
         agent.setVersion(config.getVersion());
         agent.setRegion(config.getRegion());
         agent.setDatacenter(config.getDatacenter());
         return registrationClient.register(agent).thenApply(registered -> {
-            healthService.setReady(registered);
-            if (registered) {
-                scheduler.scheduleAtFixedRate(heartbeatService::sendHeartbeat,
-                        config.getHeartbeatInterval(), config.getHeartbeatInterval(), TimeUnit.MILLISECONDS);
-            } else {
-                stopLocal();
-            }
+            if (registered) activateHeartbeat(agent);
+            else scheduleRegistrationRetry(agent);
             return registered;
         });
+    }
+
+    private void scheduleRegistrationRetry(AgentInfo agent) {
+        if (!running.get() || registrationClient.isRegistered()) return;
+        if (!registrationRetryScheduled.compareAndSet(false, true)) return;
+        try {
+            scheduler.schedule(() -> registrationClient.register(agent).whenComplete((registered, error) -> {
+                registrationRetryScheduled.set(false);
+                if (!running.get()) return;
+                if (error == null && Boolean.TRUE.equals(registered)) activateHeartbeat(agent);
+                else scheduleRegistrationRetry(agent);
+            }), config.getHeartbeatInterval(), TimeUnit.MILLISECONDS);
+        } catch (RejectedExecutionException ignored) {
+            registrationRetryScheduled.set(false);
+            // Shutdown won the race with a registration callback.
+        }
+    }
+
+    private void activateHeartbeat(AgentInfo agent) {
+        if (!running.get()) return;
+        healthService.setReady(true);
+        if (heartbeatScheduled.compareAndSet(false, true)) {
+            scheduler.scheduleAtFixedRate(() -> heartbeatService.sendHeartbeat()
+                            .whenComplete((accepted, error) -> {
+                                if (running.get() && !registrationClient.isRegistered()) {
+                                    healthService.setReady(false);
+                                    scheduleRegistrationRetry(agent);
+                                }
+                            }),
+                    config.getHeartbeatInterval(), config.getHeartbeatInterval(), TimeUnit.MILLISECONDS);
+        }
     }
 
     public CompletableFuture<Boolean> shutdown() {

@@ -33,7 +33,7 @@ class AgentCodecTest {
                 new AgentCommand.Deregister("agent-1", timestamp),
                 new AgentCommand.UpdateStatus("agent-1", AgentStatus.HEALTHY, AgentStatus.ACTIVE, timestamp),
                 new AgentCommand.UpdateCapabilities("agent-1", capabilities, timestamp),
-                new AgentCommand.Heartbeat("agent-1", AgentStatus.DEGRADED, timestamp));
+                new AgentCommand.Heartbeat("agent-1", AgentStatus.DEGRADED, timestamp, 42));
 
         for (AgentCommand command : commands) {
             AgentCommand decoded = AgentCodec.fromProto(AgentCodec.toProto(command));
@@ -46,6 +46,9 @@ class AgentCodecTest {
         assertEquals("host", register.agentInfo().getHostname());
         assertEquals(Set.of("kv", "health"), register.agentInfo().getCapabilities().getSupportedServices());
         assertEquals(AgentStatus.HEALTHY, register.agentInfo().getStatus());
+        AgentCommand.Heartbeat heartbeat = (AgentCommand.Heartbeat)
+                AgentCodec.fromProto(AgentCodec.toProto(commands.getLast()));
+        assertEquals(42, heartbeat.sequenceNumber());
     }
 
     @Test

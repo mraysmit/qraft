@@ -49,4 +49,3 @@ networks:
 volumes:
   elasticsearch-data:
     driver: local
-    driver: local

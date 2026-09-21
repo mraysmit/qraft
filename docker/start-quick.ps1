@@ -36,6 +36,8 @@ function Show-Help {
 
 function Start-Cluster {
     param([string]$Type)
+
+    & (Join-Path $PSScriptRoot "build-runtime.ps1")
     
     $composeFile = switch ($Type) {
         "3node" { "compose/docker-compose.yml" }

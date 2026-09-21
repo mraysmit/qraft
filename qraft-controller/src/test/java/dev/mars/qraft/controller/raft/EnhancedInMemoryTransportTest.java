@@ -51,12 +51,12 @@ class EnhancedInMemoryTransportTest {
 
     private static final Logger logger = LoggerFactory.getLogger(EnhancedInMemoryTransportTest.class);
 
-    private JavaRuntime vertx;
+    private JavaRuntime runtime;
     private final List<RaftNode> activeNodes = new ArrayList<>();
 
     @BeforeEach
     void setUp() {
-        vertx = JavaRuntime.create();
+        runtime = JavaRuntime.create();
         InMemoryTransportSimulator.clearAllTransports();
         activeNodes.clear();
     }
@@ -72,8 +72,8 @@ class EnhancedInMemoryTransportTest {
             }
         }
         activeNodes.clear();
-        if (vertx != null) {
-            vertx.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        if (runtime != null) {
+            runtime.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
         }
     }
 
@@ -105,13 +105,13 @@ class EnhancedInMemoryTransportTest {
         QraftStateStore sm3 = new QraftStateStore();
 
         RaftNode node1 = RaftNode.builder()
-                .runtime(vertx).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
+                .runtime(runtime).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1000).heartbeatInterval(200).build();
         RaftNode node2 = RaftNode.builder()
-                .runtime(vertx).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
+                .runtime(runtime).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1000).heartbeatInterval(200).build();
         RaftNode node3 = RaftNode.builder()
-                .runtime(vertx).nodeId("node3").clusterNodes(clusterNodes).transport(transport3).stateMachine(sm3).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
+                .runtime(runtime).nodeId("node3").clusterNodes(clusterNodes).transport(transport3).stateMachine(sm3).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1000).heartbeatInterval(200).build();
 
         startAndTrack(node1, node2, node3);
@@ -166,10 +166,10 @@ class EnhancedInMemoryTransportTest {
         QraftStateStore sm2 = new QraftStateStore();
 
         RaftNode node1 = RaftNode.builder()
-                .runtime(vertx).nodeId("leader").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
+                .runtime(runtime).nodeId("leader").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1000).heartbeatInterval(200).build();
         RaftNode node2 = RaftNode.builder()
-                .runtime(vertx).nodeId("follower").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
+                .runtime(runtime).nodeId("follower").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1000).heartbeatInterval(200).build();
 
         startAndTrack(node1, node2);
@@ -202,10 +202,10 @@ class EnhancedInMemoryTransportTest {
         QraftStateStore sm2 = new QraftStateStore();
 
         RaftNode node1 = RaftNode.builder()
-                .runtime(vertx).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
+                .runtime(runtime).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1000).heartbeatInterval(200).build();
         RaftNode node2 = RaftNode.builder()
-                .runtime(vertx).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
+                .runtime(runtime).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1000).heartbeatInterval(200).build();
 
         long startTime = System.currentTimeMillis();
@@ -239,13 +239,13 @@ class EnhancedInMemoryTransportTest {
         QraftStateStore sm3 = new QraftStateStore();
 
         RaftNode node1 = RaftNode.builder()
-                .runtime(vertx).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
+                .runtime(runtime).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(800).heartbeatInterval(150).build();
         RaftNode node2 = RaftNode.builder()
-                .runtime(vertx).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
+                .runtime(runtime).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(800).heartbeatInterval(150).build();
         RaftNode node3 = RaftNode.builder()
-                .runtime(vertx).nodeId("node3").clusterNodes(clusterNodes).transport(transport3).stateMachine(sm3).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
+                .runtime(runtime).nodeId("node3").clusterNodes(clusterNodes).transport(transport3).stateMachine(sm3).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(800).heartbeatInterval(150).build();
 
         startAndTrack(node1, node2, node3);
@@ -300,13 +300,13 @@ class EnhancedInMemoryTransportTest {
         QraftStateStore sm3 = new QraftStateStore();
 
         RaftNode node1 = RaftNode.builder()
-                .runtime(vertx).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
+                .runtime(runtime).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1000).heartbeatInterval(200).build();
         RaftNode node2 = RaftNode.builder()
-                .runtime(vertx).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
+                .runtime(runtime).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1000).heartbeatInterval(200).build();
         RaftNode node3 = RaftNode.builder()
-                .runtime(vertx).nodeId("node3").clusterNodes(clusterNodes).transport(transport3).stateMachine(sm3).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
+                .runtime(runtime).nodeId("node3").clusterNodes(clusterNodes).transport(transport3).stateMachine(sm3).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1000).heartbeatInterval(200).build();
 
         startAndTrack(node1, node2, node3);
@@ -339,10 +339,10 @@ class EnhancedInMemoryTransportTest {
         QraftStateStore sm2 = new QraftStateStore();
 
         RaftNode node1 = RaftNode.builder()
-                .runtime(vertx).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
+                .runtime(runtime).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1000).heartbeatInterval(200).build();
         RaftNode node2 = RaftNode.builder()
-                .runtime(vertx).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
+                .runtime(runtime).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1000).heartbeatInterval(200).build();
 
         long startTime = System.currentTimeMillis();
@@ -379,13 +379,13 @@ class EnhancedInMemoryTransportTest {
         QraftStateStore sm3 = new QraftStateStore();
 
         RaftNode node1 = RaftNode.builder()
-                .runtime(vertx).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
+                .runtime(runtime).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(800).heartbeatInterval(150).build();
         RaftNode node2 = RaftNode.builder()
-                .runtime(vertx).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
+                .runtime(runtime).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(800).heartbeatInterval(150).build();
         RaftNode node3 = RaftNode.builder()
-                .runtime(vertx).nodeId("node3").clusterNodes(clusterNodes).transport(transport3).stateMachine(sm3).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
+                .runtime(runtime).nodeId("node3").clusterNodes(clusterNodes).transport(transport3).stateMachine(sm3).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(800).heartbeatInterval(150).build();
 
         startAndTrack(node1, node2, node3);
@@ -425,13 +425,13 @@ class EnhancedInMemoryTransportTest {
         QraftStateStore sm3 = new QraftStateStore();
 
         RaftNode node1 = RaftNode.builder()
-                .runtime(vertx).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
+                .runtime(runtime).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1000).heartbeatInterval(200).build();
         RaftNode node2 = RaftNode.builder()
-                .runtime(vertx).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
+                .runtime(runtime).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1000).heartbeatInterval(200).build();
         RaftNode node3 = RaftNode.builder()
-                .runtime(vertx).nodeId("node3").clusterNodes(clusterNodes).transport(transport3).stateMachine(sm3).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
+                .runtime(runtime).nodeId("node3").clusterNodes(clusterNodes).transport(transport3).stateMachine(sm3).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1000).heartbeatInterval(200).build();
 
         startAndTrack(node1, node2, node3);

@@ -1,13 +1,14 @@
 version: '3.8'
 
 # 5-node Raft cluster using pre-built image (no Docker build step).
-# Requires qraft-controller:test image — built by SharedDockerCluster.
+# Requires qraft-runtime:test image — built by SharedDockerCluster.
 
 services:
   controller1:
-    image: qraft-controller:test
+    image: qraft-runtime:test
     hostname: controller1
     environment:
+      - QRAFT_MODE=server
       - QRAFT_NODE_ID=controller1
       - QRAFT_RAFT_HOST=0.0.0.0
       - QRAFT_RAFT_PORT=9080
@@ -28,9 +29,10 @@ services:
       start_period: 10s
 
   controller2:
-    image: qraft-controller:test
+    image: qraft-runtime:test
     hostname: controller2
     environment:
+      - QRAFT_MODE=server
       - QRAFT_NODE_ID=controller2
       - QRAFT_RAFT_HOST=0.0.0.0
       - QRAFT_RAFT_PORT=9080
@@ -51,9 +53,10 @@ services:
       start_period: 10s
 
   controller3:
-    image: qraft-controller:test
+    image: qraft-runtime:test
     hostname: controller3
     environment:
+      - QRAFT_MODE=server
       - QRAFT_NODE_ID=controller3
       - QRAFT_RAFT_HOST=0.0.0.0
       - QRAFT_RAFT_PORT=9080
@@ -74,9 +77,10 @@ services:
       start_period: 10s
 
   controller4:
-    image: qraft-controller:test
+    image: qraft-runtime:test
     hostname: controller4
     environment:
+      - QRAFT_MODE=server
       - QRAFT_NODE_ID=controller4
       - QRAFT_RAFT_HOST=0.0.0.0
       - QRAFT_RAFT_PORT=9080
@@ -97,9 +101,10 @@ services:
       start_period: 10s
 
   controller5:
-    image: qraft-controller:test
+    image: qraft-runtime:test
     hostname: controller5
     environment:
+      - QRAFT_MODE=server
       - QRAFT_NODE_ID=controller5
       - QRAFT_RAFT_HOST=0.0.0.0
       - QRAFT_RAFT_PORT=9080

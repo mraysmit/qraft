@@ -3,12 +3,14 @@ package dev.mars.qraft.controller.http;
 import dev.mars.qraft.controller.raft.InMemoryTransportSimulator;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.raft.RaftNodeMode;
+import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.storage.RaftStorageFactory;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.controller.state.RaftCommand;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
+import dev.mars.qraft.agent.AgentStatus;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import dev.mars.raftlog.storage.RaftStorage;
 import org.junit.jupiter.api.AfterEach;
@@ -104,6 +106,95 @@ class HttpApiServerTest {
     }
 
     @Test
+    void registersHeartbeatsAndDeregistersAgentsThroughRaft() throws Exception {
+        QraftStateStore store = startSingleNode();
+        server = new HttpApiServer(0, node, store);
+        server.start().join();
+        HttpClient client = HttpClient.newHttpClient();
+        String registration = """
+                {"agentId":"agent-1","hostname":"host-1","address":"127.0.0.1","port":8080,
+                 "version":"1.0.0","region":"eu-west","datacenter":"dc-1"}
+                """;
+        String heartbeat = """
+                {"agentId":"agent-1","timestamp":"2026-09-21T10:15:30Z",
+                 "sequenceNumber":1,"status":"passing"}
+                """;
+
+        HttpResponse<String> registered = request(client, "/api/v1/agents/register", "POST", registration);
+        HttpResponse<String> heartbeatAccepted = request(client, "/api/v1/agents/heartbeat", "POST", heartbeat);
+        HttpResponse<String> agents = request(client, "/api/v1/agents", "GET");
+
+        assertEquals(201, registered.statusCode());
+        assertEquals(204, heartbeatAccepted.statusCode());
+        assertTrue(agents.body().contains("agent-1"));
+        assertEquals(AgentStatus.HEALTHY,
+                store.findAgent("agent-1").orElseThrow().getStatus());
+
+        HttpResponse<String> deregistered = request(client, "/api/v1/agents/agent-1", "DELETE");
+        assertEquals(204, deregistered.statusCode());
+        assertTrue(store.findAgent("agent-1").isEmpty());
+    }
+
+    @Test
+    void validatesAgentEndpointMethodsAndPayloads() throws Exception {
+        startAgentApi();
+        HttpClient client = HttpClient.newHttpClient();
+
+        assertEquals(405, request(client, "/api/v1/agents/register", "GET").statusCode());
+        assertEquals(400, request(client, "/api/v1/agents/register", "POST", "{").statusCode());
+        assertEquals(400, request(client, "/api/v1/agents/register", "POST", "{\"agentId\":\" \"}").statusCode());
+        assertEquals(400, request(client, "/api/v1/agents/heartbeat", "POST",
+                "{\"agentId\":\"agent-1\",\"status\":\"not-a-status\"}").statusCode());
+        assertEquals(400, request(client, "/api/v1/agents/heartbeat", "POST",
+                "{\"agentId\":\"agent-1\",\"timestamp\":\"yesterday\"}").statusCode());
+    }
+
+    @Test
+    void reportsMissingAgentsAndAcceptsOptionalHeartbeatFields() throws Exception {
+        QraftStateStore store = startAgentApi();
+        HttpClient client = HttpClient.newHttpClient();
+
+        assertEquals(404, request(client, "/api/v1/agents/heartbeat", "POST",
+                "{\"agentId\":\"unknown\",\"sequenceNumber\":1}").statusCode());
+        assertEquals(404, request(client, "/api/v1/agents/unknown", "DELETE").statusCode());
+
+        assertEquals(201, request(client, "/api/v1/agents/register", "POST", agentRegistration()).statusCode());
+        assertEquals(204, request(client, "/api/v1/agents/heartbeat", "POST",
+                "{\"agentId\":\"agent-1\",\"sequenceNumber\":1}").statusCode());
+        assertEquals(AgentStatus.HEALTHY, store.findAgent("agent-1").orElseThrow().getStatus());
+    }
+
+    @Test
+    void rejectsAgentRequestsWhileDraining() throws Exception {
+        startAgentApi();
+        server.enterDrainMode().join();
+
+        assertEquals(503, request(HttpClient.newHttpClient(), "/api/v1/agents/register", "POST",
+                agentRegistration()).statusCode());
+    }
+
+    @Test
+    void rejectsAnOutOfOrderHeartbeatWithoutMovingAgentStateBackward() throws Exception {
+        QraftStateStore store = startAgentApi();
+        HttpClient client = HttpClient.newHttpClient();
+        assertEquals(201, request(client, "/api/v1/agents/register", "POST", agentRegistration()).statusCode());
+        assertEquals(204, request(client, "/api/v1/agents/heartbeat", "POST", """
+                {"agentId":"agent-1","timestamp":"2026-09-21T10:15:30Z",
+                 "sequenceNumber":2,"status":"passing"}
+                """).statusCode());
+
+        HttpResponse<String> stale = request(client, "/api/v1/agents/heartbeat", "POST", """
+                {"agentId":"agent-1","timestamp":"2026-09-21T10:14:30Z",
+                 "sequenceNumber":1,"status":"degraded"}
+                """);
+
+        assertEquals(409, stale.statusCode(), "a stale heartbeat sequence must be rejected");
+        assertEquals(java.time.Instant.parse("2026-09-21T10:15:30Z"),
+                store.findAgent("agent-1").orElseThrow().getLastHeartbeat());
+        assertEquals(AgentStatus.HEALTHY, store.findAgent("agent-1").orElseThrow().getStatus());
+    }
+
+    @Test
     void rejectsInvalidServiceRegistrations() throws Exception {
         QraftStateStore store = startSingleNode();
         server = new HttpApiServer(0, node, store);
@@ -124,7 +215,12 @@ class HttpApiServerTest {
         node = RaftNode.builder()
                 .runtime(runtime).nodeId("follower").clusterNodes(Set.of("follower", "peer"))
                 .transport(transport).stateMachine(store).commandCodec(new ProtobufRaftCommandCodec())
-                .mode(RaftNodeMode.volatileMode()).build();
+                .mode(RaftNodeMode.volatileMode()).electionTimeout(10_000).build();
+        node.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        node.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
+                        .setTerm(1).setLeaderId("peer").setPrevLogIndex(0).setPrevLogTerm(0)
+                        .setLeaderCommit(0).build())
+                .toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
         server = new HttpApiServer(0, node, store);
         server.start().join();
         String registration = """
@@ -134,9 +230,15 @@ class HttpApiServerTest {
 
         HttpResponse<String> response = request(HttpClient.newHttpClient(),
                 "/v1/agent/service/register", "PUT", registration);
+        HttpResponse<String> agentResponse = request(HttpClient.newHttpClient(),
+                "/api/v1/agents/register", "POST", agentRegistration());
 
         assertEquals(503, response.statusCode());
         assertTrue(response.body().contains("leader_unavailable"));
+        assertEquals(503, agentResponse.statusCode());
+        assertTrue(agentResponse.body().contains("leader_unavailable"));
+        assertTrue(agentResponse.body().contains("\"leaderId\":\"peer\""));
+        assertEquals("peer", agentResponse.headers().firstValue("X-Qraft-Leader-Id").orElseThrow());
         assertTrue(store.getServiceCatalog().instances().isEmpty());
     }
 
@@ -246,6 +348,20 @@ class HttpApiServerTest {
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.sleep(10);
         assertTrue(node.isLeader());
         return store;
+    }
+
+    private QraftStateStore startAgentApi() throws Exception {
+        QraftStateStore store = startSingleNode();
+        server = new HttpApiServer(0, node, store);
+        server.start().join();
+        return store;
+    }
+
+    private static String agentRegistration() {
+        return """
+                {"agentId":"agent-1","hostname":"host-1","address":"127.0.0.1","port":8080,
+                 "version":"1.0.0","region":"eu-west","datacenter":"dc-1"}
+                """;
     }
 
     private HttpResponse<String> request(HttpClient client, String path, String method) throws Exception {

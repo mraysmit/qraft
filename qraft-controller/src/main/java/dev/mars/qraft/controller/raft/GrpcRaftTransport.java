@@ -88,7 +88,7 @@ public class GrpcRaftTransport implements RaftTransport {
     /**
      * Creates a GrpcRaftTransport with default pool configuration.
      * 
-     * @param vertx Vert.x instance
+     * @param runtime Java runtime instance
      * @param selfId this node's ID
      * @param clusterNodes map of nodeId to host:port
      */
@@ -99,7 +99,7 @@ public class GrpcRaftTransport implements RaftTransport {
     /**
      * Creates a GrpcRaftTransport with custom pool configuration.
      * 
-     * @param vertx Vert.x instance
+     * @param runtime Java runtime instance
      * @param selfId this node's ID
      * @param clusterNodes map of nodeId to host:port
      * @param poolSize maximum number of worker threads for gRPC callbacks

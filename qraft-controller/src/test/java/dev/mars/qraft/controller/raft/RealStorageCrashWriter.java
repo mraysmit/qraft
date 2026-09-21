@@ -39,6 +39,7 @@ public final class RealStorageCrashWriter {
                 .build());
 
         wal.open(directory).join();
+        wal.replayLog().join();
         wal.truncateSuffix(3).join();
         haltAt(checkpoint, Checkpoint.AFTER_TRUNCATE);
 

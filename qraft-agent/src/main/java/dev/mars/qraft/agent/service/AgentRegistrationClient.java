@@ -12,6 +12,8 @@ import java.time.Duration;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.UUID;
 
 /** Pure Java HTTP client for agent registration with the controller. */
 public final class AgentRegistrationClient {
@@ -20,6 +22,7 @@ public final class AgentRegistrationClient {
     private final URI controllerBaseUri;
     private final Duration requestTimeout;
     private final AtomicBoolean registered = new AtomicBoolean();
+    private final AtomicReference<String> registrationId = new AtomicReference<>();
 
     public AgentRegistrationClient(HttpClient httpClient, ObjectMapper objectMapper,
                                    URI controllerBaseUri, Duration requestTimeout) {
@@ -31,6 +34,9 @@ public final class AgentRegistrationClient {
 
     public CompletableFuture<Boolean> register(AgentInfo agent) {
         try {
+            String attemptId = UUID.randomUUID().toString();
+            agent.addMetadata(AgentInfo.REGISTRATION_ID_METADATA_KEY, attemptId);
+            registrationId.set(attemptId);
             return send("POST", endpoint("/agents/register"), objectMapper.writeValueAsString(agent))
                     .thenApply(response -> response != null
                             && (response.statusCode() == 200 || response.statusCode() == 201))
@@ -49,6 +55,10 @@ public final class AgentRegistrationClient {
     }
 
     public boolean isRegistered() { return registered.get(); }
+    public String registrationId() { return registrationId.get(); }
+
+    /** Marks the local registration lease invalid after the controller returns 404. */
+    public void markRegistrationLost() { registered.set(false); }
 
     private CompletableFuture<HttpResponse<String>> send(String method, URI uri, String body) {
         HttpRequest.Builder request = HttpRequest.newBuilder(uri)

@@ -23,6 +23,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.bridge.SLF4JBridgeHandler;
 
+import java.util.concurrent.CountDownLatch;
+
 /**
  * Main application class for Qraft Controller.
  *
@@ -67,14 +69,9 @@ public class QraftControllerApplication {
         }
 
         QraftControllerService controller = new QraftControllerService(runtime);
-        controller.start()
-                .onSuccess(ignored -> logger.info("Qraft controller started successfully"))
-                .onFailure(err -> {
-                    logger.error("Failed to start Qraft controller: {}", err.getMessage(), err);
-                    System.exit(1);
-                });
+        CountDownLatch shutdownComplete = new CountDownLatch(1);
 
-        // Add shutdown hook
+        // Register cleanup before startup because startup can fail synchronously.
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             logger.info("Shutdown signal received, stopping controller...");
             try {
@@ -85,8 +82,29 @@ public class QraftControllerApplication {
                 Throwable cause = error.getCause() == null ? error : error.getCause();
                 logger.error("Controller did not shut down safely; runtime was left open: {}",
                         cause.getMessage(), cause);
+            } finally {
+                shutdownComplete.countDown();
             }
         }));
+
+        controller.start()
+                .onSuccess(ignored -> logger.info("Qraft controller started successfully"))
+                .onFailure(err -> {
+                    logger.error("Failed to start Qraft controller: {}", err.getMessage(), err);
+                    requestProcessExit(() -> System.exit(1));
+                });
+
+        try {
+            shutdownComplete.await();
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    static Thread requestProcessExit(Runnable exitAction) {
+        return Thread.ofPlatform()
+                .name("qraft-startup-exit")
+                .start(exitAction);
     }
 
     private static void configureJulToSlf4jBridge() {

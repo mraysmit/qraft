@@ -29,11 +29,11 @@ class HeartbeatServiceTest {
     void publishesHeartbeatAfterRegistration() throws Exception {
         AtomicInteger heartbeats = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/agents/register", exchange -> {
+        server.createContext("/api/v1/agents/register", exchange -> {
             exchange.sendResponseHeaders(201, -1);
             exchange.close();
         });
-        server.createContext("/agents/heartbeat", exchange -> {
+        server.createContext("/api/v1/agents/heartbeat", exchange -> {
             heartbeats.incrementAndGet();
             exchange.sendResponseHeaders(204, -1);
             exchange.close();
@@ -41,7 +41,7 @@ class HeartbeatServiceTest {
         server.start();
 
         AgentConfiguration config = AgentConfiguration.builder()
-                .agentId("agent-1").controllerUrl("http://localhost:" + server.getAddress().getPort())
+                .agentId("agent-1").controllerUrl("http://localhost:" + server.getAddress().getPort() + "/api/v1")
                 .httpConnectionTimeout(1000).build();
         AgentRegistrationClient registration = new AgentRegistrationClient(
                 HttpClient.newHttpClient(), new com.fasterxml.jackson.databind.ObjectMapper(),

@@ -17,8 +17,8 @@
 package dev.mars.qraft.monitoring;
 
 /**
- * Unified health status enum for all health check components.
- * Replaces duplicate inner Status enums in ProtocolHealthCheck and TransferEngineHealthCheck.
+ * Unified health status enum for controller and agent health checks.
+ * Provides one shared vocabulary for component-level health reporting.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2025-12-17
