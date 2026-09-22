@@ -142,6 +142,19 @@ class DockerDeploymentContractTest {
     }
 
     @Test
+    void prebuiltDockerClustersPersistRaftStateAndExerciseSnapshots() throws IOException {
+        Path root = Path.of("..").toAbsolutePath().normalize();
+        for (String relativePath : PREBUILT_COMPOSE_FILES) {
+            String compose = Files.readString(root.resolve(relativePath));
+            assertTrue(compose.contains("QRAFT_RAFT_STORAGE_PATH=/app/data"), relativePath);
+            assertTrue(compose.contains("QRAFT_RAFT_SNAPSHOT_THRESHOLD="), relativePath);
+            assertTrue(compose.contains("QRAFT_RAFT_SNAPSHOT_CHECK_INTERVAL_MS="), relativePath);
+            assertTrue(compose.contains(":/app/data"), relativePath);
+            assertTrue(compose.contains("volumes:"), relativePath);
+        }
+    }
+
+    @Test
     void agentContainerChecksTheControllerRootHealthEndpoint() throws IOException {
         Path root = Path.of("..").toAbsolutePath().normalize();
         String entrypoint = Files.readString(root.resolve("qraft-agent/docker-entrypoint.sh"));

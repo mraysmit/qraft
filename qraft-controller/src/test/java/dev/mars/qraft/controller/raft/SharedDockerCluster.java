@@ -18,6 +18,8 @@ package dev.mars.qraft.controller.raft;
 
 import org.testcontainers.containers.ComposeContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
+import org.testcontainers.DockerClientFactory;
+import com.github.dockerjava.api.model.ContainerNetwork;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -30,6 +32,9 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 import java.util.stream.Stream;
 
@@ -55,11 +60,15 @@ import java.util.stream.Stream;
  */
 public final class SharedDockerCluster {
 
+    private static final Set<String> LIFECYCLE_ACTIONS = Set.of("stop", "kill", "start");
+
     private static final Logger logger = Logger.getLogger(SharedDockerCluster.class.getName());
 
     private static volatile boolean imageBuilt = false;
     private static ComposeContainer threeNodeCluster;
     private static ComposeContainer fiveNodeCluster;
+    private static final Map<String, Map<String, ContainerNetwork>> DISCONNECTED_NETWORKS =
+            new ConcurrentHashMap<>();
 
     static {
         Runtime.getRuntime().addShutdownHook(
@@ -87,6 +96,19 @@ public final class SharedDockerCluster {
             logger.info("Shared 3-node cluster started successfully");
         }
         return threeNodeCluster;
+    }
+
+    /** Starts a disposable three-node cluster for tests that intentionally poison a volume. */
+    public static ComposeContainer startIsolatedThreeNodeCluster() {
+        ensureImageBuilt();
+        ComposeContainer cluster = new ComposeContainer(
+                new File("src/test/resources/docker-compose-3node-prebuilt.yml"))
+                .withExposedService("controller1", 8080, Wait.forHttp("/health").forStatusCode(200))
+                .withExposedService("controller2", 8080, Wait.forHttp("/health").forStatusCode(200))
+                .withExposedService("controller3", 8080, Wait.forHttp("/health").forStatusCode(200))
+                .withStartupTimeout(Duration.ofSeconds(90));
+        cluster.start();
+        return cluster;
     }
 
     /**
@@ -122,6 +144,168 @@ public final class SharedDockerCluster {
             endpoints.add("http://localhost:" + port);
         }
         return endpoints;
+    }
+
+    /** Stops one compose service without removing its container or volume. */
+    public static synchronized void stopContainer(ComposeContainer cluster, String serviceName) {
+        runDockerLifecycleCommand("stop", containerId(cluster, serviceName),
+                SharedDockerCluster::runCommand);
+    }
+
+    /** Abruptly kills one compose service without removing its container or volume. */
+    public static synchronized void killContainer(ComposeContainer cluster, String serviceName) {
+        runDockerLifecycleCommand("kill", containerId(cluster, serviceName),
+                SharedDockerCluster::runCommand);
+    }
+
+    /** Starts a previously stopped or killed compose service. */
+    public static synchronized void startContainer(ComposeContainer cluster, String serviceName) {
+        runDockerLifecycleCommand("start", containerId(cluster, serviceName),
+                SharedDockerCluster::runCommand);
+    }
+
+    /** Stops every node and starts the same containers again, retaining named volumes. */
+    public static synchronized void restartCluster(ComposeContainer cluster, int nodeCount) {
+        List<String> containerIds = new ArrayList<>();
+        for (int i = 1; i <= nodeCount; i++) {
+            containerIds.add(containerId(cluster, "controller" + i));
+        }
+        for (String containerId : containerIds) {
+            runDockerLifecycleCommand("stop", containerId, SharedDockerCluster::runCommand);
+        }
+        for (String containerId : containerIds) {
+            runDockerLifecycleCommand("start", containerId, SharedDockerCluster::runCommand);
+        }
+    }
+
+    /** Overwrites one byte in a stopped container's durable volume without recreating it. */
+    public static synchronized void overwriteVolumeFileByte(
+            ComposeContainer cluster, String serviceName, String file, long offset) {
+        if (file == null || !file.startsWith("/app/data/") || file.contains("..")) {
+            throw new IllegalArgumentException("file must be inside /app/data");
+        }
+        if (offset < 0) throw new IllegalArgumentException("offset must be non-negative");
+        String script = "printf '\\000' | dd of='" + file + "' bs=1 seek=" + offset
+                + " count=1 conv=notrunc";
+        try {
+            runCommand(List.of("docker", "run", "--rm", "--volumes-from",
+                    containerId(cluster, serviceName), "alpine:3.20", "sh", "-c", script));
+        } catch (Exception error) {
+            throw new IllegalStateException("Could not overwrite " + file + " in " + serviceName, error);
+        }
+    }
+
+    /** Runs a second controller against an active controller's volume and captures its exit. */
+    public static DockerCommandResult runStorageLockContender(
+            ComposeContainer cluster, String ownerService) {
+        List<String> command = List.of(
+                "docker", "run", "--rm", "--volumes-from", containerId(cluster, ownerService),
+                "-e", "QRAFT_MODE=server",
+                "-e", "QRAFT_NODE_ID=lock-contender",
+                "-e", "QRAFT_RAFT_PORT=9080",
+                "-e", "QRAFT_HTTP_PORT=8080",
+                "-e", "QRAFT_CLUSTER_NODES=lock-contender=localhost:9080",
+                "-e", "QRAFT_RAFT_STORAGE_PATH=/app/data",
+                "qraft-runtime:test");
+        try {
+            ProcessBuilder processBuilder = new ProcessBuilder(command);
+            processBuilder.redirectErrorStream(true);
+            Process process = processBuilder.start();
+            String output;
+            try (var stream = process.getInputStream()) {
+                output = new String(stream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            }
+            return new DockerCommandResult(process.waitFor(), output);
+        } catch (Exception error) {
+            throw new IllegalStateException("Could not run storage-lock contender", error);
+        }
+    }
+
+    public record DockerCommandResult(int exitCode, String output) { }
+
+    /**
+     * Disconnects a running service from all of its Docker networks. The container
+     * is restarted while disconnected because Docker can otherwise leave an
+     * already-established TCP connection usable after a network disconnect.
+     */
+    public static synchronized void isolateContainerNetwork(
+            ComposeContainer cluster, String serviceName) {
+        var container = cluster.getContainerByServiceName(serviceName)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown compose service: " + serviceName));
+        String containerId = container.getContainerId();
+        Map<String, ContainerNetwork> networks = Map.copyOf(
+                container.getContainerInfo().getNetworkSettings().getNetworks());
+        if (networks.isEmpty()) throw new IllegalStateException(serviceName + " has no Docker networks");
+        for (String network : networks.keySet()) {
+            DockerClientFactory.instance().client().disconnectFromNetworkCmd()
+                    .withContainerId(containerId).withNetworkId(network).exec();
+        }
+        DISCONNECTED_NETWORKS.put(containerId, networks);
+        DockerClientFactory.instance().client().restartContainerCmd(containerId).exec();
+    }
+
+    /** Reconnects a service to the exact Docker networks and aliases it previously used. */
+    public static synchronized void restoreContainerNetwork(
+            ComposeContainer cluster, String serviceName) {
+        var container = cluster.getContainerByServiceName(serviceName)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown compose service: " + serviceName));
+        String containerId = container.getContainerId();
+        Map<String, ContainerNetwork> networks = DISCONNECTED_NETWORKS.remove(containerId);
+        if (networks != null) {
+            networks.forEach((network, settings) ->
+                    DockerClientFactory.instance().client().connectToNetworkCmd()
+                            .withContainerId(containerId).withNetworkId(network)
+                            .withContainerNetwork(settings).exec());
+        }
+    }
+
+    @FunctionalInterface
+    interface DockerCommandRunner {
+        void run(List<String> command) throws Exception;
+    }
+
+    static void runDockerLifecycleCommand(
+            String action, String containerId, DockerCommandRunner commandRunner) {
+        if (!LIFECYCLE_ACTIONS.contains(action)) {
+            throw new IllegalArgumentException("Unsupported Docker lifecycle action: " + action);
+        }
+        if (containerId == null || containerId.isBlank()) {
+            throw new IllegalArgumentException("containerId is required");
+        }
+        try {
+            commandRunner.run(List.of("docker", action, containerId));
+        } catch (RuntimeException error) {
+            throw error;
+        } catch (Exception error) {
+            throw new IllegalStateException(
+                    "Docker " + action + " failed for container " + containerId, error);
+        }
+    }
+
+    private static String containerId(ComposeContainer cluster, String serviceName) {
+        return cluster.getContainerByServiceName(serviceName)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Unknown compose service: " + serviceName))
+                .getContainerId();
+    }
+
+    private static void runCommand(List<String> command) throws Exception {
+        ProcessBuilder processBuilder = new ProcessBuilder(command);
+        processBuilder.redirectErrorStream(true);
+        Process process = processBuilder.start();
+        StringBuilder output = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                output.append(line).append(System.lineSeparator());
+            }
+        }
+        int exitCode = process.waitFor();
+        if (exitCode != 0) {
+            throw new IllegalStateException(String.join(" ", command)
+                    + " exited with " + exitCode + ": " + output.toString().trim());
+        }
     }
 
     /**

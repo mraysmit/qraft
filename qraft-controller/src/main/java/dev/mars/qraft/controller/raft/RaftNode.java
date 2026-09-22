@@ -123,6 +123,7 @@ public class RaftNode {
 
     // ========== TIMING AND CONTROL ==========
     private volatile boolean running = false;
+    private volatile Throwable startupFailure;
     private final Object stopLock = new Object();
     private Promise<Void> startPromise;
     private Promise<Void> stopPromise;
@@ -488,6 +489,7 @@ public class RaftNode {
             finishOwnedAsyncOperation();
         }
         if (startupFailure != null) {
+            this.startupFailure = startupFailure;
             rollbackFailedStart(completion, startupFailure);
         }
     }
@@ -647,12 +649,12 @@ public class RaftNode {
     private void beginShutdown(Promise<Void> completion) {
         running = false;
         cancelTimers();
+        failPendingCommands(new CommandOutcomeUnknownException(
+                "Node stopped before command commitment; outcome may be unknown"));
 
         Future.all(transitionSequencer.drain(), drainOwnedAsyncOperations()).onComplete(drainResult -> {
             state = State.FOLLOWER;
             currentLeaderId = null;
-            failPendingCommands(new IllegalStateException(
-                    "Node stopped before command commitment; outcome may be unknown"));
             pendingInstalls.clear();
             outboundSnapshotTransfers.clear();
 
@@ -767,7 +769,7 @@ public class RaftNode {
     }
 
     public boolean isFenced() {
-        return transitionSequencer.isFenced();
+        return startupFailure != null || transitionSequencer.isFenced();
     }
 
     public String getLeaderId() {
@@ -1174,9 +1176,50 @@ public class RaftNode {
         cancelElectionTimer();
 
         initializeLeaderState();
+        appendLeadershipNoOpIfRecoveredEntriesAwaitCommit();
         startHeartbeats();
         sendHeartbeats(); // Immediate
         startSnapshotScheduler();
+    }
+
+    /**
+     * Establishes an entry in the new leader's term when recovery left a WAL
+     * suffix whose commit status must be re-established by a quorum. Committing
+     * this no-op also safely commits and applies the preceding retained prefix.
+     */
+    private void appendLeadershipNoOpIfRecoveredEntriesAwaitCommit() {
+        if (commitIndex >= lastLogIndex()) return;
+        long leadershipTerm = currentTerm;
+        long generation = leadershipGeneration;
+        transitionSequencer.submit(
+                        "leader-no-op:" + leadershipTerm + ":" + generation,
+                        RaftTransitionSequencer.FailurePolicy.FENCE,
+                        RaftNode::isAmbiguousLeaderAppendFailure,
+                        () -> {
+                            if (!isCurrentLeadership(leadershipTerm, generation)) {
+                                return Future.succeededFuture((LogEntry) null);
+                            }
+                            LogEntry noOp = new LogEntry(
+                                    leadershipTerm, lastLogIndex() + 1, null);
+                            return persistLogEntry(noOp).map(ignored -> noOp);
+                        },
+                        noOp -> {
+                            if (noOp == null
+                                    || !isCurrentLeadership(leadershipTerm, generation)) {
+                                return null;
+                            }
+                            log.add(noOp);
+                            logger.info("Leadership no-op submitted at index {} term {}",
+                                    noOp.getIndex(), noOp.getTerm());
+                            for (String peer : clusterNodes) {
+                                if (!peer.equals(nodeId)) sendAppendEntries(peer, false);
+                            }
+                            updateCommitIndex();
+                            return null;
+                        })
+                .onFailure(error -> logger.error(
+                        "Failed to establish leadership no-op for term {}: {}",
+                        leadershipTerm, error.getMessage(), error));
     }
 
     private void initializeLeaderState() {
@@ -1354,7 +1397,7 @@ public class RaftNode {
         MDC.put("raftRole", "FOLLOWER");
         MDC.put("raftTerm", String.valueOf(currentTerm));
         notifyStateChangeListeners(State.FOLLOWER);
-        failPendingCommands(new IllegalStateException(
+        failPendingCommands(new CommandOutcomeUnknownException(
                 "Leadership lost before command commit; outcome may be unknown"));
         cancelTimers();
         if (running) resetElectionTimer();
@@ -2578,7 +2621,7 @@ public class RaftNode {
             MDC.put("raftRole", "FOLLOWER");
             MDC.put("raftTerm", String.valueOf(currentTerm));
             notifyStateChangeListeners(State.FOLLOWER);
-            failPendingCommands(new IllegalStateException(
+            failPendingCommands(new CommandOutcomeUnknownException(
                     "Leadership lost before command commit; outcome may be unknown"));
             cancelHeartbeatTimer();
             cancelSnapshotTimer();

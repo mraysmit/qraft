@@ -85,7 +85,7 @@ class RaftNodeRealSnapshotRecoveryTest {
     }
 
     @Test
-    void restartWithUnpublishedFirstSnapshotDiscardsTemporaryAndUsesWal() throws Exception {
+    void restartWithUnpublishedFirstSnapshotFencesAndPreservesTemporary() throws Exception {
         seedWal();
         SnapshotStore.SnapshotData replacement = replacementSnapshot();
         String checkpoint = "AFTER_TEMPORARY_FORCE";
@@ -96,16 +96,13 @@ class RaftNodeRealSnapshotRecoveryTest {
 
         assertTrue(Files.exists(directory.resolve("snapshot.dat.tmp")));
         assertFalse(Files.exists(directory.resolve("snapshot.dat")));
-        RaftStorageFactory.DurableStorage recovered = await(
-                RaftStorageFactory.createDurable(directory, true));
-        assertFalse(Files.exists(directory.resolve("snapshot.dat.tmp")));
-        assertTrue(recovered.snapshots().loadLatest().get(5, TimeUnit.SECONDS).isEmpty());
-        assertEquals(new RaftStorage.PersistentMeta(3, Optional.of("node-1")),
-                recovered.wal().loadMetadata().get(5, TimeUnit.SECONDS));
-        assertEquals(List.of(1L, 2L, 3L, 4L), recovered.wal().replayLog()
-                .get(5, TimeUnit.SECONDS).stream().map(RaftStorage.LogEntryData::index).toList());
-        recovered.snapshots().closeAsync().get(5, TimeUnit.SECONDS);
-        recovered.wal().closeAsync().get(5, TimeUnit.SECONDS);
+        byte[] evidence = Files.readAllBytes(directory.resolve("snapshot.dat.tmp"));
+        CompletionException failure = assertThrows(CompletionException.class,
+                () -> await(RaftStorageFactory.createDurable(directory, true)));
+        assertTrue(failure.getCause().getMessage().contains("unpublished first snapshot"));
+        assertTrue(Files.exists(directory.resolve("snapshot.dat.tmp")));
+        org.junit.jupiter.api.Assertions.assertArrayEquals(
+                evidence, Files.readAllBytes(directory.resolve("snapshot.dat.tmp")));
     }
 
     @Test

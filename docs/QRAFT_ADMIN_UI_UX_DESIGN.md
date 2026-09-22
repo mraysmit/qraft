@@ -22,7 +22,7 @@ runtime packaging are defined in
 [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md).
 
 An interactive, self-contained reference implementation is available at
-[`prototype/qraft-admin-mockup.html`](../prototype/qraft-admin-mockup.html).
+[`console-prototype/qraft-admin-mockup.html`](../console-prototype/qraft-admin-mockup.html).
 It applies the GD Workspace runtime prototype's visual language and prototyping
 approach to this Qraft information architecture; it is a design reference, not
 an assertion that the two products share domain concepts or user journeys.

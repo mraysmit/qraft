@@ -16,9 +16,14 @@ services:
       - QRAFT_CLUSTER_NODES=controller1=controller1:9080,controller2=controller2:9080,controller3=controller3:9080
       - QRAFT_RAFT_ELECTION_TIMEOUT_MS=1500
       - QRAFT_RAFT_HEARTBEAT_INTERVAL_MS=300
+      - QRAFT_RAFT_STORAGE_PATH=/app/data
+      - QRAFT_RAFT_SNAPSHOT_THRESHOLD=5
+      - QRAFT_RAFT_SNAPSHOT_CHECK_INTERVAL_MS=1000
       - JAVA_OPTS=-Xmx256m -Xms128m
     ports:
       - "8080"
+    volumes:
+      - controller1-data:/app/data
     networks:
       - raft-cluster
     healthcheck:
@@ -40,9 +45,14 @@ services:
       - QRAFT_CLUSTER_NODES=controller1=controller1:9080,controller2=controller2:9080,controller3=controller3:9080
       - QRAFT_RAFT_ELECTION_TIMEOUT_MS=1500
       - QRAFT_RAFT_HEARTBEAT_INTERVAL_MS=300
+      - QRAFT_RAFT_STORAGE_PATH=/app/data
+      - QRAFT_RAFT_SNAPSHOT_THRESHOLD=5
+      - QRAFT_RAFT_SNAPSHOT_CHECK_INTERVAL_MS=1000
       - JAVA_OPTS=-Xmx256m -Xms128m
     ports:
       - "8080"
+    volumes:
+      - controller2-data:/app/data
     networks:
       - raft-cluster
     healthcheck:
@@ -64,9 +74,14 @@ services:
       - QRAFT_CLUSTER_NODES=controller1=controller1:9080,controller2=controller2:9080,controller3=controller3:9080
       - QRAFT_RAFT_ELECTION_TIMEOUT_MS=1500
       - QRAFT_RAFT_HEARTBEAT_INTERVAL_MS=300
+      - QRAFT_RAFT_STORAGE_PATH=/app/data
+      - QRAFT_RAFT_SNAPSHOT_THRESHOLD=5
+      - QRAFT_RAFT_SNAPSHOT_CHECK_INTERVAL_MS=1000
       - JAVA_OPTS=-Xmx256m -Xms128m
     ports:
       - "8080"
+    volumes:
+      - controller3-data:/app/data
     networks:
       - raft-cluster
     healthcheck:
@@ -79,3 +94,8 @@ services:
 networks:
   raft-cluster:
     driver: bridge
+
+volumes:
+  controller1-data:
+  controller2-data:
+  controller3-data:

@@ -8,6 +8,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
@@ -77,6 +78,23 @@ class FileSnapshotStoreTest {
                     publicationFailure.outcome());
             assertTrue(store.loadLatest().get(10, TimeUnit.SECONDS).isPresent());
         }
+    }
+
+    @Test
+    void unpublishedFirstSnapshotTemporaryFileFencesOpenAndIsPreserved() throws Exception {
+        Path temporary = directory.resolve("snapshot.dat.tmp");
+        byte[] evidence = "incomplete-first-snapshot".getBytes(StandardCharsets.UTF_8);
+        Files.write(temporary, evidence);
+
+        try (FileSnapshotStore store = new FileSnapshotStore()) {
+            ExecutionException failure = assertThrows(ExecutionException.class,
+                    () -> store.open(directory).get(10, TimeUnit.SECONDS));
+            String diagnostic = failure.getCause().getMessage();
+            assertTrue(diagnostic.contains(temporary.toString()), diagnostic);
+            assertTrue(diagnostic.contains("unpublished first snapshot"), diagnostic);
+        }
+        assertArrayEquals(evidence, Files.readAllBytes(temporary),
+                "startup fencing must preserve the temporary file for diagnosis");
     }
 
     private static SnapshotData snapshot() {

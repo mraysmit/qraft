@@ -195,7 +195,18 @@ public class QraftControllerService {
 
                         logger.info("QraftControllerService started successfully (gRPC and HTTP health mode)");
                         startPromise.complete();
-                    }).onFailure(startPromise::fail);
+                    }).onFailure(error -> {
+                        if (node.isFenced()) {
+                            logger.error("Raft recovery failed; node remains live but unready and will not "
+                                            + "participate. Preserve the node directory for diagnosis, then "
+                                            + "replace it from a healthy peer and restart: {}",
+                                    error.getMessage(), error);
+                            setupShutdownCoordinator();
+                            startPromise.complete();
+                        } else {
+                            startPromise.fail(error);
+                        }
+                    });
                 } catch (Exception e) {
                     startPromise.fail(e);
                 }

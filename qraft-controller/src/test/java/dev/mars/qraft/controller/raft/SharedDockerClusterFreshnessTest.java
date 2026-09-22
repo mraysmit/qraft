@@ -7,8 +7,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -64,5 +67,22 @@ class SharedDockerClusterFreshnessTest {
         Files.setLastModifiedTime(jar, FileTime.from(Instant.parse("2026-01-02T00:00:00Z")));
 
         assertDoesNotThrow(() -> SharedDockerCluster.assertRuntimeJarIsCurrent(repositoryRoot, jar));
+    }
+
+    @Test
+    void lifecycleCommandsUseDockerWithoutRemovingVolumes() {
+        List<List<String>> commands = new ArrayList<>();
+
+        SharedDockerCluster.runDockerLifecycleCommand(
+                "stop", "container-id", command -> commands.add(List.copyOf(command)));
+        SharedDockerCluster.runDockerLifecycleCommand(
+                "kill", "container-id", command -> commands.add(List.copyOf(command)));
+        SharedDockerCluster.runDockerLifecycleCommand(
+                "start", "container-id", command -> commands.add(List.copyOf(command)));
+
+        assertEquals(List.of(
+                List.of("docker", "stop", "container-id"),
+                List.of("docker", "kill", "container-id"),
+                List.of("docker", "start", "container-id")), commands);
     }
 }

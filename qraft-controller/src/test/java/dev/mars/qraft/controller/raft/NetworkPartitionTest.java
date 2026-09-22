@@ -20,7 +20,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInfo;
@@ -90,7 +89,6 @@ public class NetworkPartitionTest {
         logger.info("Completed network partition test: " + testInfo.getDisplayName());
     }
 
-    @Disabled("Node isolation is not implemented -- simulateNodeIsolation() is a no-op")
     @Test
     void testMajorityPartition() {
         // Wait for initial leader election
@@ -187,17 +185,8 @@ public class NetworkPartitionTest {
     // Helper methods for network manipulation
 
     private void simulateNodeIsolation(String nodeId) {
-        try {
-            // In a real implementation, this would use Docker network commands
-            // to isolate the node from the cluster network
-            logger.info("Simulating isolation of " + nodeId);
-            
-            // For now, we'll use container stop/start to simulate network issues
-            // This is a simplified approach for demonstration
-            
-        } catch (Exception e) {
-            logger.warning("Failed to isolate node " + nodeId + ": " + e.getMessage());
-        }
+        logger.info("Isolating " + nodeId + " from its Docker networks");
+        SharedDockerCluster.isolateContainerNetwork(environment, nodeId);
     }
 
     private void simulateNetworkLatency() {
@@ -215,14 +204,9 @@ public class NetworkPartitionTest {
     }
 
     private void restoreNetworkConnectivity() {
-        try {
-            logger.info("Restoring network connectivity...");
-            
-            // Remove network constraints and restore normal connectivity
-            // This would remove tc rules and reconnect isolated containers
-            
-        } catch (Exception e) {
-            logger.warning("Failed to restore network connectivity: " + e.getMessage());
+        logger.info("Restoring network connectivity...");
+        for (int i = 1; i <= 5; i++) {
+            SharedDockerCluster.restoreContainerNetwork(environment, "controller" + i);
         }
     }
 

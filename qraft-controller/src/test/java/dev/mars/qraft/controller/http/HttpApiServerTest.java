@@ -22,13 +22,18 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HttpApiServerTest {
@@ -103,6 +108,21 @@ class HttpApiServerTest {
         assertTrue(health.body().contains("PASSING"));
         assertEquals(200, deregistered.statusCode());
         assertTrue(store.getServiceCatalog().instances("payments").isEmpty());
+    }
+
+    @Test
+    void exposesRaftRoleAndDurableTerm() throws Exception {
+        QraftStateStore store = startSingleNode();
+        server = new HttpApiServer(0, node, store);
+        server.start().join();
+
+        HttpResponse<String> response = request(HttpClient.newHttpClient(), "/raft/status", "GET");
+
+        assertEquals(200, response.statusCode());
+        assertTrue(response.body().contains("\"nodeId\":\"" + node.getNodeId() + "\""));
+        assertTrue(response.body().contains("\"state\":\"LEADER\""));
+        assertTrue(response.body().contains("\"term\":" + node.getCurrentTerm()));
+        assertTrue(response.body().contains("\"snapshotLastIndex\":" + node.getSnapshotLastIndex()));
     }
 
     @Test
@@ -243,6 +263,24 @@ class HttpApiServerTest {
     }
 
     @Test
+    void reportsUnknownOutcomeWhenHttpWriteTimesOut() throws Exception {
+        GatedAppendStorage gatedWal = startGatedHttpNode();
+
+        CompletableFuture<HttpResponse<String>> request = HttpClient.newHttpClient().sendAsync(
+                serviceRegistrationRequest("pending-service"), HttpResponse.BodyHandlers.ofString());
+        gatedWal.awaitBlockedAppend();
+
+        try {
+            HttpResponse<String> response = request.get(7, TimeUnit.SECONDS);
+            assertEquals(503, response.statusCode());
+            assertTrue(response.body().contains("\"error\":\"outcome_unknown\""), response.body());
+            assertTrue(response.body().contains("\"retryable\":true"), response.body());
+        } finally {
+            gatedWal.releaseBlockedAppend();
+        }
+    }
+
+    @Test
     void reportsCatalogProtocolErrorsAndRejectsQueriesWhileDraining() throws Exception {
         QraftStateStore store = startSingleNode();
         server = new HttpApiServer(0, node, store);
@@ -299,6 +337,52 @@ class HttpApiServerTest {
         assertEquals(200, live.statusCode());
     }
 
+    @Test
+    void corruptWalFencesStartupWithoutMutatingTheEvidence() throws Exception {
+        RaftStorageFactory.DurableStorage writer = RaftStorageFactory
+                .createDurable(directory, true).toCompletionStage().toCompletableFuture()
+                .get(5, TimeUnit.SECONDS);
+        writer.wal().appendEntries(List.of(new RaftStorage.LogEntryData(
+                1, 1, new byte[]{1, 2, 3}))).join();
+        writer.wal().sync().join();
+        writer.wal().closeAsync().join();
+        writer.snapshots().close();
+        Path walPath = directory.resolve("raft.log");
+        byte[] corruptWal = Files.readAllBytes(walPath);
+        corruptWal[corruptWal.length - 1] ^= 0x01;
+        Files.write(walPath, corruptWal);
+
+        runtime = JavaRuntime.create();
+        QraftStateStore store = new QraftStateStore();
+        RaftStorageFactory.DurableStorage reopened = RaftStorageFactory
+                .createDurable(directory, true).toCompletionStage().toCompletableFuture()
+                .get(5, TimeUnit.SECONDS);
+        node = RaftNode.builder()
+                .runtime(runtime).nodeId("corrupt-node").clusterNodes(Set.of("corrupt-node"))
+                .transport(new InMemoryTransportSimulator("corrupt-node"))
+                .stateMachine(store).commandCodec(new ProtobufRaftCommandCodec())
+                .mode(RaftNodeMode.durable(reopened.wal(), reopened.snapshots()))
+                .snapshotEnabled(false).electionTimeout(25).build();
+
+        java.util.concurrent.CompletionException failure = assertThrows(
+                java.util.concurrent.CompletionException.class,
+                () -> node.start().toCompletionStage().toCompletableFuture().join());
+        String diagnostic = failure.getCause().toString();
+        assertTrue(diagnostic.contains("raft.log") || diagnostic.contains(directory.toString()), diagnostic);
+        assertTrue(diagnostic.toLowerCase().contains("position")
+                || diagnostic.toLowerCase().contains("offset")
+                || diagnostic.toLowerCase().contains("byte")
+                || diagnostic.toLowerCase().contains("index"), diagnostic);
+
+        server = new HttpApiServer(0, node, store);
+        server.start().join();
+        HttpResponse<String> ready = request(HttpClient.newHttpClient(), "/health/ready", "GET");
+        assertEquals(503, ready.statusCode());
+        assertTrue(ready.body().contains("fenced"), ready.body());
+        assertArrayEquals(corruptWal, Files.readAllBytes(walPath),
+                "failed recovery must preserve the corrupt WAL for diagnosis");
+    }
+
     private static final class AmbiguousAppendStorage implements RaftStorage {
         private final RaftStorage delegate;
 
@@ -314,6 +398,55 @@ class HttpApiServerTest {
         @Override public CompletableFuture<Void> appendEntries(List<LogEntryData> entries) {
             return delegate.appendEntries(entries).thenCompose(ignored -> CompletableFuture.failedFuture(
                     new IllegalStateException("append persisted before completion failed")));
+        }
+        @Override public CompletableFuture<Void> truncateSuffix(long fromIndex) {
+            return delegate.truncateSuffix(fromIndex);
+        }
+        @Override public CompletableFuture<Void> truncatePrefix(long toIndex) {
+            return delegate.truncatePrefix(toIndex);
+        }
+        @Override public CompletableFuture<Void> sync() { return delegate.sync(); }
+        @Override public CompletableFuture<List<LogEntryData>> replayLog() { return delegate.replayLog(); }
+        @Override public CompletableFuture<Void> closeAsync() { return delegate.closeAsync(); }
+        @Override public void close() { closeAsync(); }
+    }
+
+    private static final class GatedAppendStorage implements RaftStorage {
+        private final RaftStorage delegate;
+        private final AtomicReference<CompletableFuture<Void>> nextGate = new AtomicReference<>();
+        private final AtomicReference<CompletableFuture<Void>> blockedGate = new AtomicReference<>();
+        private final CountDownLatch appendBlocked = new CountDownLatch(1);
+
+        private GatedAppendStorage(RaftStorage delegate) {
+            this.delegate = delegate;
+        }
+
+        void blockNextAppendCompletion() {
+            nextGate.set(new CompletableFuture<>());
+        }
+
+        void awaitBlockedAppend() throws InterruptedException {
+            assertTrue(appendBlocked.await(5, TimeUnit.SECONDS), "append did not reach its gate");
+        }
+
+        void releaseBlockedAppend() {
+            CompletableFuture<Void> gate = blockedGate.get();
+            if (gate != null) gate.complete(null);
+        }
+
+        @Override public CompletableFuture<Void> open(Path dataDir) { return delegate.open(dataDir); }
+        @Override public CompletableFuture<Void> updateMetadata(long term, Optional<String> votedFor) {
+            return delegate.updateMetadata(term, votedFor);
+        }
+        @Override public CompletableFuture<PersistentMeta> loadMetadata() { return delegate.loadMetadata(); }
+        @Override public CompletableFuture<Void> appendEntries(List<LogEntryData> entries) {
+            return delegate.appendEntries(entries).thenCompose(ignored -> {
+                CompletableFuture<Void> gate = nextGate.getAndSet(null);
+                if (gate == null) return CompletableFuture.completedFuture(null);
+                blockedGate.set(gate);
+                appendBlocked.countDown();
+                return gate;
+            });
         }
         @Override public CompletableFuture<Void> truncateSuffix(long fromIndex) {
             return delegate.truncateSuffix(fromIndex);
@@ -350,6 +483,30 @@ class HttpApiServerTest {
         return store;
     }
 
+    private GatedAppendStorage startGatedHttpNode() throws Exception {
+        runtime = JavaRuntime.create();
+        QraftStateStore store = new QraftStateStore();
+        RaftStorageFactory.DurableStorage durable = RaftStorageFactory
+                .createDurable(directory, true).toCompletionStage().toCompletableFuture()
+                .get(5, TimeUnit.SECONDS);
+        GatedAppendStorage gatedWal = new GatedAppendStorage(durable.wal());
+        node = RaftNode.builder()
+                .runtime(runtime).nodeId("pending-http-node").clusterNodes(Set.of("pending-http-node"))
+                .transport(new InMemoryTransportSimulator("pending-http-node"))
+                .stateMachine(store).commandCodec(new ProtobufRaftCommandCodec())
+                .mode(RaftNodeMode.durable(gatedWal, durable.snapshots()))
+                .snapshotEnabled(false).electionTimeout(25).heartbeatInterval(10_000)
+                .build();
+        node.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (!node.isLeader() && System.nanoTime() < deadline) Thread.onSpinWait();
+        assertTrue(node.isLeader());
+        server = new HttpApiServer(0, node, store);
+        server.start().join();
+        gatedWal.blockNextAppendCompletion();
+        return gatedWal;
+    }
+
     private QraftStateStore startAgentApi() throws Exception {
         QraftStateStore store = startSingleNode();
         server = new HttpApiServer(0, node, store);
@@ -378,5 +535,17 @@ class HttpApiServerTest {
                 .method(method, publisher)
                 .build();
         return client.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    private HttpRequest serviceRegistrationRequest(String serviceId) {
+        String body = """
+                {"serviceId":"%s","serviceName":"pending","nodeId":"node-1",
+                 "address":"127.0.0.1","port":8080,"tags":[],"metadata":{},"health":"PASSING"}
+                """.formatted(serviceId);
+        return HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + server.port() + "/v1/agent/service/register"))
+                .header("Content-Type", "application/json")
+                .PUT(HttpRequest.BodyPublishers.ofString(body))
+                .build();
     }
 }

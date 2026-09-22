@@ -8,6 +8,7 @@ import dev.mars.qraft.agent.AgentInfo;
 import dev.mars.qraft.agent.AgentStatus;
 import dev.mars.qraft.catalog.ServiceInstance;
 import dev.mars.qraft.controller.raft.RaftNode;
+import dev.mars.qraft.controller.raft.CommandOutcomeUnknownException;
 import dev.mars.qraft.controller.state.AgentCommand;
 import dev.mars.qraft.controller.state.CatalogCommand;
 import dev.mars.qraft.controller.state.RaftCommand;
@@ -28,6 +29,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Lightweight JDK HTTP API for health and controller discovery endpoints. */
@@ -61,6 +63,7 @@ public final class HttpApiServer implements AutoCloseable {
         registerHealth("/health", "passing");
         register("/status", 200, "{\"status\":\"running\"}");
         register("/api/v1/info", 200, "{\"version\":\"1.0.0\",\"httpPort\":" + port + "}");
+        server.createContext("/raft/status", this::raftStatus);
         server.createContext("/api/v1/agents/register", this::registerAgent);
         server.createContext("/api/v1/agents/heartbeat", this::heartbeatAgent);
         server.createContext("/api/v1/agents", this::agents);
@@ -114,7 +117,7 @@ public final class HttpApiServer implements AutoCloseable {
                 respond(exchange, 405, "{\"error\":\"method_not_allowed\"}");
                 return;
             }
-            if (raftNode != null && raftNode.isFenced()) {
+            if ("/health/ready".equals(path) && raftNode != null && raftNode.isFenced()) {
                 respond(exchange, 503, "{\"status\":\"fenced\"}");
                 return;
             }
@@ -141,6 +144,26 @@ public final class HttpApiServer implements AutoCloseable {
         } catch (CompletionException e) {
             respondUnavailable(exchange, e);
         }
+    }
+
+    private void raftStatus(HttpExchange exchange) throws IOException {
+        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            respond(exchange, 405, "{\"error\":\"method_not_allowed\"}");
+            return;
+        }
+        if (raftNode == null) {
+            respondJson(exchange, 503, Map.of("error", "raft_unavailable"));
+            return;
+        }
+        Map<String, Object> status = new LinkedHashMap<>();
+        status.put("nodeId", raftNode.getNodeId());
+        status.put("state", raftNode.getState().name());
+        status.put("term", raftNode.getCurrentTerm());
+        status.put("leaderId", raftNode.getLeaderId());
+        status.put("commitIndex", raftNode.getCommitIndex());
+        status.put("snapshotLastIndex", raftNode.getSnapshotLastIndex());
+        status.put("fenced", raftNode.isFenced());
+        respondJson(exchange, 200, status);
     }
 
     private void registerAgent(HttpExchange exchange) throws IOException {
@@ -300,6 +323,18 @@ public final class HttpApiServer implements AutoCloseable {
     private void respondUnavailable(HttpExchange exchange, CompletionException error) throws IOException {
         Throwable cause = error.getCause() == null ? error : error.getCause();
         String leaderId = raftNode == null ? null : raftNode.getLeaderId();
+        if (cause instanceof TimeoutException || cause instanceof CommandOutcomeUnknownException) {
+            if (leaderId != null && !leaderId.isBlank()) {
+                exchange.getResponseHeaders().set("X-Qraft-Leader-Id", leaderId);
+            }
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("error", "outcome_unknown");
+            body.put("message", safeMessage(cause));
+            body.put("retryable", true);
+            if (leaderId != null && !leaderId.isBlank()) body.put("leaderId", leaderId);
+            respondJson(exchange, 503, body);
+            return;
+        }
         if (leaderId == null || leaderId.isBlank()) {
             respondJson(exchange, 503, Map.of("error", "leader_unavailable", "message", safeMessage(cause)));
             return;

@@ -10,6 +10,7 @@
 
 package dev.mars.qraft.controller.raft;
 
+import com.google.protobuf.ByteString;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
@@ -82,6 +83,37 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
     void divergentSuffixIsAbsentFromWalAndRecoveryAfterInstallation() throws Exception {
         verifyRecovery(InstalledSnapshotCrashWriter.AFTER_DIVERGENT_SUFFIX_INSTALL,
                 List.of(), 99, 3, false);
+    }
+
+    @Test
+    void emptyWalFollowerCanInstallSnapshotBeyondItsLastIndex() throws Exception {
+        RaftStorageFactory.DurableStorage durable = await(
+                RaftStorageFactory.createDurable(directory, true));
+        runtime = JavaRuntime.create();
+        QraftStateStore state = new QraftStateStore();
+        node = RaftNode.builder()
+                .runtime(runtime).nodeId("empty-follower")
+                .clusterNodes(Set.of("leader", "empty-follower", "peer"))
+                .transport(new NoOpTransport()).stateMachine(state).commandCodec(CODEC)
+                .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
+                .snapshotEnabled(false).electionTimeout(60_000).heartbeatInterval(60_000)
+                .build();
+        await(node.start());
+        QraftStateStore source = new QraftStateStore();
+        source.apply(new DistributedStateRaftCommand(
+                DistributedStateCommand.put("installed", "snapshot")));
+
+        InstallSnapshotResponse response = await(node.handleInstallSnapshot(
+                InstallSnapshotRequest.newBuilder()
+                        .setTerm(1).setLeaderId("leader")
+                        .setLastIncludedIndex(6).setLastIncludedTerm(1)
+                        .setChunkIndex(0).setTotalChunks(1).setDone(true)
+                        .setData(ByteString.copyFrom(source.takeSnapshot()))
+                        .build()));
+
+        assertTrue(response.getSuccess(), response.toString());
+        assertEquals(6, node.getSnapshotLastIndex());
+        assertEquals("snapshot", state.getMetadata("installed"));
     }
 
     private void verifyRecovery(String checkpoint, List<Long> expectedWalIndexes,

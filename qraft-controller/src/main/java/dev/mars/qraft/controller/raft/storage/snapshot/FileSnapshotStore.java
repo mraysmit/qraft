@@ -60,6 +60,12 @@ public final class FileSnapshotStore implements SnapshotStore {
             Files.createDirectories(this.directory);
             Path temporary = this.directory.resolve(TEMP_FILE);
             if (Files.exists(temporary)) {
+                Path published = this.directory.resolve(SNAPSHOT_FILE);
+                if (!Files.exists(published)) {
+                    throw new IOException("Refusing startup because unpublished first snapshot "
+                            + temporary + " has no published " + published
+                            + "; preserve the file for diagnosis and restore this node from its peers");
+                }
                 Files.delete(temporary);
             }
             opened = true;

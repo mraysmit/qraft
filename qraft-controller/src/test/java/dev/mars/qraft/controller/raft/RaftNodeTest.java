@@ -273,6 +273,50 @@ class RaftNodeTest {
     }
 
     @Test
+    void multiNodeRestartAppliesPreviouslyCommittedWalAfterElection() throws Exception {
+        Set<String> members = Set.of("node1", "node2", "node3");
+        Path node1Directory = tempDir.resolve("restart-node1");
+        Path node2Directory = tempDir.resolve("restart-node2");
+        Path node3Directory = tempDir.resolve("restart-node3");
+        node1 = durableNode("node1", members, stateMachine1, node1Directory);
+        node2 = durableNode("node2", members, stateMachine2, node2Directory);
+        node3 = durableNode("node3", members, stateMachine3, node3Directory);
+        node1.start();
+        node2.start();
+        node3.start();
+        List<RaftNode> originalNodes = List.of(node1, node2, node3);
+        await().atMost(Duration.ofSeconds(10))
+                .until(() -> originalNodes.stream().filter(RaftNode::isLeader).count() == 1);
+        RaftNode leader = originalNodes.stream().filter(RaftNode::isLeader).findFirst().orElseThrow();
+        leader.submitCommand(distributedPut("restart-key", "durable-value"))
+                .toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        await().atMost(Duration.ofSeconds(5)).until(() ->
+                List.of(stateMachine1, stateMachine2, stateMachine3).stream()
+                        .allMatch(store -> "durable-value".equals(store.getMetadata("restart-key"))));
+
+        for (RaftNode original : originalNodes) {
+            original.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        }
+        InMemoryTransportSimulator.clearAllTransports();
+        stateMachine1 = new QraftStateStore();
+        stateMachine2 = new QraftStateStore();
+        stateMachine3 = new QraftStateStore();
+        node1 = durableNode("node1", members, stateMachine1, node1Directory);
+        node2 = durableNode("node2", members, stateMachine2, node2Directory);
+        node3 = durableNode("node3", members, stateMachine3, node3Directory);
+        node1.start();
+        node2.start();
+        node3.start();
+        List<RaftNode> recoveredNodes = List.of(node1, node2, node3);
+
+        await().atMost(Duration.ofSeconds(10))
+                .until(() -> recoveredNodes.stream().filter(RaftNode::isLeader).count() == 1);
+        await().atMost(Duration.ofSeconds(5)).until(() ->
+                List.of(stateMachine1, stateMachine2, stateMachine3).stream()
+                        .allMatch(store -> "durable-value".equals(store.getMetadata("restart-key"))));
+    }
+
+    @Test
     void replaysMixedLegacyJsonAndProtobufWalEntries() {
         Path storageDir = tempDir.resolve("catalog-mixed-codec-recovery");
         RaftStorageFactory.DurableStorage writerStorage = awaitPersistence(storageDir);
@@ -934,6 +978,24 @@ class RaftNodeTest {
                 .stateMachine(store)
                 .commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.durable(storage.wal(), storage.snapshots()))
+                .electionTimeout(500)
+                .heartbeatInterval(100)
+                .build();
+    }
+
+    private RaftNode durableNode(String nodeId, Set<String> members, QraftStateStore store,
+                                 Path storageDirectory) {
+        InMemoryTransportSimulator transport = new InMemoryTransportSimulator(nodeId);
+        RaftStorageFactory.DurableStorage storage = awaitPersistence(storageDirectory);
+        return RaftNode.builder()
+                .runtime(runtime)
+                .nodeId(nodeId)
+                .clusterNodes(members)
+                .transport(transport)
+                .stateMachine(store)
+                .commandCodec(new ProtobufRaftCommandCodec())
+                .mode(RaftNodeMode.durable(storage.wal(), storage.snapshots()))
+                .snapshotEnabled(false)
                 .electionTimeout(500)
                 .heartbeatInterval(100)
                 .build();

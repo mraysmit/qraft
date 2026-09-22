@@ -1,7 +1,8 @@
 # RaftLog Externalisation Plan
 
-**Status:** Core migration implemented; operational assurance remains  
-**Last updated:** 2026-09-12  
+**Status:** Complete. Core migration implemented 2026-09-12; Tranche 8 system and
+failure verification completed 2026-09-22  
+**Last updated:** 2026-09-22  
 **Primary objective:** Make RaftLog the sole implementation of Raft WAL behavior
 used by Qraft, while Qraft retains consensus, state-machine, and application
 snapshot responsibilities.
@@ -32,8 +33,19 @@ Completed on 2026-09-12:
   exposed and then fixed loss of a matching-term entry after an earlier conflict.
 - Passed a clean full-reactor run: 435 tests, zero failures, zero errors.
 
-Remaining assurance work is the system-level failure and container matrix in
-Tranche 8; it is not duplicate-storage implementation work.
+### Verification checkpoint
+
+Completed on 2026-09-22:
+
+- Tranche 8 system-level failure and container matrix implemented; see the
+  Tranche 8 disposition below and the task list in
+  [`taks-list-22-sep-2026.md`](taks-list-22-sep-2026.md).
+- Operator runbook added: [`RAFT_STORAGE_OPERATIONS.md`](RAFT_STORAGE_OPERATIONS.md).
+- Full reactor green: controller 307 tests including 8 Docker acceptance tests,
+  core 231, distributed-state 14, agent 13, runtime 13, tenant 5; zero failures,
+  errors, or skips. Five-node `NetworkPartitionTest` re-enabled and passing.
+
+No remaining work is tracked under this plan.
 
 ## 1. Outcome
 
@@ -482,6 +494,26 @@ Exit gate:
 
 - Focused storage, controller, full reactor, and tagged container suites pass.
 - Operational documentation describes backup, corruption, fencing, and migration.
+
+Disposition (2026-09-22): complete. Scenario coverage:
+
+| Scenario | Covering test |
+|---|---|
+| Three durable servers commit, stop, recover | `DockerDurableRestartTest.committedCatalogAndTermSurviveWholeClusterRestart` |
+| Follower crashes after append, rejoins | `DockerDurableRestartTest.killedFollowerReplaysMissedCommitAfterRestart`; `RaftNodeRealStorageRecoveryTest` |
+| Leader crashes before response; unknown outcome; idempotent retry | `DockerDurableRestartTest.retryAfterLeaderCrashConvergesToOneCatalogInstance`; `HttpApiServerTest.reportsUnknownOutcomeWhenHttpWriteTimesOut` |
+| Divergent follower suffix replacement | `RaftNodeRealStorageRecoveryTest`; `RaftNodeInstalledSnapshotRealRecoveryTest` |
+| Compaction during partition; snapshot catch-up | `DockerDurableRestartTest.partitionedFollowerCatchesUpBySnapshotAndSurvivesRestart` |
+| WAL corruption blocks readiness with actionable error | `DockerDurableRestartTest.corruptFollowerStaysLiveButUnreadyWhileHealthyQuorumServes`; `HttpApiServerTest.corruptWalFencesStartupWithoutMutatingTheEvidence` |
+| Directory lock across processes | `RaftStorageProcessLockTest`; `DockerDurableRestartTest.secondContainerCannotOwnAnActiveNodeVolume` |
+| Container restart preserves catalog, snapshot, term, vote | `DockerDurableRestartTest.snapshotAndPostSnapshotWalSuffixSurviveWholeClusterRestart` |
+
+Production changes made during this tranche: typed `CommandOutcomeUnknownException`
+mapped to HTTP `outcome_unknown` with `retryable: true`; leadership no-op entry
+after recovery with uncommitted suffix; fenced recovery leaves the node live but
+unready instead of failing startup; `FileSnapshotStore` refuses to open over an
+unpublished first-snapshot temporary. Operator procedures are in
+[`RAFT_STORAGE_OPERATIONS.md`](RAFT_STORAGE_OPERATIONS.md).
 
 ## 7. Test fixture design
 
