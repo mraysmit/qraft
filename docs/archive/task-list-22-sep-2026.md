@@ -1,9 +1,10 @@
 # Tranche 8 Task List: System and Failure Verification
 
 **Date:** 2026-09-22
+**Archive status:** Closed and archived on 2026-09-22.
 **Status:** Complete. All six steps implemented and verified 2026-09-22.
 **Source plan:** [`RAFTLOG_EXTERNALISATION_TDD_PLAN.md`](RAFTLOG_EXTERNALISATION_TDD_PLAN.md), Tranche 8
-**Runbook:** [`RAFT_STORAGE_OPERATIONS.md`](RAFT_STORAGE_OPERATIONS.md)
+**Runbook:** [`RAFT_STORAGE_OPERATIONS.md`](../RAFT_STORAGE_OPERATIONS.md)
 
 ## Completion summary
 

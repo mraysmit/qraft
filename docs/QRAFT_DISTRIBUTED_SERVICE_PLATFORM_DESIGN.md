@@ -605,7 +605,7 @@ materialized state, snapshot contents, snapshot transfer, and the relationship
 between a snapshot boundary and the Raft log.
 
 The detailed test-first migration and removal gates are maintained in
-[`RAFTLOG_EXTERNALISATION_TDD_PLAN.md`](RAFTLOG_EXTERNALISATION_TDD_PLAN.md).
+[`RAFTLOG_EXTERNALISATION_TDD_PLAN.md`](archive/RAFTLOG_EXTERNALISATION_TDD_PLAN.md).
 
 The storage design therefore has two distinct ports:
 
