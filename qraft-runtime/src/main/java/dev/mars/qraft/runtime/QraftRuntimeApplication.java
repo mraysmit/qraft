@@ -12,14 +12,33 @@ public final class QraftRuntimeApplication {
     private QraftRuntimeApplication() { }
 
     public static void main(String[] args) {
+        RuntimeLifecycle lifecycle = run(
+                args, QraftRuntimeApplication::launchServer, QraftRuntimeApplication::launchClient);
+        Thread shutdownHook = Thread.ofPlatform().name("qraft-runtime-shutdown").unstarted(() ->
+                lifecycle.closeAsync().join());
+        Runtime.getRuntime().addShutdownHook(shutdownHook);
+        lifecycle.completion().join();
+    }
+
+    static RuntimeLifecycle run(String[] args, ModeLauncher serverLauncher, ModeLauncher clientLauncher) {
         Startup startup = parseArguments(args);
-        String[] modeArguments = {"--config", startup.configPath().toString()};
-        switch (startup.mode()) {
-            case "server" -> QraftControllerApplication.main(modeArguments);
-            case "client" -> QraftAgent.main(modeArguments);
+        return switch (startup.mode()) {
+            case "server" -> serverLauncher.launch(startup.configPath());
+            case "client" -> clientLauncher.launch(startup.configPath());
             default -> throw new IllegalArgumentException(
                     "Unsupported Qraft mode '" + startup.mode() + "'. Use 'server' or 'client'.");
-        }
+        };
+    }
+
+    private static RuntimeLifecycle launchServer(Path configurationPath) {
+        QraftControllerApplication.RunningController controller =
+                QraftControllerApplication.launch(configurationPath);
+        return new ManagedRuntimeLifecycle(controller::closeAsync);
+    }
+
+    private static RuntimeLifecycle launchClient(Path configurationPath) {
+        QraftAgent agent = QraftAgent.launch(configurationPath);
+        return new ManagedRuntimeLifecycle(() -> agent.shutdown().thenApply(ignored -> null));
     }
 
     static Startup parseArguments(String[] args) {
@@ -33,6 +52,11 @@ public final class QraftRuntimeApplication {
         }
         String[] configArguments = Arrays.copyOfRange(args, 1, args.length);
         return new Startup(mode, ConfigFileResolver.resolve(configArguments, mode));
+    }
+
+    @FunctionalInterface
+    interface ModeLauncher {
+        RuntimeLifecycle launch(Path configurationPath);
     }
 
     record Startup(String mode, Path configPath) { }

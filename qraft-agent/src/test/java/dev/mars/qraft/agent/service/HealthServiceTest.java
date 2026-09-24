@@ -9,6 +9,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -19,7 +20,7 @@ class HealthServiceTest {
     void tracksLocalAgentHealth() {
         AgentConfiguration config = AgentConfiguration.builder()
                 .agentId("agent-1").controllerUrl("http://localhost").agentPort(freePort()).build();
-        HealthService health = new HealthService(config);
+        HealthService health = new HealthService(config, () -> false);
 
         assertFalse(health.isHealthy());
         assertTrue(health.agentId().equals("agent-1"));
@@ -33,7 +34,8 @@ class HealthServiceTest {
     void servesLivenessAndReadinessEndpoints() throws Exception {
         AgentConfiguration config = AgentConfiguration.builder()
                 .agentId("agent-health").controllerUrl("http://localhost").agentPort(freePort()).build();
-        HealthService health = new HealthService(config);
+        AtomicBoolean ready = new AtomicBoolean();
+        HealthService health = new HealthService(config, ready::get);
         HttpClient client = HttpClient.newHttpClient();
 
         try {
@@ -43,7 +45,7 @@ class HealthServiceTest {
             assertEquals(503, get(client, config.getAgentPort(), "/health/ready"));
             assertEquals(503, get(client, config.getAgentPort(), "/health"));
 
-            health.setReady(true);
+            ready.set(true);
 
             assertEquals(200, get(client, config.getAgentPort(), "/health/ready"));
             assertEquals(200, get(client, config.getAgentPort(), "/health"));

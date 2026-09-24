@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "agent": {
+    "id": "agent-example",
+    "hostname": "agent-example",
+    "address": "agent-example",
+    "httpPort": 8080,
+    "heartbeatIntervalMs": 5000,
+    "shutdownTimeoutMs": 30000,
+    "datacenter": "dc1",
+    "region": "eu-west",
+    "version": "1.0.0"
+  },
+  "controllers": {
+    "urls": [
+      "http://controller:8080"
+    ],
+    "requestTimeoutMs": 3000
+  },
+  "catalog": {
+    "tenant": "default",
+    "namespace": "default",
+    "registrationRetryMinMs": 250,
+    "registrationRetryMaxMs": 30000,
+    "contactFreshnessMs": 90000,
+    "services": [
+      {
+        "id": "web",
+        "name": "web",
+        "address": "agent-example",
+        "port": 8080,
+        "tags": [
+          "http"
+        ],
+        "metadata": {
+          "owner": "platform"
+        },
+        "enabled": true
+      }
+    ]
+  },
+  "logging": {
+    "directory": "/app/logs"
+  }
+}

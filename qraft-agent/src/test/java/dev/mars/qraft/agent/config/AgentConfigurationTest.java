@@ -48,6 +48,7 @@ class AgentConfigurationTest {
                   "agent": {
                     "id": "node-a", "hostname": "host-a", "address": "10.0.0.4",
                     "httpPort": 8181, "heartbeatIntervalMs": 4000,
+                    "shutdownTimeoutMs": 12000,
                     "datacenter": "dc1", "region": "eu-west", "version": "2.1"
                   },
                   "controllers": {
@@ -57,6 +58,7 @@ class AgentConfigurationTest {
                   "catalog": {
                     "tenant": "tenant-a", "namespace": "payments",
                     "registrationRetryMinMs": 100, "registrationRetryMaxMs": 10000,
+                    "contactFreshnessMs": 15000,
                     "services": [{
                       "id": "web", "name": "web-api", "address": "10.0.0.4", "port": 9000,
                       "tags": ["primary"], "metadata": {"zone": "a"}, "enabled": false
@@ -67,12 +69,14 @@ class AgentConfigurationTest {
                 """);
 
         assertEquals("node-a", config.getAgentId());
-        assertEquals(List.of(URI.create("http://one:8080"), URI.create("http://two:8080/")),
+        assertEquals(List.of(URI.create("http://one:8080"), URI.create("http://two:8080")),
                 config.getControllerUrls());
         assertEquals("tenant-a", config.getTenant());
         assertEquals("payments", config.getNamespace());
         assertEquals(100, config.getRegistrationRetryMinMs());
         assertEquals(10_000, config.getRegistrationRetryMaxMs());
+        assertEquals(15_000, config.getContactFreshnessMs());
+        assertEquals(12_000, config.getShutdownTimeoutMs());
         assertEquals(2_500, config.getRequestTimeoutMs());
         assertEquals("/var/log/qraft", config.getLoggingDirectory());
         assertEquals(new ServiceDefinition("web", "web-api", "10.0.0.4", 9000,
@@ -97,6 +101,20 @@ class AgentConfigurationTest {
                 () -> AgentConfiguration.fromJson(minimalJson("[\"not a uri\"]", "")));
         assertThrows(IllegalArgumentException.class,
                 () -> AgentConfiguration.fromJson(minimalJson("[\"ftp://host/path\"]", "")));
+        assertThrows(IllegalArgumentException.class,
+                () -> AgentConfiguration.fromJson(minimalJson("[\"http://host/qraft\"]", "")));
+        assertThrows(IllegalArgumentException.class,
+                () -> AgentConfiguration.fromJson(minimalJson("[\"http://host?zone=a\"]", "")));
+        assertThrows(IllegalArgumentException.class,
+                () -> AgentConfiguration.fromJson(minimalJson("[\"http://host#seed\"]", "")));
+    }
+
+    @Test
+    void normalizesRootTrailingSlashesBeforeDeduplicatingControllerSeeds() {
+        AgentConfiguration config = AgentConfiguration.fromJson(
+                minimalJson("[\"http://one:8080/\",\"http://one:8080\"]", ""));
+
+        assertEquals(List.of(URI.create("http://one:8080")), config.getControllerUrls());
     }
 
     @Test
@@ -120,6 +138,15 @@ class AgentConfigurationTest {
                 {"version":1,"agent":{"id":"a"},
                  "controllers":{"urls":["http://localhost:8080"]},
                  "catalog":{"registrationRetryMinMs":1000,"registrationRetryMaxMs":100}}
+                """));
+        assertThrows(IllegalArgumentException.class, () -> AgentConfiguration.fromJson("""
+                {"version":1,"agent":{"id":"a"},
+                 "controllers":{"urls":["http://localhost:8080"]},
+                 "catalog":{"contactFreshnessMs":0}}
+                """));
+        assertThrows(IllegalArgumentException.class, () -> AgentConfiguration.fromJson("""
+                {"version":1,"agent":{"id":"a","shutdownTimeoutMs":0},
+                 "controllers":{"urls":["http://localhost:8080"]},"catalog":{}}
                 """));
     }
 

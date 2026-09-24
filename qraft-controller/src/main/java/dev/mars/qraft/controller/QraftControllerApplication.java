@@ -24,8 +24,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.bridge.SLF4JBridgeHandler;
 
-import java.util.concurrent.CountDownLatch;
 import java.nio.file.Path;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.function.Function;
 
 /**
  * Main application class for Qraft Controller.
@@ -55,58 +57,157 @@ public class QraftControllerApplication {
 
     public static void main(String[] args) {
         Path configPath = ConfigFileResolver.resolve(args, "server");
-        AppConfig config = AppConfig.install(configPath);
-        System.setProperty("qraft.log.dir", config.getLoggingDirectory());
-        configureJulToSlf4jBridge();
-        System.out.println(BANNER);
-        logger.info("Initializing Qraft Controller with OpenTelemetry (Java 25 runtime)...");
-
-        // Load and validate configuration (fail fast on misconfiguration)
-        TelemetryConfig.configure();
-        JavaRuntime runtime = JavaRuntime.create();
-        
-        if (config.isTelemetryEnabled()) {
-            logger.info("OpenTelemetry tracing enabled - OTLP endpoint: {}, Prometheus metrics port: {}",
-                    config.getRedactedOtlpEndpoint(), TelemetryConfig.getPrometheusPort());
-        }
-
-        QraftControllerService controller = new QraftControllerService(runtime);
+        RunningController controller = launch(configPath);
         CountDownLatch shutdownComplete = new CountDownLatch(1);
-
-        // Register cleanup before startup because startup can fail synchronously.
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+        Runtime.getRuntime().addShutdownHook(Thread.ofPlatform().unstarted(() -> {
             logger.info("Shutdown signal received, stopping controller...");
             try {
-                controller.stop().toCompletionStage().toCompletableFuture().join();
-                runtime.shutdown().toCompletionStage().toCompletableFuture().join();
+                controller.close();
                 logger.info("Controller runtime closed successfully");
             } catch (Throwable error) {
                 Throwable cause = error.getCause() == null ? error : error.getCause();
-                logger.error("Controller did not shut down safely; runtime was left open: {}",
+                logger.error("Controller did not shut down safely: {}",
                         cause.getMessage(), cause);
             } finally {
                 shutdownComplete.countDown();
             }
         }));
-
-        controller.start()
-                .onSuccess(ignored -> logger.info("Qraft controller started successfully"))
-                .onFailure(err -> {
-                    logger.error("Failed to start Qraft controller: {}", err.getMessage(), err);
-                    requestProcessExit(() -> System.exit(1));
-                });
-
         try {
             shutdownComplete.await();
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
+            controller.close();
         }
     }
 
-    static Thread requestProcessExit(Runnable exitAction) {
-        return Thread.ofPlatform()
-                .name("qraft-startup-exit")
-                .start(exitAction);
+    public static RunningController launch(Path configPath) {
+        ControllerResources resources = launch(configPath, ControllerResources::open,
+                ControllerResources::start, ControllerResources::shutdown);
+        return new RunningController(resources);
+    }
+
+    static <T> T launch(Path configPath,
+                        Function<AppConfig, T> resourceFactory,
+                        Function<T, CompletableFuture<?>> starter,
+                        Function<T, CompletableFuture<?>> shutdown) {
+        AppConfig config = AppConfig.install(configPath);
+        T resource = resourceFactory.apply(config);
+        try {
+            starter.apply(resource).join();
+            return resource;
+        } catch (RuntimeException | Error startupFailure) {
+            try {
+                shutdown.apply(resource).join();
+            } catch (Throwable cleanupFailure) {
+                startupFailure.addSuppressed(cleanupFailure);
+            }
+            throw startupFailure;
+        }
+    }
+
+    public static final class RunningController implements AutoCloseable {
+        private final ControllerResources resources;
+
+        private RunningController(ControllerResources resources) {
+            this.resources = resources;
+        }
+
+        public CompletableFuture<Void> closeAsync() {
+            return resources.shutdown();
+        }
+
+        @Override
+        public void close() {
+            closeAsync().join();
+        }
+    }
+
+    private static final class ControllerResources {
+        private final QraftControllerService controller;
+        private final JavaRuntime runtime;
+        private final AutoCloseable telemetry;
+        private CompletableFuture<Void> shutdown;
+
+        private ControllerResources(QraftControllerService controller, JavaRuntime runtime,
+                                    AutoCloseable telemetry) {
+            this.controller = controller;
+            this.runtime = runtime;
+            this.telemetry = telemetry;
+        }
+
+        static ControllerResources open(AppConfig config) {
+            System.setProperty("qraft.log.dir", config.getLoggingDirectory());
+            configureJulToSlf4jBridge();
+            System.out.println(BANNER);
+            logger.info("Initializing Qraft Controller with OpenTelemetry (Java 25 runtime)...");
+            AutoCloseable telemetry = TelemetryConfig.configure();
+            JavaRuntime runtime = null;
+            try {
+                runtime = JavaRuntime.create();
+                QraftControllerService controller = new QraftControllerService(runtime);
+                if (config.isTelemetryEnabled()) {
+                    logger.info("OpenTelemetry tracing enabled - OTLP endpoint: {}, Prometheus metrics port: {}",
+                            config.getRedactedOtlpEndpoint(), TelemetryConfig.getPrometheusPort());
+                }
+                return new ControllerResources(controller, runtime, telemetry);
+            } catch (RuntimeException | Error failure) {
+                closePartiallyOpened(runtime, telemetry, failure);
+                throw failure;
+            }
+        }
+
+        CompletableFuture<Void> start() {
+            return controller.start().toCompletionStage().toCompletableFuture()
+                    .thenRun(() -> logger.info("Qraft controller started successfully"));
+        }
+
+        synchronized CompletableFuture<Void> shutdown() {
+            if (shutdown != null) return shutdown;
+            shutdown = new CompletableFuture<>();
+            controller.stop().toCompletionStage().whenComplete((ignored, controllerFailure) ->
+                    runtime.shutdown().toCompletionStage().whenComplete((alsoIgnored, runtimeFailure) -> {
+                        Throwable failure = firstFailure(controllerFailure, runtimeFailure);
+                        try {
+                            telemetry.close();
+                        } catch (Throwable telemetryFailure) {
+                            failure = firstFailure(failure, telemetryFailure);
+                        }
+                        if (failure == null) shutdown.complete(null);
+                        else shutdown.completeExceptionally(failure);
+                    }));
+            return shutdown;
+        }
+
+        private static void closePartiallyOpened(JavaRuntime runtime, AutoCloseable telemetry,
+                                                 Throwable failure) {
+            if (runtime != null) {
+                try {
+                    runtime.shutdown().toCompletionStage().toCompletableFuture().join();
+                } catch (Throwable cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
+            }
+            try {
+                telemetry.close();
+            } catch (Throwable cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+        }
+
+        private static Throwable firstFailure(Throwable first, Throwable second) {
+            Throwable primary = unwrap(first);
+            Throwable additional = unwrap(second);
+            if (primary == null) return additional;
+            if (additional != null && additional != primary) primary.addSuppressed(additional);
+            return primary;
+        }
+
+        private static Throwable unwrap(Throwable failure) {
+            if (failure instanceof java.util.concurrent.CompletionException && failure.getCause() != null) {
+                return failure.getCause();
+            }
+            return failure;
+        }
     }
 
     private static void configureJulToSlf4jBridge() {

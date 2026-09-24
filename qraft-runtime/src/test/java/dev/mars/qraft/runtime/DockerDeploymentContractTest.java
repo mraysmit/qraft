@@ -1,5 +1,6 @@
 package dev.mars.qraft.runtime;
 
+import dev.mars.qraft.agent.config.AgentConfiguration;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -182,6 +183,18 @@ class DockerDeploymentContractTest {
         assertTrue(dockerfile.contains("sed -i 's/\\r$//' /docker-entrypoint.sh"));
         assertTrue(Files.readString(root.resolve(".gitattributes"))
                 .contains("*.sh text eol=lf"));
+    }
+
+    @Test
+    void documentedClientConfigurationIsAValidCompleteExample() {
+        Path root = Path.of("..").toAbsolutePath().normalize();
+        AgentConfiguration configuration = AgentConfiguration.fromFile(
+                root.resolve("docker/config/client.json"));
+
+        assertTrue(configuration.getAgentId().equals("agent-example"));
+        assertTrue(configuration.getControllerUrls().size() == 1);
+        assertTrue(configuration.getServices().size() == 1);
+        assertTrue(configuration.getServices().getFirst().id().equals("web"));
     }
 
     @Test

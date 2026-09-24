@@ -1,10 +1,10 @@
 # Task List: Agent Catalog Client and Reconciliation
 
 **Date:** 2026-09-24
-**Active work:** Client catalog adapter and reconciliation (platform design Tranches 3 and 4)
-**Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md)
-**Predecessor:** [`archive/task-list-catalog-identity-2026-09-22.md`](archive/task-list-catalog-identity-2026-09-22.md) (Tranches 1 and 2, complete)
-**Standards:** [`PROJECT_STANDARDS.md`](PROJECT_STANDARDS.md)
+**Completed:** 2026-09-24
+**Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md)
+**Predecessor:** [`task-list-catalog-identity-2026-09-22.md`](task-list-catalog-identity-2026-09-22.md) (Tranches 1 and 2, complete)
+**Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
 This is the current task list for the project. When the active work is complete,
 add a completion summary, move this file to `archive/`, and start a new dated
@@ -18,8 +18,10 @@ task list for the next backlog item.
 | Storage | Tranche 8 of the externalisation plan: system and failure verification | Done 2026-09-22 |
 | Catalog | Tranche 1: composite catalog identity | Done 2026-09-24 |
 | Catalog | Tranche 2: registration protocol, error envelope, `X-Qraft-Index` | Done 2026-09-24 |
-| Agent | Tranche 3: client catalog adapter | **Active** (section 3) |
-| Agent | Tranche 4: reconciliation and readiness | **Active** (section 3) |
+| Agent | Tranche 3: client catalog adapter | Done 2026-09-24 |
+| Agent | Tranche 4: reconciliation and readiness | Done 2026-09-24 |
+| Agent | Bounded graceful shutdown | Done 2026-09-24 |
+| Acceptance | End-to-end agent verification | Done 2026-09-24 |
 | Runtime | Tranche 5: unified runtime flow | Backlog |
 | Health | Tranche 6: health propagation and automatic deregistration | Backlog |
 | Acceptance | Tranche 7: multi-node container acceptance | Backlog |
@@ -33,27 +35,33 @@ task list for the next backlog item.
 
 ## 2. Current state of the agent (verified 2026-09-24)
 
-- `QraftAgent` registers **only its own node identity** with
-  `POST /api/v1/agents/register`, sends heartbeats to `/api/v1/agents/heartbeat`,
-  and deregisters with `DELETE /api/v1/agents/{agentId}`. It never calls the
-  `/v1/agent/service/*` catalog API, and it has no concept of service definitions.
-- A failed initial registration keeps the local health server live and unready and
-  retries at the fixed heartbeat interval. There is no backoff or jitter.
+- `QraftAgent` registers its node identity with `POST /api/v1/agents/register`,
+  starts single-flight service reconciliation after node registration, sends
+  heartbeats to `/api/v1/agents/heartbeat`, and deregisters the node with
+  `DELETE /api/v1/agents/{agentId}`. Shutdown withdraws readiness, stops new
+  scheduled work, deregisters committed services and then the node, and closes
+  local resources within one configured deadline.
+- A failed retryable registration keeps the local health server live and unready,
+  rotates through each configured seed once, and retries later with cancellable,
+  capped exponential backoff and injected jitter.
 - `AgentConfiguration` now loads an ordered, deduplicated controller seed list,
   tenant, namespace, retry bounds, request timeout, logging directory, and local
   service definitions from a versioned JSON document.
+- `CatalogClient` and `HttpCatalogClient` implement service registration,
+  deregistration, and scoped presence reads with typed outcomes. The last
+  successful controller is preferred by catalog, node-registration, heartbeat,
+  and node-deregistration operations.
 - Runtime, agent, controller, Docker, entrypoint, and maintained Compose startup
   now require an explicit mode and one JSON file. File discovery supports an
   explicit argument, the `qraft.config` JVM locator property, and conventional
   role-specific paths; environment-variable configuration has been removed.
 - Invalid types, values, ports, intervals, controller URLs, duplicate service
   IDs, and inconsistent retry bounds fail before runtime resources are created.
-- `AgentRegistrationClient.send` turns every transport failure into `null`, so
-  callers cannot tell a refused connection from a timeout or a `503`. The client
-  ignores the error envelope's `code` and `retryable` fields.
-- `HeartbeatService` creates its own `HttpClient` that nobody closes.
-- `shutdown()` stops the scheduler and health server **before** deregistering.
-  `close()` joins that deregistration with no deadline.
+- `AgentRegistrationClient` is now a membership facade over the shared controller
+  client; the former send-to-`null` path and heartbeat-owned `HttpClient` are gone.
+- `shutdown()` and `close()` share one idempotent, bounded completion. Local
+  health remains live while deregistration runs and stops after cleanup or the
+  deadline; an incomplete cleanup is logged once.
 - `agentId` defaults to `agent-<hostname>`. The design (section 8.3) requires a
   stable node ID that is persisted locally when it is generated.
 - The controller's `leader_unavailable` and `outcome_unknown` responses carry the
@@ -61,9 +69,12 @@ task list for the next backlog item.
   leader and must rotate through its seeds.
 
 Existing tests: `QraftAgentTest`, `AgentRegistrationClientTest`,
-`HeartbeatServiceTest`, `HealthServiceTest`, `AgentConfigurationTest`, and
-`qraft-runtime`'s `AgentControllerContractTest` (real agent against a real
-single-node controller).
+`HeartbeatServiceTest`, `HealthServiceTest`, `AgentConfigurationTest`,
+`HttpCatalogClientTest` (real JDK HTTP server), `ServiceReconcilerTest` (a
+purpose-built fake port), and `qraft-runtime`'s
+`AgentControllerContractTest` (real agent and catalog client against a real
+single-node controller), and `AgentEndToEndTest` (restart reconciliation,
+same-local-ID isolation, and follower-first three-node registration).
 
 ## 3. Active work: client catalog adapter and reconciliation
 
@@ -131,6 +142,14 @@ or current documentation uses environment variables for Qraft configuration.
 
 ### Step 2: `CatalogClient` and `HttpCatalogClient`
 
+**Status: Done 2026-09-24.** Added the outbound catalog port, JDK HTTP adapter,
+sealed machine-actionable outcomes, exact request-schema and identity-header
+handling, unique request IDs, bounded timeouts, error-envelope/status
+classification, leader hints, and idempotent client ownership. Protocol tests use
+a real JDK `HttpServer`; the runtime contract registers and deregisters through a
+real `HttpApiServer` and verifies both states through the public catalog GET API.
+The full default reactor passes with 603 tests.
+
 **Purpose.** One outbound adapter for the catalog API, with outcomes callers can
 act on.
 
@@ -166,6 +185,16 @@ service against a real `HttpApiServer` and checks the catalog through
 
 ### Step 3: Controller-seed rotation and backoff
 
+**Status: Done 2026-09-24.** Added ordered seed cycles, last-success preference,
+retryable/rejected short-circuiting, capped exponential backoff with injected
+jitter and cancellable waits for repeated node-registration cycles. Periodic
+service reconciliation remains on the heartbeat cadence. Catalog, node
+registration, heartbeat, and node deregistration now share one classified,
+lifecycle-owned JDK `HttpClient`.
+The runtime contract skips a refused seed and a `leader_unavailable` seed, commits
+through the third real controller, and prefers it on the next operation. The full
+default reactor passes with 611 tests.
+
 **Purpose.** Registration succeeds when the first configured server is a follower
 or offline (design section 22 acceptance criterion).
 
@@ -182,16 +211,25 @@ or offline (design section 22 acceptance criterion).
    idempotent update of the composite identity.
 6. Cancellation during a backoff wait stops the retry promptly.
 
-**Implementation.** Add a `ControllerEndpoints` selector and a retry policy used
-by `HttpCatalogClient`. Route the existing node registration and heartbeat calls
-through the same selector and classification, and delete their private
-`send`-to-`null` handling and the extra `HttpClient`.
+**Implementation.** Add a `ControllerEndpoints` selector shared by catalog and
+membership operations, with a retry policy for node-registration cycles. Route
+the existing node registration and heartbeat calls through the same selector and
+classification, and delete their private `send`-to-`null` handling and the extra
+`HttpClient`.
 
 **Exit gate.** In `qraft-runtime`: with three configured seeds where the first
 refuses connections and the second returns `leader_unavailable`, registration
 commits through the third.
 
 ### Step 4: Single-flight reconciliation
+
+**Status: Done 2026-09-24.** Added the lifecycle-owned `ServiceReconciler`,
+stable SHA-256 content fingerprints, partial-success retention, absence repair,
+unchanged-rejection suppression, and single-flight triggering. Reconciliation
+uses the existing service-name catalog read and matches the complete tenant,
+namespace, node, and service identity. Removed or disabled definitions registered
+by this process are deregistered on the next pass. The full default reactor passes
+with 620 tests, including 42 agent tests and 15 runtime tests.
 
 **Purpose.** Replace one-shot startup registration with periodic convergence
 (design section 9.2).
@@ -211,12 +249,27 @@ commits through the third.
 7. A `Rejected` definition is reported and not retried every cycle until its
    definition changes.
 
-**Implementation.** Add `ServiceReconciler`, owned by `QraftAgent`, scheduled on
-the agent's scheduler. Detecting absence (test 5) needs a read. Use
-`GET /v1/catalog/service/{name}` filtered by node, or record decision D2 if a
-node-scoped read endpoint is required instead.
+**Implementation.** `ServiceReconciler` is owned by `QraftAgent` and scheduled on
+the agent's scheduler. It detects absence through
+`GET /v1/catalog/service/{name}` and filters by tenant, namespace, node, and
+service ID. Decision D2 is resolved without a new endpoint; D3 is implemented for
+definitions registered by the running reconciler. The production JSON definition
+source is loaded once at startup, so D3 becomes externally observable when a
+future runtime-reload mechanism supplies a changed definition set.
+
+**Exit gate.** Partial registration remains committed, unchanged definitions do
+not produce repeat writes, and overlapping triggers share one pass.
 
 ### Step 5: Readiness policy
+
+**Status: Done 2026-09-24.** Readiness is now derived rather than assigned:
+the agent must be running, its node registration accepted, every enabled service
+definition converged, and its last successful controller response no older than
+`catalog.contactFreshnessMs` (90 seconds by default). One shared contact tracker
+covers node and catalog operations. An injected clock proves deterministic stale
+and recovery transitions, and agent lifecycle coverage proves stale contact makes
+the process unready while liveness remains active. The full default reactor
+passes with 624 tests, including 46 agent tests and 15 runtime tests.
 
 **Purpose.** Readiness reflects whether the agent is actually serving its purpose
 (design section 7.2).
@@ -237,6 +290,18 @@ readiness function evaluated from reconciler and contact state.
 
 ### Step 6: Bounded graceful shutdown
 
+**Status: Done 2026-09-24.** Added the positive file setting
+`agent.shutdownTimeoutMs` (30 seconds by default) and one memoized shutdown
+completion for repeated and concurrent callers. Shutdown withdraws readiness
+synchronously, prevents later reconciliation and heartbeat starts, cancels
+scheduled retry work, waits for an active reconciliation pass, deregisters every
+service committed by this process, and only then deregisters the node. The local
+health server remains live during that work. Completion or deadline expiry then
+stops health and closes the scheduler and shared HTTP client; deadline expiry
+force-cancels outstanding HTTP work and emits one incomplete-cleanup warning.
+The full default reactor passes with 627 tests, including 49 agent tests and 15
+runtime tests.
+
 **Purpose.** Implement the order in design section 9.4 with a total deadline.
 
 **Red tests.**
@@ -254,6 +319,17 @@ readiness function evaluated from reconciler and contact state.
 
 ### Step 7: End-to-end verification
 
+**Status: Done 2026-09-24.** Added runtime acceptance coverage proving that a
+real agent reconciles two services after a controller restart and deregisters
+them on shutdown, that two agents may each expose local service ID `web`, and
+that seed rotation commits through a follower-first three-node controller list.
+The controller's existing `InMemoryTransportSimulator` is shared through a
+test-only JAR rather than copied. The full default reactor passes with 630 tests,
+including 18 runtime tests. The complete Docker-tagged suite passes with 23
+tests. Its snapshot catch-up check now observes the follower's durable install
+event because a higher-term isolated follower can legitimately replace the
+pre-partition leader before the response is processed.
+
 1. `qraft-runtime`: a real agent with two service definitions registers both
    against a single-node controller, becomes ready, survives a controller restart
    by reconciling, and deregisters both on shutdown.
@@ -267,12 +343,22 @@ readiness function evaluated from reconciler and contact state.
 
 ### Step 8: Documentation
 
+**Status: Done 2026-09-24.** Updated the platform design and Consul plan to
+match the shipped seed-rotation, node-registration backoff, fixed-cadence
+reconciliation, readiness, shutdown, and immutable production definition-source
+semantics. Added a complete `docker/config/client.json`, documented explicit,
+JVM-property, and conventional-path startup, and added a runtime contract test
+that parses the example with the production loader. Decisions D1 to D3 are
+recorded explicitly. The final review fixes also reject controller URLs with
+paths, canonicalize equivalent origins, log rejected registrations, and serialize
+shutdown with an in-flight node registration.
+
 1. Platform design section 5.3: describe the catalog client, seeds, and
    reconciliation as current behaviour, and mark Tranches 3 and 4 complete.
 2. Section 17: document the final JSON schema and the prohibition on environment
    variables.
-3. Consul plan checklist: tick "Complete client-mode configuration and controller
-   discovery behavior".
+3. Consul plan checklist: retain the completed controller-discovery item and mark
+   the later reconciliation/readiness work accurately.
 4. `docker/README.md`: show a mounted client configuration file and both explicit
    and conventional-path startup.
 5. Record decisions D1 to D3 in the platform design's open-decisions list.
@@ -341,4 +427,16 @@ In intended order. Each item gets a detailed step list when it becomes active.
 |---|---|---|
 | D1 | Initial service-definition source | The `catalog.services` array in the versioned JSON runtime configuration |
 | D2 | How reconciliation detects an administratively deleted instance | Read `GET /v1/catalog/service/{name}` and filter by node; add a node-scoped endpoint only if that proves insufficient |
-| D3 | Whether a service removed from the definitions file is deregistered on the next reconcile | Yes for services this agent process registered. Instances left behind by an earlier process wait for Tranche 6 expiry |
+| D3 | Whether a service removed from the active definition source is deregistered on the next reconcile | Yes for services this agent process registered. The production JSON source is currently immutable for the process lifetime; future reload can activate this path. Instances left by an earlier process wait for Tranche 6 expiry |
+
+## 6. Completion summary
+
+Steps 1 through 8 are complete. The final default reactor run on 2026-09-24
+passed 638 tests with no failures, errors, or skips: distributed state 16, core
+238, agent 56, tenant 5, controller 304, and runtime 19. The Step 7 Docker-tagged
+acceptance run passed all 23 tests. `git diff --check` is clean, no Mockito was
+added, and Qraft runtime configuration remains file-only with no environment
+variable configuration or discovery path.
+
+The next active work is Tranche 5, unified runtime flow, tracked in
+[`task-list-unified-runtime-flow-2026-09-24.md`](../task-list-unified-runtime-flow-2026-09-24.md).

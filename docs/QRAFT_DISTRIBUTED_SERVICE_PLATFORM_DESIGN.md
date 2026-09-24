@@ -38,7 +38,7 @@ coverage configuration, and build-wide engineering rules.
 | `qraft-raft-engine` | Defines reusable Raft command, state-machine, and engine contracts. | Own all implementation-neutral consensus contracts and reusable Raft primitives. It must not depend on service discovery, tenancy, HTTP, or a runtime mode. |
 | `qraft-distributed-state` | Defines replicated key/value commands and codecs and currently contains the service-catalog model. | Own deterministic replicated-state commands and projections, including key/value behavior and catalog state. It must contain no network server, process lifecycle, or client-agent behavior. |
 | `qraft-core` | Contains shared Java 25 discovery, health, node, and agent domain types, together with some inherited domain code awaiting removal. | Own small, transport-neutral value types shared between server and client. Service definitions and common identity types belong here; Raft implementation and HTTP DTOs do not. |
-| `qraft-agent` | Implements client identity, outbound registration, heartbeat scheduling, and local liveness/readiness HTTP endpoints. | Implement client-mode reconciliation, controller-seed failover, local health checks, TTL renewal, and explicit ownership of client resources. It never participates in Raft. |
+| `qraft-agent` | Implements client identity, node registration, the typed outbound catalog HTTP adapter, controller-seed failover, single-flight service reconciliation, heartbeat scheduling, policy-derived local liveness/readiness HTTP endpoints, and bounded graceful shutdown. | Complete local health checks and TTL renewal. It never participates in Raft. |
 | `qraft-tenant` | Implements the current namespace lifecycle abstraction and its in-memory implementation. | Own tenant and namespace policy, validation, and lifecycle contracts. Replicated persistence is performed through distributed-state commands rather than hidden local mutation. |
 | `qraft-controller` | Contains the server application, Raft node implementation, transports, durable storage adapters, replicated state host, HTTP and gRPC APIs, snapshots, and graceful shutdown. | Operate one server member: participate in quorum, host authoritative replicated state, enforce request identity and policy, expose control-plane APIs and the built-in administrative interface, and own server lifecycle. |
 | `qraft-runtime` | Packages controller and agent dependencies behind one executable entry point and one container image. | Remain a thin composition root that validates mode-specific configuration, constructs either server or client mode, installs process shutdown handling, and packages the built-in administrative assets into the same executable artifact without owning domain logic. |
@@ -164,23 +164,71 @@ Client mode currently owns:
 
 - A local identity and network address.
 - A JDK HTTP liveness and readiness server.
-- An outbound HTTP agent-registration client.
+- An agent-membership facade over the shared outbound controller client.
+- A validated list of controller seeds and local service definitions.
+- A `CatalogClient` port and `HttpCatalogClient` adapter for service registration,
+  deregistration, and scoped presence reads across controller seeds.
+- A single-flight reconciler for enabled local service definitions.
 - A scheduled heartbeat publisher.
 
 The client registers its node identity through the controller's
 `/api/v1/agents/register`, `/api/v1/agents/heartbeat`, and
 `DELETE /api/v1/agents/{agentId}` endpoints. A failed initial registration
 keeps the local health server live and unready and retries in the background;
-readiness follows successful registration and heartbeats.
+readiness is derived continuously from lifecycle state, accepted node
+registration, convergence of every enabled local service definition, and the
+freshness of the last successful controller response.
 
-Current limitation: the client registers only itself. It does not register
-service definitions through the `/v1/agent/service/*` catalog API, and it has no
-reconciliation loop. Both are replaced by the registration and reconciliation
-design below.
+`HttpCatalogClient` sends the stable service schema and node, tenant, and
+namespace identity headers, assigns a fresh request ID to each attempt, enforces
+the configured request timeout, and returns sealed success, retryable, or rejected
+outcomes. Catalog operations, node registration, heartbeat, and node deregistration
+share this classified transport. It owns and idempotently closes its JDK
+`HttpClient`.
+
+After node registration, `QraftAgent` immediately reconciles enabled service
+definitions and schedules subsequent passes on its lifecycle-owned scheduler.
+Successful registrations are retained across partial failures. Unchanged
+definitions are verified by catalog read rather than rewritten; missing instances
+are repaired, changed definitions are resubmitted, and unchanged rejected
+definitions remain reported without being retried every cycle.
+
+The production definition source is the `catalog.services` array loaded once from
+the client JSON document at startup. Runtime file watching and configuration reload
+are not implemented. The reconciler's removal path is therefore exercised by its
+mutable source contract and tests today and becomes externally reachable when a
+future reload mechanism supplies a changed definition set.
+
+Node, heartbeat, and catalog operations update one controller-contact timestamp.
+If that timestamp becomes older than `catalog.contactFreshnessMs`, readiness
+returns 503 while liveness and background reconciliation continue. A later
+successful response restores readiness once node membership and service
+convergence are also satisfied. An agent with no service definitions requires
+only accepted node registration and fresh controller contact.
+
+Rejected node and service registrations are logged with their machine-readable
+code and message while the agent remains live and unready. On shutdown, the client
+withdraws readiness before stopping scheduled work. It waits for an active
+reconciliation pass, deregisters every service known to have committed, prevents
+new node registrations, waits for an in-flight node registration, and then sends
+an idempotent node deregistration before stopping local health and HTTP resources.
+All callers share one completion bounded by `agent.shutdownTimeoutMs`; when the
+deadline expires, outstanding HTTP work is cancelled and incomplete cleanup is
+reported once.
 
 ### 5.4 Known model gaps
 
-- Client configuration accepts one controller URL and cannot fail over among seeds.
+- Client operations rotate across ordered controller seeds on retryable outcomes,
+  stop on rejection, and remember the last successful endpoint.
+- Reconciliation runs at the configured heartbeat cadence and has no independent
+  exponential-backoff schedule. Repeated node-registration cycles use the
+  configured capped exponential backoff with jitter.
+- The most recently successful endpoint is preferred even when it is a follower;
+  leader-aware write preference remains future work.
+- Runtime configuration reload is not implemented, so changing or removing a
+  service in the JSON file requires a client restart.
+- Automatic server-side expiry remains necessary because an agent can terminate
+  without completing graceful deregistration.
 
 Catalog identity and the registration boundary were corrected in Tranches 1 and
 2. Instances are keyed by `(tenantId, namespace, nodeId, serviceId)`, registration
@@ -346,9 +394,12 @@ definitions and does not roll back successfully committed registrations.
 
 ### 9.2 Reconciliation
 
-The agent periodically reconciles desired service definitions rather than relying
-on one startup request. Reconciliation repairs state after configuration changes,
-administrative deletion, or interrupted communication.
+The agent periodically reconciles its startup service-definition snapshot rather
+than relying on one startup request. Reconciliation repairs state after
+administrative deletion or interrupted communication. Its source abstraction can
+also reconcile changed or removed definitions, but the production JSON source is
+immutable for the process lifetime because runtime configuration reload is not yet
+implemented.
 
 Only one reconciliation may run at a time. A stable content fingerprint prevents
 unnecessary writes when the desired definition has not changed.
@@ -367,8 +418,11 @@ Retryable outcomes include:
 - HTTP 429, 502, 503, or 504.
 
 Validation, authorization, and semantic conflict responses are not retried
-against every server. Reconciliation cycles use capped exponential backoff with
-jitter. The last successful endpoint is preferred for the next operation.
+against every server. A failed node-registration cycle is retried with capped
+exponential backoff and jitter. Periodic service reconciliation stays on the
+configured heartbeat cadence; retryable operations still rotate through the seed
+list within each pass. The last successful endpoint is preferred for the next
+operation, irrespective of whether it is a leader or follower.
 
 ### 9.4 Deregistration
 
@@ -378,8 +432,14 @@ successful no-op. During graceful shutdown, the agent:
 1. Marks itself unready.
 2. Stops new reconciliation and health publications.
 3. Attempts bounded deregistration for its known registered services.
-4. Stops the local HTTP server.
-5. Closes its scheduler and HTTP resources.
+4. Deregisters its node after the service attempts complete.
+5. Stops the local HTTP server.
+6. Closes its scheduler and HTTP resources.
+
+Repeated and concurrent shutdown calls share one completion. The entire sequence
+is bounded by the positive `agent.shutdownTimeoutMs` file setting, which defaults
+to 30 seconds. Deadline expiry force-cancels outstanding HTTP work and logs one
+incomplete-cleanup warning; it does not delay process termination indefinitely.
 
 Automatic expiry remains necessary because graceful shutdown cannot be guaranteed.
 
@@ -516,6 +576,16 @@ Clients branch on `code` and `retryable`, never on human-readable messages.
 used in request logging. The deprecated duplicate `error` property remains for
 one compatibility release and is scheduled for removal in the first release
 after 2026-12-31.
+
+The current `HttpCatalogClient` applies this contract for registration and
+deregistration. It treats parsed 2xx responses as success; transport failures,
+timeouts, HTTP 429/502/503/504, retryable envelopes, and malformed 5xx bodies as
+retryable; and non-retryable envelopes or malformed 4xx bodies as rejected. A
+returned `leaderId` is exposed as an outcome hint. The shared controller transport
+rotates through ordered seeds on retryable outcomes and remembers the last
+successful endpoint. Failed node-registration cycles use capped exponential
+backoff with jitter; catalog operations are retried by the periodic reconciler on
+its normal heartbeat cadence.
 
 ### 13.3 Index metadata
 
@@ -922,6 +992,7 @@ The path names one versioned JSON document. A client document has this shape:
     "id": "node-a",
     "httpPort": 8080,
     "heartbeatIntervalMs": 5000,
+    "shutdownTimeoutMs": 30000,
     "datacenter": "dc1",
     "region": "eu-west"
   },
@@ -938,6 +1009,7 @@ The path names one versioned JSON document. A client document has this shape:
     "namespace": "default",
     "registrationRetryMinMs": 250,
     "registrationRetryMaxMs": 30000,
+    "contactFreshnessMs": 90000,
     "services": []
   },
   "logging": {
@@ -945,6 +1017,10 @@ The path names one versioned JSON document. A client document has this shape:
   }
 }
 ```
+
+Every `controllers.urls` entry is an HTTP or HTTPS origin. Paths, queries,
+fragments, and user information are rejected. A root trailing slash is removed,
+scheme and host case are normalized, and equivalent origins are deduplicated.
 
 A server document uses the same envelope and keeps all server settings beneath
 `server`:
@@ -1136,16 +1212,21 @@ Status: complete (verified 2026-09-24).
 
 ### Tranche 3: Client catalog adapter
 
-1. Add real-HTTP contract tests for registration and deregistration.
-2. Implement `CatalogClient` and `HttpCatalogClient`.
-3. Replace the legacy agent registration client.
+Status: complete (verified 2026-09-24).
+
+1. [x] Add real-HTTP contract tests for registration and deregistration.
+2. [x] Implement `CatalogClient` and `HttpCatalogClient`.
+3. [x] Replace the legacy agent HTTP path with the shared classified controller
+   transport and seed selector.
 
 ### Tranche 4: Reconciliation and readiness
 
-1. Add lifecycle tests for initial failure, partial registration, recovery, and
-   shutdown.
-2. Implement single-flight reconciliation and controller-seed rotation.
-3. Keep liveness active during cluster outages and derive readiness from policy.
+Status: complete (verified 2026-09-24).
+
+1. [x] Add reconciliation tests for partial registration, recovery, changed and
+   deleted definitions, rejection suppression, and overlapping triggers.
+2. [x] Implement single-flight reconciliation and controller-seed rotation.
+3. [x] Keep liveness active during cluster outages and derive readiness from policy.
 
 ### Tranche 5: Unified runtime flow
 
@@ -1196,11 +1277,22 @@ shown in section 13.1 and currently accepts no aliases. Unknown fields are
 rejected. The legacy `health` input name is the sole temporary compatibility
 exception; it is accepted but ignored because health is server-owned.
 
-Resolved on 2026-09-24: Qraft runtime configuration is a versioned JSON file.
+Resolved D1 on 2026-09-24: Qraft runtime configuration is a versioned JSON file.
 The file is selected by explicit argument, JVM locator property, or conventional
 role-specific path, in that order. Qraft does not use environment variables for
 configuration or file discovery. Client service definitions are stored in the
 main document's `catalog.services` array rather than a separately selected file.
+
+Resolved D2 on 2026-09-24: reconciliation detects administrative deletion through
+`GET /v1/catalog/service/{name}` and filters the response by the complete tenant,
+namespace, node, and service identity. No additional node-scoped read endpoint is
+required.
+
+Resolved D3 on 2026-09-24: when the reconciler's definition source removes or
+disables a definition registered by the current process, it is deregistered on
+the next pass. The production JSON source is currently loaded once, so live file
+removal is not observed until a future reload mechanism is implemented. Instances
+left by an earlier process wait for automatic expiry from Tranche 6.
 
 Decisions that affect durable identity or wire compatibility require an explicit
 architecture decision record and fixture-based upgrade tests before implementation.

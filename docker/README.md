@@ -33,6 +33,51 @@ starts servers with `server --config /etc/qraft/server.json`. The agent image us
 location. Operators may instead use `-Dqraft.config=<path>` or the local
 `config/<role>.json` convention. No discovery method reads an environment variable.
 
+## Client configuration
+
+[`config/client.json`](config/client.json) is a complete client example. It
+declares the agent, controller origins, reconciliation policy, and services in one
+versioned file; it contains no environment-variable placeholders. Controller URLs
+must be origins such as `http://controller:8080`, without an API path, query, or
+fragment.
+
+Mount the file read-only and select it explicitly when the container may use an
+arbitrary destination:
+
+```yaml
+services:
+  agent:
+    build:
+      context: ..
+      dockerfile: qraft-runtime/Dockerfile
+    command: ["client", "--config", "/etc/qraft/example-client.json"]
+    volumes:
+      - ./config/client.json:/etc/qraft/example-client.json:ro
+```
+
+When mounted at the conventional system path, the path argument is unnecessary:
+
+```yaml
+services:
+  agent:
+    build:
+      context: ..
+      dockerfile: qraft-runtime/Dockerfile
+    command: ["client"]
+    volumes:
+      - ./config/client.json:/etc/qraft/client.json:ro
+```
+
+Outside the container entrypoint, the JVM locator is the third supported method:
+
+```text
+java -Dqraft.config=/opt/qraft/client.json -jar qraft-runtime.jar client
+```
+
+The `--config` argument has highest precedence, followed by the `qraft.config` JVM
+property, `config/client.json` relative to the working directory, and finally
+`/etc/qraft/client.json`.
+
 Compose packages the runtime JAR built on the host; it does not run Maven inside
 Docker. The `start.ps1`, `start.sh`, `start-quick.ps1`, and `start-quick.sh`
 helpers run the local build automatically before starting a cluster. To build

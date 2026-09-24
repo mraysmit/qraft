@@ -10,16 +10,20 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
 
 /** Local health state for the discovery agent. */
 public final class HealthService {
     private final AgentConfiguration config;
+    private final BooleanSupplier readiness;
     private final AtomicBoolean running = new AtomicBoolean();
-    private volatile boolean ready;
     private HttpServer server;
     private ExecutorService executor;
 
-    public HealthService(AgentConfiguration config) { this.config = config; }
+    public HealthService(AgentConfiguration config, BooleanSupplier readiness) {
+        this.config = config;
+        this.readiness = readiness;
+    }
 
     public synchronized void start() {
         if (running.get()) return;
@@ -29,10 +33,12 @@ public final class HealthService {
             server.setExecutor(executor);
             server.createContext("/health/live", exchange -> respond(exchange, 200, "{\"status\":\"alive\"}"));
             server.createContext("/health/ready", exchange -> {
+                boolean ready = isReady();
                 int status = ready ? 200 : 503;
                 respond(exchange, status, ready ? "{\"status\":\"ready\"}" : "{\"status\":\"not_ready\"}");
             });
             server.createContext("/health", exchange -> {
+                boolean ready = isReady();
                 int status = ready ? 200 : 503;
                 respond(exchange, status, ready ? "{\"status\":\"passing\"}" : "{\"status\":\"starting\"}");
             });
@@ -47,7 +53,6 @@ public final class HealthService {
     }
 
     public synchronized void shutdown() {
-        ready = false;
         running.set(false);
         if (server != null) server.stop(0);
         if (executor != null) executor.close();
@@ -55,9 +60,8 @@ public final class HealthService {
         executor = null;
     }
 
-    public void setReady(boolean value) { ready = value; }
     public boolean isHealthy() { return running.get(); }
-    public boolean isReady() { return ready; }
+    public boolean isReady() { return running.get() && readiness.getAsBoolean(); }
     public String agentId() { return config.getAgentId(); }
 
     private static void respond(HttpExchange exchange, int status, String body) throws IOException {

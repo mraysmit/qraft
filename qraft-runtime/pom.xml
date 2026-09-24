@@ -23,6 +23,13 @@
         </dependency>
         <dependency>
             <groupId>dev.mars</groupId>
+            <artifactId>qraft-controller</artifactId>
+            <version>${project.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>dev.mars</groupId>
             <artifactId>qraft-agent</artifactId>
             <version>${project.version}</version>
         </dependency>

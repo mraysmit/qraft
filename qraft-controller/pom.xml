@@ -191,6 +191,21 @@
 
     <build>
         <plugins>
+            <!-- Share the real in-memory Raft transport with downstream acceptance tests. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.2</version>
+                <executions>
+                    <execution>
+                        <id>test-jar</id>
+                        <phase>test-compile</phase>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
             <!-- Modern, actively-maintained protobuf plugin (recommended replacement for xolstice plugin) -->
             <plugin>
                 <groupId>io.github.ascopes</groupId>

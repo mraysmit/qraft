@@ -298,7 +298,9 @@ class DockerDurableRestartTest {
             String diagnostic = "LEADER LOGS:\n" + leaderLogs + "\nFOLLOWER LOGS:\n" + followerLogs;
             assertTrue(leaderLogs.contains("Sending InstallSnapshot to lagging follower " + followerService),
                     diagnostic);
-            assertTrue(leaderLogs.contains("InstallSnapshot to " + followerService + " complete"), diagnostic);
+            // The isolated follower can advance its term and replace the original leader on
+            // reconnection, so the receiver's durable install is the stable completion signal.
+            assertTrue(followerLogs.contains("Snapshot installed: snapshotLastIndex="), diagnostic);
         });
 
         SharedDockerCluster.stopContainer(CLUSTER, followerService);

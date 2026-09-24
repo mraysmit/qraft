@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -34,9 +35,11 @@ public final class AgentConfiguration {
     private final String datacenter;
     private final List<URI> controllerUrls;
     private final long heartbeatInterval;
+    private final long shutdownTimeoutMs;
     private final int requestTimeoutMs;
     private final long registrationRetryMinMs;
     private final long registrationRetryMaxMs;
+    private final long contactFreshnessMs;
     private final String tenant;
     private final String namespace;
     private final List<ServiceDefinition> services;
@@ -52,9 +55,11 @@ public final class AgentConfiguration {
         datacenter = builder.datacenter.trim();
         controllerUrls = List.copyOf(builder.controllerUrls);
         heartbeatInterval = builder.heartbeatInterval;
+        shutdownTimeoutMs = builder.shutdownTimeoutMs;
         requestTimeoutMs = builder.requestTimeoutMs;
         registrationRetryMinMs = builder.registrationRetryMinMs;
         registrationRetryMaxMs = builder.registrationRetryMaxMs;
+        contactFreshnessMs = builder.contactFreshnessMs;
         tenant = builder.tenant.trim();
         namespace = builder.namespace.trim();
         services = List.copyOf(builder.services);
@@ -93,10 +98,10 @@ public final class AgentConfiguration {
         JsonNode catalog = optionalObject(root, "catalog");
         JsonNode logging = optionalObject(root, "logging");
         rejectUnknown(agent, "agent", "id", "hostname", "address", "httpPort",
-                "heartbeatIntervalMs", "datacenter", "region", "version");
+                "heartbeatIntervalMs", "shutdownTimeoutMs", "datacenter", "region", "version");
         rejectUnknown(controllers, "controllers", "urls", "requestTimeoutMs");
         rejectUnknown(catalog, "catalog", "tenant", "namespace", "registrationRetryMinMs",
-                "registrationRetryMaxMs", "services");
+                "registrationRetryMaxMs", "contactFreshnessMs", "services");
         rejectUnknown(logging, "logging", "directory");
         HostIdentity local = localIdentity();
         return builder()
@@ -105,6 +110,7 @@ public final class AgentConfiguration {
                 .address(optionalText(agent, "address", local.address()))
                 .agentPort(optionalInt(agent, "httpPort", 8080))
                 .heartbeatInterval(optionalLong(agent, "heartbeatIntervalMs", 30_000))
+                .shutdownTimeoutMs(optionalLong(agent, "shutdownTimeoutMs", 30_000))
                 .datacenter(optionalText(agent, "datacenter", "default"))
                 .region(optionalText(agent, "region", "default"))
                 .version(optionalText(agent, "version", "1.0.0"))
@@ -114,6 +120,7 @@ public final class AgentConfiguration {
                 .namespace(optionalText(catalog, "namespace", "default"))
                 .registrationRetryMinMs(optionalLong(catalog, "registrationRetryMinMs", 250))
                 .registrationRetryMaxMs(optionalLong(catalog, "registrationRetryMaxMs", 30_000))
+                .contactFreshnessMs(optionalLong(catalog, "contactFreshnessMs", 90_000))
                 .services(parseServices(catalog.get("services")))
                 .loggingDirectory(optionalText(logging, "directory", "./logs"))
                 .build();
@@ -130,14 +137,42 @@ public final class AgentConfiguration {
             }
             try {
                 URI uri = new URI(value.textValue().trim());
-                if (!("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
-                        || uri.getHost() == null) {
-                    throw new IllegalArgumentException("Controller URL must use HTTP or HTTPS: " + value.textValue());
-                }
-                unique.add(uri);
+                unique.add(normalizeControllerUrl(uri, value.textValue()));
             } catch (URISyntaxException error) {
                 throw new IllegalArgumentException("Malformed controller URL: " + value.textValue(), error);
             }
+        }
+        return List.copyOf(unique);
+    }
+
+    private static URI normalizeControllerUrl(URI uri, String source) {
+        if (!("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
+                || uri.getHost() == null) {
+            throw new IllegalArgumentException("Controller URL must use HTTP or HTTPS: " + source);
+        }
+        String path = uri.getRawPath();
+        if ((path != null && !path.isEmpty() && !"/".equals(path))
+                || uri.getRawQuery() != null || uri.getRawFragment() != null) {
+            throw new IllegalArgumentException(
+                    "Controller URL must be an origin without a path, query, or fragment: " + source);
+        }
+        if (uri.getRawUserInfo() != null) {
+            throw new IllegalArgumentException("Controller URL must not contain user information: " + source);
+        }
+        try {
+            return new URI(uri.getScheme().toLowerCase(Locale.ROOT), null,
+                    uri.getHost().toLowerCase(Locale.ROOT), uri.getPort(), null, null, null);
+        } catch (URISyntaxException impossible) {
+            throw new IllegalArgumentException("Malformed controller URL: " + source, impossible);
+        }
+    }
+
+    private static List<URI> normalizeControllerUrls(List<URI> urls) {
+        if (urls == null) throw new IllegalArgumentException("controllers.urls is required");
+        Set<URI> unique = new LinkedHashSet<>();
+        for (URI uri : urls) {
+            if (uri == null) throw new IllegalArgumentException("controllers.urls must not contain null");
+            unique.add(normalizeControllerUrl(uri, uri.toString()));
         }
         return List.copyOf(unique);
     }
@@ -271,11 +306,13 @@ public final class AgentConfiguration {
     public String getControllerUrl() { return controllerUrls.getFirst().toString(); }
     public List<URI> getControllerUrls() { return controllerUrls; }
     public long getHeartbeatInterval() { return heartbeatInterval; }
+    public long getShutdownTimeoutMs() { return shutdownTimeoutMs; }
     public int getHttpConnectionTimeout() { return requestTimeoutMs; }
     public int getHttpIdleTimeout() { return requestTimeoutMs; }
     public int getRequestTimeoutMs() { return requestTimeoutMs; }
     public long getRegistrationRetryMinMs() { return registrationRetryMinMs; }
     public long getRegistrationRetryMaxMs() { return registrationRetryMaxMs; }
+    public long getContactFreshnessMs() { return contactFreshnessMs; }
     public String getTenant() { return tenant; }
     public String getNamespace() { return namespace; }
     public List<ServiceDefinition> getServices() { return services; }
@@ -291,9 +328,11 @@ public final class AgentConfiguration {
         private String datacenter = "default";
         private List<URI> controllerUrls = List.of();
         private long heartbeatInterval = 30_000;
+        private long shutdownTimeoutMs = 30_000;
         private int requestTimeoutMs = 5_000;
         private long registrationRetryMinMs = 250;
         private long registrationRetryMaxMs = 30_000;
+        private long contactFreshnessMs = 90_000;
         private String tenant = "default";
         private String namespace = "default";
         private List<ServiceDefinition> services = List.of();
@@ -309,12 +348,14 @@ public final class AgentConfiguration {
         public Builder controllerUrl(String value) {
             return controllerUrls(parseControllerUrls(JSON.createArrayNode().add(value)));
         }
-        public Builder controllerUrls(List<URI> value) { controllerUrls = List.copyOf(value); return this; }
+        public Builder controllerUrls(List<URI> value) { controllerUrls = normalizeControllerUrls(value); return this; }
         public Builder heartbeatInterval(long value) { heartbeatInterval = value; return this; }
+        public Builder shutdownTimeoutMs(long value) { shutdownTimeoutMs = value; return this; }
         public Builder httpConnectionTimeout(int value) { requestTimeoutMs = value; return this; }
         public Builder requestTimeoutMs(int value) { requestTimeoutMs = value; return this; }
         public Builder registrationRetryMinMs(long value) { registrationRetryMinMs = value; return this; }
         public Builder registrationRetryMaxMs(long value) { registrationRetryMaxMs = value; return this; }
+        public Builder contactFreshnessMs(long value) { contactFreshnessMs = value; return this; }
         public Builder tenant(String value) { tenant = value; return this; }
         public Builder namespace(String value) { namespace = value; return this; }
         public Builder services(List<ServiceDefinition> value) { services = List.copyOf(value); return this; }
@@ -334,9 +375,13 @@ public final class AgentConfiguration {
             if (controllerUrls.isEmpty()) throw new IllegalArgumentException("controllers.urls is required");
             if (agentPort < 1 || agentPort > 65_535) throw new IllegalArgumentException("agent.httpPort is invalid");
             if (heartbeatInterval < 1) throw new IllegalArgumentException("agent.heartbeatIntervalMs must be positive");
+            if (shutdownTimeoutMs < 1) throw new IllegalArgumentException("agent.shutdownTimeoutMs must be positive");
             if (requestTimeoutMs < 1) throw new IllegalArgumentException("controllers.requestTimeoutMs must be positive");
             if (registrationRetryMinMs < 1 || registrationRetryMaxMs < 1) {
                 throw new IllegalArgumentException("catalog retry intervals must be positive");
+            }
+            if (contactFreshnessMs < 1) {
+                throw new IllegalArgumentException("catalog.contactFreshnessMs must be positive");
             }
             if (registrationRetryMinMs > registrationRetryMaxMs) {
                 throw new IllegalArgumentException("catalog.registrationRetryMinMs must not exceed registrationRetryMaxMs");

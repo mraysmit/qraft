@@ -281,11 +281,22 @@ The implementation will be considered aligned with the target design when:
 - [x] Start and stop the controller HTTP health server with the controller lifecycle.
 - [x] Add real HTTP tests for client health transitions.
 - [x] Add runtime mode-resolution tests.
+- [x] Bound client shutdown, deregister services before the node, and terminate
+  owned scheduler and HTTP resources.
 
 ### Remaining implementation work
 
 - [ ] Complete server-mode configuration and bootstrap behavior.
-- [ ] Complete client-mode configuration and controller discovery behavior.
+- [x] Complete versioned client-mode configuration and the one-controller catalog
+  HTTP adapter with typed retryable and rejected outcomes.
+- [x] Complete controller discovery behavior: seed rotation, preferred-endpoint
+  memory, capped backoff for repeated node-registration cycles, and shared
+  node/catalog transport ownership. Periodic reconciliation remains on the
+  configured heartbeat cadence.
+- [x] Implement single-flight service reconciliation with stable fingerprints,
+  partial-success retention, catalog absence repair, and rejection suppression.
+- [x] Derive agent readiness from node membership, required service convergence,
+  and controller-contact freshness.
 - [ ] Implement agent membership and failure detection semantics.
 - [x] Implement service registration, catalog replication, and query behavior.
 - [x] Add composite `(tenant, namespace, node, serviceId)` catalog identity with

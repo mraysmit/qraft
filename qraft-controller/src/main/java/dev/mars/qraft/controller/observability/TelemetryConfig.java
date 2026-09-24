@@ -21,14 +21,14 @@ public class TelemetryConfig {
     private static int configuredPrometheusPort;
     private static String configuredOtlpEndpoint;
 
-    public static void configure() {
-        configure(AppConfig.get());
+    public static AutoCloseable configure() {
+        return configure(AppConfig.get());
     }
 
-    static void configure(AppConfig config) {
+    static AutoCloseable configure(AppConfig config) {
         if (!config.isTelemetryEnabled()) {
             logger.info("Telemetry is disabled");
-            return;
+            return () -> { };
         }
 
         configuredPrometheusPort = config.getPrometheusPort();
@@ -72,7 +72,10 @@ public class TelemetryConfig {
 
         logger.info("OpenTelemetry configured: service={}, otlp={}, prometheus={}",
                 serviceName, configuredOtlpEndpoint, configuredPrometheusPort);
-
+        return () -> {
+            meterProvider.close();
+            tracerProvider.close();
+        };
     }
 
     /**
