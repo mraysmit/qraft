@@ -1,7 +1,7 @@
 # Task List: Unified Runtime Flow
 
 **Date:** 2026-09-24
-**Active work:** Step 3, runtime-boundary end-to-end proof
+**Active work:** Step 4, deployment and documentation verification
 **Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), Tranche 5
 **Predecessor:** [`archive/task-list-agent-catalog-client-2026-09-24.md`](archive/task-list-agent-catalog-client-2026-09-24.md)
 **Standards:** [`PROJECT_STANDARDS.md`](PROJECT_STANDARDS.md)
@@ -87,6 +87,18 @@ share one managed lifecycle.
 `main` method, and shutdown ownership is explicit.
 
 ## 5. Step 3: Runtime-boundary end-to-end proof
+
+**Status: Done 2026-09-24.** Added the public
+`QraftRuntimeApplication.launch(String[])` boundary used by the production
+entry point and by a real runtime acceptance test. The test starts a durable
+single-node controller and an agent from temporary versioned server and client
+JSON files, registers two services, and observes readiness, service discovery,
+and agent registration through public HTTP APIs. It then proves readiness loss
+during a controller outage, restarts the controller with fresh storage, observes
+agent reconciliation restoring both services, and verifies client deregistration,
+lifecycle completion, and release of the controller HTTP, Raft, API gRPC, and
+agent ports. The focused acceptance test passed, and the complete runtime
+dependency reactor passed 672 tests with no failures, errors, or skips.
 
 **Red tests.**
 

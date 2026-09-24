@@ -12,12 +12,16 @@ public final class QraftRuntimeApplication {
     private QraftRuntimeApplication() { }
 
     public static void main(String[] args) {
-        RuntimeLifecycle lifecycle = run(
-                args, QraftRuntimeApplication::launchServer, QraftRuntimeApplication::launchClient);
+        RuntimeLifecycle lifecycle = launch(args);
         Thread shutdownHook = Thread.ofPlatform().name("qraft-runtime-shutdown").unstarted(() ->
                 lifecycle.closeAsync().join());
         Runtime.getRuntime().addShutdownHook(shutdownHook);
         lifecycle.completion().join();
+    }
+
+    /** Starts one configured Qraft mode and returns its runtime-owned lifecycle. */
+    public static RuntimeLifecycle launch(String[] args) {
+        return run(args, QraftRuntimeApplication::launchServer, QraftRuntimeApplication::launchClient);
     }
 
     static RuntimeLifecycle run(String[] args, ModeLauncher serverLauncher, ModeLauncher clientLauncher) {
