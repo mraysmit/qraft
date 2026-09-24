@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "server": {
+    "id": "",
+    "applicationVersion": "2.0-ext",
+    "http": {"host": "0.0.0.0", "port": 8080},
+    "apiGrpcPort": 10080,
+    "raft": {
+      "port": 9080,
+      "nodes": {},
+      "electionTimeoutMs": 5000,
+      "heartbeatIntervalMs": 1000,
+      "storage": {"type": "raftlog", "path": "", "fsync": true},
+      "snapshot": {"enabled": true, "threshold": 10000, "checkIntervalMs": 60000},
+      "logHardLimit": 100000,
+      "io": {"poolSize": 10, "queueSize": 1000}
+    },
+    "telemetry": {
+      "enabled": true,
+      "otlpEndpoint": "http://localhost:4317",
+      "prometheusPort": 9464,
+      "serviceName": "qraft-controller"
+    },
+    "shutdown": {"drainTimeoutMs": 5000, "timeoutMs": 30000}
+  },
+  "logging": {"directory": "./logs"}
+}

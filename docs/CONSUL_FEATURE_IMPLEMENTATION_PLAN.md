@@ -63,9 +63,10 @@ qraft client
 - Runtime mode is selected only by the `server` or `client` command-line
   subcommand. Environment-variable mode selection is not supported.
 - Mode-specific configuration must be validated before background services start.
-- Both modes load one versioned JSON configuration document named by the required
-  `--config <path>` argument. Qraft does not use environment variables for runtime
-  configuration or for locating that file.
+- Both modes load one versioned JSON configuration document. Its location is
+  resolved from `--config <path>`, `-Dqraft.config=<path>`, or the conventional
+  `config/<role>.json` and `/etc/qraft/<role>.json` paths. Qraft does not use
+  environment variables for runtime configuration or file discovery.
 - Both modes share configuration conventions, logging, metrics, signal handling, and graceful shutdown.
 
 The Maven modules remain separated for dependency and ownership boundaries, but

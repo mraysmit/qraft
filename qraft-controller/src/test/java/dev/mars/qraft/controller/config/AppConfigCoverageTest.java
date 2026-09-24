@@ -1,6 +1,5 @@
 package dev.mars.qraft.controller.config;
 
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
@@ -9,210 +8,129 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Map;
-import java.util.Properties;
-import java.util.concurrent.atomic.AtomicReference;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AppConfigCoverageTest {
-
     @Test
-    void packagesTheConfigurationFileThatAppConfigLoads() throws Exception {
-        ClassLoader classLoader = AppConfig.class.getClassLoader();
-        try (InputStream current = classLoader.getResourceAsStream("qraft-controller.properties")) {
-            assertNotNull(current, "qraft-controller.properties must be packaged for AppConfig");
+    void packagesTheJsonDefaultsUsedByEmbeddedTests() throws Exception {
+        ClassLoader loader = AppConfig.class.getClassLoader();
+        try (InputStream current = loader.getResourceAsStream("qraft-controller.json")) {
+            assertNotNull(current);
         }
-        assertNull(classLoader.getResource("quorus-controller.properties"),
-                "legacy Quorus configuration must not be packaged");
+        assertFalse(Files.exists(Path.of(AppConfig.class.getProtectionDomain()
+                .getCodeSource().getLocation().toURI()).resolve("qraft-controller.properties")));
     }
 
     @Test
-    void packagesTheProductionConfigurationRatherThanOnlyATestResource() throws Exception {
-        Path classesDirectory = Path.of(AppConfig.class.getProtectionDomain()
-                .getCodeSource().getLocation().toURI());
-        Path productionConfiguration = classesDirectory.resolve("qraft-controller.properties");
-        Path legacyConfiguration = classesDirectory.resolve("quorus-controller.properties");
+    void parsesACompleteVersionedServerDocument() {
+        AppConfig config = AppConfig.fromJson("""
+                {
+                  "version": 1,
+                  "server": {
+                    "id": "server-a", "applicationVersion": "3.0",
+                    "http": {"host": "127.0.0.1", "port": 8180},
+                    "apiGrpcPort": 10180,
+                    "raft": {
+                      "port": 9180,
+                      "nodes": {"server-a":"server-a:9180","server-b":"server-b:9180"},
+                      "electionTimeoutMs": 3200, "heartbeatIntervalMs": 450,
+                      "storage": {"type":"raftlog","path":"/data/a","fsync":true},
+                      "snapshot": {"enabled":true,"threshold":200,"checkIntervalMs":1500},
+                      "logHardLimit": 9000, "io":{"poolSize":4,"queueSize":200}
+                    },
+                    "telemetry": {"enabled":false,"prometheusPort":9470},
+                    "shutdown": {"drainTimeoutMs":1500,"timeoutMs":5000}
+                  },
+                  "logging": {"directory":"/var/log/qraft"}
+                }
+                """);
 
-        assertTrue(Files.isRegularFile(productionConfiguration),
-                "the controller artifact must contain qraft-controller.properties");
-        assertFalse(Files.exists(legacyConfiguration),
-                "the controller artifact must not contain the legacy Quorus resource");
-
-        Properties packaged = new Properties();
-        try (InputStream input = Files.newInputStream(productionConfiguration)) {
-            packaged.load(input);
-        }
-        Map<String, String> liveDefaults = Map.ofEntries(
-                Map.entry("qraft.version", "2.0-ext"),
-                Map.entry("qraft.node.id", ""),
-                Map.entry("qraft.http.port", "8080"),
-                Map.entry("qraft.http.host", "0.0.0.0"),
-                Map.entry("qraft.api.grpc.port", "10080"),
-                Map.entry("qraft.raft.port", "9080"),
-                Map.entry("qraft.cluster.nodes", ""),
-                Map.entry("qraft.raft.storage.type", "raftlog"),
-                Map.entry("qraft.raft.storage.path", ""),
-                Map.entry("qraft.raft.storage.fsync", "true"),
-                Map.entry("qraft.raft.snapshot.enabled", "true"),
-                Map.entry("qraft.raft.snapshot.threshold", "10000"),
-                Map.entry("qraft.raft.snapshot.check-interval-ms", "60000"),
-                Map.entry("qraft.raft.log.hard-limit", "100000"),
-                Map.entry("qraft.telemetry.otlp.endpoint", "http://localhost:4317"),
-                Map.entry("qraft.telemetry.prometheus.port", "9464"),
-                Map.entry("qraft.telemetry.enabled", "true"),
-                Map.entry("qraft.telemetry.service.name", "qraft-controller"),
-                Map.entry("qraft.raft.io.pool-size", "10"),
-                Map.entry("qraft.raft.io.queue-size", "1000"));
-        liveDefaults.forEach((key, value) -> assertEquals(value, packaged.getProperty(key),
-                () -> "the production resource must declare live setting " + key));
-        assertFalse(packaged.stringPropertyNames().stream().anyMatch(key -> key.startsWith("qraft.jobs.")),
-                "the production resource must not advertise unsupported job-scheduler settings");
-
-        byte[] productionBytes = Files.readAllBytes(productionConfiguration);
-        AtomicReference<String> requestedResource = new AtomicReference<>();
-        ClassLoader productionResources = new ClassLoader(null) {
-            @Override
-            public InputStream getResourceAsStream(String name) {
-                requestedResource.set(name);
-                return "qraft-controller.properties".equals(name)
-                        ? new ByteArrayInputStream(productionBytes)
-                        : null;
-            }
-        };
-
-        new AppConfig(productionResources);
-        assertEquals("qraft-controller.properties", requestedResource.get(),
-                "AppConfig must request the packaged production resource by its exact name");
+        assertEquals("server-a", config.getNodeId());
+        assertEquals(8180, config.getHttpPort());
+        assertEquals(9180, config.getRaftPort());
+        assertEquals(10180, config.getApiGrpcPort());
+        assertEquals("server-a=server-a:9180,server-b=server-b:9180", config.getClusterNodes());
+        assertEquals(3200, config.getElectionTimeoutMs());
+        assertEquals(450, config.getHeartbeatIntervalMs());
+        assertEquals("/data/a", config.getRaftStoragePath());
+        assertEquals("/var/log/qraft", config.getLoggingDirectory());
+        assertDoesNotThrow(config::validate);
     }
 
     @Test
-    void refusesToStartWhenTheConfigurationResourceIsMissing() {
-        ClassLoader withoutConfiguration = new ClassLoader(null) {
-            @Override
-            public InputStream getResourceAsStream(String name) {
-                return null;
-            }
-        };
-
-        IllegalStateException failure = assertThrows(IllegalStateException.class,
-                () -> new AppConfig(withoutConfiguration));
-
-        assertTrue(failure.getMessage().contains("qraft-controller.properties"));
+    void rejectsMalformedTypesInsteadOfFallingBack() {
+        assertThrows(IllegalArgumentException.class,
+                () -> AppConfig.fromJson("{\"version\":1,\"server\":{\"http\":{\"port\":\"bad\"}}}"));
+        assertThrows(IllegalArgumentException.class,
+                () -> AppConfig.fromJson("{\"version\":2,\"server\":{}}"));
+        AppConfig invalidPort = AppConfig.fromJson(
+                "{\"version\":1,\"server\":{\"http\":{\"port\":70000}}}");
+        assertThrows(IllegalStateException.class, invalidPort::validate);
     }
 
     @Test
-    void refusesToStartWhenTheConfigurationResourceCannotBeRead() {
-        ClassLoader withUnreadableConfiguration = new ClassLoader(null) {
-            @Override
-            public InputStream getResourceAsStream(String name) {
-                return new InputStream() {
-                    @Override
-                    public int read() throws IOException {
-                        throw new IOException("unreadable test resource");
-                    }
-                };
-            }
-        };
-
-        IllegalStateException failure = assertThrows(IllegalStateException.class,
-                () -> new AppConfig(withUnreadableConfiguration));
-
-        assertTrue(failure.getMessage().contains("qraft-controller.properties"));
-        assertInstanceOf(IOException.class, failure.getCause());
+    void rejectsUnknownSettingsAndDuplicateJsonKeys() {
+        assertThrows(IllegalArgumentException.class,
+                () -> AppConfig.fromJson("{\"version\":1,\"server\":{\"unexpected\":true}}"));
+        assertThrows(IllegalArgumentException.class,
+                () -> AppConfig.fromJson("{\"version\":1,\"version\":1,\"server\":{}}"));
     }
 
     @Test
-    void refusesToStartWhenTheConfigurationResourceIsMalformed() {
-        ClassLoader withMalformedConfiguration = new ClassLoader(null) {
-            @Override
-            public InputStream getResourceAsStream(String name) {
-                return new ByteArrayInputStream(
-                        "qraft.version=\\u12G4\n".getBytes(StandardCharsets.ISO_8859_1));
-            }
-        };
-
-        IllegalStateException failure = assertThrows(IllegalStateException.class,
-                () -> new AppConfig(withMalformedConfiguration));
-
-        assertTrue(failure.getMessage().contains("qraft-controller.properties"));
-        assertInstanceOf(IllegalArgumentException.class, failure.getCause());
-    }
-
-    private static final String[] KEYS = {
-            "qraft.test.string", "qraft.test.int", "qraft.test.long", "qraft.test.boolean",
-            "qraft.raft.storage.type", "qraft.raft.storage.fsync"
-    };
-
-    @AfterEach
-    void clearProperties() {
-        for (String key : KEYS) System.clearProperty(key);
+    void requiresAnExplicitNodeIdForMultipleNodes() {
+        AppConfig config = AppConfig.fromJson("""
+                {"version":1,"server":{"raft":{"nodes":{"a":"a:9080","b":"b:9080"}}}}
+                """);
+        assertThrows(IllegalStateException.class, config::validate);
     }
 
     @Test
-    void resolvesTypedSystemPropertiesAndFallbacks() {
-        AppConfig config = AppConfig.get();
-        System.setProperty("qraft.test.string", "value");
-        System.setProperty("qraft.test.int", "42");
-        System.setProperty("qraft.test.long", "9000000000");
-        System.setProperty("qraft.test.boolean", "true");
-
-        assertEquals("value", config.getString("qraft.test.string", "fallback"));
-        assertEquals(42, config.getInt("qraft.test.int", 1));
-        assertEquals(9_000_000_000L, config.getLong("qraft.test.long", 1));
-        assertTrue(config.getBoolean("qraft.test.boolean", false));
-        assertEquals("fallback", config.getString("qraft.test.missing", "fallback"));
-
-        System.setProperty("qraft.test.int", "invalid");
-        System.setProperty("qraft.test.long", "invalid");
-        assertEquals(7, config.getInt("qraft.test.int", 7));
-        assertEquals(8, config.getLong("qraft.test.long", 8));
-    }
-
-    @Test
-    void exposesValidDefaultConfiguration() {
+    void defaultDocumentIsValidAndUsesNodeSpecificStorage() {
         AppConfig config = AppConfig.get();
         assertDoesNotThrow(config::validate);
-        assertTrue(config.getHttpPort() > 0);
-        assertFalse(config.getHttpHost().isBlank());
-        assertTrue(config.getRaftPort() > 0);
-        assertTrue(config.getApiGrpcPort() > 0);
-        assertFalse(config.getRaftStorageType().isBlank());
-        assertFalse(config.getRaftStoragePath().isBlank());
-        assertTrue(config.getSnapshotThreshold() > 0);
-        assertTrue(config.getSnapshotCheckIntervalMs() > 0);
-        assertTrue(config.getLogHardLimit() > 0);
-        assertFalse(config.getServiceName().isBlank());
-        assertTrue(config.getRaftIoPoolSize() > 0);
-        assertTrue(config.getRaftIoQueueSize() > 0);
-    }
-
-    @Test
-    void blankConfiguredStoragePathUsesTheNodeSpecificDefault() {
-        AppConfig config = AppConfig.get();
-
         assertEquals("./data/raft/" + config.getNodeId(), config.getRaftStoragePath());
     }
 
     @Test
-    void acceptsOnlyTheExternalWalStorageType() {
-        AppConfig config = AppConfig.get();
+    void refusesMissingUnreadableAndMalformedPackagedConfiguration() {
+        ClassLoader missing = new ClassLoader(null) {
+            @Override public InputStream getResourceAsStream(String name) { return null; }
+        };
+        assertTrue(assertThrows(IllegalStateException.class, () -> new AppConfig(missing))
+                .getMessage().contains("qraft-controller.json"));
 
-        System.setProperty("qraft.raft.storage.type", "raftlog");
-        assertDoesNotThrow(config::validate);
+        ClassLoader unreadable = new ClassLoader(null) {
+            @Override public InputStream getResourceAsStream(String name) {
+                return new InputStream() {
+                    @Override public int read() throws IOException { throw new IOException("broken"); }
+                };
+            }
+        };
+        assertThrows(IllegalStateException.class, () -> new AppConfig(unreadable));
 
-        System.setProperty("qraft.raft.storage.type", "file");
-        IllegalStateException failure = assertThrows(IllegalStateException.class, config::validate);
-        assertTrue(failure.getMessage().contains("raftlog"));
+        ClassLoader malformed = new ClassLoader(null) {
+            @Override public InputStream getResourceAsStream(String name) {
+                return new ByteArrayInputStream("not-json".getBytes(StandardCharsets.UTF_8));
+            }
+        };
+        assertThrows(IllegalStateException.class, () -> new AppConfig(malformed));
     }
 
     @Test
-    void rejectsDisablingWalDurability() {
-        AppConfig config = AppConfig.get();
-        System.setProperty("qraft.raft.storage.type", "raftlog");
-        System.setProperty("qraft.raft.storage.fsync", "false");
-
-        IllegalStateException failure = assertThrows(IllegalStateException.class, config::validate);
-        assertTrue(failure.getMessage().contains("fsync"));
+    void refusesNonWalOrNonDurableStorage() {
+        AppConfig wrongType = AppConfig.fromJson("""
+                {"version":1,"server":{"raft":{"storage":{"type":"file","fsync":true}}}}
+                """);
+        assertThrows(IllegalStateException.class, wrongType::validate);
+        AppConfig noFsync = AppConfig.fromJson("""
+                {"version":1,"server":{"raft":{"storage":{"type":"raftlog","fsync":false}}}}
+                """);
+        assertThrows(IllegalStateException.class, noFsync::validate);
     }
 }

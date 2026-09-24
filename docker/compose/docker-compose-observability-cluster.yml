@@ -146,21 +146,9 @@ services:
       dockerfile: qraft-runtime/Dockerfile
     container_name: qraft-controller1
     hostname: controller1
-    environment:
-      - QRAFT_MODE=server
-      - QRAFT_NODE_ID=controller1
-      - QRAFT_HTTP_PORT=8080
-      - QRAFT_RAFT_PORT=9080
-      - QRAFT_CLUSTER_NODES=controller1=controller1:9080,controller2=controller2:9080,controller3=controller3:9080
-      - QRAFT_RAFT_ELECTION_TIMEOUT_MS=3000
-      - QRAFT_RAFT_HEARTBEAT_INTERVAL_MS=500
-      - JAVA_OPTS=-Xmx512m -Xms256m
-      # OpenTelemetry configuration
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-      - OTEL_METRICS_EXPORTER=otlp
-      - OTEL_TRACES_EXPORTER=otlp
-      - OTEL_SERVICE_NAME=qraft-controller
-      - OTEL_RESOURCE_ATTRIBUTES=service.instance.id=controller1
+    command: ["server", "--config", "/etc/qraft/server.json"]
+    volumes:
+      - ../config/three-node-observability/controller1.json:/etc/qraft/server.json:ro
     ports:
       - "8081:8080"
       - "9464:9464"
@@ -186,21 +174,9 @@ services:
       dockerfile: qraft-runtime/Dockerfile
     container_name: qraft-controller2
     hostname: controller2
-    environment:
-      - QRAFT_MODE=server
-      - QRAFT_NODE_ID=controller2
-      - QRAFT_HTTP_PORT=8080
-      - QRAFT_RAFT_PORT=9080
-      - QRAFT_CLUSTER_NODES=controller1=controller1:9080,controller2=controller2:9080,controller3=controller3:9080
-      - QRAFT_RAFT_ELECTION_TIMEOUT_MS=3000
-      - QRAFT_RAFT_HEARTBEAT_INTERVAL_MS=500
-      - JAVA_OPTS=-Xmx512m -Xms256m
-      # OpenTelemetry configuration
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-      - OTEL_METRICS_EXPORTER=otlp
-      - OTEL_TRACES_EXPORTER=otlp
-      - OTEL_SERVICE_NAME=qraft-controller
-      - OTEL_RESOURCE_ATTRIBUTES=service.instance.id=controller2
+    command: ["server", "--config", "/etc/qraft/server.json"]
+    volumes:
+      - ../config/three-node-observability/controller2.json:/etc/qraft/server.json:ro
     ports:
       - "8082:8080"
       - "9465:9464"
@@ -228,21 +204,9 @@ services:
       dockerfile: qraft-runtime/Dockerfile
     container_name: qraft-controller3
     hostname: controller3
-    environment:
-      - QRAFT_MODE=server
-      - QRAFT_NODE_ID=controller3
-      - QRAFT_HTTP_PORT=8080
-      - QRAFT_RAFT_PORT=9080
-      - QRAFT_CLUSTER_NODES=controller1=controller1:9080,controller2=controller2:9080,controller3=controller3:9080
-      - QRAFT_RAFT_ELECTION_TIMEOUT_MS=3000
-      - QRAFT_RAFT_HEARTBEAT_INTERVAL_MS=500
-      - JAVA_OPTS=-Xmx512m -Xms256m
-      # OpenTelemetry configuration
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
-      - OTEL_METRICS_EXPORTER=otlp
-      - OTEL_TRACES_EXPORTER=otlp
-      - OTEL_SERVICE_NAME=qraft-controller
-      - OTEL_RESOURCE_ATTRIBUTES=service.instance.id=controller3
+    command: ["server", "--config", "/etc/qraft/server.json"]
+    volumes:
+      - ../config/three-node-observability/controller3.json:/etc/qraft/server.json:ro
     ports:
       - "8083:8080"
       - "9466:9464"

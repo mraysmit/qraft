@@ -198,16 +198,21 @@ public final class SharedDockerCluster {
     /** Runs a second controller against an active controller's volume and captures its exit. */
     public static DockerCommandResult runStorageLockContender(
             ComposeContainer cluster, String ownerService) {
-        List<String> command = List.of(
-                "docker", "run", "--rm", "--volumes-from", containerId(cluster, ownerService),
-                "-e", "QRAFT_MODE=server",
-                "-e", "QRAFT_NODE_ID=lock-contender",
-                "-e", "QRAFT_RAFT_PORT=9080",
-                "-e", "QRAFT_HTTP_PORT=8080",
-                "-e", "QRAFT_CLUSTER_NODES=lock-contender=localhost:9080",
-                "-e", "QRAFT_RAFT_STORAGE_PATH=/app/data",
-                "qraft-runtime:test");
+        Path config = null;
         try {
+            config = Files.createTempFile("qraft-lock-contender-", ".json");
+            Files.writeString(config, """
+                    {"version":1,"server":{"id":"lock-contender","http":{"port":8080},
+                    "apiGrpcPort":10080,"raft":{"port":9080,
+                    "nodes":{"lock-contender":"localhost:9080"},
+                    "storage":{"type":"raftlog","path":"/app/data","fsync":true}},
+                    "telemetry":{"enabled":false}}}
+                    """);
+            List<String> command = List.of(
+                    "docker", "run", "--rm", "--volumes-from", containerId(cluster, ownerService),
+                    "--mount", "type=bind,source=" + config.toAbsolutePath()
+                            + ",target=/etc/qraft/server.json,readonly",
+                    "qraft-runtime:test", "server", "--config", "/etc/qraft/server.json");
             ProcessBuilder processBuilder = new ProcessBuilder(command);
             processBuilder.redirectErrorStream(true);
             Process process = processBuilder.start();
@@ -218,6 +223,14 @@ public final class SharedDockerCluster {
             return new DockerCommandResult(process.waitFor(), output);
         } catch (Exception error) {
             throw new IllegalStateException("Could not run storage-lock contender", error);
+        } finally {
+            if (config != null) {
+                try {
+                    Files.deleteIfExists(config);
+                } catch (IOException ignored) {
+                    // The temporary file is best-effort cleanup after Docker releases the mount.
+                }
+            }
         }
     }
 

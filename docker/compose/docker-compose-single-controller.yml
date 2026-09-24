@@ -4,20 +4,13 @@ networks:
 
 services:
   controller:
+    command: ["server", "--config", "/etc/qraft/server.json"]
     build:
       context: ../..
       dockerfile: qraft-runtime/Dockerfile
     container_name: qraft-controller-dev
-    environment:
-      - QRAFT_MODE=server
-      - QRAFT_NODE_ID=controller-dev
-      - QRAFT_RAFT_HOST=0.0.0.0
-      - QRAFT_RAFT_PORT=9080
-      - QRAFT_HTTP_PORT=8080
-      - QRAFT_CLUSTER_NODES=controller-dev=controller:9080
-      - QRAFT_RAFT_ELECTION_TIMEOUT_MS=3000
-      - QRAFT_RAFT_HEARTBEAT_INTERVAL_MS=500
-      - JAVA_OPTS=-Xmx512m -Xms256m
+    volumes:
+      - ../config/single/server.json:/etc/qraft/server.json:ro
     ports:
       - "8080:8080"
     networks:

@@ -2,8 +2,8 @@
 <configuration>
     <statusListener class="ch.qos.logback.core.status.OnConsoleStatusListener"/>
 
-    <property name="LOG_DIR" value="${QRAFT_LOG_DIR:-${user.dir}/logs}"/>
-    <property name="INSTANCE_ID" value="${QRAFT_NODE_ID:-${NODE_ID:-${HOSTNAME:-local}}}"/>
+    <property name="LOG_DIR" value="${qraft.log.dir:-${user.dir}/logs}"/>
+    <property name="INSTANCE_ID" value="server"/>
     <property name="LOG_BASE" value="${LOG_DIR}/qraft-controller-${INSTANCE_ID}"/>
     
     <!-- Console appender with MDC context for Docker logs -->

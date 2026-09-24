@@ -28,9 +28,10 @@ The compose directory also contains dedicated three-node, five-node, and
 network-partition configurations used for distributed testing. These require
 the unified `qraft-runtime` image. Qraft does not use environment variables for
 runtime configuration. Compose mounts a versioned JSON file for each process and
-starts it with `server --config /etc/qraft/server.json` or
-`client --config /etc/qraft/client.json`. The configuration path is always an
-explicit command argument, not an environment variable.
+starts servers with `server --config /etc/qraft/server.json`. The agent image uses
+`client` and discovers its mounted `/etc/qraft/client.json` through the standard
+location. Operators may instead use `-Dqraft.config=<path>` or the local
+`config/<role>.json` convention. No discovery method reads an environment variable.
 
 Compose packages the runtime JAR built on the host; it does not run Maven inside
 Docker. The `start.ps1`, `start.sh`, `start-quick.ps1`, and `start-quick.sh`

@@ -83,13 +83,15 @@ Qraft is a Consul-style service discovery and distributed coordination platform.
 
 - Qraft runtime configuration is file-based. Production processes must not read
   environment variables for application configuration.
-- The runtime receives the path to one versioned JSON configuration file through
-  the explicit `--config <path>` command-line option. The configuration path
-  itself must not come from an environment variable.
+- The runtime receives one versioned JSON configuration file. Its location is
+  resolved, in order, from `--config <path>`, the `qraft.config` JVM system
+  property, `config/<role>.json`, or `/etc/qraft/<role>.json`, where `<role>` is
+  `server` or `client`. The configuration path must not come from an environment
+  variable.
 - Configuration files must not contain environment-variable substitutions.
-- Containers and service managers mount configuration and secret files and pass
-  their paths as command arguments. They must not translate environment variables
-  into JVM system properties or command-line settings.
+- Containers and service managers mount configuration and secret files. They may
+  use an explicit command argument, the JVM locator property, or a conventional
+  path; they must not translate environment variables into configuration.
 - Tests inject parsed configuration values or temporary configuration files; they
   must not mutate or depend on the process environment.
 - Invalid, missing, unknown, or duplicate settings fail before threads, sockets,

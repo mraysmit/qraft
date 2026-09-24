@@ -39,8 +39,11 @@ class DockerDeploymentContractTest {
             String compose = Files.readString(root.resolve(relativePath));
             assertTrue(compose.contains("dockerfile: qraft-runtime/Dockerfile"), relativePath);
             if (!relativePath.endsWith("docker-compose-build-image.yml")) {
-                assertTrue(compose.contains("QRAFT_MODE=server"), relativePath);
+                assertTrue(compose.contains("command: [\"server\", \"--config\", \"/etc/qraft/server.json\"]"),
+                        relativePath);
+                assertTrue(compose.contains(":/etc/qraft/server.json:ro"), relativePath);
             }
+            assertFalse(compose.contains("QRAFT_"), relativePath);
             assertFalse(compose.contains("additional_contexts:"), relativePath);
             assertFalse(compose.contains("qraft-controller/Dockerfile"), relativePath);
             assertFalse(compose.contains("BUILDER_IMAGE"), relativePath);
@@ -55,7 +58,10 @@ class DockerDeploymentContractTest {
         for (String relativePath : PREBUILT_COMPOSE_FILES) {
             String compose = Files.readString(root.resolve(relativePath));
             assertTrue(compose.contains("image: qraft-runtime:test"), relativePath);
-            assertTrue(compose.contains("QRAFT_MODE=server"), relativePath);
+            assertTrue(compose.contains("command: [\"server\", \"--config\", \"/etc/qraft/server.json\"]"),
+                    relativePath);
+            assertTrue(compose.contains(":/etc/qraft/server.json:ro"), relativePath);
+            assertFalse(compose.contains("QRAFT_"), relativePath);
         }
     }
 
@@ -67,7 +73,7 @@ class DockerDeploymentContractTest {
                 continue;
             }
             String compose = Files.readString(root.resolve(relativePath));
-            assertFalse(compose.contains("QRAFT_RAFT_PORT=8080"), relativePath);
+            assertTrue(compose.contains("/etc/qraft/server.json"), relativePath);
         }
     }
 
@@ -146,26 +152,61 @@ class DockerDeploymentContractTest {
         Path root = Path.of("..").toAbsolutePath().normalize();
         for (String relativePath : PREBUILT_COMPOSE_FILES) {
             String compose = Files.readString(root.resolve(relativePath));
-            assertTrue(compose.contains("QRAFT_RAFT_STORAGE_PATH=/app/data"), relativePath);
-            assertTrue(compose.contains("QRAFT_RAFT_SNAPSHOT_THRESHOLD="), relativePath);
-            assertTrue(compose.contains("QRAFT_RAFT_SNAPSHOT_CHECK_INTERVAL_MS="), relativePath);
+            assertTrue(compose.contains("-acceptance/"), relativePath);
             assertTrue(compose.contains(":/app/data"), relativePath);
             assertTrue(compose.contains("volumes:"), relativePath);
+        }
+        for (String profile : List.of("three-node-acceptance", "five-node-acceptance")) {
+            try (var paths = Files.list(root.resolve("docker/config/" + profile))) {
+                for (Path config : paths.toList()) {
+                    String json = Files.readString(config);
+                    assertTrue(json.contains("\"path\":\"/app/data\""), config.toString());
+                    assertTrue(json.contains("\"threshold\":5"), config.toString());
+                    assertTrue(json.contains("\"checkIntervalMs\":1000"), config.toString());
+                }
+            }
         }
     }
 
     @Test
-    void agentContainerChecksTheControllerRootHealthEndpoint() throws IOException {
+    void agentContainerUsesTheConventionalMountedConfiguration() throws IOException {
         Path root = Path.of("..").toAbsolutePath().normalize();
         String entrypoint = Files.readString(root.resolve("qraft-agent/docker-entrypoint.sh"));
-        assertTrue(entrypoint.contains("CONTROLLER_HEALTH_URL"));
-        assertTrue(entrypoint.contains("${controller_base%/api/v1}/health"));
-        assertFalse(entrypoint.contains("curl -f \"$CONTROLLER_URL/health\""));
+        assertTrue(entrypoint.contains("\"$@\""));
+        assertFalse(entrypoint.contains("QRAFT_"));
+        assertFalse(entrypoint.contains("AGENT_"));
 
         String dockerfile = Files.readString(root.resolve("qraft-agent/Dockerfile"));
+        assertTrue(dockerfile.contains("CMD [\"client\"]"));
+        assertFalse(dockerfile.contains("ENV "));
         assertTrue(dockerfile.contains("sed -i 's/\\r$//' /docker-entrypoint.sh"));
         assertTrue(Files.readString(root.resolve(".gitattributes"))
                 .contains("*.sh text eol=lf"));
+    }
+
+    @Test
+    void qraftDeploymentArtifactsDoNotConfigureThroughEnvironmentVariables() throws IOException {
+        Path root = Path.of("..").toAbsolutePath().normalize();
+        List<Path> roots = List.of(root.resolve("qraft-agent/src/main"),
+                root.resolve("qraft-controller/src/main"), root.resolve("qraft-runtime/src/main"),
+                root.resolve("docker/compose"), root.resolve("qraft-agent/Dockerfile"),
+                root.resolve("qraft-runtime/Dockerfile"), root.resolve("qraft-agent/docker-entrypoint.sh"),
+                root.resolve("qraft-runtime/docker-entrypoint.sh"));
+        for (Path candidate : roots) {
+            if (Files.isDirectory(candidate)) {
+                try (var paths = Files.walk(candidate)) {
+                    for (Path file : paths.filter(Files::isRegularFile).toList()) {
+                        String content = Files.readString(file);
+                        assertFalse(content.contains("System.getenv("), file.toString());
+                        assertFalse(content.matches("(?s).*QRAFT_[A-Z0-9_]+.*"), file.toString());
+                    }
+                }
+            } else {
+                String content = Files.readString(candidate);
+                assertFalse(content.contains("System.getenv("), candidate.toString());
+                assertFalse(content.matches("(?s).*QRAFT_[A-Z0-9_]+.*"), candidate.toString());
+            }
+        }
     }
 
     @Test

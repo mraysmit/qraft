@@ -1,6 +1,7 @@
 package dev.mars.qraft.controller.observability;
 
-import org.junit.jupiter.api.AfterEach;
+import dev.mars.qraft.controller.config.AppConfig;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.LinkedBlockingQueue;
@@ -10,11 +11,6 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.*;
 
 class RaftMetricsTest {
-
-    @AfterEach
-    void clearTelemetryProperty() {
-        System.clearProperty("qraft.telemetry.enabled");
-    }
 
     @Test
     void tracksAndClearsRegisteredExecutor() {
@@ -40,8 +36,9 @@ class RaftMetricsTest {
 
     @Test
     void telemetryCanBeDisabledWithoutOpeningExporters() {
-        System.setProperty("qraft.telemetry.enabled", "false");
-        assertDoesNotThrow(TelemetryConfig::configure);
+        AppConfig config = AppConfig.fromJson(
+                "{\"version\":1,\"server\":{\"telemetry\":{\"enabled\":false}}}");
+        assertDoesNotThrow(() -> TelemetryConfig.configure(config));
         assertDoesNotThrow(TelemetryConfig::new);
     }
 }

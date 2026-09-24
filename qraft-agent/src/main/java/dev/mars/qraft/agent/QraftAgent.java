@@ -5,9 +5,11 @@ import dev.mars.qraft.agent.config.AgentConfiguration;
 import dev.mars.qraft.agent.service.AgentRegistrationClient;
 import dev.mars.qraft.agent.service.HealthService;
 import dev.mars.qraft.agent.service.HeartbeatService;
+import dev.mars.qraft.config.ConfigFileResolver;
 
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
@@ -94,7 +96,10 @@ public final class QraftAgent implements AutoCloseable {
     @Override public void close() { shutdown().join(); }
 
     public static void main(String[] args) {
-        QraftAgent agent = new QraftAgent(AgentConfiguration.fromEnvironment());
+        Path configPath = ConfigFileResolver.resolve(args, "client");
+        AgentConfiguration configuration = AgentConfiguration.fromFile(configPath);
+        System.setProperty("qraft.log.dir", configuration.getLoggingDirectory());
+        QraftAgent agent = new QraftAgent(configuration);
         Runtime.getRuntime().addShutdownHook(new Thread(agent::close));
         agent.start().join();
     }

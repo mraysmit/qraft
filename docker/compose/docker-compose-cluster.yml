@@ -8,22 +8,14 @@ services:
       dockerfile: qraft-runtime/Dockerfile
     container_name: qraft-controller1
     hostname: controller1
-    environment:
-      - QRAFT_MODE=server
-      - QRAFT_NODE_ID=controller1
-      - QRAFT_RAFT_HOST=0.0.0.0
-      - QRAFT_RAFT_PORT=9080
-      - QRAFT_HTTP_PORT=8080
-      - QRAFT_CLUSTER_NODES=controller1=controller1:9080,controller2=controller2:9080,controller3=controller3:9080
-      - QRAFT_RAFT_ELECTION_TIMEOUT_MS=3000
-      - QRAFT_RAFT_HEARTBEAT_INTERVAL_MS=500
-      - JAVA_OPTS=-Xmx256m -Xms128m
+    command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
       - "8081:8080"
     networks:
       qraft-cluster:
         ipv4_address: 172.20.0.11
     volumes:
+      - ../config/three-node/controller1.json:/etc/qraft/server.json:ro
       - controller1-data:/app/data
       - ../../logs:/app/logs
     labels:
@@ -48,22 +40,14 @@ services:
       dockerfile: qraft-runtime/Dockerfile
     container_name: qraft-controller2
     hostname: controller2
-    environment:
-      - QRAFT_MODE=server
-      - QRAFT_NODE_ID=controller2
-      - QRAFT_RAFT_HOST=0.0.0.0
-      - QRAFT_RAFT_PORT=9080
-      - QRAFT_HTTP_PORT=8080
-      - QRAFT_CLUSTER_NODES=controller1=controller1:9080,controller2=controller2:9080,controller3=controller3:9080
-      - QRAFT_RAFT_ELECTION_TIMEOUT_MS=3000
-      - QRAFT_RAFT_HEARTBEAT_INTERVAL_MS=500
-      - JAVA_OPTS=-Xmx256m -Xms128m
+    command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
       - "8082:8080"
     networks:
       qraft-cluster:
         ipv4_address: 172.20.0.12
     volumes:
+      - ../config/three-node/controller2.json:/etc/qraft/server.json:ro
       - controller2-data:/app/data
       - ../../logs:/app/logs
     labels:
@@ -90,22 +74,14 @@ services:
       dockerfile: qraft-runtime/Dockerfile
     container_name: qraft-controller3
     hostname: controller3
-    environment:
-      - QRAFT_MODE=server
-      - QRAFT_NODE_ID=controller3
-      - QRAFT_RAFT_HOST=0.0.0.0
-      - QRAFT_RAFT_PORT=9080
-      - QRAFT_HTTP_PORT=8080
-      - QRAFT_CLUSTER_NODES=controller1=controller1:9080,controller2=controller2:9080,controller3=controller3:9080
-      - QRAFT_RAFT_ELECTION_TIMEOUT_MS=3000
-      - QRAFT_RAFT_HEARTBEAT_INTERVAL_MS=500
-      - JAVA_OPTS=-Xmx256m -Xms128m
+    command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
       - "8083:8080"
     networks:
       qraft-cluster:
         ipv4_address: 172.20.0.13
     volumes:
+      - ../config/three-node/controller3.json:/etc/qraft/server.json:ro
       - controller3-data:/app/data
       - ../../logs:/app/logs
     labels:

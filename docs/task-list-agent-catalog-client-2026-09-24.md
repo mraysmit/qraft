@@ -39,14 +39,15 @@ task list for the next backlog item.
   `/v1/agent/service/*` catalog API, and it has no concept of service definitions.
 - A failed initial registration keeps the local health server live and unready and
   retries at the fixed heartbeat interval. There is no backoff or jitter.
-- `AgentConfiguration` accepts one `controllerUrl`. There are no seeds, no
-  failover, and no tenant or namespace.
-- The current executable and Dockerfiles still read legacy environment variables
-  (`AGENT_ID`, `CONTROLLER_URL`, `QRAFT_MODE`, and others). Section 17 now
-  prohibits all environment-variable configuration. Step 1 removes these paths
-  rather than renaming them.
-- An invalid numeric setting silently falls back to its default instead of
-  failing startup.
+- `AgentConfiguration` now loads an ordered, deduplicated controller seed list,
+  tenant, namespace, retry bounds, request timeout, logging directory, and local
+  service definitions from a versioned JSON document.
+- Runtime, agent, controller, Docker, entrypoint, and maintained Compose startup
+  now require an explicit mode and one JSON file. File discovery supports an
+  explicit argument, the `qraft.config` JVM locator property, and conventional
+  role-specific paths; environment-variable configuration has been removed.
+- Invalid types, values, ports, intervals, controller URLs, duplicate service
+  IDs, and inconsistent retry bounds fail before runtime resources are created.
 - `AgentRegistrationClient.send` turns every transport failure into `null`, so
   callers cannot tell a refused connection from a timeout or a `503`. The client
   ignores the error envelope's `code` and `retryable` fields.
@@ -69,8 +70,9 @@ single-node controller).
 ### Rules
 
 - Qraft does not use environment variables for configuration. Runtime settings
-  come from one versioned JSON file named by the mandatory `--config <path>`
-  argument; the path itself is never sourced from the environment.
+  come from one versioned JSON file selected by `--config`, `qraft.config`, or a
+  conventional role-specific location; the path is never sourced from the
+  environment.
 - Red before green. Every behavioural change starts with a failing test.
 - No Mockito. Outbound HTTP is tested against a real JDK `HttpServer` fixture.
   Agent-to-controller behaviour is tested in `qraft-runtime` against a real
@@ -82,6 +84,13 @@ single-node controller).
 - Each step leaves the reactor green and can be reverted on its own.
 
 ### Step 1: Client configuration
+
+**Status: Done 2026-09-24.** Added the shared immutable `ServiceDefinition`,
+strict client and server JSON loaders, deterministic config-file discovery, mounted
+per-process container configurations, and deployment-contract coverage that
+prohibits Qraft environment-variable configuration. The full default reactor
+passes with 597 tests, and all 12 maintained Compose manifests pass
+`docker compose config --quiet`.
 
 **Purpose.** Give the agent the inputs that reconciliation needs, and fail fast
 on invalid configuration.
@@ -105,8 +114,9 @@ on invalid configuration.
 **Implementation.**
 
 1. Remove environment-variable configuration from the runtime, agent, controller,
-   Dockerfiles, entrypoints, and maintained Compose manifests. Add the mandatory
-   `--config <path>` option and mount one versioned JSON document per process.
+   Dockerfiles, entrypoints, and maintained Compose manifests. Resolve one mounted,
+   versioned JSON document per process, in order, from `--config <path>`, the
+   `qraft.config` JVM property, `config/<role>.json`, or `/etc/qraft/<role>.json`.
    Do not add a configuration-path environment variable or environment
    substitution syntax.
 2. Add the `ServiceDefinition` value type to `qraft-core` (design sections 1.1
@@ -263,8 +273,8 @@ readiness function evaluated from reconciler and contact state.
    variables.
 3. Consul plan checklist: tick "Complete client-mode configuration and controller
    discovery behavior".
-4. `docker/README.md`: show a mounted client configuration file and an explicit
-   `client --config /etc/qraft/client.json` command.
+4. `docker/README.md`: show a mounted client configuration file and both explicit
+   and conventional-path startup.
 5. Record decisions D1 to D3 in the platform design's open-decisions list.
 
 ### Running order and gates

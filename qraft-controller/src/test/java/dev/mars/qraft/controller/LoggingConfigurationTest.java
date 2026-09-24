@@ -30,7 +30,7 @@ class LoggingConfigurationTest {
         }
 
         Element logDirectory = findProperty(configuration, "LOG_DIR");
-        assertEquals("${QRAFT_LOG_DIR:-${user.dir}/logs}", logDirectory.getAttribute("value"));
+        assertEquals("${qraft.log.dir:-${user.dir}/logs}", logDirectory.getAttribute("value"));
         assertNotNull(findAppender(configuration, "JSON"));
         assertNotNull(findAppender(configuration, "OTEL"));
     }

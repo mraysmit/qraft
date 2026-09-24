@@ -898,7 +898,15 @@ logging, storage, observability, and secrets. Production code must not call
 environment variables, and there is no environment variable for locating the
 configuration file.
 
-The runtime is started with an explicit mode and configuration path:
+The runtime is started with an explicit mode. Configuration-file discovery has
+the following descending precedence:
+
+1. `--config <path>`;
+2. the `qraft.config` JVM system property;
+3. `config/server.json` or `config/client.json` relative to the working directory;
+4. `/etc/qraft/server.json` or `/etc/qraft/client.json`.
+
+For example:
 
 ```text
 qraft server --config /etc/qraft/server.json
@@ -938,13 +946,50 @@ The path names one versioned JSON document. A client document has this shape:
 }
 ```
 
+A server document uses the same envelope and keeps all server settings beneath
+`server`:
+
+```json
+{
+  "version": 1,
+  "server": {
+    "id": "server-a",
+    "applicationVersion": "2.0-ext",
+    "http": { "host": "0.0.0.0", "port": 8080 },
+    "apiGrpcPort": 10080,
+    "raft": {
+      "port": 9080,
+      "nodes": {
+        "server-a": "server-a:9080",
+        "server-b": "server-b:9080",
+        "server-c": "server-c:9080"
+      },
+      "electionTimeoutMs": 3000,
+      "heartbeatIntervalMs": 500,
+      "storage": { "type": "raftlog", "path": "/var/lib/qraft", "fsync": true },
+      "snapshot": { "enabled": true, "threshold": 10000, "checkIntervalMs": 60000 },
+      "logHardLimit": 100000,
+      "io": { "poolSize": 10, "queueSize": 1000 }
+    },
+    "telemetry": {
+      "enabled": true,
+      "otlpEndpoint": "http://otel-collector:4317",
+      "prometheusPort": 9464,
+      "serviceName": "qraft-controller"
+    },
+    "shutdown": { "drainTimeoutMs": 5000, "timeoutMs": 30000 }
+  },
+  "logging": { "directory": "/var/log/qraft" }
+}
+```
+
 Service definitions live in the `catalog.services` array; they are not encoded in
 environment variables or discovered through a separate environment-selected
 file. Sensitive material is mounted as a file and referenced by a configuration
 file path when security support lands.
 
 Configuration parsing accepts an injected parsed document for deterministic
-tests. Only the executable boundary opens the file named by `--config`.
+tests. Only the executable boundary discovers and opens the configuration file.
 
 Invalid configuration fails before background work starts. Unknown settings,
 missing files, duplicate JSON keys, and environment-style placeholders are
@@ -1151,10 +1196,11 @@ shown in section 13.1 and currently accepts no aliases. Unknown fields are
 rejected. The legacy `health` input name is the sole temporary compatibility
 exception; it is accepted but ignored because health is server-owned.
 
-Resolved on 2026-09-24: Qraft runtime configuration is a versioned JSON file
-supplied with `--config`. Qraft does not use environment variables for
-configuration. Client service definitions are stored in the main document's
-`catalog.services` array rather than a separately selected file.
+Resolved on 2026-09-24: Qraft runtime configuration is a versioned JSON file.
+The file is selected by explicit argument, JVM locator property, or conventional
+role-specific path, in that order. Qraft does not use environment variables for
+configuration or file discovery. Client service definitions are stored in the
+main document's `catalog.services` array rather than a separately selected file.
 
 Decisions that affect durable identity or wire compatibility require an explicit
 architecture decision record and fixture-based upgrade tests before implementation.

@@ -17,6 +17,7 @@
 package dev.mars.qraft.controller;
 
 import dev.mars.qraft.controller.config.AppConfig;
+import dev.mars.qraft.config.ConfigFileResolver;
 import dev.mars.qraft.controller.observability.TelemetryConfig;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
 import org.slf4j.Logger;
@@ -24,6 +25,7 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.bridge.SLF4JBridgeHandler;
 
 import java.util.concurrent.CountDownLatch;
+import java.nio.file.Path;
 
 /**
  * Main application class for Qraft Controller.
@@ -52,14 +54,14 @@ public class QraftControllerApplication {
             """;
 
     public static void main(String[] args) {
+        Path configPath = ConfigFileResolver.resolve(args, "server");
+        AppConfig config = AppConfig.install(configPath);
+        System.setProperty("qraft.log.dir", config.getLoggingDirectory());
         configureJulToSlf4jBridge();
         System.out.println(BANNER);
         logger.info("Initializing Qraft Controller with OpenTelemetry (Java 25 runtime)...");
 
         // Load and validate configuration (fail fast on misconfiguration)
-        AppConfig config = AppConfig.get();
-        config.validate();
-
         TelemetryConfig.configure();
         JavaRuntime runtime = JavaRuntime.create();
         

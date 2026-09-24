@@ -30,20 +30,9 @@ USER qraft
 # Expose agent communication port
 EXPOSE 8080
 
-# Environment variables for Qraft Agent
-ENV JAVA_OPTS="-Xmx256m -Xms128m" \
-    QRAFT_MODE="client" \
-    AGENT_ID="" \
-    AGENT_REGION="default" \
-    AGENT_DATACENTER="default" \
-    CONTROLLER_URL="http://localhost:8080/api/v1" \
-    SUPPORTED_PROTOCOLS="HTTP,HTTPS" \
-    HEARTBEAT_INTERVAL=30000 \
-    AGENT_PORT=8080
-
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:${AGENT_PORT}/health || exit 1
+    CMD curl -f http://localhost:8080/health || exit 1
 
 # Entry point
 COPY qraft-agent/docker-entrypoint.sh /docker-entrypoint.sh
@@ -53,3 +42,4 @@ RUN sed -i 's/\r$//' /docker-entrypoint.sh \
 USER qraft
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["client"]

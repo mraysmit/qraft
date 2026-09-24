@@ -22,8 +22,10 @@ public class TelemetryConfig {
     private static String configuredOtlpEndpoint;
 
     public static void configure() {
-        AppConfig config = AppConfig.get();
-        
+        configure(AppConfig.get());
+    }
+
+    static void configure(AppConfig config) {
         if (!config.isTelemetryEnabled()) {
             logger.info("Telemetry is disabled");
             return;
