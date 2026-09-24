@@ -29,7 +29,25 @@ class ServiceCatalogValidationTest {
         ServiceCatalog catalog = new ServiceCatalog();
 
         assertThrows(IllegalArgumentException.class,
-                () -> catalog.setHealth("missing", ServiceHealth.FAILING));
+                () -> catalog.setHealth(
+                        new ServiceInstanceId("default", "default", "node", "missing"),
+                        ServiceHealth.FAILING));
+    }
+
+    @Test
+    void defaultsScopeAndEnabledButRejectsSuppliedBlankScope() {
+        ServiceInstance defaults = new ServiceInstance(
+                "id", "payments", "node", "127.0.0.1", 8080,
+                List.of(), Map.of(), ServiceHealth.PASSING);
+
+        assertEquals("default", defaults.tenantId());
+        assertEquals("default", defaults.namespace());
+        assertEquals("", defaults.datacenter());
+        assertEquals("", defaults.region());
+        assertTrue(defaults.enabled());
+        assertThrows(IllegalArgumentException.class, () -> scoped(" ", "default", "dc-1"));
+        assertThrows(IllegalArgumentException.class, () -> scoped("default", " ", "dc-1"));
+        assertThrows(IllegalArgumentException.class, () -> scoped("default", "default", " "));
     }
 
     @Test
@@ -40,13 +58,20 @@ class ServiceCatalogValidationTest {
 
         assertEquals(List.of(), catalog.instances("payments"));
         assertEquals(List.of("orders"), catalog.services());
-        assertTrue(catalog.deregister("id"));
-        assertFalse(catalog.deregister("id"));
+        ServiceInstanceId identity = new ServiceInstanceId("default", "default", "node-1", "id");
+        assertTrue(catalog.deregister(identity));
+        assertFalse(catalog.deregister(identity));
         assertEquals(List.of(), catalog.services());
     }
 
     private static ServiceInstance instance(String id, String name, int port) {
         return new ServiceInstance(id, name, "node-1", "127.0.0.1", port,
                 List.of(), Map.of(), ServiceHealth.PASSING);
+    }
+
+    private static ServiceInstance scoped(String tenant, String namespace, String datacenter) {
+        return new ServiceInstance("id", "payments", "node", "127.0.0.1", 8080,
+                List.of(), Map.of(), ServiceHealth.PASSING,
+                tenant, namespace, datacenter, "eu-west", true);
     }
 }

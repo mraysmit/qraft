@@ -1,5 +1,10 @@
 # Verbatim Account of the Qraft Logging Configuration Discussion
 
+> **Historical, non-normative record.** This verbatim discussion predates the
+> file-only configuration standard. Any suggestion below to use `QRAFT_LOG_DIR`
+> or another environment variable is superseded. Qraft does not use environment
+> variables for runtime configuration; see `PROJECT_STANDARDS.md` section 5.
+
 Date prepared: 10 September 2026
 
 Scope: This transcript begins with the question "is the logbag configuration setup correctly?" and ends with the request to create this document. It records visible user prompts, visible assistant work updates, and substantive assistant responses. Tool output and hidden system or developer instructions are excluded. Original wording, spelling, capitalization, and profanity are preserved.
@@ -518,4 +523,3 @@ If I do not know, I will say “I don’t know yet” instead of filling the gap
 ## User
 
 can you write the detailed word by word account of this discussion into a document
-

@@ -120,12 +120,20 @@ message ServiceInstanceProto {
   repeated string tags = 6;
   map<string, string> metadata = 7;
   string health = 8;
+  string tenant_id = 9;
+  string namespace = 10;
+  string datacenter = 11;
+  string region = 12;
+  optional bool enabled = 13;
 }
 
 message CatalogCommandProto {
   CatalogCommandType type = 1;
   string service_id = 2;
   ServiceInstanceProto instance = 3;
+  string node_id = 4;
+  string tenant_id = 5;
+  string namespace = 6;
 }
 
 message RaftCommandMessage {

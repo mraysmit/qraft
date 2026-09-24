@@ -31,7 +31,7 @@ The active Maven build is Java-native. The controller uses Java 25 concurrency p
 - Use `StructuredTaskScope` where structured concurrency improves lifecycle management.
 - Use `CompletableFuture`, `ExecutorService`, and `ScheduledExecutorService` only where they fit the operation model.
 - Use `java.util.concurrent.Flow` or direct queues for internal event delivery.
-- Keep Raft and WAL integration behind synchronous, Java-native interfaces.
+- Keep Raft and WAL integration behind Java-native interfaces that use standard `CompletableFuture` or `CompletionStage`, never framework-specific futures.
 - Avoid framework-managed event loops, reactive wrappers, and framework-specific futures.
 - Make shutdown explicit and ownership-based for every thread, executor, socket, and file resource.
 
@@ -60,8 +60,12 @@ qraft client
 - `server` starts the controller runtime, participates in the Raft quorum, owns replicated state, and exposes the control-plane APIs.
 - `client` starts the agent runtime, represents a managed node or service, registers with a controller, reports health, and sends heartbeats.
 - Client mode never participates in the Raft quorum.
-- `QRAFT_MODE=server|client` may be supported for container and service-manager deployments where an argument is inconvenient.
+- Runtime mode is selected only by the `server` or `client` command-line
+  subcommand. Environment-variable mode selection is not supported.
 - Mode-specific configuration must be validated before background services start.
+- Both modes load one versioned JSON configuration document named by the required
+  `--config <path>` argument. Qraft does not use environment variables for runtime
+  configuration or for locating that file.
 - Both modes share configuration conventions, logging, metrics, signal handling, and graceful shutdown.
 
 The Maven modules remain separated for dependency and ownership boundaries, but
@@ -85,12 +89,17 @@ orchestration readiness.
 ### Core modules
 
 - `qraft-core`: shared domain models, configuration, health, and discovery primitives
-- `qraft-raft-engine`: Raft consensus and replicated command execution
-- `qraft-distributed-state`: replicated key/value state
-- `qraft-controller`: cluster coordination, state ownership, and HTTP APIs
+- `qraft-raft-engine`: Raft consensus contracts and replicated command execution
+- `qraft-distributed-state`: replicated key/value and service-catalog state
+- `qraft-tenant`: tenant and namespace policy, validation, and lifecycle
+- `qraft-controller`: cluster coordination, state ownership, and HTTP and gRPC APIs
 - `qraft-agent`: node identity, service registration, heartbeats, and local checks
 - `qraft-runtime`: single executable launcher, `server`/`client` mode selection, shared lifecycle, configuration, logging, metrics, and health wiring
-- `qraft-api`: public API contracts and client-facing representations
+
+Public HTTP and gRPC request and response types live at the adapter boundary in
+`qraft-controller`; there is no separate API module. The authoritative module
+responsibilities are defined in `QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`
+section 1.1.
 
 ### Design principles
 
@@ -146,7 +155,7 @@ Introduce service registration with:
 Endpoints:
 
 - `PUT /v1/agent/service/register`
-- `PUT /v1/agent/service/deregister`
+- `PUT /v1/agent/service/deregister/:serviceId`
 - `GET /v1/catalog/services`
 - `GET /v1/catalog/service/:service`
 - `GET /v1/health/service/:service`
@@ -260,7 +269,7 @@ The implementation will be considered aligned with the target design when:
 - [x] Add the `qraft-runtime` module to the Maven reactor.
 - [x] Provide one executable runtime entry point.
 - [x] Support `server` and `client` startup modes.
-- [x] Resolve the mode from a command-line argument or `QRAFT_MODE`.
+- [x] Resolve the mode from a command-line argument.
 - [x] Package one Docker image with a mode-aware entrypoint.
 - [x] Compile and test the runtime module with its controller and agent dependencies.
 
@@ -278,6 +287,8 @@ The implementation will be considered aligned with the target design when:
 - [ ] Complete client-mode configuration and controller discovery behavior.
 - [ ] Implement agent membership and failure detection semantics.
 - [x] Implement service registration, catalog replication, and query behavior.
+- [x] Add composite `(tenant, namespace, node, serviceId)` catalog identity with
+  node-scoped idempotent deregistration and legacy-data defaults.
 - [ ] Implement health checks and health-state propagation through Raft.
 - [ ] Implement namespaces and tenancy isolation end to end.
 - [ ] Add snapshot, restore, upgrade, and operational recovery workflows.

@@ -18,11 +18,13 @@ class CatalogCommandCodecTest {
     @Test
     void roundTripsRegistrationAndDeregistration() {
         ServiceInstance instance = new ServiceInstance("search-1", "search", "node-1", "10.0.0.4",
-                9090, List.of("primary"), Map.of("zone", "a"), ServiceHealth.WARNING);
+                9090, List.of("primary"), Map.of("zone", "a"), ServiceHealth.WARNING,
+                "tenant-a", "production", "dc-1", "eu-west", false);
 
         assertEquals(CatalogCommand.register(instance), codec.deserialize(codec.serialize(CatalogCommand.register(instance))));
-        assertEquals(CatalogCommand.deregister("search-1"),
-                codec.deserialize(codec.serialize(CatalogCommand.deregister("search-1"))));
+        var identity = instance.identity();
+        assertEquals(CatalogCommand.deregister(identity),
+                codec.deserialize(codec.serialize(CatalogCommand.deregister(identity))));
     }
 
     @Test

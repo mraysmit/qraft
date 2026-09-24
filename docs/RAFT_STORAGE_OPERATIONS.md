@@ -8,7 +8,8 @@ down. A healthy quorum must remain available whenever a node is rebuilt.
 
 Set `qraft.raft.storage.type=raftlog` and point
 `qraft.raft.storage.path` at a persistent, node-specific directory. In the
-container deployment this is `QRAFT_RAFT_STORAGE_PATH=/app/data`, backed by a
+container deployment this is `raft.storage.path` in the mounted JSON configuration
+file (normally `/app/data`), backed by a
 separate named volume for each controller. Production durability requires
 `qraft.raft.storage.fsync=true`.
 
@@ -122,6 +123,13 @@ RaftLog reader can load legacy `meta.dat` and `raft.log`, append, replace a
 suffix, sync, close, and reopen. Qraft's snapshot store can read the legacy
 `snapshot.dat`; the next successful snapshot publication writes the current
 versioned format.
+
+Catalog snapshots and WAL commands written before composite service identity are
+also read directly. Missing tenant and namespace values become `default`, missing
+datacenter and region values become empty strings, and missing enabled state
+becomes `true`. No operator action, offline rewrite, or coordinated data migration
+is required; immutable fixture tests cover both legacy command bytes and snapshot
+documents.
 
 For a file-backend upgrade:
 

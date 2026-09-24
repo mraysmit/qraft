@@ -41,12 +41,14 @@ not only the features currently implemented. It includes:
 - configuration, metrics, events, and diagnostics;
 - authenticated and auditable administrative mutations.
 
-The current platform design identifies service-mesh data-plane proxying as a
-non-goal, and the current Consul-style implementation plan does not yet describe
-the mesh, routing, gateway, peering, or federation roadmap. Those documents must
-be updated when the feature contracts are defined. This UX design reserves the
-navigation and interaction model for those capabilities so they can be added
-without reorganizing the product.
+The platform design identifies service-mesh data-plane proxying as a non-goal
+and records the mesh control-plane (intentions, routing, gateways), peering, and
+federation capabilities as unscheduled (section 3). Each requires an
+architecture decision record and updates to the platform design and Consul plan
+before it is implemented. This UX design reserves the navigation and interaction
+model for those capabilities so they can be added without reorganizing the
+product; until then, their feature flags stay disabled and they produce no
+navigation entries.
 
 ## 3. Design principles
 

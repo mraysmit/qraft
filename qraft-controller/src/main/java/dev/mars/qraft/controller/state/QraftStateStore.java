@@ -58,7 +58,9 @@ public final class QraftStateStore implements RaftLogApplicator {
                 serviceCatalog.register(register.instance());
                 yield new RaftCommandResult.Success<>(register.instance());
             }
-            case CatalogCommand.Deregister deregister -> serviceCatalog.deregister(deregister.serviceId())
+            case CatalogCommand.Deregister deregister -> (deregister.isLegacy()
+                    ? serviceCatalog.deregisterLegacy(deregister.serviceId())
+                    : serviceCatalog.deregister(deregister.identity()))
                     ? new RaftCommandResult.Success<>(deregister.serviceId())
                     : new RaftCommandResult.NotFound<>(deregister.serviceId(), "ServiceInstance");
         };

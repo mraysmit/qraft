@@ -3,6 +3,7 @@ package dev.mars.qraft.controller.http;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import dev.mars.qraft.agent.AgentInfo;
 import dev.mars.qraft.agent.AgentStatus;
@@ -14,6 +15,9 @@ import dev.mars.qraft.controller.state.CatalogCommand;
 import dev.mars.qraft.controller.state.RaftCommand;
 import dev.mars.qraft.controller.state.RaftCommandResult;
 import dev.mars.qraft.controller.state.QraftStateStore;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -24,6 +28,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
@@ -34,6 +39,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Lightweight JDK HTTP API for health and controller discovery endpoints. */
 public final class HttpApiServer implements AutoCloseable {
+    private static final Logger LOG = LoggerFactory.getLogger(HttpApiServer.class);
+    private static final String REQUEST_ID_HEADER = "X-Request-Id";
     private final int port;
     private final HttpServer server;
     private final ExecutorService executor;
@@ -63,15 +70,15 @@ public final class HttpApiServer implements AutoCloseable {
         registerHealth("/health", "passing");
         register("/status", 200, "{\"status\":\"running\"}");
         register("/api/v1/info", 200, "{\"version\":\"1.0.0\",\"httpPort\":" + port + "}");
-        server.createContext("/raft/status", this::raftStatus);
-        server.createContext("/api/v1/agents/register", this::registerAgent);
-        server.createContext("/api/v1/agents/heartbeat", this::heartbeatAgent);
-        server.createContext("/api/v1/agents", this::agents);
-        server.createContext("/v1/agent/service/register", this::registerService);
-        server.createContext("/v1/agent/service/deregister", this::deregisterService);
-        server.createContext("/v1/catalog/services", this::listServices);
-        server.createContext("/v1/catalog/service", this::listServiceInstances);
-        server.createContext("/v1/health/service", this::listServiceInstances);
+        server.createContext("/raft/status", requestAware(this::raftStatus));
+        server.createContext("/api/v1/agents/register", requestAware(this::registerAgent));
+        server.createContext("/api/v1/agents/heartbeat", requestAware(this::heartbeatAgent));
+        server.createContext("/api/v1/agents", requestAware(this::agents));
+        server.createContext("/v1/agent/service/register", requestAware(this::registerService));
+        server.createContext("/v1/agent/service/deregister", requestAware(this::deregisterService));
+        server.createContext("/v1/catalog/services", requestAware(this::listServices));
+        server.createContext("/v1/catalog/service", requestAware(this::listServiceInstances));
+        server.createContext("/v1/health/service", requestAware(this::listServiceInstances));
     }
 
     public CompletableFuture<Void> start() {
@@ -98,31 +105,31 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     private void register(String path, int status, String body) {
-        server.createContext(path, exchange -> {
+        server.createContext(path, requestAware(exchange -> {
             if (draining.get() && !path.startsWith("/health")) {
-                respond(exchange, 503, "{\"status\":\"draining\"}");
+                respondError(exchange, 503, "draining", "Server is draining", true);
                 return;
             }
             if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
-                respond(exchange, 405, "{\"error\":\"method_not_allowed\"}");
+                respondError(exchange, 405, "method_not_allowed", "Method not allowed", false);
                 return;
             }
             respond(exchange, status, body);
-        });
+        }));
     }
 
     private void registerHealth(String path, String healthyStatus) {
-        server.createContext(path, exchange -> {
+        server.createContext(path, requestAware(exchange -> {
             if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
-                respond(exchange, 405, "{\"error\":\"method_not_allowed\"}");
+                respondError(exchange, 405, "method_not_allowed", "Method not allowed", false);
                 return;
             }
             if ("/health/ready".equals(path) && raftNode != null && raftNode.isFenced()) {
-                respond(exchange, 503, "{\"status\":\"fenced\"}");
+                respondError(exchange, 503, "fenced", "Raft node is fenced", true);
                 return;
             }
             respond(exchange, 200, "{\"status\":\"" + healthyStatus + "\"}");
-        });
+        }));
     }
 
     private static void respond(HttpExchange exchange, int status, String body) throws IOException {
@@ -135,12 +142,17 @@ public final class HttpApiServer implements AutoCloseable {
     private void registerService(HttpExchange exchange) throws IOException {
         if (!prepareCatalogRequest(exchange, "PUT")) return;
         try {
-            ServiceInstance instance = objectMapper.readValue(exchange.getRequestBody(), ServiceInstance.class);
+            RequestContext context = new HeaderRequestContext(exchange);
+            ServiceRegistrationRequest request = objectMapper.readerFor(ServiceRegistrationRequest.class)
+                    .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                    .readValue(exchange.getRequestBody());
+            ServiceInstance instance = request.toServiceInstance(context);
             RaftCommandResult<?> result = submit(CatalogCommand.register(instance));
-            respondJson(exchange, result instanceof RaftCommandResult.Success<?> ? 200 : 409,
-                    Map.of("registered", result instanceof RaftCommandResult.Success<?>, "serviceId", instance.serviceId()));
+            boolean registered = result instanceof RaftCommandResult.Success<?>;
+            respondJson(exchange, registered ? 200 : 409,
+                    ServiceRegistrationResponse.from(instance, registered));
         } catch (IllegalArgumentException | com.fasterxml.jackson.core.JacksonException e) {
-            respondJson(exchange, 400, Map.of("error", "invalid_registration", "message", safeMessage(e)));
+            respondError(exchange, 400, "invalid_registration", safeMessage(e), false);
         } catch (CompletionException e) {
             respondUnavailable(exchange, e);
         }
@@ -148,11 +160,11 @@ public final class HttpApiServer implements AutoCloseable {
 
     private void raftStatus(HttpExchange exchange) throws IOException {
         if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
-            respond(exchange, 405, "{\"error\":\"method_not_allowed\"}");
+            respondError(exchange, 405, "method_not_allowed", "Method not allowed", false);
             return;
         }
         if (raftNode == null) {
-            respondJson(exchange, 503, Map.of("error", "raft_unavailable"));
+            respondError(exchange, 503, "catalog_unavailable", "Raft state is unavailable", true);
             return;
         }
         Map<String, Object> status = new LinkedHashMap<>();
@@ -176,7 +188,7 @@ public final class HttpApiServer implements AutoCloseable {
             submit(AgentCommand.register(agent));
             respondJson(exchange, 201, Map.of("registered", true, "agentId", agent.getAgentId()));
         } catch (IllegalArgumentException | com.fasterxml.jackson.core.JacksonException e) {
-            respondJson(exchange, 400, Map.of("error", "invalid_agent", "message", safeMessage(e)));
+            respondError(exchange, 400, "invalid_agent", safeMessage(e), false);
         } catch (CompletionException e) {
             respondUnavailable(exchange, e);
         }
@@ -195,17 +207,18 @@ public final class HttpApiServer implements AutoCloseable {
             RaftCommandResult<?> result = submit(AgentCommand.heartbeat(
                     heartbeat.agentId(), status, timestamp, heartbeat.sequenceNumber(), heartbeat.registrationId()));
             if (result instanceof RaftCommandResult.NotFound<?>) {
-                respondJson(exchange, 404, Map.of("error", "agent_not_found", "agentId", heartbeat.agentId()));
+                respondError(exchange, 404, "agent_not_found", "Agent not found", false,
+                        Map.of("agentId", heartbeat.agentId()));
                 return;
             }
             if (result instanceof RaftCommandResult.CasMismatch<?>) {
-                respondJson(exchange, 409, Map.of("error", "stale_heartbeat", "agentId", heartbeat.agentId(),
-                        "sequenceNumber", heartbeat.sequenceNumber()));
+                respondError(exchange, 409, "stale_heartbeat", "Heartbeat validation failed", false,
+                        Map.of("agentId", heartbeat.agentId(), "sequenceNumber", heartbeat.sequenceNumber()));
                 return;
             }
             respondNoContent(exchange);
         } catch (IllegalArgumentException | com.fasterxml.jackson.core.JacksonException e) {
-            respondJson(exchange, 400, Map.of("error", "invalid_heartbeat", "message", safeMessage(e)));
+            respondError(exchange, 400, "invalid_heartbeat", safeMessage(e), false);
         } catch (CompletionException e) {
             respondUnavailable(exchange, e);
         }
@@ -221,13 +234,14 @@ public final class HttpApiServer implements AutoCloseable {
         if (!prepareStateRequest(exchange, "DELETE")) return;
         String agentId = pathParameter(exchange, "/api/v1/agents/");
         if (agentId == null) {
-            respondJson(exchange, 400, Map.of("error", "agent_id_required"));
+            respondError(exchange, 400, "agent_id_required", "Agent ID is required", false);
             return;
         }
         try {
             RaftCommandResult<?> result = submit(AgentCommand.deregister(agentId));
             if (result instanceof RaftCommandResult.NotFound<?>) {
-                respondJson(exchange, 404, Map.of("error", "agent_not_found", "agentId", agentId));
+                respondError(exchange, 404, "agent_not_found", "Agent not found", false,
+                        Map.of("agentId", agentId));
                 return;
             }
             respondNoContent(exchange);
@@ -240,13 +254,16 @@ public final class HttpApiServer implements AutoCloseable {
         if (!prepareCatalogRequest(exchange, "PUT")) return;
         String serviceId = pathParameter(exchange, "/v1/agent/service/deregister/");
         if (serviceId == null) {
-            respondJson(exchange, 400, Map.of("error", "service_id_required"));
+            respondError(exchange, 400, "service_id_required", "Service ID is required", false);
             return;
         }
         try {
-            RaftCommandResult<?> result = submit(CatalogCommand.deregister(serviceId));
-            int status = result instanceof RaftCommandResult.NotFound<?> ? 404 : 200;
-            respondJson(exchange, status, Map.of("deregistered", status == 200, "serviceId", serviceId));
+            DeregistrationRequest request = new DeregistrationRequest(serviceId, new HeaderRequestContext(exchange));
+            RaftCommandResult<?> result = submit(CatalogCommand.deregister(request.identity()));
+            boolean deregistered = result instanceof RaftCommandResult.Success<?>;
+            respondJson(exchange, 200, Map.of("deregistered", deregistered, "serviceId", serviceId));
+        } catch (IllegalArgumentException e) {
+            respondError(exchange, 400, "invalid_registration", safeMessage(e), false);
         } catch (CompletionException e) {
             respondUnavailable(exchange, e);
         }
@@ -254,6 +271,7 @@ public final class HttpApiServer implements AutoCloseable {
 
     private void listServices(HttpExchange exchange) throws IOException {
         if (!prepareCatalogRequest(exchange, "GET")) return;
+        setAppliedIndex(exchange);
         Map<String, List<String>> services = new LinkedHashMap<>();
         for (String service : stateStore.getServiceCatalog().services()) {
             List<String> tags = stateStore.getServiceCatalog().instances(service).stream()
@@ -265,13 +283,18 @@ public final class HttpApiServer implements AutoCloseable {
 
     private void listServiceInstances(HttpExchange exchange) throws IOException {
         if (!prepareCatalogRequest(exchange, "GET")) return;
+        setAppliedIndex(exchange);
         String prefix = exchange.getHttpContext().getPath() + "/";
         String serviceName = pathParameter(exchange, prefix);
         if (serviceName == null) {
-            respondJson(exchange, 400, Map.of("error", "service_name_required"));
+            respondError(exchange, 400, "service_name_required", "Service name is required", false);
             return;
         }
         respondJson(exchange, 200, stateStore.getServiceCatalog().instances(serviceName));
+    }
+
+    private void setAppliedIndex(HttpExchange exchange) {
+        exchange.getResponseHeaders().set("X-Qraft-Index", Long.toString(stateStore.getLastAppliedIndex()));
     }
 
     private boolean prepareCatalogRequest(HttpExchange exchange, String expectedMethod) throws IOException {
@@ -280,15 +303,15 @@ public final class HttpApiServer implements AutoCloseable {
 
     private boolean prepareStateRequest(HttpExchange exchange, String expectedMethod) throws IOException {
         if (draining.get()) {
-            respond(exchange, 503, "{\"status\":\"draining\"}");
+            respondError(exchange, 503, "draining", "Server is draining", true);
             return false;
         }
         if (!expectedMethod.equalsIgnoreCase(exchange.getRequestMethod())) {
-            respond(exchange, 405, "{\"error\":\"method_not_allowed\"}");
+            respondError(exchange, 405, "method_not_allowed", "Method not allowed", false);
             return false;
         }
         if (raftNode == null) {
-            respond(exchange, 503, "{\"error\":\"catalog_unavailable\"}");
+            respondError(exchange, 503, "catalog_unavailable", "Catalog is unavailable", true);
             return false;
         }
         return true;
@@ -327,21 +350,49 @@ public final class HttpApiServer implements AutoCloseable {
             if (leaderId != null && !leaderId.isBlank()) {
                 exchange.getResponseHeaders().set("X-Qraft-Leader-Id", leaderId);
             }
-            Map<String, Object> body = new LinkedHashMap<>();
-            body.put("error", "outcome_unknown");
-            body.put("message", safeMessage(cause));
-            body.put("retryable", true);
-            if (leaderId != null && !leaderId.isBlank()) body.put("leaderId", leaderId);
-            respondJson(exchange, 503, body);
+            Map<String, Object> details = leaderId == null || leaderId.isBlank()
+                    ? Map.of() : Map.of("leaderId", leaderId);
+            respondError(exchange, 503, "outcome_unknown", safeMessage(cause), true, details);
             return;
         }
         if (leaderId == null || leaderId.isBlank()) {
-            respondJson(exchange, 503, Map.of("error", "leader_unavailable", "message", safeMessage(cause)));
+            respondError(exchange, 503, "leader_unavailable", safeMessage(cause), true);
             return;
         }
         exchange.getResponseHeaders().set("X-Qraft-Leader-Id", leaderId);
-        respondJson(exchange, 503, Map.of("error", "leader_unavailable", "message", safeMessage(cause),
-                "leaderId", leaderId));
+        respondError(exchange, 503, "leader_unavailable", safeMessage(cause), true,
+                Map.of("leaderId", leaderId));
+    }
+
+    private HttpHandler requestAware(HttpHandler delegate) {
+        return exchange -> {
+            String requestId = exchange.getRequestHeaders().getFirst(REQUEST_ID_HEADER);
+            if (requestId == null || requestId.isBlank()) requestId = UUID.randomUUID().toString();
+            exchange.getResponseHeaders().set(REQUEST_ID_HEADER, requestId);
+            try (MDC.MDCCloseable ignored = MDC.putCloseable("requestId", requestId)) {
+                LOG.debug("HTTP request: method={}, path={}", exchange.getRequestMethod(),
+                        exchange.getRequestURI().getPath());
+                delegate.handle(exchange);
+            }
+        };
+    }
+
+    private void respondError(HttpExchange exchange, int status, String code, String message,
+                              boolean retryable) throws IOException {
+        respondError(exchange, status, code, message, retryable, Map.of());
+    }
+
+    private void respondError(HttpExchange exchange, int status, String code, String message,
+                              boolean retryable, Map<String, ?> details) throws IOException {
+        ErrorResponse error = new ErrorResponse(code, message, retryable, MDC.get("requestId"));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("code", error.code());
+        body.put("error", error.code());
+        body.put("message", error.message());
+        body.put("retryable", error.retryable());
+        body.put("requestId", error.requestId());
+        body.putAll(details);
+        respondJson(exchange, status, body);
     }
 
     private static String pathParameter(HttpExchange exchange, String prefix) {

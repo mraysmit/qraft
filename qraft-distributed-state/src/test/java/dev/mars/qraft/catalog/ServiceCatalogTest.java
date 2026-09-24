@@ -24,10 +24,22 @@ class ServiceCatalogTest {
     }
 
     @Test
-    void replacingAnExistingServiceIdIsIdempotent() {
+    void sameLocalServiceIdOnDifferentNodesDoesNotCollide() {
         ServiceCatalog catalog = new ServiceCatalog();
-        catalog.register(instance("payments-1", "payments", 8080));
-        ServiceInstance replacement = instance("payments-1", "payments", 9090);
+        ServiceInstance nodeB = instance("web", "web", "node-b", 8081);
+        ServiceInstance nodeA = instance("web", "web", "node-a", 8080);
+
+        catalog.register(nodeB);
+        catalog.register(nodeA);
+
+        assertEquals(List.of(nodeA, nodeB), catalog.instances("web"));
+    }
+
+    @Test
+    void replacingAnExistingCompositeIdentityIsIdempotent() {
+        ServiceCatalog catalog = new ServiceCatalog();
+        catalog.register(instance("payments-1", "payments", "node-1", 8080));
+        ServiceInstance replacement = instance("payments-1", "payments", "node-1", 9090);
 
         catalog.register(replacement);
 
@@ -37,15 +49,15 @@ class ServiceCatalogTest {
     @Test
     void deregistersOnlyTheRequestedInstance() {
         ServiceCatalog catalog = new ServiceCatalog();
-        ServiceInstance first = instance("payments-1", "payments", 8080);
-        ServiceInstance second = instance("payments-2", "payments", 8081);
+        ServiceInstance first = instance("web", "payments", "node-a", 8080);
+        ServiceInstance second = instance("web", "payments", "node-b", 8081);
         catalog.register(first);
         catalog.register(second);
 
-        assertTrue(catalog.deregister("payments-1"));
+        assertTrue(catalog.deregister(first.identity()));
 
         assertEquals(List.of(second), catalog.instances("payments"));
-        assertFalse(catalog.deregister("payments-1"));
+        assertFalse(catalog.deregister(first.identity()));
     }
 
     @Test
@@ -54,7 +66,7 @@ class ServiceCatalogTest {
         ServiceInstance registered = instance("payments-1", "payments", 8080);
         catalog.register(registered);
 
-        ServiceInstance unhealthy = catalog.setHealth("payments-1", ServiceHealth.FAILING);
+        ServiceInstance unhealthy = catalog.setHealth(registered.identity(), ServiceHealth.FAILING);
 
         assertEquals(ServiceHealth.FAILING, unhealthy.health());
         assertEquals("payments-1", unhealthy.serviceId());
@@ -77,14 +89,19 @@ class ServiceCatalogTest {
     }
 
     private static ServiceInstance instance(String id, String name, int port) {
+        return instance(id, name, "node-1", port);
+    }
+
+    private static ServiceInstance instance(String id, String name, String nodeId, int port) {
         return new ServiceInstance(
                 id,
                 name,
-                "node-1",
+                nodeId,
                 "127.0.0.1",
                 port,
                 List.of("v1"),
                 Map.of("team", "platform"),
-                ServiceHealth.PASSING);
+                ServiceHealth.PASSING,
+                "default", "default", "dc-1", "eu-west", true);
     }
 }

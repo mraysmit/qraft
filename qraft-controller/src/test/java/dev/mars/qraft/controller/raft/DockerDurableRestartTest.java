@@ -15,6 +15,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -26,6 +27,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Execution(ExecutionMode.SAME_THREAD)
 @ResourceLock("shared-docker-clusters")
 class DockerDurableRestartTest {
+    private static final String TEST_TENANT = "platform";
+    private static final String TEST_NAMESPACE = "restart";
+    private static final String TEST_NODE = "restart-test";
+    private static final Map<String, String> REGISTRATION_HEADERS = Map.of(
+            "X-Qraft-Tenant", TEST_TENANT,
+            "X-Qraft-Namespace", TEST_NAMESPACE,
+            "X-Qraft-Node", TEST_NODE);
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final HttpClient HTTP = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
@@ -159,6 +167,9 @@ class DockerDurableRestartTest {
                 .uri(URI.create(endpoints.get(oldLeaderIndex) + "/v1/agent/service/register"))
                 .timeout(Duration.ofSeconds(5))
                 .header("Content-Type", "application/json")
+                .header("X-Qraft-Tenant", TEST_TENANT)
+                .header("X-Qraft-Namespace", TEST_NAMESPACE)
+                .header("X-Qraft-Node", TEST_NODE)
                 .PUT(HttpRequest.BodyPublishers.ofString(body))
                 .build();
 
@@ -181,7 +192,8 @@ class DockerDurableRestartTest {
         await().atMost(Duration.ofSeconds(60)).until(() -> allNodesReady(endpoints));
         await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
         await().atMost(Duration.ofSeconds(30))
-                .until(() -> everyNodeContainsExactlyOnce(endpoints, serviceName, serviceId));
+                .until(() -> everyNodeContainsExactlyOnce(endpoints, serviceName, serviceId,
+                        TEST_TENANT, TEST_NAMESPACE, TEST_NODE));
     }
 
     @Test
@@ -303,7 +315,8 @@ class DockerDurableRestartTest {
         String body = registrationBody(serviceId, serviceName, port);
         for (String endpoint : endpoints) {
             try {
-                HttpResponse<String> response = send(endpoint + "/v1/agent/service/register", "PUT", body);
+                HttpResponse<String> response = send(endpoint + "/v1/agent/service/register", "PUT", body,
+                        REGISTRATION_HEADERS);
                 if (response.statusCode() == 200) return;
                 assertEquals(503, response.statusCode(), response.body());
             } catch (java.io.IOException ignored) {
@@ -315,7 +328,7 @@ class DockerDurableRestartTest {
 
     private static String registrationBody(String serviceId, String serviceName, int port) {
         return """
-                {"serviceId":"%s","serviceName":"%s","nodeId":"restart-test",
+                {"serviceId":"%s","serviceName":"%s",
                  "address":"127.0.0.1","port":%d,"tags":["restart"],
                  "metadata":{"scenario":"whole-cluster-restart"},"health":"PASSING"}
                 """.formatted(serviceId, serviceName, port);
@@ -336,7 +349,8 @@ class DockerDurableRestartTest {
     }
 
     private static boolean everyNodeContainsExactlyOnce(
-            List<String> endpoints, String serviceName, String serviceId) {
+            List<String> endpoints, String serviceName, String serviceId,
+            String tenantId, String namespace, String nodeId) {
         return endpoints.stream().allMatch(endpoint -> {
             try {
                 HttpResponse<String> response = send(
@@ -345,7 +359,10 @@ class DockerDurableRestartTest {
                 JsonNode instances = JSON.readTree(response.body());
                 int matches = 0;
                 for (JsonNode instance : instances) {
-                    if (serviceId.equals(instance.path("serviceId").asText())) matches++;
+                    if (serviceId.equals(instance.path("serviceId").asText())
+                            && tenantId.equals(instance.path("tenantId").asText())
+                            && namespace.equals(instance.path("namespace").asText())
+                            && nodeId.equals(instance.path("nodeId").asText())) matches++;
                 }
                 return matches == 1;
             } catch (Exception ignored) {
@@ -426,9 +443,15 @@ class DockerDurableRestartTest {
 
     private static HttpResponse<String> send(
             String uri, String method, String body) throws Exception {
+        return send(uri, method, body, Map.of());
+    }
+
+    private static HttpResponse<String> send(
+            String uri, String method, String body, Map<String, String> headers) throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder()
                 .uri(URI.create(uri))
                 .timeout(Duration.ofSeconds(5));
+        headers.forEach(request::header);
         if (body == null) {
             request.method(method, HttpRequest.BodyPublishers.noBody());
         } else {

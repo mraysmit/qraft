@@ -26,8 +26,13 @@ sh ./start.sh stop
 
 The compose directory also contains dedicated three-node, five-node, and
 network-partition configurations used for distributed testing. These require
-the unified `qraft-runtime` image, launched with `QRAFT_MODE=server`. Compose
-packages the runtime JAR built on the host; it does not run Maven inside
+the unified `qraft-runtime` image. Qraft does not use environment variables for
+runtime configuration. Compose mounts a versioned JSON file for each process and
+starts it with `server --config /etc/qraft/server.json` or
+`client --config /etc/qraft/client.json`. The configuration path is always an
+explicit command argument, not an environment variable.
+
+Compose packages the runtime JAR built on the host; it does not run Maven inside
 Docker. The `start.ps1`, `start.sh`, `start-quick.ps1`, and `start-quick.sh`
 helpers run the local build automatically before starting a cluster. To build
 the artifact without starting Docker, run either helper:

@@ -48,6 +48,7 @@ Qraft is a Consul-style service discovery and distributed coordination platform.
 - `qraft-agent` implements the Java 25 service-discovery agent.
 - `qraft-tenant` implements namespace and tenant management.
 - `qraft-controller` implements distributed control, Raft coordination, HTTP APIs, and gRPC services.
+- `qraft-runtime` is the thin executable composition root that selects `server` or `client` mode and owns no domain logic.
 - Modules must not depend on implementation details from a higher-level module.
 - Shared abstractions belong in the lowest module that can own them without creating a circular dependency.
 
@@ -78,19 +79,36 @@ Qraft is a Consul-style service discovery and distributed coordination platform.
 - Timing-sensitive tests must use bounded polling rather than arbitrary long sleeps wherever practical.
 - Expected fault-injection errors must be clearly identified in test output.
 
-## 5. Logging
+## 5. Configuration
 
-### 5.1 Logging API
+- Qraft runtime configuration is file-based. Production processes must not read
+  environment variables for application configuration.
+- The runtime receives the path to one versioned JSON configuration file through
+  the explicit `--config <path>` command-line option. The configuration path
+  itself must not come from an environment variable.
+- Configuration files must not contain environment-variable substitutions.
+- Containers and service managers mount configuration and secret files and pass
+  their paths as command arguments. They must not translate environment variables
+  into JVM system properties or command-line settings.
+- Tests inject parsed configuration values or temporary configuration files; they
+  must not mutate or depend on the process environment.
+- Invalid, missing, unknown, or duplicate settings fail before threads, sockets,
+  storage, or other runtime resources are opened.
+
+## 6. Logging
+
+### 6.1 Logging API
 
 - Application code must use SLF4J.
 - Logback is the runtime logging implementation.
 - JUL-based library logs must be bridged into SLF4J where the application owns the process.
 - Do not write directly to `System.out` or `System.err` for application diagnostics.
 
-### 5.2 Log locations
+### 6.2 Log locations
 
 - Runtime and test logs use the repository or deployment's central `logs` directory.
-- Production runtime location is controlled by `QRAFT_LOG_DIR`.
+- Production runtime location is controlled by `logging.directory` in the
+  runtime configuration file.
 - The default runtime location is `${user.dir}/logs`.
 - Test logs must use unique, timestamped filenames so separate runs can be compared.
 - Test logs must not be packaged into production artifacts.
@@ -109,7 +127,7 @@ logs/
 `-- archive/
 ```
 
-### 5.3 Log format and quality
+### 6.3 Log format and quality
 
 - Text logs must use UTF-8.
 - Console output must not contain ANSI control sequences when it is being captured to a file.
@@ -121,7 +139,7 @@ logs/
 - Routine retries should not repeatedly emit full stack traces after the first actionable warning.
 - Secrets, credentials, tokens, and sensitive payloads must never be logged.
 
-### 5.4 Rotation and retention
+### 6.4 Rotation and retention
 
 - Runtime text and JSON logs must rotate by date and size.
 - Archived runtime logs should be compressed.
@@ -129,7 +147,7 @@ logs/
 - Test-log retention must preserve enough runs for regression comparison without growing indefinitely.
 - Failed CI run logs should be retained longer than routine successful-run logs where supported.
 
-## 6. Standard Maven test command
+## 7. Standard Maven test command
 
 Run the Maven reactor tests from the repository root with PowerShell:
 
@@ -151,7 +169,7 @@ The `logs` directory must exist before running the command. If it does not exist
 New-Item -ItemType Directory -Force .\logs
 ```
 
-## 7. Test-log comparison
+## 8. Test-log comparison
 
 Compare two retained Maven test logs with:
 
@@ -163,7 +181,7 @@ git diff --no-index `
 
 Timestamps, UUIDs, temporary paths, random ports, and election timing are nondeterministic. Where exact comparison is required, normalize those fields or compare structured test results in addition to raw logs.
 
-## 8. Dependency management
+## 9. Dependency management
 
 - Dependency versions shared by multiple modules must be managed by the parent POM.
 - A module must explicitly declare the dependencies required by its production behavior.
@@ -171,7 +189,7 @@ Timestamps, UUIDs, temporary paths, random ports, and election timing are nondet
 - Test-only dependencies must use test scope.
 - Optional production integrations must fail clearly or remain disabled when their dependencies are unavailable.
 
-## 9. Code quality
+## 10. Code quality
 
 - Prefer clear domain-specific names over legacy compatibility terminology.
 - Remove dead code rather than preserving unused migration paths.
@@ -182,7 +200,7 @@ Timestamps, UUIDs, temporary paths, random ports, and election timing are nondet
 - Close all `AutoCloseable` resources deterministically.
 - Logging must describe observable state and operational impact rather than implementation noise.
 
-## 10. Change completion
+## 11. Change completion
 
 A change is complete when:
 

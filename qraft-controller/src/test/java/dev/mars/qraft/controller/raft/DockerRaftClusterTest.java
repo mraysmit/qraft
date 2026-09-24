@@ -95,8 +95,7 @@ public class DockerRaftClusterTest {
                 assertEquals(200, response.statusCode());
 
                 JsonNode healthData = objectMapper.readTree(response.body());
-                assertEquals("UP", healthData.get("status").asText());
-                assertEquals("controller" + (nodeIndex + 1), healthData.get("nodeId").asText());
+                assertEquals("passing", healthData.get("status").asText());
 
                 logger.info("Node " + (nodeIndex + 1) + " health check passed");
             });

@@ -47,7 +47,10 @@ The implementation must obey the following rules:
 
 ### `qraft-events`
 
-A new dependency-light module containing the shared event contracts:
+A proposed new dependency-light module containing the shared event contracts.
+It is not yet part of the Maven reactor; it is added when Phase 1 begins.
+
+The module contains:
 
 - `QraftEvent`;
 - `EventEnvelope`;
@@ -335,9 +338,13 @@ state store and its indexes remain the source of truth.
 The first external capabilities should be:
 
 ```text
-GET /api/v1/system/events?after=<cursor>&limit=<count>
-GET /api/v1/system/events/stream?after=<cursor>
+GET /v1/system/events?after=<cursor>&limit=<count>
+GET /v1/system/events/stream?after=<cursor>
 ```
+
+These use the `/v1/` prefix shared by the catalog and other target APIs. The
+controller's older `/api/v1/` agent and info routes are not a pattern for new
+endpoints.
 
 The bounded query should be implemented before live streaming. Both interfaces
 should support filters for category, severity, node, tenant, namespace, term,

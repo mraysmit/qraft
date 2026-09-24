@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-09-13
+**Last updated:** 2026-09-24
 
 ## 1. Purpose
 
@@ -72,6 +72,11 @@ particular:
 - Public HTTP and gRPC request/response DTOs stay at adapter boundaries and are
   mapped explicitly to domain commands.
 
+[`QRAFT_EVENT_ARCHITECTURE.md`](QRAFT_EVENT_ARCHITECTURE.md) proposes an
+eighth module, `qraft-events`, for dependency-light event contracts. It is not
+yet part of the reactor and will be added to this table when its first tranche
+is implemented.
+
 Some current code does not yet fully match these boundaries. Most notably, the
 service instance and catalog classes currently live together in
 `qraft-distributed-state`, while the client needs a shared service-definition
@@ -100,6 +105,13 @@ shared value types; the mutable replicated catalog remains server-side.
 - Service-mesh data-plane proxying.
 - Client participation in Raft elections or log replication.
 
+Service-mesh control-plane features (intentions, routing, gateways) and
+multi-cluster peering and federation are not scheduled. The administrative UI
+design reserves navigation for them, but none may be implemented or enabled
+until an architecture decision record defines its contract and this document
+and the Consul plan are updated. Data-plane proxying remains a non-goal
+regardless.
+
 ## 4. Design principles
 
 1. **Replicate intent, derive views.** Commands are written to Raft; catalogs and
@@ -122,8 +134,9 @@ shared value types; the mutable replicated catalog remains server-side.
 ### 5.1 Runtime
 
 The `qraft-runtime` module owns the executable entry point and resolves `server`
-or `client` from the command line or `QRAFT_MODE`. The container image packages
-the runtime and selects the mode at startup.
+or `client` from the required command-line subcommand. The container image
+packages the runtime and selects the mode through its command, never through an
+environment variable.
 
 Current limitation: mode launch delegates directly to static application entry
 points. This makes configuration injection, lifecycle assertions, and in-process
@@ -151,23 +164,29 @@ Client mode currently owns:
 
 - A local identity and network address.
 - A JDK HTTP liveness and readiness server.
-- An outbound HTTP registration client.
+- An outbound HTTP agent-registration client.
 - A scheduled heartbeat publisher.
 
-The client still targets legacy agent endpoints that the current controller HTTP
-server does not expose. It also treats failed initial registration as a reason to
-stop its local health server. Both behaviors must be replaced by the registration
-and reconciliation design below.
+The client registers its node identity through the controller's
+`/api/v1/agents/register`, `/api/v1/agents/heartbeat`, and
+`DELETE /api/v1/agents/{agentId}` endpoints. A failed initial registration
+keeps the local health server live and unready and retries in the background;
+readiness follows successful registration and heartbeats.
+
+Current limitation: the client registers only itself. It does not register
+service definitions through the `/v1/agent/service/*` catalog API, and it has no
+reconciliation loop. Both are replaced by the registration and reconciliation
+design below.
 
 ### 5.4 Known model gaps
 
-- Catalog entries are keyed only by `serviceId`, which can collide across nodes.
-- Registration HTTP payloads deserialize directly into stored service instances.
-- Health is accepted as registration input instead of being controller-owned state.
-- Datacenter, region, namespace, tenant, and enabled state are not all represented
-  explicitly in the stored service identity.
 - Client configuration accepts one controller URL and cannot fail over among seeds.
-- Obsolete transfer and job settings remain in client configuration resources.
+
+Catalog identity and the registration boundary were corrected in Tranches 1 and
+2. Instances are keyed by `(tenantId, namespace, nodeId, serviceId)`, registration
+uses a dedicated request DTO, and authoritative health is initialized by the
+server. Tenant, namespace, datacenter, region, and enabled state are durable
+instance fields.
 
 ## 6. Target system context
 
@@ -432,6 +451,53 @@ aliases for client compatibility, but responses use one stable Qraft schema.
 Internal fields such as Raft indexes and authoritative health cannot be set by a
 registration request.
 
+Registration identity is supplied through interim request-context headers:
+
+```text
+X-Qraft-Node: required
+X-Qraft-Tenant: optional; defaults to default
+X-Qraft-Namespace: optional; defaults to default
+```
+
+The registration body is:
+
+```json
+{
+  "serviceId": "web",
+  "serviceName": "frontend",
+  "address": "127.0.0.1",
+  "port": 8080,
+  "tags": ["blue"],
+  "metadata": {"team": "platform"},
+  "datacenter": "dc-1",
+  "region": "eu-west",
+  "enabled": true
+}
+```
+
+`tags` and `metadata` default to empty collections, while `datacenter` and
+`region` default to empty strings. Unknown fields are rejected with
+`invalid_registration`. For one compatibility window only, a `health` field is
+recognized but ignored; the stored health is always initialized to `UNKNOWN`.
+No aliases are currently accepted.
+
+A successful registration returns only the stable protocol fields:
+
+```json
+{
+  "serviceId": "web",
+  "serviceName": "frontend",
+  "nodeId": "node-a",
+  "tenantId": "default",
+  "namespace": "default",
+  "registered": true
+}
+```
+
+Deregistration uses the same three identity headers. It is idempotent and returns
+HTTP 200 with `{"serviceId":"web","deregistered":false}` when the composite
+instance is already absent.
+
 ### 13.2 Error envelope
 
 Errors use a stable machine-readable envelope:
@@ -446,12 +512,18 @@ Errors use a stable machine-readable envelope:
 ```
 
 Clients branch on `code` and `retryable`, never on human-readable messages.
+`X-Request-Id` is echoed when supplied and generated otherwise; the same value is
+used in request logging. The deprecated duplicate `error` property remains for
+one compatibility release and is scheduled for removal in the first release
+after 2026-12-31.
 
 ### 13.3 Index metadata
 
 Reads expose the applied state index in a response header. Blocking-query clients
 send their last observed index and a bounded wait duration. Indexes are monotonic
 for a given committed history and are not wall-clock timestamps.
+
+The current catalog read endpoints return the index as `X-Qraft-Index`.
 
 ### 13.4 Built-in administrative capabilities
 
@@ -733,11 +805,10 @@ Failure behavior is deliberate:
 - Installing a snapshot from a leader uses the same publish-before-compact order
   before changing the follower's in-memory state.
 
-The current RaftLog adapter does not yet satisfy this contract: it keeps snapshots
-only in memory and treats prefix truncation as a successful no-op. That behavior
-is acceptable only while no WAL prefix is removed and cannot be considered a
-durable snapshot implementation. The adapter must be replaced or corrected before
-snapshot-based compaction is enabled with the production WAL.
+The implementation satisfies this contract. `FileSnapshotStore` publishes
+snapshots durably and atomically, and prefix compaction calls RaftLog's real
+`truncatePrefix`. The former in-memory snapshot adapter and its no-op prefix
+truncation have been removed.
 
 ### 15.5 Recovery contract
 
@@ -773,12 +844,11 @@ separate persisted, committed, and applied indexes.
 
 ### 15.7 Version alignment
 
-Qraft must pin a RaftLog version whose published interface and behavior match the
-adapter. The current Qraft dependency is older than the checked sister project and
-does not expose the sister project's complete prefix-compaction behavior through
-the adapter.
+Qraft must pin a RaftLog version whose published interface and behavior match
+Qraft's use of it. The root POM pins `raftlog.version` (currently 1.4.0), and
+`RaftLogStorageIntegrationTest` exercises the real library.
 
-An upgrade requires contract tests against the real `FileRaftStorage` for:
+Every upgrade requires contract tests against the real `FileRaftStorage` for:
 
 - Metadata durability across close and reopen.
 - Append, sync, close, reopen, and replay.
@@ -794,7 +864,9 @@ Compatibility rules:
 
 - Existing protobuf field numbers are never reused.
 - New scalar fields have safe defaults.
-- New identity fields require an explicit migration from legacy catalog keys.
+- Legacy catalog entries that omit scoped identity load with tenant and namespace
+  `default`, empty datacenter and region, and `enabled=true`; no operator action
+  or offline rewrite is required.
 - Snapshot readers accept older documents that omit newer sections.
 - Mixed legacy and current WAL entries remain readable during the supported
   migration window.
@@ -819,30 +891,64 @@ certificate authentication can replace it without changing catalog commands.
 
 ## 17. Configuration
 
-All production environment variables use the `QRAFT_` prefix. Proposed client
-settings include:
+Qraft does not use environment variables for runtime configuration. This rule
+applies to server and client modes, containers, service-manager deployments,
+logging, storage, observability, and secrets. Production code must not call
+`System.getenv` for configuration, configuration files must not interpolate
+environment variables, and there is no environment variable for locating the
+configuration file.
+
+The runtime is started with an explicit mode and configuration path:
 
 ```text
-QRAFT_MODE=client
-QRAFT_AGENT_ID=node-a
-QRAFT_AGENT_HTTP_PORT=8080
-QRAFT_CONTROLLER_URLS=http://server-a:8080,http://server-b:8080,http://server-c:8080
-QRAFT_TENANT=default
-QRAFT_NAMESPACE=default
-QRAFT_DATACENTER=dc1
-QRAFT_REGION=eu-west
-QRAFT_REGISTRATION_RETRY_MIN_MS=250
-QRAFT_REGISTRATION_RETRY_MAX_MS=30000
-QRAFT_CONTROLLER_REQUEST_TIMEOUT_MS=3000
+qraft server --config /etc/qraft/server.json
+qraft client --config /etc/qraft/client.json
 ```
 
-Service definitions should be loaded from a dedicated JSON, YAML, or properties
-source rather than encoded into many environment variables. Configuration parsing
-accepts an injected key/value source for deterministic tests; direct environment
-access is limited to the executable boundary.
+The path names one versioned JSON document. A client document has this shape:
 
-Invalid configuration fails before background work starts. Unknown settings may
-produce warnings during a migration period and errors after removal deadlines.
+```json
+{
+  "version": 1,
+  "agent": {
+    "id": "node-a",
+    "httpPort": 8080,
+    "heartbeatIntervalMs": 5000,
+    "datacenter": "dc1",
+    "region": "eu-west"
+  },
+  "controllers": {
+    "urls": [
+      "http://server-a:8080",
+      "http://server-b:8080",
+      "http://server-c:8080"
+    ],
+    "requestTimeoutMs": 3000
+  },
+  "catalog": {
+    "tenant": "default",
+    "namespace": "default",
+    "registrationRetryMinMs": 250,
+    "registrationRetryMaxMs": 30000,
+    "services": []
+  },
+  "logging": {
+    "directory": "/var/log/qraft"
+  }
+}
+```
+
+Service definitions live in the `catalog.services` array; they are not encoded in
+environment variables or discovered through a separate environment-selected
+file. Sensitive material is mounted as a file and referenced by a configuration
+file path when security support lands.
+
+Configuration parsing accepts an injected parsed document for deterministic
+tests. Only the executable boundary opens the file named by `--config`.
+
+Invalid configuration fails before background work starts. Unknown settings,
+missing files, duplicate JSON keys, and environment-style placeholders are
+invalid.
 
 ## 18. Lifecycle and resource ownership
 
@@ -945,7 +1051,15 @@ not expose the administrative routes.
 
 ## 21. Test-first delivery sequence
 
+Current progress, the active tranche's detailed steps, and the backlog are
+tracked in the current dated task list in `docs/`
+([`task-list-agent-catalog-client-2026-09-24.md`](task-list-agent-catalog-client-2026-09-24.md)).
+Completed task lists are moved to `docs/archive/`.
+
 ### Tranche 0: Align the WAL and snapshot contracts
+
+Status: complete (2026-09-22). See the archived
+[`RAFTLOG_EXTERNALISATION_TDD_PLAN.md`](archive/RAFTLOG_EXTERNALISATION_TDD_PLAN.md).
 
 1. Add real-storage contract tests for persist-before-memory ordering, suffix
    replacement, fencing, and reopen recovery.
@@ -959,12 +1073,16 @@ not expose the administrative routes.
 
 ### Tranche 1: Correct catalog identity
 
+Status: complete (verified 2026-09-24).
+
 1. Add failing tests for duplicate local service IDs on different nodes.
 2. Add tenant, namespace, datacenter, region, and enabled-state tests.
 3. Add legacy command and snapshot fixtures.
 4. Implement composite identity and persistence changes.
 
 ### Tranche 2: Stable registration protocol
+
+Status: complete (verified 2026-09-24).
 
 1. Add request-mapping and validation tests.
 2. Separate the HTTP DTO from `ServiceInstance`.
@@ -1022,14 +1140,21 @@ The first complete service-discovery slice is accepted when:
 
 ## 23. Open decisions
 
-- Whether public HTTP field names must exactly match an external compatibility
-  profile or only provide documented aliases.
 - Whether warning services are returned by default discovery queries.
 - Whether write forwarding is implemented server-side or seed rotation remains the
   primary client behavior.
 - How agent identity is established before ACL and certificate support lands.
-- Which service-definition file formats are supported initially.
 - How long legacy command and snapshot readers remain supported.
+
+Resolved on 2026-09-22: the public registration schema uses the Qraft field names
+shown in section 13.1 and currently accepts no aliases. Unknown fields are
+rejected. The legacy `health` input name is the sole temporary compatibility
+exception; it is accepted but ignored because health is server-owned.
+
+Resolved on 2026-09-24: Qraft runtime configuration is a versioned JSON file
+supplied with `--config`. Qraft does not use environment variables for
+configuration. Client service definitions are stored in the main document's
+`catalog.services` array rather than a separately selected file.
 
 Decisions that affect durable identity or wire compatibility require an explicit
 architecture decision record and fixture-based upgrade tests before implementation.

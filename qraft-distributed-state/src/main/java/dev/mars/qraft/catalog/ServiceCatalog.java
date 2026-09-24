@@ -15,29 +15,44 @@ import java.util.concurrent.ConcurrentMap;
 public final class ServiceCatalog {
 
     private static final Comparator<ServiceInstance> INSTANCE_ORDER =
-            Comparator.comparing(ServiceInstance::serviceId);
+            Comparator.comparing(ServiceInstance::tenantId)
+                    .thenComparing(ServiceInstance::namespace)
+                    .thenComparing(ServiceInstance::nodeId)
+                    .thenComparing(ServiceInstance::serviceId);
 
-    private final ConcurrentMap<String, ServiceInstance> instances = new ConcurrentHashMap<>();
+    private final ConcurrentMap<ServiceInstanceId, ServiceInstance> instances = new ConcurrentHashMap<>();
 
     public void register(ServiceInstance instance) {
         Objects.requireNonNull(instance, "instance");
-        instances.put(instance.serviceId(), instance);
+        instances.put(instance.identity(), instance);
     }
 
-    public boolean deregister(String serviceId) {
-        Objects.requireNonNull(serviceId, "serviceId");
-        return instances.remove(serviceId) != null;
+    public boolean deregister(ServiceInstanceId identity) {
+        Objects.requireNonNull(identity, "identity");
+        return instances.remove(identity) != null;
     }
 
-    public ServiceInstance setHealth(String serviceId, ServiceHealth health) {
-        Objects.requireNonNull(serviceId, "serviceId");
+    public ServiceInstance setHealth(ServiceInstanceId identity, ServiceHealth health) {
+        Objects.requireNonNull(identity, "identity");
         Objects.requireNonNull(health, "health");
-        return instances.compute(serviceId, (id, current) -> {
+        return instances.compute(identity, (id, current) -> {
             if (current == null) {
                 throw new IllegalArgumentException("Unknown service instance: " + id);
             }
             return current.withHealth(health);
         });
+    }
+
+    /** Replays a pre-composite deregistration whose historical key was serviceId alone. */
+    public boolean deregisterLegacy(String serviceId) {
+        Objects.requireNonNull(serviceId, "serviceId");
+        boolean[] removed = {false};
+        instances.entrySet().removeIf(entry -> {
+            boolean matches = serviceId.equals(entry.getKey().serviceId());
+            removed[0] |= matches;
+            return matches;
+        });
+        return removed[0];
     }
 
     public List<String> services() {

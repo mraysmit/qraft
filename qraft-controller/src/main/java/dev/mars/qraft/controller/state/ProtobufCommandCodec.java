@@ -123,6 +123,9 @@ public final class ProtobufCommandCodec {
             case CatalogCommand.Deregister deregister -> builder
                     .setType(CatalogCommandType.CATALOG_CMD_DEREGISTER)
                     .setServiceId(deregister.serviceId())
+                    .setNodeId(deregister.nodeId())
+                    .setTenantId(deregister.tenantId())
+                    .setNamespace(deregister.namespace())
                     .build();
         };
     }
@@ -130,7 +133,11 @@ public final class ProtobufCommandCodec {
     private static CatalogCommand fromCatalogProto(CatalogCommandProto proto) {
         return switch (proto.getType()) {
             case CATALOG_CMD_REGISTER -> CatalogCommand.register(fromServiceInstanceProto(proto.getInstance()));
-            case CATALOG_CMD_DEREGISTER -> CatalogCommand.deregister(proto.getServiceId());
+            case CATALOG_CMD_DEREGISTER -> proto.getNodeId().isBlank()
+                    ? CatalogCommand.deregister(proto.getServiceId())
+                    : CatalogCommand.deregister(new dev.mars.qraft.catalog.ServiceInstanceId(
+                            scopeOrDefault(proto.getTenantId()), scopeOrDefault(proto.getNamespace()),
+                            proto.getNodeId(), proto.getServiceId()));
             default -> throw new IllegalArgumentException("Unknown CatalogCommandType: " + proto.getType());
         };
     }
@@ -145,12 +152,24 @@ public final class ProtobufCommandCodec {
                 .addAllTags(instance.tags())
                 .putAllMetadata(instance.metadata())
                 .setHealth(instance.health().name())
+                .setTenantId(instance.tenantId())
+                .setNamespace(instance.namespace())
+                .setDatacenter(instance.datacenter())
+                .setRegion(instance.region())
+                .setEnabled(instance.enabled())
                 .build();
     }
 
     private static ServiceInstance fromServiceInstanceProto(ServiceInstanceProto proto) {
         return new ServiceInstance(proto.getServiceId(), proto.getServiceName(), proto.getNodeId(),
                 proto.getAddress(), proto.getPort(), proto.getTagsList(), proto.getMetadataMap(),
-                ServiceHealth.valueOf(proto.getHealth()));
+                ServiceHealth.valueOf(proto.getHealth()),
+                scopeOrDefault(proto.getTenantId()), scopeOrDefault(proto.getNamespace()),
+                proto.getDatacenter(), proto.getRegion(),
+                !proto.hasEnabled() || proto.getEnabled());
+    }
+
+    private static String scopeOrDefault(String value) {
+        return value == null || value.isBlank() ? ServiceInstance.DEFAULT_SCOPE : value;
     }
 }
