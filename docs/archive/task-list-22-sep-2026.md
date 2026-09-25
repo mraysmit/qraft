@@ -103,7 +103,7 @@ This plan is ordered so each step builds the fixtures the next one needs, and ea
 **Prerequisite work (small, HTTP layer only).**
 
 1. In `respondUnavailable`, classify the cause: a `TimeoutException`, or an `IllegalStateException` originating from `failPendingCommands`, returns a distinct code such as `outcome_unknown` with `retryable: true`. Only genuine leader absence returns `leader_unavailable`. Consider a typed exception from `RaftNode` for the pre-commit failure rather than matching message text.
-2. Add a `retryable` boolean to the existing JSON error map. The full structured error envelope from the platform design section 13.2 can follow later; one field is enough for this test.
+2. Add a `retryable` boolean to the existing JSON error map. The full structured error envelope from the platform design section 12.2 can follow later; one field is enough for this test.
 3. Cover the mapping with a real-HTTP test against a single-node Raft state machine, per the standards' prohibition on mocking.
 
 Deferred and not required for this step: composite catalog identity, applied-index response header, HTTP request-ID propagation. These remain platform design Tranche 2 work.

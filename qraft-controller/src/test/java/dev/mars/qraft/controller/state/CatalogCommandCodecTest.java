@@ -1,11 +1,14 @@
 package dev.mars.qraft.controller.state;
 
 import dev.mars.qraft.catalog.ServiceHealth;
+import dev.mars.qraft.catalog.HealthObservation;
+import dev.mars.qraft.catalog.ServiceCheckId;
 import dev.mars.qraft.catalog.ServiceInstance;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import dev.mars.qraft.distributedstate.DistributedStateCommandCodec;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -13,6 +16,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class CatalogCommandCodecTest {
+    // Fixed protocol timestamps make the serialized values deterministic. The deadline is
+    // 45 seconds after acceptance, matching the observation's configured TTL.
+    private static final Instant OBSERVED_AT = Instant.parse("2026-09-25T09:59:59Z");
+    private static final Instant ACCEPTED_AT = Instant.parse("2026-09-25T10:00:00Z");
+    private static final Instant EXPIRY_DEADLINE = Instant.parse("2026-09-25T10:00:45Z");
+
     private final ProtobufRaftCommandCodec codec = new ProtobufRaftCommandCodec();
 
     @Test
@@ -25,6 +34,25 @@ class CatalogCommandCodecTest {
         var identity = instance.identity();
         assertEquals(CatalogCommand.deregister(identity),
                 codec.deserialize(codec.serialize(CatalogCommand.deregister(identity))));
+    }
+
+    @Test
+    void roundTripsHealthObservationAndExpiryWithoutRenumberingCatalogCommands() {
+        var checkId = new ServiceCheckId(
+                new dev.mars.qraft.catalog.ServiceInstanceId(
+                        "tenant-a", "production", "node-1", "search-1"), "http");
+        var observation = new HealthObservation(checkId, ServiceHealth.WARNING, 9,
+                OBSERVED_AT, 45_000, true, "slow response");
+        var observe = CatalogCommand.observe(observation, ACCEPTED_AT);
+        var expire = CatalogCommand.expire(checkId, 9, EXPIRY_DEADLINE, true);
+
+        assertEquals(observe, codec.deserialize(codec.serialize(observe)));
+        assertEquals(expire, codec.deserialize(codec.serialize(expire)));
+
+        // Protobuf enum numbers are part of the persisted Raft wire format. Renumbering
+        // these command types would make previously written log entries decode incorrectly.
+        assertEquals(3, dev.mars.qraft.controller.raft.grpc.CatalogCommandType.CATALOG_CMD_OBSERVE_HEALTH_VALUE);
+        assertEquals(4, dev.mars.qraft.controller.raft.grpc.CatalogCommandType.CATALOG_CMD_EXPIRE_HEALTH_VALUE);
     }
 
     @Test

@@ -22,3 +22,26 @@ services:
       retries: 3
       start_period: 30s
     restart: unless-stopped
+
+  agent:
+    command: ["client"]
+    build:
+      context: ../..
+      dockerfile: qraft-runtime/Dockerfile
+    container_name: qraft-agent-dev
+    volumes:
+      - ../config/client.json:/etc/qraft/client.json:ro
+    depends_on:
+      controller:
+        condition: service_healthy
+    networks:
+      qraft-dev:
+        aliases:
+          - agent-example
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped

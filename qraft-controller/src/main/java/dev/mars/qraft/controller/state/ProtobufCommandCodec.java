@@ -20,8 +20,13 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import dev.mars.qraft.catalog.ServiceHealth;
+import dev.mars.qraft.catalog.HealthObservation;
+import dev.mars.qraft.catalog.ServiceCheckId;
 import dev.mars.qraft.catalog.ServiceInstance;
+import dev.mars.qraft.catalog.ServiceInstanceId;
 import dev.mars.qraft.controller.raft.grpc.*;
+
+import java.time.Instant;
 
 /**
  * Facade for converting between Java command objects and Protobuf-encoded bytes.
@@ -127,6 +132,14 @@ public final class ProtobufCommandCodec {
                     .setTenantId(deregister.tenantId())
                     .setNamespace(deregister.namespace())
                     .build();
+            case CatalogCommand.ObserveHealth observe -> builder
+                    .setType(CatalogCommandType.CATALOG_CMD_OBSERVE_HEALTH)
+                    .setHealthObservation(toHealthObservationProto(observe))
+                    .build();
+            case CatalogCommand.ExpireHealth expire -> builder
+                    .setType(CatalogCommandType.CATALOG_CMD_EXPIRE_HEALTH)
+                    .setHealthExpiry(toHealthExpiryProto(expire))
+                    .build();
         };
     }
 
@@ -138,8 +151,70 @@ public final class ProtobufCommandCodec {
                     : CatalogCommand.deregister(new dev.mars.qraft.catalog.ServiceInstanceId(
                             scopeOrDefault(proto.getTenantId()), scopeOrDefault(proto.getNamespace()),
                             proto.getNodeId(), proto.getServiceId()));
+            case CATALOG_CMD_OBSERVE_HEALTH -> fromHealthObservationProto(proto.getHealthObservation());
+            case CATALOG_CMD_EXPIRE_HEALTH -> fromHealthExpiryProto(proto.getHealthExpiry());
             default -> throw new IllegalArgumentException("Unknown CatalogCommandType: " + proto.getType());
         };
+    }
+
+    private static HealthObservationCommandProto toHealthObservationProto(
+            CatalogCommand.ObserveHealth command) {
+        HealthObservation observation = command.observation();
+        ServiceCheckId check = observation.checkId();
+        ServiceInstanceId service = check.serviceInstanceId();
+        return HealthObservationCommandProto.newBuilder()
+                .setTenantId(service.tenantId())
+                .setNamespace(service.namespace())
+                .setNodeId(service.nodeId())
+                .setServiceId(service.serviceId())
+                .setCheckId(check.checkId())
+                .setStatus(observation.status().name())
+                .setSequenceNumber(observation.sequenceNumber())
+                .setObservedAtEpochMs(observation.observedAt().toEpochMilli())
+                .setTtlMs(observation.ttlMillis())
+                .setRequired(observation.required())
+                .setOutput(observation.output())
+                .setAcceptedAtEpochMs(command.acceptedAt().toEpochMilli())
+                .build();
+    }
+
+    private static CatalogCommand fromHealthObservationProto(HealthObservationCommandProto proto) {
+        ServiceCheckId check = checkId(proto.getTenantId(), proto.getNamespace(),
+                proto.getNodeId(), proto.getServiceId(), proto.getCheckId());
+        HealthObservation observation = new HealthObservation(check,
+                ServiceHealth.valueOf(proto.getStatus()), proto.getSequenceNumber(),
+                Instant.ofEpochMilli(proto.getObservedAtEpochMs()), proto.getTtlMs(),
+                proto.getRequired(), proto.getOutput());
+        return CatalogCommand.observe(observation, Instant.ofEpochMilli(proto.getAcceptedAtEpochMs()));
+    }
+
+    private static HealthExpiryCommandProto toHealthExpiryProto(CatalogCommand.ExpireHealth command) {
+        ServiceCheckId check = command.checkId();
+        ServiceInstanceId service = check.serviceInstanceId();
+        return HealthExpiryCommandProto.newBuilder()
+                .setTenantId(service.tenantId())
+                .setNamespace(service.namespace())
+                .setNodeId(service.nodeId())
+                .setServiceId(service.serviceId())
+                .setCheckId(check.checkId())
+                .setExpectedSequenceNumber(command.expectedSequenceNumber())
+                .setExpectedDeadlineEpochMs(command.expectedDeadline().toEpochMilli())
+                .setDeregisterService(command.deregisterService())
+                .build();
+    }
+
+    private static CatalogCommand fromHealthExpiryProto(HealthExpiryCommandProto proto) {
+        return CatalogCommand.expire(checkId(proto.getTenantId(), proto.getNamespace(),
+                        proto.getNodeId(), proto.getServiceId(), proto.getCheckId()),
+                proto.getExpectedSequenceNumber(),
+                Instant.ofEpochMilli(proto.getExpectedDeadlineEpochMs()),
+                proto.getDeregisterService());
+    }
+
+    private static ServiceCheckId checkId(String tenantId, String namespace,
+                                          String nodeId, String serviceId, String checkId) {
+        return new ServiceCheckId(new ServiceInstanceId(scopeOrDefault(tenantId),
+                scopeOrDefault(namespace), nodeId, serviceId), checkId);
     }
 
     private static ServiceInstanceProto toServiceInstanceProto(ServiceInstance instance) {

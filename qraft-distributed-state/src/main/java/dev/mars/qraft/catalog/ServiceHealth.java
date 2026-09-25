@@ -7,5 +7,8 @@ public enum ServiceHealth {
     UNKNOWN,
     PASSING,
     WARNING,
+    CRITICAL,
+    MAINTENANCE,
+    /** Legacy persisted name retained for command and snapshot compatibility. */
     FAILING
 }

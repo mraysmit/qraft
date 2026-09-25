@@ -7,10 +7,17 @@ import dev.mars.qraft.agent.AgentStatus;
 import dev.mars.qraft.controller.raft.RaftLogApplicator;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import dev.mars.qraft.catalog.ServiceCatalog;
+import dev.mars.qraft.catalog.HealthCheckState;
+import dev.mars.qraft.catalog.HealthObservation;
+import dev.mars.qraft.catalog.ServiceCheckId;
+import dev.mars.qraft.catalog.ServiceHealth;
 import dev.mars.qraft.catalog.ServiceInstance;
+import dev.mars.qraft.catalog.ServiceInstanceId;
 
 import java.io.IOException;
 import java.util.Map;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -22,6 +29,7 @@ public final class QraftStateStore implements RaftLogApplicator {
     private final Map<String, Long> heartbeatSequences = new ConcurrentHashMap<>();
     private final Map<String, String> metadata = new ConcurrentHashMap<>();
     private final ServiceCatalog serviceCatalog = new ServiceCatalog();
+    private final Map<ServiceCheckId, HealthCheckState> healthChecks = new ConcurrentHashMap<>();
     private final AtomicLong lastAppliedIndex = new AtomicLong();
     private final ObjectMapper objectMapper = new ObjectMapper()
             .findAndRegisterModules()
@@ -56,14 +64,105 @@ public final class QraftStateStore implements RaftLogApplicator {
         return switch (command) {
             case CatalogCommand.Register register -> {
                 serviceCatalog.register(register.instance());
-                yield new RaftCommandResult.Success<>(register.instance());
+                updateServiceHealthIfObserved(register.instance().identity());
+                yield new RaftCommandResult.Success<>(
+                        serviceCatalog.find(register.instance().identity()).orElseThrow());
             }
-            case CatalogCommand.Deregister deregister -> (deregister.isLegacy()
-                    ? serviceCatalog.deregisterLegacy(deregister.serviceId())
-                    : serviceCatalog.deregister(deregister.identity()))
-                    ? new RaftCommandResult.Success<>(deregister.serviceId())
-                    : new RaftCommandResult.NotFound<>(deregister.serviceId(), "ServiceInstance");
+            case CatalogCommand.Deregister deregister -> {
+                boolean removed = deregister.isLegacy()
+                        ? serviceCatalog.deregisterLegacy(deregister.serviceId())
+                        : serviceCatalog.deregister(deregister.identity());
+                if (removed) {
+                    if (deregister.isLegacy()) {
+                        healthChecks.keySet().removeIf(check ->
+                                check.serviceInstanceId().serviceId().equals(deregister.serviceId()));
+                    } else {
+                        removeHealthChecks(deregister.identity());
+                    }
+                }
+                yield removed
+                        ? new RaftCommandResult.Success<>(deregister.serviceId())
+                        : new RaftCommandResult.NotFound<>(deregister.serviceId(), "ServiceInstance");
+            }
+            case CatalogCommand.ObserveHealth observe -> applyHealthObservation(observe);
+            case CatalogCommand.ExpireHealth expire -> applyHealthExpiry(expire);
         };
+    }
+
+    private RaftCommandResult<?> applyHealthObservation(CatalogCommand.ObserveHealth command) {
+        HealthObservation observation = command.observation();
+        ServiceCheckId checkId = observation.checkId();
+        if (serviceCatalog.find(checkId.serviceInstanceId()).isEmpty()) {
+            return new RaftCommandResult.NotFound<>(checkId.serviceInstanceId().toString(), "ServiceInstance");
+        }
+        HealthCheckState current = healthChecks.get(checkId);
+        if (current != null
+                && observation.sequenceNumber() <= current.observation().sequenceNumber()) {
+            return new RaftCommandResult.Success<>(current);
+        }
+        HealthCheckState accepted = new HealthCheckState(observation, command.acceptedAt(),
+                command.acceptedAt().plusMillis(observation.ttlMillis()), false);
+        healthChecks.put(checkId, accepted);
+        updateServiceHealth(checkId.serviceInstanceId());
+        return new RaftCommandResult.Success<>(accepted);
+    }
+
+    private RaftCommandResult<?> applyHealthExpiry(CatalogCommand.ExpireHealth command) {
+        HealthCheckState current = healthChecks.get(command.checkId());
+        if (current == null
+                || current.observation().sequenceNumber() != command.expectedSequenceNumber()
+                || !current.deadline().equals(command.expectedDeadline())) {
+            return new RaftCommandResult.NoOp<>();
+        }
+        ServiceInstanceId identity = command.checkId().serviceInstanceId();
+        if (command.deregisterService()) {
+            if (!serviceCatalog.deregister(identity)) {
+                return new RaftCommandResult.NoOp<>();
+            }
+            removeHealthChecks(identity);
+            return new RaftCommandResult.Success<>(identity);
+        }
+        HealthCheckState expired = current.asExpired();
+        healthChecks.put(command.checkId(), expired);
+        updateServiceHealth(identity);
+        return new RaftCommandResult.Success<>(expired);
+    }
+
+    private void updateServiceHealthIfObserved(ServiceInstanceId identity) {
+        if (healthChecks.keySet().stream().anyMatch(check -> check.serviceInstanceId().equals(identity))) {
+            updateServiceHealth(identity);
+        }
+    }
+
+    private void updateServiceHealth(ServiceInstanceId identity) {
+        if (serviceCatalog.find(identity).isEmpty()) return;
+        List<HealthCheckState> states = healthChecks.values().stream()
+                .filter(state -> state.checkId().serviceInstanceId().equals(identity))
+                .toList();
+        serviceCatalog.setHealth(identity, aggregateHealth(states));
+    }
+
+    private static ServiceHealth aggregateHealth(List<HealthCheckState> states) {
+        if (states.isEmpty()) return ServiceHealth.UNKNOWN;
+        boolean warning = false;
+        boolean requiredCritical = false;
+        boolean maintenance = false;
+        for (HealthCheckState state : states) {
+            ServiceHealth status = state.observation().status();
+            maintenance |= status == ServiceHealth.MAINTENANCE;
+            boolean critical = state.expired()
+                    || status == ServiceHealth.CRITICAL
+                    || status == ServiceHealth.FAILING;
+            requiredCritical |= critical && state.observation().required();
+            if (critical || status == ServiceHealth.WARNING) warning = true;
+        }
+        if (maintenance) return ServiceHealth.MAINTENANCE;
+        if (requiredCritical) return ServiceHealth.CRITICAL;
+        return warning ? ServiceHealth.WARNING : ServiceHealth.PASSING;
+    }
+
+    private void removeHealthChecks(ServiceInstanceId identity) {
+        healthChecks.keySet().removeIf(check -> check.serviceInstanceId().equals(identity));
     }
 
     private RaftCommandResult<?> applyAgentCommand(AgentCommand command) {
@@ -154,8 +253,16 @@ public final class QraftStateStore implements RaftLogApplicator {
     @Override
     public byte[] takeSnapshot() {
         try {
+            List<HealthCheckState> orderedHealthChecks = healthChecks.values().stream()
+                    .sorted(Comparator.comparing((HealthCheckState state) ->
+                                    state.checkId().serviceInstanceId().tenantId())
+                            .thenComparing(state -> state.checkId().serviceInstanceId().namespace())
+                            .thenComparing(state -> state.checkId().serviceInstanceId().nodeId())
+                            .thenComparing(state -> state.checkId().serviceInstanceId().serviceId())
+                            .thenComparing(state -> state.checkId().checkId()))
+                    .toList();
             return objectMapper.writeValueAsBytes(new Snapshot(Map.copyOf(agents), Map.copyOf(heartbeatSequences),
-                    Map.copyOf(metadata), serviceCatalog.instances(), lastAppliedIndex.get()));
+                    Map.copyOf(metadata), serviceCatalog.instances(), orderedHealthChecks, lastAppliedIndex.get()));
         } catch (IOException e) {
             throw new IllegalStateException("Failed to serialize controller snapshot", e);
         }
@@ -174,6 +281,10 @@ public final class QraftStateStore implements RaftLogApplicator {
             metadata.clear();
             metadata.putAll(snapshot.metadata());
             serviceCatalog.replaceAll(snapshot.services() == null ? java.util.List.of() : snapshot.services());
+            healthChecks.clear();
+            if (snapshot.healthChecks() != null) {
+                snapshot.healthChecks().forEach(state -> healthChecks.put(state.checkId(), state));
+            }
             lastAppliedIndex.set(snapshot.lastAppliedIndex());
         } catch (IOException e) {
             throw new IllegalStateException("Failed to restore controller snapshot", e);
@@ -197,6 +308,7 @@ public final class QraftStateStore implements RaftLogApplicator {
         metadata.clear();
         metadata.put("version", DEFAULT_VERSION);
         serviceCatalog.clear();
+        healthChecks.clear();
         lastAppliedIndex.set(0);
     }
 
@@ -224,8 +336,20 @@ public final class QraftStateStore implements RaftLogApplicator {
         return serviceCatalog;
     }
 
+    public Optional<HealthCheckState> findHealthCheck(ServiceCheckId checkId) {
+        return Optional.ofNullable(healthChecks.get(checkId));
+    }
+
+    public List<HealthCheckState> healthChecks() {
+        return healthChecks.values().stream()
+                .sorted(Comparator.comparing(state -> state.checkId().toString()))
+                .toList();
+    }
+
     private record Snapshot(Map<String, AgentInfo> agents, Map<String, Long> heartbeatSequences,
                             Map<String, String> metadata,
-                            java.util.List<ServiceInstance> services, long lastAppliedIndex) {
+                            java.util.List<ServiceInstance> services,
+                            java.util.List<HealthCheckState> healthChecks,
+                            long lastAppliedIndex) {
     }
 }

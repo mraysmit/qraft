@@ -109,6 +109,8 @@ enum CatalogCommandType {
   CATALOG_CMD_UNSPECIFIED = 0;
   CATALOG_CMD_REGISTER = 1;
   CATALOG_CMD_DEREGISTER = 2;
+  CATALOG_CMD_OBSERVE_HEALTH = 3;
+  CATALOG_CMD_EXPIRE_HEALTH = 4;
 }
 
 message ServiceInstanceProto {
@@ -134,6 +136,34 @@ message CatalogCommandProto {
   string node_id = 4;
   string tenant_id = 5;
   string namespace = 6;
+  HealthObservationCommandProto health_observation = 7;
+  HealthExpiryCommandProto health_expiry = 8;
+}
+
+message HealthObservationCommandProto {
+  string tenant_id = 1;
+  string namespace = 2;
+  string node_id = 3;
+  string service_id = 4;
+  string check_id = 5;
+  string status = 6;
+  int64 sequence_number = 7;
+  int64 observed_at_epoch_ms = 8;
+  int64 ttl_ms = 9;
+  bool required = 10;
+  string output = 11;
+  int64 accepted_at_epoch_ms = 12;
+}
+
+message HealthExpiryCommandProto {
+  string tenant_id = 1;
+  string namespace = 2;
+  string node_id = 3;
+  string service_id = 4;
+  string check_id = 5;
+  int64 expected_sequence_number = 6;
+  int64 expected_deadline_epoch_ms = 7;
+  bool deregister_service = 8;
 }
 
 message RaftCommandMessage {

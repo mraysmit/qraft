@@ -1,13 +1,17 @@
 package dev.mars.qraft.controller.state;
 
+import dev.mars.qraft.catalog.HealthObservation;
+import dev.mars.qraft.catalog.ServiceCheckId;
 import dev.mars.qraft.catalog.ServiceInstance;
 import dev.mars.qraft.catalog.ServiceInstanceId;
 
+import java.time.Instant;
 import java.util.Objects;
 
 /** Mutations applied to the replicated service catalog. */
 public sealed interface CatalogCommand extends RaftCommand
-        permits CatalogCommand.Register, CatalogCommand.Deregister {
+        permits CatalogCommand.Register, CatalogCommand.Deregister,
+                CatalogCommand.ObserveHealth, CatalogCommand.ExpireHealth {
 
     record Register(ServiceInstance instance) implements CatalogCommand {
         public Register {
@@ -33,6 +37,26 @@ public sealed interface CatalogCommand extends RaftCommand
         }
     }
 
+    record ObserveHealth(HealthObservation observation, Instant acceptedAt) implements CatalogCommand {
+        public ObserveHealth {
+            Objects.requireNonNull(observation, "observation");
+            Objects.requireNonNull(acceptedAt, "acceptedAt");
+            acceptedAt = Instant.ofEpochMilli(acceptedAt.toEpochMilli());
+        }
+    }
+
+    record ExpireHealth(ServiceCheckId checkId, long expectedSequenceNumber,
+                        Instant expectedDeadline, boolean deregisterService) implements CatalogCommand {
+        public ExpireHealth {
+            Objects.requireNonNull(checkId, "checkId");
+            Objects.requireNonNull(expectedDeadline, "expectedDeadline");
+            expectedDeadline = Instant.ofEpochMilli(expectedDeadline.toEpochMilli());
+            if (expectedSequenceNumber < 1) {
+                throw new IllegalArgumentException("expectedSequenceNumber must be positive");
+            }
+        }
+    }
+
     static CatalogCommand register(ServiceInstance instance) {
         return new Register(instance);
     }
@@ -45,5 +69,14 @@ public sealed interface CatalogCommand extends RaftCommand
         Objects.requireNonNull(identity, "identity");
         return new Deregister(identity.serviceId(), identity.nodeId(),
                 identity.tenantId(), identity.namespace());
+    }
+
+    static CatalogCommand observe(HealthObservation observation, Instant acceptedAt) {
+        return new ObserveHealth(observation, acceptedAt);
+    }
+
+    static CatalogCommand expire(ServiceCheckId checkId, long expectedSequenceNumber,
+                                 Instant expectedDeadline, boolean deregisterService) {
+        return new ExpireHealth(checkId, expectedSequenceNumber, expectedDeadline, deregisterService);
     }
 }

@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-09-24
+**Last updated:** 2026-09-25
 
 ## 1. Purpose
 
@@ -85,64 +85,107 @@ shared value types; the mutable replicated catalog remains server-side.
 
 ## 2. Goals
 
-- Run one executable and one container image in either `server` or `client` mode.
-- Replicate every cluster mutation through Raft.
-- Keep client agents outside the Raft quorum.
-- Discover services by tenant, namespace, service name, and health state.
-- Preserve deterministic state-machine behavior across every server.
-- Survive leader changes, network partitions, process restarts, and rolling upgrades.
-- Expose explicit read consistency and write-failure behavior.
-- Provide a built-in administrative interface for inspecting and operating the
-  platform without requiring a separate management product.
-- Provide testable lifecycle ownership with bounded startup and shutdown.
-- Use Java 25 platform APIs without a framework-managed event loop.
+These goals describe the operational outcomes the platform is intended to
+provide. Later sections turn them into domain, protocol, persistence, lifecycle,
+and acceptance requirements.
 
-## 3. Non-goals
+- **One deployable artifact.** Run the same executable and container image in
+  either `server` or `client` mode. Role selection happens at startup so both
+  modes share versioning, configuration conventions, packaging, diagnostics,
+  and process-management behavior without becoming separate distributions.
+- **Raft-authoritative cluster state.** Replicate every authoritative cluster
+  mutation through Raft and acknowledge it only after it is committed and
+  applied. No HTTP handler, background task, or administrative operation may
+  create a competing mutation path around consensus.
+- **Independent client agents.** Keep client agents outside the Raft quorum so
+  workload nodes can scale, restart, and lose connectivity without changing
+  consensus membership. Agents contribute registrations and observations;
+  servers decide and retain authoritative cluster state.
+- **Scoped and useful discovery.** Discover services by tenant, namespace,
+  service name, and health state, with stable instance identity and deterministic
+  ordering. Callers must be able to distinguish healthy candidates, degraded
+  candidates, and absent services without depending on controller-local state.
+- **Deterministic replicated behavior.** Applying the same committed command
+  sequence and snapshot must produce the same state and indexes on every server.
+  State-machine application therefore cannot depend on a local clock, network
+  call, filesystem observation, or unordered iteration.
+- **Operational resilience.** Preserve committed state and restore useful service
+  after leader changes, network partitions, process restarts, snapshot recovery,
+  and supported rolling upgrades. Temporary loss of quorum may reduce
+  availability, but must not create divergent authoritative state.
+- **Explicit consistency and failure semantics.** Make each read mode's freshness
+  guarantee visible and distinguish rejected, retryable, and outcome-unknown
+  writes. Clients should be able to make safe retry decisions without parsing
+  log messages or assuming that a lost response means a failed commit.
+- **Integrated administration.** Provide a built-in interface for inspecting and
+  operating the platform without requiring a separate management product. The
+  interface uses the same authenticated APIs, authorization rules, Raft command
+  path, and consistency guarantees as every other client.
+- **Bounded, testable lifecycle management.** Give every resource an explicit
+  owner and make startup, readiness, drain, shutdown, and partial-startup cleanup
+  observable in tests. Lifecycle operations must be idempotent and complete or
+  fail within documented deadlines.
+- **Direct use of Java 25.** Build concurrency, networking, and lifecycle control
+  on Java 25 platform APIs rather than a framework-managed event loop. Shared
+  abstractions are introduced only where they express a Qraft contract or make
+  ownership and testing clearer.
 
-- File transfer or protocol transfer engines.
-- Workflow execution, job assignment, or job queues.
-- Application deployment or workload scheduling.
-- Service-mesh data-plane proxying.
-- Client participation in Raft elections or log replication.
+## 3. Design principles
 
-Service-mesh control-plane features (intentions, routing, gateways) and
-multi-cluster peering and federation are not scheduled. The administrative UI
-design reserves navigation for them, but none may be implemented or enabled
-until an architecture decision record defines its contract and this document
-and the Consul plan are updated. Data-plane proxying remains a non-goal
-regardless.
-
-## 4. Design principles
-
-1. **Replicate intent, derive views.** Commands are written to Raft; catalogs and
-   indexes are deterministic projections of committed commands.
-2. **Separate wire contracts from stored state.** HTTP request objects are not
-   persisted domain objects.
-3. **Make ownership explicit.** Every executor, timer, socket, and storage handle
-   has one lifecycle owner.
-4. **Treat retries as part of the protocol.** Operations are classified as
-   idempotent or non-idempotent before retry behavior is defined.
-5. **Expose uncertainty.** A lost response after submission is not reported as a
-   definite rejection when the commit outcome is unknown.
+1. **Replicate intent, derive views.** Raft records validated commands that state
+   what should change; catalogs, indexes, health summaries, and query structures
+   are deterministic projections of the committed sequence. Derived views must
+   be rebuildable from a snapshot and subsequent commands rather than acquiring
+   an independent source of truth.
+2. **Separate wire contracts from stored state.** HTTP and gRPC request objects
+   belong to adapter boundaries and are validated and mapped into domain
+   commands. Persisted models evolve under explicit compatibility rules and are
+   never accidental serializations of whichever public DTO a handler accepts.
+3. **Make ownership explicit.** Every executor, timer, socket, HTTP client,
+   server, subscription, and storage handle has exactly one lifecycle owner.
+   Owners close resources in a defined order, and callers receive one idempotent
+   completion rather than relying on shutdown hooks or garbage collection.
+4. **Treat retries as part of the protocol.** Classify an operation as idempotent
+   or non-idempotent before defining timeouts, failover, and retry behavior.
+   Request identity, duplicate handling, retry limits, and terminal rejection
+   must be specified at the same boundary as the operation itself.
+5. **Expose uncertainty.** A transport failure proves only that the caller did
+   not receive a result; it does not prove that the command was not committed.
+   APIs and clients distinguish definite rejection, safe retry, and unknown
+   outcome so recovery can reconcile against authoritative state.
 6. **Preserve compatibility deliberately.** Protobuf fields are never renumbered,
-   snapshots have defaults for new fields, and upgrade tests use old fixtures.
-7. **Keep tests behavioral.** Tests use real implementations, protocol fixtures,
-   purpose-built fakes, and integration clusters rather than mocking frameworks.
+   snapshots and commands define defaults for newly introduced fields, and
+   readers retain old formats for a documented migration window. Fixture-based
+   upgrade tests prove compatibility before a format change is accepted.
+7. **Keep tests behavioral.** Tests exercise observable results through real
+   implementations, protocol-level fixtures, purpose-built fakes, and integration
+   clusters rather than mocking frameworks. Tests at persistence, transport, and
+   packaging boundaries verify serialization, failure behavior, recovery, and
+   cleanup as well as the successful path.
+8. **Keep consensus membership server-only.** Client agents never participate in
+   Raft elections, quorum membership, or log replication. They communicate only
+   through public control-plane protocols, allowing the client population to
+   change independently of the small, deliberately configured server quorum.
 
-## 5. Current architecture
+## 4. Current architecture
 
-### 5.1 Runtime
+### 4.1 Runtime
 
 The `qraft-runtime` module owns the executable entry point and resolves `server`
 or `client` from the required command-line subcommand. The container image
 packages the runtime and selects the mode through its command, never through an
 environment variable.
 
-Current limitation: mode launch delegates directly to static application entry
-points. This makes configuration injection, lifecycle assertions, and in-process
-integration testing unnecessarily difficult.
+The runtime resolves the selected versioned configuration file before dispatch,
+then launches the controller or agent through an injected mode boundary. Both
+modes return the same runtime-owned lifecycle, which exposes completion and one
+idempotent asynchronous close operation. The process entry point and shutdown
+hook use that lifecycle directly; neither mode is started by invoking another
+application's static `main` method. A runtime-boundary acceptance test exercises
+real server and client startup, registration, discovery, readiness loss,
+controller restart and reconciliation, deregistration, and ordered shutdown.
 
-### 5.2 Server
+### 4.2 Server
 
 Server mode currently owns:
 
@@ -158,7 +201,7 @@ Catalog registration and deregistration are encoded as protobuf commands and
 applied to `QraftStateStore`. Catalog contents are included in snapshots, and the
 command codec can read legacy JSON log entries during migration.
 
-### 5.3 Client agent
+### 4.3 Client agent
 
 Client mode currently owns:
 
@@ -216,7 +259,7 @@ All callers share one completion bounded by `agent.shutdownTimeoutMs`; when the
 deadline expires, outstanding HTTP work is cancelled and incomplete cleanup is
 reported once.
 
-### 5.4 Known model gaps
+### 4.4 Known model gaps
 
 - Client operations rotate across ordered controller seeds on retryable outcomes,
   stop on rejection, and remember the last successful endpoint.
@@ -236,7 +279,7 @@ uses a dedicated request DTO, and authoritative health is initialized by the
 server. Tenant, namespace, datacenter, region, and enabled state are durable
 instance fields.
 
-## 6. Target system context
+## 5. Target system context
 
 ```text
 Applications and operators
@@ -266,9 +309,9 @@ Servers are authoritative for committed cluster state. Client agents are
 authoritative only for local observations and submit those observations as
 commands to the server cluster.
 
-## 7. Runtime modes
+## 6. Runtime modes
 
-### 7.1 Server mode
+### 6.1 Server mode
 
 `qraft server`:
 
@@ -283,7 +326,7 @@ A server is live when its process and local health server operate. It is ready
 when it can safely serve the advertised API behavior. Readiness may depend on
 Raft recovery, quorum, and leadership according to endpoint consistency rules.
 
-### 7.2 Client mode
+### 6.2 Client mode
 
 `qraft client`:
 
@@ -294,9 +337,9 @@ Raft recovery, quorum, and leadership according to endpoint consistency rules.
 - Remains live but unready during a controller outage.
 - Never opens Raft transport or durable Raft storage.
 
-## 8. Domain model
+## 7. Domain model
 
-### 8.1 Tenant
+### 7.1 Tenant
 
 A tenant is the top-level ownership and isolation boundary. It contains
 namespaces, services, key/value entries, sessions, locks, policies, quotas, and
@@ -305,13 +348,13 @@ audit records.
 The initial deployment may expose only the `default` tenant, but tenant identity
 must be present in stored keys before multiple tenants are enabled.
 
-### 8.2 Namespace
+### 7.2 Namespace
 
 A namespace is an isolation boundary within a tenant, commonly representing an
 environment, team, or application group. Every namespaced resource defaults to
 the `default` namespace when no explicit value is supplied.
 
-### 8.3 Agent and node
+### 7.3 Agent and node
 
 An agent is the client-mode process. A node is the stable logical identity that
 the agent represents. One node can host multiple service instances.
@@ -328,7 +371,7 @@ Agent state includes:
 - Last accepted contact and lifecycle status.
 - Locally configured service definitions and health checks.
 
-### 8.4 Service definition
+### 7.4 Service definition
 
 A service definition is client-owned configuration. It contains:
 
@@ -341,7 +384,7 @@ A service definition is client-owned configuration. It contains:
 
 It does not contain authoritative health state or Raft indexes.
 
-### 8.5 Service instance
+### 7.5 Service instance
 
 A service instance is server-owned replicated state derived from a registration
 command. Its durable identity is:
@@ -362,7 +405,7 @@ other. Re-registering the same durable identity is an idempotent update.
 Stored instance data includes the definition fields plus current health,
 registration index, modification index, and optional deregistration deadline.
 
-### 8.6 Health
+### 7.6 Health
 
 Health is server-owned state based on observations reported by agents or produced
 by server-side checks. The target states are:
@@ -376,9 +419,9 @@ by server-side checks. The target states are:
 Health changes are separate Raft commands. Registration cannot claim an
 authoritative health result.
 
-## 9. Service registration and reconciliation
+## 8. Service registration and reconciliation
 
-### 9.1 Registration flow
+### 8.1 Registration flow
 
 1. The agent loads and validates all service definitions.
 2. The local health server becomes live and reports not ready.
@@ -392,7 +435,7 @@ authoritative health result.
 Partial registration is retained. The agent retries only missing or changed
 definitions and does not roll back successfully committed registrations.
 
-### 9.2 Reconciliation
+### 8.2 Reconciliation
 
 The agent periodically reconciles its startup service-definition snapshot rather
 than relying on one startup request. Reconciliation repairs state after
@@ -404,7 +447,7 @@ implemented.
 Only one reconciliation may run at a time. A stable content fingerprint prevents
 unnecessary writes when the desired definition has not changed.
 
-### 9.3 Controller selection and retry
+### 8.3 Controller selection and retry
 
 Client configuration supplies an ordered, deduplicated list of controller seed
 URIs. For an idempotent operation, the client may try each seed once in a cycle.
@@ -424,7 +467,7 @@ configured heartbeat cadence; retryable operations still rotate through the seed
 list within each pass. The last successful endpoint is preferred for the next
 operation, irrespective of whether it is a leader or follower.
 
-### 9.4 Deregistration
+### 8.4 Deregistration
 
 Deregistration is node-scoped and idempotent. Removing an absent instance is a
 successful no-op. During graceful shutdown, the agent:
@@ -443,7 +486,7 @@ incomplete-cleanup warning; it does not delay process termination indefinitely.
 
 Automatic expiry remains necessary because graceful shutdown cannot be guaranteed.
 
-## 10. Health checks and failure detection
+## 9. Health checks and failure detection
 
 Agents execute checks close to the workload and report observations. Initial
 check types are:
@@ -465,7 +508,7 @@ mutate catalog state from local timers.
 Discovery returns all states by default only where the API contract says so. A
 healthy-service query filters to eligible states without mutating the catalog.
 
-## 11. Distributed key/value state
+## 10. Distributed key/value state
 
 Key/value entries are scoped by tenant and namespace and contain:
 
@@ -479,7 +522,7 @@ commands. Prefix listing is deterministic. Blocking queries wait for an index
 strictly greater than the caller's observed index and terminate on timeout,
 shutdown, or leadership/consistency failure.
 
-## 12. Sessions and locks
+## 11. Sessions and locks
 
 A session binds an owner identity to a TTL and optional behavior on expiry.
 Session creation, renewal, destruction, and expiration are replicated.
@@ -492,9 +535,9 @@ expiry.
 Leader-election helpers are library behavior built on sessions and locks rather
 than a separate consensus mechanism.
 
-## 13. API design
+## 12. API design
 
-### 13.1 Service endpoints
+### 12.1 Service endpoints
 
 Initial HTTP endpoints are:
 
@@ -558,7 +601,7 @@ Deregistration uses the same three identity headers. It is idempotent and return
 HTTP 200 with `{"serviceId":"web","deregistered":false}` when the composite
 instance is already absent.
 
-### 13.2 Error envelope
+### 12.2 Error envelope
 
 Errors use a stable machine-readable envelope:
 
@@ -587,7 +630,7 @@ successful endpoint. Failed node-registration cycles use capped exponential
 backoff with jitter; catalog operations are retried by the periodic reconciler on
 its normal heartbeat cadence.
 
-### 13.3 Index metadata
+### 12.3 Index metadata
 
 Reads expose the applied state index in a response header. Blocking-query clients
 send their last observed index and a bounded wait duration. Indexes are monotonic
@@ -595,7 +638,7 @@ for a given committed history and are not wall-clock timestamps.
 
 The current catalog read endpoints return the index as `X-Qraft-Index`.
 
-### 13.4 Built-in administrative capabilities
+### 12.4 Built-in administrative capabilities
 
 The server provides a built-in administrative interface backed exclusively by
 the same authenticated, authorized APIs available to other clients. It must not
@@ -610,7 +653,7 @@ domain logic to `qraft-runtime`: the runtime carries the assets, while
 `qraft-controller` owns the HTTP routes, authentication, authorization, cache
 policy, and lifecycle of the serving endpoint.
 
-#### 13.4.1 Build and executable packaging
+#### 12.4.1 Build and executable packaging
 
 The administrative frontend is compiled before the Java packaging phase into a
 static distribution containing `index.html`, hashed JavaScript and CSS bundles,
@@ -714,7 +757,7 @@ protected key/value contents are never exposed without an explicit permission.
 This section defines capabilities only. Presentation layout, navigation,
 interaction patterns, and visual design are intentionally outside this document.
 
-## 14. Consistency model
+## 13. Consistency model
 
 Every write is acknowledged after commit and state-machine application. Read modes
 are:
@@ -730,9 +773,9 @@ until forwarding exists, clients rotate through configured seeds.
 Deterministic ordering is mandatory for service lists, instances, tags, prefix
 results, and snapshot serialization.
 
-## 15. Persistence and upgrades
+## 14. Persistence and upgrades
 
-### 15.1 Storage boundaries
+### 14.1 Storage boundaries
 
 Qraft uses RaftLog as a write-ahead log, not as an application database. The WAL
 stores only:
@@ -783,7 +826,7 @@ The consensus layer should use standard `CompletableFuture` or `CompletionStage`
 at this boundary. Runtime-specific future wrappers add no storage semantics and
 should not leak into the reusable storage port.
 
-### 15.2 Opaque command payloads and materialized state
+### 14.2 Opaque command payloads and materialized state
 
 The KV example in the RaftLog demo establishes the intended separation:
 
@@ -811,7 +854,7 @@ where the format forbids it, invalid UTF-8 where text is required, and command
 variants missing required fields. The WAL checksum protects stored bytes; it does
 not replace domain-level payload validation.
 
-### 15.3 Append and conflict-replacement contract
+### 14.3 Append and conflict-replacement contract
 
 Leader submission uses this order:
 
@@ -847,7 +890,7 @@ its own atomic durability barrier. A server updates its effective persistent ter
 and vote before granting a vote or responding based on the new term. A separate
 `sync` call is neither required nor a substitute for this guarantee.
 
-### 15.4 Snapshot and prefix-compaction contract
+### 14.4 Snapshot and prefix-compaction contract
 
 Prefix compaction is safe only after a covering application snapshot is durable.
 The required order is:
@@ -880,7 +923,7 @@ snapshots durably and atomically, and prefix compaction calls RaftLog's real
 `truncatePrefix`. The former in-memory snapshot adapter and its no-op prefix
 truncation have been removed.
 
-### 15.5 Recovery contract
+### 14.5 Recovery contract
 
 Recovery proceeds by:
 
@@ -901,7 +944,7 @@ After prefix compaction, the first replayed entry may have an index greater than
 one. Recovery validates continuity relative to the snapshot boundary rather than
 assuming that every WAL begins at index one.
 
-### 15.6 Concurrency and ownership
+### 14.6 Concurrency and ownership
 
 Each node has one open WAL instance and one exclusive data-directory lock. RaftLog
 owns and serializes its blocking file operations. Qraft must not add a second
@@ -912,7 +955,7 @@ The storage future completing means the operation reached the guarantee document
 by that method; it does not mean a command is committed or applied. Raft owns the
 separate persisted, committed, and applied indexes.
 
-### 15.7 Version alignment
+### 14.7 Version alignment
 
 Qraft must pin a RaftLog version whose published interface and behavior match
 Qraft's use of it. The root POM pins `raftlog.version` (currently 1.4.0), and
@@ -928,7 +971,7 @@ Every upgrade requires contract tests against the real `FileRaftStorage` for:
 - Corrupt interior record failure and torn-tail recovery.
 - Exclusive directory locking and post-fence operation rejection.
 
-### 15.8 Application-format compatibility
+### 14.8 Application-format compatibility
 
 Compatibility rules:
 
@@ -946,7 +989,7 @@ Compatibility rules:
 Before changing catalog identity, tests must capture legacy snapshots and command
 bytes as immutable fixtures.
 
-## 16. Security and tenancy
+## 15. Security and tenancy
 
 Tenant and namespace identity must be carried through authentication context,
 commands, stored keys, queries, snapshots, metrics labels, and audit records.
@@ -959,7 +1002,7 @@ Initial development may use explicit identity headers in a trusted environment,
 but the boundary must be isolated behind a request-context interface so token or
 certificate authentication can replace it without changing catalog commands.
 
-## 17. Configuration
+## 16. Configuration
 
 Qraft does not use environment variables for runtime configuration. This rule
 applies to server and client modes, containers, service-manager deployments,
@@ -1071,7 +1114,7 @@ Invalid configuration fails before background work starts. Unknown settings,
 missing files, duplicate JSON keys, and environment-style placeholders are
 invalid.
 
-## 18. Lifecycle and resource ownership
+## 17. Lifecycle and resource ownership
 
 Startup and shutdown are explicit state machines. Suggested runtime states are:
 
@@ -1090,7 +1133,7 @@ Each service owns its servers, clients, schedulers, storage, and background task
 No component creates an executor that another component is expected to discover
 and close implicitly.
 
-## 19. Observability
+## 18. Observability
 
 Required signals include:
 
@@ -1108,11 +1151,11 @@ namespace. Sensitive tokens and health-output secrets are never logged.
 Metrics avoid unbounded labels such as raw service IDs, keys, request IDs, or
 error messages.
 
-## 20. Test strategy
+## 19. Test strategy
 
 Development follows red-green-refactor in small behavioral increments.
 
-### 20.1 Domain tests
+### 19.1 Domain tests
 
 - Composite service identity prevents cross-node and cross-tenant collisions.
 - Re-registration is deterministic and idempotent.
@@ -1120,7 +1163,7 @@ Development follows red-green-refactor in small behavioral increments.
 - Health transitions and stale observation rejection are deterministic.
 - Session expiry and lock ownership rules cover ordering boundaries.
 
-### 20.2 Codec and compatibility tests
+### 19.2 Codec and compatibility tests
 
 - Every command round-trips through protobuf.
 - Unknown fields are tolerated where safe.
@@ -1128,7 +1171,7 @@ Development follows red-green-refactor in small behavioral increments.
 - Old binary fixtures decode with documented defaults.
 - Snapshot fixtures restore and reserialize deterministically.
 
-### 20.3 Protocol adapter tests
+### 19.3 Protocol adapter tests
 
 Outbound HTTP adapters use a real JDK HTTP fixture to verify method, path, headers,
 body, timeout, response parsing, failure classification, and resource cleanup.
@@ -1140,13 +1183,13 @@ classpath loading from the packaged JAR, content types, cache and security
 headers, path-prefix stripping, client-route fallback, API-route isolation,
 disabled-route behavior, bootstrap escaping, and missing-asset responses.
 
-### 20.4 Lifecycle tests
+### 19.4 Lifecycle tests
 
 Purpose-built fakes may represent the catalog-client boundary, scheduler trigger,
 and clock. Tests cover partial startup, repeated calls, retry cancellation,
 readiness transitions, bounded shutdown, and executor termination.
 
-### 20.5 Cluster tests
+### 19.5 Cluster tests
 
 In-memory and real-transport clusters cover:
 
@@ -1158,7 +1201,7 @@ In-memory and real-transport clusters cover:
 - Snapshot installation and restart recovery.
 - Client failover across controller seeds.
 
-### 20.6 Container acceptance tests
+### 19.6 Container acceptance tests
 
 Tagged tests build one image, start it in both modes, register a service, query it
 through multiple servers, change leadership, and verify graceful and automatic
@@ -1170,11 +1213,11 @@ frontend directory on disk, fetches `index.html` and a manifest-listed hashed
 asset from the server, and verifies that client mode and disabled server mode do
 not expose the administrative routes.
 
-## 21. Test-first delivery sequence
+## 20. Test-first delivery sequence
 
 Current progress, the active tranche's detailed steps, and the backlog are
 tracked in the current dated task list in `docs/`
-([`task-list-agent-catalog-client-2026-09-24.md`](task-list-agent-catalog-client-2026-09-24.md)).
+([`task-list-agent-catalog-client-2026-09-24.md`](archive/task-list-agent-catalog-client-2026-09-24.md)).
 Completed task lists are moved to `docs/archive/`.
 
 ### Tranche 0: Align the WAL and snapshot contracts
@@ -1230,9 +1273,16 @@ Status: complete (verified 2026-09-24).
 
 ### Tranche 5: Unified runtime flow
 
-1. Introduce injectable mode launchers under tests.
-2. Start one server and one client through the runtime boundary.
-3. Verify registration, discovery, readiness, and shutdown end to end.
+Status: complete (verified 2026-09-25).
+
+1. [x] Introduce injectable mode launchers under tests.
+2. [x] Give both production modes one runtime-owned managed lifecycle.
+3. [x] Start one real server and one real client through the runtime boundary.
+4. [x] Verify registration, discovery, readiness loss and recovery,
+   reconciliation after controller restart, deregistration, and shutdown end to
+   end.
+5. [x] Exercise explicit and conventional configuration-file selection through
+   the maintained one-image Docker deployment contract.
 
 ### Tranche 6: Health propagation
 
@@ -1248,7 +1298,7 @@ Status: complete (verified 2026-09-24).
 3. Replace the leader and verify client recovery.
 4. Restart servers and verify durable recovery.
 
-## 22. Initial acceptance criteria
+## 21. Initial acceptance criteria
 
 The first complete service-discovery slice is accepted when:
 
@@ -1264,7 +1314,7 @@ The first complete service-discovery slice is accepted when:
   server mode without external asset files or an additional process.
 - The full default reactor and tagged container acceptance suite pass.
 
-## 23. Open decisions
+## 22. Open decisions
 
 - Whether warning services are returned by default discovery queries.
 - Whether write forwarding is implemented server-side or seed rotation remains the
@@ -1273,7 +1323,7 @@ The first complete service-discovery slice is accepted when:
 - How long legacy command and snapshot readers remain supported.
 
 Resolved on 2026-09-22: the public registration schema uses the Qraft field names
-shown in section 13.1 and currently accepts no aliases. Unknown fields are
+shown in section 12.1 and currently accepts no aliases. Unknown fields are
 rejected. The legacy `health` input name is the sole temporary compatibility
 exception; it is accepted but ignored because health is server-owned.
 

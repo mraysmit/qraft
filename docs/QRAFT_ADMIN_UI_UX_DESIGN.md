@@ -1,7 +1,7 @@
 # Qraft Administrative UI and UX Design
 
 **Status:** Draft  
-**Last updated:** 2026-09-14
+**Last updated:** 2026-09-25
 
 ## 1. Purpose
 
@@ -41,14 +41,11 @@ not only the features currently implemented. It includes:
 - configuration, metrics, events, and diagnostics;
 - authenticated and auditable administrative mutations.
 
-The platform design identifies service-mesh data-plane proxying as a non-goal
-and records the mesh control-plane (intentions, routing, gateways), peering, and
-federation capabilities as unscheduled (section 3). Each requires an
-architecture decision record and updates to the platform design and Consul plan
-before it is implemented. This UX design reserves the navigation and interaction
-model for those capabilities so they can be added without reorganizing the
-product; until then, their feature flags stay disabled and they produce no
-navigation entries.
+The topology, intentions, routing, gateways, peering, and federation portions of
+this document are forward-looking UX reservations rather than commitments in the
+current platform design or delivery plan. They remain disabled and produce no
+navigation entries until corresponding platform contracts and an approved
+delivery plan exist.
 
 ## 3. Design principles
 

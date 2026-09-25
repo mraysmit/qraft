@@ -144,7 +144,7 @@ health or Raft indexes.
 2. Add a `DeregistrationRequest` mapping for the node-scoped path.
 3. Decide the identity source for tenant, namespace, and node in the interim:
    explicit headers (`X-Qraft-Tenant`, `X-Qraft-Namespace`, `X-Qraft-Node`) behind
-   a `RequestContext` interface, as the platform design section 16 prescribes, so
+   a `RequestContext` interface, as the platform design section 15 prescribes, so
    token authentication can replace it later without touching commands.
 
 **Exit gate.** HTTP tests green; `HttpApiServerTest` still green.
@@ -212,8 +212,8 @@ existing state-machine interface and set the header in the three read handlers.
 
 ## Step 7: Documentation
 
-1. Update the platform design section 5.4 to remove the resolved model gaps and
-   section 13.1 to show the final request and response schemas and headers.
+1. Update the platform design section 4.4 to remove the resolved model gaps and
+   section 12.1 to show the final request and response schemas and headers.
 2. Update the Consul plan checklist: tick "service registration, catalog
    replication, and query behavior" only if it was not already ticked for the
    pre-identity version; otherwise add a line for composite identity.

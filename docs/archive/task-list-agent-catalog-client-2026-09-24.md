@@ -62,7 +62,7 @@ task list for the next backlog item.
 - `shutdown()` and `close()` share one idempotent, bounded completion. Local
   health remains live while deregistration runs and stops after cleanup or the
   deadline; an incomplete cleanup is logged once.
-- `agentId` defaults to `agent-<hostname>`. The design (section 8.3) requires a
+- `agentId` defaults to `agent-<hostname>`. The design (section 7.3) requires a
   stable node ID that is persisted locally when it is generated.
 - The controller's `leader_unavailable` and `outcome_unknown` responses carry the
   leader's **node ID**, not a URL. The client therefore cannot redirect to the
@@ -157,7 +157,7 @@ act on.
 
 1. `register` sends `PUT /v1/agent/service/register` with the `X-Qraft-Node`,
    `X-Qraft-Tenant`, and `X-Qraft-Namespace` headers and exactly the body schema in
-   design section 13.1. It never sends a `health` field.
+   design section 12.1. It never sends a `health` field.
 2. `deregister` sends `PUT /v1/agent/service/deregister/{serviceId}` with the same
    identity headers. A `200` with `"deregistered": false` counts as success.
 3. Every request sends an `X-Request-Id`, and each attempt gets a new one.
@@ -196,7 +196,7 @@ through the third real controller, and prefers it on the next operation. The ful
 default reactor passes with 611 tests.
 
 **Purpose.** Registration succeeds when the first configured server is a follower
-or offline (design section 22 acceptance criterion).
+or offline (design section 21 acceptance criterion).
 
 **Red tests.**
 
@@ -232,7 +232,7 @@ by this process are deregistered on the next pass. The full default reactor pass
 with 620 tests, including 42 agent tests and 15 runtime tests.
 
 **Purpose.** Replace one-shot startup registration with periodic convergence
-(design section 9.2).
+(design section 8.2).
 
 **Red tests (fake `CatalogClient`, injected scheduler trigger and clock).**
 
@@ -272,7 +272,7 @@ the process unready while liveness remains active. The full default reactor
 passes with 624 tests, including 46 agent tests and 15 runtime tests.
 
 **Purpose.** Readiness reflects whether the agent is actually serving its purpose
-(design section 7.2).
+(design section 6.2).
 
 **Red tests.**
 
@@ -302,7 +302,7 @@ force-cancels outstanding HTTP work and emits one incomplete-cleanup warning.
 The full default reactor passes with 627 tests, including 49 agent tests and 15
 runtime tests.
 
-**Purpose.** Implement the order in design section 9.4 with a total deadline.
+**Purpose.** Implement the order in design section 8.4 with a total deadline.
 
 **Red tests.**
 
@@ -353,9 +353,9 @@ recorded explicitly. The final review fixes also reject controller URLs with
 paths, canonicalize equivalent origins, log rejected registrations, and serialize
 shutdown with an in-flight node registration.
 
-1. Platform design section 5.3: describe the catalog client, seeds, and
+1. Platform design section 4.3: describe the catalog client, seeds, and
    reconciliation as current behaviour, and mark Tranches 3 and 4 complete.
-2. Section 17: document the final JSON schema and the prohibition on environment
+2. Section 16: document the final JSON schema and the prohibition on environment
    variables.
 3. Consul plan checklist: retain the completed controller-discovery item and mark
    the later reconciliation/readiness work accurately.
@@ -381,7 +381,7 @@ shutdown with an in-flight node registration.
 - Health checks, TTL renewal, and server-side expiry (Tranche 6). The agent keeps
   reporting node-level heartbeats only.
 - Server-side write forwarding. Seed rotation is the client behaviour for now.
-- Persisting a generated node ID (design section 8.3). It is tracked in the
+- Persisting a generated node ID (design section 7.3). It is tracked in the
   backlog and does not block this work, because `agent.id` is set explicitly in
   every supported configuration file.
 - Moving node registration from `/api/v1/agents/*` to a `/v1/` route.
@@ -399,7 +399,7 @@ In intended order. Each item gets a detailed step list when it becomes active.
 3. **Tranche 7: multi-node container acceptance.** Three servers and one client
    from one image; leader replacement and restart recovery.
 4. **Stable node identity.** Persist a generated node ID locally (design
-   section 8.3).
+   section 7.3).
 5. **Key/value HTTP API** (Consul Phase 2). Reuse the tenant and namespace
    scoping, error envelope, and `X-Qraft-Index`.
 6. **Event contracts and bounded local source** (event architecture Phases 1
@@ -419,7 +419,7 @@ In intended order. Each item gets a detailed step list when it becomes active.
 | Remove the deprecated duplicate `error` key from the error envelope | First release after 2026-12-31 |
 | Stop accepting the ignored `health` field on registration | With the `error` key removal |
 | Move legacy `/api/v1/info` and `/api/v1/agents/*` routes under `/v1/` | With Tranche 6 node-health work |
-| Decide how long legacy JSON WAL entries and pre-identity snapshots stay readable | Open decision, platform design section 23 |
+| Decide how long legacy JSON WAL entries and pre-identity snapshots stay readable | Open decision, platform design section 22 |
 
 ## 5. Open decisions for the active work
 

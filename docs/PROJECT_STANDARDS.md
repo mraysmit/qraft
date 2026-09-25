@@ -36,7 +36,6 @@ Qraft is a Consul-style service discovery and distributed coordination platform.
 ### 2.4 Feature scope
 
 - New features must contribute directly to service discovery, health checking, distributed state, namespaces, cluster membership, Raft consensus, or operational observability.
-- Transfer jobs, workflow engines, integration examples, and Quorus compatibility artifacts are outside the Qraft feature set.
 - Legacy functionality must not be retained merely because it existed in the source project.
 - Before deleting inherited code, confirm that no Consul-style feature or supported public contract depends on it.
 

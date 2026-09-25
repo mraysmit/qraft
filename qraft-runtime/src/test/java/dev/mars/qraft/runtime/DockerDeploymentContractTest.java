@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -64,6 +65,18 @@ class DockerDeploymentContractTest {
             assertTrue(compose.contains(":/etc/qraft/server.json:ro"), relativePath);
             assertFalse(compose.contains("QRAFT_"), relativePath);
         }
+    }
+
+    @Test
+    void unifiedRuntimeComposeCoversExplicitAndConventionalConfigurationSelection() throws IOException {
+        Path root = Path.of("..").toAbsolutePath().normalize();
+        String compose = Files.readString(root.resolve(
+                "docker/compose/docker-compose-single-controller.yml"));
+
+        assertTrue(compose.contains("command: [\"server\", \"--config\", \"/etc/qraft/server.json\"]"));
+        assertTrue(compose.contains("command: [\"client\"]"));
+        assertTrue(compose.contains("../config/client.json:/etc/qraft/client.json:ro"));
+        assertEquals(2, occurrences(compose, "dockerfile: qraft-runtime/Dockerfile"));
     }
 
     @Test
@@ -242,5 +255,15 @@ class DockerDeploymentContractTest {
                 assertFalse(content.contains("COPY --from="), dockerfile.toString());
             }
         }
+    }
+
+    private static int occurrences(String value, String target) {
+        int count = 0;
+        int offset = 0;
+        while ((offset = value.indexOf(target, offset)) >= 0) {
+            count++;
+            offset += target.length();
+        }
+        return count;
     }
 }

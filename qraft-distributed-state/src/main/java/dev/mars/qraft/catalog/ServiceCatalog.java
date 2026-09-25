@@ -3,6 +3,7 @@ package dev.mars.qraft.catalog;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -30,6 +31,11 @@ public final class ServiceCatalog {
     public boolean deregister(ServiceInstanceId identity) {
         Objects.requireNonNull(identity, "identity");
         return instances.remove(identity) != null;
+    }
+
+    public Optional<ServiceInstance> find(ServiceInstanceId identity) {
+        Objects.requireNonNull(identity, "identity");
+        return Optional.ofNullable(instances.get(identity));
     }
 
     public ServiceInstance setHealth(ServiceInstanceId identity, ServiceHealth health) {

@@ -4,8 +4,6 @@
 
 Qraft will evolve into a Consul-like distributed service with Raft-backed state, service discovery, health monitoring, agent lifecycle management, sessions, and distributed locks.
 
-File transfer, workflow execution, transfer jobs, job queues, and transfer-specific orchestration are out of scope.
-
 ## 2. Target Feature Set
 
 - Raft-backed distributed key/value state

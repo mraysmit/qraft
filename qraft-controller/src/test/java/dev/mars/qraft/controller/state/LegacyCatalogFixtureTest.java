@@ -55,6 +55,7 @@ class LegacyCatalogFixtureTest {
         store.restoreSnapshot(fixture("catalog-snapshot.json"));
 
         assertEquals(42, store.getLastAppliedIndex());
+        assertEquals(List.of(), store.healthChecks());
         assertEquals("fixture", store.getMetadata("source"));
         assertEquals(List.of(
                 new ServiceInstance("web-a", "web", "node-a", "10.0.0.10", 8080,

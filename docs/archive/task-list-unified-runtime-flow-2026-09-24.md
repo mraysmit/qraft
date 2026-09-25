@@ -1,14 +1,13 @@
 # Task List: Unified Runtime Flow
 
 **Date:** 2026-09-24
-**Active work:** Step 4, deployment and documentation verification
-**Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), Tranche 5
-**Predecessor:** [`archive/task-list-agent-catalog-client-2026-09-24.md`](archive/task-list-agent-catalog-client-2026-09-24.md)
-**Standards:** [`PROJECT_STANDARDS.md`](PROJECT_STANDARDS.md)
+**Completed:** 2026-09-25
+**Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), Tranche 5
+**Predecessor:** [`task-list-agent-catalog-client-2026-09-24.md`](task-list-agent-catalog-client-2026-09-24.md)
+**Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
-This is the current task list for the project. When the active work is complete,
-add a completion summary, move this file to `archive/`, and start a new dated task
-list for the next backlog item.
+This task list is complete and retained as the implementation record for the
+unified runtime flow.
 
 ## 1. Goal
 
@@ -118,6 +117,16 @@ the unified runtime API.
 
 ## 6. Step 4: Deployment and documentation verification
 
+**Status: Done 2026-09-25.** The maintained single-controller Compose deployment
+now runs both server and client modes from `qraft-runtime/Dockerfile`: server mode
+uses an explicit `--config` path, while client mode selects its mounted
+`/etc/qraft/client.json` through conventional discovery. A deployment-contract
+test protects both forms and `docker compose config --quiet` accepts the updated
+manifest. The platform design describes the runtime-owned lifecycle and marks
+Tranche 5 complete. The final default reactor passed 673 tests, and the complete
+Docker-tagged acceptance suite passed 23 tests, all without failures, errors, or
+skips. The Mockito, environment-configuration, and whitespace scans are clean.
+
 1. Keep both explicit and conventional config-file startup paths covered by the
    Docker deployment contract.
 2. Update the platform design Tranche 5 status and runtime ownership description.
@@ -131,3 +140,17 @@ the unified runtime API.
 - Multi-node container acceptance and leader replacement (Tranche 7).
 - Configuration hot reload.
 - Server-side write forwarding and leader-aware client routing.
+
+## 8. Completion summary
+
+All four steps are complete. The unified runtime now resolves configuration,
+selects a mode, starts the production controller or agent without static `main`
+delegation, and owns one managed lifecycle through shutdown. Runtime acceptance
+proves real registration, discovery, readiness transitions, restart
+reconciliation, deregistration, and resource release. The one-image Compose
+contract covers explicit and conventional file selection and contains no Qraft
+environment-variable configuration.
+
+The next active work is Tranche 6, health propagation and automatic
+deregistration, tracked in
+[`task-list-health-propagation-2026-09-25.md`](../task-list-health-propagation-2026-09-25.md).
