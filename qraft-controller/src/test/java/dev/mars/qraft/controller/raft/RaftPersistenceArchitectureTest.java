@@ -26,6 +26,14 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+/**
+ * Tests that {@link RaftPersistence} accepts WAL mutations only with the ownership capability of an
+ * active {@link RaftTransitionSequencer} transition, which expires on completion.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-15
+ * @version 1.0
+ */
 @RemediationTest(phase = "6-architecture", scenarioPrefix = "RAFT-PERSISTENCE-ARCH")
 class RaftPersistenceArchitectureTest {
     private JavaRuntime runtime;

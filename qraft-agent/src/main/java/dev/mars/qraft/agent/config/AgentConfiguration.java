@@ -1,3 +1,19 @@
+/*
+ * Copyright 2025 Mark Andrew Ray-Smith Cityline Ltd
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package dev.mars.qraft.agent.config;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -5,6 +21,10 @@ import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import dev.mars.qraft.agent.health.HealthCheckDefinition;
+import dev.mars.qraft.agent.health.HttpCheck;
+import dev.mars.qraft.agent.health.TcpCheck;
+import dev.mars.qraft.agent.health.TtlCheck;
 import dev.mars.qraft.catalog.ServiceDefinition;
 
 import java.io.IOException;
@@ -14,6 +34,7 @@ import java.net.URISyntaxException;
 import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -22,7 +43,13 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-/** Immutable, file-backed configuration for a Qraft discovery agent. */
+/**
+ * Immutable, file-backed configuration for a Qraft discovery agent.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-03-15
+ * @version 1.0
+ */
 public final class AgentConfiguration {
     private static final ObjectMapper JSON = JsonMapper.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build();
@@ -43,6 +70,7 @@ public final class AgentConfiguration {
     private final String tenant;
     private final String namespace;
     private final List<ServiceDefinition> services;
+    private final List<HealthCheckDefinition> healthChecks;
     private final String loggingDirectory;
     private final String version;
 
@@ -63,6 +91,7 @@ public final class AgentConfiguration {
         tenant = builder.tenant.trim();
         namespace = builder.namespace.trim();
         services = List.copyOf(builder.services);
+        healthChecks = List.copyOf(builder.healthChecks);
         loggingDirectory = builder.loggingDirectory.trim();
         version = builder.version.trim();
     }
@@ -104,6 +133,8 @@ public final class AgentConfiguration {
                 "registrationRetryMaxMs", "contactFreshnessMs", "services");
         rejectUnknown(logging, "logging", "directory");
         HostIdentity local = localIdentity();
+        List<HealthCheckDefinition> healthChecks = new ArrayList<>();
+        List<ServiceDefinition> services = parseServices(catalog.get("services"), healthChecks);
         return builder()
                 .agentId(requiredText(agent, "id"))
                 .hostname(optionalText(agent, "hostname", local.hostname()))
@@ -121,7 +152,8 @@ public final class AgentConfiguration {
                 .registrationRetryMinMs(optionalLong(catalog, "registrationRetryMinMs", 250))
                 .registrationRetryMaxMs(optionalLong(catalog, "registrationRetryMaxMs", 30_000))
                 .contactFreshnessMs(optionalLong(catalog, "contactFreshnessMs", 90_000))
-                .services(parseServices(catalog.get("services")))
+                .services(services)
+                .healthChecks(healthChecks)
                 .loggingDirectory(optionalText(logging, "directory", "./logs"))
                 .build();
     }
@@ -177,7 +209,7 @@ public final class AgentConfiguration {
         return List.copyOf(unique);
     }
 
-    private static List<ServiceDefinition> parseServices(JsonNode services) {
+    private static List<ServiceDefinition> parseServices(JsonNode services, List<HealthCheckDefinition> checks) {
         if (services == null || services.isNull()) return List.of();
         if (!services.isArray()) throw new IllegalArgumentException("catalog.services must be an array");
         List<ServiceDefinition> definitions = new ArrayList<>();
@@ -185,15 +217,82 @@ public final class AgentConfiguration {
         for (JsonNode service : services) {
             if (!service.isObject()) throw new IllegalArgumentException("Each catalog service must be an object");
             rejectUnknown(service, "catalog.services[]", "id", "name", "address", "port",
-                    "tags", "metadata", "enabled");
+                    "tags", "metadata", "enabled", "checks");
             String id = requiredText(service, "id");
             if (!ids.add(id)) throw new IllegalArgumentException("Duplicate catalog service id: " + id);
-            definitions.add(new ServiceDefinition(id, requiredText(service, "name"),
+            ServiceDefinition definition = new ServiceDefinition(id, requiredText(service, "name"),
                     requiredText(service, "address"), requiredInt(service, "port"),
                     stringList(service.get("tags"), "tags"), stringMap(service.get("metadata")),
-                    optionalBoolean(service, "enabled", true)));
+                    optionalBoolean(service, "enabled", true));
+            definitions.add(definition);
+            checks.addAll(parseChecks(service.get("checks"), definition));
         }
         return List.copyOf(definitions);
+    }
+
+    private static List<HealthCheckDefinition> parseChecks(JsonNode checks, ServiceDefinition service) {
+        if (checks == null || checks.isNull()) return List.of();
+        if (!checks.isArray()) throw new IllegalArgumentException("catalog.services[].checks must be an array");
+        List<HealthCheckDefinition> definitions = new ArrayList<>();
+        Set<String> ids = new LinkedHashSet<>();
+        for (JsonNode check : checks) {
+            if (!check.isObject()) throw new IllegalArgumentException("Each health check must be an object");
+            String id = requiredText(check, "id");
+            if (!ids.add(id)) {
+                throw new IllegalArgumentException("Duplicate health check id " + id + " for service " + service.id());
+            }
+            definitions.add(parseCheck(check, id, service));
+        }
+        return definitions;
+    }
+
+    private static HealthCheckDefinition parseCheck(JsonNode check, String id, ServiceDefinition service) {
+        String location = "catalog.services[].checks[]";
+        String type = requiredText(check, "type");
+        boolean required = optionalBoolean(check, "required", true);
+        return switch (type) {
+            case "http" -> {
+                rejectUnknown(check, location, "id", "type", "required", "url",
+                        "intervalMs", "timeoutMs", "ttlMs");
+                CheckTiming timing = CheckTiming.parse(check);
+                yield new HttpCheck(service.id(), id, checkUrl(requiredText(check, "url")),
+                        timing.interval(), timing.timeout(), timing.ttl(), required);
+            }
+            case "tcp" -> {
+                rejectUnknown(check, location, "id", "type", "required", "address", "port",
+                        "intervalMs", "timeoutMs", "ttlMs");
+                CheckTiming timing = CheckTiming.parse(check);
+                yield new TcpCheck(service.id(), id, optionalText(check, "address", service.address()),
+                        optionalInt(check, "port", service.port()),
+                        timing.interval(), timing.timeout(), timing.ttl(), required);
+            }
+            case "ttl" -> {
+                rejectUnknown(check, location, "id", "type", "required", "ttlMs");
+                if (!check.has("ttlMs")) throw new IllegalArgumentException("ttlMs is required for a ttl check");
+                yield new TtlCheck(service.id(), id, Duration.ofMillis(optionalLong(check, "ttlMs", 0)), required);
+            }
+            default -> throw new IllegalArgumentException("Unsupported health check type: " + type);
+        };
+    }
+
+    private static URI checkUrl(String value) {
+        try {
+            return new URI(value);
+        } catch (URISyntaxException error) {
+            throw new IllegalArgumentException("Malformed health check url: " + value, error);
+        }
+    }
+
+    /** Probe timing: interval defaults to 10s, timeout to min(2s, interval), and ttl to three intervals. */
+    private record CheckTiming(Duration interval, Duration timeout, Duration ttl) {
+        static CheckTiming parse(JsonNode check) {
+            long interval = optionalLong(check, "intervalMs", 10_000);
+            if (interval < 1) throw new IllegalArgumentException("intervalMs must be positive");
+            if (interval > Long.MAX_VALUE / 3) throw new IllegalArgumentException("intervalMs is too large");
+            long timeout = optionalLong(check, "timeoutMs", Math.min(2_000, interval));
+            long ttl = optionalLong(check, "ttlMs", interval * 3);
+            return new CheckTiming(Duration.ofMillis(interval), Duration.ofMillis(timeout), Duration.ofMillis(ttl));
+        }
     }
 
     private static List<String> stringList(JsonNode node, String field) {
@@ -316,6 +415,7 @@ public final class AgentConfiguration {
     public String getTenant() { return tenant; }
     public String getNamespace() { return namespace; }
     public List<ServiceDefinition> getServices() { return services; }
+    public List<HealthCheckDefinition> getHealthChecks() { return healthChecks; }
     public String getLoggingDirectory() { return loggingDirectory; }
     public String getVersion() { return version; }
 
@@ -336,6 +436,7 @@ public final class AgentConfiguration {
         private String tenant = "default";
         private String namespace = "default";
         private List<ServiceDefinition> services = List.of();
+        private List<HealthCheckDefinition> healthChecks = List.of();
         private String loggingDirectory = "./logs";
         private String version = "1.0.0";
 
@@ -359,6 +460,7 @@ public final class AgentConfiguration {
         public Builder tenant(String value) { tenant = value; return this; }
         public Builder namespace(String value) { namespace = value; return this; }
         public Builder services(List<ServiceDefinition> value) { services = List.copyOf(value); return this; }
+        public Builder healthChecks(List<HealthCheckDefinition> value) { healthChecks = List.copyOf(value); return this; }
         public Builder loggingDirectory(String value) { loggingDirectory = value; return this; }
         public Builder version(String value) { version = value; return this; }
 
@@ -389,6 +491,17 @@ public final class AgentConfiguration {
             Set<String> ids = new LinkedHashSet<>();
             for (ServiceDefinition service : services) {
                 if (!ids.add(service.id())) throw new IllegalArgumentException("Duplicate catalog service id: " + service.id());
+            }
+            Set<String> checkIds = new LinkedHashSet<>();
+            for (HealthCheckDefinition check : healthChecks) {
+                if (!ids.contains(check.serviceId())) {
+                    throw new IllegalArgumentException("Health check " + check.checkId()
+                            + " refers to unknown catalog service " + check.serviceId());
+                }
+                if (!checkIds.add(check.serviceId() + "/" + check.checkId())) {
+                    throw new IllegalArgumentException("Duplicate health check id " + check.checkId()
+                            + " for service " + check.serviceId());
+                }
             }
             return new AgentConfiguration(this);
         }

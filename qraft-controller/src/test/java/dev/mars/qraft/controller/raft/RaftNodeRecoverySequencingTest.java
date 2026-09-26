@@ -45,6 +45,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Tests that {@link RaftNode} startup recovery from a full log or snapshot plus suffix mutates node
+ * state only on the state loop after each storage completion.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-14
+ * @version 1.0
+ */
 @RemediationTest(phase = "6-recovery", scenarioPrefix = "RAFT-RECOVERY")
 class RaftNodeRecoverySequencingTest {
     private final ProtobufRaftCommandCodec codec = new ProtobufRaftCommandCodec();

@@ -54,6 +54,10 @@ import java.lang.annotation.Target;
  * </pre>
  *
  * @see ExpectsErrorExtension
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-03-15
+ * @version 1.0
  */
 @Target(ElementType.METHOD)
 @Retention(RetentionPolicy.RUNTIME)

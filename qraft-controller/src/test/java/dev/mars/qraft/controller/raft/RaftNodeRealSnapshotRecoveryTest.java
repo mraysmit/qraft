@@ -51,6 +51,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Crash-recovery tests for {@link RaftNode} at each snapshot publication and compaction checkpoint,
+ * using a separate-JVM crash writer with real {@link FileRaftStorage} and {@link
+ * FileSnapshotStore}.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-14
+ * @version 1.0
+ */
 @RemediationTest(phase = "6-real-snapshot", scenarioPrefix = "RAFT-SNAPSHOT-RECOVERY")
 class RaftNodeRealSnapshotRecoveryTest {
     private static final ProtobufRaftCommandCodec CODEC = new ProtobufRaftCommandCodec();

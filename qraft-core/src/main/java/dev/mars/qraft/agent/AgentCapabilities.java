@@ -11,7 +11,13 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-/** Capabilities advertised by an agent during registration and discovery. */
+/**
+ * Capabilities advertised by an agent during registration and discovery.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-03-15
+ * @version 1.0
+ */
 public class AgentCapabilities {
     @JsonProperty("supportedServices")
     private Set<String> supportedServices = new HashSet<>();

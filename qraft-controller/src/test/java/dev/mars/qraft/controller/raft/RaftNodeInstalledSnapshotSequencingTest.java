@@ -54,6 +54,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Tests that {@link RaftNode} sequences follower snapshot installation: publication, restore,
+ * suffix retention or removal, stale and duplicate transfers, and fencing on uncertain failures.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-14
+ * @version 1.0
+ */
 @RemediationTest(phase = "5", scenarioPrefix = "RAFT-INSTALLED-SNAPSHOT")
 class RaftNodeInstalledSnapshotSequencingTest {
     private JavaRuntime runtime;

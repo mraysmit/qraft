@@ -18,7 +18,13 @@ import java.nio.file.Path;
 import java.util.Base64;
 import java.util.List;
 
-/** Child-process fixture that halts at an observable real-WAL call boundary. */
+/**
+ * Child-process fixture that halts at an observable real-WAL call boundary.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-14
+ * @version 1.0
+ */
 public final class RealStorageCrashWriter {
     static final int HALT_EXIT_CODE = 91;
 

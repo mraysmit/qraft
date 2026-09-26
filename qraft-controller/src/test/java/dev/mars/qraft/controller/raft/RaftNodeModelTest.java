@@ -45,6 +45,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Seeded model tests comparing generated follower histories on {@link RaftNode} against an
+ * independent reference model, including fencing after an ambiguous sync failure.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-17
+ * @version 1.0
+ */
 @RemediationTest(phase = "7-node-model", scenarioPrefix = "RAFT-NODE-MODEL")
 class RaftNodeModelTest {
     private static final long[] REGRESSION_SEEDS = {

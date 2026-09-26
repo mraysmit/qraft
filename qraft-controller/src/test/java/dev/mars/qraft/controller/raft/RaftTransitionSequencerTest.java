@@ -41,6 +41,14 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Tests for {@link RaftTransitionSequencer} serialization, failure fencing, bounded and reserved
+ * admission, draining, and the persistence ownership guard.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-13
+ * @version 1.0
+ */
 @RemediationTest(phase = "1", scenarioPrefix = "RAFT-SEQUENCER")
 class RaftTransitionSequencerTest {
     private JavaRuntime runtime;

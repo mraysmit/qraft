@@ -47,6 +47,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Crash-recovery tests for {@link RaftNode} after WAL truncate, append and sync checkpoints on real
+ * {@link FileRaftStorage}, plus higher-term appends and WAL release on stop.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-14
+ * @version 1.0
+ */
 @RemediationTest(phase = "6-real-storage", scenarioPrefix = "RAFT-REAL-RECOVERY")
 class RaftNodeRealStorageRecoveryTest {
     private static final ProtobufRaftCommandCodec CODEC = new ProtobufRaftCommandCodec();

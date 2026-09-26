@@ -56,6 +56,14 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Tests for {@link RaftNode} stop: draining accepted WAL and snapshot work, close ordering, stop
+ * during recovery or before start, start rollback, and combined close failures.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-14
+ * @version 1.0
+ */
 @RemediationTest(phase = "6-shutdown", scenarioPrefix = "RAFT-SHUTDOWN")
 class RaftNodeShutdownSequencingTest {
     private JavaRuntime runtime;

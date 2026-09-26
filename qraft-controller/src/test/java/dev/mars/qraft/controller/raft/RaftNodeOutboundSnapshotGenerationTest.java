@@ -53,6 +53,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Tests that leader-side snapshot transfers in {@link RaftNode} ignore stale leadership
+ * generations, wait for snapshot loads at shutdown, and restart or abandon transfers correctly.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-14
+ * @version 1.0
+ */
 @RemediationTest(phase = "5", scenarioPrefix = "RAFT-OUTBOUND-SNAPSHOT")
 class RaftNodeOutboundSnapshotGenerationTest {
     private JavaRuntime runtime;

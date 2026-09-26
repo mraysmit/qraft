@@ -30,6 +30,10 @@ import java.lang.reflect.Method;
  * distinguishable from real failures in test output.
  *
  * @see ExpectsError
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-03-15
+ * @version 1.0
  */
 public class ExpectsErrorExtension implements BeforeEachCallback, AfterEachCallback {
 

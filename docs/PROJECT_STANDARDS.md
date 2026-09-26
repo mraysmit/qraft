@@ -201,11 +201,53 @@ Timestamps, UUIDs, temporary paths, random ports, and election timing are nondet
 - Close all `AutoCloseable` resources deterministically.
 - Logging must describe observable state and operational impact rather than implementation noise.
 
+### 10.1 Source file headers
+
+Every Java source file, including tests, test fakes, and fixtures, must begin with the Apache 2.0
+license header, followed by the package declaration:
+
+```java
+/*
+ * Copyright 2025 Mark Andrew Ray-Smith Cityline Ltd
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+```
+
+The copyright line matches `NOTICE` and does not change with the file's creation year.
+
+The top-level type must have a Javadoc comment that states its purpose and carries attribution:
+
+```java
+/**
+ * Runs one probe check at a fixed delay without overlapping itself.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-26
+ * @version 1.0
+ */
+```
+
+`@since` is the date the file was created. `@version` starts at `1.0` and is raised only for a
+deliberate incompatible revision of the type. A test class's Javadoc states the behavior it
+verifies.
+
 ## 11. Change completion
 
 A change is complete when:
 
 - Required behavioral tests have been added or updated.
+- Every new Java file has the license header and attributed type Javadoc described in section 10.1.
 - Relevant tests pass without hanging.
 - Logs contain no unexpected errors or invalid terminal characters.
 - Required runtime dependencies are present.

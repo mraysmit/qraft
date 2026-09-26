@@ -23,7 +23,13 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
-/** Identifies an adversarial regression suite belonging to a remediation phase. */
+/**
+ * Identifies an adversarial regression suite belonging to a remediation phase.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-03-15
+ * @version 1.0
+ */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 @ExtendWith(RemediationTestExtension.class)

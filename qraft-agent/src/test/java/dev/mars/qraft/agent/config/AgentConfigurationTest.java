@@ -1,15 +1,44 @@
+/*
+ * Copyright 2025 Mark Andrew Ray-Smith Cityline Ltd
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package dev.mars.qraft.agent.config;
 
+import dev.mars.qraft.agent.health.HttpCheck;
+import dev.mars.qraft.agent.health.TcpCheck;
+import dev.mars.qraft.agent.health.TtlCheck;
 import dev.mars.qraft.catalog.ServiceDefinition;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+/**
+ * Tests {@link AgentConfiguration} building, JSON parsing, defaults, controller seed normalization,
+ * and validation of services and health checks.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-09
+ * @version 1.0
+ */
 class AgentConfigurationTest {
     @Test
     void buildsDiscoveryConfiguration() {
@@ -186,6 +215,107 @@ class AgentConfigurationTest {
         assertThrows(UnsupportedOperationException.class,
                 () -> config.getServices().add(null));
         assertFalse(config.getControllerUrls().isEmpty());
+    }
+
+    @Test
+    void parsesHealthChecksNestedUnderServiceDefinitions() {
+        AgentConfiguration config = AgentConfiguration.fromJson(minimalJson("[\"http://localhost:8080\"]", """
+                "services": [
+                  {"id":"web","name":"web","address":"10.0.0.4","port":9000,"checks":[
+                    {"id":"http","type":"http","url":"http://127.0.0.1:9000/health",
+                     "intervalMs":10000,"timeoutMs":2000,"ttlMs":30000},
+                    {"id":"tcp","type":"tcp","intervalMs":5000,"required":false},
+                    {"id":"app","type":"ttl","ttlMs":15000}
+                  ]},
+                  {"id":"db","name":"db","address":"10.0.0.5","port":5432,"checks":[
+                    {"id":"tcp","type":"tcp","address":"db.local","port":6432,"intervalMs":1000}
+                  ]},
+                  {"id":"cache","name":"cache","address":"10.0.0.6","port":6379}
+                ]
+                """));
+
+        assertEquals(List.of(
+                new HttpCheck("web", "http", URI.create("http://127.0.0.1:9000/health"),
+                        Duration.ofSeconds(10), Duration.ofSeconds(2), Duration.ofSeconds(30), true),
+                new TcpCheck("web", "tcp", "10.0.0.4", 9000, Duration.ofSeconds(5),
+                        Duration.ofSeconds(2), Duration.ofSeconds(15), false),
+                new TtlCheck("web", "app", Duration.ofSeconds(15), true),
+                new TcpCheck("db", "tcp", "db.local", 6432, Duration.ofSeconds(1),
+                        Duration.ofSeconds(1), Duration.ofSeconds(3), true)),
+                config.getHealthChecks());
+        assertEquals(3, config.getServices().size());
+        assertThrows(UnsupportedOperationException.class, () -> config.getHealthChecks().add(null));
+    }
+
+    @Test
+    void appliesDefaultCheckTimingWhenOnlyTheTypeIsGiven() {
+        AgentConfiguration config = AgentConfiguration.fromJson(minimalJson("[\"http://localhost:8080\"]", """
+                "services": [{"id":"web","name":"web","address":"localhost","port":8080,"checks":[
+                  {"id":"tcp","type":"tcp"},
+                  {"id":"http","type":"http","url":"https://localhost:8443/ready"}
+                ]}]
+                """));
+
+        assertEquals(List.of(
+                new TcpCheck("web", "tcp", "localhost", 8080, Duration.ofSeconds(10),
+                        Duration.ofSeconds(2), Duration.ofSeconds(30), true),
+                new HttpCheck("web", "http", URI.create("https://localhost:8443/ready"),
+                        Duration.ofSeconds(10), Duration.ofSeconds(2), Duration.ofSeconds(30), true)),
+                config.getHealthChecks());
+    }
+
+    @Test
+    void rejectsInvalidHealthCheckDefinitions() {
+        List<String> invalidChecks = List.of(
+                "{}",
+                "[\"tcp\"]",
+                "[{\"type\":\"tcp\"}]",
+                "[{\"id\":\" \",\"type\":\"tcp\"}]",
+                "[{\"id\":\"c\"}]",
+                "[{\"id\":\"c\",\"type\":\"script\"}]",
+                "[{\"id\":\"c\",\"type\":\"tcp\"},{\"id\":\"c\",\"type\":\"ttl\",\"ttlMs\":1000}]",
+                "[{\"id\":\"c\",\"type\":\"tcp\",\"url\":\"http://localhost\"}]",
+                "[{\"id\":\"c\",\"type\":\"tcp\",\"port\":0}]",
+                "[{\"id\":\"c\",\"type\":\"tcp\",\"address\":\"\"}]",
+                "[{\"id\":\"c\",\"type\":\"http\"}]",
+                "[{\"id\":\"c\",\"type\":\"http\",\"url\":\"ftp://localhost/health\"}]",
+                "[{\"id\":\"c\",\"type\":\"http\",\"url\":\"http:///health\"}]",
+                "[{\"id\":\"c\",\"type\":\"http\",\"url\":\"http://user@localhost/health\"}]",
+                "[{\"id\":\"c\",\"type\":\"http\",\"url\":\"http://localhost/health\",\"address\":\"x\"}]",
+                "[{\"id\":\"c\",\"type\":\"ttl\"}]",
+                "[{\"id\":\"c\",\"type\":\"ttl\",\"ttlMs\":1000,\"intervalMs\":500}]",
+                "[{\"id\":\"c\",\"type\":\"ttl\",\"ttlMs\":0}]",
+                "[{\"id\":\"c\",\"type\":\"tcp\",\"intervalMs\":0}]",
+                "[{\"id\":\"c\",\"type\":\"tcp\",\"intervalMs\":1000,\"timeoutMs\":0}]",
+                "[{\"id\":\"c\",\"type\":\"tcp\",\"intervalMs\":1000,\"timeoutMs\":1001}]",
+                "[{\"id\":\"c\",\"type\":\"tcp\",\"intervalMs\":1000,\"ttlMs\":1000}]",
+                "[{\"id\":\"c\",\"type\":\"tcp\",\"intervalMs\":\"1000\"}]",
+                "[{\"id\":\"c\",\"type\":\"tcp\",\"required\":\"yes\"}]");
+
+        for (String checks : invalidChecks) {
+            String services = """
+                    "services":[{"id":"web","name":"web","address":"localhost","port":8080,"checks":%s}]
+                    """.formatted(checks);
+            assertThrows(IllegalArgumentException.class,
+                    () -> AgentConfiguration.fromJson(minimalJson("[\"http://localhost:8080\"]", services)),
+                    checks);
+        }
+    }
+
+    @Test
+    void builderRejectsChecksForUnknownServicesAndDuplicateCheckIdentities() {
+        ServiceDefinition web = new ServiceDefinition("web", "web", "localhost", 8080, List.of(), Map.of(), true);
+        TtlCheck check = new TtlCheck("web", "app", Duration.ofSeconds(10), true);
+
+        assertEquals(List.of(check), AgentConfiguration.builder().agentId("agent")
+                .controllerUrl("http://localhost").services(List.of(web))
+                .healthChecks(List.of(check)).build().getHealthChecks());
+        assertThrows(IllegalArgumentException.class, () -> AgentConfiguration.builder().agentId("agent")
+                .controllerUrl("http://localhost").services(List.of(web))
+                .healthChecks(List.of(new TtlCheck("missing", "app", Duration.ofSeconds(10), true))).build());
+        assertThrows(IllegalArgumentException.class, () -> AgentConfiguration.builder().agentId("agent")
+                .controllerUrl("http://localhost").services(List.of(web))
+                .healthChecks(List.of(check, new TtlCheck("web", "app", Duration.ofSeconds(20), true))).build());
     }
 
     private static String minimalJson(String urls, String catalogFields) {

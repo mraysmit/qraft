@@ -37,6 +37,10 @@ import java.util.function.Supplier;
  * supplier starts on the node's state loop, and its result is always applied on
  * that same loop before the next supplier starts. Storage futures may complete
  * on any thread without moving the application step off the state loop.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-13
+ * @version 1.0
  */
 final class RaftTransitionSequencer {
     /** Opaque capability proving ownership of one currently active transition. */

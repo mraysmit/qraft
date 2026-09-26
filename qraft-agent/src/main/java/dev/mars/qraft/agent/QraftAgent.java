@@ -1,3 +1,19 @@
+/*
+ * Copyright 2025 Mark Andrew Ray-Smith Cityline Ltd
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package dev.mars.qraft.agent;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -6,6 +22,14 @@ import dev.mars.qraft.agent.catalog.ControllerRetryPolicy;
 import dev.mars.qraft.agent.catalog.HttpCatalogClient;
 import dev.mars.qraft.agent.catalog.ServiceReconciler;
 import dev.mars.qraft.agent.config.AgentConfiguration;
+import dev.mars.qraft.agent.health.ExecutorCheckScheduler;
+import dev.mars.qraft.agent.health.HealthCheckDefinition;
+import dev.mars.qraft.agent.health.HealthPublisher;
+import dev.mars.qraft.agent.health.LocalHealthChecks;
+import dev.mars.qraft.agent.health.LocalStatusReporter;
+import dev.mars.qraft.agent.health.RequiredCheckReadiness;
+import dev.mars.qraft.agent.health.SocketTcpConnector;
+import dev.mars.qraft.catalog.ServiceDefinition;
 import dev.mars.qraft.agent.service.AgentRegistrationClient;
 import dev.mars.qraft.agent.service.HealthService;
 import dev.mars.qraft.agent.service.HeartbeatService;
@@ -18,6 +42,9 @@ import java.net.http.HttpClient;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -29,8 +56,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
-/** Pure Java discovery agent lifecycle. */
+/**
+ * Pure Java discovery agent lifecycle.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-03-15
+ * @version 1.0
+ */
 public final class QraftAgent implements AutoCloseable {
     private static final Logger LOGGER = LoggerFactory.getLogger(QraftAgent.class);
 
@@ -43,6 +77,10 @@ public final class QraftAgent implements AutoCloseable {
     private final ServiceReconciler serviceReconciler;
     private final ReadinessPolicy readinessPolicy;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    private final ScheduledExecutorService checkScheduler = Executors.newSingleThreadScheduledExecutor();
+    private final HttpClient checkHttpClient = HttpClient.newHttpClient();
+    private final LocalHealthChecks localChecks;
+    private final HealthPublisher healthPublisher;
     private final AtomicBoolean running = new AtomicBoolean();
     private final AtomicBoolean heartbeatScheduled = new AtomicBoolean();
     private final AtomicBoolean reconciliationScheduled = new AtomicBoolean();
@@ -72,8 +110,17 @@ public final class QraftAgent implements AutoCloseable {
         this.registrationClient = new AgentRegistrationClient(controllerClient);
         this.heartbeatService = new HeartbeatService(config, registrationClient);
         this.serviceReconciler = new ServiceReconciler(controllerClient, config::getServices, clock);
+        List<HealthCheckDefinition> checks = enabledServiceChecks(config);
+        RequiredCheckReadiness checkReadiness = new RequiredCheckReadiness(checks);
+        ExecutorCheckScheduler checkTimer = new ExecutorCheckScheduler(checkScheduler);
+        this.healthPublisher = new HealthPublisher(controllerClient, checkTimer, clock, retryPolicy::delayMillis);
+        this.localChecks = new LocalHealthChecks(checks, checkHttpClient, new SocketTcpConnector(), checkTimer,
+                clock, (check, result) -> {
+                    checkReadiness.onResult(check, result);
+                    healthPublisher.onResult(check, result);
+                });
         this.readinessPolicy = new ReadinessPolicy(running::get, registrationClient::isRegistered,
-                serviceReconciler::isConverged, contactTracker,
+                serviceReconciler::isConverged, checkReadiness::isSatisfied, contactTracker,
                 Duration.ofMillis(config.getContactFreshnessMs()), clock);
         this.healthService = new HealthService(config, readinessPolicy::isReady);
     }
@@ -114,10 +161,18 @@ public final class QraftAgent implements AutoCloseable {
         }
     }
 
+    /** Checks of disabled services are never run: their services are not registered. */
+    private static List<HealthCheckDefinition> enabledServiceChecks(AgentConfiguration config) {
+        Set<String> enabled = config.getServices().stream().filter(ServiceDefinition::enabled)
+                .map(ServiceDefinition::id).collect(Collectors.toUnmodifiableSet());
+        return config.getHealthChecks().stream().filter(check -> enabled.contains(check.serviceId())).toList();
+    }
+
     private void activateHeartbeat(AgentInfo agent) {
         if (!running.get()) return;
         registrationRetryNumber.set(0);
         serviceReconciler.trigger();
+        localChecks.start();
         if (reconciliationScheduled.compareAndSet(false, true)) {
             scheduler.scheduleAtFixedRate(() -> {
                         if (running.get()) serviceReconciler.trigger();
@@ -142,9 +197,12 @@ public final class QraftAgent implements AutoCloseable {
         if (shutdownFuture != null) return shutdownFuture;
 
         running.set(false);
-        CompletableFuture<ServiceReconciler.ShutdownResult> serviceShutdown =
-                serviceReconciler.beginShutdown();
+        // Checks and publications stop, and in-flight publications finish, before deregistration begins.
+        localChecks.stop();
+        CompletableFuture<Void> publicationsStopped = healthPublisher.stop();
         stopScheduledWork();
+        CompletableFuture<ServiceReconciler.ShutdownResult> serviceShutdown =
+                publicationsStopped.thenCompose(ignored -> serviceReconciler.beginShutdown());
 
         CompletableFuture<Boolean> graceful = serviceShutdown.thenCompose(services -> {
             CompletableFuture<Boolean> nodeShutdown =
@@ -176,15 +234,23 @@ public final class QraftAgent implements AutoCloseable {
     }
 
     private void finishShutdown() {
+        checkScheduler.shutdownNow();
+        checkHttpClient.shutdownNow();
         healthService.shutdown();
         controllerClient.closeNow();
     }
 
     public boolean isRunning() { return running.get(); }
     public HealthService healthService() { return healthService; }
+
+    /** Returns the process-local status input for a configured TTL check, or empty for any other check. */
+    public Optional<LocalStatusReporter> statusReporter(String serviceId, String checkId) {
+        return localChecks.reporter(serviceId, checkId);
+    }
     ServiceReconciler serviceReconciler() { return serviceReconciler; }
     boolean resourcesTerminated() {
-        return scheduler.isTerminated() && controllerClient.isClosed() && !healthService.isHealthy();
+        return scheduler.isTerminated() && checkScheduler.isTerminated() && controllerClient.isClosed()
+                && !healthService.isHealthy();
     }
     @Override public void close() { shutdown().join(); }
 

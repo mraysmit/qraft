@@ -30,6 +30,10 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Generic gRPC server host for external API services.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-03-15
+ * @version 1.0
  */
 public class GrpcServiceServer {
 

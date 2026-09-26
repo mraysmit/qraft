@@ -51,6 +51,14 @@ import java.util.function.Consumer;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Tests that election, heartbeat and snapshot timers in {@link RaftNode} run through the transition
+ * sequencer and cannot act on stale state or while a WAL transition is blocked.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-14
+ * @version 1.0
+ */
 @RemediationTest(phase = "5", scenarioPrefix = "RAFT-TIMER")
 class RaftNodeTimerSequencingTest {
     private JavaRuntime runtime;

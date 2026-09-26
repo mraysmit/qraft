@@ -1,9 +1,28 @@
+/*
+ * Copyright 2025 Mark Andrew Ray-Smith Cityline Ltd
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package dev.mars.qraft.agent.catalog;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import dev.mars.qraft.agent.health.CheckObservation;
+import dev.mars.qraft.agent.health.CheckStatus;
+import dev.mars.qraft.agent.health.ObservationOutcome;
 import dev.mars.qraft.catalog.ServiceDefinition;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -20,6 +39,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -29,13 +49,23 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Tests {@link HttpCatalogClient} request format, outcome classification, seed rotation, lookup,
+ * timeouts, and close behaviour against a local HTTP server.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-24
+ * @version 1.0
+ */
 class HttpCatalogClientTest {
     private static final ObjectMapper JSON = new ObjectMapper();
     private final List<HttpServer> servers = new ArrayList<>();
@@ -268,6 +298,100 @@ class HttpCatalogClientTest {
         assertInstanceOf(CatalogLookupOutcome.Present.class,
                 client.lookup(service()).get(2, TimeUnit.SECONDS));
         assertEquals(1, attempts.get());
+    }
+
+    @Test
+    void observeSendsTheObservationSchemaWithScopedIdentity() throws Exception {
+        List<CapturedRequest> requests = new java.util.concurrent.CopyOnWriteArrayList<>();
+        URI endpoint = start(exchange -> {
+            requests.add(capture(exchange));
+            respond(exchange, 200, "{\"serviceId\":\"payments-1\",\"checkId\":\"http\",\"nodeId\":\"node-a\","
+                    + "\"tenantId\":\"tenant-a\",\"namespace\":\"prod\",\"sequenceNumber\":7,"
+                    + "\"status\":\"WARNING\",\"deadline\":\"2026-09-26T10:00:30Z\",\"accepted\":true}");
+        });
+        HttpCatalogClient client = selectedClient(List.of(endpoint));
+
+        ObservationOutcome outcome = client.observe(observation(7)).get(2, TimeUnit.SECONDS);
+
+        assertEquals(new ObservationOutcome.Accepted(7, Instant.parse("2026-09-26T10:00:30Z")), outcome);
+        CapturedRequest request = requests.getFirst();
+        assertEquals("PUT", request.method());
+        assertEquals("/v1/agent/check/observe", request.path());
+        assertEquals("node-a", request.header("X-Qraft-Node"));
+        assertEquals("tenant-a", request.header("X-Qraft-Tenant"));
+        assertEquals("prod", request.header("X-Qraft-Namespace"));
+        assertEquals("application/json", request.header("Content-Type"));
+        assertEquals(JSON.readTree("""
+                {"serviceId":"payments-1","checkId":"http","status":"warning","sequenceNumber":7,
+                 "observedAt":"2026-09-26T09:59:59.500Z","ttlMillis":30000,"required":false,
+                 "output":"HTTP 429"}
+                """), JSON.readTree(request.body()));
+    }
+
+    @Test
+    void classifiesStaleMissingRejectedRetryableAndMalformedObservationResponses() throws Exception {
+        AtomicReference<String[]> reply = new AtomicReference<>();
+        URI endpoint = start(exchange -> respond(exchange, Integer.parseInt(reply.get()[0]), reply.get()[1]));
+        HttpCatalogClient client = selectedClient(List.of(endpoint));
+
+        reply.set(new String[] {"409", "{\"code\":\"stale_observation\",\"message\":\"older\","
+                + "\"retryable\":false,\"currentSequenceNumber\":9}"});
+        assertEquals(new ObservationOutcome.Stale(9), client.observe(observation(7)).get(2, TimeUnit.SECONDS));
+
+        reply.set(new String[] {"404", "{\"code\":\"service_not_found\",\"message\":\"missing\","
+                + "\"retryable\":false}"});
+        assertEquals(new ObservationOutcome.Rejected("service_not_found", "missing", null),
+                client.observe(observation(7)).get(2, TimeUnit.SECONDS));
+
+        reply.set(new String[] {"503", "{\"code\":\"leader_unavailable\",\"message\":\"no leader\","
+                + "\"retryable\":true,\"leaderId\":\"node-2\"}"});
+        assertEquals(new ObservationOutcome.Retryable("leader_unavailable", "no leader", "node-2"),
+                client.observe(observation(7)).get(2, TimeUnit.SECONDS));
+
+        reply.set(new String[] {"409", "{\"code\":\"stale_observation\",\"message\":\"older\","
+                + "\"retryable\":false}"});
+        assertInstanceOf(ObservationOutcome.Rejected.class, client.observe(observation(7)).get(2, TimeUnit.SECONDS));
+
+        reply.set(new String[] {"200", "{\"accepted\":true}"});
+        ObservationOutcome malformed = client.observe(observation(7)).get(2, TimeUnit.SECONDS);
+        assertEquals("invalid_response", ((ObservationOutcome.Retryable) malformed).code());
+    }
+
+    @Test
+    void observeRotatesRetryableSeedsAndAStaleAnswerEndsTheCycle() throws Exception {
+        URI refused;
+        try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
+            refused = URI.create("http://127.0.0.1:" + socket.getLocalPort());
+        }
+        AtomicInteger staleAttempts = new AtomicInteger();
+        URI stale = start(exchange -> {
+            staleAttempts.incrementAndGet();
+            respond(exchange, 409, "{\"code\":\"stale_observation\",\"message\":\"older\","
+                    + "\"retryable\":false,\"currentSequenceNumber\":12}");
+        });
+        AtomicInteger laterAttempts = new AtomicInteger();
+        URI later = start(exchange -> {
+            laterAttempts.incrementAndGet();
+            respond(exchange, 500, "{}");
+        });
+        ControllerContactTracker contact = new ControllerContactTracker(java.time.Clock.systemUTC());
+        HttpCatalogClient client = new HttpCatalogClient(HttpClient.newHttpClient(), JSON,
+                List.of(refused, stale, later), "node-a", "tenant-a", "prod", "dc-1", "eu-west",
+                Duration.ofSeconds(1), contact);
+        clients.add(client);
+
+        assertEquals(new ObservationOutcome.Stale(12), client.observe(observation(7)).get(2, TimeUnit.SECONDS));
+        assertEquals(1, staleAttempts.get());
+        assertEquals(0, laterAttempts.get());
+        assertNotNull(contact.lastSuccessfulContact(), "a stale answer is still a successful controller contact");
+
+        client.observe(observation(13)).get(2, TimeUnit.SECONDS);
+        assertEquals(2, staleAttempts.get(), "the endpoint that answered is preferred next time");
+    }
+
+    private static CheckObservation observation(long sequenceNumber) {
+        return new CheckObservation("payments-1", "http", CheckStatus.WARNING, sequenceNumber,
+                Instant.parse("2026-09-26T09:59:59.500Z"), Duration.ofSeconds(30), false, "HTTP 429");
     }
 
     private HttpCatalogClient client(Duration timeout) {

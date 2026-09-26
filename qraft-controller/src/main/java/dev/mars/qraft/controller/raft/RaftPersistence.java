@@ -25,6 +25,10 @@ import java.util.concurrent.CompletableFuture;
  * <p>Reads and lifecycle operations are available directly. Every mutation
  * requires the opaque ownership capability of the exact transition that
  * initiated it, including mutations started by asynchronous continuations.</p>
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-17
+ * @version 1.0
  */
 final class RaftPersistence {
     private final Optional<RaftStorage> wal;

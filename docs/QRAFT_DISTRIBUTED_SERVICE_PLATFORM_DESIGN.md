@@ -36,9 +36,9 @@ coverage configuration, and build-wide engineering rules.
 | Module | Current purpose | Target responsibility |
 |---|---|---|
 | `qraft-raft-engine` | Defines reusable Raft command, state-machine, and engine contracts. | Own all implementation-neutral consensus contracts and reusable Raft primitives. It must not depend on service discovery, tenancy, HTTP, or a runtime mode. |
-| `qraft-distributed-state` | Defines replicated key/value commands and codecs and currently contains the service-catalog model. | Own deterministic replicated-state commands and projections, including key/value behavior and catalog state. It must contain no network server, process lifecycle, or client-agent behavior. |
+| `qraft-distributed-state` | Defines replicated key/value commands and codecs and currently contains the service-catalog model, including composite health-check identity, ordered observations, and replicated check state. | Own deterministic replicated-state commands and projections, including key/value behavior and catalog state. It must contain no network server, process lifecycle, or client-agent behavior. |
 | `qraft-core` | Contains shared Java 27 discovery, health, node, and agent domain types, together with some inherited domain code awaiting removal. | Own small, transport-neutral value types shared between server and client. Service definitions and common identity types belong here; Raft implementation and HTTP DTOs do not. |
-| `qraft-agent` | Implements client identity, node registration, the typed outbound catalog HTTP adapter, controller-seed failover, single-flight service reconciliation, heartbeat scheduling, policy-derived local liveness/readiness HTTP endpoints, and bounded graceful shutdown. | Complete local health checks and TTL renewal. It never participates in Raft. |
+| `qraft-agent` | Implements client identity, node registration, the typed outbound catalog HTTP adapter, controller-seed failover, single-flight service reconciliation, heartbeat scheduling, policy-derived local liveness/readiness HTTP endpoints, bounded graceful shutdown, local execution of configured HTTP, TCP, and TTL checks, and sequenced publication of their observations and renewals. | Keep local health authoritative at the server without participating in Raft. |
 | `qraft-tenant` | Implements the current namespace lifecycle abstraction and its in-memory implementation. | Own tenant and namespace policy, validation, and lifecycle contracts. Replicated persistence is performed through distributed-state commands rather than hidden local mutation. |
 | `qraft-controller` | Contains the server application, Raft node implementation, transports, durable storage adapters, replicated state host, HTTP and gRPC APIs, snapshots, and graceful shutdown. | Operate one server member: participate in quorum, host authoritative replicated state, enforce request identity and policy, expose control-plane APIs and the built-in administrative interface, and own server lifecycle. |
 | `qraft-runtime` | Packages controller and agent dependencies behind one executable entry point and one container image. | Remain a thin composition root that validates mode-specific configuration, constructs either server or client mode, installs process shutdown handling, and packages the built-in administrative assets into the same executable artifact without owning domain logic. |
@@ -191,15 +191,26 @@ Server mode currently owns:
 
 - Raft membership, elections, replication, and snapshots.
 - Durable Raft storage.
-- The replicated key/value and service-catalog state machine.
+- The replicated key/value, service-catalog, and health-check state machine.
 - Internal Raft gRPC transport.
 - External distributed-state gRPC service.
-- JDK HTTP health, status, and catalog endpoints.
+- JDK HTTP health, status, catalog, health-observation, and health-discovery
+  endpoints.
 - Coordinated shutdown of Raft, servers, storage, and executors.
 
-Catalog registration and deregistration are encoded as protobuf commands and
-applied to `QraftStateStore`. Catalog contents are included in snapshots, and the
-command codec can read legacy JSON log entries during migration.
+Catalog registration, deregistration, health observation, and health expiry are
+encoded as protobuf commands and applied to `QraftStateStore`. The state machine
+accepts only a strictly newer sequence for each check. It derives aggregate
+service health deterministically, and an expiry changes state only when it matches
+the exact sequence and deadline. Catalog and health-check contents are included in
+snapshots, and the command codec can read legacy JSON log entries during
+migration.
+
+`PUT /v1/agent/check/observe` stamps each observation with the receiving server's
+time before proposing it. `GET /v1/health/service/{serviceName}` returns each
+instance with its replicated checks and can be filtered to passing instances
+(section 12.1.1). No server evaluates deadlines yet, so an unrenewed check stays
+in its last accepted state until leader-owned expiry is implemented.
 
 ### 4.3 Client agent
 
@@ -213,14 +224,38 @@ Client mode currently owns:
   deregistration, and scoped presence reads across controller seeds.
 - A single-flight reconciler for enabled local service definitions.
 - A scheduled heartbeat publisher.
+- `LocalHealthChecks`, which runs configured HTTP, TCP, and TTL checks
+  independently through an injected scheduler and clock and accepts
+  process-local TTL status through `LocalStatusReporter`.
+- `HealthPublisher`, which publishes check results as sequenced observations
+  through the shared controller client.
 
 The client registers its node identity through the controller's
 `/api/v1/agents/register`, `/api/v1/agents/heartbeat`, and
 `DELETE /api/v1/agents/{agentId}` endpoints. A failed initial registration
 keeps the local health server live and unready and retries in the background;
 readiness is derived continuously from lifecycle state, accepted node
-registration, convergence of every enabled local service definition, and the
-freshness of the last successful controller response.
+registration, convergence of every enabled local service definition, required
+checks, and the freshness of the last successful controller response.
+
+Checks of enabled services start once node registration is accepted. The
+required-check readiness policy is: the agent is unready while any required check
+has produced no result yet, or its latest local result is critical. Warning and
+maintenance results keep the agent ready, optional checks never affect readiness,
+and liveness is unaffected by check results. Readiness therefore follows the
+health of the workloads the agent represents, while controller outages continue
+to withdraw readiness through contact freshness.
+
+`HealthPublisher` keeps at most one publication in flight per check and
+coalesces results that arrive meanwhile to the latest. A changed status or output
+is published immediately. An unchanged result is republished as a renewal once
+half the check's TTL has passed since the last acceptance. Sequence numbers are
+strictly increasing per check and start from the wall clock in milliseconds, so a
+restarted agent normally exceeds the sequence its predecessor left behind. A
+`stale_observation` answer raises the floor to the server's current sequence and
+republishes. Retryable failures and `service_not_found` answers resend the same
+observation after the capped registration backoff, which the server treats as an
+idempotent replay; other rejections are logged and dropped.
 
 `HttpCatalogClient` sends the stable service schema and node, tenant, and
 namespace identity headers, assigns a fresh request ID to each attempt, enforces
@@ -270,6 +305,7 @@ reported once.
   leader-aware write preference remains future work.
 - Runtime configuration reload is not implemented, so changing or removing a
   service in the JSON file requires a client restart.
+- TCP checks have no warning outcome: a connection either succeeds or fails.
 - Automatic server-side expiry remains necessary because an agent can terminate
   without completing graceful deregistration.
 
@@ -473,7 +509,8 @@ Deregistration is node-scoped and idempotent. Removing an absent instance is a
 successful no-op. During graceful shutdown, the agent:
 
 1. Marks itself unready.
-2. Stops new reconciliation and health publications.
+2. Stops local checks and health publications, then waits for in-flight
+   publications to finish, and stops new reconciliation.
 3. Attempts bounded deregistration for its known registered services.
 4. Deregisters its node after the service attempts complete.
 5. Stops the local HTTP server.
@@ -1192,6 +1229,45 @@ environment variables or discovered through a separate environment-selected
 file. Sensitive material is mounted as a file and referenced by a configuration
 file path when security support lands.
 
+A service entry may carry an optional `checks` array. Check IDs are unique within
+their service, and the same ID may be reused by different services:
+
+```json
+{
+  "id": "web", "name": "web", "address": "10.0.0.4", "port": 9000,
+  "checks": [
+    {"id": "http", "type": "http", "url": "http://127.0.0.1:9000/health",
+     "intervalMs": 10000, "timeoutMs": 2000, "ttlMs": 30000},
+    {"id": "tcp", "type": "tcp", "intervalMs": 5000, "required": false},
+    {"id": "app", "type": "ttl", "ttlMs": 15000}
+  ]
+}
+```
+
+- `http` issues a GET to an absolute HTTP or HTTPS `url` without user
+  information. A 2xx response is passing, 429 is warning, and any other status or
+  transport failure is critical. The response body is discarded.
+- `tcp` opens one connection to `address` and `port`, which default to the
+  service's own address and port. A connection is passing; anything else is
+  critical.
+- `ttl` has no probe. The local process reports its status (`passing`,
+  `warning`, `critical`, or `maintenance`) through an internal agent input. If no
+  report arrives within `ttlMs`, the agent records a critical result locally.
+  `ttlMs` is required and it is the only timing setting.
+
+For `http` and `tcp`, `intervalMs` defaults to 10000, `timeoutMs` to the lesser
+of 2000 and the interval, and `ttlMs` to three intervals. The timeout must not
+exceed the interval, and `ttlMs` must exceed it. `ttlMs` is the server-side time
+to live of each published observation. `required` defaults to `true`. Unknown
+check settings are rejected.
+
+Each check runs independently on the agent. The next attempt starts only after
+the previous one completes or times out, so a check never overlaps itself. A
+timeout cancels the in-flight request or connection and records a critical
+result. Diagnostic output is limited to 4096 characters, matching the controller
+limit. Local results never modify server state directly; the agent publishes them
+as health observations (section 12.1.1).
+
 Configuration parsing accepts an injected parsed document for deterministic
 tests. Only the executable boundary discovers and opens the configuration file.
 
@@ -1302,7 +1378,7 @@ not expose the administrative routes.
 
 Current progress, the active tranche's detailed steps, and the backlog are
 tracked in the current dated task list in `docs/`
-([`task-list-agent-catalog-client-2026-09-24.md`](archive/task-list-agent-catalog-client-2026-09-24.md)).
+([`task-list-health-propagation-2026-09-25.md`](task-list-health-propagation-2026-09-25.md)).
 Completed task lists are moved to `docs/archive/`.
 
 ### Tranche 0: Align the WAL and snapshot contracts
@@ -1371,10 +1447,13 @@ Status: complete (verified 2026-09-25).
 
 ### Tranche 6: Health propagation
 
-1. Define health observation and expiry commands with deterministic tests.
-2. Implement local checks and TTL renewal.
-3. Implement leader-owned expiry proposals and automatic deregistration.
-4. Verify behavior across leadership changes and clock boundaries.
+Status: in progress. The replicated model, the controller health API, local
+check execution, and agent publication are complete; leader-owned expiry is next.
+
+1. [x] Define health observation and expiry commands with deterministic tests.
+2. [x] Implement local checks and TTL renewal.
+3. [ ] Implement leader-owned expiry proposals and automatic deregistration.
+4. [ ] Verify behavior across leadership changes and clock boundaries.
 
 ### Tranche 7: Multi-node container acceptance
 

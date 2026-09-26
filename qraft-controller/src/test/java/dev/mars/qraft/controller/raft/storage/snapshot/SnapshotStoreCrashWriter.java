@@ -17,7 +17,13 @@ import dev.mars.raftlog.storage.RaftStorageConfig;
 import java.nio.file.Path;
 import java.util.Base64;
 
-/** Child-process fixture that halts at an observable snapshot/WAL boundary. */
+/**
+ * Child-process fixture that halts at an observable snapshot/WAL boundary.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-14
+ * @version 1.0
+ */
 public final class SnapshotStoreCrashWriter {
     public static final int HALT_EXIT_CODE = 92;
     public static final String AFTER_PUBLICATION_BEFORE_COMPACTION =

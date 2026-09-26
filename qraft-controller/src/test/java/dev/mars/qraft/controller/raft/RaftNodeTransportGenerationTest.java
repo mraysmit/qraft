@@ -47,6 +47,14 @@ import java.util.function.Consumer;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Tests that {@link RaftNode} discards delayed append responses from a previous leadership and does
+ * not let granted votes overtake a blocked higher-term transition.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-14
+ * @version 1.0
+ */
 @RemediationTest(phase = "5", scenarioPrefix = "RAFT-TRANSPORT-GENERATION")
 class RaftNodeTransportGenerationTest {
     private JavaRuntime runtime;

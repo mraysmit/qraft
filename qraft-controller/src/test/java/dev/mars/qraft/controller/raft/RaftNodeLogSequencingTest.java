@@ -55,6 +55,14 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Tests that {@link RaftNode} serializes leader and follower log appends, truncations and syncs,
+ * reserves admission for peer traffic, and fences on uncertain WAL failures.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-14
+ * @version 1.0
+ */
 @RemediationTest(phase = "3", scenarioPrefix = "RAFT-LOG")
 class RaftNodeLogSequencingTest {
     private JavaRuntime runtime;

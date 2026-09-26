@@ -49,6 +49,14 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Tests that {@link RaftNode} serializes term and vote metadata writes, applies vote state on the
+ * owning state loop only after durability, and fences on uncertain metadata failures.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-13
+ * @version 1.0
+ */
 @RemediationTest(phase = "2", scenarioPrefix = "RAFT-METADATA")
 class RaftNodeMetadataSequencingTest {
     private JavaRuntime runtime;

@@ -27,7 +27,13 @@ import java.util.Optional;
 
 import static java.util.Objects.requireNonNull;
 
-/** Emits stable, searchable lifecycle events for remediation regression tests. */
+/**
+ * Emits stable, searchable lifecycle events for remediation regression tests.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-14
+ * @version 1.0
+ */
 public final class RemediationTestExtension implements BeforeEachCallback, TestWatcher {
     public static final String REMEDIATION_ID_MDC_KEY = "remediationId";
     public static final String REMEDIATION_PHASE_MDC_KEY = "remediationPhase";

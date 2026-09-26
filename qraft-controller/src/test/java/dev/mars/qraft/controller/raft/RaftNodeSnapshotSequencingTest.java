@@ -53,6 +53,14 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/**
+ * Tests that {@link RaftNode} serializes local snapshot publication and prefix compaction with
+ * appends and votes, and handles publication and compaction failures by fencing when uncertain.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-14
+ * @version 1.0
+ */
 @RemediationTest(phase = "4", scenarioPrefix = "RAFT-SNAPSHOT")
 class RaftNodeSnapshotSequencingTest {
     private JavaRuntime runtime;

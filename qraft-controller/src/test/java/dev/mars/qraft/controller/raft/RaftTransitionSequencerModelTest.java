@@ -30,6 +30,14 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+/**
+ * Seeded model tests checking that generated {@link RaftTransitionSequencer} histories match a
+ * serialized reference model and drain at shutdown.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-15
+ * @version 1.0
+ */
 @RemediationTest(phase = "6-model", scenarioPrefix = "RAFT-MODEL-HISTORY")
 class RaftTransitionSequencerModelTest {
     private static final long[] REGRESSION_SEEDS = {

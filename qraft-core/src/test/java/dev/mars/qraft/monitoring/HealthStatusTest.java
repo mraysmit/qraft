@@ -23,6 +23,10 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Tests for HealthStatus enum.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-03-15
+ * @version 1.0
  */
 @DisplayName("HealthStatus Enum Tests")
 class HealthStatusTest {

@@ -39,7 +39,13 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
-/** Child-process fixture for real installed-snapshot and shutdown-drain recovery. */
+/**
+ * Child-process fixture for real installed-snapshot and shutdown-drain recovery.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-15
+ * @version 1.0
+ */
 public final class InstalledSnapshotCrashWriter {
     public static final int HALT_EXIT_CODE = 93;
     public static final String AFTER_INSTALLED_SNAPSHOT_PUBLICATION =

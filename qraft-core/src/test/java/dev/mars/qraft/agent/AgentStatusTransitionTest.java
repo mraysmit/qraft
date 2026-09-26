@@ -33,6 +33,10 @@ import static org.junit.jupiter.api.Assertions.*;
  * Parameterized tests for AgentStatus transition validation.
  * Covers every (source, target) pair to ensure complete transition map
  * coverage.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-03-15
+ * @version 1.0
  */
 class AgentStatusTransitionTest {
 

@@ -1,7 +1,7 @@
 # Task List: Health Propagation and Automatic Deregistration
 
 **Date:** 2026-09-25
-**Active work:** Step 3, file configuration and local check execution
+**Active work:** Step 5, leader-owned expiry
 **Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), Tranche 6
 **Predecessor:** [`archive/task-list-unified-runtime-flow-2026-09-24.md`](archive/task-list-unified-runtime-flow-2026-09-24.md)
 **Standards:** [`PROJECT_STANDARDS.md`](PROJECT_STANDARDS.md)
@@ -20,14 +20,21 @@ leader-proposed expiry commands.
 
 ## 2. Current state
 
+Updated 2026-09-26, after Step 4.
+
 - Registration stores a server-owned health value, but registration requests
   cannot set authoritative health.
-- Agents publish node heartbeats and reconcile service definitions; they do not
-  yet execute service checks or renew service TTLs.
-- `GET /v1/health/service/{serviceName}` currently shares the catalog listing
-  path rather than applying a defined health filter.
+- The replicated state machine accepts ordered per-check observations, derives
+  aggregate service health, and applies explicit expiry commands (Step 1).
+- Agents and other clients can submit observations through
+  `PUT /v1/agent/check/observe`. `GET /v1/health/service/{serviceName}` returns
+  instances with their checks and supports a `passing` filter (Step 2).
+- The agent parses `catalog.services[].checks`, runs HTTP, TCP, and TTL checks
+  locally (Step 3), publishes their observations and renewals, and withdraws
+  readiness while a required check is critical or has not yet reported (Step 4).
 - Graceful shutdown deregisters services, but registrations left by crashed or
-  disconnected agents do not expire automatically.
+  disconnected agents do not expire automatically. No leader evaluates
+  deadlines yet (Step 5).
 
 ## 3. Rules
 
@@ -112,6 +119,37 @@ stale-order handling, and health-filtered discovery.
 
 ## 6. Step 3: File configuration and local check execution
 
+**Status: Done 2026-09-26, with one exit-gate exception noted below.** Each
+`catalog.services` entry accepts an optional `checks` array of `http`, `tcp`, and
+`ttl` definitions. Parsing validates identity, type-specific fields, and timing
+(timeout at most the interval, TTL greater than the interval), rejects unknown
+settings, and applies documented defaults. `AgentConfiguration` exposes the result
+as `getHealthChecks()`; `ServiceDefinition` and its registration fingerprint are
+unchanged. The new `dev.mars.qraft.agent.health` package runs each check
+independently through an injected `CheckScheduler` and `Clock`:
+
+- HTTP uses the JDK `HttpClient`: 2xx is passing, 429 warning, and anything else
+  critical.
+- TCP connects through a `TcpConnector` transport boundary backed by a
+  virtual-thread socket.
+- A scheduled timeout cancels the in-flight probe, and the next attempt is
+  scheduled only after completion, so a check never overlaps itself.
+- Stopping is terminal: it cancels scheduled and in-flight work, and no late
+  result is delivered.
+- Output is limited to 4096 characters.
+
+Process-local status is the `LocalStatusReporter` input for TTL checks. A report
+produces a local result only, and a missed renewal produces one local critical
+result until the next report. Real HTTP servers and sockets cover the protocol
+paths; a manual clock and scheduler drive every timing assertion. The 21 new
+agent tests passed three consecutive runs, and the full default reactor passed
+685 tests on JDK 27 with no failures, errors, or skips.
+
+Exit-gate exception: TCP has no warning outcome. A connection either succeeds or
+fails, so no TCP warning test exists. Adding one would need a new policy, such as
+a slow-connect threshold. The checks are not yet started by `QraftAgent`; Step 4
+wires them to publication and lifecycle.
+
 1. Extend `catalog.services` with validated optional health-check definitions;
    no separate file or environment-variable source is introduced.
 2. Implement TTL, HTTP, and TCP check runners with injected clocks, schedulers,
@@ -125,6 +163,46 @@ stale-order handling, and health-filtered discovery.
 recovery, cancellation, and non-overlap for each check type.
 
 ## 7. Step 4: Agent publication and renewal
+
+**Status: Done 2026-09-26.** `HttpCatalogClient` implements the new
+`ObservationClient` port. It sends `PUT /v1/agent/check/observe` with the
+existing identity headers and seed rotation, and classifies the answer as
+accepted, stale (with the server's current sequence), retryable, or rejected.
+Accepted and stale answers count as controller contact.
+
+`HealthPublisher` handles sequencing and delivery:
+
+- It keeps one publication in flight per check and coalesces later results.
+- It publishes changes immediately and unchanged results as renewals at half
+  the TTL.
+- Sequences are strictly increasing, clock-seeded, and raised past a stale
+  answer before republishing.
+- Retries resend the identical observation after the capped registration
+  backoff, including while registration is still converging
+  (`service_not_found`).
+
+`QraftAgent` starts the checks of enabled services after node registration and
+exposes `statusReporter(serviceId, checkId)` for process-local TTL status. On
+shutdown it stops the checks and the publisher and waits for in-flight
+publications before service deregistration begins. Readiness follows the
+user-selected required-check policy: unready while any required check is
+critical or has no result; warning and maintenance stay ready. The policy is
+documented in the design document, section 4.3.
+
+The exit-gate contract test (`AgentHealthPublicationTest`) runs a real agent
+against a real controller. It covers:
+
+- publication through a refused first seed;
+- renewal with an unchanged status;
+- a required HTTP check failing and recovering, with readiness following it;
+- process-local TTL status;
+- recovery after a controller restart;
+- a recording proxy showing that every observation precedes deregistration and
+  no request follows shutdown.
+
+The 15 new agent tests and 2 contract tests passed three consecutive runs, and
+the full default reactor passed 702 tests on JDK 27 with no failures, errors, or
+skips.
 
 1. Publish changed observations and TTL renewals through the shared classified
    controller client and seed rotation.

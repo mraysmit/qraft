@@ -28,6 +28,10 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Comprehensive test suite for AgentInfo.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-03-15
+ * @version 1.0
  */
 class AgentInfoTest {
 

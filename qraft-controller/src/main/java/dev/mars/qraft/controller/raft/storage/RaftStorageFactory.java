@@ -16,7 +16,13 @@ import dev.mars.qraft.raft.api.SnapshotStore;
 
 import java.nio.file.Path;
 
-/** Opens the persistence components used by a durable Qraft node. */
+/**
+ * Opens the persistence components used by a durable Qraft node.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-03-15
+ * @version 1.0
+ */
 public final class RaftStorageFactory {
 
     private RaftStorageFactory() {

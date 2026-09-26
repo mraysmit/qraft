@@ -29,6 +29,10 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Minimal key-value state machine for generic Raft service mode.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-03-15
+ * @version 1.0
  */
 public class GenericStateStore implements RaftLogApplicator {
 
