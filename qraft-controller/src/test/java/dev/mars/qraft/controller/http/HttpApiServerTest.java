@@ -4,7 +4,10 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.mars.qraft.catalog.HealthCheckState;
+import dev.mars.qraft.catalog.ServiceCheckId;
 import dev.mars.qraft.catalog.ServiceHealth;
+import dev.mars.qraft.catalog.ServiceInstanceId;
 import dev.mars.qraft.controller.raft.InMemoryTransportSimulator;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.raft.RaftNodeMode;
@@ -29,6 +32,10 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.nio.file.Files;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -587,6 +594,286 @@ class HttpApiServerTest {
         assertTrue(ready.body().contains("fenced"), ready.body());
         assertArrayEquals(corruptWal, Files.readAllBytes(walPath),
                 "failed recovery must preserve the corrupt WAL for diagnosis");
+    }
+
+    @Test
+    void healthObservationIsCommittedWithAServerReceiptDeadline() throws Exception {
+        MutableClock clock = new MutableClock(Instant.parse("2026-09-26T10:00:00.123456Z"));
+        QraftStateStore store = startHealthApi(clock);
+        HttpClient client = HttpClient.newHttpClient();
+        registerService(client, "web", "frontend", "node-a", "acme", "payments");
+        long indexBefore = store.getLastAppliedIndex();
+
+        HttpResponse<String> response = request(client, "/v1/agent/check/observe", "PUT",
+                observation("web", "http", "passing", 1, 30_000, "200 OK"),
+                Map.of("X-Qraft-Node", "node-a", "X-Qraft-Tenant", "acme", "X-Qraft-Namespace", "payments"));
+
+        assertEquals(200, response.statusCode(), response.body());
+        long responseIndex = Long.parseLong(response.headers().firstValue("X-Qraft-Index").orElseThrow());
+        assertTrue(responseIndex > indexBefore);
+        assertEquals(store.getLastAppliedIndex(), responseIndex);
+        JsonNode body = new ObjectMapper().readTree(response.body());
+        assertEquals(Set.of("serviceId", "checkId", "nodeId", "tenantId", "namespace",
+                        "sequenceNumber", "status", "deadline", "accepted"),
+                body.properties().stream().map(Map.Entry::getKey).collect(java.util.stream.Collectors.toSet()));
+        assertEquals("web", body.get("serviceId").textValue());
+        assertEquals("http", body.get("checkId").textValue());
+        assertEquals("node-a", body.get("nodeId").textValue());
+        assertEquals("acme", body.get("tenantId").textValue());
+        assertEquals("payments", body.get("namespace").textValue());
+        assertEquals(1, body.get("sequenceNumber").longValue());
+        assertEquals("PASSING", body.get("status").textValue());
+        assertEquals("2026-09-26T10:00:30.123Z", body.get("deadline").textValue());
+        assertTrue(body.get("accepted").booleanValue());
+
+        ServiceCheckId checkId = new ServiceCheckId(
+                new ServiceInstanceId("acme", "payments", "node-a", "web"), "http");
+        HealthCheckState state = store.findHealthCheck(checkId).orElseThrow();
+        assertEquals(Instant.parse("2026-09-26T10:00:00.123Z"), state.acceptedAt());
+        assertEquals(Instant.parse("2026-09-26T10:00:30.123Z"), state.deadline());
+        assertEquals("200 OK", state.observation().output());
+        assertTrue(state.observation().required());
+        assertEquals(ServiceHealth.PASSING,
+                store.getServiceCatalog().instances("frontend").getFirst().health());
+    }
+
+    @Test
+    void replayingAnAcceptedObservationSucceedsWithoutMovingItsDeadline() throws Exception {
+        MutableClock clock = new MutableClock(Instant.parse("2026-09-26T10:00:00Z"));
+        QraftStateStore store = startHealthApi(clock);
+        HttpClient client = HttpClient.newHttpClient();
+        registerService(client, "web", "frontend", "node-a");
+        String body = observation("web", "ttl", "passing", 7, 10_000, null);
+
+        HttpResponse<String> first = request(client, "/v1/agent/check/observe", "PUT", body,
+                Map.of("X-Qraft-Node", "node-a"));
+        clock.advance(Duration.ofSeconds(5));
+        HttpResponse<String> replay = request(client, "/v1/agent/check/observe", "PUT", body,
+                Map.of("X-Qraft-Node", "node-a"));
+
+        assertEquals(200, first.statusCode(), first.body());
+        assertEquals(200, replay.statusCode(), replay.body());
+        JsonNode firstBody = new ObjectMapper().readTree(first.body());
+        JsonNode replayBody = new ObjectMapper().readTree(replay.body());
+        assertEquals(firstBody, replayBody);
+        assertEquals("2026-09-26T10:00:10Z", replayBody.get("deadline").textValue());
+        assertTrue(replay.headers().firstValue("X-Qraft-Index").isPresent());
+        assertEquals(Instant.parse("2026-09-26T10:00:00Z"),
+                store.healthChecks().getFirst().acceptedAt());
+    }
+
+    @Test
+    void staleObservationsAreRejectedWithoutChangingAcceptedState() throws Exception {
+        QraftStateStore store = startHealthApi(new MutableClock(Instant.parse("2026-09-26T10:00:00Z")));
+        HttpClient client = HttpClient.newHttpClient();
+        registerService(client, "web", "frontend", "node-a");
+        Map<String, String> identity = Map.of("X-Qraft-Node", "node-a");
+        assertEquals(200, request(client, "/v1/agent/check/observe", "PUT",
+                observation("web", "http", "warning", 5, 10_000, "slow"), identity).statusCode());
+
+        HttpResponse<String> older = request(client, "/v1/agent/check/observe", "PUT",
+                observation("web", "http", "passing", 4, 10_000, null), identity);
+        HttpResponse<String> conflictingReplay = request(client, "/v1/agent/check/observe", "PUT",
+                observation("web", "http", "critical", 5, 10_000, "down"), identity);
+
+        assertEquals(409, older.statusCode(), older.body());
+        JsonNode olderBody = assertErrorEnvelope(older, "stale_observation", false);
+        assertEquals(5, olderBody.get("currentSequenceNumber").longValue());
+        assertEquals(409, conflictingReplay.statusCode(), conflictingReplay.body());
+        assertErrorEnvelope(conflictingReplay, "stale_observation", false);
+        HealthCheckState state = store.healthChecks().getFirst();
+        assertEquals(5, state.observation().sequenceNumber());
+        assertEquals(ServiceHealth.WARNING, state.observation().status());
+        assertEquals(ServiceHealth.WARNING, store.getServiceCatalog().instances("frontend").getFirst().health());
+    }
+
+    @Test
+    void observationsForUnregisteredCompositeInstancesAreNotFound() throws Exception {
+        QraftStateStore store = startHealthApi(new MutableClock(Instant.parse("2026-09-26T10:00:00Z")));
+        HttpClient client = HttpClient.newHttpClient();
+        registerService(client, "web", "frontend", "node-a");
+
+        HttpResponse<String> otherNode = request(client, "/v1/agent/check/observe", "PUT",
+                observation("web", "http", "passing", 1, 10_000, null), Map.of("X-Qraft-Node", "node-b"));
+        HttpResponse<String> otherTenant = request(client, "/v1/agent/check/observe", "PUT",
+                observation("web", "http", "passing", 1, 10_000, null),
+                Map.of("X-Qraft-Node", "node-a", "X-Qraft-Tenant", "acme"));
+
+        assertEquals(404, otherNode.statusCode(), otherNode.body());
+        assertErrorEnvelope(otherNode, "service_not_found", false);
+        assertEquals(404, otherTenant.statusCode(), otherTenant.body());
+        assertErrorEnvelope(otherTenant, "service_not_found", false);
+        assertTrue(store.healthChecks().isEmpty());
+    }
+
+    @Test
+    void invalidObservationsUseTheStructuredEnvelope() throws Exception {
+        QraftStateStore store = startHealthApi(new MutableClock(Instant.parse("2026-09-26T10:00:00Z")));
+        HttpClient client = HttpClient.newHttpClient();
+        registerService(client, "web", "frontend", "node-a");
+        Map<String, String> identity = Map.of("X-Qraft-Node", "node-a");
+        String valid = observation("web", "http", "passing", 1, 10_000, null);
+        List<String> invalidBodies = List.of(
+                "not json",
+                valid.replace("}", ",\"alias\":\"x\"}"),
+                valid.replace("\"serviceId\":\"web\",", ""),
+                valid.replace("\"checkId\":\"http\",", "\"checkId\":\" \","),
+                valid.replace("\"passing\"", "\"unknown\""),
+                valid.replace("\"passing\"", "\"failing\""),
+                valid.replace("\"passing\"", "\"bogus\""),
+                valid.replace("\"status\":\"passing\",", ""),
+                valid.replace("\"sequenceNumber\":1", "\"sequenceNumber\":0"),
+                valid.replace("\"sequenceNumber\":1,", ""),
+                valid.replace("\"ttlMillis\":10000", "\"ttlMillis\":0"),
+                valid.replace(",\"ttlMillis\":10000", ""),
+                valid.replace("\"observedAt\":\"2026-09-26T09:59:59Z\",", ""),
+                valid.replace("2026-09-26T09:59:59Z", "yesterday"),
+                observation("web", "http", "passing", 1, 10_000, "x".repeat(4097)));
+
+        for (String invalid : invalidBodies) {
+            assertTrue(!invalid.equals(valid), "invalid fixture must differ from the valid body");
+            HttpResponse<String> response = request(client, "/v1/agent/check/observe", "PUT", invalid, identity);
+            assertEquals(400, response.statusCode(), invalid + " -> " + response.body());
+            assertErrorEnvelope(response, "invalid_observation", false);
+        }
+        HttpResponse<String> missingNode = request(client, "/v1/agent/check/observe", "PUT", valid);
+        assertEquals(400, missingNode.statusCode(), missingNode.body());
+        assertErrorEnvelope(missingNode, "invalid_observation", false);
+        HttpResponse<String> wrongMethod = request(client, "/v1/agent/check/observe", "POST", valid, identity);
+        assertEquals(405, wrongMethod.statusCode(), wrongMethod.body());
+        assertErrorEnvelope(wrongMethod, "method_not_allowed", false);
+        assertTrue(store.healthChecks().isEmpty());
+
+        HttpResponse<String> maximumOutput = request(client, "/v1/agent/check/observe", "PUT",
+                observation("web", "http", "PASSING", 1, 10_000, "x".repeat(4096)), identity);
+        assertEquals(200, maximumOutput.statusCode(), maximumOutput.body());
+
+        server.enterDrainMode().join();
+        HttpResponse<String> draining = request(client, "/v1/agent/check/observe", "PUT",
+                observation("web", "http", "passing", 2, 10_000, null), identity);
+        assertEquals(503, draining.statusCode(), draining.body());
+        assertErrorEnvelope(draining, "draining", true);
+    }
+
+    @Test
+    void healthDiscoveryReportsChecksAndFiltersPassingWithoutMutatingState() throws Exception {
+        QraftStateStore store = startHealthApi(new MutableClock(Instant.parse("2026-09-26T10:00:00Z")));
+        HttpClient client = HttpClient.newHttpClient();
+        registerService(client, "web-1", "frontend", "node-a");
+        registerService(client, "web-2", "frontend", "node-b");
+        registerService(client, "web-3", "frontend", "node-c");
+        registerService(client, "web-4", "frontend", "node-d");
+        assertEquals(200, request(client, "/v1/agent/check/observe", "PUT",
+                observation("web-1", "http", "passing", 1, 10_000, "ok"),
+                Map.of("X-Qraft-Node", "node-a")).statusCode());
+        assertEquals(200, request(client, "/v1/agent/check/observe", "PUT",
+                observation("web-2", "http", "warning", 1, 10_000, "slow"),
+                Map.of("X-Qraft-Node", "node-b")).statusCode());
+        assertEquals(200, request(client, "/v1/agent/check/observe", "PUT",
+                observation("web-3", "tcp", "critical", 1, 10_000, "refused"),
+                Map.of("X-Qraft-Node", "node-c")).statusCode());
+        long index = store.getLastAppliedIndex();
+
+        HttpResponse<String> all = request(client, "/v1/health/service/frontend", "GET");
+        HttpResponse<String> passing = request(client, "/v1/health/service/frontend?passing", "GET");
+        HttpResponse<String> passingTrue = request(client, "/v1/health/service/frontend?passing=true", "GET");
+        HttpResponse<String> passingFalse = request(client, "/v1/health/service/frontend?passing=false", "GET");
+        HttpResponse<String> invalidFilter = request(client, "/v1/health/service/frontend?passing=maybe", "GET");
+        HttpResponse<String> unknownQuery = request(client, "/v1/health/service/frontend?stale=true", "GET");
+        HttpResponse<String> catalog = request(client, "/v1/catalog/service/frontend", "GET");
+
+        assertEquals(200, all.statusCode(), all.body());
+        JsonNode allBody = new ObjectMapper().readTree(all.body());
+        assertEquals(List.of("web-1", "web-2", "web-3", "web-4"), serviceIds(allBody));
+        assertEquals(List.of("PASSING", "WARNING", "CRITICAL", "UNKNOWN"), healthStates(allBody));
+        JsonNode firstEntry = allBody.get(0);
+        assertEquals(Set.of("service", "checks"),
+                firstEntry.properties().stream().map(Map.Entry::getKey).collect(java.util.stream.Collectors.toSet()));
+        JsonNode check = firstEntry.get("checks").get(0);
+        assertEquals(Set.of("checkId", "status", "required", "sequenceNumber", "observedAt",
+                        "acceptedAt", "deadline", "expired", "output"),
+                check.properties().stream().map(Map.Entry::getKey).collect(java.util.stream.Collectors.toSet()));
+        assertEquals("http", check.get("checkId").textValue());
+        assertEquals("PASSING", check.get("status").textValue());
+        assertEquals("2026-09-26T09:59:59Z", check.get("observedAt").textValue());
+        assertEquals("2026-09-26T10:00:00Z", check.get("acceptedAt").textValue());
+        assertEquals("2026-09-26T10:00:10Z", check.get("deadline").textValue());
+        assertEquals(false, check.get("expired").booleanValue());
+        assertEquals("ok", check.get("output").textValue());
+        assertEquals(0, allBody.get(3).get("checks").size());
+
+        assertEquals(List.of("web-1"), serviceIds(new ObjectMapper().readTree(passing.body())));
+        assertEquals(List.of("web-1"), serviceIds(new ObjectMapper().readTree(passingTrue.body())));
+        assertEquals(serviceIds(allBody), serviceIds(new ObjectMapper().readTree(passingFalse.body())));
+        assertEquals(400, invalidFilter.statusCode(), invalidFilter.body());
+        assertErrorEnvelope(invalidFilter, "invalid_query", false);
+        assertEquals(400, unknownQuery.statusCode(), unknownQuery.body());
+        assertErrorEnvelope(unknownQuery, "invalid_query", false);
+        for (HttpResponse<String> read : List.of(all, passing, passingTrue, passingFalse, catalog)) {
+            assertEquals(index, Long.parseLong(read.headers().firstValue("X-Qraft-Index").orElseThrow()));
+        }
+        assertEquals(4, new ObjectMapper().readTree(catalog.body()).size());
+        assertEquals(index, store.getLastAppliedIndex());
+        assertEquals(3, store.healthChecks().size());
+    }
+
+    private QraftStateStore startHealthApi(Clock clock) throws Exception {
+        QraftStateStore store = startSingleNode();
+        server = new HttpApiServer(0, node, store, clock);
+        server.start().join();
+        return store;
+    }
+
+    private void registerService(HttpClient client, String serviceId, String serviceName,
+                                 String nodeId) throws Exception {
+        registerService(client, serviceId, serviceName, nodeId, "default", "default");
+    }
+
+    private void registerService(HttpClient client, String serviceId, String serviceName, String nodeId,
+                                 String tenantId, String namespace) throws Exception {
+        String registration = """
+                {"serviceId":"%s","serviceName":"%s","address":"127.0.0.1","port":8080}
+                """.formatted(serviceId, serviceName);
+        HttpResponse<String> response = request(client, "/v1/agent/service/register", "PUT", registration,
+                Map.of("X-Qraft-Node", nodeId, "X-Qraft-Tenant", tenantId, "X-Qraft-Namespace", namespace));
+        assertEquals(200, response.statusCode(), response.body());
+    }
+
+    private static String observation(String serviceId, String checkId, String status, long sequenceNumber,
+                                      long ttlMillis, String output) {
+        String outputField = output == null ? "" : ",\"output\":\"" + output + "\"";
+        return """
+                {"serviceId":"%s","checkId":"%s","status":"%s","sequenceNumber":%d,\
+                "observedAt":"2026-09-26T09:59:59Z","ttlMillis":%d%s}"""
+                .formatted(serviceId, checkId, status, sequenceNumber, ttlMillis, outputField);
+    }
+
+    private static List<String> serviceIds(JsonNode entries) {
+        List<String> ids = new java.util.ArrayList<>();
+        entries.forEach(entry -> ids.add(entry.get("service").get("serviceId").textValue()));
+        return ids;
+    }
+
+    private static List<String> healthStates(JsonNode entries) {
+        List<String> states = new java.util.ArrayList<>();
+        entries.forEach(entry -> states.add(entry.get("service").get("health").textValue()));
+        return states;
+    }
+
+    private static final class MutableClock extends Clock {
+        private final AtomicReference<Instant> now;
+
+        MutableClock(Instant start) {
+            now = new AtomicReference<>(start);
+        }
+
+        void advance(Duration duration) {
+            now.updateAndGet(current -> current.plus(duration));
+        }
+
+        @Override public ZoneOffset getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(java.time.ZoneId zone) { return this; }
+        @Override public Instant instant() { return now.get(); }
     }
 
     private static final class AmbiguousAppendStorage implements RaftStorage {

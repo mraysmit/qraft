@@ -1,7 +1,7 @@
 # Task List: Health Propagation and Automatic Deregistration
 
 **Date:** 2026-09-25
-**Active work:** Step 2, controller health API
+**Active work:** Step 3, file configuration and local check execution
 **Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), Tranche 6
 **Predecessor:** [`archive/task-list-unified-runtime-flow-2026-09-24.md`](archive/task-list-unified-runtime-flow-2026-09-24.md)
 **Standards:** [`PROJECT_STANDARDS.md`](PROJECT_STANDARDS.md)
@@ -82,6 +82,22 @@ fields.
 are deterministic under injected timestamps.
 
 ## 5. Step 2: Controller health API
+
+**Status: Done 2026-09-26.** Added `PUT /v1/agent/check/observe`, which takes
+the composite identity from the registration headers and validates status,
+sequence, observed time, TTL, and output length (at most 4096 characters). The
+receiving server stamps its injected-clock receipt time into the observe command,
+so the deadline never depends on the agent clock. Success is returned only after
+commit and apply, with `X-Qraft-Index`. An exact replay returns the original 200
+body and deadline; an older sequence, or the same sequence with different
+content, returns 409 `stale_observation` with `currentSequenceNumber`; an
+unregistered composite instance returns 404 `service_not_found`.
+`GET /v1/health/service/{serviceName}` now returns each instance with its
+replicated checks, and `?passing` narrows the result to `PASSING` instances; any
+other query parameter or value returns `invalid_query`. Catalog discovery is
+unchanged and neither read moves the applied index. The contract is documented in
+the design document, section 12.1.1. The six new real-HTTP tests passed, and the
+full default reactor passed 664 tests on JDK 27 with no failures, errors, or skips.
 
 1. Add request validation and error-envelope tests for health observations.
 2. Expose an agent-facing observation/renewal endpoint with the existing

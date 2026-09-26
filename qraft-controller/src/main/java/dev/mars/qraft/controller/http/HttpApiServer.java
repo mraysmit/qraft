@@ -7,7 +7,11 @@ import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import dev.mars.qraft.agent.AgentInfo;
 import dev.mars.qraft.agent.AgentStatus;
+import dev.mars.qraft.catalog.HealthCheckState;
+import dev.mars.qraft.catalog.HealthObservation;
+import dev.mars.qraft.catalog.ServiceHealth;
 import dev.mars.qraft.catalog.ServiceInstance;
+import dev.mars.qraft.catalog.ServiceInstanceId;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.raft.CommandOutcomeUnknownException;
 import dev.mars.qraft.controller.state.AgentCommand;
@@ -23,6 +27,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,6 +41,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 
 /** Lightweight JDK HTTP API for health and controller discovery endpoints. */
 public final class HttpApiServer implements AutoCloseable {
@@ -50,13 +56,20 @@ public final class HttpApiServer implements AutoCloseable {
     private final RaftNode raftNode;
     private final QraftStateStore stateStore;
     private final AtomicBoolean draining = new AtomicBoolean();
+    private final Clock clock;
 
     public HttpApiServer(int port) throws IOException {
         this(port, null, null);
     }
 
     public HttpApiServer(int port, RaftNode raftNode, QraftStateStore stateStore) throws IOException {
+        this(port, raftNode, stateStore, Clock.systemUTC());
+    }
+
+    public HttpApiServer(int port, RaftNode raftNode, QraftStateStore stateStore, Clock clock)
+            throws IOException {
         this.port = port;
+        this.clock = Objects.requireNonNull(clock, "clock");
         if ((raftNode == null) != (stateStore == null)) {
             throw new IllegalArgumentException("raftNode and stateStore must be configured together");
         }
@@ -76,9 +89,10 @@ public final class HttpApiServer implements AutoCloseable {
         server.createContext("/api/v1/agents", requestAware(this::agents));
         server.createContext("/v1/agent/service/register", requestAware(this::registerService));
         server.createContext("/v1/agent/service/deregister", requestAware(this::deregisterService));
+        server.createContext("/v1/agent/check/observe", requestAware(this::observeHealth));
         server.createContext("/v1/catalog/services", requestAware(this::listServices));
         server.createContext("/v1/catalog/service", requestAware(this::listServiceInstances));
-        server.createContext("/v1/health/service", requestAware(this::listServiceInstances));
+        server.createContext("/v1/health/service", requestAware(this::listServiceHealth));
     }
 
     public CompletableFuture<Void> start() {
@@ -291,6 +305,87 @@ public final class HttpApiServer implements AutoCloseable {
             return;
         }
         respondJson(exchange, 200, stateStore.getServiceCatalog().instances(serviceName));
+    }
+
+    private void observeHealth(HttpExchange exchange) throws IOException {
+        if (!prepareCatalogRequest(exchange, "PUT")) return;
+        try {
+            RequestContext context = new HeaderRequestContext(exchange);
+            HealthObservationRequest request = objectMapper.readerFor(HealthObservationRequest.class)
+                    .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                    .readValue(exchange.getRequestBody());
+            HealthObservation observation = request.toObservation(context);
+            RaftCommandResult<?> result = submit(CatalogCommand.observe(observation, clock.instant()));
+            if (result instanceof RaftCommandResult.NotFound<?>) {
+                respondError(exchange, 404, "service_not_found", "Service instance is not registered", false,
+                        Map.of("serviceId", request.serviceId(), "checkId", request.checkId()));
+                return;
+            }
+            if (!(result instanceof RaftCommandResult.Success<?>(HealthCheckState current))) {
+                throw new IllegalStateException("Unexpected observation result: " + result);
+            }
+            // The state machine answers an equal or older sequence with the current state; only an exact
+            // replay of the accepted observation is a success.
+            if (!current.observation().equals(observation)) {
+                respondError(exchange, 409, "stale_observation", "Observation is older than the accepted state",
+                        false, Map.of("currentSequenceNumber", current.observation().sequenceNumber()));
+                return;
+            }
+            setAppliedIndex(exchange);
+            respondJson(exchange, 200, HealthObservationResponse.accepted(current));
+        } catch (IllegalArgumentException | com.fasterxml.jackson.core.JacksonException e) {
+            respondError(exchange, 400, "invalid_observation", safeMessage(e), false);
+        } catch (CompletionException e) {
+            respondUnavailable(exchange, e);
+        }
+    }
+
+    private void listServiceHealth(HttpExchange exchange) throws IOException {
+        if (!prepareCatalogRequest(exchange, "GET")) return;
+        String serviceName = pathParameter(exchange, "/v1/health/service/");
+        if (serviceName == null) {
+            respondError(exchange, 400, "service_name_required", "Service name is required", false);
+            return;
+        }
+        boolean passingOnly;
+        try {
+            passingOnly = passingFilter(exchange.getRequestURI().getRawQuery());
+        } catch (IllegalArgumentException e) {
+            respondError(exchange, 400, "invalid_query", safeMessage(e), false);
+            return;
+        }
+        setAppliedIndex(exchange);
+        Map<ServiceInstanceId, List<HealthCheckState>> checks = stateStore.healthChecks().stream()
+                .collect(Collectors.groupingBy(state -> state.checkId().serviceInstanceId()));
+        List<HealthServiceEntry> entries = stateStore.getServiceCatalog().instances(serviceName).stream()
+                .filter(instance -> !passingOnly || instance.health() == ServiceHealth.PASSING)
+                .map(instance -> HealthServiceEntry.from(instance,
+                        checks.getOrDefault(instance.identity(), List.of())))
+                .toList();
+        respondJson(exchange, 200, entries);
+    }
+
+    /** Parses the only supported health query parameter: {@code passing}, {@code passing=true|false}. */
+    private static boolean passingFilter(String rawQuery) {
+        boolean passingOnly = false;
+        if (rawQuery == null || rawQuery.isEmpty()) return false;
+        for (String parameter : rawQuery.split("&")) {
+            if (parameter.isEmpty()) continue;
+            int separator = parameter.indexOf('=');
+            String name = URLDecoder.decode(separator < 0 ? parameter : parameter.substring(0, separator),
+                    StandardCharsets.UTF_8);
+            String value = separator < 0 ? "" : URLDecoder.decode(parameter.substring(separator + 1),
+                    StandardCharsets.UTF_8);
+            if (!"passing".equals(name)) {
+                throw new IllegalArgumentException("Unsupported query parameter: " + name);
+            }
+            passingOnly = switch (value) {
+                case "", "true" -> true;
+                case "false" -> false;
+                default -> throw new IllegalArgumentException("passing must be true or false");
+            };
+        }
+        return passingOnly;
     }
 
     private void setAppliedIndex(HttpExchange exchange) {

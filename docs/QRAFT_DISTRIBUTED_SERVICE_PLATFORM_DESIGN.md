@@ -544,6 +544,7 @@ Initial HTTP endpoints are:
 ```text
 PUT /v1/agent/service/register
 PUT /v1/agent/service/deregister/{serviceId}
+PUT /v1/agent/check/observe
 GET /v1/catalog/services
 GET /v1/catalog/service/{serviceName}
 GET /v1/health/service/{serviceName}
@@ -600,6 +601,90 @@ A successful registration returns only the stable protocol fields:
 Deregistration uses the same three identity headers. It is idempotent and returns
 HTTP 200 with `{"serviceId":"web","deregistered":false}` when the composite
 instance is already absent.
+
+#### 12.1.1 Health observations and health discovery
+
+Agents report check results and TTL renewals with
+`PUT /v1/agent/check/observe`, using the same identity headers as registration.
+A renewal is simply a newer observation of the same check. The body is:
+
+```json
+{
+  "serviceId": "web",
+  "checkId": "http",
+  "status": "passing",
+  "sequenceNumber": 7,
+  "observedAt": "2026-09-26T09:59:59Z",
+  "ttlMillis": 30000,
+  "required": true,
+  "output": "200 OK"
+}
+```
+
+`status` is `passing`, `warning`, `critical`, or `maintenance`
+(case-insensitive); `UNKNOWN` is server-derived and cannot be reported.
+`sequenceNumber` and `ttlMillis` must be positive, `observedAt` is an ISO-8601
+UTC instant, `required` defaults to `true`, and `output` is optional and limited
+to 4096 characters. Unknown fields and any other validation failure return
+`invalid_observation`.
+
+The receiving server stamps the command with its own receipt time, and the
+deadline is that receipt time plus `ttlMillis`; the agent clock never determines
+expiry. Success is returned only after the observation is committed and applied:
+
+```json
+{
+  "serviceId": "web",
+  "checkId": "http",
+  "nodeId": "node-a",
+  "tenantId": "default",
+  "namespace": "default",
+  "sequenceNumber": 7,
+  "status": "PASSING",
+  "deadline": "2026-09-26T10:00:30Z",
+  "accepted": true
+}
+```
+
+The response carries `X-Qraft-Index`, which is at least the index that applied the
+observation. Other outcomes are:
+
+- An exact replay of the accepted observation returns the same 200 body with the
+  original deadline, so a retry after an unknown outcome is safe.
+- An older sequence, or the same sequence with different content, returns HTTP
+  409 `stale_observation` with `currentSequenceNumber`, and state is unchanged.
+- An observation for a composite instance that is not registered returns HTTP 404
+  `service_not_found`.
+
+`GET /v1/health/service/{serviceName}` returns every instance of the service in
+deterministic identity order, whatever its health. Each entry pairs the stored
+registration with its replicated checks ordered by check ID:
+
+```json
+[
+  {
+    "service": {"serviceId": "web", "health": "PASSING", "...": "..."},
+    "checks": [
+      {
+        "checkId": "http",
+        "status": "PASSING",
+        "required": true,
+        "sequenceNumber": 7,
+        "observedAt": "2026-09-26T09:59:59Z",
+        "acceptedAt": "2026-09-26T10:00:00Z",
+        "deadline": "2026-09-26T10:00:30Z",
+        "expired": false,
+        "output": "200 OK"
+      }
+    ]
+  }
+]
+```
+
+`?passing` or `?passing=true` restricts the result to instances whose aggregate
+health is `PASSING`; `passing=false` is the unfiltered default. Any other query
+parameter or value returns `invalid_query`. Health reads never mutate the catalog.
+`GET /v1/catalog/service/{serviceName}` continues to return bare registrations.
 
 ### 12.2 Error envelope
 
