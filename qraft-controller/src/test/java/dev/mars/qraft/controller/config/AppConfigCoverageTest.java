@@ -24,6 +24,8 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -85,6 +87,40 @@ class AppConfigCoverageTest {
         assertEquals("/data/a", config.getRaftStoragePath());
         assertEquals("/var/log/qraft", config.getLoggingDirectory());
         assertDoesNotThrow(config::validate);
+    }
+
+    @Test
+    void parsesAPositiveLeaderExpiryEvaluationInterval() {
+        assertEquals(1_000, AppConfig.fromJson("{\"version\":1,\"server\":{}}").getHealthExpiryIntervalMs());
+        assertEquals(250, AppConfig.fromJson(
+                "{\"version\":1,\"server\":{\"health\":{\"expiryIntervalMs\":250}}}").getHealthExpiryIntervalMs());
+        for (String invalid : List.of("{\"expiryIntervalMs\":0}", "{\"expiryIntervalMs\":-5}",
+                "{\"expiryIntervalMs\":\"fast\"}", "{\"expiryIntervalMs\":1.5}", "{\"unexpected\":1}", "[]")) {
+            assertThrows(IllegalArgumentException.class, () -> AppConfig.fromJson(
+                    "{\"version\":1,\"server\":{\"health\":" + invalid + "}}"), invalid);
+        }
+    }
+
+    @Test
+    void parsesTheServerWideNodeMembershipPolicy() {
+        AppConfig defaults = AppConfig.fromJson("{\"version\":1,\"server\":{}}");
+        assertEquals(90_000, defaults.getNodeTtlMs());
+        assertEquals(Duration.ofHours(72).toMillis(), defaults.getNodeReapAfterMs(),
+                "a node left unreachable for 72 hours is reaped with its services unless configured otherwise");
+
+        AppConfig neverReap = AppConfig.fromJson(
+                "{\"version\":1,\"server\":{\"health\":{\"nodeReapAfterMs\":0}}}");
+        assertEquals(0, neverReap.getNodeReapAfterMs(), "zero explicitly turns reaping off");
+
+        AppConfig configured = AppConfig.fromJson(
+                "{\"version\":1,\"server\":{\"health\":{\"nodeTtlMs\":600,\"nodeReapAfterMs\":800}}}");
+        assertEquals(600, configured.getNodeTtlMs());
+        assertEquals(800, configured.getNodeReapAfterMs());
+        for (String invalid : List.of("{\"nodeTtlMs\":0}", "{\"nodeTtlMs\":-1}", "{\"nodeReapAfterMs\":-1}",
+                "{\"nodeTtlMs\":\"90s\"}")) {
+            assertThrows(IllegalArgumentException.class, () -> AppConfig.fromJson(
+                    "{\"version\":1,\"server\":{\"health\":" + invalid + "}}"), invalid);
+        }
     }
 
     @Test

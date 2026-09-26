@@ -29,7 +29,7 @@ import java.util.Set;
  * @version 1.0
  */
 public record HttpCheck(String serviceId, String checkId, URI url, Duration interval, Duration timeout,
-                        Duration ttl, boolean required) implements ProbeCheck {
+                        Duration ttl, boolean required, Duration deregisterAfter) implements ProbeCheck {
     public HttpCheck {
         HealthCheckDefinition.requireText(serviceId, "serviceId");
         HealthCheckDefinition.requireText(checkId, "checkId");
@@ -42,5 +42,12 @@ public record HttpCheck(String serviceId, String checkId, URI url, Duration inte
             throw new IllegalArgumentException("HTTP check url must not contain user information");
         }
         ProbeCheck.validateTiming(interval, timeout, ttl);
+        HealthCheckDefinition.requireNotNegative(deregisterAfter, "check deregisterAfter");
+    }
+
+    /** HTTP check whose service is never deregistered automatically. */
+    public HttpCheck(String serviceId, String checkId, URI url, Duration interval, Duration timeout,
+                     Duration ttl, boolean required) {
+        this(serviceId, checkId, url, interval, timeout, ttl, required, Duration.ZERO);
     }
 }

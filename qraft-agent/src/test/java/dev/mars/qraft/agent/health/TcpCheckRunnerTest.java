@@ -30,11 +30,12 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests for {@link ProbeCheckRunner} running a {@link TcpCheck} against real sockets and a
- * scripted connector at the transport boundary.
+ * scripted connector at the transport boundary, including the slow-connection warning threshold.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-26
@@ -132,6 +133,51 @@ class TcpCheckRunnerTest {
     }
 
     @Test
+    void aConnectionThatTakesAtLeastTheWarningThresholdIsAWarning() throws Exception {
+        ScriptedConnector connector = new ScriptedConnector();
+        runner = start(check(7000, Duration.ofMillis(300)), connector);
+
+        time.runDue();
+        time.advance(Duration.ofMillis(299));
+        connector.attempt(0).complete(null);
+        CheckResult justUnder = results.next();
+        assertEquals(CheckStatus.PASSING, justUnder.status());
+        assertEquals("TCP connect to 127.0.0.1:7000 succeeded", justUnder.output());
+
+        time.advance(INTERVAL);
+        time.advance(Duration.ofMillis(300));
+        connector.attempt(1).complete(null);
+        CheckResult atThreshold = results.next();
+        assertEquals(CheckStatus.WARNING, atThreshold.status());
+        assertEquals("TCP connect to 127.0.0.1:7000 took 300 ms, at or above the warning threshold of 300 ms",
+                atThreshold.output());
+
+        time.advance(INTERVAL);
+        connector.attempt(2).complete(null);
+        assertEquals(CheckStatus.PASSING, results.next().status(), "a fast connection recovers from the warning");
+    }
+
+    @Test
+    void withoutAWarningThresholdASlowConnectionStillPasses() throws Exception {
+        ScriptedConnector connector = new ScriptedConnector();
+        runner = start(check(7000), connector);
+
+        time.runDue();
+        time.advance(TIMEOUT.minusMillis(1));
+        connector.attempt(0).complete(null);
+
+        assertEquals(CheckStatus.PASSING, results.next().status());
+    }
+
+    @Test
+    void theWarningThresholdMustBeShorterThanTheTimeout() {
+        assertThrows(IllegalArgumentException.class, () -> check(7000, TIMEOUT),
+                "a connection that takes the whole timeout has already failed");
+        assertThrows(IllegalArgumentException.class, () -> check(7000, Duration.ofMillis(-1)));
+        assertEquals(Duration.ZERO, check(7000).warnAfter(), "no threshold unless one is configured");
+    }
+
+    @Test
     void aConnectorThatThrowsIsReportedAsCritical() throws Exception {
         runner = start(check(7000), (host, port, timeout) -> {
             throw new IllegalStateException("resolver unavailable");
@@ -145,13 +191,19 @@ class TcpCheckRunnerTest {
     }
 
     private HealthCheckRunner start(TcpCheck check, TcpConnector connector) {
-        HealthCheckRunner started = new ProbeCheckRunner(check, new TcpProbe(check, connector), time, time, results);
+        HealthCheckRunner started = new ProbeCheckRunner(check, new TcpProbe(check, connector, time), time, time,
+                results);
         started.start();
         return started;
     }
 
     private static TcpCheck check(int port) {
         return new TcpCheck("db", "tcp", "127.0.0.1", port, INTERVAL, TIMEOUT, Duration.ofSeconds(15), true);
+    }
+
+    private static TcpCheck check(int port, Duration warnAfter) {
+        return new TcpCheck("db", "tcp", "127.0.0.1", port, INTERVAL, TIMEOUT, Duration.ofSeconds(15), true,
+                Duration.ZERO, warnAfter);
     }
 
     private static final class ScriptedConnector implements TcpConnector {

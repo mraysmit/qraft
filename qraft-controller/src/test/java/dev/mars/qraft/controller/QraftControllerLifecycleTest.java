@@ -23,15 +23,22 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests that controller launch validates configuration before opening resources and closes acquired
- * resources when startup fails.
+ * Tests that controller launch validates configuration before opening resources, closes acquired
+ * resources when startup fails, and releases the runtime and telemetry off the thread that finished
+ * stopping the controller.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-24
@@ -71,6 +78,54 @@ class QraftControllerLifecycleTest {
 
         assertSame(expected, actual.getCause());
         assertEquals(1, resource.shutdowns.get());
+    }
+
+    @Test
+    void theRuntimeAndTelemetryAreReleasedOffTheThreadThatFinishedStoppingTheController() throws Exception {
+        CompletableFuture<Void> controllerStopped = new CompletableFuture<>();
+        CountDownLatch stoppingThreadReturned = new CountDownLatch(1);
+        CompletableFuture<Boolean> runtimeSawTheStoppingThreadReturn = new CompletableFuture<>();
+        AtomicBoolean telemetryClosed = new AtomicBoolean();
+
+        // Like JavaRuntime.shutdown when the stop finished on one of its workers: it waits for that thread.
+        CompletableFuture<Void> released = QraftControllerApplication.releaseAfter(controllerStopped, () -> {
+            runtimeSawTheStoppingThreadReturn.complete(awaitQuietly(stoppingThreadReturned));
+            return CompletableFuture.completedFuture(null);
+        }, () -> telemetryClosed.set(true));
+        Thread stoppingThread = Thread.ofPlatform().start(() -> {
+            controllerStopped.complete(null);
+            stoppingThreadReturned.countDown();
+        });
+
+        assertTrue(runtimeSawTheStoppingThreadReturn.get(30, TimeUnit.SECONDS),
+                "the runtime shutdown ran on the thread it was waiting for");
+        released.get(10, TimeUnit.SECONDS);
+        assertTrue(telemetryClosed.get());
+        stoppingThread.join(10_000);
+    }
+
+    @Test
+    void everyReleaseStepRunsAndTheFirstFailureCarriesTheOthers() {
+        IllegalStateException controllerFailure = new IllegalStateException("controller");
+        IllegalStateException runtimeFailure = new IllegalStateException("runtime");
+        IllegalStateException telemetryFailure = new IllegalStateException("telemetry");
+
+        ExecutionException error = assertThrows(ExecutionException.class, () ->
+                QraftControllerApplication.releaseAfter(CompletableFuture.failedFuture(controllerFailure),
+                        () -> CompletableFuture.failedFuture(runtimeFailure),
+                        () -> { throw telemetryFailure; }).get(10, TimeUnit.SECONDS));
+
+        assertSame(controllerFailure, error.getCause());
+        assertArrayEquals(new Throwable[]{runtimeFailure, telemetryFailure}, controllerFailure.getSuppressed());
+    }
+
+    private static boolean awaitQuietly(CountDownLatch latch) {
+        try {
+            return latch.await(10, TimeUnit.SECONDS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
     }
 
     private Path validConfiguration() throws Exception {

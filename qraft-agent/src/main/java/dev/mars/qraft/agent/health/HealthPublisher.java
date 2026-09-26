@@ -166,7 +166,8 @@ public final class HealthPublisher implements CheckResultListener {
                         if (current) {
                             unconfirmed = new CheckObservation(observation.serviceId(), observation.checkId(),
                                     observation.status(), ++lastSequence, observation.observedAt(),
-                                    observation.ttl(), observation.required(), observation.output());
+                                    observation.ttl(), observation.required(), observation.output(),
+                                    observation.deregisterAfter());
                             if (pending == null) send(unconfirmed);
                         }
                     }
@@ -175,7 +176,7 @@ public final class HealthPublisher implements CheckResultListener {
                     }
                     case ObservationOutcome.Rejected rejected -> {
                         if (!current) break;
-                        if ("service_not_found".equals(rejected.code())) {
+                        if (retriedWhileRegistrationConverges(rejected.code())) {
                             scheduleRetry();
                         } else {
                             LOGGER.warn("Health observation rejected: service={}, check={}, sequence={}, code={}, "
@@ -211,6 +212,14 @@ public final class HealthPublisher implements CheckResultListener {
             if (retry != null) retry.cancel();
             retry = null;
         }
+    }
+
+    /**
+     * A service or check can be unknown only because this agent's (re)registration has not committed
+     * yet, so these rejections are retried rather than dropped.
+     */
+    private static boolean retriedWhileRegistrationConverges(String code) {
+        return "service_not_found".equals(code) || "check_not_declared".equals(code);
     }
 
     private record CheckKey(String serviceId, String checkId) {

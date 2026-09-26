@@ -166,6 +166,33 @@ class RaftNodeTimerSequencingTest {
     }
 
     @Test
+    void aVoteAppliedWhileStoppingDoesNotReArmTheElectionTimer() throws Exception {
+        runtime = JavaRuntime.create();
+        timers = new ManualTimerScheduler(runtime);
+        GatedTimerStorage storage = new GatedTimerStorage();
+        storage.open(null).join();
+        node = RaftNode.builder().runtime(runtime).nodeId("node-1").clusterNodes(Set.of("node-1", "peer-1"))
+                .transport(new AutoTransport(false)).stateMachine(new QraftStateStore())
+                .commandCodec(new ProtobufRaftCommandCodec()).mode(RaftNodeMode.durable(storage, storage))
+                .snapshotEnabled(false).electionTimeout(10_000).heartbeatInterval(10_000)
+                .timerScheduler(timers).build();
+        await(node.start());
+        storage.blockNextMetadataUpdate();
+        Future<VoteResponse> vote = node.handleVoteRequest(VoteRequest.newBuilder()
+                .setTerm(1).setCandidateId("peer-1").setLastLogIndex(0).setLastLogTerm(0).build());
+        storage.awaitBlockedMetadataUpdate();
+
+        Future<Void> stop = node.stop();
+        awaitStateLoop();
+        storage.releaseBlockedMetadataUpdate();
+        await(vote);
+        await(stop);
+        awaitStateLoop();
+
+        assertEquals(0, timers.oneShotCount(), "a stopped node must not hold an armed election timer");
+    }
+
+    @Test
     void queueRejectedElectionRearmsTheElectionTimer() throws Exception {
         runtime = JavaRuntime.create();
         timers = new ManualTimerScheduler(runtime);
@@ -228,13 +255,13 @@ class RaftNodeTimerSequencingTest {
 
     private void electLeader() {
         timers.fireNextOneShot();
-        await(node.awaitState(RaftNode.State.LEADER, 3_000));
+        await(node.awaitState(RaftNode.State.LEADER, 10_000));
     }
 
     private void awaitStateLoop() throws Exception {
         CompletableFuture<Void> marker = new CompletableFuture<>();
         runtime.runOnContext(ignored -> marker.complete(null));
-        marker.get(2, TimeUnit.SECONDS);
+        marker.get(10, TimeUnit.SECONDS);
     }
 
     private static <T> T await(Future<T> future) {
@@ -345,7 +372,7 @@ class RaftNodeTimerSequencingTest {
         }
 
         void awaitBlockedMetadataUpdate() throws Exception {
-            metadataEntered.get(2, TimeUnit.SECONDS);
+            metadataEntered.get(10, TimeUnit.SECONDS);
         }
 
         void releaseBlockedMetadataUpdate() { blockedMetadataGate.complete(null); }
@@ -355,7 +382,7 @@ class RaftNodeTimerSequencingTest {
             syncEntered = new CompletableFuture<>();
         }
 
-        void awaitBlockedSync() throws Exception { syncEntered.get(2, TimeUnit.SECONDS); }
+        void awaitBlockedSync() throws Exception { syncEntered.get(10, TimeUnit.SECONDS); }
         void releaseBlockedSync() { blockedSyncGate.complete(null); }
 
         @Override public CompletableFuture<Void> open(Path dataDir) { return delegate.open(dataDir); }

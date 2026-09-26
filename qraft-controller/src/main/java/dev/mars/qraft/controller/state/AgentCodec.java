@@ -16,6 +16,8 @@
 
 package dev.mars.qraft.controller.state;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.mars.qraft.agent.AgentCapabilities;
 import dev.mars.qraft.agent.AgentInfo;
 import dev.mars.qraft.agent.AgentNetworkInfo;
@@ -66,6 +68,11 @@ final class AgentCodec {
                 builder.setType(AgentCommandType.AGENT_CMD_UPDATE_CAPABILITIES);
                 builder.setNewCapabilities(toProto(c.newCapabilities()));
             }
+            case AgentCommand.Expire e -> {
+                builder.setType(AgentCommandType.AGENT_CMD_EXPIRE);
+                builder.setExpectedLastContactEpochMs(e.expectedLastContact().toEpochMilli());
+                builder.setReap(e.reap());
+            }
             case AgentCommand.Heartbeat h -> {
                 builder.setType(AgentCommandType.AGENT_CMD_HEARTBEAT);
                 builder.setSequenceNumber(h.sequenceNumber());
@@ -80,8 +87,8 @@ final class AgentCodec {
     }
 
     static AgentCommand fromProto(AgentCommandProto proto) {
-        Instant timestamp = proto.getTimestampEpochMs() > 0
-                ? Instant.ofEpochMilli(proto.getTimestampEpochMs()) : Instant.now();
+        // Decoding must never read the local clock: every replica and every replay must see one value.
+        Instant timestamp = Instant.ofEpochMilli(proto.getTimestampEpochMs());
         AgentStatus newStatus = proto.getNewStatus() != AgentStatusProto.AGENT_STATUS_UNSPECIFIED
                 ? fromProto(proto.getNewStatus()) : null;
         return switch (proto.getType()) {
@@ -98,8 +105,28 @@ final class AgentCodec {
             case AGENT_CMD_HEARTBEAT -> new AgentCommand.Heartbeat(
                     proto.getAgentId(), newStatus, timestamp, proto.getSequenceNumber(),
                     proto.getRegistrationId().isEmpty() ? null : proto.getRegistrationId());
+            case AGENT_CMD_EXPIRE -> new AgentCommand.Expire(proto.getAgentId(),
+                    Instant.ofEpochMilli(proto.getExpectedLastContactEpochMs()), proto.getReap(), timestamp);
             default -> throw new IllegalArgumentException("Unknown AgentCommandType: " + proto.getType());
         };
+    }
+
+    private static final ObjectMapper CAPABILITY_JSON = new ObjectMapper();
+
+    private static String toJson(Object value) {
+        try {
+            return CAPABILITY_JSON.writeValueAsString(value);
+        } catch (JsonProcessingException error) {
+            throw new IllegalArgumentException("Custom capability value is not JSON-serializable", error);
+        }
+    }
+
+    private static Object fromJson(String json) {
+        try {
+            return CAPABILITY_JSON.readValue(json, Object.class);
+        } catch (JsonProcessingException error) {
+            throw new IllegalArgumentException("Malformed custom capability value", error);
+        }
     }
 
     // ── Domain models ───────────────────────────────────────────
@@ -124,8 +151,8 @@ final class AgentCodec {
     private static AgentInfo fromProto(AgentInfoProto proto) {
         AgentInfo info = new AgentInfo(
                 proto.getAgentId(),
-                proto.getHostname(),
-                proto.getAddress(),
+                proto.hasHostname() ? proto.getHostname() : null,
+                proto.hasAddress() ? proto.getAddress() : null,
                 proto.getPort());
         if (proto.hasCapabilities()) {
             info.setCapabilities(fromProto(proto.getCapabilities()));
@@ -133,21 +160,15 @@ final class AgentCodec {
         if (proto.getStatus() != AgentStatusProto.AGENT_STATUS_UNSPECIFIED) {
             info.setStatus(fromProto(proto.getStatus()));
         }
-        if (proto.getRegistrationTimeEpochMs() > 0) {
-            info.setRegistrationTime(Instant.ofEpochMilli(proto.getRegistrationTimeEpochMs()));
-        }
+        // The AgentInfo constructor stamps the local clock; a decoded value must come from the entry only.
+        info.setRegistrationTime(proto.getRegistrationTimeEpochMs() > 0
+                ? Instant.ofEpochMilli(proto.getRegistrationTimeEpochMs()) : null);
         if (proto.getLastHeartbeatEpochMs() > 0) {
             info.setLastHeartbeat(Instant.ofEpochMilli(proto.getLastHeartbeatEpochMs()));
         }
-        if (!proto.getVersion().isEmpty()) {
-            info.setVersion(proto.getVersion());
-        }
-        if (!proto.getRegion().isEmpty()) {
-            info.setRegion(proto.getRegion());
-        }
-        if (!proto.getDatacenter().isEmpty()) {
-            info.setDatacenter(proto.getDatacenter());
-        }
+        info.setVersion(proto.hasVersion() ? proto.getVersion() : null);
+        info.setRegion(proto.hasRegion() ? proto.getRegion() : null);
+        info.setDatacenter(proto.hasDatacenter() ? proto.getDatacenter() : null);
         if (proto.getMetadataCount() > 0) {
             info.setMetadata(new HashMap<>(proto.getMetadataMap()));
         }
@@ -159,7 +180,7 @@ final class AgentCodec {
                 .addAllSupportedServices(caps.getSupportedServices());
         Optional.ofNullable(caps.getAvailableRegions()).ifPresent(builder::addAllAvailableRegions);
         Optional.ofNullable(caps.getCustomCapabilities()).ifPresent(cc ->
-                cc.forEach((k, v) -> builder.putCustomCapabilities(k, v != null ? v.toString() : "")));
+                cc.forEach((k, v) -> builder.putCustomCapabilitiesJson(k, toJson(v))));
         Optional.ofNullable(caps.getSystemInfo()).ifPresent(si -> builder.setSystemInfo(toProto(si)));
         Optional.ofNullable(caps.getNetworkInfo()).ifPresent(ni -> builder.setNetworkInfo(toProto(ni)));
         return builder.build();
@@ -169,7 +190,11 @@ final class AgentCodec {
         AgentCapabilities caps = new AgentCapabilities();
         caps.setSupportedServices(new HashSet<>(proto.getSupportedServicesList()));
         caps.setAvailableRegions(new HashSet<>(proto.getAvailableRegionsList()));
-        if (proto.getCustomCapabilitiesCount() > 0) {
+        if (proto.getCustomCapabilitiesJsonCount() > 0) {
+            Map<String, Object> values = new HashMap<>();
+            proto.getCustomCapabilitiesJsonMap().forEach((key, json) -> values.put(key, fromJson(json)));
+            caps.setCustomCapabilities(values);
+        } else if (proto.getCustomCapabilitiesCount() > 0) {
             caps.setCustomCapabilities(new HashMap<>(proto.getCustomCapabilitiesMap()));
         }
         if (proto.hasSystemInfo()) {
@@ -198,9 +223,9 @@ final class AgentCodec {
 
     private static AgentSystemInfo fromProto(AgentSystemInfoProto proto) {
         AgentSystemInfo info = new AgentSystemInfo();
-        info.setOperatingSystem(proto.getOperatingSystem());
-        info.setArchitecture(proto.getArchitecture());
-        info.setJavaVersion(proto.getJavaVersion());
+        info.setOperatingSystem(proto.hasOperatingSystem() ? proto.getOperatingSystem() : null);
+        info.setArchitecture(proto.hasArchitecture() ? proto.getArchitecture() : null);
+        info.setJavaVersion(proto.hasJavaVersion() ? proto.getJavaVersion() : null);
         info.setTotalMemory(proto.getTotalMemory());
         info.setAvailableMemory(proto.getAvailableMemory());
         info.setTotalDiskSpace(proto.getTotalDiskSpace());
@@ -228,14 +253,14 @@ final class AgentCodec {
 
     private static AgentNetworkInfo fromProto(AgentNetworkInfoProto proto) {
         AgentNetworkInfo info = new AgentNetworkInfo();
-        info.setPublicIpAddress(proto.getPublicIpAddress());
-        info.setPrivateIpAddress(proto.getPrivateIpAddress());
+        info.setPublicIpAddress(proto.hasPublicIpAddress() ? proto.getPublicIpAddress() : null);
+        info.setPrivateIpAddress(proto.hasPrivateIpAddress() ? proto.getPrivateIpAddress() : null);
         info.setNetworkInterfaces(new ArrayList<>(proto.getNetworkInterfacesList()));
         info.setBandwidthCapacity(proto.getBandwidthCapacity());
         info.setCurrentBandwidthUsage(proto.getCurrentBandwidthUsage());
         info.setLatencyMs(proto.getLatencyMs());
         info.setPacketLossPercentage(proto.getPacketLossPercentage());
-        info.setConnectionType(proto.getConnectionType());
+        info.setConnectionType(proto.hasConnectionType() ? proto.getConnectionType() : null);
         info.setNatTraversal(proto.getIsNatTraversal());
         info.setFirewallPorts(new ArrayList<>(proto.getFirewallPortsList()));
         return info;

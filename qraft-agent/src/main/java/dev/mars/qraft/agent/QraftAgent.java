@@ -30,6 +30,7 @@ import dev.mars.qraft.agent.health.LocalStatusReporter;
 import dev.mars.qraft.agent.health.RequiredCheckReadiness;
 import dev.mars.qraft.agent.health.SocketTcpConnector;
 import dev.mars.qraft.catalog.ServiceDefinition;
+import dev.mars.qraft.concurrent.Deadlines;
 import dev.mars.qraft.agent.service.AgentRegistrationClient;
 import dev.mars.qraft.agent.service.HealthService;
 import dev.mars.qraft.agent.service.HeartbeatService;
@@ -79,6 +80,7 @@ public final class QraftAgent implements AutoCloseable {
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     private final ScheduledExecutorService checkScheduler = Executors.newSingleThreadScheduledExecutor();
     private final HttpClient checkHttpClient = HttpClient.newHttpClient();
+    private final HttpClient controllerHttpClient = HttpClient.newHttpClient();
     private final LocalHealthChecks localChecks;
     private final HealthPublisher healthPublisher;
     private final AtomicBoolean running = new AtomicBoolean();
@@ -103,7 +105,7 @@ public final class QraftAgent implements AutoCloseable {
         this.config = config;
         this.retryPolicy = retryPolicy;
         ControllerContactTracker contactTracker = new ControllerContactTracker(clock);
-        this.controllerClient = new HttpCatalogClient(HttpClient.newHttpClient(), new ObjectMapper(),
+        this.controllerClient = new HttpCatalogClient(controllerHttpClient, new ObjectMapper(),
                 config.getControllerUrls(), config.getAgentId(), config.getTenant(), config.getNamespace(),
                 config.getDatacenter(), config.getRegion(), Duration.ofMillis(config.getRequestTimeoutMs()),
                 contactTracker);
@@ -173,6 +175,14 @@ public final class QraftAgent implements AutoCloseable {
         registrationRetryNumber.set(0);
         serviceReconciler.trigger();
         localChecks.start();
+        try {
+            schedulePeriodicWork(agent);
+        } catch (RejectedExecutionException ignored) {
+            // Shutdown stopped the scheduler after the running check; there is nothing left to schedule.
+        }
+    }
+
+    private void schedulePeriodicWork(AgentInfo agent) {
         if (reconciliationScheduled.compareAndSet(false, true)) {
             scheduler.scheduleAtFixedRate(() -> {
                         if (running.get()) serviceReconciler.trigger();
@@ -210,7 +220,7 @@ public final class QraftAgent implements AutoCloseable {
             return nodeShutdown.handle((nodeRemoved, failure) ->
                     services.complete() && failure == null && Boolean.TRUE.equals(nodeRemoved));
         });
-        CompletableFuture<Boolean> bounded = graceful.orTimeout(
+        CompletableFuture<Boolean> bounded = Deadlines.bound(graceful,
                 config.getShutdownTimeoutMs(), TimeUnit.MILLISECONDS);
         shutdownFuture = bounded.handle((complete, failure) -> {
             boolean succeeded = failure == null && Boolean.TRUE.equals(complete);
@@ -223,7 +233,7 @@ public final class QraftAgent implements AutoCloseable {
                         + "automatic expiry may be required");
             }
             return succeeded;
-        });
+        }).thenCompose(succeeded -> awaitQuiescence().thenApply(quiet -> succeeded && quiet));
         return shutdownFuture;
     }
 
@@ -231,6 +241,22 @@ public final class QraftAgent implements AutoCloseable {
         CompletableFuture<Void> delay = pendingRetryDelay.getAndSet(null);
         if (delay != null) delay.cancel(false);
         scheduler.shutdownNow();
+    }
+
+    /**
+     * Completes once no agent-owned thread or client can still run: a scheduled task that was mid-run
+     * at shutdown has returned, so nothing is sent after shutdown completes.
+     */
+    private CompletableFuture<Boolean> awaitQuiescence() {
+        return Quiescence.shutdownNowAndAwait(List.of(scheduler, checkScheduler),
+                        List.of(checkHttpClient, controllerHttpClient), Duration.ofMillis(config.getShutdownTimeoutMs()))
+                .thenApply(quiet -> {
+                    if (!quiet) {
+                        LOGGER.warn("Agent threads did not terminate within {}ms of shutdown",
+                                config.getShutdownTimeoutMs());
+                    }
+                    return quiet;
+                });
     }
 
     private void finishShutdown() {
@@ -248,9 +274,10 @@ public final class QraftAgent implements AutoCloseable {
         return localChecks.reporter(serviceId, checkId);
     }
     ServiceReconciler serviceReconciler() { return serviceReconciler; }
-    boolean resourcesTerminated() {
-        return scheduler.isTerminated() && checkScheduler.isTerminated() && controllerClient.isClosed()
-                && !healthService.isHealthy();
+    /** True once shutdown has completed and every agent-owned thread, client, and listener has stopped. */
+    public boolean isTerminated() {
+        return scheduler.isTerminated() && checkScheduler.isTerminated() && checkHttpClient.isTerminated()
+                && controllerHttpClient.isTerminated() && controllerClient.isClosed() && !healthService.isHealthy();
     }
     @Override public void close() { shutdown().join(); }
 

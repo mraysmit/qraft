@@ -243,6 +243,12 @@ public final class ServiceReconciler {
             append(canonical, key);
             append(canonical, value);
         });
+        // Declared checks are appended only when present, so definitions without checks keep their
+        // fingerprint; the marker separates them from tags and metadata.
+        if (!definition.checkIds().isEmpty()) {
+            append(canonical, "checks:" + definition.checkIds().size());
+            definition.checkIds().forEach(value -> append(canonical, value));
+        }
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
                     .digest(canonical.toString().getBytes(StandardCharsets.UTF_8)));

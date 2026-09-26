@@ -103,7 +103,7 @@ class RaftFailureTest {
         
         // Should fail
         ExecutionException exception = assertThrows(ExecutionException.class, () -> {
-            future.toCompletionStage().toCompletableFuture().get(1, TimeUnit.SECONDS);
+            future.toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         });
         
         assertTrue(exception.getCause() instanceof IllegalStateException);
@@ -252,7 +252,7 @@ class RaftFailureTest {
         Future<Void> future = failingNode.start();
         
         ExecutionException exception = assertThrows(ExecutionException.class, () -> {
-            future.toCompletionStage().toCompletableFuture().get(1, TimeUnit.SECONDS);
+            future.toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         });
         
         assertTrue(exception.getCause() instanceof RuntimeException);

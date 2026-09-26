@@ -22,7 +22,10 @@ import dev.mars.qraft.catalog.ServiceInstance;
 import dev.mars.qraft.catalog.ServiceInstanceId;
 
 import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
 import java.util.Objects;
+import java.util.TreeSet;
 
 /**
  * Mutations applied to the replicated service catalog.
@@ -35,9 +38,29 @@ public sealed interface CatalogCommand extends RaftCommand
         permits CatalogCommand.Register, CatalogCommand.Deregister,
                 CatalogCommand.ObserveHealth, CatalogCommand.ExpireHealth {
 
-    record Register(ServiceInstance instance) implements CatalogCommand {
+    /**
+     * Registers or replaces an instance. {@code declaredCheckIds} lists the checks the registering
+     * agent will publish, sorted and distinct; replicated checks outside the list are pruned and later
+     * observations for them are rejected. {@code null} means the registration declares nothing, as
+     * older agents and log entries do, and existing checks are kept.
+     */
+    record Register(ServiceInstance instance, List<String> declaredCheckIds) implements CatalogCommand {
         public Register {
             Objects.requireNonNull(instance, "instance");
+            if (declaredCheckIds != null) {
+                TreeSet<String> canonical = new TreeSet<>();
+                for (String checkId : declaredCheckIds) {
+                    if (checkId == null || checkId.isBlank()) {
+                        throw new IllegalArgumentException("declared check identifiers must not be blank");
+                    }
+                    canonical.add(checkId);
+                }
+                declaredCheckIds = List.copyOf(canonical);
+            }
+        }
+
+        public boolean declaresChecks() {
+            return declaredCheckIds != null;
         }
     }
 
@@ -80,7 +103,11 @@ public sealed interface CatalogCommand extends RaftCommand
     }
 
     static CatalogCommand register(ServiceInstance instance) {
-        return new Register(instance);
+        return new Register(instance, null);
+    }
+
+    static CatalogCommand register(ServiceInstance instance, Collection<String> declaredCheckIds) {
+        return new Register(instance, List.copyOf(Objects.requireNonNull(declaredCheckIds, "declaredCheckIds")));
     }
 
     static CatalogCommand deregister(String serviceId) {

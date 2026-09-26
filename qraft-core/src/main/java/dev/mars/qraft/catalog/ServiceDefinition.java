@@ -16,8 +16,10 @@
 
 package dev.mars.qraft.catalog;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeSet;
 
 /**
  * Client-owned declaration of a service that an agent should publish.
@@ -27,7 +29,8 @@ import java.util.Map;
  * @version 1.0
  */
 public record ServiceDefinition(String id, String name, String address, int port,
-                                List<String> tags, Map<String, String> metadata, boolean enabled) {
+                                List<String> tags, Map<String, String> metadata, boolean enabled,
+                                List<String> checkIds) {
     public ServiceDefinition {
         id = required("service id", id);
         name = required("service name", name);
@@ -44,6 +47,29 @@ public record ServiceDefinition(String id, String name, String address, int port
                 || entry.getKey().isBlank() || entry.getValue() == null)) {
             throw new IllegalArgumentException("service metadata keys must be non-blank and values non-null");
         }
+        checkIds = canonicalCheckIds(checkIds == null ? List.of() : checkIds);
+    }
+
+    /** Definition that declares no health checks. */
+    public ServiceDefinition(String id, String name, String address, int port,
+                             List<String> tags, Map<String, String> metadata, boolean enabled) {
+        this(id, name, address, port, tags, metadata, enabled, List.of());
+    }
+
+    /** Returns this definition declaring exactly the given check identifiers. */
+    public ServiceDefinition withCheckIds(Collection<String> declaredCheckIds) {
+        return new ServiceDefinition(id, name, address, port, tags, metadata, enabled, List.copyOf(declaredCheckIds));
+    }
+
+    private static List<String> canonicalCheckIds(Collection<String> values) {
+        TreeSet<String> canonical = new TreeSet<>();
+        for (String value : values) {
+            if (value == null || value.isBlank()) {
+                throw new IllegalArgumentException("service check identifiers must not be blank");
+            }
+            canonical.add(value);
+        }
+        return List.copyOf(canonical);
     }
 
     private static String required(String name, String value) {

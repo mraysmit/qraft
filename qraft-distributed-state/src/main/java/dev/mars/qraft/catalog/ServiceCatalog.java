@@ -33,7 +33,7 @@ import java.util.concurrent.ConcurrentMap;
  * @since 2026-09-09
  * @version 1.0
  */
-public final class ServiceCatalog {
+public final class ServiceCatalog implements ServiceCatalogView {
 
     private static final Comparator<ServiceInstance> INSTANCE_ORDER =
             Comparator.comparing(ServiceInstance::tenantId)
@@ -53,6 +53,7 @@ public final class ServiceCatalog {
         return instances.remove(identity) != null;
     }
 
+    @Override
     public Optional<ServiceInstance> find(ServiceInstanceId identity) {
         Objects.requireNonNull(identity, "identity");
         return Optional.ofNullable(instances.get(identity));
@@ -81,6 +82,7 @@ public final class ServiceCatalog {
         return removed[0];
     }
 
+    @Override
     public List<String> services() {
         return instances.values().stream()
                 .map(ServiceInstance::serviceName)
@@ -89,6 +91,7 @@ public final class ServiceCatalog {
                 .toList();
     }
 
+    @Override
     public List<ServiceInstance> instances(String serviceName) {
         Objects.requireNonNull(serviceName, "serviceName");
         return instances.values().stream()
@@ -98,6 +101,7 @@ public final class ServiceCatalog {
     }
 
     /** Returns every registration in deterministic service-id order. */
+    @Override
     public List<ServiceInstance> instances() {
         return instances.values().stream()
                 .sorted(INSTANCE_ORDER)

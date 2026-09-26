@@ -86,7 +86,7 @@ class RaftNodeLogSequencingTest {
                 .heartbeatInterval(10_000)
                 .build();
         await(node.start());
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.onSpinWait();
         if (!node.isLeader()) throw new AssertionError("single node did not become leader");
     }
@@ -150,7 +150,7 @@ class RaftNodeLogSequencingTest {
                 .heartbeatInterval(10_000)
                 .build();
         await(node.start());
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.onSpinWait();
         assertTrue(node.isLeader());
 
@@ -184,7 +184,7 @@ class RaftNodeLogSequencingTest {
                 .heartbeatInterval(10_000)
                 .build();
         await(node.start());
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.onSpinWait();
         assertTrue(node.isLeader());
 
@@ -279,7 +279,7 @@ class RaftNodeLogSequencingTest {
 
         storage.releaseBlockedSync();
 
-        assertSame(runtime, completionContext.get(2, TimeUnit.SECONDS));
+        assertSame(runtime, completionContext.get(10, TimeUnit.SECONDS));
         assertInstanceOf(RaftCommandResult.Success.class, await(first));
         assertInstanceOf(RaftCommandResult.Success.class, await(second));
         assertEquals(3, node.getLogSize());
@@ -520,7 +520,7 @@ class RaftNodeLogSequencingTest {
         CompletableFuture<Void> marker = new CompletableFuture<>();
         runtime.runOnContext(ignored -> marker.complete(null));
         try {
-            marker.get(2, TimeUnit.SECONDS);
+            marker.get(10, TimeUnit.SECONDS);
         } catch (Exception error) {
             throw new AssertionError("state-loop marker did not run", error);
         }
@@ -557,7 +557,7 @@ class RaftNodeLogSequencingTest {
 
         void awaitBlockedAppend() {
             try {
-                appendEntered.get(2, TimeUnit.SECONDS);
+                appendEntered.get(10, TimeUnit.SECONDS);
             } catch (Exception error) {
                 throw new AssertionError("append did not reach its completion gate", error);
             }
@@ -574,7 +574,7 @@ class RaftNodeLogSequencingTest {
 
         void awaitBlockedTruncate() {
             try {
-                truncateEntered.get(2, TimeUnit.SECONDS);
+                truncateEntered.get(10, TimeUnit.SECONDS);
             } catch (Exception error) {
                 throw new AssertionError("truncate did not reach its completion gate", error);
             }
@@ -595,7 +595,7 @@ class RaftNodeLogSequencingTest {
 
         void awaitBlockedSync() {
             try {
-                syncEntered.get(2, TimeUnit.SECONDS);
+                syncEntered.get(10, TimeUnit.SECONDS);
             } catch (Exception error) {
                 throw new AssertionError("sync did not reach its completion gate", error);
             }

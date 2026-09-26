@@ -189,7 +189,12 @@ controller restart and reconciliation, deregistration, and ordered shutdown.
 
 Server mode currently owns:
 
-- Raft membership, elections, replication, and snapshots.
+- Raft membership, elections, replication, snapshots, and check-quorum: a leader
+  steps down in its current term, failing uncommitted writes, when a majority
+  including itself has not acknowledged any request for one election timeout's
+  worth of heartbeat rounds. Counting applied rounds rather than wall-clock time
+  means a delayed state loop cannot cause a false step-down, and a single-node
+  cluster never steps down.
 - Durable Raft storage.
 - The replicated key/value, service-catalog, and health-check state machine.
 - Internal Raft gRPC transport.
@@ -209,8 +214,12 @@ migration.
 `PUT /v1/agent/check/observe` stamps each observation with the receiving server's
 time before proposing it. `GET /v1/health/service/{serviceName}` returns each
 instance with its replicated checks and can be filtered to passing instances
-(section 12.1.1). No server evaluates deadlines yet, so an unrenewed check stays
-in its last accepted state until leader-owned expiry is implemented.
+(section 12.1.1).
+
+Only the leader evaluates deadlines (section 9.1). It proposes explicit expiry
+commands, and followers apply them only as committed log entries. A registration
+may declare its check IDs; re-registering prunes undeclared checks and rejects
+later observations for them.
 
 ### 4.3 Client agent
 
@@ -306,8 +315,6 @@ reported once.
 - Runtime configuration reload is not implemented, so changing or removing a
   service in the JSON file requires a client restart.
 - TCP checks have no warning outcome: a connection either succeeds or fails.
-- Automatic server-side expiry remains necessary because an agent can terminate
-  without completing graceful deregistration.
 
 Catalog identity and the registration boundary were corrected in Tranches 1 and
 2. Instances are keyed by `(tenantId, namespace, nodeId, serviceId)`, registration
@@ -542,6 +549,60 @@ TTL expiry and automatic deregistration must be deterministic. A leader evaluate
 deadlines and proposes explicit replicated expiration commands; followers do not
 mutate catalog state from local timers.
 
+### 9.1 Leader-owned expiry
+
+`LeaderHealthExpiry` runs only while its server is the Raft leader. It evaluates
+on gaining leadership, then at the sooner of `server.health.expiryIntervalMs`
+(default 1000) and the next due instant. Losing leadership cancels evaluation and
+forgets in-flight proposals, and completions from an earlier term are ignored. A
+due command is not proposed again while it is in flight. Each proposal times out
+after five seconds so a lost proposal is re-evaluated.
+
+The side-effect-free `HealthExpiryEvaluator` applies these rules:
+
+- **Grace after failover.** Agents cannot renew while there is no leader, and
+  servers' clocks may differ. A check is therefore due only at the later of its
+  stored deadline and the current leader's acquisition time plus the check's TTL.
+  A failover never mass-expires checks, and a leader whose clock runs ahead still
+  waits a full TTL.
+- **Exact identity.** Every command names the stored sequence number and
+  deadline. A renewal committed first turns the expiry into a no-op, and an
+  expiry committed first is superseded by the renewal.
+- **Two phases.** An unrenewed check is first marked expired, which makes a
+  required check critical. If its latest observation carries a positive
+  `deregisterAfterMillis`, the leader deregisters the instance that long after
+  the effective deadline; zero means never. The state machine accepts a
+  deregistering command only for a check that is already expired.
+- **Saturation.** Deadlines beyond the representable time range never fall due.
+
+Deregistration removes the instance, its checks, and its declared check set. An
+agent that is still alive re-registers the instance through reconciliation.
+
+### 9.2 Node membership expiry
+
+The same leader-only component expires silent nodes under a server-wide policy:
+`server.health.nodeTtlMs` (default 90000) and `server.health.nodeReapAfterMs`
+(default 259200000, 72 hours, Consul's reconnect window; 0 never reaps). Node registration and heartbeat times are
+stamped with the receiving server's clock; the timestamp an agent sends is
+ignored. All replicated agent command times are stored in milliseconds, so the
+leader and its followers hold identical values that expiry can match exactly.
+
+- A node's last contact is its last heartbeat, or its registration time before
+  its first heartbeat. It is due at the later of `lastContact + nodeTtlMs` and
+  `leaderSince + nodeTtlMs`, the same failover grace used for checks.
+- The first phase marks the node `UNREACHABLE`. A later heartbeat restores it to
+  `HEALTHY`.
+- With a positive reap delay, an unreachable node is reaped that long after its
+  effective deadline. Reaping removes the node entry and every service instance
+  whose node is that node, in every tenant and namespace, together with their
+  checks and declared check sets. This removes the services of a crashed agent
+  even when they have no checks.
+- Both phases name the stored last contact, so a heartbeat or re-registration
+  committed first makes a stale command a no-op. Reaping applies only to a node
+  that is already unreachable.
+- A node command differing only in its proposal time is the same in-flight
+  expiry and is not proposed twice.
+
 Discovery returns all states by default only where the API contract says so. A
 healthy-service query filters to eligible states without mutating the catalog.
 
@@ -612,12 +673,18 @@ The registration body is:
   "metadata": {"team": "platform"},
   "datacenter": "dc-1",
   "region": "eu-west",
-  "enabled": true
+  "enabled": true,
+  "checks": ["http", "tcp"]
 }
 ```
 
 `tags` and `metadata` default to empty collections, while `datacenter` and
-`region` default to empty strings. Unknown fields are rejected with
+`region` default to empty strings. `checks` optionally declares the check IDs the
+agent will publish for this instance. A registration that declares checks prunes
+any replicated check not in the list and makes the server reject later
+observations for undeclared checks; an empty list declares that there are none.
+Omitting `checks`, as older agents do, keeps the existing checks and accepts any
+check ID. The agent always declares the checks configured for the service. Unknown fields are rejected with
 `invalid_registration`. For one compatibility window only, a `health` field is
 recognized but ignored; the stored health is always initialized to `UNKNOWN`.
 No aliases are currently accepted.
@@ -654,7 +721,8 @@ A renewal is simply a newer observation of the same check. The body is:
   "observedAt": "2026-09-26T09:59:59Z",
   "ttlMillis": 30000,
   "required": true,
-  "output": "200 OK"
+  "output": "200 OK",
+  "deregisterAfterMillis": 120000
 }
 ```
 
@@ -662,7 +730,9 @@ A renewal is simply a newer observation of the same check. The body is:
 (case-insensitive); `UNKNOWN` is server-derived and cannot be reported.
 `sequenceNumber` and `ttlMillis` must be positive, `observedAt` is an ISO-8601
 UTC instant, `required` defaults to `true`, and `output` is optional and limited
-to 4096 characters. Unknown fields and any other validation failure return
+to 4096 characters. `deregisterAfterMillis` is optional, must not be negative,
+and defaults to zero, meaning the service is never deregistered automatically
+(section 9.1). Unknown fields and any other validation failure return
 `invalid_observation`.
 
 The receiving server stamps the command with its own receipt time, and the
@@ -692,6 +762,10 @@ observation. Other outcomes are:
   409 `stale_observation` with `currentSequenceNumber`, and state is unchanged.
 - An observation for a composite instance that is not registered returns HTTP 404
   `service_not_found`.
+- An observation for a check that the instance's registration does not declare
+  returns HTTP 404 `check_not_declared` with `checkId`. The agent retries both 404
+  outcomes, because either can be caused by its own re-registration not having
+  committed yet.
 
 `GET /v1/health/service/{serviceName}` returns every instance of the service in
 deterministic identity order, whatever its health. Each entry pairs the stored
@@ -711,7 +785,8 @@ registration with its replicated checks ordered by check ID:
         "acceptedAt": "2026-09-26T10:00:00Z",
         "deadline": "2026-09-26T10:00:30Z",
         "expired": false,
-        "output": "200 OK"
+        "output": "200 OK",
+        "deregisterAfterMillis": 120000
       }
     ]
   }
@@ -894,6 +969,39 @@ until forwarding exists, clients rotate through configured seeds.
 
 Deterministic ordering is mandatory for service lists, instances, tags, prefix
 results, and snapshot serialization.
+
+### 13.1 Replica determinism
+
+Replicated state must depend only on the committed log. The following rules
+enforce that:
+
+- **Apply what is logged.** A leader encodes each command once. It appends and
+  applies the command decoded from those bytes, not the object it received, so
+  any normalization in the codec is identical on the leader, its followers, and
+  after WAL replay.
+- **Replicated bytes are authoritative.** Every log entry keeps the exact bytes
+  that were replicated. Persistence, sending to followers, and comparing a
+  retransmitted entry with an existing one all use those bytes, never a
+  re-encoding. Protobuf map encoding follows Java map iteration order, which is
+  randomized per JVM, so re-encoding could otherwise make a duplicate entry look
+  like a divergent log and fence a healthy follower.
+- **No clock or randomness during decoding or application.** Times in commands
+  are chosen once, by the proposing server, and stored in milliseconds. An entry
+  without a time decodes to the epoch, not to the replaying node's clock.
+- **Clients do not own server state.** Registration status, registration time,
+  heartbeat time, and observation receipt time come from the receiving server.
+  Agent-supplied values for these are ignored, although an observation's
+  `observedAt` is kept for display.
+- **Lossless encoding.** Nullable strings use protobuf `optional` fields, so null
+  and the empty string stay distinct. Custom capability values are encoded as
+  JSON, so numbers, booleans, lists, objects, and null keep their types. Older
+  entries fall back to the legacy text map. Null and empty lists are treated as
+  the same.
+- **No shared mutable state.** The state machine stores deep copies of command
+  objects. Readers receive detached copies of agents and a read-only catalog
+  view, so nothing outside a committed command can change replicated state.
+- **Reproducible snapshots.** Snapshot JSON writes map entries in key order, so
+  replicas and JVMs produce identical bytes for identical state.
 
 ## 14. Persistence and upgrades
 
@@ -1218,7 +1326,8 @@ A server document uses the same envelope and keeps all server settings beneath
       "prometheusPort": 9464,
       "serviceName": "qraft-controller"
     },
-    "shutdown": { "drainTimeoutMs": 5000, "timeoutMs": 30000 }
+    "shutdown": { "drainTimeoutMs": 5000, "timeoutMs": 30000 },
+    "health": { "expiryIntervalMs": 1000, "nodeTtlMs": 90000, "nodeReapAfterMs": 259200000 }
   },
   "logging": { "directory": "/var/log/qraft" }
 }
@@ -1249,7 +1358,9 @@ their service, and the same ID may be reused by different services:
   transport failure is critical. The response body is discarded.
 - `tcp` opens one connection to `address` and `port`, which default to the
   service's own address and port. A connection is passing; anything else is
-  critical.
+  critical. With `warnAfterMs`, a connection that takes at least that long is a
+  warning. The threshold must be shorter than `timeoutMs`, and zero or absent
+  never warns.
 - `ttl` has no probe. The local process reports its status (`passing`,
   `warning`, `critical`, or `maintenance`) through an internal agent input. If no
   report arrives within `ttlMs`, the agent records a critical result locally.
@@ -1258,8 +1369,10 @@ their service, and the same ID may be reused by different services:
 For `http` and `tcp`, `intervalMs` defaults to 10000, `timeoutMs` to the lesser
 of 2000 and the interval, and `ttlMs` to three intervals. The timeout must not
 exceed the interval, and `ttlMs` must exceed it. `ttlMs` is the server-side time
-to live of each published observation. `required` defaults to `true`. Unknown
-check settings are rejected.
+to live of each published observation. `required` defaults to `true`. Any check
+may set `deregisterAfterMs`: how long the check may stay expired at the server
+before its service is deregistered automatically. It defaults to zero, meaning
+never, and must not be negative. Unknown check settings are rejected.
 
 Each check runs independently on the agent. The next attempt starts only after
 the previous one completes or times out, so a check never overlaps itself. A
@@ -1294,6 +1407,20 @@ Each service owns its servers, clients, schedulers, storage, and background task
 No component creates an executor that another component is expected to discover
 and close implicitly.
 
+A future's callbacks run on the thread that completes it, so blocking work never
+runs inline on a thread the component did not create for that work:
+
+- Bounded waits use `Deadlines` from `qraft-core`, not `CompletableFuture.orTimeout`
+  or `completeOnTimeout`. The JDK completes those on one JVM-wide delay thread,
+  where a blocked callback would stall every timeout in the process. `Deadlines`
+  delivers each timeout on a new virtual thread and releases the pending expiry
+  once the result arrives.
+- The controller releases its runtime and telemetry on a virtual thread of its
+  own after the service stops. Otherwise the runtime shutdown could wait for the
+  thread running it.
+- The agent awaits executor and HTTP client termination on a virtual thread
+  before reporting shutdown complete.
+
 ## 18. Observability
 
 Required signals include:
@@ -1308,6 +1435,11 @@ Required signals include:
 
 Logs carry request ID, node ID, Raft role and term where applicable, tenant, and
 namespace. Sensitive tokens and health-output secrets are never logged.
+
+A Raft transition logs and traces in the MDC and OpenTelemetry context of the
+caller that submitted it, for every step: preparation, persistence completion, and
+application. Neither the storage thread that completed persistence nor the
+transition that ran before it supplies that context.
 
 Metrics avoid unbounded labels such as raw service IDs, keys, request IDs, or
 error messages.
@@ -1378,7 +1510,7 @@ not expose the administrative routes.
 
 Current progress, the active tranche's detailed steps, and the backlog are
 tracked in the current dated task list in `docs/`
-([`task-list-health-propagation-2026-09-25.md`](task-list-health-propagation-2026-09-25.md)).
+([`task-list-multi-node-container-acceptance-2026-09-26.md`](task-list-multi-node-container-acceptance-2026-09-26.md)).
 Completed task lists are moved to `docs/archive/`.
 
 ### Tranche 0: Align the WAL and snapshot contracts
@@ -1447,20 +1579,33 @@ Status: complete (verified 2026-09-25).
 
 ### Tranche 6: Health propagation
 
-Status: in progress. The replicated model, the controller health API, local
-check execution, and agent publication are complete; leader-owned expiry is next.
+Status: complete (2026-09-26). See the archived
+[`task-list-health-propagation-2026-09-25.md`](archive/task-list-health-propagation-2026-09-25.md).
+The replicated model, the controller health API, local check
+execution, agent publication, leader-owned expiry, and end-to-end verification are
+done. The end-to-end tests cover servers and an agent started from configuration
+files, HTTP, TCP, and TTL transitions with `passing` discovery, and a killed
+client. Proxies that hold renewals force the renewal/expiry boundary across a
+leader change in both directions. In one, a renewal inside the new leader's grace
+means the check never expires. In the other, a renewal held beyond the grace
+expires the check, and the renewal then restores it. The Docker-tagged suite
+includes an agent container that runs health checks.
 
 1. [x] Define health observation and expiry commands with deterministic tests.
 2. [x] Implement local checks and TTL renewal.
-3. [ ] Implement leader-owned expiry proposals and automatic deregistration.
-4. [ ] Verify behavior across leadership changes and clock boundaries.
+3. [x] Implement leader-owned expiry proposals and automatic deregistration.
+4. [x] Verify behavior across leadership changes and clock boundaries.
 
 ### Tranche 7: Multi-node container acceptance
 
-1. Start three server containers and one client container from one image.
-2. Verify replication and discovery through every server.
-3. Replace the leader and verify client recovery.
-4. Restart servers and verify durable recovery.
+Status: in progress. `DockerAgentHealthTest` covers items 1 to 3.
+`DockerDurableRestartTest` covers durable server recovery without a client
+container.
+
+1. [x] Start three server containers and one client container from one image.
+2. [x] Verify replication and discovery through every server.
+3. [x] Replace the leader and verify client recovery.
+4. [ ] Restart servers and verify durable recovery.
 
 ## 21. Initial acceptance criteria
 

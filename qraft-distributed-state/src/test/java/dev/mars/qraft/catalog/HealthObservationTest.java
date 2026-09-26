@@ -63,6 +63,19 @@ class HealthObservationTest {
     }
 
     @Test
+    void carriesAnOptionalDeregistrationDelayThatDefaultsToNever() {
+        Instant now = Instant.parse("2026-09-25T09:00:00Z");
+
+        assertEquals(120_000, new HealthObservation(
+                CHECK, ServiceHealth.PASSING, 1, now, 30_000, true, "", 120_000).deregisterAfterMillis());
+        assertEquals(0, new HealthObservation(
+                CHECK, ServiceHealth.PASSING, 1, now, 30_000, true, "").deregisterAfterMillis(),
+                "zero means the service is never deregistered automatically");
+        assertThrows(IllegalArgumentException.class,
+                () -> new HealthObservation(CHECK, ServiceHealth.PASSING, 1, now, 30_000, true, "", -1));
+    }
+
+    @Test
     void normalizesObservedTimeToTheReplicatedMillisecondPrecision() {
         HealthObservation observation = new HealthObservation(
                 CHECK, ServiceHealth.PASSING, 1,

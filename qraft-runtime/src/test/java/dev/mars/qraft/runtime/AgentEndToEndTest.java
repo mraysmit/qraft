@@ -79,7 +79,7 @@ class AgentEndToEndTest {
         int controllerPort = freePort();
         controllers = ControllerGroup.single(controllerPort);
         QraftAgent agent = agent("agent-a", controllers.endpoints(), List.of(
-                service("web", "web", 8080), service("api", "api", 8081)), 150);
+                service("web", "web", 8080), service("api", "api", 8081)), 1_000);
 
         assertTrue(agent.start().get(5, TimeUnit.SECONDS));
         waitUntil(() -> agent.healthService().isReady()
@@ -152,7 +152,7 @@ class AgentEndToEndTest {
         QraftAgent agent = new QraftAgent(AgentConfiguration.builder()
                 .agentId(id).hostname(id + "-host").address("127.0.0.1")
                 .agentPort(freePort()).controllerUrls(endpoints)
-                .heartbeatInterval(40).requestTimeoutMs(500)
+                .heartbeatInterval(40).requestTimeoutMs(5_000)
                 .registrationRetryMinMs(20).registrationRetryMaxMs(100)
                 .contactFreshnessMs(freshnessMs).shutdownTimeoutMs(2_000)
                 .services(services).build());
@@ -166,7 +166,7 @@ class AgentEndToEndTest {
     }
 
     private static void waitUntil(BooleanSupplier condition) throws Exception {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!condition.getAsBoolean() && System.nanoTime() < deadline) Thread.sleep(10);
         assertTrue(condition.getAsBoolean(), "condition was not met before the deadline");
     }

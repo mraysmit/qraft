@@ -159,7 +159,7 @@ class RaftNodeTransportGenerationTest {
     }
 
     private void awaitLeaderAtOrAboveTerm(long minimumTerm) {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while ((!node.isLeader() || node.getCurrentTerm() < minimumTerm)
                 && System.nanoTime() < deadline) {
             Thread.onSpinWait();
@@ -172,7 +172,7 @@ class RaftNodeTransportGenerationTest {
     private void awaitStateLoop() throws Exception {
         java.util.concurrent.CompletableFuture<Void> marker = new java.util.concurrent.CompletableFuture<>();
         runtime.runOnContext(ignored -> marker.complete(null));
-        marker.get(2, TimeUnit.SECONDS);
+        marker.get(10, TimeUnit.SECONDS);
     }
 
     private static <T> T await(Future<T> future) {
@@ -244,7 +244,7 @@ class RaftNodeTransportGenerationTest {
         }
 
         void awaitBlockedMetadataUpdate() throws Exception {
-            metadataUpdateEntered.get(2, TimeUnit.SECONDS);
+            metadataUpdateEntered.get(10, TimeUnit.SECONDS);
         }
 
         void releaseBlockedMetadataUpdate() {

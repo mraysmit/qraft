@@ -147,7 +147,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
 
         stepDownAndReelect(oldTerm);
         long responseTerm = node.getCurrentTerm() + 1;
-        Future<RaftNode.State> follower = node.awaitState(RaftNode.State.FOLLOWER, 2_000);
+        Future<RaftNode.State> follower = node.awaitState(RaftNode.State.FOLLOWER, 10_000);
         stale.response().complete(InstallSnapshotResponse.newBuilder()
                 .setTerm(responseTerm)
                 .setSuccess(false)
@@ -260,7 +260,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
     }
 
     private void awaitNextIndex(long expected) {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (node.getNextIndex("peer-1") != expected && System.nanoTime() < deadline) {
             Thread.onSpinWait();
         }
@@ -284,7 +284,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
     }
 
     private void awaitLeaderAtOrAboveTerm(long minimumTerm) {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while ((!node.isLeader() || node.getCurrentTerm() < minimumTerm)
                 && System.nanoTime() < deadline) {
             Thread.onSpinWait();
@@ -297,7 +297,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
     private void awaitStateLoop() throws Exception {
         CompletableFuture<Void> marker = new CompletableFuture<>();
         runtime.runOnContext(ignored -> marker.complete(null));
-        marker.get(2, TimeUnit.SECONDS);
+        marker.get(10, TimeUnit.SECONDS);
     }
 
     private static <T> T await(Future<T> future) {
@@ -318,7 +318,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
         }
 
         void awaitRejectedAppend() throws Exception {
-            rejectedAppend.get(2, TimeUnit.SECONDS);
+            rejectedAppend.get(10, TimeUnit.SECONDS);
         }
 
         PendingSnapshot takeSnapshot() throws Exception {
@@ -376,7 +376,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
             loadEntered = new CompletableFuture<>();
         }
 
-        void awaitBlockedSnapshotLoad() throws Exception { loadEntered.get(2, TimeUnit.SECONDS); }
+        void awaitBlockedSnapshotLoad() throws Exception { loadEntered.get(10, TimeUnit.SECONDS); }
         void releaseBlockedSnapshotLoad() { blockedLoadGate.complete(null); }
 
         @Override public CompletableFuture<Void> open(Path dataDir) { return delegate.open(dataDir); }

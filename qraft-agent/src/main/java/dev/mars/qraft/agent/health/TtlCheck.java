@@ -25,11 +25,17 @@ import java.time.Duration;
  * @since 2026-09-26
  * @version 1.0
  */
-public record TtlCheck(String serviceId, String checkId, Duration ttl, boolean required)
+public record TtlCheck(String serviceId, String checkId, Duration ttl, boolean required, Duration deregisterAfter)
         implements HealthCheckDefinition {
     public TtlCheck {
         HealthCheckDefinition.requireText(serviceId, "serviceId");
         HealthCheckDefinition.requireText(checkId, "checkId");
         HealthCheckDefinition.requirePositive(ttl, "check ttl");
+        HealthCheckDefinition.requireNotNegative(deregisterAfter, "check deregisterAfter");
+    }
+
+    /** TTL check whose service is never deregistered automatically. */
+    public TtlCheck(String serviceId, String checkId, Duration ttl, boolean required) {
+        this(serviceId, checkId, ttl, required, Duration.ZERO);
     }
 }

@@ -18,11 +18,13 @@ package dev.mars.qraft.controller.state;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import dev.mars.qraft.agent.AgentCapabilities;
 import dev.mars.qraft.agent.AgentInfo;
 import dev.mars.qraft.agent.AgentStatus;
 import dev.mars.qraft.controller.raft.RaftLogApplicator;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import dev.mars.qraft.catalog.ServiceCatalog;
+import dev.mars.qraft.catalog.ServiceCatalogView;
 import dev.mars.qraft.catalog.HealthCheckState;
 import dev.mars.qraft.catalog.HealthObservation;
 import dev.mars.qraft.catalog.ServiceCheckId;
@@ -31,6 +33,7 @@ import dev.mars.qraft.catalog.ServiceInstance;
 import dev.mars.qraft.catalog.ServiceInstanceId;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.util.Map;
 import java.util.Comparator;
 import java.util.List;
@@ -47,15 +50,21 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class QraftStateStore implements RaftLogApplicator {
     private static final String DEFAULT_VERSION = "3.0";
+    /** Entity type reported when an observation names a check its registration does not declare. */
+    public static final String HEALTH_CHECK_ENTITY = "HealthCheck";
     private final Map<String, AgentInfo> agents = new ConcurrentHashMap<>();
     private final Map<String, Long> heartbeatSequences = new ConcurrentHashMap<>();
     private final Map<String, String> metadata = new ConcurrentHashMap<>();
     private final ServiceCatalog serviceCatalog = new ServiceCatalog();
+    private final ServiceCatalogView catalogView = ServiceCatalogView.of(serviceCatalog);
     private final Map<ServiceCheckId, HealthCheckState> healthChecks = new ConcurrentHashMap<>();
+    private final Map<ServiceInstanceId, List<String>> declaredChecks = new ConcurrentHashMap<>();
     private final AtomicLong lastAppliedIndex = new AtomicLong();
     private final ObjectMapper objectMapper = new ObjectMapper()
             .findAndRegisterModules()
-            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+            // Map entries in key order make snapshot bytes reproducible on every replica and JVM.
+            .configure(com.fasterxml.jackson.databind.SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
 
     public QraftStateStore() {
         this(null);
@@ -85,8 +94,19 @@ public final class QraftStateStore implements RaftLogApplicator {
     private RaftCommandResult<?> applyCatalogCommand(CatalogCommand command) {
         return switch (command) {
             case CatalogCommand.Register register -> {
+                ServiceInstanceId identity = register.instance().identity();
                 serviceCatalog.register(register.instance());
-                updateServiceHealthIfObserved(register.instance().identity());
+                boolean pruned = false;
+                if (register.declaresChecks()) {
+                    declaredChecks.put(identity, register.declaredCheckIds());
+                    pruned = healthChecks.keySet().removeIf(check -> check.serviceInstanceId().equals(identity)
+                            && !register.declaredCheckIds().contains(check.checkId()));
+                } else {
+                    declaredChecks.remove(identity);
+                }
+                // Without checks, a registration keeps the health it carries, as older log entries expect.
+                if (pruned) updateServiceHealth(identity);
+                else updateServiceHealthIfObserved(identity);
                 yield new RaftCommandResult.Success<>(
                         serviceCatalog.find(register.instance().identity()).orElseThrow());
             }
@@ -98,6 +118,8 @@ public final class QraftStateStore implements RaftLogApplicator {
                     if (deregister.isLegacy()) {
                         healthChecks.keySet().removeIf(check ->
                                 check.serviceInstanceId().serviceId().equals(deregister.serviceId()));
+                        declaredChecks.keySet().removeIf(instance ->
+                                instance.serviceId().equals(deregister.serviceId()));
                     } else {
                         removeHealthChecks(deregister.identity());
                     }
@@ -116,6 +138,11 @@ public final class QraftStateStore implements RaftLogApplicator {
         ServiceCheckId checkId = observation.checkId();
         if (serviceCatalog.find(checkId.serviceInstanceId()).isEmpty()) {
             return new RaftCommandResult.NotFound<>(checkId.serviceInstanceId().toString(), "ServiceInstance");
+        }
+        List<String> declared = declaredChecks.get(checkId.serviceInstanceId());
+        if (declared != null && !declared.contains(checkId.checkId())) {
+            // A late observation must not resurrect a check its agent no longer declares.
+            return new RaftCommandResult.NotFound<>(checkId.checkId(), HEALTH_CHECK_ENTITY);
         }
         HealthCheckState current = healthChecks.get(checkId);
         if (current != null
@@ -138,7 +165,8 @@ public final class QraftStateStore implements RaftLogApplicator {
         }
         ServiceInstanceId identity = command.checkId().serviceInstanceId();
         if (command.deregisterService()) {
-            if (!serviceCatalog.deregister(identity)) {
+            // Deregistration is the second phase: the same check must already have been expired.
+            if (!current.expired() || !serviceCatalog.deregister(identity)) {
                 return new RaftCommandResult.NoOp<>();
             }
             removeHealthChecks(identity);
@@ -183,14 +211,49 @@ public final class QraftStateStore implements RaftLogApplicator {
         return warning ? ServiceHealth.WARNING : ServiceHealth.PASSING;
     }
 
+    private RaftCommandResult<?> applyNodeExpiry(AgentCommand.Expire expire) {
+        AgentInfo current = agents.get(expire.agentId());
+        if (current == null || !expire.expectedLastContact().equals(lastContact(current))) {
+            return new RaftCommandResult.NoOp<>();
+        }
+        boolean unreachable = current.getStatus() == AgentStatus.UNREACHABLE;
+        if (!expire.reap()) {
+            if (unreachable) return new RaftCommandResult.NoOp<>();
+            AgentInfo changed = AgentInfo.copyOf(current);
+            changed.setStatus(AgentStatus.UNREACHABLE);
+            agents.put(expire.agentId(), changed);
+            return new RaftCommandResult.Success<>(changed);
+        }
+        // Reaping is the second phase: the node must already have been marked unreachable.
+        if (!unreachable) return new RaftCommandResult.NoOp<>();
+        agents.remove(expire.agentId());
+        heartbeatSequences.remove(expire.agentId());
+        for (ServiceInstance instance : serviceCatalog.instances()) {
+            if (instance.nodeId().equals(expire.agentId())) {
+                serviceCatalog.deregister(instance.identity());
+                removeHealthChecks(instance.identity());
+            }
+        }
+        return new RaftCommandResult.Success<>(current);
+    }
+
+    /** A node's last contact is its last heartbeat, or its registration time before its first heartbeat. */
+    public static Instant lastContact(AgentInfo agent) {
+        return agent.getLastHeartbeat() != null ? agent.getLastHeartbeat() : agent.getRegistrationTime();
+    }
+
     private void removeHealthChecks(ServiceInstanceId identity) {
+        declaredChecks.remove(identity);
         healthChecks.keySet().removeIf(check -> check.serviceInstanceId().equals(identity));
     }
 
     private RaftCommandResult<?> applyAgentCommand(AgentCommand command) {
         return switch (command) {
+            case AgentCommand.Expire expire -> applyNodeExpiry(expire);
             case AgentCommand.Register register -> {
-                AgentInfo registered = AgentInfo.copyOf(register.agentInfo());
+                // Lifecycle status and times are server-owned; a registration cannot claim them.
+                AgentInfo registered = detached(register.agentInfo());
+                registered.setStatus(AgentStatus.REGISTERING);
                 registered.setRegistrationTime(register.timestamp());
                 registered.setLastHeartbeat(null);
                 agents.put(register.agentId(), registered);
@@ -223,7 +286,7 @@ public final class QraftStateStore implements RaftLogApplicator {
                     yield new RaftCommandResult.NotFound<>(update.agentId(), "Agent");
                 }
                 AgentInfo changed = AgentInfo.copyOf(current);
-                changed.setCapabilities(update.newCapabilities());
+                changed.setCapabilities(objectMapper.convertValue(update.newCapabilities(), AgentCapabilities.class));
                 changed.setLastHeartbeat(update.timestamp());
                 agents.put(update.agentId(), changed);
                 yield new RaftCommandResult.Success<>(changed);
@@ -246,7 +309,8 @@ public final class QraftStateStore implements RaftLogApplicator {
                 changed.setLastHeartbeat(heartbeat.timestamp());
                 if (heartbeat.status() != null) {
                     changed.setStatus(heartbeat.status());
-                } else if (changed.getStatus() == AgentStatus.REGISTERING) {
+                } else if (changed.getStatus() == AgentStatus.REGISTERING
+                        || changed.getStatus() == AgentStatus.UNREACHABLE) {
                     changed.setStatus(AgentStatus.HEALTHY);
                 }
                 agents.put(heartbeat.agentId(), changed);
@@ -283,8 +347,16 @@ public final class QraftStateStore implements RaftLogApplicator {
                             .thenComparing(state -> state.checkId().serviceInstanceId().serviceId())
                             .thenComparing(state -> state.checkId().checkId()))
                     .toList();
+            List<DeclaredChecks> orderedDeclarations = declaredChecks.entrySet().stream()
+                    .map(entry -> new DeclaredChecks(entry.getKey(), entry.getValue()))
+                    .sorted(Comparator.comparing((DeclaredChecks declared) -> declared.instance().tenantId())
+                            .thenComparing(declared -> declared.instance().namespace())
+                            .thenComparing(declared -> declared.instance().nodeId())
+                            .thenComparing(declared -> declared.instance().serviceId()))
+                    .toList();
             return objectMapper.writeValueAsBytes(new Snapshot(Map.copyOf(agents), Map.copyOf(heartbeatSequences),
-                    Map.copyOf(metadata), serviceCatalog.instances(), orderedHealthChecks, lastAppliedIndex.get()));
+                    Map.copyOf(metadata), serviceCatalog.instances(), orderedHealthChecks, orderedDeclarations,
+                    lastAppliedIndex.get()));
         } catch (IOException e) {
             throw new IllegalStateException("Failed to serialize controller snapshot", e);
         }
@@ -306,6 +378,11 @@ public final class QraftStateStore implements RaftLogApplicator {
             healthChecks.clear();
             if (snapshot.healthChecks() != null) {
                 snapshot.healthChecks().forEach(state -> healthChecks.put(state.checkId(), state));
+            }
+            declaredChecks.clear();
+            if (snapshot.declaredChecks() != null) {
+                snapshot.declaredChecks().forEach(declared ->
+                        declaredChecks.put(declared.instance(), List.copyOf(declared.checkIds())));
             }
             lastAppliedIndex.set(snapshot.lastAppliedIndex());
         } catch (IOException e) {
@@ -331,15 +408,28 @@ public final class QraftStateStore implements RaftLogApplicator {
         metadata.put("version", DEFAULT_VERSION);
         serviceCatalog.clear();
         healthChecks.clear();
+        declaredChecks.clear();
         lastAppliedIndex.set(0);
     }
 
+    /** Returns detached copies; changing them cannot change replicated state. */
     public Map<String, AgentInfo> getAgents() {
-        return Map.copyOf(agents);
+        Map<String, AgentInfo> copies = new java.util.TreeMap<>();
+        agents.forEach((agentId, agent) -> copies.put(agentId, detached(agent)));
+        return java.util.Collections.unmodifiableMap(copies);
     }
 
+    /** Returns a detached copy; changing it cannot change replicated state. */
     public Optional<AgentInfo> findAgent(String agentId) {
-        return Optional.ofNullable(agents.get(agentId));
+        return Optional.ofNullable(agents.get(agentId)).map(this::detached);
+    }
+
+    /**
+     * A deep copy, so replicated state never shares a mutable object with a command, a caller, or an
+     * earlier version of the same agent.
+     */
+    private AgentInfo detached(AgentInfo agent) {
+        return objectMapper.convertValue(agent, AgentInfo.class);
     }
 
     public Optional<String> findMetadata(String key) {
@@ -354,8 +444,9 @@ public final class QraftStateStore implements RaftLogApplicator {
         return Map.copyOf(metadata);
     }
 
-    public ServiceCatalog getServiceCatalog() {
-        return serviceCatalog;
+    /** Returns a read-only view; the catalog changes only through committed commands. */
+    public ServiceCatalogView getServiceCatalog() {
+        return catalogView;
     }
 
     public Optional<HealthCheckState> findHealthCheck(ServiceCheckId checkId) {
@@ -372,6 +463,11 @@ public final class QraftStateStore implements RaftLogApplicator {
                             Map<String, String> metadata,
                             java.util.List<ServiceInstance> services,
                             java.util.List<HealthCheckState> healthChecks,
+                            java.util.List<DeclaredChecks> declaredChecks,
                             long lastAppliedIndex) {
+    }
+
+    /** Check identifiers a registration declared for one instance; absent from snapshots written earlier. */
+    private record DeclaredChecks(ServiceInstanceId instance, java.util.List<String> checkIds) {
     }
 }

@@ -16,6 +16,10 @@ Qraft is a Consul-style service discovery and distributed coordination platform.
 - Do not introduce compatibility wrappers that reproduce Vert.x APIs without a clear project-level abstraction.
 - Blocking operations should use bounded executors or virtual threads as appropriate to the workload.
 - Shared mutable state must have an explicit ownership and serialization model.
+- A future's callbacks run on the thread that completes it. Blocking work must not run inline in a callback on a
+  thread the code does not own; hand it to a thread created for that work.
+- Bound asynchronous waits with `dev.mars.qraft.concurrent.Deadlines`, never `CompletableFuture.orTimeout` or
+  `completeOnTimeout`, which complete on one JVM-wide delay thread.
 
 ### 2.2 Network protocols
 
@@ -77,6 +81,17 @@ Qraft is a Consul-style service discovery and distributed coordination platform.
 - Tests must not depend on execution order.
 - Timing-sensitive tests must use bounded polling rather than arbitrary long sleeps wherever practical.
 - Expected fault-injection errors must be clearly identified in test output.
+
+### 4.4 Deterministic tests
+
+Flaky tests are not tolerated. An intermittent failure is a defect: find the race, check whether the same race exists in production code, and fix both. Rerunning is not a fix.
+
+- Time-dependent behavior is driven by injected clocks and schedulers, never by wall-clock sleeps.
+- A test must not assert a wall-clock upper bound, such as "completes within 1 s". To prove that an operation does not wait for something, hold that thing with a latch that is released only after the operation has returned.
+- Absence is proven exactly where possible, for example by showing that nothing was proposed after a synchronous step, rather than by waiting and observing nothing.
+- Liveness waits, including future `get` timeouts, polling deadlines, and request timeouts on paths expected to succeed, are generous, at least 10 seconds for in-process work and 5 seconds for local HTTP. They only bound failure diagnosis and must never be the thing that fails under machine load.
+- Callbacks are registered before the operation they observe can complete, or the test must not depend on which thread runs them.
+- A new or changed concurrency test is run repeatedly before the change is complete.
 
 ## 5. Configuration
 

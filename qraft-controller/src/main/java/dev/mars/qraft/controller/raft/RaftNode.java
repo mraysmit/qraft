@@ -139,6 +139,12 @@ public class RaftNode {
     private boolean snapshotTimerTransitionPending = false;
     private final java.util.Set<String> unavailablePeers = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
+    // ========== CHECK-QUORUM (state loop only) ==========
+    // Leadership is measured in applied heartbeat rounds rather than wall-clock time, so a delayed
+    // state loop cannot cause a false step-down.
+    private long heartbeatRound;
+    private final Map<String, Long> lastContactRound = new HashMap<>();
+
     // ========== STATE CHANGE LISTENERS ==========
     private final List<java.util.function.Consumer<State>> stateChangeListeners = new CopyOnWriteArrayList<>();
 
@@ -147,6 +153,8 @@ public class RaftNode {
 
     // ========== CONFIGURATION PARAMETERS ==========
     private final long electionTimeoutMs;
+    /** Heartbeat rounds covering one election timeout; older peer contact no longer counts. */
+    private final long quorumContactRounds;
     private final long heartbeatIntervalMs;
     private final boolean snapshotEnabled;
     private final long snapshotThreshold;
@@ -345,6 +353,7 @@ public class RaftNode {
             @Override public boolean cancelTimer(long id) { return runtime.cancelTimer(id); }
         } : configuredTimerScheduler;
         this.electionTimeoutMs = electionTimeoutMs;
+        this.quorumContactRounds = Math.max(1, (electionTimeoutMs + heartbeatIntervalMs - 1) / heartbeatIntervalMs);
         this.heartbeatIntervalMs = heartbeatIntervalMs;
         this.snapshotEnabled = snapshotEnabled && this.persistence.isDurable();
         this.snapshotThreshold = snapshotThreshold;
@@ -476,8 +485,8 @@ public class RaftNode {
                 completion.tryFail(new RaftTransitionSequencer.DrainingException());
             } else {
                 transport.start(this::handleMessage);
-                resetElectionTimer();
                 running = true;
+                resetElectionTimer();
                 logger.info("Raft node {} started successfully (term={}, logSize={})",
                         nodeId, currentTerm, log.size());
                 completion.tryComplete();
@@ -559,7 +568,7 @@ public class RaftNode {
                                                 + expectedIndex + " but found " + entry.index()));
                             }
                             RaftCommand command = deserialize(ByteString.copyFrom(entry.payload()));
-                            log.add(new LogEntry(entry.term(), entry.index(), command));
+                            log.add(new LogEntry(entry.term(), entry.index(), command, entry.payload()));
                             replayedCount++;
                             expectedIndex++;
                         }
@@ -588,7 +597,7 @@ public class RaftNode {
                                             + " but found " + entry.index()));
                         }
                         RaftCommand command = deserialize(ByteString.copyFrom(entry.payload()));
-                        log.add(new LogEntry(entry.term(), entry.index(), command));
+                        log.add(new LogEntry(entry.term(), entry.index(), command, entry.payload()));
                         expectedIndex++;
                     }
                     logger.info("Recovered {} log entries from storage", entries.size());
@@ -653,6 +662,10 @@ public class RaftNode {
                 "Node stopped before command commitment; outcome may be unknown"));
 
         Future.all(transitionSequencer.drain(), drainOwnedAsyncOperations()).onComplete(drainResult -> {
+            // Writes applied while draining re-register their promises; with replication stopped they
+            // can no longer commit, so they are failed here rather than left pending forever.
+            failPendingCommands(new CommandOutcomeUnknownException(
+                    "Node stopped before command commitment; outcome may be unknown"));
             state = State.FOLLOWER;
             currentLeaderId = null;
             pendingInstalls.clear();
@@ -710,7 +723,15 @@ public class RaftNode {
                                     + "). Wait for snapshot.")));
         }
 
-        LogEntry entry = new LogEntry(currentTerm, lastLogIndex() + 1, command);
+        // The leader applies exactly what it logs: the command decoded from its own encoding. Any
+        // field the codec normalizes is then identical on the leader, its followers, and after replay.
+        LogEntry entry;
+        try {
+            byte[] payload = serialize(command).toByteArray();
+            entry = new LogEntry(currentTerm, lastLogIndex() + 1, deserialize(ByteString.copyFrom(payload)), payload);
+        } catch (RuntimeException error) {
+            return Future.succeededFuture(LeaderAppendDecision.rejected(new CommandEncodingException(error)));
+        }
         return persistLogEntry(entry).map(ignored -> LeaderAppendDecision.accepted(entry));
     }
 
@@ -753,7 +774,7 @@ public class RaftNode {
 
         ByteString serialized;
         try {
-            serialized = serialize(entry.getCommand());
+            serialized = payloadOf(entry);
         } catch (RuntimeException error) {
             return Future.failedFuture(new CommandEncodingException(error));
         }
@@ -915,36 +936,17 @@ public class RaftNode {
      * @return a Future that completes with the target state or fails on timeout
      */
     public Future<State> awaitState(State targetState, long timeoutMs) {
-        // Already in target state
-        if (state == targetState) {
-            return Future.succeededFuture(targetState);
-        }
-
         Promise<State> promise = Promise.promise();
-
-        // Register listener
         java.util.function.Consumer<State> listener = newState -> {
-            if (newState == targetState && !promise.future().isComplete()) {
-                promise.complete(targetState);
-            }
+            if (newState == targetState) promise.tryComplete(targetState);
         };
         addStateChangeListener(listener);
-
-        // Set timeout
-        long timerId = setTimer(timeoutMs, id -> {
-            if (!promise.future().isComplete()) {
-                removeStateChangeListener(listener);
-                promise.fail("Timed out waiting for state " + targetState + " after " + timeoutMs + "ms (current: " + state + ")");
-            }
-        });
-
-        // Clean up on completion
-        promise.future().onComplete(ar -> {
-            removeStateChangeListener(listener);
-            timerScheduler.cancelTimer(timerId);
-        });
-
-        return promise.future();
+        // Checked after registering, so a transition between the check and the registration is not missed.
+        if (state == targetState) promise.tryComplete(targetState);
+        // The timeout is the observer's own; it never occupies the node's election and heartbeat timers.
+        Future<State> result = promise.future().timeout(timeoutMs, TimeUnit.MILLISECONDS);
+        result.onComplete(ignored -> removeStateChangeListener(listener));
+        return result;
     }
 
     /**
@@ -1014,6 +1016,8 @@ public class RaftNode {
 
     private void resetElectionTimer() {
         cancelElectionTimer();
+        // A transition applied while stopping must not re-arm the timer that shutdown cancelled.
+        if (!running) return;
 
         long timeout = electionTimeoutMs + (long) (Math.random() * electionTimeoutMs);
         long timerGeneration = electionTimerGeneration;
@@ -1176,6 +1180,11 @@ public class RaftNode {
         cancelElectionTimer();
 
         initializeLeaderState();
+        heartbeatRound = 0;
+        lastContactRound.clear();
+        for (String peer : clusterNodes) {
+            if (!peer.equals(nodeId)) lastContactRound.put(peer, 0L);
+        }
         appendLeadershipNoOpIfRecoveredEntriesAwaitCommit();
         startHeartbeats();
         sendHeartbeats(); // Immediate
@@ -1199,8 +1208,8 @@ public class RaftNode {
                             if (!isCurrentLeadership(leadershipTerm, generation)) {
                                 return Future.succeededFuture((LogEntry) null);
                             }
-                            LogEntry noOp = new LogEntry(
-                                    leadershipTerm, lastLogIndex() + 1, null);
+                            LogEntry noOp = new LogEntry(leadershipTerm, lastLogIndex() + 1, null,
+                                    serialize(null).toByteArray());
                             return persistLogEntry(noOp).map(ignored -> noOp);
                         },
                         noOp -> {
@@ -1272,9 +1281,49 @@ public class RaftNode {
     private Void applyHeartbeatTimer(HeartbeatTimerDecision decision) {
         if (decision.timerGeneration() == heartbeatTimerGeneration
                 && isCurrentLeadership(decision.term(), decision.leaderGeneration())) {
+            heartbeatRound++;
+            if (!majorityRecentlyContacted()) {
+                stepDownForLostQuorum();
+                return null;
+            }
             sendHeartbeats();
         }
         return null;
+    }
+
+    /**
+     * Check-quorum: true while this leader plus the peers that answered within the last election
+     * timeout's worth of heartbeat rounds form a majority. A single-node cluster is always its own
+     * majority.
+     */
+    private boolean majorityRecentlyContacted() {
+        long reachable = 1 + lastContactRound.values().stream()
+                .filter(round -> heartbeatRound - round <= quorumContactRounds)
+                .count();
+        return reachable >= clusterNodes.size() / 2 + 1;
+    }
+
+    private void recordPeerContact(String peerId) {
+        if (lastContactRound.containsKey(peerId)) lastContactRound.put(peerId, heartbeatRound);
+    }
+
+    /**
+     * Steps down in the current term when a majority has been unreachable for an election timeout,
+     * so a partitioned leader stops accepting writes and a majority can elect a replacement without
+     * this node competing as leader.
+     */
+    private void stepDownForLostQuorum() {
+        state = State.FOLLOWER;
+        currentLeaderId = null;
+        MDC.put("raftRole", "FOLLOWER");
+        MDC.put("raftTerm", String.valueOf(currentTerm));
+        logger.warn("Node {} stepping down in term {}: a majority has not responded for {} heartbeat rounds",
+                nodeId, currentTerm, quorumContactRounds);
+        notifyStateChangeListeners(State.FOLLOWER);
+        failPendingCommands(new CommandOutcomeUnknownException(
+                "Leadership lost because a majority is unreachable; outcome may be unknown"));
+        cancelTimers();
+        if (running) resetElectionTimer();
     }
 
     private record HeartbeatTimerDecision(
@@ -1337,6 +1386,13 @@ public class RaftNode {
     }
 
     private Future<VoteDecision> prepareAndPersistVote(VoteRequest request) {
+        if (!running) {
+            // Before recovery completes, term and vote are defaults, not durable state; after stop they are
+            // no longer served. Deciding now could persist a second vote in an already-voted term.
+            logger.debug("Rejecting vote from {} for term {}: node is not running",
+                    request.getCandidateId(), request.getTerm());
+            return Future.succeededFuture(new VoteDecision(currentTerm, votedFor, false, false));
+        }
         long requestedTerm = request.getTerm();
         logger.debug("Handling vote request: candidateId={}, requestTerm={}, localTerm={}, localVotedFor={}, candidateLastLogTerm={}, candidateLastLogIndex={}",
                 request.getCandidateId(), requestedTerm, currentTerm, votedFor,
@@ -1468,6 +1524,11 @@ public class RaftNode {
 
     private Future<FollowerAppendDecision> prepareAndPersistFollowerAppend(
             AppendEntriesRequest request) {
+        if (!running) {
+            // Recovery has not rebuilt the durable term and log yet, or the node has stopped.
+            logger.debug("Rejecting AppendEntries from {}: node is not running", request.getLeaderId());
+            return Future.succeededFuture(FollowerAppendDecision.stale(request));
+        }
         if (request.getTerm() < currentTerm) {
             logger.debug("Rejecting AppendEntries: stale term {} < {}", request.getTerm(), currentTerm);
             return Future.succeededFuture(FollowerAppendDecision.stale(request));
@@ -1494,7 +1555,8 @@ public class RaftNode {
         try {
             for (dev.mars.qraft.controller.raft.grpc.LogEntry entryProto : request.getEntriesList()) {
                 RaftCommand command = deserialize(entryProto.getData());
-                LogEntry newEntry = new LogEntry(entryProto.getTerm(), currentIndex, command);
+                LogEntry newEntry = new LogEntry(entryProto.getTerm(), currentIndex, command,
+                        entryProto.getData().toByteArray());
                 incomingEntries.add(newEntry);
                 incomingEntryData.add(new LogEntryData(
                         currentIndex, entryProto.getTerm(), entryProto.getData().toByteArray()));
@@ -1513,7 +1575,7 @@ public class RaftNode {
         // indices plus the inclusive snapshot/compaction boundary.
         List<LogEntryData> currentEntryData = log.stream().skip(1)
                 .map(entry -> new LogEntryData(entry.getIndex(), entry.getTerm(),
-                        serialize(entry.getCommand()).toByteArray()))
+                        payloadOf(entry).toByteArray()))
                 .toList();
         AppendPlan appendPlan = AppendPlan.from(
                 startIndex, incomingEntryData, currentEntryData, snapshotLastIndex);
@@ -1676,8 +1738,7 @@ public class RaftNode {
         // Append entries
         if (!entries.isEmpty()) {
             List<LogEntryData> entryDataList = entries.stream()
-                .map(e -> new LogEntryData(e.getIndex(), e.getTerm(), 
-                                           serialize(e.getCommand()).toByteArray()))
+                .map(e -> new LogEntryData(e.getIndex(), e.getTerm(), payloadOf(e).toByteArray()))
                 .toList();
             f = f.compose(v -> toFuture(persistence.appendEntries(ownership, entryDataList)));
         }
@@ -1721,7 +1782,7 @@ public class RaftNode {
                     builder.addEntries(dev.mars.qraft.controller.raft.grpc.LogEntry.newBuilder()
                             .setTerm(entry.getTerm())
                             .setIndex(entry.getIndex())
-                            .setData(serialize(entry.getCommand()))
+                            .setData(payloadOf(entry))
                             .build());
                 }
             }
@@ -1785,6 +1846,7 @@ public class RaftNode {
             return null;
         }
 
+        recordPeerContact(decision.peerId());
         if (unavailablePeers.remove(decision.peerId())) {
             logger.info("Raft peer {} is reachable again", decision.peerId());
         }
@@ -2325,6 +2387,7 @@ public class RaftNode {
                 || !isCurrentLeadership(transfer.term(), transfer.leaderGeneration())) {
             return null;
         }
+        recordPeerContact(transfer.target());
 
         if (!response.getSuccess()) {
             int retryChunk = response.getNextChunkIndex();
@@ -2480,6 +2543,10 @@ public class RaftNode {
     private Future<InstalledSnapshotPlan> prepareAndPersistInstalledSnapshot(
             InstallSnapshotRequest request) {
         installSnapshotReceived.add(1);
+        if (!running) {
+            logger.debug("Rejecting InstallSnapshot from {}: node is not running", request.getLeaderId());
+            return Future.succeededFuture(InstalledSnapshotPlan.rejectedWithoutStateChange(request));
+        }
         if (request.getTerm() < currentTerm) {
             logger.debug("Rejecting InstallSnapshot: stale term {} < {}",
                     request.getTerm(), currentTerm);
@@ -2575,6 +2642,10 @@ public class RaftNode {
     private Future<InstalledSnapshotPlan> persistInstalledSnapshot(InstalledSnapshotPlan plan) {
         RaftTransitionSequencer.Ownership ownership = transitionSequencer.currentOwnership();
         if (plan.snapshot() == null) return Future.succeededFuture(plan);
+        // Read loop-owned log state here, on the state loop: the continuations below run on the
+        // snapshot store's thread once publication completes.
+        long boundary = plan.snapshot().lastIncludedIndex();
+        boolean hasSuffixToRemove = lastLogIndex() >= boundary + 1;
 
         Future<Void> publication;
         try {
@@ -2595,8 +2666,6 @@ public class RaftNode {
                 .compose(published -> {
                     if (published.failure() != null) return Future.succeededFuture(published);
                     if (!persistence.isDurable()) return Future.succeededFuture(published);
-                    long boundary = published.snapshot().lastIncludedIndex();
-                    boolean hasSuffixToRemove = lastLogIndex() >= boundary + 1;
                     Future<Void> durability = published.retainSuffix() || !hasSuffixToRemove
                             ? Future.succeededFuture()
                             : toFuture(persistence.truncateSuffix(ownership, boundary + 1))
@@ -2921,6 +2990,12 @@ public class RaftNode {
 
     private static <T> Future<T> toFuture(CompletableFuture<T> future) {
         return Future.fromCompletionStage(future);
+    }
+
+    /** The replicated bytes of an entry; only in-memory sentinels fall back to encoding the command. */
+    private ByteString payloadOf(LogEntry entry) {
+        byte[] payload = entry.getPayload();
+        return payload != null ? ByteString.copyFrom(payload) : serialize(entry.getCommand());
     }
 
     private ByteString serialize(RaftCommand cmd) {

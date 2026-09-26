@@ -26,8 +26,11 @@ import org.slf4j.bridge.SLF4JBridgeHandler;
 
 import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * Main application class for Qraft Controller.
@@ -162,19 +165,10 @@ public class QraftControllerApplication {
         }
 
         synchronized CompletableFuture<Void> shutdown() {
-            if (shutdown != null) return shutdown;
-            shutdown = new CompletableFuture<>();
-            controller.stop().toCompletionStage().whenComplete((ignored, controllerFailure) ->
-                    runtime.shutdown().toCompletionStage().whenComplete((alsoIgnored, runtimeFailure) -> {
-                        Throwable failure = firstFailure(controllerFailure, runtimeFailure);
-                        try {
-                            telemetry.close();
-                        } catch (Throwable telemetryFailure) {
-                            failure = firstFailure(failure, telemetryFailure);
-                        }
-                        if (failure == null) shutdown.complete(null);
-                        else shutdown.completeExceptionally(failure);
-                    }));
+            if (shutdown == null) {
+                shutdown = releaseAfter(controller.stop().toCompletionStage(),
+                        () -> runtime.shutdown().toCompletionStage(), telemetry);
+            }
             return shutdown;
         }
 
@@ -193,21 +187,54 @@ public class QraftControllerApplication {
                 failure.addSuppressed(cleanupFailure);
             }
         }
+    }
 
-        private static Throwable firstFailure(Throwable first, Throwable second) {
-            Throwable primary = unwrap(first);
-            Throwable additional = unwrap(second);
-            if (primary == null) return additional;
-            if (additional != null && additional != primary) primary.addSuppressed(additional);
-            return primary;
-        }
-
-        private static Throwable unwrap(Throwable failure) {
-            if (failure instanceof java.util.concurrent.CompletionException && failure.getCause() != null) {
-                return failure.getCause();
+    /**
+     * Releases the runtime and then telemetry once the controller has stopped. Every step runs even if an
+     * earlier one failed; the result fails with the first failure, carrying the later ones as suppressed.
+     * <p>
+     * The steps block, and the stop completes on whichever thread finished the last shutdown step, which can
+     * belong to a pool the runtime shutdown waits for. They therefore run on a virtual thread of their own.
+     */
+    static CompletableFuture<Void> releaseAfter(CompletionStage<?> controllerStopped,
+                                                Supplier<? extends CompletionStage<?>> runtimeShutdown,
+                                                AutoCloseable telemetry) {
+        Executor release = task -> Thread.ofVirtual().name("qraft-controller-release").start(task);
+        CompletableFuture<Void> released = new CompletableFuture<>();
+        controllerStopped.whenCompleteAsync((ignored, controllerFailure) -> {
+            CompletionStage<?> runtimeStopped;
+            try {
+                runtimeStopped = runtimeShutdown.get();
+            } catch (Throwable runtimeFailure) {
+                runtimeStopped = CompletableFuture.failedFuture(runtimeFailure);
             }
-            return failure;
+            runtimeStopped.whenCompleteAsync((alsoIgnored, runtimeFailure) -> {
+                Throwable failure = firstFailure(controllerFailure, runtimeFailure);
+                try {
+                    telemetry.close();
+                } catch (Throwable telemetryFailure) {
+                    failure = firstFailure(failure, telemetryFailure);
+                }
+                if (failure == null) released.complete(null);
+                else released.completeExceptionally(failure);
+            }, release);
+        }, release);
+        return released;
+    }
+
+    private static Throwable firstFailure(Throwable first, Throwable second) {
+        Throwable primary = unwrap(first);
+        Throwable additional = unwrap(second);
+        if (primary == null) return additional;
+        if (additional != null && additional != primary) primary.addSuppressed(additional);
+        return primary;
+    }
+
+    private static Throwable unwrap(Throwable failure) {
+        if (failure instanceof java.util.concurrent.CompletionException && failure.getCause() != null) {
+            return failure.getCause();
         }
+        return failure;
     }
 
     private static void configureJulToSlf4jBridge() {

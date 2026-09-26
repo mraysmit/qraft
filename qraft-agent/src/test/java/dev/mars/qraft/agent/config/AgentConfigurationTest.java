@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.agent.config;
 
+import dev.mars.qraft.agent.health.HealthCheckDefinition;
 import dev.mars.qraft.agent.health.HttpCheck;
 import dev.mars.qraft.agent.health.TcpCheck;
 import dev.mars.qraft.agent.health.TtlCheck;
@@ -248,6 +249,26 @@ class AgentConfigurationTest {
     }
 
     @Test
+    void servicesDeclareTheIdentifiersOfTheirConfiguredChecks() {
+        AgentConfiguration parsed = AgentConfiguration.fromJson(minimalJson("[\"http://localhost:8080\"]", """
+                "services": [
+                  {"id":"web","name":"web","address":"localhost","port":8080,"checks":[
+                    {"id":"tcp","type":"tcp"},{"id":"app","type":"ttl","ttlMs":1000}]},
+                  {"id":"db","name":"db","address":"localhost","port":5432}
+                ]
+                """));
+        assertEquals(List.of("app", "tcp"), parsed.getServices().get(0).checkIds());
+        assertEquals(List.of(), parsed.getServices().get(1).checkIds());
+
+        ServiceDefinition web = new ServiceDefinition("web", "web", "localhost", 8080, List.of(), Map.of(), true);
+        AgentConfiguration built = AgentConfiguration.builder().agentId("agent").controllerUrl("http://localhost")
+                .services(List.of(web)).healthChecks(List.of(new TtlCheck("web", "app", Duration.ofSeconds(5), true)))
+                .build();
+        assertEquals(List.of("app"), built.getServices().getFirst().checkIds(),
+                "the configured checks are the single source of a service's declared checks");
+    }
+
+    @Test
     void appliesDefaultCheckTimingWhenOnlyTheTypeIsGiven() {
         AgentConfiguration config = AgentConfiguration.fromJson(minimalJson("[\"http://localhost:8080\"]", """
                 "services": [{"id":"web","name":"web","address":"localhost","port":8080,"checks":[
@@ -261,6 +282,49 @@ class AgentConfigurationTest {
                         Duration.ofSeconds(2), Duration.ofSeconds(30), true),
                 new HttpCheck("web", "http", URI.create("https://localhost:8443/ready"),
                         Duration.ofSeconds(10), Duration.ofSeconds(2), Duration.ofSeconds(30), true)),
+                config.getHealthChecks());
+    }
+
+    @Test
+    void parsesAnOptionalPerCheckDeregistrationDelay() {
+        AgentConfiguration config = AgentConfiguration.fromJson(minimalJson("[\"http://localhost:8080\"]", """
+                "services": [{"id":"web","name":"web","address":"localhost","port":8080,"checks":[
+                  {"id":"http","type":"http","url":"http://localhost:8080/health","deregisterAfterMs":60000},
+                  {"id":"tcp","type":"tcp","deregisterAfterMs":0},
+                  {"id":"app","type":"ttl","ttlMs":15000,"deregisterAfterMs":90000},
+                  {"id":"plain","type":"ttl","ttlMs":15000}
+                ]}]
+                """));
+
+        List<HealthCheckDefinition> checks = config.getHealthChecks();
+        assertEquals(Duration.ofSeconds(60), checks.get(0).deregisterAfter());
+        assertEquals(Duration.ZERO, checks.get(1).deregisterAfter());
+        assertEquals(Duration.ofSeconds(90), checks.get(2).deregisterAfter());
+        assertEquals(Duration.ZERO, checks.get(3).deregisterAfter(), "absent means never deregister");
+        for (String invalid : List.of("-1", "\"60s\"", "1.5")) {
+            String services = """
+                    "services":[{"id":"web","name":"web","address":"localhost","port":8080,
+                     "checks":[{"id":"c","type":"tcp","deregisterAfterMs":%s}]}]
+                    """.formatted(invalid);
+            assertThrows(IllegalArgumentException.class,
+                    () -> AgentConfiguration.fromJson(minimalJson("[\"http://localhost:8080\"]", services)), invalid);
+        }
+    }
+
+    @Test
+    void parsesAnOptionalTcpSlowConnectionWarningThreshold() {
+        AgentConfiguration config = AgentConfiguration.fromJson(minimalJson("[\"http://localhost:8080\"]", """
+                "services": [{"id":"db","name":"db","address":"localhost","port":5432,"checks":[
+                  {"id":"slow","type":"tcp","intervalMs":1000,"timeoutMs":500,"warnAfterMs":200},
+                  {"id":"plain","type":"tcp","intervalMs":1000,"timeoutMs":500}
+                ]}]
+                """));
+
+        assertEquals(List.of(
+                new TcpCheck("db", "slow", "localhost", 5432, Duration.ofSeconds(1), Duration.ofMillis(500),
+                        Duration.ofSeconds(3), true, Duration.ZERO, Duration.ofMillis(200)),
+                new TcpCheck("db", "plain", "localhost", 5432, Duration.ofSeconds(1), Duration.ofMillis(500),
+                        Duration.ofSeconds(3), true)),
                 config.getHealthChecks());
     }
 
@@ -290,7 +354,12 @@ class AgentConfigurationTest {
                 "[{\"id\":\"c\",\"type\":\"tcp\",\"intervalMs\":1000,\"timeoutMs\":1001}]",
                 "[{\"id\":\"c\",\"type\":\"tcp\",\"intervalMs\":1000,\"ttlMs\":1000}]",
                 "[{\"id\":\"c\",\"type\":\"tcp\",\"intervalMs\":\"1000\"}]",
-                "[{\"id\":\"c\",\"type\":\"tcp\",\"required\":\"yes\"}]");
+                "[{\"id\":\"c\",\"type\":\"tcp\",\"required\":\"yes\"}]",
+                "[{\"id\":\"c\",\"type\":\"tcp\",\"intervalMs\":1000,\"timeoutMs\":500,\"warnAfterMs\":500}]",
+                "[{\"id\":\"c\",\"type\":\"tcp\",\"warnAfterMs\":-1}]",
+                "[{\"id\":\"c\",\"type\":\"tcp\",\"warnAfterMs\":\"100\"}]",
+                "[{\"id\":\"c\",\"type\":\"http\",\"url\":\"http://localhost/health\",\"warnAfterMs\":100}]",
+                "[{\"id\":\"c\",\"type\":\"ttl\",\"ttlMs\":1000,\"warnAfterMs\":100}]");
 
         for (String checks : invalidChecks) {
             String services = """

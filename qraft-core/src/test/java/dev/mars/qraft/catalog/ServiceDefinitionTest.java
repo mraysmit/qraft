@@ -50,6 +50,19 @@ class ServiceDefinitionTest {
     }
 
     @Test
+    void declaresItsCheckIdentifiersInCanonicalOrder() {
+        ServiceDefinition definition = new ServiceDefinition(
+                "web-1", "web", "10.0.0.5", 8080, List.of(), Map.of(), true);
+
+        assertEquals(List.of(), definition.checkIds(), "a definition without checks declares none");
+        ServiceDefinition withChecks = definition.withCheckIds(List.of("tcp", "http", "tcp"));
+        assertEquals(List.of("http", "tcp"), withChecks.checkIds());
+        assertEquals(definition.withCheckIds(List.of("http", "tcp")), withChecks);
+        assertThrows(UnsupportedOperationException.class, () -> withChecks.checkIds().add("x"));
+        assertThrows(IllegalArgumentException.class, () -> definition.withCheckIds(List.of(" ")));
+    }
+
+    @Test
     void rejectsMissingIdentityAndInvalidPorts() {
         assertThrows(IllegalArgumentException.class,
                 () -> new ServiceDefinition("", "web", "localhost", 80, List.of(), Map.of(), true));

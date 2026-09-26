@@ -124,6 +124,8 @@ public final class ProtobufCommandCodec {
                     .setType(CatalogCommandType.CATALOG_CMD_REGISTER)
                     .setServiceId(register.instance().serviceId())
                     .setInstance(toServiceInstanceProto(register.instance()))
+                    .setChecksDeclared(register.declaresChecks())
+                    .addAllDeclaredCheckIds(register.declaresChecks() ? register.declaredCheckIds() : java.util.List.of())
                     .build();
             case CatalogCommand.Deregister deregister -> builder
                     .setType(CatalogCommandType.CATALOG_CMD_DEREGISTER)
@@ -145,7 +147,9 @@ public final class ProtobufCommandCodec {
 
     private static CatalogCommand fromCatalogProto(CatalogCommandProto proto) {
         return switch (proto.getType()) {
-            case CATALOG_CMD_REGISTER -> CatalogCommand.register(fromServiceInstanceProto(proto.getInstance()));
+            case CATALOG_CMD_REGISTER -> proto.getChecksDeclared()
+                    ? CatalogCommand.register(fromServiceInstanceProto(proto.getInstance()), proto.getDeclaredCheckIdsList())
+                    : CatalogCommand.register(fromServiceInstanceProto(proto.getInstance()));
             case CATALOG_CMD_DEREGISTER -> proto.getNodeId().isBlank()
                     ? CatalogCommand.deregister(proto.getServiceId())
                     : CatalogCommand.deregister(new dev.mars.qraft.catalog.ServiceInstanceId(
@@ -174,6 +178,7 @@ public final class ProtobufCommandCodec {
                 .setTtlMs(observation.ttlMillis())
                 .setRequired(observation.required())
                 .setOutput(observation.output())
+                .setDeregisterAfterMs(observation.deregisterAfterMillis())
                 .setAcceptedAtEpochMs(command.acceptedAt().toEpochMilli())
                 .build();
     }
@@ -184,7 +189,7 @@ public final class ProtobufCommandCodec {
         HealthObservation observation = new HealthObservation(check,
                 ServiceHealth.valueOf(proto.getStatus()), proto.getSequenceNumber(),
                 Instant.ofEpochMilli(proto.getObservedAtEpochMs()), proto.getTtlMs(),
-                proto.getRequired(), proto.getOutput());
+                proto.getRequired(), proto.getOutput(), proto.getDeregisterAfterMs());
         return CatalogCommand.observe(observation, Instant.ofEpochMilli(proto.getAcceptedAtEpochMs()));
     }
 

@@ -28,6 +28,7 @@ enum AgentCommandType {
   AGENT_CMD_UPDATE_STATUS = 3;
   AGENT_CMD_UPDATE_CAPABILITIES = 4;
   AGENT_CMD_HEARTBEAT = 5;
+  AGENT_CMD_EXPIRE = 6;
 }
 
 enum SystemMetadataCommandType {
@@ -37,9 +38,9 @@ enum SystemMetadataCommandType {
 }
 
 message AgentSystemInfoProto {
-  string operating_system = 1;
-  string architecture = 2;
-  string java_version = 3;
+  optional string operating_system = 1;
+  optional string architecture = 2;
+  optional string java_version = 3;
   int64 total_memory = 4;
   int64 available_memory = 5;
   int64 total_disk_space = 6;
@@ -50,14 +51,14 @@ message AgentSystemInfoProto {
 }
 
 message AgentNetworkInfoProto {
-  string public_ip_address = 1;
-  string private_ip_address = 2;
+  optional string public_ip_address = 1;
+  optional string private_ip_address = 2;
   repeated string network_interfaces = 3;
   int64 bandwidth_capacity = 4;
   int64 current_bandwidth_usage = 5;
   double latency_ms = 6;
   double packet_loss_percentage = 7;
-  string connection_type = 8;
+  optional string connection_type = 8;
   bool is_nat_traversal = 9;
   repeated int32 firewall_ports = 10;
 }
@@ -67,23 +68,26 @@ message AgentCapabilitiesProto {
   reserved 2, 3, 4;
   repeated string available_regions = 5;
   reserved 6, 7;
+  // Legacy: values rendered as text, which loses their JSON types. Read only when field 11 is empty.
   map<string, string> custom_capabilities = 8;
   AgentSystemInfoProto system_info = 9;
   AgentNetworkInfoProto network_info = 10;
+  // Each value encoded as JSON so numbers, booleans, lists, objects, and null survive replication.
+  map<string, string> custom_capabilities_json = 11;
 }
 
 message AgentInfoProto {
   string agent_id = 1;
-  string hostname = 2;
-  string address = 3;
+  optional string hostname = 2;
+  optional string address = 3;
   int32 port = 4;
   AgentCapabilitiesProto capabilities = 5;
   AgentStatusProto status = 6;
   int64 registration_time_epoch_ms = 7;
   int64 last_heartbeat_epoch_ms = 8;
-  string version = 9;
-  string region = 10;
-  string datacenter = 11;
+  optional string version = 9;
+  optional string region = 10;
+  optional string datacenter = 11;
   map<string, string> metadata = 12;
 }
 
@@ -97,6 +101,8 @@ message AgentCommandProto {
   AgentStatusProto expected_status = 7;
   int64 sequence_number = 8;
   string registration_id = 9;
+  int64 expected_last_contact_epoch_ms = 10;
+  bool reap = 11;
 }
 
 message SystemMetadataCommandProto {
@@ -138,6 +144,9 @@ message CatalogCommandProto {
   string namespace = 6;
   HealthObservationCommandProto health_observation = 7;
   HealthExpiryCommandProto health_expiry = 8;
+  // A registration that declares its checks; false, including older entries, keeps existing checks.
+  bool checks_declared = 9;
+  repeated string declared_check_ids = 10;
 }
 
 message HealthObservationCommandProto {
@@ -153,6 +162,8 @@ message HealthObservationCommandProto {
   bool required = 10;
   string output = 11;
   int64 accepted_at_epoch_ms = 12;
+  // Zero, including entries written before this field existed, means never deregister automatically.
+  int64 deregister_after_ms = 13;
 }
 
 message HealthExpiryCommandProto {

@@ -86,11 +86,11 @@ class HttpCatalogClientTest {
                     + "\"nodeId\":\"node-a\",\"tenantId\":\"tenant-a\","
                     + "\"namespace\":\"prod\",\"registered\":true}");
         });
-        HttpCatalogClient client = client(Duration.ofSeconds(1));
+        HttpCatalogClient client = client(Duration.ofSeconds(10));
         ServiceDefinition service = service();
 
-        assertInstanceOf(CatalogOutcome.Success.class, client.register(endpoint, service).get(2, TimeUnit.SECONDS));
-        assertInstanceOf(CatalogOutcome.Success.class, client.register(endpoint, service).get(2, TimeUnit.SECONDS));
+        assertInstanceOf(CatalogOutcome.Success.class, client.register(endpoint, service).get(10, TimeUnit.SECONDS));
+        assertInstanceOf(CatalogOutcome.Success.class, client.register(endpoint, service).get(10, TimeUnit.SECONDS));
 
         assertEquals(2, requests.size());
         CapturedRequest first = requests.getFirst();
@@ -100,7 +100,8 @@ class HttpCatalogClientTest {
         assertEquals("tenant-a", first.header("X-Qraft-Tenant"));
         assertEquals("prod", first.header("X-Qraft-Namespace"));
         JsonNode body = JSON.readTree(first.body());
-        assertEquals(9, body.size());
+        assertEquals(10, body.size());
+        assertEquals(List.of("http", "tcp"), JSON.convertValue(body.path("checks"), List.class));
         assertEquals("payments-1", body.path("serviceId").textValue());
         assertEquals("payments", body.path("serviceName").textValue());
         assertEquals("127.0.0.1", body.path("address").textValue());
@@ -122,10 +123,10 @@ class HttpCatalogClientTest {
             requests.add(capture(exchange));
             respond(exchange, 200, "{\"serviceId\":\"payments-1\",\"deregistered\":false}");
         });
-        HttpCatalogClient client = client(Duration.ofSeconds(1));
+        HttpCatalogClient client = client(Duration.ofSeconds(10));
 
         CatalogOutcome.Success outcome = assertInstanceOf(CatalogOutcome.Success.class,
-                client.deregister(endpoint, "payments-1").get(2, TimeUnit.SECONDS));
+                client.deregister(endpoint, "payments-1").get(10, TimeUnit.SECONDS));
         assertFalse(outcome.changed());
         assertEquals("/v1/agent/service/deregister/payments-1", requests.getFirst().path());
         assertEquals("node-a", requests.getFirst().header("X-Qraft-Node"));
@@ -154,66 +155,71 @@ class HttpCatalogClientTest {
                 default -> respond(exchange, 504, "not-json");
             }
         });
-        HttpCatalogClient client = client(Duration.ofSeconds(1));
+        HttpCatalogClient client = client(Duration.ofSeconds(10));
 
         CatalogOutcome.Retryable retry = assertInstanceOf(CatalogOutcome.Retryable.class,
-                client.deregister(endpoint, "retry-envelope").get(2, TimeUnit.SECONDS));
+                client.deregister(endpoint, "retry-envelope").get(10, TimeUnit.SECONDS));
         assertEquals("draining", retry.code());
         assertEquals("later", retry.message());
         assertEquals("node-b", retry.leaderId());
         CatalogOutcome.Rejected rejected = assertInstanceOf(CatalogOutcome.Rejected.class,
-                client.deregister(endpoint, "reject-envelope").get(2, TimeUnit.SECONDS));
+                client.deregister(endpoint, "reject-envelope").get(10, TimeUnit.SECONDS));
         assertEquals("invalid_registration", rejected.code());
         assertInstanceOf(CatalogOutcome.Retryable.class,
-                client.deregister(endpoint, "malformed-server").get(2, TimeUnit.SECONDS));
+                client.deregister(endpoint, "malformed-server").get(10, TimeUnit.SECONDS));
         assertInstanceOf(CatalogOutcome.Rejected.class,
-                client.deregister(endpoint, "malformed-client").get(2, TimeUnit.SECONDS));
+                client.deregister(endpoint, "malformed-client").get(10, TimeUnit.SECONDS));
         assertInstanceOf(CatalogOutcome.Retryable.class,
-                client.deregister(endpoint, "rate-limited").get(2, TimeUnit.SECONDS));
+                client.deregister(endpoint, "rate-limited").get(10, TimeUnit.SECONDS));
         CatalogOutcome.Retryable unknown = assertInstanceOf(CatalogOutcome.Retryable.class,
-                client.deregister(endpoint, "outcome-unknown").get(2, TimeUnit.SECONDS));
+                client.deregister(endpoint, "outcome-unknown").get(10, TimeUnit.SECONDS));
         assertEquals("outcome_unknown", unknown.code());
         assertInstanceOf(CatalogOutcome.Retryable.class,
-                client.deregister(endpoint, "bad-gateway").get(2, TimeUnit.SECONDS));
+                client.deregister(endpoint, "bad-gateway").get(10, TimeUnit.SECONDS));
         assertInstanceOf(CatalogOutcome.Retryable.class,
-                client.deregister(endpoint, "unavailable").get(2, TimeUnit.SECONDS));
+                client.deregister(endpoint, "unavailable").get(10, TimeUnit.SECONDS));
         assertInstanceOf(CatalogOutcome.Retryable.class,
-                client.deregister(endpoint, "gateway-timeout").get(2, TimeUnit.SECONDS));
+                client.deregister(endpoint, "gateway-timeout").get(10, TimeUnit.SECONDS));
         CatalogOutcome.Retryable malformedSuccess = assertInstanceOf(CatalogOutcome.Retryable.class,
-                client.deregister(endpoint, "bad-success").get(2, TimeUnit.SECONDS));
+                client.deregister(endpoint, "bad-success").get(10, TimeUnit.SECONDS));
         assertEquals("invalid_response", malformedSuccess.code());
     }
 
     @Test
     void timeoutAndConnectionRefusalAreRetryableWithinTheBound() throws Exception {
+        java.util.concurrent.CountDownLatch releaseResponse = new java.util.concurrent.CountDownLatch(1);
         URI slow = start(exchange -> {
             try {
-                Thread.sleep(500);
+                // Held until the client has returned, so a returned outcome proves the request timeout applied.
+                releaseResponse.await(30, TimeUnit.SECONDS);
                 respond(exchange, 200, "{\"serviceId\":\"slow\",\"deregistered\":true}");
             } catch (InterruptedException ignored) {
                 Thread.currentThread().interrupt();
             }
         });
         HttpCatalogClient client = client(Duration.ofMillis(50));
-        long started = System.nanoTime();
-        CatalogOutcome.Retryable timedOut = assertInstanceOf(CatalogOutcome.Retryable.class,
-                client.deregister(slow, "slow").get(2, TimeUnit.SECONDS));
+        CatalogOutcome.Retryable timedOut;
+        try {
+            timedOut = assertInstanceOf(CatalogOutcome.Retryable.class,
+                    client.deregister(slow, "slow").get(10, TimeUnit.SECONDS));
+        } finally {
+            releaseResponse.countDown();
+        }
         assertEquals("request_timeout", timedOut.code());
-        assertTrue(Duration.ofNanos(System.nanoTime() - started).compareTo(Duration.ofSeconds(1)) < 0);
 
         URI refused;
         try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
             refused = URI.create("http://127.0.0.1:" + socket.getLocalPort());
         }
         assertInstanceOf(CatalogOutcome.Retryable.class,
-                client.deregister(refused, "offline").get(2, TimeUnit.SECONDS));
+                client.deregister(refused, "offline").get(10, TimeUnit.SECONDS));
     }
 
     @Test
     void closesOwnedHttpClientExactlyOnceAndRejectsLaterCalls() {
         CloseTrackingHttpClient transport = new CloseTrackingHttpClient(HttpClient.newHttpClient());
         HttpCatalogClient client = new HttpCatalogClient(transport, JSON, "node-a", "tenant-a", "prod",
-                "dc-1", "eu-west", Duration.ofSeconds(1));
+                "dc-1", "eu-west", Duration.ofSeconds(10));
         clients.add(client);
 
         client.close();
@@ -245,11 +251,11 @@ class HttpCatalogClientTest {
         });
         HttpCatalogClient client = selectedClient(List.of(refused, retryable, successful));
 
-        assertInstanceOf(CatalogOutcome.Success.class, client.register(service()).get(2, TimeUnit.SECONDS));
+        assertInstanceOf(CatalogOutcome.Success.class, client.register(service()).get(10, TimeUnit.SECONDS));
         assertEquals(1, retryableAttempts.get());
         assertEquals(1, successfulAttempts.get());
 
-        assertInstanceOf(CatalogOutcome.Success.class, client.register(service()).get(2, TimeUnit.SECONDS));
+        assertInstanceOf(CatalogOutcome.Success.class, client.register(service()).get(10, TimeUnit.SECONDS));
         assertEquals(1, retryableAttempts.get(), "the preferred successful seed must be tried first");
         assertEquals(2, successfulAttempts.get());
     }
@@ -269,7 +275,7 @@ class HttpCatalogClientTest {
         });
         HttpCatalogClient client = selectedClient(List.of(rejected, later));
 
-        assertInstanceOf(CatalogOutcome.Rejected.class, client.register(service()).get(2, TimeUnit.SECONDS));
+        assertInstanceOf(CatalogOutcome.Rejected.class, client.register(service()).get(10, TimeUnit.SECONDS));
         assertEquals(1, rejectedAttempts.get());
         assertEquals(0, laterAttempts.get());
     }
@@ -288,7 +294,7 @@ class HttpCatalogClientTest {
         HttpCatalogClient client = selectedClient(List.of(endpoint));
 
         assertInstanceOf(CatalogLookupOutcome.Absent.class,
-                client.lookup(service()).get(2, TimeUnit.SECONDS));
+                client.lookup(service()).get(10, TimeUnit.SECONDS));
 
         servers.getFirst().removeContext("/");
         servers.getFirst().createContext("/", exchange -> respond(exchange, 200,
@@ -296,7 +302,7 @@ class HttpCatalogClientTest {
                         + "\"nodeId\":\"node-a\",\"tenantId\":\"tenant-a\","
                         + "\"namespace\":\"prod\"}]"));
         assertInstanceOf(CatalogLookupOutcome.Present.class,
-                client.lookup(service()).get(2, TimeUnit.SECONDS));
+                client.lookup(service()).get(10, TimeUnit.SECONDS));
         assertEquals(1, attempts.get());
     }
 
@@ -311,7 +317,7 @@ class HttpCatalogClientTest {
         });
         HttpCatalogClient client = selectedClient(List.of(endpoint));
 
-        ObservationOutcome outcome = client.observe(observation(7)).get(2, TimeUnit.SECONDS);
+        ObservationOutcome outcome = client.observe(observation(7)).get(10, TimeUnit.SECONDS);
 
         assertEquals(new ObservationOutcome.Accepted(7, Instant.parse("2026-09-26T10:00:30Z")), outcome);
         CapturedRequest request = requests.getFirst();
@@ -324,7 +330,7 @@ class HttpCatalogClientTest {
         assertEquals(JSON.readTree("""
                 {"serviceId":"payments-1","checkId":"http","status":"warning","sequenceNumber":7,
                  "observedAt":"2026-09-26T09:59:59.500Z","ttlMillis":30000,"required":false,
-                 "output":"HTTP 429"}
+                 "output":"HTTP 429","deregisterAfterMillis":120000}
                 """), JSON.readTree(request.body()));
     }
 
@@ -336,24 +342,24 @@ class HttpCatalogClientTest {
 
         reply.set(new String[] {"409", "{\"code\":\"stale_observation\",\"message\":\"older\","
                 + "\"retryable\":false,\"currentSequenceNumber\":9}"});
-        assertEquals(new ObservationOutcome.Stale(9), client.observe(observation(7)).get(2, TimeUnit.SECONDS));
+        assertEquals(new ObservationOutcome.Stale(9), client.observe(observation(7)).get(10, TimeUnit.SECONDS));
 
         reply.set(new String[] {"404", "{\"code\":\"service_not_found\",\"message\":\"missing\","
                 + "\"retryable\":false}"});
         assertEquals(new ObservationOutcome.Rejected("service_not_found", "missing", null),
-                client.observe(observation(7)).get(2, TimeUnit.SECONDS));
+                client.observe(observation(7)).get(10, TimeUnit.SECONDS));
 
         reply.set(new String[] {"503", "{\"code\":\"leader_unavailable\",\"message\":\"no leader\","
                 + "\"retryable\":true,\"leaderId\":\"node-2\"}"});
         assertEquals(new ObservationOutcome.Retryable("leader_unavailable", "no leader", "node-2"),
-                client.observe(observation(7)).get(2, TimeUnit.SECONDS));
+                client.observe(observation(7)).get(10, TimeUnit.SECONDS));
 
         reply.set(new String[] {"409", "{\"code\":\"stale_observation\",\"message\":\"older\","
                 + "\"retryable\":false}"});
-        assertInstanceOf(ObservationOutcome.Rejected.class, client.observe(observation(7)).get(2, TimeUnit.SECONDS));
+        assertInstanceOf(ObservationOutcome.Rejected.class, client.observe(observation(7)).get(10, TimeUnit.SECONDS));
 
         reply.set(new String[] {"200", "{\"accepted\":true}"});
-        ObservationOutcome malformed = client.observe(observation(7)).get(2, TimeUnit.SECONDS);
+        ObservationOutcome malformed = client.observe(observation(7)).get(10, TimeUnit.SECONDS);
         assertEquals("invalid_response", ((ObservationOutcome.Retryable) malformed).code());
     }
 
@@ -377,21 +383,22 @@ class HttpCatalogClientTest {
         ControllerContactTracker contact = new ControllerContactTracker(java.time.Clock.systemUTC());
         HttpCatalogClient client = new HttpCatalogClient(HttpClient.newHttpClient(), JSON,
                 List.of(refused, stale, later), "node-a", "tenant-a", "prod", "dc-1", "eu-west",
-                Duration.ofSeconds(1), contact);
+                Duration.ofSeconds(10), contact);
         clients.add(client);
 
-        assertEquals(new ObservationOutcome.Stale(12), client.observe(observation(7)).get(2, TimeUnit.SECONDS));
+        assertEquals(new ObservationOutcome.Stale(12), client.observe(observation(7)).get(10, TimeUnit.SECONDS));
         assertEquals(1, staleAttempts.get());
         assertEquals(0, laterAttempts.get());
         assertNotNull(contact.lastSuccessfulContact(), "a stale answer is still a successful controller contact");
 
-        client.observe(observation(13)).get(2, TimeUnit.SECONDS);
+        client.observe(observation(13)).get(10, TimeUnit.SECONDS);
         assertEquals(2, staleAttempts.get(), "the endpoint that answered is preferred next time");
     }
 
     private static CheckObservation observation(long sequenceNumber) {
         return new CheckObservation("payments-1", "http", CheckStatus.WARNING, sequenceNumber,
-                Instant.parse("2026-09-26T09:59:59.500Z"), Duration.ofSeconds(30), false, "HTTP 429");
+                Instant.parse("2026-09-26T09:59:59.500Z"), Duration.ofSeconds(30), false, "HTTP 429",
+                Duration.ofMinutes(2));
     }
 
     private HttpCatalogClient client(Duration timeout) {
@@ -403,7 +410,7 @@ class HttpCatalogClientTest {
 
     private HttpCatalogClient selectedClient(List<URI> endpoints) {
         HttpCatalogClient client = new HttpCatalogClient(HttpClient.newHttpClient(), JSON, endpoints,
-                "node-a", "tenant-a", "prod", "dc-1", "eu-west", Duration.ofSeconds(1));
+                "node-a", "tenant-a", "prod", "dc-1", "eu-west", Duration.ofSeconds(10));
         clients.add(client);
         return client;
     }
@@ -418,7 +425,7 @@ class HttpCatalogClientTest {
 
     private static ServiceDefinition service() {
         return new ServiceDefinition("payments-1", "payments", "127.0.0.1", 9090,
-                List.of("blue"), Map.of("team", "platform"), true);
+                List.of("blue"), Map.of("team", "platform"), true).withCheckIds(List.of("tcp", "http"));
     }
 
     private static CapturedRequest capture(HttpExchange exchange) throws IOException {

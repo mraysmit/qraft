@@ -135,6 +135,7 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         body.put("datacenter", datacenter);
         body.put("region", region);
         body.put("enabled", service.enabled());
+        body.put("checks", service.checkIds());
         try {
             HttpRequest request = request(controller, "/v1/agent/service/register")
                     .header("Content-Type", "application/json")
@@ -256,6 +257,7 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         body.put("ttlMillis", observation.ttl().toMillis());
         body.put("required", observation.required());
         body.put("output", observation.output());
+        body.put("deregisterAfterMillis", observation.deregisterAfter().toMillis());
         try {
             return observeAttempt(endpoints.cycle(), 0, objectMapper.writeValueAsString(body));
         } catch (IOException error) {

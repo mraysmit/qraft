@@ -51,6 +51,7 @@ class DockerDeploymentContractTest {
             "qraft-controller/src/test/resources/docker-compose-5node-test.yml");
     private static final List<String> PREBUILT_COMPOSE_FILES = List.of(
             "qraft-controller/src/test/resources/docker-compose-3node-prebuilt.yml",
+            "qraft-controller/src/test/resources/docker-compose-3node-agent-prebuilt.yml",
             "qraft-controller/src/test/resources/docker-compose-5node-prebuilt.yml");
 
     @Test
@@ -232,6 +233,20 @@ class DockerDeploymentContractTest {
         assertTrue(configuration.getControllerUrls().size() == 1);
         assertTrue(configuration.getServices().size() == 1);
         assertTrue(configuration.getServices().getFirst().id().equals("web"));
+    }
+
+    @Test
+    void agentAcceptanceContainerRunsTheConfiguredHealthChecksAgainstEveryServer() throws IOException {
+        Path root = Path.of("..").toAbsolutePath().normalize();
+        AgentConfiguration configuration = AgentConfiguration.fromFile(
+                root.resolve("docker/config/agent-acceptance/agent.json"));
+
+        assertTrue(configuration.getControllerUrls().size() == 3);
+        assertTrue(configuration.getHealthChecks().size() == 2);
+        String compose = Files.readString(root.resolve(
+                "qraft-controller/src/test/resources/docker-compose-3node-agent-prebuilt.yml"));
+        assertTrue(compose.contains("command: [\"client\", \"--config\", \"/etc/qraft/client.json\"]"));
+        assertTrue(compose.contains("agent-acceptance/agent.json:/etc/qraft/client.json:ro"));
     }
 
     @Test

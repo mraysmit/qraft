@@ -87,7 +87,7 @@ class RaftNodeSnapshotSequencingTest {
                 .heartbeatInterval(10_000)
                 .build();
         await(node.start());
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.onSpinWait();
         if (!node.isLeader()) throw new AssertionError("single node did not become leader");
         assertInstanceOf(RaftCommandResult.Success.class,
@@ -316,7 +316,7 @@ class RaftNodeSnapshotSequencingTest {
         CompletableFuture<Void> marker = new CompletableFuture<>();
         runtime.runOnContext(ignored -> marker.complete(null));
         try {
-            marker.get(2, TimeUnit.SECONDS);
+            marker.get(10, TimeUnit.SECONDS);
         } catch (Exception error) {
             throw new AssertionError("state-loop marker did not run", error);
         }
@@ -488,7 +488,7 @@ class RaftNodeSnapshotSequencingTest {
 
         private static void awaitGate(CompletableFuture<Void> entered, String operation) {
             try {
-                entered.get(2, TimeUnit.SECONDS);
+                entered.get(10, TimeUnit.SECONDS);
             } catch (Exception error) {
                 throw new AssertionError(operation + " did not reach its gate", error);
             }

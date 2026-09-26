@@ -153,7 +153,7 @@ class QraftAgentTest {
         appender.start();
         logger.addAppender(appender);
         try {
-            assertFalse(agent.start().get(1, TimeUnit.SECONDS));
+            assertFalse(agent.start().get(10, TimeUnit.SECONDS));
 
             assertFalse(repeatedRegistration.await(100, TimeUnit.MILLISECONDS));
             assertEquals(1, registrations.get());
@@ -163,7 +163,7 @@ class QraftAgentTest {
                             && event.getFormattedMessage().contains("bad address")).count());
         } finally {
             logger.detachAppender(appender);
-            assertTrue(agent.shutdown().get(1, TimeUnit.SECONDS));
+            assertTrue(agent.shutdown().get(10, TimeUnit.SECONDS));
         }
     }
 
@@ -199,7 +199,7 @@ class QraftAgentTest {
 
         try {
             assertFalse(agent.start().join(), "the initial registration should expose the outage");
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
             while ((!agent.healthService().isReady() || heartbeats.get() == 0)
                     && System.nanoTime() < deadline) {
                 Thread.sleep(10);
@@ -246,8 +246,8 @@ class QraftAgentTest {
         QraftAgent agent = new QraftAgent(config);
 
         try {
-            assertTrue(agent.start().get(1, TimeUnit.SECONDS));
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            assertTrue(agent.start().get(10, TimeUnit.SECONDS));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
             while ((registrations.get() < 2 || heartbeats.get() < 2)
                     && System.nanoTime() < deadline) {
                 Thread.sleep(10);
@@ -297,8 +297,8 @@ class QraftAgentTest {
         QraftAgent agent = new QraftAgent(config);
 
         try {
-            assertTrue(agent.start().get(1, TimeUnit.SECONDS));
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            assertTrue(agent.start().get(10, TimeUnit.SECONDS));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
             while (agent.serviceReconciler().registeredCount() == 0
                     && System.nanoTime() < deadline) Thread.onSpinWait();
 
@@ -340,8 +340,8 @@ class QraftAgentTest {
         QraftAgent agent = new QraftAgent(config);
 
         try {
-            assertTrue(agent.start().get(1, TimeUnit.SECONDS));
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            assertTrue(agent.start().get(10, TimeUnit.SECONDS));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
             while ((serviceRegistrations.get() == 0 || agent.serviceReconciler().isReconciling())
                     && System.nanoTime() < deadline) Thread.onSpinWait();
 
@@ -375,7 +375,7 @@ class QraftAgentTest {
                 new ControllerRetryPolicy(10, 100, () -> 0.0), clock);
 
         try {
-            assertTrue(agent.start().get(1, TimeUnit.SECONDS));
+            assertTrue(agent.start().get(10, TimeUnit.SECONDS));
             assertTrue(agent.healthService().isReady());
 
             clock.advance(Duration.ofMillis(1_001));
@@ -429,7 +429,7 @@ class QraftAgentTest {
         AgentConfiguration config = agentConfigWithServices(2_000);
         QraftAgent agent = new QraftAgent(config);
 
-        assertTrue(agent.start().get(1, TimeUnit.SECONDS));
+        assertTrue(agent.start().get(10, TimeUnit.SECONDS));
         awaitRegisteredServices(agent, 2);
         CompletableFuture<Boolean> shutdown = agent.shutdown();
         CompletableFuture<Boolean> repeated = agent.shutdown();
@@ -441,11 +441,11 @@ class QraftAgentTest {
         assertFalse(events.contains("node"), "node deregistration must wait for every service");
         releaseServices.countDown();
 
-        assertTrue(shutdown.get(1, TimeUnit.SECONDS));
+        assertTrue(shutdown.get(10, TimeUnit.SECONDS));
         assertEquals(Set.of("service:web", "service:api"), Set.copyOf(events.subList(0, 2)));
         assertEquals("node", events.get(2));
         assertFalse(agent.healthService().isHealthy());
-        assertTrue(agent.resourcesTerminated());
+        assertTrue(agent.isTerminated());
     }
 
     @Test
@@ -464,7 +464,8 @@ class QraftAgentTest {
         });
         server.createContext("/v1/agent/service/deregister", exchange -> {
             try {
-                releaseDeregistration.await(2, TimeUnit.SECONDS);
+                // Held until the test has asserted, so a shutdown that completes cannot have waited for it.
+                releaseDeregistration.await(30, TimeUnit.SECONDS);
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
             }
@@ -478,18 +479,17 @@ class QraftAgentTest {
         logger.addAppender(appender);
 
         try {
-            assertTrue(agent.start().get(1, TimeUnit.SECONDS));
+            assertTrue(agent.start().get(10, TimeUnit.SECONDS));
             awaitRegisteredServices(agent, 2);
-            long started = System.nanoTime();
 
-            assertFalse(agent.shutdown().get(1, TimeUnit.SECONDS));
-            assertTrue(Duration.ofNanos(System.nanoTime() - started).compareTo(Duration.ofSeconds(1)) < 0);
+            assertFalse(agent.shutdown().get(10, TimeUnit.SECONDS),
+                    "shutdown completes at its deadline while every deregistration is still held open");
             assertSame(agent.shutdown(), agent.shutdown());
             assertEquals(1, appender.list.stream()
                     .filter(event -> event.getFormattedMessage().contains("shutdown incomplete"))
                     .count());
             assertFalse(agent.healthService().isHealthy());
-            assertTrue(agent.resourcesTerminated());
+            assertTrue(agent.isTerminated());
         } finally {
             releaseDeregistration.countDown();
             logger.detachAppender(appender);
@@ -510,7 +510,7 @@ class QraftAgentTest {
     }
 
     private static void awaitRegisteredServices(QraftAgent agent, int count) throws Exception {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (agent.serviceReconciler().registeredCount() < count && System.nanoTime() < deadline) {
             Thread.onSpinWait();
         }

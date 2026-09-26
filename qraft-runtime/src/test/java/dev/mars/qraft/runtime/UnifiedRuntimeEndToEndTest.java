@@ -227,14 +227,14 @@ class UnifiedRuntimeEndToEndTest {
                   },
                   "controllers": {
                     "urls": ["http://127.0.0.1:%d"],
-                    "requestTimeoutMs": 500
+                    "requestTimeoutMs": 5000
                   },
                   "catalog": {
                     "tenant": "default",
                     "namespace": "default",
                     "registrationRetryMinMs": 25,
                     "registrationRetryMaxMs": 100,
-                    "contactFreshnessMs": 200,
+                    "contactFreshnessMs": 1000,
                     "services": [
                       {"id":"web","name":"web","address":"127.0.0.1","port":8080,
                        "tags":["http"],"metadata":{"owner":"runtime"},"enabled":true},

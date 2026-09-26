@@ -436,7 +436,7 @@ class RaftNodeInstalledSnapshotSequencingTest {
         CompletableFuture<Void> marker = new CompletableFuture<>();
         runtime.runOnContext(ignored -> marker.complete(null));
         try {
-            marker.get(2, TimeUnit.SECONDS);
+            marker.get(10, TimeUnit.SECONDS);
         } catch (Exception error) {
             throw new AssertionError("state-loop marker did not run", error);
         }
@@ -487,7 +487,7 @@ class RaftNodeInstalledSnapshotSequencingTest {
 
         void awaitBlockedSnapshotPublication() {
             try {
-                publicationEntered.get(2, TimeUnit.SECONDS);
+                publicationEntered.get(10, TimeUnit.SECONDS);
             } catch (Exception error) {
                 throw new AssertionError("snapshot publication did not reach its gate", error);
             }

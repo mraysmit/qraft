@@ -35,8 +35,18 @@ public sealed interface HealthCheckDefinition permits ProbeCheck, TtlCheck {
 
     boolean required();
 
+    /**
+     * How long the check may remain expired at the server before its service is deregistered
+     * automatically; zero means never.
+     */
+    Duration deregisterAfter();
+
     static void requireText(String value, String field) {
         if (value == null || value.isBlank()) throw new IllegalArgumentException(field + " must not be blank");
+    }
+
+    static void requireNotNegative(Duration value, String field) {
+        if (value == null || value.isNegative()) throw new IllegalArgumentException(field + " must not be negative");
     }
 
     static void requirePositive(Duration value, String field) {

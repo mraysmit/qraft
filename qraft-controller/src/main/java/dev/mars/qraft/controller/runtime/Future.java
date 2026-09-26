@@ -16,6 +16,8 @@
 
 package dev.mars.qraft.controller.runtime;
 
+import dev.mars.qraft.concurrent.Deadlines;
+
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -127,7 +129,7 @@ public final class Future<T> implements AsyncResult<T> {
     }
 
     public Future<T> timeout(long timeout, TimeUnit unit) {
-        return new Future<>(delegate.copy().orTimeout(timeout, unit));
+        return new Future<>(Deadlines.bound(delegate, timeout, unit));
     }
 
     public Future<T> onSuccess(Consumer<? super T> action) {

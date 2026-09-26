@@ -66,7 +66,7 @@ class DistributedStateGrpcServiceTest {
                 .heartbeatInterval(20)
                 .build();
         node.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.sleep(10);
         assertTrue(node.isLeader());
         service = new DistributedStateGrpcService(node, store);

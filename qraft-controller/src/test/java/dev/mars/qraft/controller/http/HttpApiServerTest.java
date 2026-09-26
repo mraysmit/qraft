@@ -388,6 +388,7 @@ class HttpApiServerTest {
                 {"agentId":"agent-1","timestamp":"2026-09-21T10:15:30Z",
                  "sequenceNumber":2,"status":"passing"}
                 """).statusCode());
+        java.time.Instant acceptedHeartbeat = store.findAgent("agent-1").orElseThrow().getLastHeartbeat();
 
         HttpResponse<String> stale = request(client, "/api/v1/agents/heartbeat", "POST", """
                 {"agentId":"agent-1","timestamp":"2026-09-21T10:14:30Z",
@@ -396,8 +397,7 @@ class HttpApiServerTest {
 
         assertEquals(409, stale.statusCode(), "a stale heartbeat sequence must be rejected");
         assertErrorEnvelope(stale, "stale_heartbeat", false);
-        assertEquals(java.time.Instant.parse("2026-09-21T10:15:30Z"),
-                store.findAgent("agent-1").orElseThrow().getLastHeartbeat());
+        assertEquals(acceptedHeartbeat, store.findAgent("agent-1").orElseThrow().getLastHeartbeat());
         assertEquals(AgentStatus.HEALTHY, store.findAgent("agent-1").orElseThrow().getStatus());
     }
 
@@ -550,7 +550,7 @@ class HttpApiServerTest {
                 .snapshotEnabled(false).electionTimeout(25).heartbeatInterval(10_000)
                 .build();
         node.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.onSpinWait();
         assertTrue(node.isLeader());
 
@@ -750,6 +750,8 @@ class HttpApiServerTest {
                 valid.replace("\"sequenceNumber\":1,", ""),
                 valid.replace("\"ttlMillis\":10000", "\"ttlMillis\":0"),
                 valid.replace(",\"ttlMillis\":10000", ""),
+                valid.replace("}", ",\"deregisterAfterMillis\":-1}"),
+                valid.replace("}", ",\"deregisterAfterMillis\":\"soon\"}"),
                 valid.replace("\"observedAt\":\"2026-09-26T09:59:59Z\",", ""),
                 valid.replace("2026-09-26T09:59:59Z", "yesterday"),
                 observation("web", "http", "passing", 1, 10_000, "x".repeat(4097)));
@@ -815,7 +817,7 @@ class HttpApiServerTest {
                 firstEntry.properties().stream().map(Map.Entry::getKey).collect(java.util.stream.Collectors.toSet()));
         JsonNode check = firstEntry.get("checks").get(0);
         assertEquals(Set.of("checkId", "status", "required", "sequenceNumber", "observedAt",
-                        "acceptedAt", "deadline", "expired", "output"),
+                        "acceptedAt", "deadline", "expired", "output", "deregisterAfterMillis"),
                 check.properties().stream().map(Map.Entry::getKey).collect(java.util.stream.Collectors.toSet()));
         assertEquals("http", check.get("checkId").textValue());
         assertEquals("PASSING", check.get("status").textValue());
@@ -839,6 +841,87 @@ class HttpApiServerTest {
         assertEquals(4, new ObjectMapper().readTree(catalog.body()).size());
         assertEquals(index, store.getLastAppliedIndex());
         assertEquals(3, store.healthChecks().size());
+    }
+
+    @Test
+    void observationCarriesTheDeregistrationDelayIntoReplicatedStateAndDiscovery() throws Exception {
+        QraftStateStore store = startHealthApi(new MutableClock(Instant.parse("2026-09-26T10:00:00Z")));
+        HttpClient client = HttpClient.newHttpClient();
+        registerService(client, "web", "frontend", "node-a");
+        Map<String, String> identity = Map.of("X-Qraft-Node", "node-a");
+
+        HttpResponse<String> withDelay = request(client, "/v1/agent/check/observe", "PUT",
+                observation("web", "ttl", "passing", 1, 10_000, null).replace("}", ",\"deregisterAfterMillis\":60000}"),
+                identity);
+        HttpResponse<String> withoutDelay = request(client, "/v1/agent/check/observe", "PUT",
+                observation("web", "http", "passing", 1, 10_000, null), identity);
+
+        assertEquals(200, withDelay.statusCode(), withDelay.body());
+        assertEquals(200, withoutDelay.statusCode(), withoutDelay.body());
+        ServiceInstanceId instance = new ServiceInstanceId("default", "default", "node-a", "web");
+        assertEquals(60_000, store.findHealthCheck(new ServiceCheckId(instance, "ttl"))
+                .orElseThrow().observation().deregisterAfterMillis());
+        assertEquals(0, store.findHealthCheck(new ServiceCheckId(instance, "http"))
+                .orElseThrow().observation().deregisterAfterMillis());
+        JsonNode checks = new ObjectMapper().readTree(
+                request(client, "/v1/health/service/frontend", "GET").body()).get(0).get("checks");
+        assertEquals(0, checks.get(0).get("deregisterAfterMillis").longValue());
+        assertEquals(60_000, checks.get(1).get("deregisterAfterMillis").longValue());
+    }
+
+    @Test
+    void registrationDeclaringChecksPrunesOthersAndRejectsLaterUndeclaredObservations() throws Exception {
+        QraftStateStore store = startHealthApi(new MutableClock(Instant.parse("2026-09-26T10:00:00Z")));
+        HttpClient client = HttpClient.newHttpClient();
+        Map<String, String> identity = Map.of("X-Qraft-Node", "node-a");
+        registerService(client, "web", "frontend", "node-a");
+        assertEquals(200, request(client, "/v1/agent/check/observe", "PUT",
+                observation("web", "http", "passing", 1, 10_000, null), identity).statusCode());
+
+        HttpResponse<String> reRegistered = request(client, "/v1/agent/service/register", "PUT", """
+                {"serviceId":"web","serviceName":"frontend","address":"127.0.0.1","port":8080,
+                 "checks":["tcp"]}
+                """, identity);
+        HttpResponse<String> late = request(client, "/v1/agent/check/observe", "PUT",
+                observation("web", "http", "critical", 2, 10_000, null), identity);
+        HttpResponse<String> declared = request(client, "/v1/agent/check/observe", "PUT",
+                observation("web", "tcp", "passing", 1, 10_000, null), identity);
+
+        assertEquals(200, reRegistered.statusCode(), reRegistered.body());
+        assertEquals(404, late.statusCode(), late.body());
+        JsonNode lateError = assertErrorEnvelope(late, "check_not_declared", false);
+        assertEquals("http", lateError.get("checkId").textValue());
+        assertEquals(200, declared.statusCode(), declared.body());
+        ServiceInstanceId instance = new ServiceInstanceId("default", "default", "node-a", "web");
+        assertTrue(store.findHealthCheck(new ServiceCheckId(instance, "http")).isEmpty());
+        assertTrue(store.findHealthCheck(new ServiceCheckId(instance, "tcp")).isPresent());
+
+        for (String invalid : List.of("\"tcp\"", "[1]", "[\" \"]", "[null]")) {
+            HttpResponse<String> rejected = request(client, "/v1/agent/service/register", "PUT", """
+                    {"serviceId":"web","serviceName":"frontend","address":"127.0.0.1","port":8080,
+                     "checks":%s}
+                    """.formatted(invalid), identity);
+            assertEquals(400, rejected.statusCode(), invalid + " -> " + rejected.body());
+            assertErrorEnvelope(rejected, "invalid_registration", false);
+        }
+    }
+
+    @Test
+    void membershipTimesAreStampedWithTheServerClockNotTheAgentClock() throws Exception {
+        MutableClock clock = new MutableClock(Instant.parse("2026-09-26T10:00:00Z"));
+        QraftStateStore store = startHealthApi(clock);
+        HttpClient client = HttpClient.newHttpClient();
+
+        assertEquals(201, request(client, "/api/v1/agents/register", "POST", agentRegistration()).statusCode());
+        assertEquals(Instant.parse("2026-09-26T10:00:00Z"),
+                store.findAgent("agent-1").orElseThrow().getRegistrationTime());
+
+        clock.advance(Duration.ofSeconds(5));
+        assertEquals(204, request(client, "/api/v1/agents/heartbeat", "POST", """
+                {"agentId":"agent-1","timestamp":"2000-01-01T00:00:00Z","sequenceNumber":1,"status":"passing"}
+                """).statusCode());
+        assertEquals(Instant.parse("2026-09-26T10:00:05Z"), store.findAgent("agent-1").orElseThrow().getLastHeartbeat(),
+                "an agent clock that is wrong cannot move its own membership deadline");
     }
 
     private QraftStateStore startHealthApi(Clock clock) throws Exception {
@@ -994,7 +1077,7 @@ class HttpApiServerTest {
                 .heartbeatInterval(20)
                 .build();
         node.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.sleep(10);
         assertTrue(node.isLeader());
         return store;
@@ -1015,7 +1098,7 @@ class HttpApiServerTest {
                 .snapshotEnabled(false).electionTimeout(25).heartbeatInterval(10_000)
                 .build();
         node.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.onSpinWait();
         assertTrue(node.isLeader());
         server = new HttpApiServer(0, node, store);

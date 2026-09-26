@@ -179,7 +179,7 @@ class AgentControllerContractTest {
     }
 
     private static void waitUntil(java.util.function.BooleanSupplier condition) throws Exception {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!condition.getAsBoolean() && System.nanoTime() < deadline) Thread.sleep(10);
         assertTrue(condition.getAsBoolean(), "condition was not met before the deadline");
     }

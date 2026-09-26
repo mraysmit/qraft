@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -94,6 +95,36 @@ class FutureTest {
                         .toCompletionStage().toCompletableFuture().join());
 
         assertInstanceOf(TimeoutException.class, error.getCause());
+    }
+
+    @Test
+    void workBlockedAfterOneTimeoutDoesNotStallAnotherTimeout() throws Exception {
+        CountDownLatch firstCallbackBlocked = new CountDownLatch(1);
+        CountDownLatch releaseFirstCallback = new CountDownLatch(1);
+        CountDownLatch secondTimedOut = new CountDownLatch(1);
+        try {
+            Promise.<String>promise().future().timeout(1, TimeUnit.MILLISECONDS).onFailure(error -> {
+                firstCallbackBlocked.countDown();
+                awaitQuietly(releaseFirstCallback);
+            });
+            assertTrue(firstCallbackBlocked.await(10, TimeUnit.SECONDS));
+
+            Promise.<String>promise().future().timeout(1, TimeUnit.MILLISECONDS)
+                    .onFailure(error -> secondTimedOut.countDown());
+
+            assertTrue(secondTimedOut.await(10, TimeUnit.SECONDS),
+                    "a callback blocked after one timeout must not hold up the delivery of any other timeout");
+        } finally {
+            releaseFirstCallback.countDown();
+        }
+    }
+
+    private static void awaitQuietly(CountDownLatch latch) {
+        try {
+            latch.await(30, TimeUnit.SECONDS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     @Test

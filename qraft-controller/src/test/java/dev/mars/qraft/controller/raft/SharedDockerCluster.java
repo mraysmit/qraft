@@ -112,6 +112,23 @@ public final class SharedDockerCluster {
     }
 
     /**
+     * Starts a disposable three-node cluster with one client-mode {@code agent} container whose
+     * configuration runs HTTP and TCP health checks.
+     */
+    public static ComposeContainer startIsolatedThreeNodeClusterWithAgent() {
+        ensureImageBuilt();
+        ComposeContainer cluster = new ComposeContainer(
+                new File("src/test/resources/docker-compose-3node-agent-prebuilt.yml"))
+                .withExposedService("controller1", 8080, Wait.forHttp("/health").forStatusCode(200))
+                .withExposedService("controller2", 8080, Wait.forHttp("/health").forStatusCode(200))
+                .withExposedService("controller3", 8080, Wait.forHttp("/health").forStatusCode(200))
+                .withExposedService("agent", 8080, Wait.forHttp("/health/live").forStatusCode(200))
+                .withStartupTimeout(Duration.ofSeconds(90));
+        cluster.start();
+        return cluster;
+    }
+
+    /**
      * Returns the shared 5-node cluster, building the image and starting containers on first call.
      */
     public static synchronized ComposeContainer getFiveNodeCluster() {

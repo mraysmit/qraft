@@ -41,6 +41,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -134,11 +135,52 @@ class RaftNodeRecoverySequencingTest {
         assertTrue(stateMachine.mutationContexts().stream().allMatch(context -> context == runtime));
     }
 
+    @Test
+    void raftRequestsArrivingDuringRecoveryAreRejectedWithoutTouchingDurableState() throws Exception {
+        runtime = JavaRuntime.create();
+        storage = new AsyncRecoveryStorage(new RaftStorage.PersistentMeta(5, Optional.of("node-2")),
+                Optional.empty(), List.of());
+        node = buildNode(storage, new RecordingStateMachine(), Set.of("node-1", "node-2", "node-3"));
+
+        Future<Void> start = node.start();
+        storage.awaitMetadataRequest();
+        CompletableFuture<VoteResponse> vote = node.handleVoteRequest(VoteRequest.newBuilder()
+                .setTerm(5).setCandidateId("node-3").setLastLogIndex(100).setLastLogTerm(5).build())
+                .toCompletionStage().toCompletableFuture();
+        CompletableFuture<AppendEntriesResponse> append = node.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
+                .setTerm(6).setLeaderId("node-3").setPrevLogIndex(0).setPrevLogTerm(0).setLeaderCommit(0).build())
+                .toCompletionStage().toCompletableFuture();
+
+        assertTrue(vote.handle((response, failure) -> failure != null || !response.getVoteGranted())
+                .get(10, TimeUnit.SECONDS), "a vote cannot be decided against unrecovered state");
+        assertTrue(append.handle((response, failure) -> failure != null || !response.getSuccess())
+                .get(10, TimeUnit.SECONDS), "an append cannot be accepted against unrecovered state");
+        assertEquals(List.of(), storage.metadataWrites, "the recovered term and vote must not be overwritten");
+
+        completeOffLoop(() -> storage.metadata.complete(storage.metadataValue));
+        storage.awaitSnapshotRequest();
+        completeOffLoop(() -> storage.snapshot.complete(storage.snapshotValue));
+        storage.awaitReplayRequest();
+        completeOffLoop(() -> storage.replay.complete(storage.replayValue));
+        await(start);
+
+        assertEquals(5, node.getCurrentTerm());
+        assertEquals("node-2", node.getVotedFor());
+        VoteResponse secondVote = await(node.handleVoteRequest(VoteRequest.newBuilder()
+                .setTerm(5).setCandidateId("node-3").setLastLogIndex(100).setLastLogTerm(5).build()));
+        assertFalse(secondVote.getVoteGranted(), "one vote per term: node-2 already holds this term's vote");
+        assertEquals(List.of(), storage.metadataWrites);
+    }
+
     private RaftNode buildNode(AsyncRecoveryStorage storage, RecordingStateMachine stateMachine) {
+        return buildNode(storage, stateMachine, Set.of("node-1"));
+    }
+
+    private RaftNode buildNode(AsyncRecoveryStorage storage, RecordingStateMachine stateMachine, Set<String> members) {
         return RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
-                .clusterNodes(Set.of("node-1"))
+                .clusterNodes(members)
                 .transport(new RecoveryTransport())
                 .stateMachine(stateMachine)
                 .commandCodec(codec)
@@ -213,6 +255,7 @@ class RaftNodeRecoverySequencingTest {
         private final CompletableFuture<JavaRuntime> metadataRequested = new CompletableFuture<>();
         private final CompletableFuture<JavaRuntime> snapshotRequested = new CompletableFuture<>();
         private final CompletableFuture<JavaRuntime> replayRequested = new CompletableFuture<>();
+        private final List<String> metadataWrites = new java.util.concurrent.CopyOnWriteArrayList<>();
 
         private AsyncRecoveryStorage(PersistentMeta metadataValue,
                                      Optional<SnapshotData> snapshotValue,
@@ -222,9 +265,9 @@ class RaftNodeRecoverySequencingTest {
             this.replayValue = replayValue;
         }
 
-        JavaRuntime awaitMetadataRequest() throws Exception { return metadataRequested.get(2, TimeUnit.SECONDS); }
-        JavaRuntime awaitSnapshotRequest() throws Exception { return snapshotRequested.get(2, TimeUnit.SECONDS); }
-        JavaRuntime awaitReplayRequest() throws Exception { return replayRequested.get(2, TimeUnit.SECONDS); }
+        JavaRuntime awaitMetadataRequest() throws Exception { return metadataRequested.get(10, TimeUnit.SECONDS); }
+        JavaRuntime awaitSnapshotRequest() throws Exception { return snapshotRequested.get(10, TimeUnit.SECONDS); }
+        JavaRuntime awaitReplayRequest() throws Exception { return replayRequested.get(10, TimeUnit.SECONDS); }
 
         void releaseAll() {
             metadata.complete(metadataValue);
@@ -233,7 +276,10 @@ class RaftNodeRecoverySequencingTest {
         }
 
         @Override public CompletableFuture<Void> open(Path dataDir) { return CompletableFuture.completedFuture(null); }
-        @Override public CompletableFuture<Void> updateMetadata(long term, Optional<String> votedFor) { return CompletableFuture.completedFuture(null); }
+        @Override public CompletableFuture<Void> updateMetadata(long term, Optional<String> votedFor) {
+            metadataWrites.add(term + ":" + votedFor.orElse(""));
+            return CompletableFuture.completedFuture(null);
+        }
         @Override public CompletableFuture<PersistentMeta> loadMetadata() {
             metadataRequested.complete(JavaRuntime.currentContext());
             return metadata;

@@ -40,7 +40,8 @@ record HealthObservationRequest(
         String observedAt,
         Long ttlMillis,
         Boolean required,
-        String output) {
+        String output,
+        Long deregisterAfterMillis) {
 
     static final int MAX_OUTPUT_LENGTH = 4096;
 
@@ -53,7 +54,8 @@ record HealthObservationRequest(
         ServiceInstanceId instance = new ServiceInstanceId(
                 context.tenantId(), context.namespace(), context.nodeId(), serviceId);
         return new HealthObservation(new ServiceCheckId(instance, checkId), parseStatus(status),
-                sequenceNumber, parseObservedAt(observedAt), ttlMillis, required == null || required, output);
+                sequenceNumber, parseObservedAt(observedAt), ttlMillis, required == null || required, output,
+                deregisterAfterMillis == null ? 0 : deregisterAfterMillis);
     }
 
     private static ServiceHealth parseStatus(String value) {

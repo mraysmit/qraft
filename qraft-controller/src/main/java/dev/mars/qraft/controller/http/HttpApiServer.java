@@ -27,6 +27,7 @@ import dev.mars.qraft.catalog.HealthCheckState;
 import dev.mars.qraft.catalog.HealthObservation;
 import dev.mars.qraft.catalog.ServiceHealth;
 import dev.mars.qraft.catalog.ServiceInstance;
+import dev.mars.qraft.concurrent.Deadlines;
 import dev.mars.qraft.catalog.ServiceInstanceId;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.raft.CommandOutcomeUnknownException;
@@ -183,7 +184,10 @@ public final class HttpApiServer implements AutoCloseable {
                     .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                     .readValue(exchange.getRequestBody());
             ServiceInstance instance = request.toServiceInstance(context);
-            RaftCommandResult<?> result = submit(CatalogCommand.register(instance));
+            List<String> declaredCheckIds = request.declaredCheckIds();
+            RaftCommandResult<?> result = submit(declaredCheckIds == null
+                    ? CatalogCommand.register(instance)
+                    : CatalogCommand.register(instance, declaredCheckIds));
             boolean registered = result instanceof RaftCommandResult.Success<?>;
             respondJson(exchange, registered ? 200 : 409,
                     ServiceRegistrationResponse.from(instance, registered));
@@ -221,7 +225,7 @@ public final class HttpApiServer implements AutoCloseable {
             if (agent.getAgentId() == null || agent.getAgentId().isBlank()) {
                 throw new IllegalArgumentException("agentId is required");
             }
-            submit(AgentCommand.register(agent));
+            submit(AgentCommand.register(agent, clock.instant()));
             respondJson(exchange, 201, Map.of("registered", true, "agentId", agent.getAgentId()));
         } catch (IllegalArgumentException | com.fasterxml.jackson.core.JacksonException e) {
             respondError(exchange, 400, "invalid_agent", safeMessage(e), false);
@@ -239,7 +243,8 @@ public final class HttpApiServer implements AutoCloseable {
             }
             AgentStatus status = heartbeat.status() == null || heartbeat.status().isBlank()
                     ? null : heartbeatStatus(heartbeat.status());
-            Instant timestamp = heartbeat.timestamp() == null ? Instant.now() : heartbeat.timestamp();
+            // Membership expiry is measured from server receipt time; the agent's own timestamp is not trusted.
+            Instant timestamp = clock.instant();
             RaftCommandResult<?> result = submit(AgentCommand.heartbeat(
                     heartbeat.agentId(), status, timestamp, heartbeat.sequenceNumber(), heartbeat.registrationId()));
             if (result instanceof RaftCommandResult.NotFound<?>) {
@@ -338,8 +343,11 @@ public final class HttpApiServer implements AutoCloseable {
                     .readValue(exchange.getRequestBody());
             HealthObservation observation = request.toObservation(context);
             RaftCommandResult<?> result = submit(CatalogCommand.observe(observation, clock.instant()));
-            if (result instanceof RaftCommandResult.NotFound<?>) {
-                respondError(exchange, 404, "service_not_found", "Service instance is not registered", false,
+            if (result instanceof RaftCommandResult.NotFound<?> notFound) {
+                boolean undeclared = QraftStateStore.HEALTH_CHECK_ENTITY.equals(notFound.entityType());
+                respondError(exchange, 404, undeclared ? "check_not_declared" : "service_not_found",
+                        undeclared ? "The service registration does not declare this check"
+                                : "Service instance is not registered", false,
                         Map.of("serviceId", request.serviceId(), "checkId", request.checkId()));
                 return;
             }
@@ -435,8 +443,7 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     private RaftCommandResult<?> submit(RaftCommand command) {
-        return raftNode.submitCommand(command).toCompletionStage().toCompletableFuture()
-                .orTimeout(5, TimeUnit.SECONDS)
+        return Deadlines.bound(raftNode.submitCommand(command).toCompletionStage(), 5, TimeUnit.SECONDS)
                 .join();
     }
 

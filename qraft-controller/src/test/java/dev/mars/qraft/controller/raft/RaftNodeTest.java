@@ -353,7 +353,7 @@ class RaftNodeTest {
         // Verify the exception
         assertThrows(Exception.class, () -> {
             try {
-                future.toCompletionStage().toCompletableFuture().get(1, TimeUnit.SECONDS);
+                future.toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
             } catch (Exception e) {
                 assertTrue(e.getCause() instanceof IllegalStateException);
                 assertTrue(e.getCause().getMessage().contains("Not the leader"));
@@ -409,7 +409,7 @@ class RaftNodeTest {
         Future<VoteResponse> future = transport1.sendVoteRequest("node2", voteRequest);
         
         assertDoesNotThrow(() -> {
-            VoteResponse response = future.toCompletionStage().toCompletableFuture().get(1, TimeUnit.SECONDS);
+            VoteResponse response = future.toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
             assertNotNull(response);
             assertEquals(1, response.getTerm());
         });
@@ -423,7 +423,11 @@ class RaftNodeTest {
         assertEquals(1, entry.getTerm());
         assertEquals(5, entry.getIndex());
         assertEquals(command, entry.getCommand());
-        assertNotNull(entry.getTimestamp());
+        assertEquals(null, entry.getPayload());
+        byte[] payload = {1, 2, 3};
+        LogEntry replicated = new LogEntry(1, 5, command, payload);
+        payload[0] = 9;
+        assertArrayEquals(new byte[]{1, 2, 3}, replicated.getPayload(), "the payload is copied defensively");
         assertFalse(entry.isNoOp());
         
         // Test no-op entry

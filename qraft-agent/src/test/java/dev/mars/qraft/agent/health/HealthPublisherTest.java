@@ -41,7 +41,8 @@ class HealthPublisherTest {
     private static final Instant START = Instant.parse("2026-09-26T12:00:00Z");
     private static final HttpCheck HTTP = new HttpCheck("web", "http", java.net.URI.create("http://127.0.0.1/health"),
             Duration.ofSeconds(10), Duration.ofSeconds(2), Duration.ofSeconds(30), true);
-    private static final TtlCheck TTL = new TtlCheck("web", "app", Duration.ofSeconds(20), false);
+    private static final TtlCheck TTL = new TtlCheck("web", "app", Duration.ofSeconds(20), false,
+            Duration.ofSeconds(90));
 
     private final ManualTime time = new ManualTime(START);
     private final ScriptedClient client = new ScriptedClient();
@@ -52,7 +53,7 @@ class HealthPublisherTest {
         publisher.onResult(HTTP, result(CheckStatus.WARNING, "HTTP 429"));
 
         assertEquals(List.of(new CheckObservation("web", "http", CheckStatus.WARNING, START.toEpochMilli(), START,
-                Duration.ofSeconds(30), true, "HTTP 429")), client.sent());
+                Duration.ofSeconds(30), true, "HTTP 429", Duration.ZERO)), client.sent());
     }
 
     @Test
@@ -156,6 +157,16 @@ class HealthPublisherTest {
     }
 
     @Test
+    void anUndeclaredCheckIsRetriedBecauseItMayRaceItsOwnReRegistration() {
+        publisher.onResult(HTTP, result(CheckStatus.PASSING, "HTTP 200"));
+        client.reject(0, "check_not_declared");
+
+        time.advance(Duration.ofSeconds(1));
+
+        assertEquals(client.sent().get(0), client.sent().get(1));
+    }
+
+    @Test
     void checksPublishIndependently() {
         publisher.onResult(HTTP, result(CheckStatus.PASSING, "HTTP 200"));
         publisher.onResult(TTL, result(CheckStatus.WARNING, "degraded"));
@@ -164,6 +175,8 @@ class HealthPublisherTest {
         assertEquals("app", client.sent().get(1).checkId());
         assertEquals(false, client.sent().get(1).required());
         assertEquals(Duration.ofSeconds(20), client.sent().get(1).ttl());
+        assertEquals(Duration.ofSeconds(90), client.sent().get(1).deregisterAfter(),
+                "the check's deregistration delay travels with every observation");
     }
 
     @Test

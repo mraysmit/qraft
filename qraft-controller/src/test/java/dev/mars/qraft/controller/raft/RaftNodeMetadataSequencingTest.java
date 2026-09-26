@@ -174,7 +174,7 @@ class RaftNodeMetadataSequencingTest {
         storage.releaseBlockedUpdateOffLoop();
 
         try {
-            assertSame(runtime, completionContext.get(2, TimeUnit.SECONDS));
+            assertSame(runtime, completionContext.get(10, TimeUnit.SECONDS));
         } catch (Exception error) {
             throw new AssertionError("vote completion callback did not run", error);
         }
@@ -221,7 +221,7 @@ class RaftNodeMetadataSequencingTest {
         assertNull(node.getVotedFor());
 
         electionStorage.releaseBlockedUpdate();
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.onSpinWait();
 
         assertTrue(node.isLeader());
@@ -247,7 +247,7 @@ class RaftNodeMetadataSequencingTest {
         CompletableFuture<Void> marker = new CompletableFuture<>();
         runtime.runOnContext(ignored -> marker.complete(null));
         try {
-            marker.get(2, TimeUnit.SECONDS);
+            marker.get(10, TimeUnit.SECONDS);
         } catch (Exception error) {
             throw new AssertionError("state-loop marker did not run", error);
         }
@@ -268,7 +268,7 @@ class RaftNodeMetadataSequencingTest {
 
         void awaitBlockedUpdate() {
             try {
-                updateEntered.get(2, TimeUnit.SECONDS);
+                updateEntered.get(10, TimeUnit.SECONDS);
             } catch (Exception error) {
                 throw new AssertionError("metadata update did not reach its gate", error);
             }

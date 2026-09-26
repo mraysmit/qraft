@@ -29,7 +29,8 @@ import java.util.Objects;
  * @version 1.0
  */
 public record CheckObservation(String serviceId, String checkId, CheckStatus status, long sequenceNumber,
-                               Instant observedAt, Duration ttl, boolean required, String output) {
+                               Instant observedAt, Duration ttl, boolean required, String output,
+                               Duration deregisterAfter) {
     public CheckObservation {
         HealthCheckDefinition.requireText(serviceId, "serviceId");
         HealthCheckDefinition.requireText(checkId, "checkId");
@@ -38,11 +39,12 @@ public record CheckObservation(String serviceId, String checkId, CheckStatus sta
         HealthCheckDefinition.requirePositive(ttl, "ttl");
         if (sequenceNumber < 1) throw new IllegalArgumentException("sequenceNumber must be positive");
         output = output == null ? "" : output;
+        HealthCheckDefinition.requireNotNegative(deregisterAfter, "deregisterAfter");
     }
 
     static CheckObservation of(HealthCheckDefinition check, CheckResult result, long sequenceNumber) {
         return new CheckObservation(check.serviceId(), check.checkId(), result.status(), sequenceNumber,
-                result.observedAt(), check.ttl(), check.required(), result.output());
+                result.observedAt(), check.ttl(), check.required(), result.output(), check.deregisterAfter());
     }
 
     boolean reports(CheckResult result) {

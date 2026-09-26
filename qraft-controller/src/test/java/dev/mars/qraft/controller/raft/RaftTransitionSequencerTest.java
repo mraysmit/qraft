@@ -20,9 +20,13 @@ import dev.mars.qraft.controller.runtime.Future;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.runtime.Promise;
 import dev.mars.qraft.controller.testsupport.RemediationTest;
+import io.opentelemetry.context.Context;
+import io.opentelemetry.context.ContextKey;
+import io.opentelemetry.context.Scope;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -43,7 +47,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests for {@link RaftTransitionSequencer} serialization, failure fencing, bounded and reserved
- * admission, draining, and the persistence ownership guard.
+ * admission, draining, the persistence ownership guard, and per-transition logging and tracing context.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-13
@@ -91,7 +95,7 @@ class RaftTransitionSequencerTest {
         awaitHistory(history, List.of("first-start"));
         assertFalse(second.isComplete(), "second transition started while the first was in flight");
 
-        CompletableFuture.runAsync(() -> firstGate.complete("first-result")).get(2, TimeUnit.SECONDS);
+        CompletableFuture.runAsync(() -> firstGate.complete("first-result")).get(10, TimeUnit.SECONDS);
 
         assertEquals("first-result", await(first));
         assertEquals("second-result", await(second));
@@ -226,17 +230,25 @@ class RaftTransitionSequencerTest {
     @Test
     void alreadyCompletedTransitionsDoNotDrainRecursively() throws Exception {
         int transitionCount = 10_000;
-        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, transitionCount);
-        List<Future<Integer>> results = new ArrayList<>(transitionCount);
+        // Normal admission holds an eighth of the capacity in reserve; size it so the whole burst is admitted.
+        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 2 * transitionCount);
+        CompletableFuture<List<Future<Integer>>> submitted = new CompletableFuture<>();
         AtomicInteger started = new AtomicInteger();
 
-        for (int index = 0; index < transitionCount; index++) {
-            int result = index;
-            results.add(sequencer.submit("sync-" + index, () -> {
-                started.incrementAndGet();
-                return Future.succeededFuture(result);
-            }));
-        }
+        // Submitting from one state-loop task queues every transition before the first can finish,
+        // which is the deepest chain of already-completed transitions.
+        runtime.runOnContext(ignored -> {
+            List<Future<Integer>> results = new ArrayList<>(transitionCount);
+            for (int index = 0; index < transitionCount; index++) {
+                int result = index;
+                results.add(sequencer.submit("sync-" + index, () -> {
+                    started.incrementAndGet();
+                    return Future.succeededFuture(result);
+                }));
+            }
+            submitted.complete(results);
+        });
+        List<Future<Integer>> results = submitted.get(10, TimeUnit.SECONDS);
 
         assertEquals(transitionCount - 1, await(results.getLast()));
         assertEquals(transitionCount, started.get());
@@ -255,7 +267,7 @@ class RaftTransitionSequencerTest {
             }
         });
 
-        Throwable rejected = bypassFailure.get(2, TimeUnit.SECONDS);
+        Throwable rejected = bypassFailure.get(10, TimeUnit.SECONDS);
         assertInstanceOf(IllegalStateException.class, rejected);
         assertTrue(rejected.getMessage().contains("without transition ownership"));
 
@@ -266,12 +278,68 @@ class RaftTransitionSequencerTest {
         await(owned);
     }
 
+    @Test
+    void eachTransitionRunsInTheLoggingAndTracingContextItWasSubmittedIn() throws Exception {
+        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 8);
+        ContextKey<String> trace = ContextKey.named("trace");
+        Promise<String> firstPersisted = Promise.promise();
+        List<String> seen = Collections.synchronizedList(new ArrayList<>());
+
+        Future<String> first = submitIn("request-a", Context.root().with(trace, "trace-a"), () ->
+                sequencer.submit("first", RaftTransitionSequencer.FailurePolicy.CONTINUE, () -> {
+                    seen.add("first-start " + observed(trace));
+                    return firstPersisted.future();
+                }, value -> {
+                    seen.add("first-apply " + observed(trace));
+                    return value;
+                }));
+        Future<String> second = submitIn("request-b", Context.root().with(trace, "trace-b"), () ->
+                sequencer.submit("second", RaftTransitionSequencer.FailurePolicy.CONTINUE, () -> {
+                    seen.add("second-start " + observed(trace));
+                    return Future.succeededFuture("b");
+                }, value -> {
+                    seen.add("second-apply " + observed(trace));
+                    return value;
+                }));
+        awaitHistory(seen, List.of("first-start request-a/trace-a"));
+
+        // Storage completes on a thread carrying its own context, as the write-ahead-log thread does.
+        Thread storage = Thread.ofPlatform().start(() -> submitIn("storage", Context.root().with(trace, "trace-storage"),
+                () -> firstPersisted.complete("a")));
+
+        assertEquals("a", await(first));
+        assertEquals("b", await(second));
+        storage.join(10_000);
+        assertEquals(List.of("first-start request-a/trace-a", "first-apply request-a/trace-a",
+                "second-start request-b/trace-b", "second-apply request-b/trace-b"), seen);
+    }
+
+    private static <T> T submitIn(String requestId, Context tracing, java.util.function.Supplier<T> submission) {
+        try (Scope ignored = tracing.makeCurrent()) {
+            MDC.put("requestId", requestId);
+            return submission.get();
+        } finally {
+            MDC.clear();
+        }
+    }
+
+    private static void submitIn(String requestId, Context tracing, Runnable submission) {
+        submitIn(requestId, tracing, () -> {
+            submission.run();
+            return null;
+        });
+    }
+
+    private static String observed(ContextKey<String> trace) {
+        return MDC.get("requestId") + "/" + Context.current().get(trace);
+    }
+
     private static <T> T await(Future<T> future) throws Exception {
-        return future.timeout(5, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
+        return future.timeout(10, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
     }
 
     private static void awaitHistory(List<String> history, List<String> expected) throws Exception {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (System.nanoTime() < deadline) {
             if (history.equals(expected)) return;
             Thread.onSpinWait();

@@ -48,7 +48,8 @@ public sealed interface AgentCommand extends RaftCommand
                 AgentCommand.Deregister,
                 AgentCommand.UpdateStatus,
                 AgentCommand.UpdateCapabilities,
-                AgentCommand.Heartbeat {
+                AgentCommand.Heartbeat,
+                AgentCommand.Expire {
 
     /** Common accessor: every subtype carries an agent ID. */
     String agentId();
@@ -70,6 +71,7 @@ public sealed interface AgentCommand extends RaftCommand
             Objects.requireNonNull(agentId, "agentId");
             Objects.requireNonNull(agentInfo, "agentInfo");
             Objects.requireNonNull(timestamp, "timestamp");
+            timestamp = replicated(timestamp);
         }
     }
 
@@ -85,6 +87,7 @@ public sealed interface AgentCommand extends RaftCommand
         public Deregister {
             Objects.requireNonNull(agentId, "agentId");
             Objects.requireNonNull(timestamp, "timestamp");
+            timestamp = replicated(timestamp);
         }
     }
 
@@ -104,6 +107,7 @@ public sealed interface AgentCommand extends RaftCommand
             Objects.requireNonNull(expectedStatus, "expectedStatus");
             Objects.requireNonNull(newStatus, "newStatus");
             Objects.requireNonNull(timestamp, "timestamp");
+            timestamp = replicated(timestamp);
         }
     }
 
@@ -121,6 +125,7 @@ public sealed interface AgentCommand extends RaftCommand
             Objects.requireNonNull(agentId, "agentId");
             Objects.requireNonNull(newCapabilities, "newCapabilities");
             Objects.requireNonNull(timestamp, "timestamp");
+            timestamp = replicated(timestamp);
         }
     }
 
@@ -139,7 +144,10 @@ public sealed interface AgentCommand extends RaftCommand
         public Heartbeat {
             Objects.requireNonNull(agentId, "agentId");
             Objects.requireNonNull(timestamp, "timestamp");
+            timestamp = replicated(timestamp);
             if (sequenceNumber < 0) throw new IllegalArgumentException("sequenceNumber must not be negative");
+            // A blank registration identifier means "no registration check" on every replica.
+            if (registrationId != null && registrationId.isBlank()) registrationId = null;
             // status may be null — heartbeat doesn't always carry a status update
         }
 
@@ -152,18 +160,55 @@ public sealed interface AgentCommand extends RaftCommand
         }
     }
 
+    /**
+     * Leader-proposed membership expiry. Without {@code reap}, it marks the node unreachable; with
+     * {@code reap}, it removes an already unreachable node together with every service instance it
+     * registered. Either applies only while the node's last contact, its last heartbeat or else its
+     * registration time, still equals {@code expectedLastContact}, so a heartbeat or re-registration
+     * committed first turns a stale command into a no-op.
+     */
+    record Expire(String agentId, Instant expectedLastContact, boolean reap, Instant timestamp)
+            implements AgentCommand {
+        private static final long serialVersionUID = 1L;
+
+        public Expire {
+            Objects.requireNonNull(agentId, "agentId");
+            Objects.requireNonNull(expectedLastContact, "expectedLastContact");
+            Objects.requireNonNull(timestamp, "timestamp");
+            expectedLastContact = replicated(expectedLastContact);
+            timestamp = replicated(timestamp);
+        }
+    }
+
+    /**
+     * Replicated times are stored in milliseconds, so the leader and its followers, which decode the
+     * command from the log, hold identical values that expiry commands can match exactly.
+     */
+    private static Instant replicated(Instant instant) {
+        return Instant.ofEpochMilli(instant.toEpochMilli());
+    }
+
     // ── Factory methods (preserve existing API) ─────────────────
 
     /**
      * Create a command to register a new agent.
      */
     static AgentCommand register(AgentInfo agentInfo) {
-        return new Register(agentInfo.getAgentId(), agentInfo, Instant.now());
+        return register(agentInfo, Instant.now());
+    }
+
+    /** Registration stamped with the proposing server's clock, which membership expiry relies on. */
+    static AgentCommand register(AgentInfo agentInfo, Instant timestamp) {
+        return new Register(agentInfo.getAgentId(), agentInfo, timestamp);
     }
 
     /**
      * Create a command to deregister an agent.
      */
+    static AgentCommand expire(String agentId, Instant expectedLastContact, boolean reap, Instant timestamp) {
+        return new Expire(agentId, expectedLastContact, reap, timestamp);
+    }
+
     static AgentCommand deregister(String agentId) {
         return new Deregister(agentId, Instant.now());
     }

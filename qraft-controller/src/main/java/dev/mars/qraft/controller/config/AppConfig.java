@@ -48,6 +48,8 @@ public final class AppConfig {
     private static final ObjectMapper JSON = JsonMapper.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build();
     private static final String DEFAULT_RESOURCE = "qraft-controller.json";
+    /** An unreachable node is reaped with its services after 72 hours, the reconnect window Consul uses. */
+    private static final long DEFAULT_NODE_REAP_AFTER_MS = 72L * 60 * 60 * 1000;
     private static volatile AppConfig instance = loadDefault();
 
     private final Map<String, Object> values;
@@ -103,9 +105,10 @@ public final class AppConfig {
         JsonNode io = optionalObject(raft, "io");
         JsonNode telemetry = optionalObject(server, "telemetry");
         JsonNode shutdown = optionalObject(server, "shutdown");
+        JsonNode health = optionalObject(server, "health");
         JsonNode logging = optionalObject(root, "logging");
         rejectUnknown(server, "server", "id", "applicationVersion", "http", "apiGrpcPort",
-                "raft", "telemetry", "shutdown");
+                "raft", "telemetry", "shutdown", "health");
         rejectUnknown(http, "server.http", "host", "port");
         rejectUnknown(raft, "server.raft", "port", "nodes", "electionTimeoutMs",
                 "heartbeatIntervalMs", "storage", "snapshot", "logHardLimit", "io");
@@ -115,6 +118,7 @@ public final class AppConfig {
         rejectUnknown(telemetry, "server.telemetry", "enabled", "otlpEndpoint",
                 "prometheusPort", "serviceName");
         rejectUnknown(shutdown, "server.shutdown", "drainTimeoutMs", "timeoutMs");
+        rejectUnknown(health, "server.health", "expiryIntervalMs", "nodeTtlMs", "nodeReapAfterMs");
         rejectUnknown(logging, "logging", "directory");
 
         Map<String, Object> values = new LinkedHashMap<>();
@@ -145,6 +149,15 @@ public final class AppConfig {
                 optionalText(telemetry, "serviceName", "qraft-controller"));
         values.put("qraft.shutdown.drain.timeout.ms", optionalLong(shutdown, "drainTimeoutMs", 5000));
         values.put("qraft.shutdown.timeout.ms", optionalLong(shutdown, "timeoutMs", 30_000));
+        long expiryIntervalMs = optionalLong(health, "expiryIntervalMs", 1_000);
+        if (expiryIntervalMs < 1) throw new IllegalArgumentException("server.health.expiryIntervalMs must be positive");
+        values.put("qraft.health.expiry-interval-ms", expiryIntervalMs);
+        long nodeTtlMs = optionalLong(health, "nodeTtlMs", 90_000);
+        if (nodeTtlMs < 1) throw new IllegalArgumentException("server.health.nodeTtlMs must be positive");
+        long nodeReapAfterMs = optionalLong(health, "nodeReapAfterMs", DEFAULT_NODE_REAP_AFTER_MS);
+        if (nodeReapAfterMs < 0) throw new IllegalArgumentException("server.health.nodeReapAfterMs must not be negative");
+        values.put("qraft.health.node-ttl-ms", nodeTtlMs);
+        values.put("qraft.health.node-reap-after-ms", nodeReapAfterMs);
         values.put("qraft.logging.directory", optionalText(logging, "directory", "./logs"));
         return new AppConfig(values);
     }
@@ -200,6 +213,12 @@ public final class AppConfig {
         return getLong("qraft.raft.snapshot.check-interval-ms", 60_000);
     }
     public long getLogHardLimit() { return getLong("qraft.raft.log.hard-limit", 100_000); }
+    /** How often the leader evaluates health-check deadlines, unless a check falls due sooner. */
+    public long getHealthExpiryIntervalMs() { return getLong("qraft.health.expiry-interval-ms", 1_000); }
+    /** How long a node may go without a heartbeat before the leader marks it unreachable. */
+    public long getNodeTtlMs() { return getLong("qraft.health.node-ttl-ms", 90_000); }
+    /** How long an unreachable node is kept before it and its services are reaped; zero never reaps. */
+    public long getNodeReapAfterMs() { return getLong("qraft.health.node-reap-after-ms", DEFAULT_NODE_REAP_AFTER_MS); }
     public boolean isTelemetryEnabled() { return getBoolean("qraft.telemetry.enabled", true); }
     public String getOtlpEndpoint() {
         return getString("qraft.telemetry.otlp.endpoint", "http://localhost:4317");

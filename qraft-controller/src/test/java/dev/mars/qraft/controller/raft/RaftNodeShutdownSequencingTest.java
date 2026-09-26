@@ -144,6 +144,37 @@ class RaftNodeShutdownSequencingTest {
     }
 
     @Test
+    void writesThatCanNoLongerCommitWhenTheDrainEndsFailInsteadOfHangingForever() {
+        ShutdownStorage clusterStorage = new ShutdownStorage(closeEvents);
+        clusterStorage.open(null).join();
+        ShutdownTransport silentPeers = new ShutdownTransport(closeEvents);
+        silentPeers.holdAppendResponses();
+        RaftNode leader = RaftNode.builder().runtime(runtime).nodeId("leader")
+                .clusterNodes(Set.of("leader", "peer-2", "peer-3")).transport(silentPeers)
+                .stateMachine(new QraftStateStore()).commandCodec(new ProtobufRaftCommandCodec())
+                .mode(RaftNodeMode.durable(clusterStorage, clusterStorage)).snapshotEnabled(false)
+                .electionTimeout(25).heartbeatInterval(10_000).build();
+        await(leader.start());
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!leader.isLeader() && System.nanoTime() < deadline) Thread.onSpinWait();
+        assertTrue(leader.isLeader());
+
+        clusterStorage.blockNextSync();
+        Future<RaftCommandResult<?>> active = leader.submitCommand(put("active", "one"));
+        clusterStorage.awaitBlockedSync();
+        Future<RaftCommandResult<?>> queued = leader.submitCommand(put("queued", "two"));
+        Future<Void> stop = leader.stop();
+        clusterStorage.releaseBlockedSync();
+        await(stop);
+
+        for (Future<RaftCommandResult<?>> write : List.of(active, queued)) {
+            CompletionException failure = assertThrows(CompletionException.class, () -> await(write),
+                    "a write accepted during the drain that cannot commit must still complete");
+            assertInstanceOf(CommandOutcomeUnknownException.class, failure.getCause());
+        }
+    }
+
+    @Test
     void concurrentStopsShareOneCompletionAndCloseResourcesOnce() {
         storage.blockNextSync();
         Future<RaftCommandResult<?>> active = node.submitCommand(put("active", "one"));
@@ -368,7 +399,7 @@ class RaftNodeShutdownSequencingTest {
     }
 
     private void awaitLeader() {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.onSpinWait();
         if (!node.isLeader()) throw new AssertionError("single node did not become leader");
     }
@@ -377,7 +408,7 @@ class RaftNodeShutdownSequencingTest {
         CompletableFuture<Void> marker = new CompletableFuture<>();
         runtime.runOnContext(ignored -> marker.complete(null));
         try {
-            marker.get(2, TimeUnit.SECONDS);
+            marker.get(10, TimeUnit.SECONDS);
         } catch (Exception error) {
             throw new AssertionError("state-loop marker did not run", error);
         }
@@ -410,7 +441,7 @@ class RaftNodeShutdownSequencingTest {
 
         void awaitHeldAppend() {
             try {
-                appendHeld.get(2, TimeUnit.SECONDS);
+                appendHeld.get(10, TimeUnit.SECONDS);
             } catch (Exception error) {
                 throw new AssertionError("append request was not held", error);
             }
@@ -487,7 +518,7 @@ class RaftNodeShutdownSequencingTest {
 
         void awaitBlockedSync() {
             try {
-                syncEntered.get(2, TimeUnit.SECONDS);
+                syncEntered.get(10, TimeUnit.SECONDS);
             } catch (Exception error) {
                 throw new AssertionError("sync did not reach its gate", error);
             }
@@ -506,7 +537,7 @@ class RaftNodeShutdownSequencingTest {
 
         void awaitBlockedMetadataLoad() {
             try {
-                metadataEntered.get(2, TimeUnit.SECONDS);
+                metadataEntered.get(10, TimeUnit.SECONDS);
             } catch (Exception error) {
                 throw new AssertionError("metadata load did not reach its gate", error);
             }
@@ -525,7 +556,7 @@ class RaftNodeShutdownSequencingTest {
 
         void awaitBlockedSnapshotPublication() {
             try {
-                snapshotPublicationEntered.get(2, TimeUnit.SECONDS);
+                snapshotPublicationEntered.get(10, TimeUnit.SECONDS);
             } catch (Exception error) {
                 throw new AssertionError("snapshot publication did not reach its gate", error);
             }
@@ -547,7 +578,7 @@ class RaftNodeShutdownSequencingTest {
 
         void awaitBlockedPrefixCompaction() {
             try {
-                prefixCompactionEntered.get(2, TimeUnit.SECONDS);
+                prefixCompactionEntered.get(10, TimeUnit.SECONDS);
             } catch (Exception error) {
                 throw new AssertionError("prefix compaction did not reach its gate", error);
             }

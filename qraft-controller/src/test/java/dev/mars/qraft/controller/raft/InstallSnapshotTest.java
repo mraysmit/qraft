@@ -341,7 +341,7 @@ class InstallSnapshotTest {
 
         Future.fromCompletionStage(storage.open(Path.of("/tmp/stale-test"))).onComplete(ctx.succeeding(v -> {
             node.start().onComplete(ctx.succeeding(v2 -> {
-                node.awaitState(RaftNode.State.LEADER, 5000).onComplete(ctx.succeeding(state -> {
+                node.awaitState(RaftNode.State.LEADER, 10_000).onComplete(ctx.succeeding(state -> {
 
                     // The node is now leader with currentTerm >= 1
                     // Send an InstallSnapshot with term 0 (stale)

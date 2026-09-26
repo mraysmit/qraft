@@ -20,7 +20,8 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * Ordered agent observation for one service health check.
+ * Ordered agent observation for one service health check. {@code deregisterAfterMillis} is how long
+ * the check may remain expired before its service is deregistered automatically; zero means never.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-25
@@ -33,7 +34,8 @@ public record HealthObservation(
         Instant observedAt,
         long ttlMillis,
         boolean required,
-        String output) {
+        String output,
+        long deregisterAfterMillis) {
 
     public HealthObservation {
         Objects.requireNonNull(checkId, "checkId");
@@ -54,5 +56,14 @@ public record HealthObservation(
             throw new IllegalArgumentException("ttlMillis must be positive");
         }
         output = output == null ? "" : output;
+        if (deregisterAfterMillis < 0) {
+            throw new IllegalArgumentException("deregisterAfterMillis must not be negative");
+        }
+    }
+
+    /** Observation whose service is never deregistered automatically when the check expires. */
+    public HealthObservation(ServiceCheckId checkId, ServiceHealth status, long sequenceNumber,
+                             Instant observedAt, long ttlMillis, boolean required, String output) {
+        this(checkId, status, sequenceNumber, observedAt, ttlMillis, required, output, 0);
     }
 }

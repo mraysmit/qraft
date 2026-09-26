@@ -16,11 +16,6 @@
 
 package dev.mars.qraft.controller.runtime;
 
-import io.opentelemetry.context.Context;
-import io.opentelemetry.context.Scope;
-import org.slf4j.MDC;
-
-import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
@@ -29,6 +24,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
@@ -48,8 +44,13 @@ public final class JavaRuntime {
     private final Map<Long, ScheduledFuture<?>> timers = new ConcurrentHashMap<>();
 
     private JavaRuntime() {
-        scheduler = Executors.newSingleThreadScheduledExecutor(
-                Thread.ofPlatform().daemon().name("qraft-state-loop").factory());
+        this(Executors.newSingleThreadScheduledExecutor(
+                Thread.ofPlatform().daemon().name("qraft-state-loop").factory()));
+    }
+
+    /** Runtime whose state loop and timers run on {@code scheduler}, which must have exactly one thread. */
+    JavaRuntime(ScheduledExecutorService scheduler) {
+        this.scheduler = scheduler;
         workers = Executors.newThreadPerTaskExecutor(
                 Thread.ofVirtual().name("qraft-worker-", 0).factory());
     }
@@ -58,30 +59,37 @@ public final class JavaRuntime {
     public static JavaRuntime currentContext() { return CURRENT.get(); }
 
     public void runOnContext(Consumer<Void> action) {
-        Map<String, String> context = captureMdc();
-        Context telemetryContext = Context.current();
-        scheduler.execute(() -> runInContext(context, telemetryContext, () -> action.accept(null)));
+        CallerContext context = CallerContext.capture();
+        scheduler.execute(() -> runInContext(context, () -> action.accept(null)));
     }
 
     public long setTimer(long delayMs, Consumer<Long> action) {
         long id = timerIds.incrementAndGet();
-        Map<String, String> context = captureMdc();
-        Context telemetryContext = Context.current();
-        timers.put(id, scheduler.schedule(() -> {
+        CallerContext context = CallerContext.capture();
+        AtomicBoolean fired = new AtomicBoolean();
+        ScheduledFuture<?> timer = scheduler.schedule(() -> {
+            fired.set(true);
             timers.remove(id);
-            runInContext(context, telemetryContext, () -> action.accept(id));
-        }, delayMs, TimeUnit.MILLISECONDS));
+            runInContext(context, () -> action.accept(id));
+        }, delayMs, TimeUnit.MILLISECONDS);
+        timers.put(id, timer);
+        // A short timer can fire before it is recorded; its own remove then ran first, so undo the record.
+        if (fired.get()) timers.remove(id, timer);
         return id;
     }
 
     public long setPeriodic(long periodMs, Consumer<Long> action) {
         long id = timerIds.incrementAndGet();
-        Map<String, String> context = captureMdc();
-        Context telemetryContext = Context.current();
+        CallerContext context = CallerContext.capture();
         timers.put(id, scheduler.scheduleAtFixedRate(
-                () -> runInContext(context, telemetryContext, () -> action.accept(id)),
+                () -> runInContext(context, () -> action.accept(id)),
                 periodMs, periodMs, TimeUnit.MILLISECONDS));
         return id;
+    }
+
+    /** Number of registered timers that have not fired or been cancelled; for lifecycle tests. */
+    int pendingTimerCount() {
+        return timers.size();
     }
 
     public boolean cancelTimer(long id) {
@@ -94,9 +102,8 @@ public final class JavaRuntime {
 
     <T> Future<T> executeBlocking(ExecutorService executor, Callable<T> task) {
         Promise<T> promise = Promise.promise();
-        Map<String, String> context = captureMdc();
-        Context telemetryContext = Context.current();
-        executor.submit(() -> runWithContext(context, telemetryContext, () -> {
+        CallerContext context = CallerContext.capture();
+        executor.submit(() -> context.run(() -> {
             try {
                 T value = task.call();
                 runOnContext(ignored -> promise.complete(value));
@@ -137,29 +144,12 @@ public final class JavaRuntime {
 
     public Future<Void> close() { return shutdown(); }
 
-    private void runInContext(Map<String, String> context, Context telemetryContext, Runnable task) {
+    private void runInContext(CallerContext context, Runnable task) {
         CURRENT.set(this);
         try {
-            runWithContext(context, telemetryContext, task);
+            context.run(task);
         } finally {
             CURRENT.remove();
-        }
-    }
-
-    private static Map<String, String> captureMdc() {
-        Map<String, String> context = MDC.getCopyOfContextMap();
-        return context == null ? Map.of() : new HashMap<>(context);
-    }
-
-    private static void runWithContext(Map<String, String> context, Context telemetryContext, Runnable task) {
-        Map<String, String> previous = MDC.getCopyOfContextMap();
-        try (Scope ignored = telemetryContext.makeCurrent()) {
-            if (context.isEmpty()) MDC.clear();
-            else MDC.setContextMap(context);
-            task.run();
-        } finally {
-            if (previous == null || previous.isEmpty()) MDC.clear();
-            else MDC.setContextMap(previous);
         }
     }
 }

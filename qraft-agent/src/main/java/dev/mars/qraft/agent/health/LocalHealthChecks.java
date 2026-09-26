@@ -55,7 +55,7 @@ public final class LocalHealthChecks {
                 case HttpCheck http -> runners.add(new ProbeCheckRunner(
                         http, new HttpProbe(http, httpClient), scheduler, clock, listener));
                 case TcpCheck tcp -> runners.add(new ProbeCheckRunner(
-                        tcp, new TcpProbe(tcp, tcpConnector), scheduler, clock, listener));
+                        tcp, new TcpProbe(tcp, tcpConnector, clock), scheduler, clock, listener));
                 case TtlCheck ttl -> {
                     TtlCheckRunner runner = new TtlCheckRunner(ttl, scheduler, clock, listener);
                     runners.add(runner);

@@ -153,4 +153,4 @@ environment-variable configuration.
 
 The next active work is Tranche 6, health propagation and automatic
 deregistration, tracked in
-[`task-list-health-propagation-2026-09-25.md`](../task-list-health-propagation-2026-09-25.md).
+[`task-list-health-propagation-2026-09-25.md`](task-list-health-propagation-2026-09-25.md).

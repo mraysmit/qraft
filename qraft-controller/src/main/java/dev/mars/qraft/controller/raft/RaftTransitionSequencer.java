@@ -17,6 +17,7 @@
 package dev.mars.qraft.controller.raft;
 
 import dev.mars.qraft.controller.runtime.AsyncResult;
+import dev.mars.qraft.controller.runtime.CallerContext;
 import dev.mars.qraft.controller.runtime.Future;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.runtime.Promise;
@@ -37,6 +38,9 @@ import java.util.function.Supplier;
  * supplier starts on the node's state loop, and its result is always applied on
  * that same loop before the next supplier starts. Storage futures may complete
  * on any thread without moving the application step off the state loop.
+ *
+ * <p>A transition's steps log and trace in the context of the caller that submitted it, not in that of
+ * the storage thread that completed its persistence or of the transition that ran before it.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-13
@@ -237,22 +241,31 @@ final class RaftTransitionSequencer {
     }
 
     private <T> void start(Transition<T> transition) {
-        Future<?> operation;
-        try {
-            operation = Objects.requireNonNull(
-                    transition.action.get(), "transition action returned null");
-        } catch (Throwable error) {
-            dispatch(() -> finish(transition, null, error), transition.result);
-            return;
-        }
-        operation.onComplete(result -> dispatch(
-                () -> finish(transition, result.result(), result.cause()), transition.result));
+        transition.context.run(() -> {
+            Future<?> operation;
+            try {
+                operation = Objects.requireNonNull(
+                        transition.action.get(), "transition action returned null");
+            } catch (Throwable error) {
+                dispatch(() -> finish(transition, null, error), transition.result);
+                return;
+            }
+            operation.onComplete(result -> dispatch(
+                    () -> finish(transition, result.result(), result.cause()), transition.result));
+        });
     }
 
     private <T> void finish(Transition<T> transition, Object value, Throwable error) {
         assertStateLoop();
         if (active != transition) return;
 
+        transition.context.run(() -> settle(transition, value, error));
+
+        completeDrainIfIdle();
+        startNextIfIdle();
+    }
+
+    private <T> void settle(Transition<T> transition, Object value, Throwable error) {
         T applied = null;
         if (error == null) {
             try {
@@ -273,9 +286,6 @@ final class RaftTransitionSequencer {
 
         if (error == null) transition.result.tryComplete(applied);
         else transition.result.tryFail(error);
-
-        completeDrainIfIdle();
-        startNextIfIdle();
     }
 
     private void fenceQueuedTransitions(Throwable cause) {
@@ -329,6 +339,7 @@ final class RaftTransitionSequencer {
         private final Function<Object, T> apply;
         private final Promise<T> result = Promise.promise();
         private final Ownership ownership = new Ownership();
+        private final CallerContext context = CallerContext.capture();
 
         private Transition(String name, AdmissionClass admissionClass, FailurePolicy failurePolicy,
                            Predicate<Throwable> fenceOnFailure,

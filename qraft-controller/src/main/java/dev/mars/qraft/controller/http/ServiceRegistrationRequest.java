@@ -40,7 +40,19 @@ record ServiceRegistrationRequest(
         String datacenter,
         String region,
         Boolean enabled,
-        String health) {
+        String health,
+        List<Object> checks) {
+
+    /** Returns the declared check identifiers, or {@code null} when the request declares none. */
+    List<String> declaredCheckIds() {
+        if (checks == null) return null;
+        return checks.stream().map(value -> {
+            if (!(value instanceof String checkId) || checkId.isBlank()) {
+                throw new IllegalArgumentException("checks must contain non-blank check identifiers");
+            }
+            return checkId;
+        }).toList();
+    }
 
     ServiceInstance toServiceInstance(RequestContext context) {
         return new ServiceInstance(serviceId, serviceName, context.nodeId(), address, port,

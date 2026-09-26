@@ -16,8 +16,12 @@
 
 package dev.mars.qraft.controller;
 
+import dev.mars.qraft.concurrent.Deadlines;
 import dev.mars.qraft.controller.api.DistributedStateGrpcService;
 import dev.mars.qraft.controller.config.AppConfig;
+import dev.mars.qraft.controller.health.ExpiryScheduler;
+import dev.mars.qraft.controller.health.LeaderHealthExpiry;
+import dev.mars.qraft.controller.health.NodeExpiryPolicy;
 import dev.mars.qraft.controller.lifecycle.ShutdownCoordinator;
 import dev.mars.qraft.controller.runtime.Future;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
@@ -36,11 +40,16 @@ import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.controller.http.HttpApiServer;
 
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Main service host for the Qraft Controller.
@@ -52,6 +61,8 @@ import java.util.Set;
 public class QraftControllerService {
 
     private static final Logger logger = LoggerFactory.getLogger(QraftControllerService.class);
+    /** Bounds an expiry proposal, so a proposal that never completes cannot suppress re-evaluation. */
+    private static final long HEALTH_EXPIRY_PROPOSAL_TIMEOUT_MS = 5_000;
 
     private final JavaRuntime runtime;
 
@@ -61,6 +72,8 @@ public class QraftControllerService {
     private Optional<GrpcRaftServer> raftGrpcServer = Optional.empty();
     private Optional<GrpcServiceServer> apiGrpcServer = Optional.empty();
     private Optional<HttpApiServer> httpApiServer = Optional.empty();
+    private Optional<LeaderHealthExpiry> healthExpiry = Optional.empty();
+    private Optional<ScheduledExecutorService> healthExpiryExecutor = Optional.empty();
     private Optional<ShutdownCoordinator> shutdownCoordinator = Optional.empty();
 
     public QraftControllerService(JavaRuntime runtime) {
@@ -178,6 +191,19 @@ public class QraftControllerService {
             HttpApiServer healthServer = new HttpApiServer(config.getHttpPort(), node, stateMachine);
             this.httpApiServer = Optional.of(healthServer);
 
+            // Only the leader evaluates health-check deadlines; followers apply committed expiry commands.
+            ScheduledExecutorService expiryExecutor = Executors.newSingleThreadScheduledExecutor(
+                    Thread.ofPlatform().name("qraft-health-expiry").daemon(true).factory());
+            this.healthExpiryExecutor = Optional.of(expiryExecutor);
+            NodeExpiryPolicy nodePolicy = new NodeExpiryPolicy(Duration.ofMillis(config.getNodeTtlMs()),
+                    Duration.ofMillis(config.getNodeReapAfterMs()));
+            this.healthExpiry = Optional.of(LeaderHealthExpiry.attach(node, stateMachine::healthChecks,
+                    () -> stateMachine.getAgents().values(), nodePolicy,
+                    command -> Deadlines.bound(node.submitCommand(command).toCompletionStage(),
+                            HEALTH_EXPIRY_PROPOSAL_TIMEOUT_MS, TimeUnit.MILLISECONDS),
+                    ExpiryScheduler.of(expiryExecutor), Clock.systemUTC(),
+                    Duration.ofMillis(config.getHealthExpiryIntervalMs())));
+
             internalRaftServer.start().compose(v1 -> {
                 logger.info("Internal Raft gRPC server started on port {}", raftPort);
                 return externalApiServer.start();
@@ -239,6 +265,10 @@ public class QraftControllerService {
         // Phase 2: AWAIT_COMPLETION - no controller-managed work remains after draining.
         
         // Phase 3: STOP_SERVICES - Stop in reverse order of startup
+        coordinator.onServiceStop("health-expiry-stop", () -> {
+            stopHealthExpiry();
+            return Future.succeededFuture();
+        });
         coordinator.onServiceStop("grpc-server-stop", () -> {
             Future<Void> raftStop = raftGrpcServer.map(GrpcRaftServer::stop).orElseGet(Future::succeededFuture);
             Future<Void> apiStop = apiGrpcServer.map(GrpcServiceServer::stop).orElseGet(Future::succeededFuture);
@@ -254,6 +284,11 @@ public class QraftControllerService {
         
         logger.info("Shutdown coordinator configured (drain={}ms, timeout={}ms)", 
                    drainTimeoutMs, shutdownTimeoutMs);
+    }
+
+    private void stopHealthExpiry() {
+        healthExpiry.ifPresent(LeaderHealthExpiry::close);
+        healthExpiryExecutor.ifPresent(ScheduledExecutorService::shutdownNow);
     }
 
     public Future<Void> stop() {
@@ -277,6 +312,7 @@ public class QraftControllerService {
                     }),
             () -> {
                 // Fallback to immediate shutdown if coordinator wasn't initialized
+                stopHealthExpiry();
                 try {
                     Future<Void> raftStop = raftNode.map(RaftNode::stop).orElseGet(Future::succeededFuture);
                     Future<Void> internalGrpcStop = raftGrpcServer.map(GrpcRaftServer::stop).orElseGet(Future::succeededFuture);

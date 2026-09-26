@@ -48,14 +48,15 @@ record HealthServiceEntry(ServiceInstance service, List<Check> checks) {
             String acceptedAt,
             String deadline,
             boolean expired,
-            String output) {
+            String output,
+            long deregisterAfterMillis) {
 
         static Check from(HealthCheckState state) {
             var observation = state.observation();
             return new Check(state.checkId().checkId(), observation.status(), observation.required(),
                     observation.sequenceNumber(), observation.observedAt().toString(),
                     state.acceptedAt().toString(), state.deadline().toString(), state.expired(),
-                    observation.output());
+                    observation.output(), observation.deregisterAfterMillis());
         }
     }
 }

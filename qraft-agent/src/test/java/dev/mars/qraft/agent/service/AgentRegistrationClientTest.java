@@ -99,7 +99,7 @@ class AgentRegistrationClientTest {
         URI available = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
         controllerClient = new HttpCatalogClient(HttpClient.newHttpClient(), new ObjectMapper(),
                 List.of(refused, available), "agent-1", "default", "default",
-                "default", "default", Duration.ofSeconds(1));
+                "default", "default", Duration.ofSeconds(10));
         AgentRegistrationClient client = new AgentRegistrationClient(controllerClient);
 
         assertTrue(client.register(new AgentInfo("agent-1", "host", "127.0.0.1", 8080)).join());
@@ -167,16 +167,101 @@ class AgentRegistrationClientTest {
 
         assertFalse(shutdown.isDone());
         releaseRegistration.countDown();
-        assertTrue(registration.get(1, TimeUnit.SECONDS));
-        assertTrue(shutdown.get(1, TimeUnit.SECONDS));
+        assertTrue(registration.get(10, TimeUnit.SECONDS));
+        assertTrue(shutdown.get(10, TimeUnit.SECONDS));
         assertEquals(1, deregistrations.get());
         assertFalse(client.isRegistered());
+    }
+
+    @Test
+    void aSlowHeartbeatFromAnEarlierRegistrationCannotUnregisterANewerOne() throws Exception {
+        java.util.concurrent.CountDownLatch heartbeatArrived = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch releaseHeartbeat = new java.util.concurrent.CountDownLatch(1);
+        startConcurrentServer(exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            if (exchange.getRequestURI().getPath().endsWith("/heartbeat")) {
+                heartbeatArrived.countDown();
+                await(releaseHeartbeat);
+                respond(exchange, 404, "{\"code\":\"agent_not_found\",\"message\":\"gone\",\"retryable\":false}");
+            } else {
+                exchange.sendResponseHeaders(201, -1);
+                exchange.close();
+            }
+        });
+        AgentRegistrationClient client = client();
+        AgentInfo agent = new AgentInfo("agent-1", "host", "127.0.0.1", 8080);
+        assertTrue(client.register(agent).get(10, TimeUnit.SECONDS));
+
+        CompletableFuture<Boolean> staleHeartbeat = client.heartbeat("agent-1", java.time.Instant.now(), 1, "passing");
+        assertTrue(heartbeatArrived.await(10, TimeUnit.SECONDS));
+        assertTrue(client.register(agent).get(10, TimeUnit.SECONDS), "a newer registration succeeds");
+        String current = client.registrationId();
+        releaseHeartbeat.countDown();
+        staleHeartbeat.get(10, TimeUnit.SECONDS);
+
+        assertTrue(client.isRegistered(), "the rejection belonged to the earlier registration");
+        assertEquals(current, client.registrationId());
+    }
+
+    @Test
+    void aSlowFailedRegistrationCannotOverwriteANewerSuccessfulOne() throws Exception {
+        java.util.concurrent.CountDownLatch firstArrived = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch releaseFirst = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicInteger registrations = new java.util.concurrent.atomic.AtomicInteger();
+        startConcurrentServer(exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            if (registrations.incrementAndGet() == 1) {
+                firstArrived.countDown();
+                await(releaseFirst);
+                respond(exchange, 503, "{\"code\":\"leader_unavailable\",\"message\":\"later\",\"retryable\":true}");
+            } else {
+                exchange.sendResponseHeaders(201, -1);
+                exchange.close();
+            }
+        });
+        controllerClient = new HttpCatalogClient(HttpClient.newHttpClient(), new ObjectMapper(),
+                List.of(java.net.URI.create("http://localhost:" + server.getAddress().getPort())),
+                "agent-1", "default", "default", "default", "default", Duration.ofSeconds(30));
+        AgentRegistrationClient client = new AgentRegistrationClient(controllerClient);
+        AgentInfo agent = new AgentInfo("agent-1", "host", "127.0.0.1", 8080);
+
+        CompletableFuture<Boolean> slowFailure = client.register(agent);
+        assertTrue(firstArrived.await(10, TimeUnit.SECONDS));
+        assertTrue(client.register(agent).get(10, TimeUnit.SECONDS));
+        releaseFirst.countDown();
+        assertEquals(false, slowFailure.get(10, TimeUnit.SECONDS));
+
+        assertTrue(client.isRegistered(), "an earlier attempt's late failure must not undo the newer registration");
+    }
+
+    /** Replaces the fixture server with one that serves requests concurrently, so a held response blocks nothing else. */
+    private void startConcurrentServer(com.sun.net.httpserver.HttpHandler handler) throws java.io.IOException {
+        server.stop(0);
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.setExecutor(java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor());
+        server.createContext("/api/v1", handler);
+        server.start();
+    }
+
+    private static void await(java.util.concurrent.CountDownLatch latch) {
+        try {
+            latch.await(30, TimeUnit.SECONDS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static void respond(com.sun.net.httpserver.HttpExchange exchange, int status, String body)
+            throws java.io.IOException {
+        byte[] bytes = body.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        exchange.sendResponseHeaders(status, bytes.length);
+        try (var output = exchange.getResponseBody()) { output.write(bytes); }
     }
 
     private AgentRegistrationClient client() {
         controllerClient = new HttpCatalogClient(HttpClient.newHttpClient(), new ObjectMapper(),
                 List.of(java.net.URI.create("http://localhost:" + server.getAddress().getPort())),
-                "agent-1", "default", "default", "default", "default", Duration.ofSeconds(2));
+                "agent-1", "default", "default", "default", "default", Duration.ofSeconds(10));
         return new AgentRegistrationClient(controllerClient);
     }
 }

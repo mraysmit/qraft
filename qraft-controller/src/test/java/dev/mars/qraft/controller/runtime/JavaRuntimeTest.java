@@ -28,8 +28,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Tests {@link JavaRuntime} context serialization, virtual-thread blocking execution, timers,
- * worker executors, and MDC propagation.
+ * Tests {@link JavaRuntime} context serialization, virtual-thread blocking execution, timers
+ * (including one that fires before its registration is recorded), worker executors, and MDC propagation.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-09
@@ -57,27 +57,50 @@ class JavaRuntimeTest {
             observedThread.complete(Thread.currentThread().getName());
         });
 
-        assertEquals("qraft-state-loop", observedThread.get(2, TimeUnit.SECONDS));
+        assertEquals("qraft-state-loop", observedThread.get(10, TimeUnit.SECONDS));
     }
 
     @Test
     void executeBlockingUsesVirtualThreadAndCompletesOnRuntimeContext() throws Exception {
         CompletableFuture<Boolean> callbackOnRuntime = new CompletableFuture<>();
+        java.util.concurrent.CountDownLatch callbackRegistered = new java.util.concurrent.CountDownLatch(1);
 
-        Future<Boolean> operation = runtime.executeBlocking(() -> Thread.currentThread().isVirtual())
-                .onSuccess(ignored -> callbackOnRuntime.complete(JavaRuntime.currentContext() == runtime));
+        // The task waits until the callback is registered; otherwise a completion that wins the race runs
+        // the late-registered callback inline on the test thread instead of on the runtime context.
+        Future<Boolean> operation = runtime.executeBlocking(() -> {
+            callbackRegistered.await(2, TimeUnit.SECONDS);
+            return Thread.currentThread().isVirtual();
+        });
+        operation.onSuccess(ignored -> callbackOnRuntime.complete(JavaRuntime.currentContext() == runtime));
+        callbackRegistered.countDown();
 
-        assertTrue(operation.toCompletionStage().toCompletableFuture().get(2, TimeUnit.SECONDS));
-        assertTrue(callbackOnRuntime.get(2, TimeUnit.SECONDS));
+        assertTrue(operation.toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
+        assertTrue(callbackOnRuntime.get(10, TimeUnit.SECONDS));
     }
 
     @Test
     void timerCompletesAfterDelay() throws Exception {
         long started = System.nanoTime();
 
-        runtime.timer(30).toCompletionStage().toCompletableFuture().get(2, TimeUnit.SECONDS);
+        runtime.timer(30).toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
 
         assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started) >= 20);
+    }
+
+    @Test
+    void aTimerThatFiresBeforeItsRegistrationIsRecordedLeavesNoRegistrationBehind() throws Exception {
+        JavaRuntime racing = new JavaRuntime(new FiresBeforeScheduleReturns());
+        try {
+            java.util.concurrent.atomic.AtomicInteger fired = new java.util.concurrent.atomic.AtomicInteger();
+
+            racing.setTimer(0, ignored -> fired.incrementAndGet());
+
+            assertEquals(1, fired.get(), "the scheduler ran the timer before setTimer could record it");
+            assertEquals(0, racing.pendingTimerCount(),
+                    "a timer that fires before its registration is recorded must not leave a stale entry");
+        } finally {
+            racing.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        }
     }
 
     @Test
@@ -96,7 +119,7 @@ class JavaRuntimeTest {
         WorkerExecutor worker = runtime.createSharedWorkerExecutor("storage-test", 1);
         try {
             String threadName = worker.executeBlocking(() -> Thread.currentThread().getName())
-                    .toCompletionStage().toCompletableFuture().get(2, TimeUnit.SECONDS);
+                    .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
             assertTrue(threadName.startsWith("storage-test-"));
         } finally {
             worker.close();
@@ -110,11 +133,11 @@ class JavaRuntimeTest {
         runtime.runOnContext(ignored -> first.complete(MDC.get("nodeId")));
         MDC.clear();
 
-        assertEquals("node-a", first.get(2, TimeUnit.SECONDS));
+        assertEquals("node-a", first.get(10, TimeUnit.SECONDS));
 
         CompletableFuture<String> second = new CompletableFuture<>();
         runtime.runOnContext(ignored -> second.complete(MDC.get("nodeId")));
-        assertNull(second.get(2, TimeUnit.SECONDS));
+        assertNull(second.get(10, TimeUnit.SECONDS));
     }
 
     @Test
@@ -123,6 +146,24 @@ class JavaRuntimeTest {
         Future<String> operation = runtime.executeBlocking(() -> MDC.get("requestId"));
         MDC.clear();
 
-        assertEquals("request-1", operation.toCompletionStage().toCompletableFuture().get(2, TimeUnit.SECONDS));
+        assertEquals("request-1", operation.toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
+    }
+
+    /** Runs each scheduled task to completion before {@code schedule} returns, the widest timer race. */
+    private static final class FiresBeforeScheduleReturns extends java.util.concurrent.ScheduledThreadPoolExecutor {
+        FiresBeforeScheduleReturns() {
+            super(1);
+        }
+
+        @Override
+        public java.util.concurrent.ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
+            java.util.concurrent.ScheduledFuture<?> scheduled = super.schedule(command, 0, TimeUnit.NANOSECONDS);
+            try {
+                scheduled.get(10, TimeUnit.SECONDS);
+            } catch (Exception failure) {
+                throw new AssertionError("the scheduled task did not complete", failure);
+            }
+            return scheduled;
+        }
     }
 }

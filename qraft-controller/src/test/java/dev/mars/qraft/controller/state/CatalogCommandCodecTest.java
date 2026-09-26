@@ -80,6 +80,42 @@ class CatalogCommandCodecTest {
     }
 
     @Test
+    void roundTripsTheDeregistrationDelayAndDecodesOlderObservationsAsNever() throws Exception {
+        var checkId = new ServiceCheckId(
+                new dev.mars.qraft.catalog.ServiceInstanceId(
+                        "tenant-a", "production", "node-1", "search-1"), "ttl");
+        var observe = CatalogCommand.observe(new HealthObservation(checkId, ServiceHealth.PASSING, 3,
+                OBSERVED_AT, 45_000, true, "", 120_000), ACCEPTED_AT);
+
+        assertEquals(observe, codec.deserialize(codec.serialize(observe)));
+
+        // An entry written before the field existed carries no deregistration delay.
+        var olderEntry = dev.mars.qraft.controller.raft.grpc.RaftCommandMessage.parseFrom(codec.serialize(observe))
+                .toBuilder();
+        olderEntry.getCatalogCommandBuilder().getHealthObservationBuilder().clearDeregisterAfterMs();
+        var decoded = (CatalogCommand.ObserveHealth) codec.deserialize(olderEntry.build().toByteArray());
+        assertEquals(0, decoded.observation().deregisterAfterMillis());
+    }
+
+    @Test
+    void distinguishesDeclaredEmptyCheckListsFromUndeclaredRegistrations() {
+        ServiceInstance instance = new ServiceInstance("search-1", "search", "node-1", "10.0.0.4",
+                9090, List.of(), Map.of(), ServiceHealth.UNKNOWN,
+                "tenant-a", "production", "dc-1", "eu-west", true);
+
+        var declared = CatalogCommand.register(instance, List.of("tcp", "http", "tcp"));
+        var declaredNone = CatalogCommand.register(instance, List.of());
+        var undeclared = CatalogCommand.register(instance);
+
+        assertEquals(List.of("http", "tcp"), ((CatalogCommand.Register) declared).declaredCheckIds(),
+                "declared identifiers are sorted and distinct so replicas encode them identically");
+        assertEquals(declared, codec.deserialize(codec.serialize(declared)));
+        assertEquals(declaredNone, codec.deserialize(codec.serialize(declaredNone)));
+        assertEquals(undeclared, codec.deserialize(codec.serialize(undeclared)));
+        assertEquals(null, ((CatalogCommand.Register) undeclared).declaredCheckIds());
+    }
+
+    @Test
     void readsLegacyJsonDistributedStateEntries() {
         byte[] legacy = new DistributedStateCommandCodec().serialize(DistributedStateCommand.put("key", "value"));
 

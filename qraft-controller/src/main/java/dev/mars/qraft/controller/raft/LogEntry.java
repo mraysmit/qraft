@@ -19,7 +19,6 @@ package dev.mars.qraft.controller.raft;
 import dev.mars.qraft.controller.state.RaftCommand;
 
 import java.io.Serializable;
-import java.time.Instant;
 import java.util.Objects;
 /**
  * Description for LogEntry
@@ -36,13 +35,24 @@ public class LogEntry implements Serializable {
     private final long term;
     private final long index;
     private final RaftCommand command;
-    private final Instant timestamp;
+    /** The replicated encoding of the command; {@code null} only for in-memory sentinels. */
+    private final byte[] payload;
 
+    /** Creates an entry without a replicated encoding, used for in-memory sentinels and tests. */
     public LogEntry(long term, long index, RaftCommand command) {
+        this(term, index, command, null);
+    }
+
+    /**
+     * Creates an entry whose {@code command} was decoded from {@code payload}. The payload, not a
+     * re-encoding of the command, is what is persisted, sent to followers, and compared with incoming
+     * entries, so an encoding that is not byte-stable can never look like a divergent log.
+     */
+    public LogEntry(long term, long index, RaftCommand command, byte[] payload) {
         this.term = term;
         this.index = index;
         this.command = command;
-        this.timestamp = Instant.now();
+        this.payload = payload == null ? null : payload.clone();
     }
 
     public long getTerm() {
@@ -57,8 +67,9 @@ public class LogEntry implements Serializable {
         return command;
     }
 
-    public Instant getTimestamp() {
-        return timestamp;
+    /** Returns a copy of the replicated encoding, or {@code null} for an in-memory sentinel. */
+    public byte[] getPayload() {
+        return payload == null ? null : payload.clone();
     }
 
     /**
@@ -76,13 +87,11 @@ public class LogEntry implements Serializable {
         return term == logEntry.term &&
                index == logEntry.index &&
                Objects.equals(command, logEntry.command);
-        // Note: timestamp is intentionally excluded from equality
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(term, index, command);
-        // Note: timestamp is intentionally excluded from hashCode
     }
 
     @Override
@@ -91,7 +100,6 @@ public class LogEntry implements Serializable {
                 "term=" + term +
                 ", index=" + index +
                 ", command=" + command +
-                ", timestamp=" + timestamp +
                 '}';
     }
 }

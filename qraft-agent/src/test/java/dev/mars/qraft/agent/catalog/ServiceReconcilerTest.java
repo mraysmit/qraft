@@ -102,6 +102,28 @@ class ServiceReconcilerTest {
     }
 
     @Test
+    void aChangedCheckSetIsReRegisteredSoTheControllerCanPruneRemovedChecks() {
+        FakeCatalogClient client = new FakeCatalogClient();
+        ServiceDefinition web = service("web", "web", 8080, true).withCheckIds(List.of("http", "tcp"));
+        AtomicReference<List<ServiceDefinition>> definitions = new AtomicReference<>(List.of(web));
+        ServiceReconciler reconciler = new ServiceReconciler(client, definitions::get, CLOCK);
+        reconciler.trigger().join();
+        client.lookups.put("web", new CatalogLookupOutcome.Present());
+
+        definitions.set(List.of(web.withCheckIds(List.of("tcp"))));
+        reconciler.trigger().join();
+        definitions.set(List.of(web.withCheckIds(List.of())));
+        reconciler.trigger().join();
+
+        assertEquals(List.of("web", "web", "web"), client.registrations);
+        assertEquals(ServiceReconciler.fingerprint(service("web", "web", 8080, true)),
+                ServiceReconciler.fingerprint(web.withCheckIds(List.of())));
+        assertFalse(ServiceReconciler.fingerprint(web.withCheckIds(List.of("a")))
+                .equals(ServiceReconciler.fingerprint(service("web", "web", 8080, true)
+                        .withCheckIds(List.of()))), "the check set is part of the definition fingerprint");
+    }
+
+    @Test
     void registersAgainWhenControllerReportsTheInstanceAbsent() {
         FakeCatalogClient client = new FakeCatalogClient();
         ServiceDefinition web = service("web", "web", 8080, true);

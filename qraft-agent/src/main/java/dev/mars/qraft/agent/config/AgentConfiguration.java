@@ -90,8 +90,13 @@ public final class AgentConfiguration {
         contactFreshnessMs = builder.contactFreshnessMs;
         tenant = builder.tenant.trim();
         namespace = builder.namespace.trim();
-        services = List.copyOf(builder.services);
         healthChecks = List.copyOf(builder.healthChecks);
+        // The configured checks are the single source of each service's declared check identifiers.
+        services = builder.services.stream()
+                .map(service -> service.withCheckIds(healthChecks.stream()
+                        .filter(check -> check.serviceId().equals(service.id()))
+                        .map(HealthCheckDefinition::checkId).toList()))
+                .toList();
         loggingDirectory = builder.loggingDirectory.trim();
         version = builder.version.trim();
     }
@@ -250,26 +255,29 @@ public final class AgentConfiguration {
         String location = "catalog.services[].checks[]";
         String type = requiredText(check, "type");
         boolean required = optionalBoolean(check, "required", true);
+        Duration deregisterAfter = Duration.ofMillis(optionalLong(check, "deregisterAfterMs", 0));
         return switch (type) {
             case "http" -> {
                 rejectUnknown(check, location, "id", "type", "required", "url",
-                        "intervalMs", "timeoutMs", "ttlMs");
+                        "intervalMs", "timeoutMs", "ttlMs", "deregisterAfterMs");
                 CheckTiming timing = CheckTiming.parse(check);
                 yield new HttpCheck(service.id(), id, checkUrl(requiredText(check, "url")),
-                        timing.interval(), timing.timeout(), timing.ttl(), required);
+                        timing.interval(), timing.timeout(), timing.ttl(), required, deregisterAfter);
             }
             case "tcp" -> {
                 rejectUnknown(check, location, "id", "type", "required", "address", "port",
-                        "intervalMs", "timeoutMs", "ttlMs");
+                        "intervalMs", "timeoutMs", "ttlMs", "deregisterAfterMs", "warnAfterMs");
                 CheckTiming timing = CheckTiming.parse(check);
                 yield new TcpCheck(service.id(), id, optionalText(check, "address", service.address()),
                         optionalInt(check, "port", service.port()),
-                        timing.interval(), timing.timeout(), timing.ttl(), required);
+                        timing.interval(), timing.timeout(), timing.ttl(), required, deregisterAfter,
+                        Duration.ofMillis(optionalLong(check, "warnAfterMs", 0)));
             }
             case "ttl" -> {
-                rejectUnknown(check, location, "id", "type", "required", "ttlMs");
+                rejectUnknown(check, location, "id", "type", "required", "ttlMs", "deregisterAfterMs");
                 if (!check.has("ttlMs")) throw new IllegalArgumentException("ttlMs is required for a ttl check");
-                yield new TtlCheck(service.id(), id, Duration.ofMillis(optionalLong(check, "ttlMs", 0)), required);
+                yield new TtlCheck(service.id(), id, Duration.ofMillis(optionalLong(check, "ttlMs", 0)), required,
+                        deregisterAfter);
             }
             default -> throw new IllegalArgumentException("Unsupported health check type: " + type);
         };

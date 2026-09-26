@@ -66,7 +66,7 @@ public final class AgentRegistrationClient {
                     }
                     return outcome instanceof CatalogOutcome.Success;
                 })
-                .whenComplete((success, error) -> registered.set(Boolean.TRUE.equals(success)));
+                .whenComplete((success, error) -> recordOutcome(attemptId, Boolean.TRUE.equals(success)));
         return registrationInFlight;
     }
 
@@ -78,12 +78,12 @@ public final class AgentRegistrationClient {
         heartbeat.put("timestamp", timestamp.toString());
         heartbeat.put("sequenceNumber", sequenceNumber);
         heartbeat.put("status", status);
-        String currentRegistrationId = registrationId.get();
-        if (currentRegistrationId != null) heartbeat.put("registrationId", currentRegistrationId);
+        String heartbeatRegistrationId = registrationId.get();
+        if (heartbeatRegistrationId != null) heartbeat.put("registrationId", heartbeatRegistrationId);
         return controllerClient.heartbeatAgent(heartbeat).thenApply(outcome -> {
             if (outcome instanceof CatalogOutcome.Rejected rejected
                     && ("agent_not_found".equals(rejected.code()) || "http_404".equals(rejected.code()))) {
-                registered.set(false);
+                recordOutcome(heartbeatRegistrationId, false);
                 return false;
             }
             return outcome instanceof CatalogOutcome.Success;
@@ -105,6 +105,14 @@ public final class AgentRegistrationClient {
         shutdown = registrationInFlight.handle((ignored, failure) -> null)
                 .thenCompose(ignored -> deregister(agentId));
         return shutdown;
+    }
+
+    /**
+     * Applies an outcome only if it belongs to the current registration attempt. Responses can arrive
+     * out of order, so a late answer about an earlier attempt must not overwrite a newer one.
+     */
+    private synchronized void recordOutcome(String attemptId, boolean isRegistered) {
+        if (Objects.equals(attemptId, registrationId.get())) registered.set(isRegistered);
     }
 
     public boolean isRegistered() { return registered.get(); }
