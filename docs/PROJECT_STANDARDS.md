@@ -10,8 +10,8 @@ Qraft is a Consul-style service discovery and distributed coordination platform.
 
 ### 2.1 Java platform
 
-- Use Java 25 or newer.
-- Prefer standard Java APIs and Java 25 concurrency facilities.
+- Use Java 27 or newer.
+- Prefer standard Java APIs and Java 27 concurrency facilities.
 - Vert.x is prohibited.
 - Do not introduce compatibility wrappers that reproduce Vert.x APIs without a clear project-level abstraction.
 - Blocking operations should use bounded executors or virtual threads as appropriate to the workload.
@@ -44,7 +44,7 @@ Qraft is a Consul-style service discovery and distributed coordination platform.
 - `qraft-raft-engine` defines Raft engine contracts and primitives.
 - `qraft-distributed-state` defines replicated-state commands and codecs.
 - `qraft-core` contains shared domain models and framework primitives.
-- `qraft-agent` implements the Java 25 service-discovery agent.
+- `qraft-agent` implements the Java 27 service-discovery agent.
 - `qraft-tenant` implements namespace and tenant management.
 - `qraft-controller` implements distributed control, Raft coordination, HTTP APIs, and gRPC services.
 - `qraft-runtime` is the thin executable composition root that selects `server` or `client` mode and owns no domain logic.

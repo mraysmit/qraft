@@ -23,18 +23,18 @@
     </modules>
 
     <properties>
-        <maven.compiler.release>25</maven.compiler.release>
-        <maven.compiler.source>25</maven.compiler.source>
-        <maven.compiler.target>25</maven.compiler.target>
+        <maven.compiler.release>27</maven.compiler.release>
+        <maven.compiler.source>27</maven.compiler.source>
+        <maven.compiler.target>27</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <junit.version>5.14.3</junit.version>
         <testcontainers.version>2.0.3</testcontainers.version>
-        <jacoco.version>0.8.13</jacoco.version>
+        <jacoco.version>0.8.15</jacoco.version>
         <raftlog.version>1.4.0</raftlog.version>
         <slf4j.version>2.0.17</slf4j.version>
         <logback.version>1.5.32</logback.version>
         <logstash.logback.encoder.version>8.1</logstash.logback.encoder.version>
-        <required.java.version>[25,)</required.java.version>
+        <required.java.version>[27,)</required.java.version>
         <test.log.directory>${maven.multiModuleProjectDirectory}/logs</test.log.directory>
         <test.log.configuration>${maven.multiModuleProjectDirectory}/config/logback-test.xml</test.log.configuration>
     </properties>
@@ -159,7 +159,7 @@
                             <rules>
                                 <requireJavaVersion>
                                     <version>${required.java.version}</version>
-                                    <message>Qraft requires JDK 25 or newer. Point Maven and the IDE test runtime at your openjdk-25 installation.</message>
+                                    <message>Qraft requires JDK 27 or newer. Point Maven and the IDE test runtime at your openjdk-27 installation.</message>
                                 </requireJavaVersion>
                             </rules>
                         </configuration>

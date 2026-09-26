@@ -95,7 +95,7 @@ class DockerDeploymentContractTest {
     void runtimeImageOnlyPackagesTheHostBuiltArtifact() throws IOException {
         Path root = Path.of("..").toAbsolutePath().normalize();
         String dockerfile = Files.readString(root.resolve("qraft-runtime/Dockerfile"));
-        assertTrue(dockerfile.startsWith("FROM eclipse-temurin:25-jre-alpine"));
+        assertTrue(dockerfile.startsWith("FROM sapmachine:27-jre-alpine"));
         assertTrue(dockerfile.contains(
                 "COPY qraft-runtime/target/qraft-runtime.jar /app/qraft.jar"));
         assertFalse(dockerfile.contains("*.jar"));
@@ -104,7 +104,7 @@ class DockerDeploymentContractTest {
         assertFalse(dockerfile.contains("COPY --from="));
 
         String agentDockerfile = Files.readString(root.resolve("qraft-agent/Dockerfile"));
-        assertTrue(agentDockerfile.startsWith("FROM eclipse-temurin:25-jre-alpine"));
+        assertTrue(agentDockerfile.startsWith("FROM sapmachine:27-jre-alpine"));
         assertTrue(agentDockerfile.contains(
                 "COPY qraft-runtime/target/qraft-runtime.jar app.jar"));
         assertFalse(agentDockerfile.contains("*.jar"));

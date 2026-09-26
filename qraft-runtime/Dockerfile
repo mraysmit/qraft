@@ -1,4 +1,4 @@
-FROM eclipse-temurin:25-jre-alpine
+FROM sapmachine:27-jre-alpine
 
 RUN apk add --no-cache curl tzdata bash \
     && addgroup -g 1001 qraft \

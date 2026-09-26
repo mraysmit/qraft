@@ -32,7 +32,7 @@ import java.util.function.Function;
 /**
  * Main application class for Qraft Controller.
  *
- * Bootstraps the Java 25 runtime and controller services.
+ * Bootstraps the Java 27 runtime and controller services.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2025-08-26
@@ -139,7 +139,7 @@ public class QraftControllerApplication {
             System.setProperty("qraft.log.dir", config.getLoggingDirectory());
             configureJulToSlf4jBridge();
             System.out.println(BANNER);
-            logger.info("Initializing Qraft Controller with OpenTelemetry (Java 25 runtime)...");
+            logger.info("Initializing Qraft Controller with OpenTelemetry (Java 27 runtime)...");
             AutoCloseable telemetry = TelemetryConfig.configure();
             JavaRuntime runtime = null;
             try {

@@ -1,6 +1,6 @@
 # Qraft
 
-Qraft is a Java 25 service-discovery and distributed-coordination platform built on Raft consensus.
+Qraft is a Java 27 service-discovery and distributed-coordination platform built on Raft consensus.
 
 It is designed for systems that need strongly ordered commands, replicated state, service discovery, health reporting, agent coordination, and tenant isolation across a cluster.
 

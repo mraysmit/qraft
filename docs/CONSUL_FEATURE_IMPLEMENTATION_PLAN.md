@@ -15,15 +15,15 @@ Qraft will evolve into a Consul-like distributed service with Raft-backed state,
 - ACLs and namespaces
 - Prometheus metrics and operational status
 
-## 3. Runtime Direction: Pure Java 25
+## 3. Runtime Direction: Pure Java 27
 
-Qraft will not use Vert.x. The runtime model will use Java 25 platform APIs and standard-library concurrency primitives.
+Qraft will not use Vert.x. The runtime model will use Java 27 platform APIs and standard-library concurrency primitives.
 
-The active Maven build is Java-native. The controller uses Java 25 concurrency primitives and native grpc-java transport with no Vert.x runtime dependency.
+The active Maven build is Java-native. The controller uses Java 27 concurrency primitives and native grpc-java transport with no Vert.x runtime dependency.
 
 ### Replacement principles
 
-- Use `com.sun.net.httpserver.HttpServer` or a small Java 25 HTTP abstraction for server endpoints.
+- Use `com.sun.net.httpserver.HttpServer` or a small Java 27 HTTP abstraction for server endpoints.
 - Use `java.net.http.HttpClient` for outbound agent and health-check requests.
 - Use virtual threads for blocking request and background service work.
 - Use `StructuredTaskScope` where structured concurrency improves lifecycle management.
@@ -113,14 +113,14 @@ section 1.1.
 
 ## 5. Implementation Phases
 
-### Phase 1: Establish the core boundaries and Java 25 runtime
+### Phase 1: Establish the core boundaries and Java 27 runtime
 
 - Standardize naming around `Service`, `Instance`, `HealthCheck`, `Session`, and `KeyValue`.
 - Remove remaining transfer, workflow, assignment, and job concepts from active APIs.
 - Confirm the Maven module structure reflects the intended runtime modules.
 - Define interfaces for replicated state, service catalog, health checks, and sessions.
 - Remove Vert.x from module dependencies and public APIs.
-- Establish shared Java 25 executors, virtual-thread policies, and shutdown conventions.
+- Establish shared Java 27 executors, virtual-thread policies, and shutdown conventions.
 - Add the unified runtime launcher with explicit `server` and `client` startup modes.
 - Define mode-specific configuration validation and common lifecycle ownership.
 - Add client liveness and readiness HTTP endpoints and connect them to container health checks.

@@ -11,7 +11,7 @@
     <artifactId>qraft-core</artifactId>
     <packaging>jar</packaging>
     <name>Qraft Core</name>
-    <description>Pure Java 25 discovery and health domain models</description>
+    <description>Pure Java 27 discovery and health domain models</description>
     <dependencies>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>

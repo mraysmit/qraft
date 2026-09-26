@@ -11,7 +11,7 @@
     <artifactId>qraft-tenant</artifactId>
     <packaging>jar</packaging>
     <name>Qraft Namespace Management</name>
-    <description>Pure Java 25 namespace lifecycle service</description>
+    <description>Pure Java 27 namespace lifecycle service</description>
     <dependencies>
         <dependency>
             <groupId>org.junit.jupiter</groupId>

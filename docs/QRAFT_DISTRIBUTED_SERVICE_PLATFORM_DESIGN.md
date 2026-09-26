@@ -30,14 +30,14 @@ qraft
 ```
 
 The root `qraft` project is not a deployable application. It owns the reactor,
-shared dependency versions, Java 25 compiler settings, test conventions,
+shared dependency versions, Java 27 compiler settings, test conventions,
 coverage configuration, and build-wide engineering rules.
 
 | Module | Current purpose | Target responsibility |
 |---|---|---|
 | `qraft-raft-engine` | Defines reusable Raft command, state-machine, and engine contracts. | Own all implementation-neutral consensus contracts and reusable Raft primitives. It must not depend on service discovery, tenancy, HTTP, or a runtime mode. |
 | `qraft-distributed-state` | Defines replicated key/value commands and codecs and currently contains the service-catalog model. | Own deterministic replicated-state commands and projections, including key/value behavior and catalog state. It must contain no network server, process lifecycle, or client-agent behavior. |
-| `qraft-core` | Contains shared Java 25 discovery, health, node, and agent domain types, together with some inherited domain code awaiting removal. | Own small, transport-neutral value types shared between server and client. Service definitions and common identity types belong here; Raft implementation and HTTP DTOs do not. |
+| `qraft-core` | Contains shared Java 27 discovery, health, node, and agent domain types, together with some inherited domain code awaiting removal. | Own small, transport-neutral value types shared between server and client. Service definitions and common identity types belong here; Raft implementation and HTTP DTOs do not. |
 | `qraft-agent` | Implements client identity, node registration, the typed outbound catalog HTTP adapter, controller-seed failover, single-flight service reconciliation, heartbeat scheduling, policy-derived local liveness/readiness HTTP endpoints, and bounded graceful shutdown. | Complete local health checks and TTL renewal. It never participates in Raft. |
 | `qraft-tenant` | Implements the current namespace lifecycle abstraction and its in-memory implementation. | Own tenant and namespace policy, validation, and lifecycle contracts. Replicated persistence is performed through distributed-state commands rather than hidden local mutation. |
 | `qraft-controller` | Contains the server application, Raft node implementation, transports, durable storage adapters, replicated state host, HTTP and gRPC APIs, snapshots, and graceful shutdown. | Operate one server member: participate in quorum, host authoritative replicated state, enforce request identity and policy, expose control-plane APIs and the built-in administrative interface, and own server lifecycle. |
@@ -125,8 +125,8 @@ and acceptance requirements.
   owner and make startup, readiness, drain, shutdown, and partial-startup cleanup
   observable in tests. Lifecycle operations must be idempotent and complete or
   fail within documented deadlines.
-- **Direct use of Java 25.** Build concurrency, networking, and lifecycle control
-  on Java 25 platform APIs rather than a framework-managed event loop. Shared
+- **Direct use of Java 27.** Build concurrency, networking, and lifecycle control
+  on Java 27 platform APIs rather than a framework-managed event loop. Shared
   abstractions are introduced only where they express a Qraft contract or make
   ownership and testing clearer.
 

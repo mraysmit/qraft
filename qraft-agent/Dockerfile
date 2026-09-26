@@ -1,4 +1,4 @@
-FROM eclipse-temurin:25-jre-alpine
+FROM sapmachine:27-jre-alpine
 
 # Install required packages
 RUN apk add --no-cache \

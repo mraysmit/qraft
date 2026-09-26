@@ -11,7 +11,7 @@
     <artifactId>qraft-agent</artifactId>
     <packaging>jar</packaging>
     <name>Qraft Agent</name>
-    <description>Pure Java 25 service-discovery agent</description>
+    <description>Pure Java 27 service-discovery agent</description>
     <dependencies>
         <dependency>
             <groupId>dev.mars</groupId>
