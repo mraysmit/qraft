@@ -53,7 +53,7 @@ class CrashedAgentExpiryEndToEndTest {
     Path temporaryDirectory;
 
     private final List<RuntimeLifecycle> lifecycles = new ArrayList<>();
-    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofMillis(300)).build();
+    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private Process client;
 
     @AfterEach
@@ -95,8 +95,10 @@ class CrashedAgentExpiryEndToEndTest {
         client.destroyForcibly();
         assertTrue(client.waitFor(10, TimeUnit.SECONDS), "the client process did not terminate");
 
+        // The check stays expired and critical for deregisterAfterMs (5 s) before deregistration, a window no
+        // poll on a loaded machine can miss.
         AtomicBoolean sawExpiry = new AtomicBoolean();
-        await(Duration.ofSeconds(15), () -> {
+        await(Duration.ofSeconds(30), () -> {
             if ("true".equals(checkField(controller, "expired"))
                     && "CRITICAL".equals(serviceHealth(controller))) {
                 sawExpiry.set(true);
@@ -123,8 +125,9 @@ class CrashedAgentExpiryEndToEndTest {
         client.destroyForcibly();
         assertTrue(client.waitFor(10, TimeUnit.SECONDS), "the client process did not terminate");
 
+        // The node stays unreachable for nodeReapAfterMs (5 s) before it is reaped.
         AtomicBoolean sawUnreachable = new AtomicBoolean();
-        await(Duration.ofSeconds(15), () -> {
+        await(Duration.ofSeconds(30), () -> {
             if ("UNREACHABLE".equals(nodeStatus(controller)) && instanceCount(controller) == 1) sawUnreachable.set(true);
             return sawUnreachable.get() && nodeStatus(controller) == null && instanceCount(controller) == 0;
         });
@@ -144,7 +147,7 @@ class CrashedAgentExpiryEndToEndTest {
     private String nodeStatus(URI controller) {
         try {
             HttpResponse<String> response = http.send(HttpRequest.newBuilder(controller.resolve("/api/v1/agents"))
-                    .timeout(Duration.ofMillis(500)).GET().build(), HttpResponse.BodyHandlers.ofString());
+                    .timeout(Duration.ofSeconds(5)).GET().build(), HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() != 200) return "unavailable";
             for (JsonNode agent : JSON.readTree(response.body())) {
                 if ("crashing-agent".equals(agent.path("agentId").asText())) return agent.path("status").asText().toUpperCase(java.util.Locale.ROOT);
@@ -175,7 +178,7 @@ class CrashedAgentExpiryEndToEndTest {
     private JsonNode healthEntries(URI controller) {
         try {
             HttpResponse<String> response = http.send(HttpRequest.newBuilder(
-                            controller.resolve("/v1/health/service/web")).timeout(Duration.ofMillis(500)).GET().build(),
+                            controller.resolve("/v1/health/service/web")).timeout(Duration.ofSeconds(5)).GET().build(),
                     HttpResponse.BodyHandlers.ofString());
             return response.statusCode() == 200 ? JSON.readTree(response.body()) : null;
         } catch (Exception unavailable) {
@@ -201,7 +204,7 @@ class CrashedAgentExpiryEndToEndTest {
 
     private int status(URI uri) {
         try {
-            return http.send(HttpRequest.newBuilder(uri).timeout(Duration.ofMillis(500)).GET().build(),
+            return http.send(HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(5)).GET().build(),
                     HttpResponse.BodyHandlers.discarding()).statusCode();
         } catch (Exception unavailable) {
             return -1;
@@ -238,7 +241,7 @@ class CrashedAgentExpiryEndToEndTest {
                       "heartbeatIntervalMs": 25,
                       "storage": {"type": "raftlog", "path": %s, "fsync": true}
                     },
-                    "health": {"expiryIntervalMs": 50, "nodeTtlMs": 600, "nodeReapAfterMs": 800},
+                    "health": {"expiryIntervalMs": 50, "nodeTtlMs": 600, "nodeReapAfterMs": 5000},
                     "telemetry": {"enabled": false},
                     "shutdown": {"drainTimeoutMs": 100, "timeoutMs": 5000}
                   },
@@ -261,7 +264,7 @@ class CrashedAgentExpiryEndToEndTest {
                     "services": [
                       {"id": "web", "name": "web", "address": "127.0.0.1", "port": %d,
                        "checks": [{"id": "tcp", "type": "tcp", "intervalMs": 100, "ttlMs": 600,
-                                   "deregisterAfterMs": 800}]}
+                                   "deregisterAfterMs": 5000}]}
                     ]
                   },
                   "logging": {"directory": %s}

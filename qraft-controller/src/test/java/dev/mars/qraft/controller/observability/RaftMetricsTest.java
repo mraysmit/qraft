@@ -37,7 +37,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class RaftMetricsTest {
 
     @Test
-    void tracksAndClearsRegisteredExecutor() {
+    void tracksAndClearsRegisteredExecutor() throws Exception {
         RaftMetrics metrics = RaftMetrics.getInstance();
         ThreadPoolExecutor executor = new ThreadPoolExecutor(
                 1, 1, 0, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
@@ -45,7 +45,17 @@ class RaftMetricsTest {
         try {
             metrics.registerThreadPool("node", executor);
             assertEquals(1, metrics.getPoolSize());
-            assertTrue(metrics.getActiveThreadCount() >= 0);
+            java.util.concurrent.CountDownLatch running = new java.util.concurrent.CountDownLatch(1);
+            java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+            java.util.concurrent.Future<?> task = executor.submit(() -> {
+                running.countDown();
+                release.await(30, TimeUnit.SECONDS);
+                return null;
+            });
+            assertTrue(running.await(10, TimeUnit.SECONDS));
+            assertEquals(1, metrics.getActiveThreadCount(), "the running task is counted");
+            release.countDown();
+            task.get(10, TimeUnit.SECONDS);
             assertEquals(0, metrics.getQueuedTaskCount());
             metrics.recordVoteRequest("node", "peer", true);
             metrics.recordVoteRequest("node", "peer", false);

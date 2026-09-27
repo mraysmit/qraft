@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.controller.state;
 
+import dev.mars.qraft.catalog.ServiceKey;
 import dev.mars.qraft.agent.AgentStatus;
 import dev.mars.qraft.catalog.ServiceHealth;
 import dev.mars.qraft.catalog.ServiceInstance;
@@ -86,7 +87,7 @@ class LegacyCatalogFixtureTest {
                         List.of("blue"), Map.of("zone", "a"), ServiceHealth.PASSING),
                 new ServiceInstance("web-b", "web", "node-b", "10.0.0.20", 8081,
                         List.of("green"), Map.of("zone", "b"), ServiceHealth.WARNING)),
-                store.getServiceCatalog().instances("web"));
+                store.getServiceCatalog().instances(ServiceKey.inDefaultScope("web")));
 
         var agent = store.findAgent("agent-legacy").orElseThrow();
         assertEquals("legacy-host", agent.getHostname());

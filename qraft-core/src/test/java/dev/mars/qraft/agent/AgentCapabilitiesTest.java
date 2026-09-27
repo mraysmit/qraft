@@ -47,14 +47,8 @@ class AgentCapabilitiesTest {
         capabilities.setSupportedServices(Set.of("catalog", "health"));
         capabilities.addAvailableRegion("eu-west-1");
 
-        assertTrue(capabilities.supportsService("catalog"));
-        assertTrue(capabilities.isAvailableInRegion("eu-west-1"));
-        assertFalse(capabilities.isAvailableInRegion("us-east-1"));
-    }
-
-    @Test
-    void emptyRegionSetMeansAllRegions() {
-        assertTrue(new AgentCapabilities().isAvailableInRegion("any-region"));
+        assertEquals(Set.of("catalog", "health"), capabilities.getSupportedServices());
+        assertEquals(Set.of("eu-west-1"), capabilities.getAvailableRegions());
     }
 
     @Test
@@ -66,7 +60,7 @@ class AgentCapabilitiesTest {
         AgentCapabilities decoded = new ObjectMapper().readValue(
                 new ObjectMapper().writeValueAsString(capabilities), AgentCapabilities.class);
 
-        assertTrue(decoded.supportsService("catalog"));
+        assertEquals(Set.of("catalog"), decoded.getSupportedServices());
         assertEquals("1", decoded.getCustomCapabilities().get("version"));
     }
 }

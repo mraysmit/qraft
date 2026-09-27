@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.controller.health;
 
+import dev.mars.qraft.catalog.ServiceKey;
 import dev.mars.qraft.catalog.HealthCheckState;
 import dev.mars.qraft.catalog.HealthObservation;
 import dev.mars.qraft.catalog.ServiceCheckId;
@@ -105,7 +106,7 @@ class LeaderHealthExpiryClusterTest {
         assertEquals(1, proposals.get(leader).get());
         nodes.keySet().stream().filter(id -> !id.equals(leader))
                 .forEach(id -> assertEquals(0, proposals.get(id).get(), "follower " + id + " proposed"));
-        assertEquals(ServiceHealth.CRITICAL, stores.get(leader).getServiceCatalog().instances("web").getFirst().health());
+        assertEquals(ServiceHealth.CRITICAL, stores.get(leader).getServiceCatalog().instances(ServiceKey.inDefaultScope("web")).getFirst().health());
     }
 
     @Test
@@ -147,7 +148,7 @@ class LeaderHealthExpiryClusterTest {
 
         time.advance(Duration.ofSeconds(60));
         waitUntil(() -> stores.values().stream().allMatch(store ->
-                store.getServiceCatalog().instances("web").isEmpty() && store.healthChecks().isEmpty()));
+                store.getServiceCatalog().instances(ServiceKey.inDefaultScope("web")).isEmpty() && store.healthChecks().isEmpty()));
     }
 
     @Test
@@ -165,7 +166,7 @@ class LeaderHealthExpiryClusterTest {
 
         waitUntil(() -> everyReplica(state -> state.map(current ->
                 current.observation().sequenceNumber() == 2 && !current.expired()).orElse(false)));
-        assertTrue(stores.values().stream().allMatch(store -> store.getServiceCatalog().instances("web").size() == 1),
+        assertTrue(stores.values().stream().allMatch(store -> store.getServiceCatalog().instances(ServiceKey.inDefaultScope("web")).size() == 1),
                 "in either commit order the renewal leaves the service registered and not expired");
     }
 

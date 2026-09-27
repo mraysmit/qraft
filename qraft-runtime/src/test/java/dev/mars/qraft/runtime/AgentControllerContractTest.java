@@ -80,12 +80,18 @@ class AgentControllerContractTest {
 
     @AfterEach
     void closeResources() throws Exception {
-        if (agent != null) agent.shutdown().get(5, TimeUnit.SECONDS);
-        if (catalogClient != null) catalogClient.close();
-        if (retryableServer != null) retryableServer.stop(0);
-        if (server != null) server.close();
-        if (node != null) node.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-        if (runtime != null) runtime.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        new Cleanup()
+                .run(() -> { if (agent != null) agent.shutdown().get(10, TimeUnit.SECONDS); })
+                .run(() -> { if (catalogClient != null) catalogClient.close(); })
+                .run(() -> { if (retryableServer != null) retryableServer.stop(0); })
+                .run(() -> { if (server != null) server.close(); })
+                .run(() -> {
+                    if (node != null) node.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                })
+                .run(() -> {
+                    if (runtime != null) runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                })
+                .rethrow();
     }
 
     @Test

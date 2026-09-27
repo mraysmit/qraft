@@ -46,12 +46,18 @@ class ControllerRetryPolicyTest {
     }
 
     @Test
-    void cancellingBackoffCompletesPromptlyWithoutRunningItsAction() throws Exception {
+    void cancellingBackoffCancelsItsScheduledWakeUp() throws Exception {
         try (var scheduler = new ScheduledThreadPoolExecutor(1)) {
+            scheduler.setRemoveOnCancelPolicy(true);
             ControllerRetryPolicy policy = new ControllerRetryPolicy(10_000, 10_000, () -> 0.0);
             var delay = policy.delay(scheduler, 0);
+            assertEquals(1, scheduler.getQueue().size(), "the backoff schedules one wake-up");
+
             assertTrue(delay.cancel(false));
+
             assertTrue(delay.isCancelled());
+            assertEquals(0, scheduler.getQueue().size(),
+                    "a cancelled backoff must not leave a wake-up behind to run later");
         }
     }
 }

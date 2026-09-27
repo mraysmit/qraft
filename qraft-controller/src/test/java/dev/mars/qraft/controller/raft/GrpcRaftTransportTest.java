@@ -99,6 +99,14 @@ class GrpcRaftTransportTest {
         }
     }
 
+    private static dev.mars.qraft.controller.raft.grpc.LogEntry encodedEntry(
+            long index, long term, String key, String value) {
+        byte[] command = new ProtobufRaftCommandCodec().serialize(new DistributedStateRaftCommand(
+                dev.mars.qraft.distributedstate.DistributedStateCommand.put(key, value)));
+        return dev.mars.qraft.controller.raft.grpc.LogEntry.newBuilder()
+                .setIndex(index).setTerm(term).setData(com.google.protobuf.ByteString.copyFrom(command)).build();
+    }
+
     private int findAvailablePort() throws IOException {
         try (ServerSocket socket = new ServerSocket(0)) {
             return socket.getLocalPort();
@@ -412,36 +420,23 @@ class GrpcRaftTransportTest {
         GrpcRaftTransport transport = new GrpcRaftTransport(runtime, "client", cluster);
         transport.start(msg -> {});
         
-        // Create large entries
-        byte[] largeData = new byte[100 * 1024]; // 100KB
-        java.util.Arrays.fill(largeData, (byte) 'X');
-        
-        dev.mars.qraft.controller.raft.grpc.LogEntry entry = dev.mars.qraft.controller.raft.grpc.LogEntry.newBuilder()
-                .setTerm(1)
-                .setIndex(1)
-                .setData(com.google.protobuf.ByteString.copyFrom(largeData))
-                .build();
-        
+        // A real encoded command about 100 KB long. The term is beyond any the single-member target can
+        // reach by electing itself, so the append is always from its current leader.
+        String largeValue = "X".repeat(100 * 1024);
         AppendEntriesRequest request = AppendEntriesRequest.newBuilder()
-                .setTerm(1)
+                .setTerm(100)
                 .setLeaderId("client")
                 .setPrevLogIndex(0)
                 .setPrevLogTerm(0)
                 .setLeaderCommit(0)
-                .addEntries(entry)
+                .addEntries(encodedEntry(1, 100, "large", largeValue))
                 .build();
-        
-        // Server may reject due to deserialization issues for non-Java-serialized data
-        // The important thing is that the transport doesn't crash
-        try {
-            AppendEntriesResponse response = transport.sendAppendEntries("target", request)
-                    .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            assertNotNull(response);
-        } catch (ExecutionException e) {
-            // Expected - server may fail to deserialize the large non-serialized entry
-            // This is correct behavior - we're testing the transport handles this gracefully
-        }
-        
+
+        AppendEntriesResponse response = transport.sendAppendEntries("target", request)
+                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+
+        assertTrue(response.getSuccess(), response.toString());
+        assertEquals(1, response.getMatchIndex());
         transport.stop();
     }
 
@@ -455,33 +450,20 @@ class GrpcRaftTransportTest {
         transport.start(msg -> {});
         
         AppendEntriesRequest.Builder requestBuilder = AppendEntriesRequest.newBuilder()
-                .setTerm(1)
+                .setTerm(100)
                 .setLeaderId("client")
                 .setPrevLogIndex(0)
                 .setPrevLogTerm(0)
                 .setLeaderCommit(0);
-        
-        // Add 100 log entries
         for (int i = 0; i < 100; i++) {
-            dev.mars.qraft.controller.raft.grpc.LogEntry entry = dev.mars.qraft.controller.raft.grpc.LogEntry.newBuilder()
-                    .setTerm(1)
-                    .setIndex(i + 1)
-                    .setData(com.google.protobuf.ByteString.copyFromUtf8("command-" + i))
-                    .build();
-            requestBuilder.addEntries(entry);
+            requestBuilder.addEntries(encodedEntry(i + 1, 100, "command-" + i, "value-" + i));
         }
-        
-        // Server may reject due to deserialization issues for non-Java-serialized data
-        // The important thing is that the transport doesn't crash
-        try {
-            AppendEntriesResponse response = transport.sendAppendEntries("target", requestBuilder.build())
-                    .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            assertNotNull(response);
-        } catch (ExecutionException e) {
-            // Expected - server may fail to deserialize the non-serialized entries
-            // This is correct behavior - we're testing the transport handles this gracefully
-        }
-        
+
+        AppendEntriesResponse response = transport.sendAppendEntries("target", requestBuilder.build())
+                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+
+        assertTrue(response.getSuccess(), response.toString());
+        assertEquals(100, response.getMatchIndex(), "every entry of the batch is verified");
         transport.stop();
     }
 

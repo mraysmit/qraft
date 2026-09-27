@@ -715,6 +715,10 @@ A successful registration returns only the stable protocol fields:
 }
 ```
 
+A registration the replicated catalog does not accept answers 409
+`registration_rejected` in the error envelope; a success-shaped body is never
+returned for a failure.
+
 Deregistration uses the same three identity headers. It is idempotent and returns
 HTTP 200 with `{"serviceId":"web","deregistered":false}` when the composite
 instance is already absent.
@@ -1128,6 +1132,25 @@ uncommitted entry from an earlier term that no conflict has truncated yet.
 Reporting it would let the leader count the follower for entries it does not
 hold, and committing it would apply an entry the cluster never committed.
 
+The leader commits index N only when a majority of the whole membership,
+`floor(n / 2) + 1` including itself, has a match index of at least N, and only
+when the entry at N is from its current term. An entry from an earlier term
+commits only as part of a later current-term commit (Raft section 5.4.2). A
+cluster of two therefore needs both members, and a cluster of four needs three.
+
+Committed entries are applied strictly in index order. If the state machine
+fails to apply one, whether from a local fault or because an older server in a
+rolling upgrade does not know the command, the node fences:
+- the applied index stays before the entry, and nothing after it is applied;
+- the waiting client receives the failure;
+- other pending writes fail with an unknown outcome;
+- the node stops its election, heartbeat, and snapshot timers, and reports
+  unready.
+
+Skipping the entry would leave that replica silently different from every
+replica that applied it. Recovery is an operator action: a fix or an upgrade,
+then a restart.
+
 An append or sync failure leaves the in-memory log unchanged and produces a
 failed response. A durability failure that fences the WAL also fences the Raft
 node: later operations must not be attempted on the same storage instance.
@@ -1192,7 +1215,13 @@ Recovery proceeds by:
 2. Loading the latest valid application snapshot.
 3. Restoring the state machine and its included index and term.
 4. Replaying the WAL in its original index order.
-5. Rejecting entries that overlap the snapshot with a conflicting term.
+5. Rejecting entries that overlap the snapshot with a conflicting term. A
+   follower publishes an installed snapshot before it removes the WAL suffix that
+   conflicts with it, so a crash between the two leaves a WAL entry at the
+   snapshot boundary with another term. Recovery then discards that entry and
+   every later one, which belong to the history the snapshot replaced, and
+   completes the interrupted WAL compaction in an owned transition before the
+   node starts. Such entries are never replayed or applied.
 6. Applying eligible committed entries strictly after the snapshot boundary.
 
 RaftLog may repair only a structurally incomplete final record caused by a torn
@@ -1730,6 +1759,14 @@ The file is selected by explicit argument, JVM locator property, or conventional
 role-specific path, in that order. Qraft does not use environment variables for
 configuration or file discovery. Client service definitions are stored in the
 main document's `catalog.services` array rather than a separately selected file.
+
+Discovery reads never cross tenant or namespace. `GET /v1/catalog/services`,
+`GET /v1/catalog/service/{serviceName}`, and `GET /v1/health/service/{serviceName}`
+use the same optional `X-Qraft-Tenant` and `X-Qraft-Namespace` headers as
+registration, default to `default`, and return only that scope, grouped by the
+discovery key of section 7.5. A blank scope header is rejected with 400
+`invalid_scope`. Reads across scopes are an administrative concern for a later
+authenticated API.
 
 Resolved D2 on 2026-09-24: reconciliation detects administrative deletion through
 `GET /v1/catalog/service/{name}` and filters the response by the complete tenant,

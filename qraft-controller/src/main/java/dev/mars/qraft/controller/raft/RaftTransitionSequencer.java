@@ -190,6 +190,15 @@ final class RaftTransitionSequencer {
     }
 
     /**
+     * Fences for a fault found outside a transition's own failure, such as a committed entry that cannot
+     * be applied. The active transition, if any, still completes; queued and later transitions fail.
+     */
+    void fence(Throwable cause) {
+        assertStateLoop();
+        fenceQueuedTransitions(cause);
+    }
+
+    /**
      * Enforces that a persistence gateway is being entered by the transition
      * that currently owns the complete prepare/persist/apply lifecycle.
      */

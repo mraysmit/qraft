@@ -260,60 +260,6 @@ class RaftFailureTest {
         logExpectedFailure("transport start failure", exception.getCause());
     }
 
-    @Test
-    void testStateMachineFailures() {
-        // Test state machine that throws exceptions
-        RaftLogApplicator failingStateMachine = new RaftLogApplicator() {
-            @Override
-            public RaftCommandResult<?> apply(RaftCommand command) {
-                throw new RuntimeException("State machine error");
-            }
-            
-            @Override
-            public byte[] takeSnapshot() {
-                throw new RuntimeException("Snapshot error");
-            }
-            
-            @Override
-            public void restoreSnapshot(byte[] snapshot) {
-                throw new RuntimeException("Restore error");
-            }
-            
-            @Override
-            public long getLastAppliedIndex() {
-                return 0;
-            }
-
-            @Override
-            public void setLastAppliedIndex(long index) {
-                throw new RuntimeException("Set index error");
-            }
-
-            @Override
-            public void reset() {
-                throw new RuntimeException("Reset error");
-            }
-        };
-        
-        // Test snapshot failure
-        RuntimeException snapshotFailure = assertThrows(RuntimeException.class, () -> {
-            failingStateMachine.takeSnapshot();
-        });
-        logExpectedFailure("state-machine snapshot failure", snapshotFailure);
-        
-        // Test restore failure
-        RuntimeException restoreFailure = assertThrows(RuntimeException.class, () -> {
-            failingStateMachine.restoreSnapshot(new byte[0]);
-        });
-        logExpectedFailure("state-machine restore failure", restoreFailure);
-        
-        // Test reset failure
-        RuntimeException resetFailure = assertThrows(RuntimeException.class, () -> {
-            failingStateMachine.reset();
-        });
-        logExpectedFailure("state-machine reset failure", resetFailure);
-    }
-
     private static void logExpectedFailure(String scenario, Throwable failure) {
         System.out.println("[EXPECTED-TEST-FAILURE] Scenario=" + scenario + " message=" + failure.getMessage());
     }

@@ -16,6 +16,8 @@
 
 package dev.mars.qraft.controller;
 
+import dev.mars.qraft.controller.config.AppConfig;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -47,6 +49,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class QraftControllerLifecycleTest {
     @TempDir
     Path temporaryDirectory;
+
+    /** {@code launch} sets the process-wide log directory; it is restored so later tests do not log to a deleted directory. */
+    private final String previousLogDirectory = System.getProperty("qraft.log.dir");
+
+    /** {@code launch} installs its configuration process-wide; later tests must see the one found here. */
+    private final AppConfig previousConfiguration = AppConfig.get();
+
+    @AfterEach
+    void restoreProcessWideState() {
+        if (previousLogDirectory == null) System.clearProperty("qraft.log.dir");
+        else System.setProperty("qraft.log.dir", previousLogDirectory);
+        AppConfig.install(previousConfiguration);
+    }
 
     @Test
     void validatesConfigurationBeforeOpeningControllerResources() throws Exception {

@@ -29,7 +29,9 @@ import org.slf4j.LoggerFactory;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 import static org.awaitility.Awaitility.await;
@@ -46,7 +48,6 @@ import static org.junit.jupiter.api.Assertions.*;
  * @version 2.0
  * @since 2026-01-20
  */
-@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class EnhancedInMemoryTransportTest {
 
     private static final Logger logger = LoggerFactory.getLogger(EnhancedInMemoryTransportTest.class);
@@ -89,7 +90,6 @@ class EnhancedInMemoryTransportTest {
     }
 
     @Test
-    @Order(1)
     @DisplayName("Test network partition prevents communication")
     void testNetworkPartition() {
         logger.info("=== Testing Network Partition ===");
@@ -148,7 +148,6 @@ class EnhancedInMemoryTransportTest {
     }
 
     @Test
-    @Order(2)
     @DisplayName("Test message reordering affects Raft behavior")
     void testMessageReordering() {
         logger.info("=== Testing Message Reordering ===");
@@ -184,7 +183,6 @@ class EnhancedInMemoryTransportTest {
     }
 
     @Test
-    @Order(3)
     @DisplayName("Test bandwidth throttling slows down communication")
     void testBandwidthThrottling() {
         logger.info("=== Testing Bandwidth Throttling ===");
@@ -223,7 +221,6 @@ class EnhancedInMemoryTransportTest {
     }
 
     @Test
-    @Order(4)
     @DisplayName("Test crash failure mode stops node communication")
     void testCrashFailureMode() {
         logger.info("=== Testing Crash Failure Mode ===");
@@ -258,7 +255,7 @@ class EnhancedInMemoryTransportTest {
         assertEquals(1, leaderCount(node1, node2, node3), "Should have one leader initially");
 
         // Crash node1
-        transport1.setFailureMode(InMemoryTransportSimulator.FailureMode.CRASH, 0.0);
+        transport1.setFailureMode(InMemoryTransportSimulator.FailureMode.CRASH);
         logger.info("Crashed node1");
 
         // Wait for cluster to adapt — node2 or node3 should be leader
@@ -281,48 +278,6 @@ class EnhancedInMemoryTransportTest {
     }
 
     @Test
-    @Order(5)
-    @DisplayName("Test Byzantine failure mode with corrupted responses")
-    void testByzantineFailureMode() {
-        logger.info("=== Testing Byzantine Failure Mode ===");
-        
-        Set<String> clusterNodes = Set.of("node1", "node2", "node3");
-
-        InMemoryTransportSimulator transport1 = new InMemoryTransportSimulator("node1");
-        InMemoryTransportSimulator transport2 = new InMemoryTransportSimulator("node2");
-        InMemoryTransportSimulator transport3 = new InMemoryTransportSimulator("node3");
-
-        // Make node1 Byzantine (corrupt 50% of responses)
-        transport1.setFailureMode(InMemoryTransportSimulator.FailureMode.BYZANTINE, 0.5);
-
-        QraftStateStore sm1 = new QraftStateStore();
-        QraftStateStore sm2 = new QraftStateStore();
-        QraftStateStore sm3 = new QraftStateStore();
-
-        RaftNode node1 = RaftNode.builder()
-                .runtime(runtime).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(1000).heartbeatInterval(200).build();
-        RaftNode node2 = RaftNode.builder()
-                .runtime(runtime).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(1000).heartbeatInterval(200).build();
-        RaftNode node3 = RaftNode.builder()
-                .runtime(runtime).nodeId("node3").clusterNodes(clusterNodes).transport(transport3).stateMachine(sm3).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(1000).heartbeatInterval(200).build();
-
-        startAndTrack(node1, node2, node3);
-
-        // Raft should tolerate Byzantine node — wait for election to settle
-        await().atMost(Duration.ofSeconds(10))
-            .pollInterval(Duration.ofMillis(100))
-            .until(() -> leaderCount(node1, node2, node3) <= 1);
-
-        long lc = leaderCount(node1, node2, node3);
-        logger.info("Leader count with Byzantine node: {}", lc);
-        assertTrue(lc <= 1, "Should have at most one leader with Byzantine node");
-    }
-
-    @Test
-    @Order(6)
     @DisplayName("Test SLOW failure mode increases latency")
     void testSlowFailureMode() {
         logger.info("=== Testing SLOW Failure Mode ===");
@@ -333,7 +288,7 @@ class EnhancedInMemoryTransportTest {
         InMemoryTransportSimulator transport2 = new InMemoryTransportSimulator("node2");
 
         // Make node1 slow (10x latency)
-        transport1.setFailureMode(InMemoryTransportSimulator.FailureMode.SLOW, 0.0);
+        transport1.setFailureMode(InMemoryTransportSimulator.FailureMode.SLOW);
 
         QraftStateStore sm1 = new QraftStateStore();
         QraftStateStore sm2 = new QraftStateStore();
@@ -360,7 +315,6 @@ class EnhancedInMemoryTransportTest {
     }
 
     @Test
-    @Order(7)
     @DisplayName("Test FLAKY failure mode with intermittent issues")
     void testFlakyFailureMode() {
         logger.info("=== Testing FLAKY Failure Mode ===");
@@ -372,7 +326,7 @@ class EnhancedInMemoryTransportTest {
         InMemoryTransportSimulator transport3 = new InMemoryTransportSimulator("node3");
 
         // Make node2 flaky (intermittent 50% high latency)
-        transport2.setFailureMode(InMemoryTransportSimulator.FailureMode.FLAKY, 0.0);
+        transport2.setFailureMode(InMemoryTransportSimulator.FailureMode.FLAKY);
 
         QraftStateStore sm1 = new QraftStateStore();
         QraftStateStore sm2 = new QraftStateStore();
@@ -400,8 +354,7 @@ class EnhancedInMemoryTransportTest {
     }
 
     @Test
-    @Order(8)
-    @DisplayName("Test combined chaos: partition + reordering + packet drop")
+    @DisplayName("Combined chaos never elects two leaders in one term, and a leader emerges once it clears")
     void testCombinedChaos() {
         logger.info("=== Testing Combined Chaos Scenarios ===");
         
@@ -434,15 +387,30 @@ class EnhancedInMemoryTransportTest {
                 .runtime(runtime).nodeId("node3").clusterNodes(clusterNodes).transport(transport3).stateMachine(sm3).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
                 .electionTimeout(1000).heartbeatInterval(200).build();
 
+        // Every transition to leader is recorded on the node's state loop with its term, so election
+        // safety is checked over the whole run rather than sampled.
+        Map<Long, Set<String>> leadersByTerm = new ConcurrentHashMap<>();
+        for (RaftNode node : List.of(node1, node2, node3)) {
+            node.addStateChangeListener(state -> {
+                if (state == RaftNode.State.LEADER) {
+                    leadersByTerm.computeIfAbsent(node.getCurrentTerm(), term -> ConcurrentHashMap.newKeySet())
+                            .add(node.getNodeId());
+                }
+            });
+        }
         startAndTrack(node1, node2, node3);
 
-        // Even with combined chaos, Raft should eventually have at most 1 leader
-        await().atMost(Duration.ofSeconds(15))
-            .pollInterval(Duration.ofMillis(200))
-            .until(() -> leaderCount(node1, node2, node3) <= 1);
+        await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofMillis(50))
+                .until(() -> leaderCount(node1, node2, node3) >= 1);
+        for (InMemoryTransportSimulator transport : List.of(transport1, transport2, transport3)) {
+            transport.setChaosConfig(5, 15, 0.0);
+            transport.setReorderingConfig(false, 0.0, 0);
+        }
+        await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofMillis(50))
+                .until(() -> leaderCount(node1, node2, node3) == 1);
 
-        long lc = leaderCount(node1, node2, node3);
-        logger.info("Leader count with combined chaos: {}", lc);
-        assertTrue(lc <= 1, "Should have at most one leader");
+        assertFalse(leadersByTerm.isEmpty());
+        leadersByTerm.forEach((term, leaders) ->
+                assertEquals(1, leaders.size(), "term " + term + " elected " + leaders));
     }
 }

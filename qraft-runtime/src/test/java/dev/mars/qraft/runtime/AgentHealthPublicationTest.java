@@ -18,6 +18,7 @@ package dev.mars.qraft.runtime;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import dev.mars.qraft.catalog.ServiceKey;
 import dev.mars.qraft.agent.QraftAgent;
 import dev.mars.qraft.agent.config.AgentConfiguration;
 import dev.mars.qraft.agent.health.CheckStatus;
@@ -91,10 +92,12 @@ class AgentHealthPublicationTest {
 
     @AfterEach
     void closeResources() throws Exception {
-        if (agent != null) agent.shutdown().get(5, TimeUnit.SECONDS);
-        if (proxy != null) proxy.stop(0);
-        if (workload != null) workload.stop(0);
-        if (controller != null) controller.close();
+        new Cleanup()
+                .run(() -> { if (agent != null) agent.shutdown().get(10, TimeUnit.SECONDS); })
+                .run(() -> { if (proxy != null) proxy.stop(0); })
+                .run(() -> { if (workload != null) workload.stop(0); })
+                .run(() -> { if (controller != null) controller.close(); })
+                .rethrow();
     }
 
     @Test
@@ -156,7 +159,7 @@ class AgentHealthPublicationTest {
         assertTrue(deregistration > 0, proxiedRequests.toString());
         assertTrue(lastObservation < deregistration,
                 "every observation precedes deregistration: " + proxiedRequests);
-        assertTrue(controller.store().getServiceCatalog().instances("web").isEmpty());
+        assertTrue(controller.store().getServiceCatalog().instances(ServiceKey.inDefaultScope("web")).isEmpty());
         assertTrue(controller.store().healthChecks().isEmpty());
         assertTrue(agent.isTerminated(),
                 "no agent thread or client remains after shutdown, so no request can follow it");
@@ -237,7 +240,7 @@ class AgentHealthPublicationTest {
     }
 
     private ServiceHealth serviceHealth() {
-        return controller.store().getServiceCatalog().instances("web").getFirst().health();
+        return controller.store().getServiceCatalog().instances(ServiceKey.inDefaultScope("web")).getFirst().health();
     }
 
     private static URI refusedEndpoint() throws IOException {

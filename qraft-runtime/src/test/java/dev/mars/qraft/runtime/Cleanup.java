@@ -1,5 +1,3 @@
-package dev.mars.qraft.core.exceptions;
-
 /*
  * Copyright 2025 Mark Andrew Ray-Smith Cityline Ltd
  *
@@ -16,26 +14,35 @@ package dev.mars.qraft.core.exceptions;
  * limitations under the License.
  */
 
+package dev.mars.qraft.runtime;
 
 /**
- * Base exception class for all Qraft-related exceptions.
- * Provides a common hierarchy for error handling throughout the system.
+ * Runs every teardown step even when an earlier one fails, so one resource that will not stop cannot
+ * leave the others open for the next test. The first failure is rethrown with the later ones suppressed.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
- * @since 2025-08-17
+ * @since 2026-09-27
  * @version 1.0
  */
-public class QraftException extends Exception {
-    
-    public QraftException(String message) {
-        super(message);
+final class Cleanup {
+    @FunctionalInterface
+    interface Step {
+        void run() throws Exception;
     }
-    
-    public QraftException(String message, Throwable cause) {
-        super(message, cause);
+
+    private Exception failure;
+
+    Cleanup run(Step step) {
+        try {
+            step.run();
+        } catch (Exception error) {
+            if (failure == null) failure = error;
+            else failure.addSuppressed(error);
+        }
+        return this;
     }
-    
-    public QraftException(Throwable cause) {
-        super(cause);
+
+    void rethrow() throws Exception {
+        if (failure != null) throw failure;
     }
 }

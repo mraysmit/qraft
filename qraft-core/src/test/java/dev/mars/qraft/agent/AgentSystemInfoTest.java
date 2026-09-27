@@ -130,93 +130,6 @@ class AgentSystemInfoTest {
     }
 
     @Test
-    void testMemoryUsagePercentage() {
-        AgentSystemInfo systemInfo = new AgentSystemInfo();
-        
-        systemInfo.setTotalMemory(16L * 1024 * 1024 * 1024); // 16 GB
-        systemInfo.setAvailableMemory(8L * 1024 * 1024 * 1024); // 8 GB
-        
-        assertEquals(50.0, systemInfo.getMemoryUsagePercentage(), 0.01);
-        
-        // Test with zero total memory
-        systemInfo.setTotalMemory(0);
-        assertEquals(0.0, systemInfo.getMemoryUsagePercentage(), 0.01);
-    }
-
-    @Test
-    void testDiskUsagePercentage() {
-        AgentSystemInfo systemInfo = new AgentSystemInfo();
-        
-        systemInfo.setTotalDiskSpace(1000L * 1024 * 1024 * 1024); // 1000 GB
-        systemInfo.setAvailableDiskSpace(250L * 1024 * 1024 * 1024); // 250 GB
-        
-        assertEquals(75.0, systemInfo.getDiskUsagePercentage(), 0.01);
-        
-        // Test with zero total disk
-        systemInfo.setTotalDiskSpace(0);
-        assertEquals(0.0, systemInfo.getDiskUsagePercentage(), 0.01);
-    }
-
-    @Test
-    void testHasSufficientResources() {
-        AgentSystemInfo systemInfo = new AgentSystemInfo();
-        
-        // Sufficient resources
-        systemInfo.setTotalMemory(16L * 1024 * 1024 * 1024);
-        systemInfo.setAvailableMemory(8L * 1024 * 1024 * 1024); // 50% usage
-        systemInfo.setTotalDiskSpace(1000L * 1024 * 1024 * 1024);
-        systemInfo.setAvailableDiskSpace(500L * 1024 * 1024 * 1024); // 50% usage
-        systemInfo.setCpuUsage(50.0);
-        
-        assertTrue(systemInfo.hasSufficientResources());
-        
-        // High memory usage (91%)
-        systemInfo.setAvailableMemory((long) (16L * 1024 * 1024 * 1024 * 0.09));
-        assertFalse(systemInfo.hasSufficientResources());
-        
-        // High disk usage (96%)
-        systemInfo.setAvailableMemory(8L * 1024 * 1024 * 1024);
-        systemInfo.setAvailableDiskSpace((long) (1000L * 1024 * 1024 * 1024 * 0.04));
-        assertFalse(systemInfo.hasSufficientResources());
-        
-        // High CPU usage (91%)
-        systemInfo.setAvailableDiskSpace(500L * 1024 * 1024 * 1024);
-        systemInfo.setCpuUsage(91.0);
-        assertFalse(systemInfo.hasSufficientResources());
-    }
-
-    @Test
-    void testGetResourceAvailabilityScore() {
-        AgentSystemInfo systemInfo = new AgentSystemInfo();
-        
-        // Excellent resources (10% usage across the board)
-        systemInfo.setTotalMemory(16L * 1024 * 1024 * 1024);
-        systemInfo.setAvailableMemory((long) (16L * 1024 * 1024 * 1024 * 0.9)); // 10% usage
-        systemInfo.setTotalDiskSpace(1000L * 1024 * 1024 * 1024);
-        systemInfo.setAvailableDiskSpace((long) (1000L * 1024 * 1024 * 1024 * 0.9)); // 10% usage
-        systemInfo.setCpuUsage(10.0);
-        
-        double score = systemInfo.getResourceAvailabilityScore();
-        assertTrue(score > 0.8, "Excellent resources should have score > 0.8, got: " + score);
-        
-        // Poor resources (95% usage)
-        systemInfo.setAvailableMemory((long) (16L * 1024 * 1024 * 1024 * 0.05));
-        systemInfo.setAvailableDiskSpace((long) (1000L * 1024 * 1024 * 1024 * 0.05));
-        systemInfo.setCpuUsage(95.0);
-        
-        score = systemInfo.getResourceAvailabilityScore();
-        assertTrue(score < 0.2, "Poor resources should have score < 0.2, got: " + score);
-        
-        // Medium resources (50% usage)
-        systemInfo.setAvailableMemory(8L * 1024 * 1024 * 1024);
-        systemInfo.setAvailableDiskSpace(500L * 1024 * 1024 * 1024);
-        systemInfo.setCpuUsage(50.0);
-        
-        score = systemInfo.getResourceAvailabilityScore();
-        assertTrue(score > 0.4 && score < 0.6, "Medium resources should have score between 0.4 and 0.6, got: " + score);
-    }
-
-    @Test
     void testToString() {
         AgentSystemInfo systemInfo = new AgentSystemInfo();
         systemInfo.setOperatingSystem("Linux");
@@ -231,6 +144,17 @@ class AgentSystemInfoTest {
         assertTrue(str.contains("x86_64"));
         assertTrue(str.contains("21.0.1"));
         assertTrue(str.contains("8"));
+    }
+
+    @Test
+    void serializesOnlyReportedFieldsAndNoDerivedScores() throws Exception {
+        var fields = new java.util.TreeSet<String>();
+        new ObjectMapper().readTree(new ObjectMapper().writeValueAsString(new AgentSystemInfo()))
+                .fieldNames().forEachRemaining(fields::add);
+
+        assertEquals(new java.util.TreeSet<>(java.util.Set.of("operatingSystem", "architecture", "javaVersion",
+                "totalMemory", "availableMemory", "totalDiskSpace", "availableDiskSpace", "cpuCores",
+                "cpuUsage", "loadAverage")), fields);
     }
 
     @Test

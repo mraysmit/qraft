@@ -20,6 +20,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.junit.jupiter.api.parallel.ResourceLock;
@@ -48,6 +49,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 @Tag("docker")
+// Each test waits only on bounded conditions, up to about 270 s in all; the method budget exceeds that,
+// so a failure reports the condition that was not met rather than the module's default method timeout.
+@Timeout(value = 10, unit = TimeUnit.MINUTES)
 @Execution(ExecutionMode.SAME_THREAD)
 @ResourceLock("shared-docker-clusters")
 class DockerDurableRestartTest {
@@ -58,6 +62,10 @@ class DockerDurableRestartTest {
             "X-Qraft-Tenant", TEST_TENANT,
             "X-Qraft-Namespace", TEST_NAMESPACE,
             "X-Qraft-Node", TEST_NODE);
+    /** Catalog reads are confined to one tenant and namespace, so they carry the registrations' scope. */
+    private static final Map<String, String> SCOPE_HEADERS = Map.of(
+            "X-Qraft-Tenant", TEST_TENANT,
+            "X-Qraft-Namespace", TEST_NAMESPACE);
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final HttpClient HTTP = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
@@ -275,6 +283,8 @@ class DockerDurableRestartTest {
         SharedDockerCluster.DockerCommandResult contender =
                 SharedDockerCluster.runStorageLockContender(CLUSTER, "controller1");
 
+        assertTrue(contender.exited(), "the contender must stop on its own, not serve the volume: "
+                + contender.output());
         assertTrue(contender.exitCode() != 0, contender.output());
         assertTrue(contender.output().contains("/app/data"), contender.output());
         assertTrue(contender.output().toLowerCase().contains("lock"), contender.output());
@@ -365,7 +375,7 @@ class DockerDurableRestartTest {
         return endpoints.stream().allMatch(endpoint -> {
             try {
                 HttpResponse<String> response = send(
-                        endpoint + "/v1/catalog/service/" + serviceName, "GET", null);
+                        endpoint + "/v1/catalog/service/" + serviceName, "GET", null, SCOPE_HEADERS);
                 return response.statusCode() == 200
                         && serviceIds.stream().allMatch(response.body()::contains);
             } catch (Exception ignored) {
@@ -380,7 +390,8 @@ class DockerDurableRestartTest {
         return endpoints.stream().allMatch(endpoint -> {
             try {
                 HttpResponse<String> response = send(
-                        endpoint + "/v1/catalog/service/" + serviceName, "GET", null);
+                        endpoint + "/v1/catalog/service/" + serviceName, "GET", null,
+                        Map.of("X-Qraft-Tenant", tenantId, "X-Qraft-Namespace", namespace));
                 if (response.statusCode() != 200) return false;
                 JsonNode instances = JSON.readTree(response.body());
                 int matches = 0;

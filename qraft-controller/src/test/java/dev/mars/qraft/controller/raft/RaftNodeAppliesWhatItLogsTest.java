@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.controller.raft;
 
+import dev.mars.qraft.catalog.ServiceKey;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
@@ -104,7 +105,7 @@ class RaftNodeAppliesWhatItLogsTest {
         assertTrue(retransmitted.getSuccess(), "a duplicate of an identical entry is not a divergent log");
         assertEquals(1, retransmitted.getMatchIndex());
         assertTrue(!follower.isFenced(), "the follower must not fence itself");
-        assertEquals(1, store.getServiceCatalog().instances("web").size());
+        assertEquals(1, store.getServiceCatalog().instances(ServiceKey.inDefaultScope("web")).size());
     }
 
     /**

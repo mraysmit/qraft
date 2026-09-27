@@ -17,6 +17,7 @@
 package dev.mars.qraft.agent;
 
 import dev.mars.qraft.agent.config.AgentConfiguration;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -41,6 +42,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class QraftAgentApplicationTest {
     @TempDir
     Path temporaryDirectory;
+
+    /** {@code launch} sets the process-wide log directory; it is restored so later tests do not log to a deleted directory. */
+    private final String previousLogDirectory = System.getProperty("qraft.log.dir");
+
+    @AfterEach
+    void restoreLogDirectory() {
+        if (previousLogDirectory == null) System.clearProperty("qraft.log.dir");
+        else System.setProperty("qraft.log.dir", previousLogDirectory);
+    }
 
     @Test
     void validatesConfigurationBeforeOpeningAgentResources() throws Exception {

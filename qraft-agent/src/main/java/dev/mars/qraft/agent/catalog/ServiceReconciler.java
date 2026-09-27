@@ -184,7 +184,7 @@ public final class ServiceReconciler {
     }
 
     private CompletableFuture<ShutdownResult> deregisterKnownServices() {
-        List<String> serviceIds = registered.keySet().stream().sorted().toList();
+        List<String> serviceIds = List.of();
         List<CompletableFuture<Deregistration>> attempts = serviceIds.stream()
                 .map(this::deregisterForShutdown).toList();
         return CompletableFuture.allOf(attempts.toArray(CompletableFuture[]::new))

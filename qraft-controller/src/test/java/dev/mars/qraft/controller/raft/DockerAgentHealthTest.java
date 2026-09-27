@@ -37,6 +37,7 @@ import static dev.mars.qraft.controller.raft.DockerHealthApi.leaderIndex;
 import static dev.mars.qraft.controller.raft.DockerHealthApi.passingWithBothChecks;
 import static dev.mars.qraft.controller.raft.DockerHealthApi.webEntry;
 import static org.awaitility.Awaitility.await;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -78,9 +79,16 @@ class DockerAgentHealthTest {
                     && survivors.stream().allMatch(endpoint -> passingWithBothChecks(endpoint)
                             && httpSequence(endpoint) > sequenceBeforeLoss));
 
+            // Expiry would also remove the instance, but only after holding its checks critical for
+            // deregisterAfterMs (5 s), far longer than a poll. A graceful stop deregisters directly, so no
+            // server may ever show the checks expired.
             SharedDockerCluster.stopContainer(cluster, "agent");
-            await().atMost(Duration.ofSeconds(60)).until(() ->
-                    survivors.stream().allMatch(endpoint -> instanceCount(endpoint) == 0));
+            AtomicBoolean sawExpiry = new AtomicBoolean();
+            await().atMost(Duration.ofSeconds(60)).pollInterval(Duration.ofMillis(100)).until(() -> {
+                if (survivors.stream().anyMatch(DockerAgentHealthTest::anyCheckExpired)) sawExpiry.set(true);
+                return survivors.stream().allMatch(endpoint -> instanceCount(endpoint) == 0);
+            });
+            assertFalse(sawExpiry.get(), "a graceful stop deregisters the service; it must not be left to expire");
         } finally {
             cluster.stop();
         }
@@ -143,6 +151,15 @@ class DockerAgentHealthTest {
     private static String agentStatus(ComposeContainer cluster, String path) throws Exception {
         return SharedDockerCluster.execInService(cluster, "agent", "curl", "-s", "-o", "/dev/null",
                 "-w", "%{http_code}", "--max-time", "5", "http://127.0.0.1:8080" + path).trim();
+    }
+
+    private static boolean anyCheckExpired(String endpoint) {
+        JsonNode entry = webEntry(endpoint);
+        if (entry == null) return false;
+        for (JsonNode check : entry.path("checks")) {
+            if (check.path("expired").asBoolean()) return true;
+        }
+        return false;
     }
 
     private static boolean expiredAndCritical(String endpoint) {

@@ -18,6 +18,7 @@ package dev.mars.qraft.controller.raft;
 
 import dev.mars.raftlog.storage.RaftStorage;
 import dev.mars.raftlog.storage.RaftStorage.LogEntryData;
+import dev.mars.qraft.catalog.ServiceKey;
 import dev.mars.qraft.controller.raft.storage.RaftStorageFactory;
 import dev.mars.qraft.controller.raft.storage.snapshot.FileSnapshotStore;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
@@ -203,7 +204,7 @@ class RaftNodeTest {
         assertInstanceOf(RaftCommandResult.Success.class, registered);
         await().atMost(Duration.ofSeconds(5)).until(() ->
                 List.of(stateMachine1, stateMachine2, stateMachine3).stream()
-                        .allMatch(store -> store.getServiceCatalog().instances("catalog").equals(List.of(instance))));
+                        .allMatch(store -> store.getServiceCatalog().instances(ServiceKey.inDefaultScope("catalog")).equals(List.of(instance))));
 
         RaftCommandResult<?> deregistered = leader.submitCommand(CatalogCommand.deregister("catalog-1"))
                 .toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
@@ -211,7 +212,7 @@ class RaftNodeTest {
         assertInstanceOf(RaftCommandResult.Success.class, deregistered);
         await().atMost(Duration.ofSeconds(5)).until(() ->
                 List.of(stateMachine1, stateMachine2, stateMachine3).stream()
-                        .allMatch(store -> store.getServiceCatalog().instances("catalog").isEmpty()));
+                        .allMatch(store -> store.getServiceCatalog().instances(ServiceKey.inDefaultScope("catalog")).isEmpty()));
     }
 
     @Test
@@ -243,9 +244,13 @@ class RaftNodeTest {
 
         await().atMost(Duration.ofSeconds(10)).until(() ->
                 List.of(stateMachine1, stateMachine2, stateMachine3).stream()
-                        .allMatch(store -> store.getServiceCatalog().instances("catalog").equals(List.of(winningValue))));
-        assertThrows(Exception.class,
-                () -> uncertainWrite.toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS));
+                        .allMatch(store -> store.getServiceCatalog().instances(ServiceKey.inDefaultScope("catalog")).equals(List.of(winningValue))));
+        // The partitioned leader could not commit; by the time the partition heals it has learned of the
+        // majority's term, so the write has already failed. A timeout here would be a hang, not an answer.
+        java.util.concurrent.ExecutionException lost = assertThrows(java.util.concurrent.ExecutionException.class,
+                () -> uncertainWrite.toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
+        assertInstanceOf(CommandOutcomeUnknownException.class, lost.getCause(),
+                "a write the old leader could not commit has an unknown outcome");
     }
 
     @Test
@@ -268,7 +273,7 @@ class RaftNodeTest {
         RaftNode recovered = durableSingleNode("catalog-durable", recoveredStore, recoveryStorage);
         recovered.start().toCompletionStage().toCompletableFuture().join();
 
-        assertEquals(List.of(snapshotted, afterSnapshot), recoveredStore.getServiceCatalog().instances("catalog"));
+        assertEquals(List.of(snapshotted, afterSnapshot), recoveredStore.getServiceCatalog().instances(ServiceKey.inDefaultScope("catalog")));
         recovered.stop().toCompletionStage().toCompletableFuture().join();
     }
 
@@ -337,7 +342,7 @@ class RaftNodeTest {
         recovered.start().toCompletionStage().toCompletableFuture().join();
 
         assertEquals("legacy-value", recoveredStore.getMetadata("legacy-key"));
-        assertEquals(List.of(instance), recoveredStore.getServiceCatalog().instances("catalog"));
+        assertEquals(List.of(instance), recoveredStore.getServiceCatalog().instances(ServiceKey.inDefaultScope("catalog")));
         recovered.stop().toCompletionStage().toCompletableFuture().join();
     }
 

@@ -39,7 +39,7 @@ import java.util.function.Consumer;
  * - Network partitions (isolate nodes)
  * - Message reordering
  * - Bandwidth throttling
- * - Byzantine and crash-recovery failure modes
+ * - Crash, slow, and flaky failure modes
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @version 2.0
@@ -84,7 +84,6 @@ public class InMemoryTransportSimulator implements RaftTransport {
     
     // Failure Mode Configuration
     private volatile FailureMode failureMode = FailureMode.NONE;
-    private volatile double byzantineCorruptionRate = 0.0;
     private volatile boolean crashed = false;
     
     /**
@@ -93,7 +92,6 @@ public class InMemoryTransportSimulator implements RaftTransport {
     public enum FailureMode {
         NONE,           // Normal operation
         CRASH,          // Node crashes (stops responding)
-        BYZANTINE,      // Node sends corrupted/malicious responses
         SLOW,           // Node responds very slowly
         FLAKY           // Node intermittently fails
     }
@@ -149,11 +147,9 @@ public class InMemoryTransportSimulator implements RaftTransport {
     /**
      * Set the failure mode for this transport.
      * @param mode the failure mode to use
-     * @param byzantineCorruptionRate for BYZANTINE mode, probability of corrupting a response
      */
-    public void setFailureMode(FailureMode mode, double byzantineCorruptionRate) {
+    public void setFailureMode(FailureMode mode) {
         this.failureMode = mode;
-        this.byzantineCorruptionRate = byzantineCorruptionRate;
         if (mode == FailureMode.CRASH) {
             this.crashed = true;
         } else {
@@ -347,10 +343,6 @@ public class InMemoryTransportSimulator implements RaftTransport {
                         System.currentTimeMillis() + delay + reorderDelay,
                         () -> {
                             VoteResponse response = targetTransport.handleVoteRequest(request);
-                            // Apply Byzantine corruption if enabled
-                            if (failureMode == FailureMode.BYZANTINE && random.nextDouble() < byzantineCorruptionRate) {
-                                response = corruptVoteResponse(response);
-                            }
                             promise.complete(response);
                         }
                     );
@@ -362,11 +354,6 @@ public class InMemoryTransportSimulator implements RaftTransport {
                 // Process vote request
                 VoteResponse response = targetTransport.handleVoteRequest(request);
                 
-                // Apply Byzantine corruption if enabled
-                if (failureMode == FailureMode.BYZANTINE && random.nextDouble() < byzantineCorruptionRate) {
-                    response = corruptVoteResponse(response);
-                    logger.debug("Corrupted VoteResponse from {} to {} (Byzantine)", targetNodeId, nodeId);
-                }
                 
                 logger.debug("Vote request from {} to {}: {}", nodeId, targetNodeId, response.getVoteGranted());
                 
@@ -425,10 +412,6 @@ public class InMemoryTransportSimulator implements RaftTransport {
                         System.currentTimeMillis() + delay + reorderDelay,
                         () -> {
                             AppendEntriesResponse response = targetTransport.handleAppendEntries(request);
-                            // Apply Byzantine corruption if enabled
-                            if (failureMode == FailureMode.BYZANTINE && random.nextDouble() < byzantineCorruptionRate) {
-                                response = corruptAppendEntriesResponse(response);
-                            }
                             promise.complete(response);
                         }
                     );
@@ -440,11 +423,6 @@ public class InMemoryTransportSimulator implements RaftTransport {
                 // Process append entries request
                 AppendEntriesResponse response = targetTransport.handleAppendEntries(request);
                 
-                // Apply Byzantine corruption if enabled
-                if (failureMode == FailureMode.BYZANTINE && random.nextDouble() < byzantineCorruptionRate) {
-                    response = corruptAppendEntriesResponse(response);
-                    logger.debug("Corrupted AppendEntriesResponse from {} to {} (Byzantine)", targetNodeId, nodeId);
-                }
                 
                 logger.debug("Append entries from {} to {}: {}", nodeId, targetNodeId, response.getSuccess());
                 
@@ -472,26 +450,6 @@ public class InMemoryTransportSimulator implements RaftTransport {
         }
     }
     
-    /**
-     * Corrupt a VoteResponse for Byzantine testing.
-     */
-    private VoteResponse corruptVoteResponse(VoteResponse original) {
-        return VoteResponse.newBuilder()
-            .setTerm(original.getTerm() + random.nextInt(10)) // Wrong term
-            .setVoteGranted(!original.getVoteGranted()) // Flip vote
-            .build();
-    }
-    
-    /**
-     * Corrupt an AppendEntriesResponse for Byzantine testing.
-     */
-    private AppendEntriesResponse corruptAppendEntriesResponse(AppendEntriesResponse original) {
-        return AppendEntriesResponse.newBuilder()
-            .setTerm(original.getTerm() + random.nextInt(10)) // Wrong term
-            .setSuccess(!original.getSuccess()) // Flip success
-            .setMatchIndex(random.nextInt(100)) // Wrong match index
-            .build();
-    }
 
 
     private VoteResponse handleVoteRequest(VoteRequest request) {

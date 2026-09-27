@@ -18,6 +18,7 @@ package dev.mars.qraft.controller.state;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.mars.qraft.catalog.ServiceKey;
 import dev.mars.qraft.agent.AgentCapabilities;
 import dev.mars.qraft.agent.AgentInfo;
 import dev.mars.qraft.agent.AgentStatus;
@@ -112,7 +113,13 @@ class ReplicaDeterminismTest {
     @Test
     void snapshotsAreByteForByteReproducibleAndRoundTripExactly() throws Exception {
         QraftStateStore store = new QraftStateStore();
-        List<RaftCommand> log = edgeCaseLog();
+        List<RaftCommand> log = new ArrayList<>(edgeCaseLog());
+        // Twenty agents and metadata keys in reverse order: the store holds them in maps whose iteration
+        // order is randomised per JVM, so only an explicitly ordered writer produces sorted keys.
+        for (char suffix = 't'; suffix >= 'a'; suffix--) {
+            log.add(AgentCommand.register(new AgentInfo("order-" + suffix, "host", "10.0.0.2", 8080), NANOS));
+            log.add(new DistributedStateRaftCommand(DistributedStateCommand.put("order-" + suffix, "v")));
+        }
         log.forEach(command -> store.apply(codec.deserialize(codec.serialize(command))));
 
         byte[] snapshot = store.takeSnapshot();
@@ -120,10 +127,13 @@ class ReplicaDeterminismTest {
         restored.restoreSnapshot(snapshot);
 
         assertEquals(new String(snapshot, StandardCharsets.UTF_8), snapshotText(restored));
-        JsonNode agents = JSON.readTree(snapshot).get("agents");
-        List<String> order = new ArrayList<>();
-        agents.fieldNames().forEachRemaining(order::add);
-        assertEquals(order.stream().sorted().toList(), order, "map entries are written in key order");
+        for (String map : List.of("agents", "metadata")) {
+            JsonNode entries = JSON.readTree(snapshot).get(map);
+            List<String> order = new ArrayList<>();
+            entries.fieldNames().forEachRemaining(order::add);
+            assertEquals(true, order.size() >= 20, map + " holds the ordering fixture");
+            assertEquals(order.stream().sorted().toList(), order, map + " entries are written in key order");
+        }
     }
 
     @Test
@@ -155,7 +165,7 @@ class ReplicaDeterminismTest {
         for (java.lang.reflect.Method method : view.getClass().getMethods()) {
             assertEquals(false, mutators.contains(method.getName()), "the view exposes " + method.getName());
         }
-        assertEquals(1, store.getServiceCatalog().instances("web").size());
+        assertEquals(1, store.getServiceCatalog().instances(ServiceKey.inDefaultScope("web")).size());
     }
 
     @Test

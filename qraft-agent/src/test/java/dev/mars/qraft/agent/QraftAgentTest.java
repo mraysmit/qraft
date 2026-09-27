@@ -41,10 +41,11 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 
-import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -52,7 +53,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests {@link QraftAgent} registration, retry, readiness, service reconciliation, and ordered
- * shutdown against a stub controller.
+ * shutdown against a stub controller. Retry delays and periodic heartbeats run on a
+ * {@link ManualScheduledExecutor}, so a test decides when they fire and proves exactly that none is
+ * scheduled.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-03-15
@@ -60,6 +63,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class QraftAgentTest {
     private HttpServer server;
+    private final ManualScheduledExecutor scheduler = new ManualScheduledExecutor();
 
     @AfterEach
     void stopServer() {
@@ -129,10 +133,9 @@ class QraftAgentTest {
     @Test
     void rejectedNodeRegistrationIsLoggedAndNeverRetried() throws Exception {
         AtomicInteger registrations = new AtomicInteger();
-        CountDownLatch repeatedRegistration = new CountDownLatch(1);
         server = HttpServer.create(new InetSocketAddress(0), 0);
         server.createContext("/api/v1/agents/register", exchange -> {
-            if (registrations.incrementAndGet() > 1) repeatedRegistration.countDown();
+            registrations.incrementAndGet();
             byte[] body = ("{\"code\":\"invalid_agent\",\"message\":\"bad address\","
                     + "\"retryable\":false}").getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(400, body.length);
@@ -146,8 +149,8 @@ class QraftAgentTest {
         AgentConfiguration config = AgentConfiguration.builder()
                 .agentId("agent-1").hostname("host").address("127.0.0.1")
                 .agentPort(freePort()).controllerUrl("http://localhost:" + server.getAddress().getPort())
-                .registrationRetryMinMs(10).registrationRetryMaxMs(20).build();
-        QraftAgent agent = new QraftAgent(config);
+                .build();
+        QraftAgent agent = manuallyTimedAgent(config);
         Logger logger = (Logger) LoggerFactory.getLogger(AgentRegistrationClient.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
@@ -155,7 +158,7 @@ class QraftAgentTest {
         try {
             assertFalse(agent.start().get(10, TimeUnit.SECONDS));
 
-            assertFalse(repeatedRegistration.await(100, TimeUnit.MILLISECONDS));
+            assertEquals(0, scheduler.pendingCount(), "no registration retry may be scheduled");
             assertEquals(1, registrations.get());
             assertEquals(1, appender.list.stream().filter(event ->
                     event.getFormattedMessage().contains("agentId=agent-1")
@@ -193,25 +196,109 @@ class QraftAgentTest {
                 .address("127.0.0.1")
                 .agentPort(freePort())
                 .controllerUrl("http://localhost:" + server.getAddress().getPort())
-                .heartbeatInterval(25)
+                .heartbeatInterval(60_000)
                 .build();
-        QraftAgent agent = new QraftAgent(config);
+        QraftAgent agent = manuallyTimedAgent(config);
 
         try {
-            assertFalse(agent.start().join(), "the initial registration should expose the outage");
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-            while ((!agent.healthService().isReady() || heartbeats.get() == 0)
-                    && System.nanoTime() < deadline) {
-                Thread.sleep(10);
-            }
+            assertFalse(agent.start().get(10, TimeUnit.SECONDS),
+                    "the initial registration should expose the outage");
+            assertEquals(1, scheduler.pendingCount(), "exactly one registration retry is scheduled");
+            assertEquals(0, heartbeats.get());
 
-            assertAll(
-                    () -> assertTrue(registrations.get() >= 2, "registration must be retried"),
-                    () -> assertTrue(agent.healthService().isReady(), "successful retry must make the agent ready"),
-                    () -> assertTrue(heartbeats.get() > 0, "heartbeats must begin after recovery"));
+            scheduler.advance(RETRY_WINDOW);
+            awaitTrue(() -> scheduler.pendingCount() == 2, "reconciliation and heartbeat are scheduled");
+            assertEquals(2, registrations.get(), "registration is retried once");
+            assertTrue(agent.healthService().isReady(), "successful retry must make the agent ready");
+
+            scheduler.advance(Duration.ofMillis(config.getHeartbeatInterval()));
+            awaitTrue(() -> heartbeats.get() == 1, "heartbeats begin after recovery");
         } finally {
             agent.shutdown().join();
         }
+    }
+
+    @Test
+    void registrationBackoffGrowsWhileTheControllerIsDownAndRestartsAfterSuccess() throws Exception {
+        AtomicInteger registrations = new AtomicInteger();
+        AtomicInteger heartbeats = new AtomicInteger();
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/api/v1/agents/register", exchange -> {
+            int status = registrations.incrementAndGet() <= 3 ? 503 : 201;
+            exchange.sendResponseHeaders(status, -1);
+            exchange.close();
+        });
+        server.createContext("/api/v1/agents/heartbeat", exchange -> {
+            int status = heartbeats.incrementAndGet() == 1 ? 404 : 204;
+            exchange.sendResponseHeaders(status, -1);
+            exchange.close();
+        });
+        server.createContext("/api/v1/agents/agent-1", exchange -> {
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        server.start();
+        AgentConfiguration config = AgentConfiguration.builder()
+                .agentId("agent-1").hostname("host").address("127.0.0.1")
+                .agentPort(freePort()).controllerUrl("http://localhost:" + server.getAddress().getPort())
+                .heartbeatInterval(60_000)
+                .build();
+        QraftAgent agent = manuallyTimedAgent(config);
+
+        try {
+            assertFalse(agent.start().get(10, TimeUnit.SECONDS));
+            // With a zero jitter sample, retry n waits half of min(10 ms * 2^n, 100 ms).
+            assertEquals(Duration.ofMillis(5), scheduler.nextDelay());
+            advanceToRegistration(2, registrations);
+            assertEquals(Duration.ofMillis(10), scheduler.nextDelay(), "the second retry waits longer");
+            advanceToRegistration(3, registrations);
+            assertEquals(Duration.ofMillis(20), scheduler.nextDelay(), "the third retry waits longer again");
+
+            scheduler.advance(scheduler.nextDelay());
+            awaitTrue(() -> registrations.get() == 4 && scheduler.pendingCount() == 2,
+                    "the fourth attempt registers and schedules heartbeats");
+            assertTrue(agent.healthService().isReady());
+
+            scheduler.advance(Duration.ofMillis(config.getHeartbeatInterval()));
+            awaitTrue(() -> scheduler.pendingCount() == 3, "the rejected heartbeat schedules a retry");
+            assertEquals(Duration.ofMillis(5), scheduler.nextDelay(),
+                    "a successful registration restarts the backoff");
+        } finally {
+            agent.shutdown().get(10, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void shutdownCancelsAPendingRegistrationRetry() throws Exception {
+        AtomicInteger registrations = new AtomicInteger();
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/api/v1/agents/register", exchange -> {
+            registrations.incrementAndGet();
+            exchange.sendResponseHeaders(503, -1);
+            exchange.close();
+        });
+        server.start();
+        AgentConfiguration config = AgentConfiguration.builder()
+                .agentId("agent-1").hostname("host").address("127.0.0.1")
+                .agentPort(freePort()).controllerUrl("http://localhost:" + server.getAddress().getPort())
+                .build();
+        QraftAgent agent = manuallyTimedAgent(config);
+
+        assertFalse(agent.start().get(10, TimeUnit.SECONDS));
+        assertEquals(1, scheduler.pendingCount(), "a registration retry is pending");
+
+        agent.shutdown().get(10, TimeUnit.SECONDS);
+
+        assertEquals(0, scheduler.pendingCount(), "shutdown leaves no retry scheduled");
+        scheduler.advance(Duration.ofHours(1));
+        assertEquals(1, registrations.get(), "no registration is attempted after shutdown");
+        assertTrue(agent.isTerminated());
+    }
+
+    private void advanceToRegistration(int attempt, AtomicInteger registrations) throws InterruptedException {
+        scheduler.advance(scheduler.nextDelay());
+        awaitTrue(() -> registrations.get() == attempt && scheduler.pendingCount() == 1,
+                "attempt " + attempt + " fails and schedules the next retry");
     }
 
     @Test
@@ -240,25 +327,27 @@ class QraftAgentTest {
                 .address("127.0.0.1")
                 .agentPort(freePort())
                 .controllerUrl("http://localhost:" + server.getAddress().getPort())
-                .heartbeatInterval(25)
-                .httpConnectionTimeout(1_000)
+                .heartbeatInterval(60_000)
                 .build();
-        QraftAgent agent = new QraftAgent(config);
+        QraftAgent agent = manuallyTimedAgent(config);
+        Duration heartbeatInterval = Duration.ofMillis(config.getHeartbeatInterval());
 
         try {
             assertTrue(agent.start().get(10, TimeUnit.SECONDS));
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-            while ((registrations.get() < 2 || heartbeats.get() < 2)
-                    && System.nanoTime() < deadline) {
-                Thread.sleep(10);
-            }
+            assertEquals(2, scheduler.pendingCount(), "reconciliation and heartbeat are scheduled");
 
-            assertAll(
-                    () -> assertTrue(registrations.get() >= 2,
-                            "a heartbeat 404 must trigger registration again"),
-                    () -> assertTrue(heartbeats.get() >= 2,
-                            "heartbeats must resume after registration"),
-                    () -> assertTrue(agent.healthService().isReady()));
+            scheduler.advance(heartbeatInterval);
+            awaitTrue(() -> scheduler.pendingCount() == 3,
+                    "the rejected heartbeat schedules a registration retry");
+            assertEquals(1, heartbeats.get());
+            assertFalse(agent.healthService().isReady(), "a forgotten agent is not ready");
+
+            scheduler.advance(RETRY_WINDOW);
+            awaitTrue(() -> registrations.get() == 2 && agent.healthService().isReady(),
+                    "the retry registers the agent again");
+            scheduler.advance(heartbeatInterval);
+            awaitTrue(() -> heartbeats.get() == 2, "heartbeats resume after registration");
+            assertEquals(2, registrations.get());
         } finally {
             agent.shutdown().join();
         }
@@ -411,7 +500,7 @@ class QraftAgentTest {
             events.add("service:" + serviceId);
             servicesStarted.countDown();
             try {
-                releaseServices.await(2, TimeUnit.SECONDS);
+                releaseServices.await(30, TimeUnit.SECONDS);
                 byte[] body = ("{\"serviceId\":\"" + serviceId + "\",\"deregistered\":true}")
                         .getBytes(StandardCharsets.UTF_8);
                 exchange.sendResponseHeaders(200, body.length);
@@ -426,7 +515,8 @@ class QraftAgentTest {
             exchange.close();
         });
         server.start();
-        AgentConfiguration config = agentConfigWithServices(2_000);
+        // The test releases deregistration itself, so the deadline must never be what ends shutdown.
+        AgentConfiguration config = agentConfigWithServices(60_000);
         QraftAgent agent = new QraftAgent(config);
 
         assertTrue(agent.start().get(10, TimeUnit.SECONDS));
@@ -437,7 +527,7 @@ class QraftAgentTest {
         assertSame(shutdown, repeated);
         assertFalse(agent.healthService().isReady(), "readiness must be withdrawn synchronously");
         assertTrue(agent.healthService().isHealthy(), "local health must remain live during deregistration");
-        assertTrue(servicesStarted.await(1, TimeUnit.SECONDS));
+        assertTrue(servicesStarted.await(10, TimeUnit.SECONDS));
         assertFalse(events.contains("node"), "node deregistration must wait for every service");
         releaseServices.countDown();
 
@@ -515,6 +605,21 @@ class QraftAgentTest {
             Thread.onSpinWait();
         }
         assertEquals(count, agent.serviceReconciler().registeredCount());
+    }
+
+    /** A retry window longer than any delay the retry policy of {@link #manuallyTimedAgent} produces. */
+    private static final Duration RETRY_WINDOW = Duration.ofMillis(100);
+
+    private QraftAgent manuallyTimedAgent(AgentConfiguration config) {
+        return new QraftAgent(config, new ControllerRetryPolicy(10, 100, () -> 0.0), Clock.systemUTC(),
+                scheduler, Executors.newSingleThreadScheduledExecutor());
+    }
+
+    /** Bounds a wait for an HTTP exchange the manual scheduler started; the bound only diagnoses a hang. */
+    private static void awaitTrue(BooleanSupplier condition, String description) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!condition.getAsBoolean() && System.nanoTime() < deadline) Thread.sleep(5);
+        assertTrue(condition.getAsBoolean(), description);
     }
 
     private static int freePort() throws Exception {

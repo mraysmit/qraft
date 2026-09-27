@@ -47,7 +47,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Seeded model tests comparing generated follower histories on {@link RaftNode} against an
- * independent reference model, including fencing after an ambiguous sync failure.
+ * independent reference model, including fencing after an ambiguous sync failure. The histories include
+ * leaders behind the follower's tail, where only the verified prefix may be matched or committed.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-17
@@ -176,6 +177,10 @@ class RaftNodeModelTest {
         operations.add(new VoteTemplate(TermChoice.SAME, true, "candidate-a"));
         operations.add(new VoteTemplate(TermChoice.SAME, true, "candidate-b"));
         operations.add(new AppendTemplate(TermChoice.STALE, AppendShape.HEARTBEAT, 0, false));
+        // A leader behind the follower's tail: only the prefix it names is verified.
+        operations.add(new AppendTemplate(TermChoice.SAME, AppendShape.LAGGING_HEARTBEAT, 0, true));
+        operations.add(new AppendTemplate(TermChoice.SAME, AppendShape.EXTEND, 2, false));
+        operations.add(new AppendTemplate(TermChoice.SAME, AppendShape.LAGGING_RESEND, 0, true));
         while (operations.size() < count) {
             if (random.nextInt(4) == 0) {
                 operations.add(new VoteTemplate(
@@ -183,9 +188,12 @@ class RaftNodeModelTest {
                         random.nextBoolean(),
                         random.nextBoolean() ? "candidate-a" : "candidate-b"));
             } else {
-                AppendShape shape = random.nextInt(5) == 0
-                        ? AppendShape.INCONSISTENT_HEARTBEAT
-                        : random.nextBoolean() ? AppendShape.EXTEND : AppendShape.HEARTBEAT;
+                AppendShape shape = switch (random.nextInt(8)) {
+                    case 0 -> AppendShape.INCONSISTENT_HEARTBEAT;
+                    case 1 -> AppendShape.LAGGING_HEARTBEAT;
+                    case 2 -> AppendShape.LAGGING_RESEND;
+                    default -> random.nextBoolean() ? AppendShape.EXTEND : AppendShape.HEARTBEAT;
+                };
                 operations.add(new AppendTemplate(
                         TermChoice.values()[random.nextInt(TermChoice.values().length)],
                         shape, random.nextInt(3), random.nextBoolean()));
@@ -203,7 +211,7 @@ class RaftNodeModelTest {
                 assertEquals(expected.accepted(), actual.getSuccess(), context);
                 assertEquals(expected.state().term(), actual.getTerm(), context);
                 if (actual.getSuccess()) {
-                    assertEquals(expected.state().lastIndex(), actual.getMatchIndex(), context);
+                    assertEquals(expected.matchIndex(), actual.getMatchIndex(), context);
                 }
             }
             case VoteOperation vote -> {
@@ -223,6 +231,11 @@ class RaftNodeModelTest {
         };
     }
 
+    /**
+     * The follower rule of design section 14.3. A success verifies only the prefix the leader named
+     * plus the entries it sent, so the match index and any commit stop there. A tail beyond it may
+     * belong to an unrelated history.
+     */
     private static ExpectedResult applyAppend(ReferenceState state, AppendOperation operation) {
         AppendEntriesRequest request = operation.request();
         if (request.getTerm() < state.term()) return new ExpectedResult(state, false);
@@ -250,14 +263,15 @@ class RaftNodeModelTest {
             log.add(operation.entries().get(incomingIndex++));
         }
 
-        long commit = Math.max(state.commitIndex(), Math.min(request.getLeaderCommit(), log.size()));
+        long verified = request.getPrevLogIndex() + operation.entries().size();
+        long commit = Math.max(state.commitIndex(), Math.min(request.getLeaderCommit(), verified));
         Map<String, String> applied = new LinkedHashMap<>(state.applied());
         for (long index = state.lastApplied() + 1; index <= commit; index++) {
             ModelEntry entry = log.get(Math.toIntExact(index - 1));
             applied.put(entry.key(), entry.value());
         }
         return new ExpectedResult(new ReferenceState(
-                term, vote, List.copyOf(log), commit, commit, Map.copyOf(applied)), true);
+                term, vote, List.copyOf(log), commit, commit, Map.copyOf(applied)), true, verified);
     }
 
     private static ExpectedResult applyVote(ReferenceState state, VoteOperation operation) {
@@ -385,6 +399,20 @@ class RaftNodeModelTest {
                                 "value-" + random.nextInt(10_000)));
                     }
                 }
+                case LAGGING_HEARTBEAT -> {
+                    // Names an earlier prefix and carries nothing; the tail after it is unverified.
+                    prevIndex = Math.max(0, state.lastIndex() - 1 - random.nextInt(2));
+                    prevTerm = state.termAt(prevIndex);
+                }
+                case LAGGING_RESEND -> {
+                    // Resends one entry the follower already holds, two behind its last index.
+                    if (state.lastIndex() >= 2) {
+                        prevIndex = state.lastIndex() - 2;
+                        prevTerm = state.termAt(prevIndex);
+                        ModelEntry held = state.log().get(Math.toIntExact(prevIndex));
+                        entries.add(held);
+                    }
+                }
                 case REPLACE_UNCOMMITTED -> {
                     prevIndex = Math.max(state.commitIndex(), state.lastIndex() - 1);
                     prevTerm = state.termAt(prevIndex);
@@ -392,7 +420,11 @@ class RaftNodeModelTest {
                             "value-" + random.nextInt(10_000)));
                 }
             }
-            long leaderCommit = commitAll ? prevIndex + entries.size() : state.commitIndex();
+            long leaderCommit = switch (shape) {
+                // The leader has committed further than this follower has verified.
+                case LAGGING_HEARTBEAT, LAGGING_RESEND -> state.lastIndex() + 1;
+                default -> commitAll ? prevIndex + entries.size() : state.commitIndex();
+            };
             return appendOperation(term, prevIndex, prevTerm, leaderCommit, List.copyOf(entries));
         }
     }
@@ -420,11 +452,17 @@ class RaftNodeModelTest {
 
     private enum TermChoice { STALE, SAME, HIGHER }
 
-    private enum AppendShape { HEARTBEAT, INCONSISTENT_HEARTBEAT, EXTEND, REPLACE_UNCOMMITTED }
+    private enum AppendShape {
+        HEARTBEAT, INCONSISTENT_HEARTBEAT, EXTEND, REPLACE_UNCOMMITTED, LAGGING_HEARTBEAT, LAGGING_RESEND
+    }
 
     private record ModelEntry(long term, String key, String value) { }
 
-    private record ExpectedResult(ReferenceState state, boolean accepted) { }
+    private record ExpectedResult(ReferenceState state, boolean accepted, long matchIndex) {
+        ExpectedResult(ReferenceState state, boolean accepted) {
+            this(state, accepted, 0);
+        }
+    }
 
     private record ReferenceState(
             long term,

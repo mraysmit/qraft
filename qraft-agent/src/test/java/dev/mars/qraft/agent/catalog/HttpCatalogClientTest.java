@@ -186,6 +186,24 @@ class HttpCatalogClientTest {
     }
 
     @Test
+    void aRegistrationTheCatalogRejectsIsNotRetried() throws Exception {
+        AtomicInteger attempts = new AtomicInteger();
+        URI endpoint = start(exchange -> {
+            attempts.incrementAndGet();
+            respond(exchange, 409, "{\"code\":\"registration_rejected\","
+                    + "\"message\":\"The replicated catalog did not accept the registration\","
+                    + "\"retryable\":false,\"requestId\":\"r-1\"}");
+        });
+        HttpCatalogClient client = client(Duration.ofSeconds(10));
+
+        CatalogOutcome.Rejected rejected = assertInstanceOf(CatalogOutcome.Rejected.class,
+                client.register(endpoint, service()).get(10, TimeUnit.SECONDS));
+
+        assertEquals("registration_rejected", rejected.code());
+        assertEquals(1, attempts.get());
+    }
+
+    @Test
     void timeoutAndConnectionRefusalAreRetryableWithinTheBound() throws Exception {
         java.util.concurrent.CountDownLatch releaseResponse = new java.util.concurrent.CountDownLatch(1);
         URI slow = start(exchange -> {
@@ -211,8 +229,11 @@ class HttpCatalogClientTest {
         try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
             refused = URI.create("http://127.0.0.1:" + socket.getLocalPort());
         }
-        assertInstanceOf(CatalogOutcome.Retryable.class,
-                client.deregister(refused, "offline").get(10, TimeUnit.SECONDS));
+        // Windows retries a refused loopback connection for about two seconds, so the refusal is observed
+        // with a bound that cannot expire first; the 50 ms client would report a timeout instead.
+        CatalogOutcome.Retryable offline = assertInstanceOf(CatalogOutcome.Retryable.class,
+                client(Duration.ofSeconds(10)).deregister(refused, "offline").get(20, TimeUnit.SECONDS));
+        assertEquals("transport_error", offline.code());
     }
 
     @Test
@@ -283,8 +304,10 @@ class HttpCatalogClientTest {
     @Test
     void lookupMatchesTheCompleteScopedIdentityAndClassifiesAbsence() throws Exception {
         AtomicInteger attempts = new AtomicInteger();
+        List<CapturedRequest> lookups = new CopyOnWriteArrayList<>();
         URI endpoint = start(exchange -> {
             attempts.incrementAndGet();
+            lookups.add(capture(exchange));
             assertEquals("GET", exchange.getRequestMethod());
             assertEquals("/v1/catalog/service/payments", exchange.getRequestURI().getPath());
             respond(exchange, 200, "[{\"serviceId\":\"payments-1\","
@@ -295,6 +318,10 @@ class HttpCatalogClientTest {
 
         assertInstanceOf(CatalogLookupOutcome.Absent.class,
                 client.lookup(service()).get(10, TimeUnit.SECONDS));
+        // The server confines a catalog read to the scope headers; without them it would read the
+        // default scope, and an agent in any other scope would find its own services absent.
+        assertEquals("tenant-a", lookups.getFirst().header("X-Qraft-Tenant"));
+        assertEquals("prod", lookups.getFirst().header("X-Qraft-Namespace"));
 
         servers.getFirst().removeContext("/");
         servers.getFirst().createContext("/", exchange -> respond(exchange, 200,

@@ -44,6 +44,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -77,8 +78,8 @@ public final class QraftAgent implements AutoCloseable {
     private final ControllerRetryPolicy retryPolicy;
     private final ServiceReconciler serviceReconciler;
     private final ReadinessPolicy readinessPolicy;
-    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-    private final ScheduledExecutorService checkScheduler = Executors.newSingleThreadScheduledExecutor();
+    private final ScheduledExecutorService scheduler;
+    private final ScheduledExecutorService checkScheduler;
     private final HttpClient checkHttpClient = HttpClient.newHttpClient();
     private final HttpClient controllerHttpClient = HttpClient.newHttpClient();
     private final LocalHealthChecks localChecks;
@@ -102,8 +103,22 @@ public final class QraftAgent implements AutoCloseable {
     }
 
     QraftAgent(AgentConfiguration config, ControllerRetryPolicy retryPolicy, Clock clock) {
+        this(config, retryPolicy, clock, Executors.newSingleThreadScheduledExecutor(),
+                Executors.newSingleThreadScheduledExecutor());
+    }
+
+    /**
+     * Creates an agent on the given executors. The agent owns both and shuts them down with itself.
+     *
+     * @param scheduler      runs registration retry delays, heartbeats, and periodic reconciliation
+     * @param checkScheduler runs local health checks and publication retries
+     */
+    QraftAgent(AgentConfiguration config, ControllerRetryPolicy retryPolicy, Clock clock,
+               ScheduledExecutorService scheduler, ScheduledExecutorService checkScheduler) {
         this.config = config;
         this.retryPolicy = retryPolicy;
+        this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
+        this.checkScheduler = Objects.requireNonNull(checkScheduler, "checkScheduler");
         ControllerContactTracker contactTracker = new ControllerContactTracker(clock);
         this.controllerClient = new HttpCatalogClient(controllerHttpClient, new ObjectMapper(),
                 config.getControllerUrls(), config.getAgentId(), config.getTenant(), config.getNamespace(),

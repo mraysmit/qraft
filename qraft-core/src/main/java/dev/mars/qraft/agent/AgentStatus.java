@@ -19,12 +19,7 @@ package dev.mars.qraft.agent;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
-import java.util.Collections;
-import java.util.EnumMap;
-import java.util.EnumSet;
 import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
 
 /**
  * Lifecycle status of a client-mode node in the replicated node registry.
@@ -35,7 +30,7 @@ import java.util.Set;
  * reports degradation, has stopped heartbeating, or needs intervention.</li>
  * <li><strong>Transitional</strong> ({@code REGISTERING}, {@code MAINTENANCE}): the node is joining or has
  * been taken out of service on purpose.</li>
- * <li><strong>Terminal</strong> ({@code DEREGISTERED}): the node has been removed; no transition follows.</li>
+ * <li><strong>Terminal</strong> ({@code DEREGISTERED}): the node has been removed.</li>
  * </ul>
  *
  * <p>{@code FAILED} is not terminal: a failed node can still be deregistered. The statuses of the job system
@@ -72,23 +67,6 @@ public enum AgentStatus {
 
     /** The node has been removed. This is the only terminal status. */
     DEREGISTERED("deregistered", "Agent has been deregistered", false);
-
-    // ── Transition table (single source of truth) ──────────────────────
-
-    private static final Map<AgentStatus, Set<AgentStatus>> TRANSITIONS;
-
-    static {
-        var map = new EnumMap<AgentStatus, Set<AgentStatus>>(AgentStatus.class);
-        map.put(REGISTERING, EnumSet.of(HEALTHY, FAILED));
-        map.put(HEALTHY, EnumSet.of(DEGRADED, MAINTENANCE, UNREACHABLE, FAILED, DEREGISTERED));
-        map.put(DEGRADED, EnumSet.of(HEALTHY, MAINTENANCE, UNREACHABLE, FAILED, DEREGISTERED));
-        map.put(MAINTENANCE, EnumSet.of(HEALTHY, UNREACHABLE, FAILED, DEREGISTERED));
-        map.put(UNREACHABLE, EnumSet.of(HEALTHY, FAILED, DEREGISTERED));
-        map.put(FAILED, EnumSet.of(DEREGISTERED));
-        map.put(DEREGISTERED, EnumSet.noneOf(AgentStatus.class));
-        map.replaceAll((k, v) -> Collections.unmodifiableSet(v));
-        TRANSITIONS = Collections.unmodifiableMap(map);
-    }
 
     private final String value;
     private final String description;
@@ -185,30 +163,6 @@ public enum AgentStatus {
             }
         }
         return fromValue(value);
-    }
-
-    // ── State-machine transitions ──────────────────────────────────────
-
-    /**
-     * Whether a transition from this status to {@code target} is valid:
-     *
-     * <pre>
-     *   REGISTERING  → HEALTHY, FAILED
-     *   HEALTHY      → DEGRADED, MAINTENANCE, UNREACHABLE, FAILED, DEREGISTERED
-     *   DEGRADED     → HEALTHY, MAINTENANCE, UNREACHABLE, FAILED, DEREGISTERED
-     *   MAINTENANCE  → HEALTHY, UNREACHABLE, FAILED, DEREGISTERED
-     *   UNREACHABLE  → HEALTHY, FAILED, DEREGISTERED
-     *   FAILED       → DEREGISTERED
-     *   DEREGISTERED → (terminal)
-     * </pre>
-     */
-    public boolean canTransitionTo(AgentStatus target) {
-        return TRANSITIONS.getOrDefault(this, EnumSet.noneOf(AgentStatus.class)).contains(target);
-    }
-
-    /** The statuses this status can transition to; empty for the terminal status. */
-    public Set<AgentStatus> getValidTransitions() {
-        return TRANSITIONS.getOrDefault(this, Collections.emptySet());
     }
 
     @Override

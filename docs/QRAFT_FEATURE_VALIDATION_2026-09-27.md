@@ -45,7 +45,7 @@ Status key:
 | Catalog | Register and deregister through Raft; composite identity; idempotence | Done | `HttpApiServerTest`, `AgentEndToEndTest` |
 | Catalog | Catalog and health queries with deterministic ordering | Done | `ServiceCatalog` sorts names and instances |
 | Catalog | Registration and modification indexes on instances (design 7.5) | Missing | `ServiceInstance` has no index fields |
-| Catalog | Reads scoped by tenant and namespace | Missing | Headers apply to writes only; reads return every scope |
+| Catalog | Reads scoped by tenant and namespace | Done | Catalog and health reads honour the scope headers; `HttpApiServerTest`, `ServiceCatalogTest`; done 2026-09-27 |
 | Health | Ordered observations, derived service health, all five states | Done | `HealthCommandStateStoreTest`, `HealthPropagationEndToEndTest` |
 | Health | Leader-owned expiry and automatic deregistration | Done | `LeaderHealthExpiry*Test`, `CrashedAgentExpiryEndToEndTest` |
 | Health | Node membership expiry: unreachable, then reaped | Done | `NodeExpiryEvaluatorTest`, `NodeMembershipExpiryStateStoreTest` |
@@ -125,8 +125,8 @@ need:
 5. **Sessions and locks.** Replicated sessions with TTL and expiry, key
    acquire and release with owner enforcement, and a leader-election helper.
 6. **Tenancy end to end.** Replicated tenants and namespaces with validation
-   and lifecycle, and scoped reads for the catalog, health, agents, and
-   key/value.
+   and lifecycle, and scoped reads for agents and key/value. Catalog and health
+   reads are scoped as of 2026-09-27.
 7. **Observability.** Catalog, health, request, agent, and session metrics; a
    leader-side membership and replication status; and storage and snapshot
    status.

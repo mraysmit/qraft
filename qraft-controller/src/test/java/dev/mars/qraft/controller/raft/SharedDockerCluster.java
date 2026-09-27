@@ -66,7 +66,6 @@ public final class SharedDockerCluster {
 
     private static volatile boolean imageBuilt = false;
     private static ComposeContainer threeNodeCluster;
-    private static ComposeContainer fiveNodeCluster;
     private static final Map<String, Map<String, ContainerNetwork>> DISCONNECTED_NETWORKS =
             new ConcurrentHashMap<>();
 
@@ -138,29 +137,6 @@ public final class SharedDockerCluster {
                 .withStartupTimeout(Duration.ofSeconds(90));
         cluster.start();
         return cluster;
-    }
-
-    /**
-     * Returns the shared 5-node cluster, building the image and starting containers on first call.
-     */
-    public static synchronized ComposeContainer getFiveNodeCluster() {
-        if (fiveNodeCluster == null) {
-            ensureImageBuilt();
-
-            logger.info("Starting shared 5-node cluster...");
-            fiveNodeCluster = new ComposeContainer(
-                    new File("src/test/resources/docker-compose-5node-prebuilt.yml"))
-                    .withExposedService("controller1", 8080, Wait.forHttp("/health").forStatusCode(200))
-                    .withExposedService("controller2", 8080, Wait.forHttp("/health").forStatusCode(200))
-                    .withExposedService("controller3", 8080, Wait.forHttp("/health").forStatusCode(200))
-                    .withExposedService("controller4", 8080, Wait.forHttp("/health").forStatusCode(200))
-                    .withExposedService("controller5", 8080, Wait.forHttp("/health").forStatusCode(200))
-                    .withStartupTimeout(Duration.ofSeconds(90));
-
-            fiveNodeCluster.start();
-            logger.info("Shared 5-node cluster started successfully");
-        }
-        return fiveNodeCluster;
     }
 
     /**
@@ -243,6 +219,7 @@ public final class SharedDockerCluster {
     public static DockerCommandResult runStorageLockContender(
             ComposeContainer cluster, String ownerService) {
         Path config = null;
+        Path output = null;
         try {
             config = Files.createTempFile("qraft-lock-contender-", ".json");
             Files.writeString(config, """
@@ -252,33 +229,40 @@ public final class SharedDockerCluster {
                     "storage":{"type":"raftlog","path":"/app/data","fsync":true}},
                     "telemetry":{"enabled":false}}}
                     """);
+            String name = "qraft-lock-contender-" + java.util.UUID.randomUUID();
             List<String> command = List.of(
-                    "docker", "run", "--rm", "--volumes-from", containerId(cluster, ownerService),
+                    "docker", "run", "--rm", "--name", name, "--volumes-from", containerId(cluster, ownerService),
                     "--mount", "type=bind,source=" + config.toAbsolutePath()
                             + ",target=/etc/qraft/server.json,readonly",
                     "qraft-runtime:test", "server", "--config", "/etc/qraft/server.json");
-            ProcessBuilder processBuilder = new ProcessBuilder(command);
-            processBuilder.redirectErrorStream(true);
-            Process process = processBuilder.start();
-            String output;
-            try (var stream = process.getInputStream()) {
-                output = new String(stream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            output = Files.createTempFile("qraft-lock-contender-", ".log");
+            Process process = new ProcessBuilder(command).redirectErrorStream(true)
+                    .redirectOutput(output.toFile()).start();
+            // A contender that wrongly acquired the lock would serve forever: it is bounded, then removed.
+            boolean exited = process.waitFor(60, java.util.concurrent.TimeUnit.SECONDS);
+            if (!exited) {
+                new ProcessBuilder("docker", "rm", "-f", name).redirectErrorStream(true).start()
+                        .waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
+                process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
             }
-            return new DockerCommandResult(process.waitFor(), output);
+            String text = Files.readString(output, java.nio.charset.StandardCharsets.UTF_8);
+            return new DockerCommandResult(exited, exited ? process.exitValue() : -1, text);
         } catch (Exception error) {
             throw new IllegalStateException("Could not run storage-lock contender", error);
         } finally {
-            if (config != null) {
+            for (Path temporary : new Path[]{config, output}) {
+                if (temporary == null) continue;
                 try {
-                    Files.deleteIfExists(config);
+                    Files.deleteIfExists(temporary);
                 } catch (IOException ignored) {
-                    // The temporary file is best-effort cleanup after Docker releases the mount.
+                    // Temporary files are best-effort cleanup after Docker releases the mount.
                 }
             }
         }
     }
 
-    public record DockerCommandResult(int exitCode, String output) { }
+    /** A command's outcome; {@code exited} is false when it was still running at its bound and was removed. */
+    public record DockerCommandResult(boolean exited, int exitCode, String output) { }
 
     /**
      * Disconnects a running service from all of its Docker networks. The container
@@ -495,9 +479,6 @@ public final class SharedDockerCluster {
         logger.info("Shutting down shared Docker clusters...");
         if (threeNodeCluster != null) {
             try { threeNodeCluster.stop(); } catch (Exception e) { /* ignore */ }
-        }
-        if (fiveNodeCluster != null) {
-            try { fiveNodeCluster.stop(); } catch (Exception e) { /* ignore */ }
         }
     }
 }

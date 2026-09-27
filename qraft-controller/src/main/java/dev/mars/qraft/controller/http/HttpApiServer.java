@@ -29,6 +29,7 @@ import dev.mars.qraft.catalog.ServiceHealth;
 import dev.mars.qraft.catalog.ServiceInstance;
 import dev.mars.qraft.concurrent.Deadlines;
 import dev.mars.qraft.catalog.ServiceInstanceId;
+import dev.mars.qraft.catalog.ServiceKey;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.raft.RaftStatus;
 import dev.mars.qraft.controller.ui.AdminUiConfig;
@@ -240,9 +241,12 @@ public final class HttpApiServer implements AutoCloseable {
             RaftCommandResult<?> result = submit(declaredCheckIds == null
                     ? CatalogCommand.register(instance)
                     : CatalogCommand.register(instance, declaredCheckIds));
-            boolean registered = result instanceof RaftCommandResult.Success<?>;
-            respondJson(exchange, registered ? 200 : 409,
-                    ServiceRegistrationResponse.from(instance, registered));
+            if (result instanceof RaftCommandResult.Success<?>) {
+                respondJson(exchange, 200, ServiceRegistrationResponse.from(instance, true));
+            } else {
+                respondError(exchange, 409, "registration_rejected",
+                        "The replicated catalog did not accept the registration", false);
+            }
         } catch (IllegalArgumentException | com.fasterxml.jackson.core.JacksonException e) {
             respondError(exchange, 400, "invalid_registration", safeMessage(e), false);
         } catch (CompletionException e) {
@@ -374,10 +378,12 @@ public final class HttpApiServer implements AutoCloseable {
 
     private void listServices(HttpExchange exchange) throws IOException {
         if (!prepareCatalogRequest(exchange, "GET")) return;
+        ReadScope scope = readScope(exchange);
+        if (scope == null) return;
         setAppliedIndex(exchange);
         Map<String, List<String>> services = new LinkedHashMap<>();
-        for (String service : stateStore.getServiceCatalog().services()) {
-            List<String> tags = stateStore.getServiceCatalog().instances(service).stream()
+        for (String service : stateStore.getServiceCatalog().services(scope.tenantId(), scope.namespace())) {
+            List<String> tags = stateStore.getServiceCatalog().instances(scope.service(service)).stream()
                     .flatMap(instance -> instance.tags().stream()).distinct().sorted().toList();
             services.put(service, tags);
         }
@@ -386,14 +392,37 @@ public final class HttpApiServer implements AutoCloseable {
 
     private void listServiceInstances(HttpExchange exchange) throws IOException {
         if (!prepareCatalogRequest(exchange, "GET")) return;
-        setAppliedIndex(exchange);
         String prefix = exchange.getHttpContext().getPath() + "/";
         String serviceName = pathParameter(exchange, prefix);
         if (serviceName == null) {
             respondError(exchange, 400, "service_name_required", "Service name is required", false);
             return;
         }
-        respondJson(exchange, 200, stateStore.getServiceCatalog().instances(serviceName));
+        ReadScope scope = readScope(exchange);
+        if (scope == null) return;
+        setAppliedIndex(exchange);
+        respondJson(exchange, 200, stateStore.getServiceCatalog().instances(scope.service(serviceName)));
+    }
+
+    /**
+     * Reads the tenant and namespace a discovery read is confined to, from the same optional headers a
+     * registration uses. Answers {@code invalid_scope} and returns {@code null} when a header is blank.
+     */
+    private ReadScope readScope(HttpExchange exchange) throws IOException {
+        try {
+            return new ReadScope(
+                    HeaderRequestContext.optionalScope(exchange, HeaderRequestContext.TENANT_HEADER),
+                    HeaderRequestContext.optionalScope(exchange, HeaderRequestContext.NAMESPACE_HEADER));
+        } catch (IllegalArgumentException e) {
+            respondError(exchange, 400, "invalid_scope", safeMessage(e), false);
+            return null;
+        }
+    }
+
+    private record ReadScope(String tenantId, String namespace) {
+        ServiceKey service(String serviceName) {
+            return new ServiceKey(tenantId, namespace, serviceName);
+        }
     }
 
     private void observeHealth(HttpExchange exchange) throws IOException {
@@ -446,10 +475,13 @@ public final class HttpApiServer implements AutoCloseable {
             respondError(exchange, 400, "invalid_query", safeMessage(e), false);
             return;
         }
+        ReadScope scope = readScope(exchange);
+        if (scope == null) return;
         setAppliedIndex(exchange);
         Map<ServiceInstanceId, List<HealthCheckState>> checks = stateStore.healthChecks().stream()
                 .collect(Collectors.groupingBy(state -> state.checkId().serviceInstanceId()));
-        List<HealthServiceEntry> entries = stateStore.getServiceCatalog().instances(serviceName).stream()
+        List<HealthServiceEntry> entries = stateStore.getServiceCatalog().instances(scope.service(serviceName))
+                .stream()
                 .filter(instance -> !passingOnly || instance.health() == ServiceHealth.PASSING)
                 .map(instance -> HealthServiceEntry.from(instance,
                         checks.getOrDefault(instance.identity(), List.of())))

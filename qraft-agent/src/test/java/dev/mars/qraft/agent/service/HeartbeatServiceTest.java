@@ -30,6 +30,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -80,11 +81,21 @@ class HeartbeatServiceTest {
     }
 
     @Test
-    void doesNotPublishBeforeRegistration() {
+    void doesNotPublishBeforeRegistration() throws Exception {
+        AtomicInteger heartbeats = new AtomicInteger();
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/api/v1/agents/heartbeat", exchange -> {
+            heartbeats.incrementAndGet();
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        server.start();
         AgentConfiguration config = AgentConfiguration.builder()
-                .agentId("agent-1").controllerUrl("http://localhost").build();
+                .agentId("agent-1").controllerUrl("http://localhost:" + server.getAddress().getPort()).build();
         AgentRegistrationClient registration = registration(config);
+
         assertFalse(new HeartbeatService(config, registration).sendHeartbeat().join());
+        assertEquals(0, heartbeats.get(), "an unregistered agent sends nothing, though the controller would accept it");
     }
 
     private AgentRegistrationClient registration(AgentConfiguration config) {

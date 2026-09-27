@@ -27,8 +27,8 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests {@link ServiceCatalog} registration, lookup, composite identity per node, idempotent
- * replacement, deregistration, and health transitions.
+ * Tests {@link ServiceCatalog} registration, lookup confined to one tenant and namespace, composite
+ * identity per node, idempotent replacement, deregistration, and health transitions.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-09
@@ -43,8 +43,28 @@ class ServiceCatalogTest {
 
         catalog.register(instance);
 
-        assertEquals(List.of(instance), catalog.instances("payments"));
-        assertEquals(List.of("payments"), catalog.services());
+        assertEquals(List.of(instance), catalog.instances(ServiceKey.inDefaultScope("payments")));
+        assertEquals(List.of("payments"), catalog.services(ServiceInstance.DEFAULT_SCOPE, ServiceInstance.DEFAULT_SCOPE));
+    }
+
+    @Test
+    void lookupsNeverCrossTenantOrNamespace() {
+        ServiceCatalog catalog = new ServiceCatalog();
+        ServiceInstance defaultScope = instance("web", "web", "node-1", 8080);
+        ServiceInstance acmeProd = scoped("web", "web", "acme", "prod");
+        ServiceInstance acmeTest = scoped("web", "web", "acme", "test");
+        ServiceInstance acmeBilling = scoped("billing", "billing", "acme", "prod");
+        List.of(acmeTest, acmeBilling, acmeProd, defaultScope).forEach(catalog::register);
+
+        assertEquals(List.of(defaultScope), catalog.instances(ServiceKey.inDefaultScope("web")));
+        assertEquals(List.of(acmeProd), catalog.instances(new ServiceKey("acme", "prod", "web")));
+        assertEquals(List.of(acmeTest), catalog.instances(new ServiceKey("acme", "test", "web")));
+        assertEquals(List.of(), catalog.instances(new ServiceKey("other", "prod", "web")));
+        assertEquals(List.of("web"), catalog.services("default", "default"));
+        assertEquals(List.of("billing", "web"), catalog.services("acme", "prod"));
+        assertEquals(List.of("web"), catalog.services("acme", "test"));
+        assertEquals(List.of(), catalog.services("acme", "default"));
+        assertEquals(4, catalog.instances().size(), "the unscoped listing still holds every scope");
     }
 
     @Test
@@ -56,7 +76,7 @@ class ServiceCatalogTest {
         catalog.register(nodeB);
         catalog.register(nodeA);
 
-        assertEquals(List.of(nodeA, nodeB), catalog.instances("web"));
+        assertEquals(List.of(nodeA, nodeB), catalog.instances(ServiceKey.inDefaultScope("web")));
     }
 
     @Test
@@ -67,7 +87,7 @@ class ServiceCatalogTest {
 
         catalog.register(replacement);
 
-        assertEquals(List.of(replacement), catalog.instances("payments"));
+        assertEquals(List.of(replacement), catalog.instances(ServiceKey.inDefaultScope("payments")));
     }
 
     @Test
@@ -80,7 +100,7 @@ class ServiceCatalogTest {
 
         assertTrue(catalog.deregister(first.identity()));
 
-        assertEquals(List.of(second), catalog.instances("payments"));
+        assertEquals(List.of(second), catalog.instances(ServiceKey.inDefaultScope("payments")));
         assertFalse(catalog.deregister(first.identity()));
     }
 
@@ -96,7 +116,7 @@ class ServiceCatalogTest {
         assertEquals("payments-1", unhealthy.serviceId());
         assertEquals(8080, unhealthy.port());
         assertNotSame(registered, unhealthy);
-        assertEquals(List.of(unhealthy), catalog.instances("payments"));
+        assertEquals(List.of(unhealthy), catalog.instances(ServiceKey.inDefaultScope("payments")));
     }
 
     @Test
@@ -104,9 +124,9 @@ class ServiceCatalogTest {
         ServiceCatalog catalog = new ServiceCatalog();
         catalog.register(instance("payments-1", "payments", 8080));
 
-        List<ServiceInstance> instances = catalog.instances("payments");
+        List<ServiceInstance> instances = catalog.instances(ServiceKey.inDefaultScope("payments"));
 
-        assertEquals(List.of(), catalog.instances("unknown"));
+        assertEquals(List.of(), catalog.instances(ServiceKey.inDefaultScope("unknown")));
         org.junit.jupiter.api.Assertions.assertThrows(
                 UnsupportedOperationException.class,
                 () -> instances.add(instance("payments-2", "payments", 8081)));
@@ -114,6 +134,11 @@ class ServiceCatalogTest {
 
     private static ServiceInstance instance(String id, String name, int port) {
         return instance(id, name, "node-1", port);
+    }
+
+    private static ServiceInstance scoped(String id, String name, String tenantId, String namespace) {
+        return new ServiceInstance(id, name, "node-1", "127.0.0.1", 8080, List.of(), Map.of(),
+                ServiceHealth.PASSING, tenantId, namespace, "", "", true);
     }
 
     private static ServiceInstance instance(String id, String name, String nodeId, int port) {

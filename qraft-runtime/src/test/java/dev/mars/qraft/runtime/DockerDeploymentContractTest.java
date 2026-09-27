@@ -53,8 +53,7 @@ class DockerDeploymentContractTest {
     private static final List<String> PREBUILT_COMPOSE_FILES = List.of(
             "qraft-controller/src/test/resources/docker-compose-3node-prebuilt.yml",
             "qraft-controller/src/test/resources/docker-compose-3node-agent-prebuilt.yml",
-            "qraft-controller/src/test/resources/docker-compose-3node-agent-restart-prebuilt.yml",
-            "qraft-controller/src/test/resources/docker-compose-5node-prebuilt.yml");
+            "qraft-controller/src/test/resources/docker-compose-3node-agent-restart-prebuilt.yml");
 
     @Test
     void controllerDeploymentsBuildTheUnifiedRuntimeInServerMode() throws IOException {

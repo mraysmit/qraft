@@ -20,19 +20,23 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.mars.qraft.catalog.ServiceKey;
 import dev.mars.qraft.catalog.HealthCheckState;
 import dev.mars.qraft.catalog.ServiceCheckId;
 import dev.mars.qraft.catalog.ServiceHealth;
 import dev.mars.qraft.catalog.ServiceInstanceId;
 import dev.mars.qraft.controller.raft.InMemoryTransportSimulator;
+import dev.mars.qraft.controller.raft.RaftLogApplicator;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.raft.RaftNodeMode;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.storage.RaftStorageFactory;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
+import dev.mars.qraft.controller.state.CatalogCommand;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.controller.state.RaftCommand;
+import dev.mars.qraft.controller.state.RaftCommandResult;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.agent.AgentStatus;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
@@ -62,6 +66,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -207,7 +212,26 @@ class HttpApiServerTest {
         assertTrue(instances.body().contains("payments-1"));
         assertTrue(health.body().contains("UNKNOWN"));
         assertEquals(200, deregistered.statusCode());
-        assertTrue(store.getServiceCatalog().instances("payments").isEmpty());
+        assertTrue(store.getServiceCatalog().instances(ServiceKey.inDefaultScope("payments")).isEmpty());
+    }
+
+    @Test
+    void registrationTheStateMachineDoesNotAcceptAnswersWithTheErrorEnvelope() throws Exception {
+        QraftStateStore store = new QraftStateStore();
+        startSingleNode(new RejectingRegistrations(store));
+        server = new HttpApiServer(0, node, store);
+        server.start().join();
+
+        HttpResponse<String> response = request(HttpClient.newHttpClient(), "/v1/agent/service/register",
+                "PUT", """
+                        {"serviceId":"payments-1","serviceName":"payments",
+                         "address":"127.0.0.1","port":8080}
+                        """, Map.of("X-Qraft-Node", "node-1"));
+
+        assertEquals(409, response.statusCode(), response.body());
+        JsonNode body = assertErrorEnvelope(response, "registration_rejected", false);
+        assertTrue(body.path("registered").isMissingNode(), response.body());
+        assertTrue(store.getServiceCatalog().instances(ServiceKey.inDefaultScope("payments")).isEmpty());
     }
 
     @Test
@@ -227,7 +251,7 @@ class HttpApiServerTest {
                         "X-Qraft-Namespace", "payments"));
 
         assertEquals(200, response.statusCode(), response.body());
-        var stored = store.getServiceCatalog().instances("frontend").getFirst();
+        var stored = store.getServiceCatalog().instances(new ServiceKey("acme", "payments", "frontend")).getFirst();
         assertEquals(ServiceHealth.UNKNOWN, stored.health());
         assertEquals("node-a", stored.nodeId());
         assertEquals("acme", stored.tenantId());
@@ -238,6 +262,76 @@ class HttpApiServerTest {
         assertEquals(Set.of("serviceId", "serviceName", "nodeId", "tenantId", "namespace", "registered"),
                 body.properties().stream().map(Map.Entry::getKey).collect(java.util.stream.Collectors.toSet()));
         assertTrue(body.get("registered").booleanValue());
+    }
+
+    @Test
+    void catalogAndHealthReadsAreScopedByTenantAndNamespace() throws Exception {
+        QraftStateStore store = startSingleNode();
+        server = new HttpApiServer(0, node, store);
+        server.start().join();
+        HttpClient client = HttpClient.newHttpClient();
+        Map<String, String> acmeProd = Map.of("X-Qraft-Tenant", "acme", "X-Qraft-Namespace", "prod");
+        registerIn(client, Map.of(), "web-1", "payments", "default-tag");
+        registerIn(client, acmeProd, "web-1", "payments", "acme-tag");
+        registerIn(client, acmeProd, "billing-1", "billing", "acme-tag");
+
+        JsonNode defaultInstances = readJson(client, "/v1/catalog/service/payments", Map.of());
+        JsonNode acmeInstances = readJson(client, "/v1/catalog/service/payments", acmeProd);
+        JsonNode otherNamespace = readJson(client, "/v1/catalog/service/payments",
+                Map.of("X-Qraft-Tenant", "acme"));
+
+        assertEquals(1, defaultInstances.size(), defaultInstances.toString());
+        assertEquals("default", defaultInstances.get(0).get("tenantId").textValue());
+        assertEquals(1, acmeInstances.size(), acmeInstances.toString());
+        assertEquals("acme", acmeInstances.get(0).get("tenantId").textValue());
+        assertEquals("prod", acmeInstances.get(0).get("namespace").textValue());
+        assertEquals(0, otherNamespace.size(), otherNamespace.toString());
+
+        assertEquals(new ObjectMapper().readTree("{\"payments\":[\"default-tag\"]}"),
+                readJson(client, "/v1/catalog/services", Map.of()));
+        assertEquals(new ObjectMapper().readTree("{\"billing\":[\"acme-tag\"],\"payments\":[\"acme-tag\"]}"),
+                readJson(client, "/v1/catalog/services", acmeProd));
+
+        JsonNode acmeHealth = readJson(client, "/v1/health/service/payments", acmeProd);
+        assertEquals(List.of("web-1"), serviceIds(acmeHealth));
+        assertEquals("acme", acmeHealth.get(0).get("service").get("tenantId").textValue());
+        assertEquals(1, readJson(client, "/v1/health/service/payments", Map.of()).size());
+    }
+
+    @Test
+    void readsRejectBlankScopeHeaders() throws Exception {
+        QraftStateStore store = startSingleNode();
+        server = new HttpApiServer(0, node, store);
+        server.start().join();
+        HttpClient client = HttpClient.newHttpClient();
+
+        for (String path : List.of("/v1/catalog/services", "/v1/catalog/service/payments",
+                "/v1/health/service/payments")) {
+            HttpResponse<String> blankTenant = request(client, path, "GET", null, Map.of("X-Qraft-Tenant", " "));
+            HttpResponse<String> blankNamespace = request(client, path, "GET", null,
+                    Map.of("X-Qraft-Namespace", " "));
+
+            assertEquals(400, blankTenant.statusCode(), path + " " + blankTenant.body());
+            assertErrorEnvelope(blankTenant, "invalid_scope", false);
+            assertEquals(400, blankNamespace.statusCode(), path + " " + blankNamespace.body());
+            assertErrorEnvelope(blankNamespace, "invalid_scope", false);
+        }
+    }
+
+    private void registerIn(HttpClient client, Map<String, String> scope, String serviceId, String serviceName,
+                            String tag) throws Exception {
+        Map<String, String> headers = new java.util.HashMap<>(scope);
+        headers.put("X-Qraft-Node", "node-1");
+        HttpResponse<String> response = request(client, "/v1/agent/service/register", "PUT", """
+                {"serviceId":"%s","serviceName":"%s","address":"127.0.0.1","port":8080,"tags":["%s"]}
+                """.formatted(serviceId, serviceName, tag), headers);
+        assertEquals(200, response.statusCode(), response.body());
+    }
+
+    private JsonNode readJson(HttpClient client, String path, Map<String, String> headers) throws Exception {
+        HttpResponse<String> response = request(client, path, "GET", null, headers);
+        assertEquals(200, response.statusCode(), path + " " + response.body());
+        return new ObjectMapper().readTree(response.body());
     }
 
     @Test
@@ -261,7 +355,7 @@ class HttpApiServerTest {
                 Map.of("X-Qraft-Node", "node-b"));
 
         assertEquals(200, accepted.statusCode(), accepted.body());
-        var stored = store.getServiceCatalog().instances("frontend").getFirst();
+        var stored = store.getServiceCatalog().instances(ServiceKey.inDefaultScope("frontend")).getFirst();
         assertEquals("default", stored.tenantId());
         assertEquals("default", stored.namespace());
         assertEquals(400, rejected.statusCode(), rejected.body());
@@ -293,7 +387,7 @@ class HttpApiServerTest {
         assertTrue(removed.body().contains("\"deregistered\":true"));
         assertEquals(200, absent.statusCode(), absent.body());
         assertTrue(absent.body().contains("\"deregistered\":false"));
-        assertTrue(store.getServiceCatalog().instances("frontend").isEmpty());
+        assertTrue(store.getServiceCatalog().instances(ServiceKey.inDefaultScope("frontend")).isEmpty());
     }
 
     @Test
@@ -424,11 +518,19 @@ class HttpApiServerTest {
         server = new HttpApiServer(0, node, store);
         server.start().join();
 
-        HttpResponse<String> response = request(HttpClient.newHttpClient(),
-                "/v1/agent/service/register", "PUT", "{\"serviceId\":\"missing-fields\"}");
+        HttpClient client = HttpClient.newHttpClient();
 
-        assertEquals(400, response.statusCode());
-        assertTrue(response.body().contains("invalid_registration"));
+        HttpResponse<String> missingField = request(client, "/v1/agent/service/register", "PUT",
+                "{\"serviceId\":\"missing-fields\"}", Map.of("X-Qraft-Node", "node-1"));
+        HttpResponse<String> missingNode = request(client, "/v1/agent/service/register", "PUT",
+                "{\"serviceId\":\"web\",\"serviceName\":\"web\",\"address\":\"127.0.0.1\",\"port\":80}");
+
+        assertEquals(400, missingField.statusCode());
+        JsonNode fieldError = assertErrorEnvelope(missingField, "invalid_registration", false);
+        assertTrue(fieldError.path("message").textValue().contains("serviceName"), missingField.body());
+        assertEquals(400, missingNode.statusCode());
+        JsonNode nodeError = assertErrorEnvelope(missingNode, "invalid_registration", false);
+        assertTrue(nodeError.path("message").textValue().contains("X-Qraft-Node"), missingNode.body());
     }
 
     @Test
@@ -511,7 +613,7 @@ class HttpApiServerTest {
     }
 
     @Test
-    void concurrentNodeRegistrationsPreserveBothCompositeInstancesThroughSequencer() throws Exception {
+    void twoNodesRegisteringOneServiceIdBothCommitBehindABlockedAppend() throws Exception {
         GatedAppendStorage gatedWal = startGatedHttpNode();
         HttpClient client = HttpClient.newHttpClient();
         CompletableFuture<HttpResponse<String>> nodeA = client.sendAsync(
@@ -541,10 +643,18 @@ class HttpApiServerTest {
         server.start().join();
         HttpClient client = HttpClient.newHttpClient();
 
+        Map<String, String> node1 = Map.of("X-Qraft-Node", "node-1");
         assertEquals(405, request(client, "/v1/catalog/services", "POST").statusCode());
-        assertEquals(400, request(client, "/v1/agent/service/deregister", "PUT").statusCode());
-        assertEquals(400, request(client,
-                "/v1/agent/service/deregister/unknown", "PUT").statusCode());
+        HttpResponse<String> noServiceId = request(client, "/v1/agent/service/deregister", "PUT", null, node1);
+        assertEquals(400, noServiceId.statusCode());
+        assertErrorEnvelope(noServiceId, "service_id_required", false);
+        HttpResponse<String> unknown = request(client, "/v1/agent/service/deregister/unknown", "PUT", null, node1);
+        assertEquals(200, unknown.statusCode(), "deregistering an absent instance is idempotent");
+        assertFalse(new ObjectMapper().readTree(unknown.body()).path("deregistered").booleanValue());
+        HttpResponse<String> noNode = request(client, "/v1/agent/service/deregister/unknown", "PUT");
+        assertEquals(400, noNode.statusCode());
+        assertTrue(assertErrorEnvelope(noNode, "invalid_registration", false)
+                .path("message").textValue().contains("X-Qraft-Node"), noNode.body());
 
         server.enterDrainMode().join();
         assertEquals(503, request(client, "/v1/catalog/services", "GET").statusCode());
@@ -675,7 +785,7 @@ class HttpApiServerTest {
         assertEquals("200 OK", state.observation().output());
         assertTrue(state.observation().required());
         assertEquals(ServiceHealth.PASSING,
-                store.getServiceCatalog().instances("frontend").getFirst().health());
+                store.getServiceCatalog().instances(new ServiceKey("acme", "payments", "frontend")).getFirst().health());
     }
 
     @Test
@@ -725,7 +835,7 @@ class HttpApiServerTest {
         HealthCheckState state = store.healthChecks().getFirst();
         assertEquals(5, state.observation().sequenceNumber());
         assertEquals(ServiceHealth.WARNING, state.observation().status());
-        assertEquals(ServiceHealth.WARNING, store.getServiceCatalog().instances("frontend").getFirst().health());
+        assertEquals(ServiceHealth.WARNING, store.getServiceCatalog().instances(ServiceKey.inDefaultScope("frontend")).getFirst().health());
     }
 
     @Test
@@ -1078,10 +1188,15 @@ class HttpApiServerTest {
     }
 
     private QraftStateStore startSingleNode() throws Exception {
+        QraftStateStore store = new QraftStateStore();
+        startSingleNode(store);
+        return store;
+    }
+
+    private void startSingleNode(RaftLogApplicator store) throws Exception {
         runtime = JavaRuntime.create();
         InMemoryTransportSimulator.clearAllTransports();
         InMemoryTransportSimulator transport = new InMemoryTransportSimulator("catalog-node");
-        QraftStateStore store = new QraftStateStore();
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("catalog-node")
@@ -1097,7 +1212,19 @@ class HttpApiServerTest {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.sleep(10);
         assertTrue(node.isLeader());
-        return store;
+    }
+
+    /** Applies every command to the store except service registrations, which it declines. */
+    private record RejectingRegistrations(QraftStateStore store) implements RaftLogApplicator {
+        @Override public RaftCommandResult<?> apply(RaftCommand command) {
+            return command instanceof CatalogCommand.Register
+                    ? new RaftCommandResult.NoOp<>() : store.apply(command);
+        }
+        @Override public byte[] takeSnapshot() { return store.takeSnapshot(); }
+        @Override public void restoreSnapshot(byte[] snapshot) { store.restoreSnapshot(snapshot); }
+        @Override public long getLastAppliedIndex() { return store.getLastAppliedIndex(); }
+        @Override public void setLastAppliedIndex(long index) { store.setLastAppliedIndex(index); }
+        @Override public void reset() { store.reset(); }
     }
 
     private GatedAppendStorage startGatedHttpNode() throws Exception {

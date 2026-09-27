@@ -266,7 +266,8 @@
                       Exclude heavyweight tests from the default build:
                         docker - requires Docker; starts multi-node Compose clusters
                         slow   - timing-sensitive in-memory Raft cluster tests
-                      Run them explicitly:  mvn test -Dgroups=docker,slow
+                      Run them explicitly, clearing the exclusion as well:
+                        mvn test -Dgroups=docker -Dtest.excludedGroups=
                     -->
                     <excludedGroups>${test.excludedGroups}</excludedGroups>
                     <systemPropertyVariables>

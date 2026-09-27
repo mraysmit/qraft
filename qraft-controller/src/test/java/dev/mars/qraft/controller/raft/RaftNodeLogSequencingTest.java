@@ -307,6 +307,28 @@ class RaftNodeLogSequencingTest {
         storage.assertSyncCount(1);
     }
 
+    /**
+     * A WAL rejection the storage guarantees happened before any byte was written is not ambiguous.
+     * The leader's in-memory log is unchanged, the client receives the rejection, and the node keeps
+     * serving: the next write commits. (An uncertain sync failure fences instead; see
+     * {@link #uncertainLeaderSyncFailureFencesLaterAppend()}.)
+     */
+    @Test
+    void leaderAppendRejectedBeforeWriteLeavesTheLogUnchangedAndKeepsServing() {
+        storage.rejectNextAppendBeforeWrite();
+
+        CompletionException failed = assertThrows(CompletionException.class,
+                () -> await(node.submitCommand(put("rejected", "write"))));
+
+        assertInstanceOf(FileRaftStorage.WriteRejectedException.class, failed.getCause());
+        assertEquals(1, node.getLogSize(), "the in-memory log holds only the sentinel");
+        assertTrue(storage.logEntries().isEmpty());
+        assertFalse(node.isFenced());
+        assertInstanceOf(RaftCommandResult.Success.class, await(node.submitCommand(put("after", "rejection"))));
+        assertEquals(2, node.getLogSize(), "the next write takes index 1, the rejected one left no gap");
+        storage.assertAppendCount(2);
+    }
+
     @Test
     void followerRequestCannotPrepareFromLogBeingReplacedByEarlierRequest() {
         restartAsFollower();

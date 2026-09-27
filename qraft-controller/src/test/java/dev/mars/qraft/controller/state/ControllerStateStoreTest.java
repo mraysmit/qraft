@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.controller.state;
 
+import dev.mars.qraft.catalog.ServiceKey;
 import dev.mars.qraft.agent.AgentCapabilities;
 import dev.mars.qraft.agent.AgentInfo;
 import dev.mars.qraft.agent.AgentStatus;
@@ -130,13 +131,13 @@ class ControllerStateStoreTest {
                 "127.0.0.1", 8080, List.of("v1"), Map.of("team", "platform"), ServiceHealth.PASSING);
 
         assertInstanceOf(RaftCommandResult.Success.class, store.apply(CatalogCommand.register(instance)));
-        assertEquals(List.of(instance), store.getServiceCatalog().instances("payments"));
+        assertEquals(List.of(instance), store.getServiceCatalog().instances(ServiceKey.inDefaultScope("payments")));
         byte[] snapshot = store.takeSnapshot();
         assertInstanceOf(RaftCommandResult.Success.class, store.apply(CatalogCommand.deregister("payments-1")));
         assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(CatalogCommand.deregister("payments-1")));
 
         store.restoreSnapshot(snapshot);
-        assertEquals(List.of(instance), store.getServiceCatalog().instances("payments"));
+        assertEquals(List.of(instance), store.getServiceCatalog().instances(ServiceKey.inDefaultScope("payments")));
         store.reset();
         assertTrue(store.getServiceCatalog().instances().isEmpty());
     }

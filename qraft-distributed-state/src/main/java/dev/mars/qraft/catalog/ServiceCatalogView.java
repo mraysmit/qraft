@@ -26,15 +26,18 @@ import java.util.Optional;
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-26
- * @version 1.0
+ * @version 2.0
  */
 public interface ServiceCatalogView {
     Optional<ServiceInstance> find(ServiceInstanceId identity);
 
-    List<String> services();
+    /** The names of the services registered in one tenant and namespace, sorted. */
+    List<String> services(String tenantId, String namespace);
 
-    List<ServiceInstance> instances(String serviceName);
+    /** The instances of one service in its tenant and namespace, in deterministic identity order. */
+    List<ServiceInstance> instances(ServiceKey service);
 
+    /** Every instance in every tenant and namespace, for replication and expiry rather than discovery. */
     List<ServiceInstance> instances();
 
     /** Returns a view that delegates reads to {@code catalog} and cannot be cast back to it. */
@@ -42,8 +45,10 @@ public interface ServiceCatalogView {
         Objects.requireNonNull(catalog, "catalog");
         return new ServiceCatalogView() {
             @Override public Optional<ServiceInstance> find(ServiceInstanceId identity) { return catalog.find(identity); }
-            @Override public List<String> services() { return catalog.services(); }
-            @Override public List<ServiceInstance> instances(String serviceName) { return catalog.instances(serviceName); }
+            @Override public List<String> services(String tenantId, String namespace) {
+                return catalog.services(tenantId, namespace);
+            }
+            @Override public List<ServiceInstance> instances(ServiceKey service) { return catalog.instances(service); }
             @Override public List<ServiceInstance> instances() { return catalog.instances(); }
         };
     }

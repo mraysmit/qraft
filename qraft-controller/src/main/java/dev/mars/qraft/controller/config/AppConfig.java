@@ -69,11 +69,18 @@ public final class AppConfig {
     public static AppConfig get() { return instance; }
 
     public static AppConfig install(Path path) {
-        AppConfig loaded = fromFile(path);
-        loaded.validate();
-        instance = loaded;
-        loaded.logConfiguration();
-        return loaded;
+        return install(fromFile(path));
+    }
+
+    /**
+     * Validates {@code config} and makes it the process-wide configuration. A caller that installs a
+     * configuration temporarily, such as a test that launches a server, reinstalls the one it replaced.
+     */
+    public static AppConfig install(AppConfig config) {
+        config.validate();
+        instance = config;
+        config.logConfiguration();
+        return config;
     }
 
     public static AppConfig fromFile(Path path) {

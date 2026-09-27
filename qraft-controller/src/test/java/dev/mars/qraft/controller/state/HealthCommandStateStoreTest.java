@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.controller.state;
 
+import dev.mars.qraft.catalog.ServiceKey;
 import dev.mars.qraft.catalog.HealthCheckState;
 import dev.mars.qraft.catalog.HealthObservation;
 import dev.mars.qraft.catalog.ServiceCheckId;
@@ -293,7 +294,7 @@ class HealthCommandStateStoreTest {
     }
 
     private static ServiceInstance service(QraftStateStore store) {
-        return store.getServiceCatalog().instances("web").getFirst();
+        return store.getServiceCatalog().instances(new ServiceKey("tenant-a", "production", "web")).getFirst();
     }
 
     private static ServiceCheckId check(String checkId) {

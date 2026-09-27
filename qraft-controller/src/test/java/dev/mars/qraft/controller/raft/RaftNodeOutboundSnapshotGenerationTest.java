@@ -108,15 +108,14 @@ class RaftNodeOutboundSnapshotGenerationTest {
         storage.awaitBlockedSnapshotLoad();
         long oldTerm = node.getCurrentTerm();
 
-        stepDownAndReelect(oldTerm);
-        assertEquals(4, node.getNextIndex("peer-1"));
+        long nextIndex = stepDownAndReelect(oldTerm);
 
         storage.releaseBlockedSnapshotLoad();
         awaitStateLoop();
 
         assertNull(transport.pollSnapshot(200),
                 "a snapshot loaded for an old leadership must not be transmitted");
-        assertEquals(4, node.getNextIndex("peer-1"));
+        assertEquals(nextIndex, node.getNextIndex("peer-1"));
     }
 
     @Test
@@ -125,8 +124,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
         PendingSnapshot stale = transport.takeSnapshot();
         long oldTerm = stale.request().getTerm();
 
-        stepDownAndReelect(oldTerm);
-        assertEquals(4, node.getNextIndex("peer-1"));
+        long nextIndex = stepDownAndReelect(oldTerm);
 
         stale.response().complete(InstallSnapshotResponse.newBuilder()
                 .setTerm(oldTerm)
@@ -135,7 +133,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
                 .build());
         awaitStateLoop();
 
-        assertEquals(4, node.getNextIndex("peer-1"),
+        assertEquals(nextIndex, node.getNextIndex("peer-1"),
                 "an acknowledgement from an old transfer must be ignored");
     }
 
@@ -167,9 +165,11 @@ class RaftNodeOutboundSnapshotGenerationTest {
         long oldTerm = stale.request().getTerm();
 
         stepDownAndReelect(oldTerm);
-        lowerFollowerNextIndex("lower-to-three", "3");
-        lowerFollowerNextIndex("lower-to-two", "2");
-        lowerFollowerNextIndex("lower-to-one", "1");
+        // Each rejected append lowers the peer's next index by one, until it reaches entries the
+        // snapshot has compacted, which the current leadership can only send as a new transfer.
+        for (int step = 0; node.getNextIndex("peer-1") > node.getSnapshotLastIndex(); step++) {
+            lowerFollowerNextIndex("lower-" + step, String.valueOf(step));
+        }
         node.submitCommand(put("current", "snapshot-transfer"));
         PendingSnapshot current = transport.takeSnapshot();
 
@@ -267,7 +267,14 @@ class RaftNodeOutboundSnapshotGenerationTest {
         assertEquals(expected, node.getNextIndex("peer-1"));
     }
 
-    private void stepDownAndReelect(long oldTerm) throws Exception {
+    /**
+     * Re-elects the node in a later term and waits until the new leadership's no-op has committed, so no
+     * replication of it can move the peer's indexes during the test. The entries the peer rejected are
+     * uncommitted, so a new leader always appends that no-op (design section 14.3).
+     *
+     * @return the peer's next index, which a fresh leadership sets just past its log
+     */
+    private long stepDownAndReelect(long oldTerm) throws Exception {
         VoteResponse vote = await(node.handleVoteRequest(VoteRequest.newBuilder()
                 .setTerm(oldTerm + 1)
                 .setCandidateId("peer-1")
@@ -276,7 +283,14 @@ class RaftNodeOutboundSnapshotGenerationTest {
                 .build()));
         assertTrue(vote.getVoteGranted());
         awaitLeaderAtOrAboveTerm(oldTerm + 2);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (node.getCommitIndex() < node.getLastLogIndex() && System.nanoTime() < deadline) {
+            Thread.onSpinWait();
+        }
         awaitStateLoop();
+        assertEquals(node.getLastLogIndex(), node.getCommitIndex(), "the new leadership's no-op commits");
+        assertEquals(node.getLastLogIndex() + 1, node.getNextIndex("peer-1"));
+        return node.getNextIndex("peer-1");
     }
 
     private DistributedStateRaftCommand put(String key, String value) {

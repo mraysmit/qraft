@@ -17,21 +17,26 @@
 package dev.mars.qraft.controller.support;
 
 import dev.mars.qraft.controller.runtime.JavaRuntime;
+import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.AfterTestExecutionCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.ParameterContext;
 import org.junit.jupiter.api.extension.ParameterResolver;
 
+import java.util.concurrent.TimeUnit;
+
 /**
  * JUnit extension that injects a {@link JavaRuntime} and {@link JavaTestContext}, awaits test
- * completion, and closes the runtime after each test.
+ * completion, and closes the runtime after each test, waiting for it to stop. A runtime injected into a
+ * class-level method is closed after the class.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-09
  * @version 1.0
  */
-public final class JavaRuntimeExtension implements ParameterResolver, AfterTestExecutionCallback, AfterEachCallback {
+public final class JavaRuntimeExtension
+        implements ParameterResolver, AfterTestExecutionCallback, AfterEachCallback, AfterAllCallback {
     private static final ExtensionContext.Namespace NS = ExtensionContext.Namespace.create(JavaRuntimeExtension.class);
 
     @Override public boolean supportsParameter(ParameterContext parameter, ExtensionContext context) {
@@ -52,8 +57,16 @@ public final class JavaRuntimeExtension implements ParameterResolver, AfterTestE
         if (testContext != null) testContext.assertComplete();
     }
 
-    @Override public void afterEach(ExtensionContext context) {
-        JavaRuntime runtime = context.getStore(NS).remove("runtime", JavaRuntime.class);
-        if (runtime != null) runtime.close();
+    @Override public void afterEach(ExtensionContext context) throws Exception {
+        close(context.getStore(NS).remove("runtime", JavaRuntime.class));
+    }
+
+    /** Closes a runtime a class-level method such as {@code @BeforeAll} resolved, which no test owns. */
+    @Override public void afterAll(ExtensionContext context) throws Exception {
+        close(context.getStore(NS).remove("runtime", JavaRuntime.class));
+    }
+
+    private static void close(JavaRuntime runtime) throws Exception {
+        if (runtime != null) runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
     }
 }

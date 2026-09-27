@@ -40,14 +40,13 @@ import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Integration tests for Raft cluster using Docker Compose.
- * Tests real network communication and cluster behavior by starting
- * a 3-node containerised cluster via {@link SharedDockerCluster}.
- * 
- * <p>Requires Docker to be running. Excluded from the default
- * {@code mvn test} cycle; run explicitly with
- * {@code mvn test -Dgroups=docker}.</p>
- * 
+ * Tests that the shared three-server container cluster starts with every server passing its health check
+ * and elects exactly one leader. Failover and partitions are covered by {@link DockerDurableRestartTest}
+ * and {@link DockerRunningPartitionTest}.
+ *
+ * <p>Requires Docker. Excluded from the default build; run with
+ * {@code mvn test -Dgroups=docker -Dtest.excludedGroups=}.</p>
+ *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @version 1.0
  * @since 2025-08-20
@@ -135,67 +134,6 @@ public class DockerRaftClusterTest {
         logger.info("Leader elected: " + leaderId);
     }
 
-    @Test
-    void testLeaderFailureAndReelection() {
-        // Wait for initial leader election with increased timeout
-        await().atMost(Duration.ofSeconds(60))
-                .pollInterval(Duration.ofSeconds(2))
-                .conditionEvaluationListener(condition -> {
-                    if (!condition.isSatisfied()) {
-                        logger.info("Waiting for leader (failover test)...");
-                    }
-                })
-                .until(this::hasExactlyOneLeader);
-
-        // Find the current leader
-        int leaderIndex = findLeaderIndex();
-        assertTrue(leaderIndex >= 0, "Leader should be found");
-        String originalLeader = "controller" + (leaderIndex + 1);
-        logger.info("Original leader: " + originalLeader);
-
-        // TODO: Implement individual container stop/start for proper leader failover test
-        // Note: Using environment.stop() stops all containers, breaking test isolation.
-        // A proper implementation would use Docker API to stop just the leader container.
-        // For now, we verify that leader election works (which is the key functionality).
-        
-        logger.info("Leader election verified - leader failover test requires Docker API integration");
-    }
-
-    @Test
-    void testNetworkPartitionRecovery() {
-        // Wait for initial stable cluster with increased timeout
-        await().atMost(Duration.ofSeconds(60))
-                .pollInterval(Duration.ofSeconds(2))
-                .conditionEvaluationListener(condition -> {
-                    if (!condition.isSatisfied()) {
-                        logger.info("Waiting for leader (partition test)...");
-                    }
-                })
-                .until(this::hasExactlyOneLeader);
-
-        int originalLeader = findLeaderIndex();
-        logger.info("Original leader: controller" + (originalLeader + 1));
-
-        // Simulate network partition by stopping one follower
-        // In a real implementation, this would use Docker network manipulation
-        logger.info("Simulating network partition...");
-
-        // Verify cluster maintains quorum with 2/3 nodes
-        await().atMost(Duration.ofSeconds(30))
-                .pollInterval(Duration.ofSeconds(2))
-                .until(() -> {
-                    try {
-                        // Check that remaining nodes can still elect/maintain leader
-                        return hasExactlyOneLeader();
-                    } catch (Exception e) {
-                        return false;
-                    }
-                });
-
-        logger.info("Cluster maintained quorum during partition");
-        assertTrue(hasExactlyOneLeader(), "Cluster should maintain exactly one leader");
-    }
-
     // Helper methods
 
     private boolean allNodesHealthy() {
@@ -236,20 +174,6 @@ public class DockerRaftClusterTest {
         boolean result = leaderCount == 1;
         logger.info("Cluster state: " + stateLog + "| leaders=" + leaderCount + " | result=" + result);
         return result;
-    }
-
-    private int findLeaderIndex() {
-        for (int i = 0; i < nodeEndpoints.size(); i++) {
-            try {
-                String state = getNodeState(i);
-                if ("LEADER".equals(state)) {
-                    return i;
-                }
-            } catch (Exception e) {
-                // Continue searching
-            }
-        }
-        return -1;
     }
 
     private String getNodeState(int nodeIndex) throws Exception {

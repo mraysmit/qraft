@@ -6,6 +6,12 @@
  * You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package dev.mars.qraft.controller.raft.storage.snapshot;
@@ -54,6 +60,9 @@ public final class InstalledSnapshotCrashWriter {
             "DURING_SHUTDOWN_AFTER_PREFIX_COMPACTION";
     public static final String AFTER_DIVERGENT_SUFFIX_INSTALL =
             "AFTER_DIVERGENT_SUFFIX_INSTALL";
+    /** Halts once a snapshot whose boundary term conflicts with the WAL is durable, before the WAL is trimmed. */
+    public static final String AFTER_DIVERGENT_SNAPSHOT_PUBLICATION =
+            "AFTER_DIVERGENT_SNAPSHOT_PUBLICATION";
 
     private InstalledSnapshotCrashWriter() {
     }
@@ -76,7 +85,8 @@ public final class InstalledSnapshotCrashWriter {
                 : null;
         RaftStorage wal = gatedWal == null ? realWal : gatedWal;
         FileSnapshotStore snapshots = new FileSnapshotStore(reached -> {
-            if (AFTER_INSTALLED_SNAPSHOT_PUBLICATION.equals(checkpoint)
+            if ((AFTER_INSTALLED_SNAPSHOT_PUBLICATION.equals(checkpoint)
+                    || AFTER_DIVERGENT_SNAPSHOT_PUBLICATION.equals(checkpoint))
                     && reached == FileSnapshotStore.PersistenceCheckpoint.AFTER_DIRECTORY_FORCE) {
                 Runtime.getRuntime().halt(HALT_EXIT_CODE);
             }
@@ -104,7 +114,7 @@ public final class InstalledSnapshotCrashWriter {
                         .setLeaderId("leader-1")
                         .setLastIncludedIndex(3)
                         .setLastIncludedTerm(AFTER_DIVERGENT_SUFFIX_INSTALL.equals(checkpoint)
-                                ? 99 : 2)
+                                || AFTER_DIVERGENT_SNAPSHOT_PUBLICATION.equals(checkpoint) ? 99 : 2)
                         .setChunkIndex(0)
                         .setTotalChunks(1)
                         .setData(ByteString.copyFrom(snapshotBytes()))

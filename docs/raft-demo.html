@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Raft Cluster Demo</title>
+<style>
+:root{
+  --surface-0:#F7F6F2;--surface-1:#FFFFFF;
+  --text-primary:#1F1E1B;--text-secondary:#5F5E5A;--text-muted:#888780;
+  --border:rgba(31,30,27,.12);--border-strong:rgba(31,30,27,.25);--border-stronger:rgba(31,30,27,.4);
+  --bg-success:#E1F5EE;--border-success:#1D9E75;--text-success:#085041;
+  --bg-warning:#FAEEDA;--border-warning:#BA7517;--text-warning:#633806;
+  --radius:8px;
+  --font-sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --surface-0:#1A1A18;--surface-1:#262624;
+    --text-primary:#EDEBE4;--text-secondary:#B4B2A9;--text-muted:#888780;
+    --border:rgba(255,255,255,.12);--border-strong:rgba(255,255,255,.25);--border-stronger:rgba(255,255,255,.4);
+    --bg-success:#04342C;--border-success:#5DCAA5;--text-success:#9FE1CB;
+    --bg-warning:#412402;--border-warning:#EF9F27;--text-warning:#FAC775;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --surface-0:#1A1A18;--surface-1:#262624;
+  --text-primary:#EDEBE4;--text-secondary:#B4B2A9;--text-muted:#888780;
+  --border:rgba(255,255,255,.12);--border-strong:rgba(255,255,255,.25);--border-stronger:rgba(255,255,255,.4);
+  --bg-success:#04342C;--border-success:#5DCAA5;--text-success:#9FE1CB;
+  --bg-warning:#412402;--border-warning:#EF9F27;--text-warning:#FAC775;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--surface-0);color:var(--text-primary);font-family:var(--font-sans);font-size:16px;line-height:1.6}
+main{max-width:760px;margin:0 auto;padding:32px 16px 48px}
+header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
+h1{font-size:22px;font-weight:500;margin:0 0 4px}
+h2{font-size:16px;font-weight:500;margin:28px 0 8px}
+p.lead{margin:0;color:var(--text-secondary);font-size:15px}
+.card{background:var(--surface-1);border:0.5px solid var(--border);border-radius:12px;padding:16px;margin-top:20px}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.rw-btn{font:inherit;font-size:13px;padding:6px 12px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface-1);color:var(--text-primary);cursor:pointer}
+.rw-btn:hover{border-color:var(--border-stronger)}
+.rw-btn:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--border-success);outline-offset:2px}
+.rw-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}
+.rw-row label{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text-secondary);cursor:pointer}
+select{font:inherit;font-size:13px;padding:5px 8px;border-radius:var(--radius);border:0.5px solid var(--border-strong);background:var(--surface-1);color:var(--text-primary)}
+.rw-hint{font-size:12px;color:var(--text-muted)}
+.rw-leg{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--text-secondary);margin-top:12px}
+.rw-leg span{display:inline-flex;align-items:center;gap:6px}
+.rw-feed{font-size:13px;line-height:1.6;min-height:84px;margin-top:12px;padding-top:10px;border-top:0.5px solid var(--border)}
+ul.try{margin:0;padding-left:20px;color:var(--text-secondary);font-size:15px}
+ul.try li{margin-bottom:6px}
+ul.try b{color:var(--text-primary);font-weight:500}
+svg text{font-family:var(--font-sans)}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <div>
+    <h1>Raft cluster demo</h1>
+    <p class="lead">Five servers electing a leader and replicating a log, slowed down so you can watch.</p>
+  </div>
+  <button class="rw-btn" id="rf-theme" aria-label="Toggle light or dark theme">Theme</button>
+</header>
+
+<div class="card">
+  <h2 class="sr-only">Animated five-server Raft cluster showing leader election, heartbeats and log replication. Click a server to crash or restart it.</h2>
+  <svg id="rf" width="100%" viewBox="116 20 448 380" style="display:block;max-width:560px;margin:0 auto" role="img" aria-label="Raft cluster animation"></svg>
+  <div class="rw-row">
+    <button class="rw-btn" id="rf-write">Client write</button>
+    <button class="rw-btn" id="rf-crash">Crash leader</button>
+    <button class="rw-btn" id="rf-pause">Pause</button>
+    <button class="rw-btn" id="rf-reset">Reset</button>
+    <label><input type="checkbox" id="rf-auto" checked> Auto writes</label>
+    <label>Speed
+      <select id="rf-speed">
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+      </select>
+    </label>
+  </div>
+  <div class="rw-row"><span class="rw-hint">Click any server to crash or restart it.</span></div>
+  <div class="rw-leg">
+    <span><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="5" fill="#D85A30"/></svg>Vote request / reply</span>
+    <span><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="4" fill="#1D9E75"/></svg>Heartbeat / ack</span>
+    <span><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="5.5" fill="#EF9F27"/></svg>Entries being copied</span>
+    <span><svg width="12" height="12" aria-hidden="true"><circle cx="6" cy="6" r="4" fill="none" stroke="#888780" stroke-width="1.2"/></svg>Hollow = rejected</span>
+    <span><svg width="12" height="12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" rx="2" fill="#1D9E75"/></svg>Committed</span>
+    <span><svg width="12" height="12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" rx="2" fill="#EF9F27"/></svg>Not yet committed</span>
+    <span><svg width="24" height="12" aria-hidden="true"><rect x="0" y="5" width="24" height="3" rx="1.5" fill="#888780"/></svg>Election timer</span>
+  </div>
+  <div id="rf-feed" class="rw-feed" aria-live="polite"></div>
+</div>
+
+<h2>Things to try</h2>
+<ul class="try">
+  <li><b>Crash the leader.</b> The followers' timers run out, one becomes a candidate and wins. Writes are refused until the new leader is in place.</li>
+  <li><b>Crash two followers, then write.</b> Entries still commit, because the leader plus two others is 3 of 5.</li>
+  <li><b>Crash a third follower.</b> New entries stay amber (not committed), because no majority can store them.</li>
+  <li><b>Restart a server that missed entries.</b> Watch the hollow "rejected" replies: the leader backs up one entry at a time until the logs match, then fills in the gap.</li>
+</ul>
+</main>
+
+<script>
+(function(){
+const root=document.documentElement;
+document.getElementById('rf-theme').onclick=()=>{
+  const dark=root.dataset.theme?root.dataset.theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches;
+  root.dataset.theme=dark?'light':'dark';
+};
+
+const svg=document.getElementById('rf'),NS='http://www.w3.org/2000/svg';
+const N=5,MAJ=3,W=124,H=70,SL=8,HB=2200,TR=900,TMIN=4000,TMAX=7000;
+const P=[[340,65],[492,176],[434,354],[246,354],[188,176]];
+const C={vote:'#D85A30',hb:'#1D9E75',ent:'#EF9F27'};
+const autoEl=document.getElementById('rf-auto'),feedEl=document.getElementById('rf-feed'),pauseBtn=document.getElementById('rf-pause'),speedEl=document.getElementById('rf-speed');
+let now=0,msgs=[],feed=[],nodes=[],nextAuto=0,last=null;
+let paused=false;
+try{paused=matchMedia('(prefers-reduced-motion: reduce)').matches;}catch(e){}
+pauseBtn.textContent=paused?'Play':'Pause';
+
+function mk(t,a,p){const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);(p||svg).appendChild(e);return e;}
+const gL=mk('g',{}),gM=mk('g',{}),gC=mk('g',{});
+for(let i=0;i<N;i++)for(let j=i+1;j<N;j++)mk('line',{x1:P[i][0],y1:P[i][1],x2:P[j][0],y2:P[j][1],stroke:'var(--border)','stroke-width':0.5},gL);
+
+const cards=P.map((p,i)=>{
+  const x=p[0]-W/2,y=p[1]-H/2;
+  const g=mk('g',{style:'cursor:pointer',role:'button',tabindex:0,'aria-label':'Crash or restart S'+(i+1)},gC);
+  const r=mk('rect',{x:x,y:y,width:W,height:H,rx:8,'stroke-width':0.8},g);
+  const nm=mk('text',{x:x+10,y:y+18,style:'font-size:14px;font-weight:500',fill:'var(--text-primary)'},g);nm.textContent='S'+(i+1);
+  const role=mk('text',{x:x+W-10,y:y+18,'text-anchor':'end',style:'font-size:12px'},g);
+  const term=mk('text',{x:x+10,y:y+35,style:'font-size:12px',fill:'var(--text-secondary)'},g);
+  const slots=[];for(let k=0;k<SL;k++)slots.push(mk('rect',{x:x+8+k*14,y:y+42,width:11,height:12,rx:2},g));
+  mk('rect',{x:x+8,y:y+60,width:108,height:3,rx:1.5,fill:'var(--border)'},g);
+  const bar=mk('rect',{x:x+8,y:y+60,width:108,height:3,rx:1.5},g);
+  g.addEventListener('click',()=>toggle(i));
+  g.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();toggle(i);}});
+  return {g,r,role,term,slots,bar};
+});
+
+function log(s){
+  feed.unshift(s);feed=feed.slice(0,4);feedEl.innerHTML='';
+  feed.forEach((t,k)=>{const d=document.createElement('div');d.textContent=t;d.style.color=k?'var(--text-muted)':'var(--text-primary)';feedEl.appendChild(d);});
+}
+function rnd(){return TMIN+Math.random()*(TMAX-TMIN);}
+function resetTimer(n){n.tmax=rnd();n.deadline=now+n.tmax;}
+function lastTerm(n){return n.log.length?n.log[n.log.length-1]:0;}
+function S(i){return 'S'+(i+1);}
+
+function reset(){
+  now=0;msgs.forEach(m=>m.el.remove());msgs=[];feed=[];nextAuto=0;
+  nodes=P.map((_,i)=>{const t=1500+Math.random()*4500;return {id:i,role:'follower',term:0,votedFor:null,log:[],commit:0,alive:true,deadline:t,tmax:t,votes:new Set(),next:[],match:[],hbAt:0};});
+  log('All five servers start as followers with no leader. Each has a random election timer.');
+  render();
+}
+
+function send(f,t,type,d){
+  const ax=P[f][0],ay=P[f][1],bx=P[t][0],by=P[t][1],dx=bx-ax,dy=by-ay;
+  const te=Math.min(dx?(W/2+4)/Math.abs(dx):1e9,dy?(H/2+4)/Math.abs(dy):1e9);
+  let col,r,hollow=false;
+  if(type==='RV'){col=C.vote;r=5;}
+  else if(type==='RVR'){col=C.vote;r=3.5;hollow=!d.grant;}
+  else if(type==='AE'){col=d.entries.length?C.ent:C.hb;r=d.entries.length?6:4;}
+  else{col=C.hb;r=3.5;hollow=!d.ok;}
+  const sx=ax+dx*te,sy=ay+dy*te;
+  const el=mk('circle',{cx:sx,cy:sy,r:r,fill:hollow?'none':col,stroke:col,'stroke-width':1.2},gM);
+  msgs.push({f,t,type,d,t0:now,el,sx,sy,ex:bx-dx*te,ey:by-dy*te});
+}
+
+function stepDown(n,term){
+  if(term>n.term){n.term=term;n.votedFor=null;}
+  if(n.role!=='follower'){
+    const was=n.role;n.role='follower';resetTimer(n);
+    if(was==='leader')log(S(n.id)+' sees term '+term+' and steps down to follower.');
+  }
+}
+function elect(n){
+  n.role='candidate';n.term++;n.votedFor=n.id;n.votes=new Set([n.id]);resetTimer(n);
+  log(S(n.id)+' timed out and becomes a candidate for term '+n.term+'. It votes for itself and asks the others.');
+  nodes.forEach(o=>{if(o.id!==n.id)send(n.id,o.id,'RV',{term:n.term,cand:n.id,lastIdx:n.log.length,lastTerm:lastTerm(n)});});
+}
+function becomeLeader(n){
+  n.role='leader';n.next=nodes.map(()=>n.log.length);n.match=nodes.map(()=>0);n.match[n.id]=n.log.length;n.hbAt=now;nextAuto=now+2500;
+  log(S(n.id)+' won '+n.votes.size+' of 5 votes and is leader for term '+n.term+'. It starts sending heartbeats.');
+}
+function sendAE(n,i){
+  const pi=n.next[i];
+  send(n.id,i,'AE',{term:n.term,leader:n.id,prevIdx:pi,prevTerm:pi>0?n.log[pi-1]:0,entries:n.log.slice(pi),commit:n.commit});
+}
+function bcast(n){nodes.forEach(o=>{if(o.id!==n.id)sendAE(n,o.id);});}
+function advance(n){
+  n.match[n.id]=n.log.length;
+  for(let k=n.log.length;k>n.commit;k--){
+    if(n.log[k-1]!==n.term)break;
+    const cnt=nodes.filter(o=>o.id===n.id||n.match[o.id]>=k).length;
+    if(cnt>=MAJ){n.commit=k;log('Entry '+k+' is on '+cnt+' of 5 servers, so it is committed.');break;}
+  }
+}
+
+const HND={
+  RV(n,m){
+    const d=m.d;if(d.term>n.term)stepDown(n,d.term);let g=false;
+    if(d.term===n.term&&(n.votedFor===null||n.votedFor===d.cand)){
+      const lt=lastTerm(n);
+      if(d.lastTerm>lt||(d.lastTerm===lt&&d.lastIdx>=n.log.length))g=true;
+    }
+    if(g){n.votedFor=d.cand;resetTimer(n);}
+    send(n.id,d.cand,'RVR',{term:n.term,grant:g});
+  },
+  RVR(n,m){
+    const d=m.d;if(d.term>n.term){stepDown(n,d.term);return;}
+    if(n.role==='candidate'&&d.term===n.term&&d.grant){n.votes.add(m.f);if(n.votes.size>=MAJ)becomeLeader(n);}
+  },
+  AE(n,m){
+    const d=m.d;
+    if(d.term<n.term){send(n.id,m.f,'AER',{term:n.term,ok:false,match:0});return;}
+    if(d.term>n.term||n.role!=='follower')stepDown(n,d.term);
+    resetTimer(n);
+    if(d.prevIdx>n.log.length||(d.prevIdx>0&&n.log[d.prevIdx-1]!==d.prevTerm)){send(n.id,m.f,'AER',{term:n.term,ok:false,match:0});return;}
+    let idx=d.prevIdx;
+    for(const t of d.entries){if(n.log.length>idx&&n.log[idx]!==t)n.log.length=idx;if(n.log.length===idx)n.log.push(t);idx++;}
+    const lastNew=d.prevIdx+d.entries.length;
+    if(d.commit>n.commit)n.commit=Math.min(d.commit,lastNew);
+    send(n.id,m.f,'AER',{term:n.term,ok:true,match:lastNew});
+  },
+  AER(n,m){
+    const d=m.d;if(d.term>n.term){stepDown(n,d.term);return;}
+    if(n.role!=='leader'||d.term!==n.term)return;
+    if(d.ok){n.match[m.f]=Math.max(n.match[m.f],d.match);n.next[m.f]=n.match[m.f];advance(n);}
+    else{n.next[m.f]=Math.max(0,n.next[m.f]-1);log(S(m.f)+"'s log doesn't match. "+S(n.id)+' backs up one entry and retries.');sendAE(n,m.f);}
+  }
+};
+
+function leader(){
+  return nodes.filter(n=>n.alive&&n.role==='leader').sort((a,b)=>b.term-a.term)[0];
+}
+function write(){
+  nextAuto=now+6000;const L=leader();
+  if(!L){log('Client write refused: there is no leader right now (an election is in progress).');return;}
+  L.log.push(L.term);L.match[L.id]=L.log.length;
+  log('Client sends SET x='+L.log.length+'. Leader '+S(L.id)+' appends entry '+L.log.length+' and copies it out.');
+  bcast(L);L.hbAt=now+HB;
+}
+function toggle(i){
+  const n=nodes[i];
+  if(n.alive){n.alive=false;log(S(i)+(n.role==='leader'?' (the leader)':'')+' crashed. It stops sending and receiving.');}
+  else{n.alive=true;n.role='follower';n.commit=0;resetTimer(n);log(S(i)+' restarts as a follower. Its term and log were saved to disk.');}
+  render();
+}
+function tick(dt){
+  now+=dt;
+  const arr=msgs.filter(m=>now-m.t0>=TR);msgs=msgs.filter(m=>now-m.t0<TR);
+  arr.forEach(m=>{m.el.remove();const n=nodes[m.t];if(n.alive)HND[m.type](n,m);});
+  nodes.forEach(n=>{
+    if(!n.alive)return;
+    if(n.role==='leader'){if(now>=n.hbAt){bcast(n);n.hbAt=now+HB;}}
+    else if(now>=n.deadline)elect(n);
+  });
+  if(autoEl.checked&&leader()&&now>=nextAuto)write();
+}
+function render(){
+  nodes.forEach((n,i)=>{
+    const c=cards[i],st=n.alive?n.role:'down';
+    c.r.setAttribute('fill',{leader:'var(--bg-success)',candidate:'var(--bg-warning)',follower:'var(--surface-1)',down:'transparent'}[st]);
+    c.r.setAttribute('stroke',{leader:'var(--border-success)',candidate:'var(--border-warning)',follower:'var(--border-strong)',down:'var(--border-strong)'}[st]);
+    if(n.alive)c.r.removeAttribute('stroke-dasharray');else c.r.setAttribute('stroke-dasharray','4 3');
+    c.g.setAttribute('opacity',n.alive?1:0.45);
+    c.role.textContent=st;
+    c.role.setAttribute('fill',{leader:'var(--text-success)',candidate:'var(--text-warning)',follower:'var(--text-secondary)',down:'var(--text-muted)'}[st]);
+    c.term.textContent='term '+n.term+(n.alive&&n.role==='candidate'?' · '+n.votes.size+' votes':'');
+    const s0=Math.max(0,n.log.length-SL);
+    c.slots.forEach((s,k)=>{
+      const idx=s0+k;
+      if(idx<n.log.length){s.setAttribute('fill',idx<n.commit?C.hb:C.ent);s.setAttribute('stroke','none');s.removeAttribute('stroke-dasharray');}
+      else{s.setAttribute('fill','none');s.setAttribute('stroke','var(--border-strong)');s.setAttribute('stroke-width','0.6');s.setAttribute('stroke-dasharray','2 2');}
+    });
+    const f=(n.alive&&n.role!=='leader')?Math.max(0,Math.min(1,(n.deadline-now)/n.tmax)):0;
+    c.bar.setAttribute('width',108*f);c.bar.setAttribute('fill',n.role==='candidate'?C.vote:'#888780');
+  });
+  msgs.forEach(m=>{const p=Math.min(1,(now-m.t0)/TR);m.el.setAttribute('cx',m.sx+(m.ex-m.sx)*p);m.el.setAttribute('cy',m.sy+(m.ey-m.sy)*p);});
+}
+function loop(ts){
+  if(last===null)last=ts;
+  const dt=Math.min(50,ts-last);last=ts;
+  if(!paused)tick(dt*parseFloat(speedEl.value||'1'));
+  render();requestAnimationFrame(loop);
+}
+
+document.getElementById('rf-write').onclick=write;
+document.getElementById('rf-crash').onclick=()=>{const L=leader();if(L)toggle(L.id);else log('No leader to crash right now.');};
+pauseBtn.onclick=()=>{paused=!paused;pauseBtn.textContent=paused?'Play':'Pause';};
+document.getElementById('rf-reset').onclick=reset;
+reset();requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

@@ -135,91 +135,6 @@ class AgentNetworkInfoTest {
     }
 
     @Test
-    void testBandwidthUtilizationPercentage() {
-        AgentNetworkInfo networkInfo = new AgentNetworkInfo();
-        
-        networkInfo.setBandwidthCapacity(100_000_000L); // 100 MB/s
-        networkInfo.setCurrentBandwidthUsage(50_000_000L); // 50 MB/s
-        
-        assertEquals(50.0, networkInfo.getBandwidthUtilizationPercentage(), 0.01);
-        
-        // Test with zero capacity
-        networkInfo.setBandwidthCapacity(0);
-        assertEquals(0.0, networkInfo.getBandwidthUtilizationPercentage(), 0.01);
-    }
-
-    @Test
-    void testAvailableBandwidth() {
-        AgentNetworkInfo networkInfo = new AgentNetworkInfo();
-        
-        networkInfo.setBandwidthCapacity(100_000_000L); // 100 MB/s
-        networkInfo.setCurrentBandwidthUsage(30_000_000L); // 30 MB/s
-        
-        assertEquals(70_000_000L, networkInfo.getAvailableBandwidth());
-        
-        // Test when usage exceeds capacity
-        networkInfo.setCurrentBandwidthUsage(110_000_000L);
-        assertEquals(0L, networkInfo.getAvailableBandwidth());
-    }
-
-    @Test
-    void testIsNetworkHealthy() {
-        AgentNetworkInfo networkInfo = new AgentNetworkInfo();
-        
-        // Healthy network
-        networkInfo.setLatencyMs(50.0);
-        networkInfo.setPacketLossPercentage(1.0);
-        networkInfo.setBandwidthCapacity(100_000_000L);
-        networkInfo.setCurrentBandwidthUsage(50_000_000L);
-        
-        assertTrue(networkInfo.isNetworkHealthy());
-        
-        // High latency
-        networkInfo.setLatencyMs(1500.0);
-        assertFalse(networkInfo.isNetworkHealthy());
-        
-        // High packet loss
-        networkInfo.setLatencyMs(50.0);
-        networkInfo.setPacketLossPercentage(10.0);
-        assertFalse(networkInfo.isNetworkHealthy());
-        
-        // High bandwidth utilization
-        networkInfo.setPacketLossPercentage(1.0);
-        networkInfo.setCurrentBandwidthUsage(95_000_000L);
-        assertFalse(networkInfo.isNetworkHealthy());
-    }
-
-    @Test
-    void testGetNetworkQualityScore() {
-        AgentNetworkInfo networkInfo = new AgentNetworkInfo();
-        
-        // Excellent network
-        networkInfo.setLatencyMs(10.0);
-        networkInfo.setPacketLossPercentage(0.1);
-        networkInfo.setBandwidthCapacity(100_000_000L);
-        networkInfo.setCurrentBandwidthUsage(10_000_000L);
-        
-        double score = networkInfo.getNetworkQualityScore();
-        assertTrue(score > 0.9, "Excellent network should have score > 0.9, got: " + score);
-        
-        // Poor network
-        networkInfo.setLatencyMs(900.0);
-        networkInfo.setPacketLossPercentage(15.0);
-        networkInfo.setCurrentBandwidthUsage(95_000_000L);
-        
-        score = networkInfo.getNetworkQualityScore();
-        assertTrue(score < 0.35, "Poor network should have score < 0.35, got: " + score);
-        
-        // Medium network
-        networkInfo.setLatencyMs(200.0);
-        networkInfo.setPacketLossPercentage(2.0);
-        networkInfo.setCurrentBandwidthUsage(50_000_000L);
-        
-        score = networkInfo.getNetworkQualityScore();
-        assertTrue(score > 0.4 && score < 0.9, "Medium network should have score between 0.4 and 0.9, got: " + score);
-    }
-
-    @Test
     void testToString() {
         AgentNetworkInfo networkInfo = new AgentNetworkInfo();
         networkInfo.setPublicIpAddress("203.0.113.42");
@@ -232,6 +147,26 @@ class AgentNetworkInfoTest {
         assertTrue(str.contains("203.0.113.42"));
         assertTrue(str.contains("192.168.1.100"));
         assertTrue(str.contains("ethernet"));
+    }
+
+    @Test
+    void serializesOnlyReportedFieldsAndNoDerivedScores() throws Exception {
+        var fields = new java.util.TreeSet<String>();
+        new ObjectMapper().readTree(new ObjectMapper().writeValueAsString(new AgentNetworkInfo()))
+                .fieldNames().forEachRemaining(fields::add);
+
+        assertEquals(new java.util.TreeSet<>(java.util.Set.of("publicIpAddress", "privateIpAddress",
+                "networkInterfaces", "bandwidthCapacity", "currentBandwidthUsage", "latencyMs",
+                "packetLossPercentage", "connectionType", "isNatTraversal", "firewallPorts")), fields);
+    }
+
+    @Test
+    void readsTheNatTraversalFlagUnderEitherName() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+
+        assertTrue(mapper.readValue("{\"isNatTraversal\":true}", AgentNetworkInfo.class).isNatTraversal());
+        assertTrue(mapper.readValue("{\"natTraversal\":true}", AgentNetworkInfo.class).isNatTraversal(),
+                "agents built before the duplicate was removed also sent natTraversal");
     }
 
     @Test

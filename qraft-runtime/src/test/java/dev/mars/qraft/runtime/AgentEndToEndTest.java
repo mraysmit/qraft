@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.runtime;
 
+import dev.mars.qraft.catalog.ServiceKey;
 import dev.mars.qraft.agent.QraftAgent;
 import dev.mars.qraft.agent.config.AgentConfiguration;
 import dev.mars.qraft.catalog.ServiceDefinition;
@@ -67,11 +68,13 @@ class AgentEndToEndTest {
 
     @AfterEach
     void closeResources() throws Exception {
+        Cleanup cleanup = new Cleanup();
         for (QraftAgent agent : agents.reversed()) {
-            agent.shutdown().get(5, TimeUnit.SECONDS);
+            cleanup.run(() -> agent.shutdown().get(10, TimeUnit.SECONDS));
         }
-        if (controllers != null) controllers.close();
-        InMemoryTransportSimulator.clearAllTransports();
+        cleanup.run(() -> { if (controllers != null) controllers.close(); })
+                .run(InMemoryTransportSimulator::clearAllTransports)
+                .rethrow();
     }
 
     @Test
@@ -108,9 +111,9 @@ class AgentEndToEndTest {
         assertTrue(first.start().get(5, TimeUnit.SECONDS));
         assertTrue(second.start().get(5, TimeUnit.SECONDS));
         waitUntil(() -> first.healthService().isReady() && second.healthService().isReady()
-                && controllers.store(0).getServiceCatalog().instances("web").size() == 2);
+                && controllers.store(0).getServiceCatalog().instances(ServiceKey.inDefaultScope("web")).size() == 2);
 
-        var instances = controllers.store(0).getServiceCatalog().instances("web");
+        var instances = controllers.store(0).getServiceCatalog().instances(ServiceKey.inDefaultScope("web"));
         assertEquals(Set.of("agent-a", "agent-b"),
                 instances.stream().map(instance -> instance.nodeId()).collect(java.util.stream.Collectors.toSet()));
         assertEquals(Set.of("web"),
@@ -118,7 +121,7 @@ class AgentEndToEndTest {
 
         assertTrue(first.shutdown().get(5, TimeUnit.SECONDS));
         assertTrue(second.shutdown().get(5, TimeUnit.SECONDS));
-        waitUntil(() -> controllers.store(0).getServiceCatalog().instances("web").isEmpty());
+        waitUntil(() -> controllers.store(0).getServiceCatalog().instances(ServiceKey.inDefaultScope("web")).isEmpty());
     }
 
     @Test
@@ -138,13 +141,13 @@ class AgentEndToEndTest {
         assertTrue(agent.start().get(5, TimeUnit.SECONDS));
         waitUntil(() -> agent.healthService().isReady()
                 && controllers.stores().stream().allMatch(store ->
-                        store.getServiceCatalog().instances("web").size() == 1));
+                        store.getServiceCatalog().instances(ServiceKey.inDefaultScope("web")).size() == 1));
 
         assertEquals("cluster-agent", controllers.store(leader).getServiceCatalog()
-                .instances("web").getFirst().nodeId());
+                .instances(ServiceKey.inDefaultScope("web")).getFirst().nodeId());
         assertTrue(agent.shutdown().get(5, TimeUnit.SECONDS));
         waitUntil(() -> controllers.stores().stream().allMatch(store ->
-                store.getServiceCatalog().instances("web").isEmpty()));
+                store.getServiceCatalog().instances(ServiceKey.inDefaultScope("web")).isEmpty()));
     }
 
     private QraftAgent agent(String id, List<URI> endpoints,

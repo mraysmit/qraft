@@ -6,6 +6,12 @@
  * You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package dev.mars.qraft.controller.raft;
@@ -127,6 +133,76 @@ class RaftNodeRealStorageRecoveryTest {
         assertEquals(2, node.getCurrentTerm());
         assertEquals(1, node.getLastLogIndex());
         assertFalse(node.isFenced());
+    }
+
+    /**
+     * A crash mid-write leaves a structurally incomplete final record. Recovery repairs it and keeps
+     * every complete record before it (design section 14.5).
+     */
+    @Test
+    void aTornFinalRecordIsRepairedAndEveryCompleteRecordRecovers() throws Exception {
+        seedWal();
+        Path log = directory.resolve("raft.log");
+        byte[] bytes = Files.readAllBytes(log);
+        Files.write(log, java.util.Arrays.copyOf(bytes, bytes.length - 3));
+
+        QraftStateStore state = new QraftStateStore();
+        node = singleNode(state);
+        await(node.start());
+
+        assertTrue(node.isRunning());
+        assertEquals(2, node.getLastApplied(), "the two complete records are recovered and applied");
+        assertEquals("one", state.getMetadata("retained-1"));
+        assertEquals("two", state.getMetadata("retained-2"));
+        assertEquals(null, state.getMetadata("obsolete"), "the torn record is not applied");
+    }
+
+    /**
+     * A complete record whose checksum fails is not a torn write: it may be acknowledged data. The
+     * node must refuse to start and must leave the log byte for byte as it found it, rather than
+     * repair it by discarding the record (design section 14.5).
+     */
+    @Test
+    void aCorruptCompleteRecordFailsStartupAndLeavesTheLogUntouched() throws Exception {
+        seedWal();
+        Path log = directory.resolve("raft.log");
+        byte[] bytes = Files.readAllBytes(log);
+        bytes[bytes.length / 2] ^= 0x01;
+        Files.write(log, bytes);
+        RemediationTestExtension.logExpectedFailure(
+                "CORRUPT_INTERIOR_RECORD", "CorruptLogException", "fixture flips a byte inside a complete record");
+
+        node = singleNode(new QraftStateStore());
+        java.util.concurrent.ExecutionException failure = org.junit.jupiter.api.Assertions.assertThrows(
+                java.util.concurrent.ExecutionException.class,
+                () -> node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
+
+        Throwable cause = failure;
+        while (cause != null && !(cause instanceof FileRaftStorage.CorruptLogException)) cause = cause.getCause();
+        assertTrue(cause instanceof FileRaftStorage.CorruptLogException, failure.toString());
+        assertFalse(node.isRunning());
+        await(node.stop());
+        node = null;
+        org.junit.jupiter.api.Assertions.assertArrayEquals(bytes, Files.readAllBytes(log),
+                "a corrupt log is evidence, never rewritten by recovery");
+    }
+
+    private RaftNode singleNode(QraftStateStore state) {
+        RaftStorageFactory.DurableStorage durable = await(
+                RaftStorageFactory.createDurable(directory, true));
+        runtime = JavaRuntime.create();
+        return RaftNode.builder()
+                .runtime(runtime)
+                .nodeId("node-1")
+                .clusterNodes(Set.of("node-1"))
+                .transport(new NoOpTransport())
+                .stateMachine(state)
+                .commandCodec(CODEC)
+                .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
+                .snapshotEnabled(false)
+                .electionTimeout(60_000)
+                .heartbeatInterval(60_000)
+                .build();
     }
 
     @Test

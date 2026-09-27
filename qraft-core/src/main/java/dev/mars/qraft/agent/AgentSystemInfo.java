@@ -24,7 +24,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * 
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2025-08-26
- * @version 1.0
+ * @version 2.0
  */
 public class AgentSystemInfo {
 
@@ -242,56 +242,6 @@ public class AgentSystemInfo {
      */
     public void setLoadAverage(double loadAverage) {
         this.loadAverage = loadAverage;
-    }
-
-    /**
-     * Get the memory usage percentage.
-     * 
-     * @return the memory usage percentage
-     */
-    public double getMemoryUsagePercentage() {
-        if (totalMemory <= 0) {
-            return 0.0;
-        }
-        return ((double) (totalMemory - availableMemory) / totalMemory) * 100.0;
-    }
-
-    /**
-     * Get the disk usage percentage.
-     * 
-     * @return the disk usage percentage
-     */
-    public double getDiskUsagePercentage() {
-        if (totalDiskSpace <= 0) {
-            return 0.0;
-        }
-        return ((double) (totalDiskSpace - availableDiskSpace) / totalDiskSpace) * 100.0;
-    }
-
-    /**
-     * Check if the system has sufficient resources for new work.
-     * 
-     * @return true if the system has sufficient resources
-     */
-    public boolean hasSufficientResources() {
-        return getMemoryUsagePercentage() < 90.0 && 
-               getDiskUsagePercentage() < 95.0 && 
-               cpuUsage < 90.0;
-    }
-
-    /**
-     * Calculate a resource availability score (0.0 to 1.0).
-     * Higher scores indicate better resource availability.
-     * 
-     * @return the resource availability score
-     */
-    public double getResourceAvailabilityScore() {
-        double memoryScore = Math.max(0.0, (100.0 - getMemoryUsagePercentage()) / 100.0);
-        double diskScore = Math.max(0.0, (100.0 - getDiskUsagePercentage()) / 100.0);
-        double cpuScore = Math.max(0.0, (100.0 - cpuUsage) / 100.0);
-        
-        // Weighted average: memory 40%, CPU 40%, disk 20%
-        return (memoryScore * 0.4) + (cpuScore * 0.4) + (diskScore * 0.2);
     }
 
     @Override

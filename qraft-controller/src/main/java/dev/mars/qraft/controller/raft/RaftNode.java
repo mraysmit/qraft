@@ -557,6 +557,9 @@ public class RaftNode {
                 return toFuture(persistence.replayLog());
             });
         Future<Void> recovered = composeOnStateLoop(replay, entries -> {
+                if (snapshotLastIndex > 0 && conflictsWithSnapshotBoundary(entries)) {
+                    return discardInterruptedInstallationSuffix(entries.size());
+                }
                 if (snapshotLastIndex > 0) {
                     // Snapshot recovery: only replay entries AFTER the snapshot
                     int replayedCount = 0;
@@ -613,6 +616,40 @@ public class RaftNode {
             .onFailure(err -> {
                 logger.error("Recovery failed: {}", err.getMessage(), err);
             });
+    }
+
+    /**
+     * Whether the WAL holds an entry at the snapshot boundary whose term differs from the
+     * snapshot's. An installed snapshot is published before the WAL suffix that conflicts with it is
+     * truncated, so a crash between the two leaves such an entry, and every later one, from a history
+     * the snapshot replaced.
+     */
+    private boolean conflictsWithSnapshotBoundary(List<LogEntryData> entries) {
+        for (LogEntryData entry : entries) {
+            if (entry.index() == snapshotLastIndex) return entry.term() != snapshotLastTerm;
+        }
+        return false;
+    }
+
+    /**
+     * Completes the WAL compaction of an installation interrupted after its snapshot was published:
+     * removes the conflicting suffix durably, then the prefix the snapshot covers. The in-memory log
+     * keeps only the snapshot sentinel, and the retained snapshot state is what is applied.
+     */
+    private Future<Void> discardInterruptedInstallationSuffix(int walEntries) {
+        long boundary = snapshotLastIndex;
+        logger.warn("WAL entry at snapshot boundary {} conflicts with snapshot term {}; "
+                        + "discarding {} WAL entries from the history the snapshot replaced",
+                boundary, snapshotLastTerm, walEntries);
+        return transitionSequencer.submit(
+                "recovery-discard-divergent-suffix:" + boundary,
+                RaftTransitionSequencer.FailurePolicy.FENCE,
+                () -> {
+                    RaftTransitionSequencer.Ownership ownership = transitionSequencer.currentOwnership();
+                    return toFuture(persistence.truncateSuffix(ownership, boundary + 1))
+                            .compose(ignored -> toFuture(persistence.sync(ownership)))
+                            .compose(ignored -> toFuture(persistence.truncatePrefix(ownership, boundary)));
+                });
     }
 
     /**
@@ -1936,7 +1973,11 @@ public class RaftNode {
         List<Long> indices = new ArrayList<>(matchIndex.values());
         indices.add(lastLogIndex()); // Leader's match index
         Collections.sort(indices);
-        long N = indices.get(indices.size() / 2); // Majority index
+        // The highest index held by a majority: in ascending order, the members at and after this
+        // position number exactly size / 2 + 1. Taking size / 2 instead counts only half of an even-sized
+        // cluster, letting two of four members, or the leader of two alone, commit.
+        int majority = indices.size() / 2 + 1;
+        long N = indices.get(indices.size() - majority);
 
         if (N > commitIndex && hasLogEntry(N) && log.get(toArrayIndex(N)).getTerm() == currentTerm) {
             commitIndex = N;
@@ -1944,38 +1985,48 @@ public class RaftNode {
         }
     }
 
+    /**
+     * Applies committed entries in order. An entry the state machine fails to apply fences the node:
+     * skipping it would leave this replica different from every replica that applied it, whether the
+     * failure was local or the command is one an older server does not know. The applied index stays
+     * before the entry, nothing after it is applied, and a fenced node applies nothing more.
+     */
     private void applyLog() {
+        if (transitionSequencer.isFenced()) return;
         while (lastApplied < commitIndex) {
-            lastApplied++;
-            if (!hasLogEntry(lastApplied)) {
+            long index = lastApplied + 1;
+            if (!hasLogEntry(index)) {
                 // Entry already compacted by snapshot - skip
+                lastApplied = index;
                 continue;
             }
-            LogEntry entry = log.get(toArrayIndex(lastApplied));
+            LogEntry entry = log.get(toArrayIndex(index));
             RaftCommandResult<?> result = null;
-            Exception exception = null;
-
             try {
                 if (entry.getCommand() != null) {
                     result = stateMachine.apply(entry.getCommand());
                 }
-                stateMachine.setLastAppliedIndex(lastApplied);
+                stateMachine.setLastAppliedIndex(index);
             } catch (Exception e) {
-                logger.error("Failed to apply command at index {}: {}", lastApplied, e.getMessage());
-                logger.debug("Stack trace for command apply failure at index {}", lastApplied, e);
-                exception = e;
+                fenceOnApplyFailure(index, e);
+                return;
             }
+            lastApplied = index;
 
             // Complete future if this node is leader
-            Promise<RaftCommandResult<?>> promise = pendingCommands.remove(lastApplied);
-            if (promise != null) {
-                if (exception != null) {
-                    promise.fail(exception);
-                } else {
-                    promise.complete(result);
-                }
-            }
+            Promise<RaftCommandResult<?>> promise = pendingCommands.remove(index);
+            if (promise != null) promise.complete(result);
         }
+    }
+
+    private void fenceOnApplyFailure(long index, Exception failure) {
+        logger.error("Fencing node {}: committed entry {} could not be applied; this replica must not continue "
+                + "without it: {}", nodeId, index, failure.getMessage(), failure);
+        Promise<RaftCommandResult<?>> failed = pendingCommands.remove(index);
+        if (failed != null) failed.fail(failure);
+        failPendingCommands(new CommandOutcomeUnknownException(
+                "Node fenced after failing to apply committed entry " + index + "; outcome may be unknown"));
+        transitionSequencer.fence(failure);
     }
 
     // ========== SNAPSHOT SCHEDULING ==========

@@ -17,7 +17,8 @@
 package dev.mars.qraft.catalog;
 
 /**
- * Scope-qualified service name used for catalog lookups.
+ * Scope-qualified service name used for catalog lookups: the discovery grouping key. Discovery never
+ * crosses tenant or namespace, so every service-name lookup carries one.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-24
@@ -28,6 +29,11 @@ public record ServiceKey(String tenantId, String namespace, String serviceName) 
         requireText(tenantId, "tenantId");
         requireText(namespace, "namespace");
         requireText(serviceName, "serviceName");
+    }
+
+    /** The key of {@code serviceName} in the default tenant and namespace. */
+    public static ServiceKey inDefaultScope(String serviceName) {
+        return new ServiceKey(ServiceInstance.DEFAULT_SCOPE, ServiceInstance.DEFAULT_SCOPE, serviceName);
     }
 
     private static void requireText(String value, String field) {

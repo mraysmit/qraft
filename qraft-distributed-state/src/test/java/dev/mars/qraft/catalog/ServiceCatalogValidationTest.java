@@ -80,12 +80,12 @@ class ServiceCatalogValidationTest {
         catalog.register(instance("id", "payments", 8080));
         catalog.register(instance("id", "orders", 8081));
 
-        assertEquals(List.of(), catalog.instances("payments"));
-        assertEquals(List.of("orders"), catalog.services());
+        assertEquals(List.of(), catalog.instances(ServiceKey.inDefaultScope("payments")));
+        assertEquals(List.of("orders"), catalog.services(ServiceInstance.DEFAULT_SCOPE, ServiceInstance.DEFAULT_SCOPE));
         ServiceInstanceId identity = new ServiceInstanceId("default", "default", "node-1", "id");
         assertTrue(catalog.deregister(identity));
         assertFalse(catalog.deregister(identity));
-        assertEquals(List.of(), catalog.services());
+        assertEquals(List.of(), catalog.services(ServiceInstance.DEFAULT_SCOPE, ServiceInstance.DEFAULT_SCOPE));
     }
 
     private static ServiceInstance instance(String id, String name, int port) {

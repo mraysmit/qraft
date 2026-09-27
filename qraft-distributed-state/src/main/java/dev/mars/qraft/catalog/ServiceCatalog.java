@@ -31,7 +31,7 @@ import java.util.concurrent.ConcurrentMap;
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-09
- * @version 1.0
+ * @version 2.0
  */
 public final class ServiceCatalog implements ServiceCatalogView {
 
@@ -83,8 +83,11 @@ public final class ServiceCatalog implements ServiceCatalogView {
     }
 
     @Override
-    public List<String> services() {
+    public List<String> services(String tenantId, String namespace) {
+        Objects.requireNonNull(tenantId, "tenantId");
+        Objects.requireNonNull(namespace, "namespace");
         return instances.values().stream()
+                .filter(instance -> tenantId.equals(instance.tenantId()) && namespace.equals(instance.namespace()))
                 .map(ServiceInstance::serviceName)
                 .distinct()
                 .sorted()
@@ -92,15 +95,15 @@ public final class ServiceCatalog implements ServiceCatalogView {
     }
 
     @Override
-    public List<ServiceInstance> instances(String serviceName) {
-        Objects.requireNonNull(serviceName, "serviceName");
+    public List<ServiceInstance> instances(ServiceKey service) {
+        Objects.requireNonNull(service, "service");
         return instances.values().stream()
-                .filter(instance -> serviceName.equals(instance.serviceName()))
+                .filter(instance -> service.equals(instance.serviceKey()))
                 .sorted(INSTANCE_ORDER)
                 .toList();
     }
 
-    /** Returns every registration in deterministic service-id order. */
+    /** Returns every registration, in every tenant and namespace, in deterministic identity order. */
     @Override
     public List<ServiceInstance> instances() {
         return instances.values().stream()

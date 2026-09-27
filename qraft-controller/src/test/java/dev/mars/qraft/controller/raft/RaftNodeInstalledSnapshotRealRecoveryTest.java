@@ -6,6 +6,12 @@
  * You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package dev.mars.qraft.controller.raft;
@@ -42,11 +48,14 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -91,6 +100,114 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
     void divergentSuffixIsAbsentFromWalAndRecoveryAfterInstallation() throws Exception {
         verifyRecovery(InstalledSnapshotCrashWriter.AFTER_DIVERGENT_SUFFIX_INSTALL,
                 List.of(), 99, 3, false);
+    }
+
+    /**
+     * A follower publishes an installed snapshot before it truncates the WAL suffix that conflicts
+     * with it. The child process halts in that window; the follower restarts in its real cluster.
+     * The WAL entry at the snapshot boundary, and everything after it, belong to the history the
+     * snapshot replaced: recovery drops them, finishes the compaction, and a leader continues from
+     * the boundary.
+     */
+    @Test
+    void crashAfterPublishingAConflictingSnapshotDropsTheReplacedHistory() throws Exception {
+        seedWal();
+        RemediationTestExtension.logExpectedFailure(
+                InstalledSnapshotCrashWriter.AFTER_DIVERGENT_SNAPSHOT_PUBLICATION, "ProcessHalt",
+                "fixture halts after publishing a conflicting installed snapshot");
+        ProcessResult crash = runCrashWriter(InstalledSnapshotCrashWriter.AFTER_DIVERGENT_SNAPSHOT_PUBLICATION);
+        assertEquals(InstalledSnapshotCrashWriter.HALT_EXIT_CODE, crash.exitCode(), crash.output());
+        assertDurableState(3, 99, List.of(1L, 2L, 3L, 4L));
+
+        QraftStateStore state = new QraftStateStore();
+        node = follower(state);
+        await(node.start());
+
+        RaftStatus recovered = await(node.status());
+        assertEquals(3, recovered.snapshotLastIndex());
+        assertEquals(3, recovered.lastLogIndex(), "no WAL entry of the replaced history is in the log");
+        assertEquals(3, recovered.lastApplied());
+        assertEquals("three", state.getMetadata("key-3"));
+        assertNull(state.getMetadata("key-4"));
+
+        AppendEntriesResponse appended = await(node.handleAppendEntriesRequest(appendAfterBoundary()));
+        assertTrue(appended.getSuccess(), appended.toString());
+        awaitApplied(4);
+        assertEquals("after-recovery", state.getMetadata("key-5"));
+
+        await(node.stop());
+        node = null;
+        assertDurableState(3, 99, List.of(4L));
+    }
+
+    /**
+     * Recovery's own compaction removes the suffix, syncs, then removes the covered prefix. A crash
+     * between the two leaves the conflicting boundary entry without a suffix; the next recovery
+     * finds the same conflict and completes the compaction.
+     */
+    @Test
+    void recoveryCompletesACompactionThatWasItselfInterrupted() throws Exception {
+        try (FileRaftStorage wal = wal()) {
+            wal.open(directory).get(5, TimeUnit.SECONDS);
+            wal.updateMetadata(3, Optional.of("follower-1")).get(5, TimeUnit.SECONDS);
+            wal.appendEntries(List.of(
+                    entry(1, 1, "key-1", "one"),
+                    entry(2, 1, "key-2", "two"),
+                    entry(3, 2, "key-3", "three"))).get(5, TimeUnit.SECONDS);
+            wal.sync().get(5, TimeUnit.SECONDS);
+        }
+        saveConflictingSnapshot();
+
+        QraftStateStore state = new QraftStateStore();
+        node = follower(state);
+        await(node.start());
+
+        assertEquals(3, await(node.status()).lastLogIndex());
+        assertEquals("leader-three", state.getMetadata("key-3"));
+        await(node.stop());
+        node = null;
+        assertDurableState(3, 99, List.of());
+    }
+
+    /**
+     * A storage failure while recovery removes the replaced history must stop the node from
+     * starting, never let it serve a half-compacted log. The next start completes the compaction.
+     */
+    @Test
+    void aFailedCompactionFailsStartupAndTheNextStartCompletesIt() throws Exception {
+        seedWal();
+        saveConflictingSnapshot();
+        RaftStorageFactory.DurableStorage durable = await(
+                RaftStorageFactory.createDurable(directory, true));
+        runtime = JavaRuntime.create();
+        node = RaftNode.builder()
+                .runtime(runtime).nodeId("follower-1").clusterNodes(Set.of("follower-1", "leader-1"))
+                .transport(new NoOpTransport()).stateMachine(new QraftStateStore()).commandCodec(CODEC)
+                .mode(RaftNodeMode.durable(new FailingSyncStorage(durable.wal()), durable.snapshots()))
+                .snapshotEnabled(false).electionTimeout(60_000).heartbeatInterval(60_000)
+                .build();
+        RemediationTestExtension.logExpectedFailure(
+                "RECOVERY_COMPACTION_SYNC", "IOException", "fixture fails the WAL sync during recovery");
+
+        ExecutionException failure = assertThrows(ExecutionException.class,
+                () -> node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
+
+        assertEquals("Simulated recovery sync failure", rootMessage(failure), failure.toString());
+        assertFalse(node.isRunning());
+        await(node.stop());
+        node = null;
+        runtime.shutdown().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        runtime = null;
+        assertDurableState(3, 99, List.of(1L, 2L, 3L));
+
+        QraftStateStore state = new QraftStateStore();
+        node = follower(state);
+        await(node.start());
+
+        assertEquals(3, await(node.status()).lastLogIndex());
+        await(node.stop());
+        node = null;
+        assertDurableState(3, 99, List.of());
     }
 
     @Test
@@ -149,22 +266,8 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
                     .stream().map(RaftStorage.LogEntryData::index).toList());
         }
 
-        RaftStorageFactory.DurableStorage durable = await(
-                RaftStorageFactory.createDurable(directory, true));
-        runtime = JavaRuntime.create();
         QraftStateStore state = new QraftStateStore();
-        node = RaftNode.builder()
-                .runtime(runtime)
-                .nodeId("follower-1")
-                .clusterNodes(Set.of("follower-1"))
-                .transport(new NoOpTransport())
-                .stateMachine(state)
-                .commandCodec(CODEC)
-                .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
-                .snapshotEnabled(false)
-                .electionTimeout(60_000)
-                .heartbeatInterval(60_000)
-                .build();
+        node = singleNode(state);
         await(node.start());
 
         assertTrue(node.isRunning());
@@ -176,6 +279,120 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
         assertEquals("three", state.getMetadata("key-3"));
         assertEquals(expectFourthEntry ? "four" : null, state.getMetadata("key-4"));
         assertFalse(Files.exists(directory.resolve("snapshot.dat.tmp")));
+    }
+
+    private void saveConflictingSnapshot() throws Exception {
+        QraftStateStore installed = new QraftStateStore();
+        installed.apply(new DistributedStateRaftCommand(
+                DistributedStateCommand.put("key-3", "leader-three")));
+        try (FileSnapshotStore snapshots = new FileSnapshotStore()) {
+            snapshots.open(directory).get(5, TimeUnit.SECONDS);
+            snapshots.saveAtomically(new SnapshotStore.SnapshotData(installed.takeSnapshot(), 3, 99))
+                    .get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    private static String rootMessage(Throwable error) {
+        Throwable root = error;
+        while (root.getCause() != null) root = root.getCause();
+        return String.valueOf(root.getMessage());
+    }
+
+    /** Delegates to the real WAL except that {@code sync} fails. */
+    private record FailingSyncStorage(RaftStorage delegate) implements RaftStorage {
+        @Override public java.util.concurrent.CompletableFuture<Void> open(Path dataDir) { return delegate.open(dataDir); }
+        @Override public java.util.concurrent.CompletableFuture<Void> updateMetadata(long term, Optional<String> votedFor) {
+            return delegate.updateMetadata(term, votedFor);
+        }
+        @Override public java.util.concurrent.CompletableFuture<PersistentMeta> loadMetadata() { return delegate.loadMetadata(); }
+        @Override public java.util.concurrent.CompletableFuture<Void> appendEntries(List<LogEntryData> entries) {
+            return delegate.appendEntries(entries);
+        }
+        @Override public java.util.concurrent.CompletableFuture<Void> truncateSuffix(long fromIndex) {
+            return delegate.truncateSuffix(fromIndex);
+        }
+        @Override public java.util.concurrent.CompletableFuture<Void> truncatePrefix(long toIndex) {
+            return delegate.truncatePrefix(toIndex);
+        }
+        @Override public java.util.concurrent.CompletableFuture<Void> sync() {
+            return java.util.concurrent.CompletableFuture.failedFuture(
+                    new java.io.IOException("Simulated recovery sync failure"));
+        }
+        @Override public java.util.concurrent.CompletableFuture<List<LogEntryData>> replayLog() { return delegate.replayLog(); }
+        @Override public void close() { delegate.close(); }
+        @Override public java.util.concurrent.CompletableFuture<Void> closeAsync() { return delegate.closeAsync(); }
+    }
+
+    /** The follower the crash writer ran, restarted in the same two-member cluster. */
+    private RaftNode follower(QraftStateStore state) {
+        RaftStorageFactory.DurableStorage durable = await(
+                RaftStorageFactory.createDurable(directory, true));
+        runtime = JavaRuntime.create();
+        return RaftNode.builder()
+                .runtime(runtime)
+                .nodeId("follower-1")
+                .clusterNodes(Set.of("follower-1", "leader-1"))
+                .transport(new NoOpTransport())
+                .stateMachine(state)
+                .commandCodec(CODEC)
+                .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
+                .snapshotEnabled(false)
+                .electionTimeout(60_000)
+                .heartbeatInterval(60_000)
+                .build();
+    }
+
+    /** A leader of the next term appending index 4 directly after the conflicting snapshot boundary. */
+    private static AppendEntriesRequest appendAfterBoundary() {
+        return AppendEntriesRequest.newBuilder()
+                .setTerm(4).setLeaderId("leader-1")
+                .setPrevLogIndex(3).setPrevLogTerm(99).setLeaderCommit(4)
+                .addEntries(dev.mars.qraft.controller.raft.grpc.LogEntry.newBuilder()
+                        .setTerm(4).setIndex(4)
+                        .setData(ByteString.copyFrom(entry(4, 4, "key-5", "after-recovery").payload())))
+                .build();
+    }
+
+    private void awaitApplied(long index) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (await(node.status()).lastApplied() < index && System.nanoTime() < deadline) {
+            Thread.sleep(5);
+        }
+        assertEquals(index, await(node.status()).lastApplied());
+    }
+
+    private void assertDurableState(long snapshotIndex, long snapshotTerm, List<Long> walIndexes)
+            throws Exception {
+        try (FileSnapshotStore snapshots = new FileSnapshotStore()) {
+            snapshots.open(directory).get(5, TimeUnit.SECONDS);
+            SnapshotStore.SnapshotData snapshot = snapshots.loadLatest()
+                    .get(5, TimeUnit.SECONDS).orElseThrow();
+            assertEquals(snapshotIndex, snapshot.lastIncludedIndex());
+            assertEquals(snapshotTerm, snapshot.lastIncludedTerm());
+        }
+        try (FileRaftStorage wal = wal()) {
+            wal.open(directory).get(5, TimeUnit.SECONDS);
+            assertEquals(walIndexes, wal.replayLog().get(5, TimeUnit.SECONDS).stream()
+                    .map(RaftStorage.LogEntryData::index).toList());
+        }
+    }
+
+    private RaftNode singleNode(QraftStateStore state) {
+        RaftStorageFactory.DurableStorage durable = await(
+                RaftStorageFactory.createDurable(directory, true));
+        runtime = JavaRuntime.create();
+        return RaftNode.builder()
+                .runtime(runtime)
+                .nodeId("follower-1")
+                .clusterNodes(Set.of("follower-1"))
+                .transport(new NoOpTransport())
+                .stateMachine(state)
+                .commandCodec(CODEC)
+                .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
+                .snapshotEnabled(false)
+                .electionTimeout(60_000)
+                .heartbeatInterval(60_000)
+                .build();
     }
 
     private void seedWal() throws Exception {

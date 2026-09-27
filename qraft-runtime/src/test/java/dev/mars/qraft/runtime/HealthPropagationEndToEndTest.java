@@ -106,21 +106,19 @@ class HealthPropagationEndToEndTest {
 
     @AfterEach
     void closeResources() throws Exception {
-        stopReporting();
-        if (agent != null) agent.shutdown().get(10, TimeUnit.SECONDS);
-        holdObservations.set(false);
+        Cleanup cleanup = new Cleanup()
+                .run(this::stopReporting)
+                .run(() -> { if (agent != null) agent.shutdown().get(10, TimeUnit.SECONDS); })
+                .run(() -> holdObservations.set(false));
         for (RuntimeLifecycle lifecycle : lifecycles.reversed()) {
-            try {
-                lifecycle.closeAsync().get(10, TimeUnit.SECONDS);
-            } catch (Exception ignored) {
-                // Preserve the primary failure; each lifecycle is closed independently.
-            }
+            cleanup.run(() -> lifecycle.closeAsync().get(10, TimeUnit.SECONDS));
         }
-        proxies.forEach(proxy -> proxy.stop(0));
-        proxyExecutors.forEach(ExecutorService::close);
-        if (workload != null) workload.stop(0);
-        if (tcpListener != null) tcpListener.close();
-        http.close();
+        proxies.forEach(proxy -> cleanup.run(() -> proxy.stop(0)));
+        proxyExecutors.forEach(executor -> cleanup.run(executor::close));
+        cleanup.run(() -> { if (workload != null) workload.stop(0); })
+                .run(() -> { if (tcpListener != null) tcpListener.close(); })
+                .run(http::close)
+                .rethrow();
     }
 
     @Test

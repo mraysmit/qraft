@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.agent;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.util.List;
@@ -26,7 +27,7 @@ import java.util.List;
  * 
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2025-08-26
- * @version 1.0
+ * @version 2.0
  */
 public class AgentNetworkInfo {
 
@@ -215,6 +216,7 @@ public class AgentNetworkInfo {
      * 
      * @return true if NAT traversal is required
      */
+    @JsonProperty("isNatTraversal")
     public boolean isNatTraversal() {
         return isNatTraversal;
     }
@@ -224,6 +226,8 @@ public class AgentNetworkInfo {
      * 
      * @param natTraversal true if NAT traversal is required
      */
+    @JsonProperty("isNatTraversal")
+    @JsonAlias("natTraversal")
     public void setNatTraversal(boolean natTraversal) {
         isNatTraversal = natTraversal;
     }
@@ -244,58 +248,6 @@ public class AgentNetworkInfo {
      */
     public void setFirewallPorts(List<Integer> firewallPorts) {
         this.firewallPorts = firewallPorts;
-    }
-
-    /**
-     * Get the bandwidth utilization percentage.
-     * 
-     * @return the bandwidth utilization percentage
-     */
-    public double getBandwidthUtilizationPercentage() {
-        if (bandwidthCapacity <= 0) {
-            return 0.0;
-        }
-        return ((double) currentBandwidthUsage / bandwidthCapacity) * 100.0;
-    }
-
-    /**
-     * Get the available bandwidth in bytes per second.
-     * 
-     * @return the available bandwidth
-     */
-    public long getAvailableBandwidth() {
-        return Math.max(0, bandwidthCapacity - currentBandwidthUsage);
-    }
-
-    /**
-     * Check if the network connection is healthy.
-     * 
-     * @return true if the network connection is healthy
-     */
-    public boolean isNetworkHealthy() {
-        return latencyMs < 1000.0 && // Less than 1 second latency
-               packetLossPercentage < 5.0 && // Less than 5% packet loss
-               getBandwidthUtilizationPercentage() < 90.0; // Less than 90% bandwidth utilization
-    }
-
-    /**
-     * Calculate a network quality score (0.0 to 1.0).
-     * Higher scores indicate better network quality.
-     * 
-     * @return the network quality score
-     */
-    public double getNetworkQualityScore() {
-        // Latency score (lower is better)
-        double latencyScore = Math.max(0.0, Math.min(1.0, (1000.0 - latencyMs) / 1000.0));
-        
-        // Packet loss score (lower is better)
-        double packetLossScore = Math.max(0.0, (100.0 - packetLossPercentage) / 100.0);
-        
-        // Bandwidth availability score (higher is better)
-        double bandwidthScore = Math.max(0.0, (100.0 - getBandwidthUtilizationPercentage()) / 100.0);
-        
-        // Weighted average: latency 40%, packet loss 30%, bandwidth 30%
-        return (latencyScore * 0.4) + (packetLossScore * 0.3) + (bandwidthScore * 0.3);
     }
 
     @Override

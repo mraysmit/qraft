@@ -329,22 +329,4 @@ class ShutdownCoordinatorTest {
         }
     }
 
-    @Nested
-    @DisplayName("Fluent API")
-    class FluentApiTests {
-
-        @Test
-        @DisplayName("Should support fluent chaining")
-        void shouldSupportFluentChaining(JavaRuntime runtime) {
-            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime)
-                    .onDrain("drain", () -> Future.succeededFuture())
-                    .onAwaitCompletion("await", () -> Future.succeededFuture())
-                    .onServiceStop("stop", () -> Future.succeededFuture())
-                    .onResourceClose("close", () -> Future.succeededFuture());
-            
-            // Should not throw
-            assertNotNull(coordinator);
-            assertEquals(ShutdownCoordinator.State.RUNNING, coordinator.getState());
-        }
-    }
 }

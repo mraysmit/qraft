@@ -56,7 +56,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests that {@link RaftNode} sequences follower snapshot installation: publication, restore,
- * suffix retention or removal, stale and duplicate transfers, and fencing on uncertain failures.
+ * suffix retention or removal, stale and duplicate transfers, fencing on uncertain failures, and
+ * transfers in several chunks, including chunks out of order, a missing first chunk, a repeated chunk,
+ * and a transfer the leader restarts.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-14
@@ -161,6 +163,101 @@ class RaftNodeInstalledSnapshotSequencingTest {
         assertEquals(1, duplicate.getNextChunkIndex());
         assertEquals(1, storage.saveCount());
         assertEquals(1, storage.prefixTruncateCount());
+    }
+
+    @Test
+    void aTransferInThreeChunksInstallsTheWholeSnapshotOnlyAtTheLastChunk() {
+        byte[][] chunks = thirds(snapshotBytes(5, "chunked", "whole"));
+
+        for (int chunk = 0; chunk < 2; chunk++) {
+            InstallSnapshotResponse response = await(node.handleInstallSnapshot(
+                    installRequest(1, 5, 3, chunk, 3, chunks[chunk], false)));
+            assertTrue(response.getSuccess());
+            assertEquals(chunk + 1, response.getNextChunkIndex());
+            assertEquals(0, storage.saveCount(), "nothing is published before the last chunk");
+            assertEquals(0, node.getSnapshotLastIndex());
+        }
+        InstallSnapshotResponse last = await(node.handleInstallSnapshot(
+                installRequest(1, 5, 3, 2, 3, chunks[2], true)));
+
+        assertTrue(last.getSuccess());
+        assertEquals(1, storage.saveCount());
+        assertEquals(5, node.getSnapshotLastIndex());
+        assertEquals("whole", stateMachine.getMetadata("chunked"));
+    }
+
+    @Test
+    void aSkippedChunkIsRefusedWithTheCursorOfTheMissingChunk() {
+        byte[][] chunks = thirds(snapshotBytes(5, "skipped", "recovered"));
+        assertTrue(await(node.handleInstallSnapshot(
+                installRequest(1, 5, 3, 0, 3, chunks[0], false))).getSuccess());
+
+        InstallSnapshotResponse skipped = await(node.handleInstallSnapshot(
+                installRequest(1, 5, 3, 2, 3, chunks[2], true)));
+
+        assertFalse(skipped.getSuccess());
+        assertEquals(1, skipped.getNextChunkIndex(), "the follower asks for the chunk it is missing");
+        assertEquals(0, storage.saveCount());
+
+        assertTrue(await(node.handleInstallSnapshot(
+                installRequest(1, 5, 3, 1, 3, chunks[1], false))).getSuccess());
+        assertTrue(await(node.handleInstallSnapshot(
+                installRequest(1, 5, 3, 2, 3, chunks[2], true))).getSuccess());
+        assertEquals("recovered", stateMachine.getMetadata("skipped"),
+                "the transfer completes from the cursor with the original bytes");
+    }
+
+    @Test
+    void aTransferThatDoesNotStartAtTheFirstChunkIsRefusedFromTheStart() {
+        byte[][] chunks = thirds(snapshotBytes(5, "no", "start"));
+
+        InstallSnapshotResponse response = await(node.handleInstallSnapshot(
+                installRequest(1, 5, 3, 1, 3, chunks[1], false)));
+
+        assertFalse(response.getSuccess());
+        assertEquals(0, response.getNextChunkIndex());
+        assertEquals(InstallSnapshotResponse.RejectionReason.ASSEMBLER_STATE_LOST, response.getRejectionReason());
+        assertEquals(0, storage.saveCount());
+    }
+
+    @Test
+    void aRepeatedChunkIsNotAppendedTwice() {
+        byte[][] chunks = thirds(snapshotBytes(5, "repeated", "once"));
+        assertTrue(await(node.handleInstallSnapshot(
+                installRequest(1, 5, 3, 0, 3, chunks[0], false))).getSuccess());
+
+        InstallSnapshotResponse repeat = await(node.handleInstallSnapshot(
+                installRequest(1, 5, 3, 0, 3, chunks[0], false)));
+        assertFalse(repeat.getSuccess());
+        assertEquals(1, repeat.getNextChunkIndex(), "the follower keeps its cursor");
+
+        assertTrue(await(node.handleInstallSnapshot(
+                installRequest(1, 5, 3, 1, 3, chunks[1], false))).getSuccess());
+        assertTrue(await(node.handleInstallSnapshot(
+                installRequest(1, 5, 3, 2, 3, chunks[2], true))).getSuccess());
+        assertEquals("once", stateMachine.getMetadata("repeated"),
+                "a duplicated chunk would corrupt the assembled bytes");
+    }
+
+    @Test
+    void aLeaderThatRestartsWithANewerSnapshotReplacesThePartialTransfer() {
+        byte[][] older = thirds(snapshotBytes(5, "older", "partial"));
+        assertTrue(await(node.handleInstallSnapshot(
+                installRequest(1, 5, 3, 0, 3, older[0], false))).getSuccess());
+        assertTrue(await(node.handleInstallSnapshot(
+                installRequest(1, 5, 3, 1, 3, older[1], false))).getSuccess());
+
+        byte[][] newer = thirds(snapshotBytes(8, "newer", "complete"));
+        for (int chunk = 0; chunk < 3; chunk++) {
+            InstallSnapshotResponse response = await(node.handleInstallSnapshot(
+                    installRequest(1, 8, 3, chunk, 3, newer[chunk], chunk == 2)));
+            assertTrue(response.getSuccess(), "chunk " + chunk + ": " + response);
+        }
+
+        assertEquals(1, storage.saveCount());
+        assertEquals(8, node.getSnapshotLastIndex());
+        assertEquals("complete", stateMachine.getMetadata("newer"));
+        assertNull(stateMachine.getMetadata("older"), "no byte of the abandoned transfer is installed");
     }
 
     @Test
@@ -420,6 +517,12 @@ class RaftNodeInstalledSnapshotSequencingTest {
         state.apply(put(key, value));
         state.setLastAppliedIndex(index);
         return state.takeSnapshot();
+    }
+
+    private static byte[][] thirds(byte[] bytes) {
+        int first = bytes.length / 3;
+        int second = 2 * bytes.length / 3;
+        return new byte[][]{slice(bytes, 0, first), slice(bytes, first, second), slice(bytes, second, bytes.length)};
     }
 
     private static byte[] slice(byte[] bytes, int from, int to) {

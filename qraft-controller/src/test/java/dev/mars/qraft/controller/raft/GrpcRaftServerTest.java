@@ -719,7 +719,7 @@ class GrpcRaftServerTest {
     }
 
     @Test
-    @DisplayName("Request should fail with very short deadline")
+    @DisplayName("Request with an expired deadline fails with DEADLINE_EXCEEDED")
     void testRequestWithVeryShortDeadline() throws Exception {
         startServerAndConnect();
         
@@ -730,17 +730,13 @@ class GrpcRaftServerTest {
                 .setLastLogTerm(0)
                 .build();
         
-        // Use extremely short deadline - may or may not fail depending on timing
-        // This test verifies the deadline mechanism works
-        RaftServiceGrpc.RaftServiceBlockingStub stubWithDeadline = 
-                blockingStub.withDeadlineAfter(1, TimeUnit.NANOSECONDS);
-        
-        // Should either succeed quickly or timeout
-        try {
-            stubWithDeadline.requestVote(request);
-        } catch (StatusRuntimeException e) {
-            assertEquals(Status.Code.DEADLINE_EXCEEDED, e.getStatus().getCode());
-        }
+        // A deadline that has already passed fails the call before it is sent, whatever the timing.
+        RaftServiceGrpc.RaftServiceBlockingStub stubWithDeadline =
+                blockingStub.withDeadline(Deadline.after(-1, TimeUnit.SECONDS));
+
+        StatusRuntimeException expired = assertThrows(StatusRuntimeException.class,
+                () -> stubWithDeadline.requestVote(request));
+        assertEquals(Status.Code.DEADLINE_EXCEEDED, expired.getStatus().getCode());
     }
 
     // ========== STRESS TESTS ==========
@@ -864,34 +860,28 @@ class GrpcRaftServerTest {
     void testAppendEntriesLargeEntries() throws Exception {
         startServerAndConnect();
         
-        // Create a large entry (1MB of data)
-        byte[] largeData = new byte[1024 * 1024];
-        java.util.Arrays.fill(largeData, (byte) 'X');
-        
+        // A real encoded command about 1 MB long, well inside the transport's message limit. The term is
+        // beyond any the single-member node can reach by electing itself.
+        byte[] command = new ProtobufRaftCommandCodec().serialize(new DistributedStateRaftCommand(
+                dev.mars.qraft.distributedstate.DistributedStateCommand.put("large", "X".repeat(1024 * 1024))));
         dev.mars.qraft.controller.raft.grpc.LogEntry entry = dev.mars.qraft.controller.raft.grpc.LogEntry.newBuilder()
-                .setTerm(1)
+                .setTerm(100)
                 .setIndex(1)
-                .setData(com.google.protobuf.ByteString.copyFrom(largeData))
+                .setData(com.google.protobuf.ByteString.copyFrom(command))
                 .build();
-        
         AppendEntriesRequest request = AppendEntriesRequest.newBuilder()
-                .setTerm(1)
+                .setTerm(100)
                 .setLeaderId("leader1")
                 .setPrevLogIndex(0)
                 .setPrevLogTerm(0)
                 .setLeaderCommit(0)
                 .addEntries(entry)
                 .build();
-        
-        // Server may reject due to deserialization issues for non-Java-serialized data
-        // The important thing is that it handles this gracefully (doesn't crash)
-        try {
-            AppendEntriesResponse response = blockingStub.appendEntries(request);
-            assertNotNull(response);
-        } catch (io.grpc.StatusRuntimeException e) {
-            // Expected - server may fail to deserialize the large non-serialized entry
-            // This is correct behavior - we're testing the server doesn't crash
-        }
+
+        AppendEntriesResponse response = blockingStub.withDeadlineAfter(10, TimeUnit.SECONDS).appendEntries(request);
+
+        assertTrue(response.getSuccess(), response.toString());
+        assertEquals(1, response.getMatchIndex());
     }
 
     @Test

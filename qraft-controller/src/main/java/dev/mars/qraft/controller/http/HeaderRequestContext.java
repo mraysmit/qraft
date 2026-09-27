@@ -46,7 +46,8 @@ final class HeaderRequestContext implements RequestContext {
     @Override public String namespace() { return namespace; }
     @Override public String nodeId() { return nodeId; }
 
-    private static String optionalScope(HttpExchange exchange, String header) {
+    /** Reads an optional scope header: absent means the default scope, and blank is rejected. */
+    static String optionalScope(HttpExchange exchange, String header) {
         String value = exchange.getRequestHeaders().getFirst(header);
         if (value == null) return ServiceInstance.DEFAULT_SCOPE;
         if (value.isBlank()) throw new IllegalArgumentException(header + " must not be blank");
