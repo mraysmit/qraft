@@ -105,8 +105,39 @@ final class DockerHealthApi {
 
     /** {@code snapshotLastIndex} from {@code /raft/status}, or -1. */
     static long snapshotLastIndex(String server) {
+        return raftStatus(server, "snapshotLastIndex");
+    }
+
+    /** One numeric field of {@code /raft/status}, which the server reads as one consistent view, or -1. */
+    static long raftStatus(String server, String field) {
         JsonNode status = get(server + "/raft/status");
-        return status == null ? -1 : status.path("snapshotLastIndex").asLong(-1);
+        return status == null ? -1 : status.path(field).asLong(-1);
+    }
+
+    /** The {@code ?passing} view of {@code web}, or {@code null} when the server does not answer. */
+    static JsonNode passingWeb(String server) {
+        return get(server + "/v1/health/service/web?passing");
+    }
+
+    /**
+     * Registers an unrelated service in its own tenant and namespace through {@code server}, which must be
+     * the leader, to add one committed log entry. Returns the HTTP status, or -1 without an answer.
+     */
+    static int registerFiller(String server, int number) {
+        String body = """
+                {"serviceId":"filler-%d","serviceName":"filler","address":"127.0.0.1","port":%d}
+                """.formatted(number, 10_000 + number);
+        try {
+            return HTTP.send(HttpRequest.newBuilder(URI.create(server + "/v1/agent/service/register"))
+                    .timeout(Duration.ofSeconds(5))
+                    .header("Content-Type", "application/json")
+                    .header("X-Qraft-Tenant", "filler").header("X-Qraft-Namespace", "filler")
+                    .header("X-Qraft-Node", "filler-node")
+                    .PUT(HttpRequest.BodyPublishers.ofString(body)).build(),
+                    HttpResponse.BodyHandlers.discarding()).statusCode();
+        } catch (Exception unreachable) {
+            return -1;
+        }
     }
 
     /** Index of the only reachable server reporting itself leader, or -1 while there is not exactly one. */

@@ -365,16 +365,6 @@ public class AgentInfo {
         return status != null && status.isHealthy();
     }
 
-    /**
-     * Check if the agent is available for new work.
-     * 
-     * @return true if the agent is available
-     */
-    public boolean isAvailable() {
-        return status == AgentStatus.HEALTHY ||
-                status == AgentStatus.ACTIVE ||
-                status == AgentStatus.IDLE;
-    }
 
     @Override
     public boolean equals(Object o) {

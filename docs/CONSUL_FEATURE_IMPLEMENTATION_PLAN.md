@@ -4,6 +4,12 @@
 
 Qraft will evolve into a Consul-like distributed service with Raft-backed state, service discovery, health monitoring, agent lifecycle management, sessions, and distributed locks.
 
+**Delivery status.** This plan defines the target feature set. What is built is
+recorded in
+[`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md)
+and in the dated task lists in this directory and its `archive/`. The checklist
+at the end of this plan was last reconciled with the code on 2026-09-27.
+
 ## 2. Target Feature Set
 
 - Raft-backed distributed key/value state
@@ -284,7 +290,9 @@ The implementation will be considered aligned with the target design when:
 
 ### Remaining implementation work
 
-- [ ] Complete server-mode configuration and bootstrap behavior.
+- [x] Complete server-mode configuration and bootstrap behavior, with static
+  membership from `server.raft.nodes`. Adding and removing servers is not
+  implemented (feature validation item 10).
 - [x] Complete versioned client-mode configuration and the one-controller catalog
   HTTP adapter with typed retryable and rejected outcomes.
 - [x] Complete controller discovery behavior: seed rotation, preferred-endpoint
@@ -295,12 +303,33 @@ The implementation will be considered aligned with the target design when:
   partial-success retention, catalog absence repair, and rejection suppression.
 - [x] Derive agent readiness from node membership, required service convergence,
   and controller-contact freshness.
-- [ ] Implement agent membership and failure detection semantics.
+- [x] Implement agent membership and failure detection semantics: unreachable
+  after the node TTL, reaped with its services after the reap delay.
 - [x] Implement service registration, catalog replication, and query behavior.
 - [x] Add composite `(tenant, namespace, node, serviceId)` catalog identity with
   node-scoped idempotent deregistration and legacy-data defaults.
-- [ ] Implement health checks and health-state propagation through Raft.
-- [ ] Implement namespaces and tenancy isolation end to end.
-- [ ] Add snapshot, restore, upgrade, and operational recovery workflows.
-- [ ] Add multi-node integration and failure-injection coverage.
+- [x] Implement health checks and health-state propagation through Raft: HTTP,
+  TCP, and TTL checks, leader-owned expiry, and automatic deregistration.
+- [ ] Implement namespaces and tenancy isolation end to end: replicated tenants
+  and namespaces, and scoped reads (feature validation item 6).
+- [x] Add snapshot, restore, upgrade, and operational recovery workflows:
+  snapshots in every role, installation, recovery, and the backup, recovery, and
+  upgrade procedures in `RAFT_STORAGE_OPERATIONS.md`.
+- [x] Add multi-node integration and failure-injection coverage, including
+  container crash, partition, and whole-cluster restart tests.
 - [x] Run the complete reactor test suite and review the resulting log.
+- [x] Remove the job-system concepts from the active build.
+- [x] Make server readiness reflect recovery, fencing, draining, and leadership
+  (feature validation item 2).
+- [ ] Complete the key/value store: tenant and namespace scoping, indexes,
+  flags, compare-and-set, and the HTTP `/v1/kv` API (phase 2; item 3).
+- [ ] Add `default`, `stale`, and `consistent` reads, and blocking queries
+  (phase 6; item 4).
+- [ ] Implement sessions, locks, and leader-election helpers (phase 5; item 5).
+- [ ] Add catalog, health, request, agent, and session metrics, and cluster
+  membership and storage status (phase 8; item 7).
+- [ ] Implement the bounded event journal (item 8).
+- [ ] Implement ACL tokens, policies, token validation, and audit events
+  (phase 7; item 9).
+- [ ] Decide on and implement server membership change, DNS discovery, and
+  persisted generated node identity (item 10).

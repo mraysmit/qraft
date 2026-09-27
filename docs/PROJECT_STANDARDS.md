@@ -91,6 +91,7 @@ Flaky tests are not tolerated. An intermittent failure is a defect: find the rac
 - Absence is proven exactly where possible, for example by showing that nothing was proposed after a synchronous step, rather than by waiting and observing nothing.
 - Liveness waits, including future `get` timeouts, polling deadlines, and request timeouts on paths expected to succeed, are generous, at least 10 seconds for in-process work and 5 seconds for local HTTP. They only bound failure diagnosis and must never be the thing that fails under machine load.
 - Callbacks are registered before the operation they observe can complete, or the test must not depend on which thread runs them.
+- A test that asserts which thread ran a callback never blocks in `join` or `get` on the same future before the callback has run: a blocked thread helps complete the future and may run the callback itself.
 - A new or changed concurrency test is run repeatedly before the change is complete.
 
 ## 5. Configuration

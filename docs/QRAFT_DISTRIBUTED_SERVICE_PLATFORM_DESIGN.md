@@ -366,8 +366,21 @@ commands to the server cluster.
 - Enters drain mode before shutdown.
 
 A server is live when its process and local health server operate. It is ready
-when it can safely serve the advertised API behavior. Readiness may depend on
-Raft recovery, quorum, and leadership according to endpoint consistency rules.
+when it can safely serve the advertised API behavior. `/health/ready` returns 200
+only when all of the following hold:
+
+- it is not draining;
+- recovery has finished;
+- it is not fenced;
+- it knows a current leader: it is the leader, or a follower of one.
+
+Otherwise it returns 503 with the error envelope. The code is `not_ready` and a
+`conditions` list names every failed condition: `draining`, `unavailable` (its
+Raft state cannot be read), `fenced`, or else `recovering`, and `no_leader`. The
+conditions are read as one consistent view on the Raft state loop. A candidate,
+or a server cut off from the majority, is unready until it rejoins a leader.
+Readiness does not yet depend on read consistency, because consistency modes do
+not exist yet. `/health/live` is unaffected by every condition.
 
 ### 6.2 Client mode
 
@@ -1345,11 +1358,23 @@ A server document uses the same envelope and keeps all server settings beneath
       "serviceName": "qraft-controller"
     },
     "shutdown": { "drainTimeoutMs": 5000, "timeoutMs": 30000 },
-    "health": { "expiryIntervalMs": 1000, "nodeTtlMs": 90000, "nodeReapAfterMs": 259200000 }
+    "health": { "expiryIntervalMs": 1000, "nodeTtlMs": 90000, "nodeReapAfterMs": 259200000 },
+    "ui": { "enabled": true, "path": "/ui/" }
   },
   "logging": { "directory": "/var/log/qraft" }
 }
 ```
+
+`server.ui` controls the embedded administrative interface (section 12.4):
+
+- `enabled` defaults to `true`. Until authentication exists, the interface is
+  read-only and the server logs a startup warning that it is unauthenticated.
+- `path` defaults to `/ui/`. It must be a lowercase, slash-terminated prefix whose
+  first segment is not `v1`, `api`, `health`, `raft`, `status`, `metrics`, or
+  `debug`.
+- `devAssetsDirectory` is an optional, development-only replacement for the
+  embedded assets. It must exist, contain `index.html`, and accompany an enabled
+  interface.
 
 Service definitions live in the `catalog.services` array; they are not encoded in
 environment variables or discovered through a separate environment-selected
@@ -1451,6 +1476,10 @@ Required signals include:
 - Request latency and errors by stable route and error code.
 - Session count, expiry count, and lock contention.
 
+`/raft/status` reports the node ID, role, term, leader, commit index, last
+applied index, last log index, snapshot index, and fenced flag as one consistent
+view read on the node's state loop.
+
 Logs carry request ID, node ID, Raft role and term where applicable, tenant, and
 namespace. Sensitive tokens and health-output secrets are never logged.
 
@@ -1528,7 +1557,7 @@ not expose the administrative routes.
 
 Current progress, the active tranche's detailed steps, and the backlog are
 tracked in the current dated task list in `docs/`
-([`task-list-multi-node-container-acceptance-2026-09-26.md`](task-list-multi-node-container-acceptance-2026-09-26.md)).
+([`task-list-platform-hygiene-and-readiness-2026-09-27.md`](task-list-platform-hygiene-and-readiness-2026-09-27.md); the administrative interface list is paused, see [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md)).
 Completed task lists are moved to `docs/archive/`.
 
 ### Tranche 0: Align the WAL and snapshot contracts
@@ -1616,14 +1645,41 @@ includes an agent container that runs health checks.
 
 ### Tranche 7: Multi-node container acceptance
 
-Status: in progress. `DockerAgentHealthTest` covers items 1 to 3.
-`DockerDurableRestartTest` covers durable server recovery without a client
-container.
+Status: complete (2026-09-27). See the archived
+[`task-list-multi-node-container-acceptance-2026-09-26.md`](archive/task-list-multi-node-container-acceptance-2026-09-26.md).
+The tests fall into two classes:
+
+- `DockerAgentHealthTest` covers items 1 to 3, and a client partitioned from
+  every server and then healed.
+- `DockerAgentRecoveryTest` covers item 4 with a running client:
+  - a whole-cluster crash that outlasts the check TTL, recovered from disk
+    without expiring anything;
+  - a killed follower that must install the leader's snapshot to learn health
+    state;
+  - a crashed and restarted client;
+  - a gracefully restarted client.
+
+The work also fixed Raft defects the tests exposed. Followers now compact their
+own logs, a follower accepts appends that overlap its snapshot, and a follower
+reports and commits only what a request verified (sections 14.3 and 14.4).
 
 1. [x] Start three server containers and one client container from one image.
 2. [x] Verify replication and discovery through every server.
 3. [x] Replace the leader and verify client recovery.
-4. [ ] Restart servers and verify durable recovery.
+4. [x] Restart servers and verify durable recovery.
+
+### Tranche 8: Embedded administrative interface
+
+Status: in progress. The increments, API prerequisites, and view map are in
+[`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md).
+This tranche delivers increments UI-0 and UI-1.
+
+1. [ ] Serve the embedded interface from the runtime JAR in server mode
+   (sections 12.4.1 and 19.6).
+2. [ ] Build the frontend reproducibly within `mvn package`.
+3. [ ] Deliver read-only discovery views on the existing APIs.
+4. [ ] Prove packaged-JAR and container delivery, with no interface in client
+   mode or when it is disabled.
 
 ## 21. Initial acceptance criteria
 
@@ -1640,6 +1696,21 @@ The first complete service-discovery slice is accepted when:
 - The shaded runtime artifact serves the embedded administrative interface in
   server mode without external asset files or an additional process.
 - The full default reactor and tagged container acceptance suite pass.
+
+Evidence as of 2026-09-27:
+
+| Criterion | Status | Evidence |
+|---|---|---|
+| One image in both modes | Met | `DockerAgentHealthTest`, `DockerAgentRecoveryTest` |
+| Same local service ID on two nodes | Met | `AgentEndToEndTest.twoAgentsCanRegisterTheSameLocalServiceId` |
+| Live and unready without controllers | Met | `DockerAgentRecoveryTest` (whole-cluster crash), `DockerAgentHealthTest` (partition) |
+| Ready after required services commit | Met | `QraftAgentTest.retriesRegistrationAndBecomesReadyWhenControllerRecovers`, `DockerAgentRecoveryTest` |
+| Registration via a follower or offline seed | Met | `AgentEndToEndTest.threeNodeClusterAcceptsAgentWhenFirstSeedIsAFollower`, `AgentHealthPublicationTest` |
+| Catalog survives restart and snapshot recovery | Met | `DockerDurableRestartTest`, `DockerAgentRecoveryTest` |
+| Leadership change keeps committed registrations | Met | `DockerDurableRestartTest.killedLeaderIsReplacedAndRejoinsWithCompleteCatalog`, `DockerAgentHealthTest` |
+| Bounded graceful deregistration; expiry handles crashes | Met | `QraftAgentTest.unreachableControllerCannotExtendShutdownPastDeadlineAndLogsOnce`, `DockerAgentHealthTest`, `CrashedAgentExpiryEndToEndTest` |
+| Embedded administrative interface | Open | Not implemented (sections 12.4 and 19.6) |
+| Full default reactor and container suite pass | Met | 807 default tests and 30 Docker-tagged tests |
 
 ## 22. Open decisions
 

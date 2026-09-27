@@ -32,6 +32,11 @@ import java.util.function.Supplier;
  * Composable asynchronous result backed by a {@link java.util.concurrent.CompletionStage}, with
  * map, compose, recover, timeout, and completion callbacks.
  *
+ * <p>A callback runs on the thread that completes the future, on the registering thread if the future has
+ * already completed, or on any thread blocked in {@code join} or {@code get} on the same future, which may
+ * help run pending callbacks when it wakes. Code that must run on a particular thread, such as a Raft state
+ * loop, checks where it runs and dispatches there itself.
+ *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-09
  * @version 1.0

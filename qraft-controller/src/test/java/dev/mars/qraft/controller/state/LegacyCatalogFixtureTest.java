@@ -92,7 +92,8 @@ class LegacyCatalogFixtureTest {
         assertEquals("legacy-host", agent.getHostname());
         assertEquals("192.0.2.10", agent.getAddress());
         assertEquals(8500, agent.getPort());
-        assertEquals(AgentStatus.ACTIVE, agent.getStatus());
+        assertEquals(AgentStatus.HEALTHY, agent.getStatus(),
+                "a snapshot written with the job system's active status restores as healthy");
         assertEquals("2.9.0", agent.getVersion());
         assertEquals("eu-west", agent.getRegion());
         assertEquals("dc-legacy", agent.getDatacenter());

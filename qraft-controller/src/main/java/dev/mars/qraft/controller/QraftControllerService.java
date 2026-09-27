@@ -19,6 +19,7 @@ package dev.mars.qraft.controller;
 import dev.mars.qraft.concurrent.Deadlines;
 import dev.mars.qraft.controller.api.DistributedStateGrpcService;
 import dev.mars.qraft.controller.config.AppConfig;
+import dev.mars.qraft.controller.ui.UiAssets;
 import dev.mars.qraft.controller.health.ExpiryScheduler;
 import dev.mars.qraft.controller.health.LeaderHealthExpiry;
 import dev.mars.qraft.controller.health.NodeExpiryPolicy;
@@ -188,7 +189,8 @@ public class QraftControllerService {
             DistributedStateGrpcService distributedStateService = new DistributedStateGrpcService(node, stateMachine);
             GrpcServiceServer externalApiServer = new GrpcServiceServer(runtime, apiGrpcPort, distributedStateService);
             this.apiGrpcServer = Optional.of(externalApiServer);
-            HttpApiServer healthServer = new HttpApiServer(config.getHttpPort(), node, stateMachine);
+            HttpApiServer healthServer = new HttpApiServer(config.getHttpPort(), node, stateMachine, Clock.systemUTC(),
+                    config.getAdminUi(), UiAssets.forConfig(config.getAdminUi()));
             this.httpApiServer = Optional.of(healthServer);
 
             // Only the leader evaluates health-check deadlines; followers apply committed expiry commands.

@@ -159,39 +159,24 @@ class AgentInfoTest {
     }
 
     @Test
-    void testIsHealthy() {
+    void onlyAHealthyNodeIsHealthy() {
         AgentInfo agentInfo = new AgentInfo();
 
         agentInfo.setStatus(AgentStatus.HEALTHY);
         assertTrue(agentInfo.isHealthy());
 
-        agentInfo.setStatus(AgentStatus.ACTIVE);
-        assertTrue(agentInfo.isHealthy());
-
-        agentInfo.setStatus(AgentStatus.IDLE);
-        assertTrue(agentInfo.isHealthy()); // IDLE delegates to AgentStatus.isHealthy()
-
-        agentInfo.setStatus(AgentStatus.FAILED);
-        assertFalse(agentInfo.isHealthy());
-
-        agentInfo.setStatus(AgentStatus.UNREACHABLE);
-        assertFalse(agentInfo.isHealthy());
+        for (AgentStatus status : java.util.List.of(AgentStatus.DEGRADED, AgentStatus.MAINTENANCE,
+                AgentStatus.UNREACHABLE, AgentStatus.FAILED)) {
+            agentInfo.setStatus(status);
+            assertFalse(agentInfo.isHealthy(), status.toString());
+        }
     }
 
     @Test
-    void testIsAvailable() {
-        AgentInfo agentInfo = new AgentInfo();
+    void anAgentHasNoWorkAvailabilityProperty() throws Exception {
+        String json = new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules()
+                .writeValueAsString(new AgentInfo("agent-1", "host", "10.0.0.1", 8080));
 
-        agentInfo.setStatus(AgentStatus.HEALTHY);
-        assertTrue(agentInfo.isAvailable());
-
-        agentInfo.setStatus(AgentStatus.IDLE);
-        assertTrue(agentInfo.isAvailable());
-
-        agentInfo.setStatus(AgentStatus.OVERLOADED);
-        assertFalse(agentInfo.isAvailable());
-
-        agentInfo.setStatus(AgentStatus.MAINTENANCE);
-        assertFalse(agentInfo.isAvailable());
+        assertFalse(json.contains("\"available\""), "the job system's availability for work is gone: " + json);
     }
 }

@@ -272,12 +272,8 @@ final class AgentCodec {
         return switch (status) {
             case REGISTERING -> AgentStatusProto.AGENT_STATUS_REGISTERING;
             case HEALTHY -> AgentStatusProto.AGENT_STATUS_HEALTHY;
-            case ACTIVE -> AgentStatusProto.AGENT_STATUS_ACTIVE;
-            case IDLE -> AgentStatusProto.AGENT_STATUS_IDLE;
             case DEGRADED -> AgentStatusProto.AGENT_STATUS_DEGRADED;
-            case OVERLOADED -> AgentStatusProto.AGENT_STATUS_OVERLOADED;
             case MAINTENANCE -> AgentStatusProto.AGENT_STATUS_MAINTENANCE;
-            case DRAINING -> AgentStatusProto.AGENT_STATUS_DRAINING;
             case UNREACHABLE -> AgentStatusProto.AGENT_STATUS_UNREACHABLE;
             case FAILED -> AgentStatusProto.AGENT_STATUS_FAILED;
             case DEREGISTERED -> AgentStatusProto.AGENT_STATUS_DEREGISTERED;
@@ -288,12 +284,12 @@ final class AgentCodec {
         return switch (status) {
             case AGENT_STATUS_REGISTERING -> AgentStatus.REGISTERING;
             case AGENT_STATUS_HEALTHY -> AgentStatus.HEALTHY;
-            case AGENT_STATUS_ACTIVE -> AgentStatus.ACTIVE;
-            case AGENT_STATUS_IDLE -> AgentStatus.IDLE;
+            // Statuses of the job system: replicated history written earlier may hold them.
+            case AGENT_STATUS_ACTIVE, AGENT_STATUS_IDLE -> AgentStatus.HEALTHY;
             case AGENT_STATUS_DEGRADED -> AgentStatus.DEGRADED;
-            case AGENT_STATUS_OVERLOADED -> AgentStatus.OVERLOADED;
+            case AGENT_STATUS_OVERLOADED -> AgentStatus.DEGRADED;
             case AGENT_STATUS_MAINTENANCE -> AgentStatus.MAINTENANCE;
-            case AGENT_STATUS_DRAINING -> AgentStatus.DRAINING;
+            case AGENT_STATUS_DRAINING -> AgentStatus.MAINTENANCE;
             case AGENT_STATUS_UNREACHABLE -> AgentStatus.UNREACHABLE;
             case AGENT_STATUS_FAILED -> AgentStatus.FAILED;
             case AGENT_STATUS_DEREGISTERED -> AgentStatus.DEREGISTERED;

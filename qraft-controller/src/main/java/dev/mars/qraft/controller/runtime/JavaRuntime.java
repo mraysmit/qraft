@@ -97,6 +97,11 @@ public final class JavaRuntime {
         return timer != null && timer.cancel(false);
     }
 
+    /**
+     * Runs {@code task} on a virtual thread and completes the returned future on this runtime's context, with
+     * the caller's logging and tracing context. Its callbacks run there unless they are registered after it
+     * completes or another thread blocked on it helps run them (see {@link Future}).
+     */
     public <T> Future<T> executeBlocking(Callable<T> task) { return executeBlocking(workers, task); }
     public <T> Future<T> executeBlocking(Callable<T> task, boolean ordered) { return executeBlocking(task); }
 

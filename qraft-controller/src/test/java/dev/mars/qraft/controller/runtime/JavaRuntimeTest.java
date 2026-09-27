@@ -74,8 +74,10 @@ class JavaRuntimeTest {
         operation.onSuccess(ignored -> callbackOnRuntime.complete(JavaRuntime.currentContext() == runtime));
         callbackRegistered.countDown();
 
-        assertTrue(operation.toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
+        // Wait on the callback, never on the operation: a thread blocked in get() on the operation's future
+        // helps complete it and may run the callback itself (reproduced 2 in 2,000 runs).
         assertTrue(callbackOnRuntime.get(10, TimeUnit.SECONDS));
+        assertTrue(operation.toCompletionStage().toCompletableFuture().getNow(false));
     }
 
     @Test

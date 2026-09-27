@@ -1,14 +1,32 @@
 # Task List: Multi-Node Container Acceptance
 
 **Date:** 2026-09-26
-**Active work:** Step 2, killed follower catches up on health state
-**Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), Tranche 7
-**Predecessor:** [`archive/task-list-health-propagation-2026-09-25.md`](archive/task-list-health-propagation-2026-09-25.md)
-**Standards:** [`PROJECT_STANDARDS.md`](PROJECT_STANDARDS.md)
+**Completed:** 2026-09-27
+**Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), Tranche 7
+**Predecessor:** [`task-list-health-propagation-2026-09-25.md`](task-list-health-propagation-2026-09-25.md)
+**Successor:** [`task-list-embedded-admin-interface-2026-09-27.md`](../task-list-embedded-admin-interface-2026-09-27.md)
+**Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
-This is the current task list for the project. When the active work is complete,
-add a completion summary, move this file to `archive/`, and start a new dated task
-list for the next backlog item.
+This task list is complete and retained as the implementation record for
+multi-node container acceptance.
+
+**Completion summary (2026-09-27).** Tranche 7 is complete:
+
+- In containers built from one image, a three-server cluster and a client-mode
+  agent survive, and converge after, each of the following:
+  - a whole-cluster crash that outlasts the check TTL;
+  - a killed follower that must install the leader's snapshot;
+  - a crashed agent;
+  - a gracefully restarted agent;
+  - an agent partitioned from every server.
+- Each Docker test was shown to fail without the behaviour it verifies, and
+  passed three consecutive runs.
+- The work found and fixed three Raft defects: followers never compacted their
+  logs; a follower refused appends that overlap its snapshot; and a follower
+  reported and committed a stale uncommitted tail, which is a safety violation.
+
+The embedded administrative interface remains the one open acceptance
+criterion.
 
 ## 1. Goal
 
@@ -198,6 +216,37 @@ and 14.4, records the append and compaction contracts.
 **Exit gate.** The Docker test passes three consecutive runs and fails when
 snapshot installation omits health state.
 
+**Status: Done 2026-09-27.**
+`DockerAgentRecoveryTest.aKilledFollowerInstallsTheLeadersSnapshotAndThenHoldsTheLeadersHealthState`
+proves the follower's health state can only have come from the installed
+snapshot:
+
+- It records a follower's last log index, kills the follower, and freezes the
+  agent, so no later observation can rebuild the checks through the log.
+- It writes filler registrations in a separate tenant until the leader's snapshot
+  covers every health entry and passes the follower's last log index.
+- After its restart, the follower's snapshot index passes its old last log
+  index, which it can reach only by installing the leader's snapshot.
+- The follower's `/v1/health/service/web` and `?passing` answers then equal the
+  leader's.
+- The unfrozen agent then passes again on every server.
+
+With `QraftStateStore` restoring snapshots without health checks, the test fails
+on that convergence condition. It then passed three consecutive runs, together
+with Step 1's test and `DockerAgentHealthTest`.
+
+Supporting changes:
+
+- `/raft/status` now reports `lastLogIndex` and `lastApplied`. It reads one
+  consistent `RaftStatus` on the node's state loop through `RaftNode.status()`.
+  Fields read one at a time from the HTTP thread could mix two moments, for
+  example during snapshot trimming (`HttpApiServerTest`).
+- The Docker agent test classes declare a 10-minute method budget. The module's
+  90-second default timeout would otherwise interrupt a test that starts its own
+  cluster before its bounded waits can report which condition failed.
+
+The full default reactor passed 807 tests.
+
 ## 6. Step 3: Agent container crash and restart
 
 These scenarios use the restart profile from Step 1.
@@ -220,6 +269,44 @@ fail without the behaviour it verifies:
   disabled, because either one alone keeps sequences increasing.
 - Item 3 fails when shutdown skips deregistration.
 
+**Status: Done 2026-09-27.** Two tests in `DockerAgentRecoveryTest` cover this
+step:
+
+- `aCrashedAgentRestartsUnderTheSameIdentityWithoutItsInstanceEverBeingRemovedOrDuplicated`
+  kills and restarts the agent container. It records the committed `http` check
+  only after the kill, once every server agrees, so no observation from the
+  killed process can still be in flight. No server ever shows the instance
+  removed or duplicated. Every server ends with one node and one passing
+  instance, with a sequence number above the recorded one. The test pins no node
+  ID, so a restart under a new identity shows up as a duplicate rather than as a
+  failure to start.
+- `aGracefullyStoppedAgentDeregistersItsServiceAndRegistersItAgainWhenItStarts`
+  finds the service gone from every server once `docker stop` returns, and
+  passing again after `docker start`.
+
+Exit-gate results:
+
+- **Identity.** With an agent ID unique to each process, the crash test fails
+  after the restart.
+- **Sequencing.** Three safeguards overlap here: clock seeding, the stale floor,
+  and a resend at the next sequence on each stale answer. Disabling clock seeding
+  and the floor together is not enough, because the resend catches up with the
+  small sequences an unseeded process reaches. The gate instead seeds sequences
+  from process uptime, which models a clock that steps back across a restart:
+  - With the stale floor intact, the crash test still passes. This shows in a
+    container that the floor rescues a restarted agent whose sequences start
+    below the servers'.
+  - With stale answers dropped, it fails: the checks expire and the service is
+    removed before the agent recovers.
+- **Deregistration.** With service deregistration skipped on shutdown, the
+  graceful test fails.
+
+The recovery class then passed three consecutive runs. The first version of the
+crash test was rejected by its own gate. It pinned the node ID, so the identity
+mutation failed before the crash. It also read the pre-crash sequence before the
+kill, so a renewal still in flight from the killed process could stand in for
+one from the new process.
+
 ## 7. Step 4: Agent partitioned from every server
 
 1. Add a Docker helper that disconnects a running container from its networks
@@ -236,6 +323,26 @@ fail without the behaviour it verifies:
 **Exit gate.** The Docker test passes three consecutive runs and fails when
 periodic reconciliation is disabled.
 
+**Status: Done 2026-09-27.**
+`DockerAgentHealthTest.anAgentCutOffFromEveryServerIsExpiredAndDeregisteredThenRejoinsWhenThePartitionHeals`
+uses `SharedDockerCluster.partitionContainer` to disconnect the running agent
+from its network without restarting it. `isolateContainerNetwork` now uses the
+same helper and then restarts the container.
+
+- A partitioned container also loses its published ports, so the test reads the
+  agent's own `/health/live` and `/health/ready` inside the container through
+  `execInService`.
+- While partitioned, the agent stays live and becomes unready. Every server shows
+  its checks expired and its service critical, and then deregisters the service.
+- After `restoreContainerNetwork`, the agent's periodic reconciliation registers
+  the service again. Every server then shows exactly one passing instance, and
+  the agent is ready.
+
+The expiry profile's controller contact freshness is now 5 seconds. With periodic
+reconciliation disabled in `QraftAgent`, the test fails waiting for the service
+to return after the partition heals. `DockerAgentHealthTest` then passed three
+consecutive runs.
+
 ## 8. Step 5: Verification and close-out
 
 1. Run the full default reactor and the full Docker-tagged suite, each new
@@ -247,6 +354,23 @@ periodic reconciliation is disabled.
    section 21. The embedded administrative interface criterion stays open,
    because that work is out of scope here.
 
+**Status: Done 2026-09-27.**
+
+- **Default reactor.** 807 tests passed.
+- **Docker-tagged suite.** 30 tests passed against a freshly built runtime JAR:
+  - `ConfigurableRaftClusterTest`, 8 tests;
+  - `DockerAgentHealthTest`, 3 tests;
+  - `DockerAgentRecoveryTest`, 4 tests;
+  - `DockerDurableRestartTest`, 8 tests;
+  - `DockerRaftClusterTest`, 4 tests;
+  - `NetworkPartitionTest`, 3 tests.
+- **Scans.** The header audit, the Mockito scan, the production
+  environment-variable, `orTimeout`, and `completeOnTimeout` scans, the
+  whitespace check, and a check for leftover mutation markers were all clean.
+  No containers were left running.
+- **Design document.** Tranche 7 is marked complete, and section 21 records the
+  evidence against each initial acceptance criterion.
+
 ## 9. Out of scope
 
 - Packaging the embedded administrative interface and its packaged-artifact
@@ -256,3 +380,6 @@ periodic reconciliation is disabled.
 - Five-node container acceptance with agents.
 - Server-side write forwarding and leader-aware client redirection.
 - ACLs, certificate-derived identity, and TLS between containers.
+
+The next active work is the embedded administrative interface, tracked in
+[`task-list-embedded-admin-interface-2026-09-27.md`](../task-list-embedded-admin-interface-2026-09-27.md).

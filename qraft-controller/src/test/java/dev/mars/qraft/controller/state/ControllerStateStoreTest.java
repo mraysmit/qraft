@@ -76,9 +76,9 @@ class ControllerStateStoreTest {
         assertTrue(store.findAgent("agent-1").isPresent());
 
         assertInstanceOf(RaftCommandResult.CasMismatch.class, store.apply(new AgentCommand.UpdateStatus(
-                "agent-1", AgentStatus.HEALTHY, AgentStatus.ACTIVE, now)));
+                "agent-1", AgentStatus.HEALTHY, AgentStatus.HEALTHY, now)));
         assertInstanceOf(RaftCommandResult.Success.class, store.apply(new AgentCommand.UpdateStatus(
-                "agent-1", AgentStatus.REGISTERING, AgentStatus.ACTIVE, now)));
+                "agent-1", AgentStatus.REGISTERING, AgentStatus.HEALTHY, now)));
 
         AgentCapabilities capabilities = new AgentCapabilities();
         capabilities.setSupportedServices(java.util.Set.of("kv"));
@@ -101,7 +101,7 @@ class ControllerStateStoreTest {
         assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(AgentCommand.heartbeat("missing")));
         assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(AgentCommand.updateCapabilities("missing", capabilities)));
         assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(AgentCommand.updateStatus(
-                "missing", AgentStatus.HEALTHY, AgentStatus.ACTIVE)));
+                "missing", AgentStatus.HEALTHY, AgentStatus.HEALTHY)));
 
         store.apply(command(DistributedStateCommand.put("feature", "enabled")));
         assertEquals("enabled", store.getMetadata("feature"));

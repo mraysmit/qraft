@@ -309,6 +309,9 @@ class HttpApiServerTest {
         assertTrue(response.body().contains("\"state\":\"LEADER\""));
         assertTrue(response.body().contains("\"term\":" + node.getCurrentTerm()));
         assertTrue(response.body().contains("\"snapshotLastIndex\":" + node.getSnapshotLastIndex()));
+        assertTrue(response.body().contains("\"lastLogIndex\":" + node.getLastLogIndex()),
+                "operators and acceptance tests need the node's last log index: " + response.body());
+        assertTrue(response.body().contains("\"lastApplied\":" + node.getLastApplied()), response.body());
     }
 
     @Test
@@ -353,6 +356,20 @@ class HttpApiServerTest {
                 "{\"agentId\":\"agent-1\",\"status\":\"not-a-status\"}").statusCode());
         assertEquals(400, request(client, "/api/v1/agents/heartbeat", "POST",
                 "{\"agentId\":\"agent-1\",\"timestamp\":\"yesterday\"}").statusCode());
+    }
+
+    @Test
+    void rejectsTheJobSystemsLegacyStatusesInHeartbeats() throws Exception {
+        QraftStateStore store = startAgentApi();
+        HttpClient client = HttpClient.newHttpClient();
+        assertEquals(201, request(client, "/api/v1/agents/register", "POST", agentRegistration()).statusCode());
+
+        for (String legacy : List.of("active", "idle", "overloaded", "draining")) {
+            assertEquals(400, request(client, "/api/v1/agents/heartbeat", "POST",
+                    "{\"agentId\":\"agent-1\",\"status\":\"" + legacy + "\"}").statusCode(), legacy);
+        }
+        assertEquals(AgentStatus.REGISTERING, store.findAgent("agent-1").orElseThrow().getStatus(),
+                "a rejected heartbeat changes nothing");
     }
 
     @Test

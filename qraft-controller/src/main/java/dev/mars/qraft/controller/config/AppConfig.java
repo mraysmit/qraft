@@ -21,6 +21,7 @@ import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import dev.mars.qraft.controller.ui.AdminUiConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,6 +35,7 @@ import java.nio.file.Path;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.StringJoiner;
 
 /**
@@ -106,9 +108,10 @@ public final class AppConfig {
         JsonNode telemetry = optionalObject(server, "telemetry");
         JsonNode shutdown = optionalObject(server, "shutdown");
         JsonNode health = optionalObject(server, "health");
+        JsonNode ui = optionalObject(server, "ui");
         JsonNode logging = optionalObject(root, "logging");
         rejectUnknown(server, "server", "id", "applicationVersion", "http", "apiGrpcPort",
-                "raft", "telemetry", "shutdown", "health");
+                "raft", "telemetry", "shutdown", "health", "ui");
         rejectUnknown(http, "server.http", "host", "port");
         rejectUnknown(raft, "server.raft", "port", "nodes", "electionTimeoutMs",
                 "heartbeatIntervalMs", "storage", "snapshot", "logHardLimit", "io");
@@ -119,6 +122,7 @@ public final class AppConfig {
                 "prometheusPort", "serviceName");
         rejectUnknown(shutdown, "server.shutdown", "drainTimeoutMs", "timeoutMs");
         rejectUnknown(health, "server.health", "expiryIntervalMs", "nodeTtlMs", "nodeReapAfterMs");
+        rejectUnknown(ui, "server.ui", "enabled", "path", "devAssetsDirectory");
         rejectUnknown(logging, "logging", "directory");
 
         Map<String, Object> values = new LinkedHashMap<>();
@@ -158,6 +162,10 @@ public final class AppConfig {
         if (nodeReapAfterMs < 0) throw new IllegalArgumentException("server.health.nodeReapAfterMs must not be negative");
         values.put("qraft.health.node-ttl-ms", nodeTtlMs);
         values.put("qraft.health.node-reap-after-ms", nodeReapAfterMs);
+        AdminUiConfig adminUi = parseAdminUi(ui);
+        values.put("qraft.ui.enabled", adminUi.enabled());
+        values.put("qraft.ui.path", adminUi.path());
+        values.put("qraft.ui.dev-assets-directory", adminUi.devAssetsDirectory().map(Path::toString).orElse(""));
         values.put("qraft.logging.directory", optionalText(logging, "directory", "./logs"));
         return new AppConfig(values);
     }
@@ -240,6 +248,23 @@ public final class AppConfig {
     public int getRaftIoQueueSize() { return getInt("qraft.raft.io.queue-size", 1000); }
     public String getVersion() { return getString("qraft.version", "2.0-ext"); }
     public String getLoggingDirectory() { return getString("qraft.logging.directory", "./logs"); }
+    /** The validated {@code server.ui} settings; parsing already rejected any invalid combination. */
+    public AdminUiConfig getAdminUi() {
+        String directory = getString("qraft.ui.dev-assets-directory", "");
+        return new AdminUiConfig(getBoolean("qraft.ui.enabled", true), getString("qraft.ui.path", AdminUiConfig.DEFAULT_PATH),
+                directory.isEmpty() ? Optional.empty() : Optional.of(Path.of(directory)));
+    }
+
+    /** Validates {@code server.ui} while the file is parsed, before any listener or file is opened. */
+    private static AdminUiConfig parseAdminUi(JsonNode ui) {
+        JsonNode directory = ui.get("devAssetsDirectory");
+        if (directory != null && (!directory.isTextual() || directory.textValue().isBlank())) {
+            throw new IllegalArgumentException("server.ui.devAssetsDirectory must be a non-blank path");
+        }
+        return new AdminUiConfig(optionalBoolean(ui, "enabled", true),
+                optionalText(ui, "path", AdminUiConfig.DEFAULT_PATH),
+                directory == null ? Optional.empty() : Optional.of(Path.of(directory.textValue().trim())));
+    }
 
     public String getString(String key, String defaultValue) {
         Object value = values.get(key);

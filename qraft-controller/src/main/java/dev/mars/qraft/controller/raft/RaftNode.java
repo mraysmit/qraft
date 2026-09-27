@@ -790,6 +790,22 @@ public class RaftNode {
         return running;
     }
 
+    /**
+     * Captures this node's Raft state on its state loop, so every field belongs to the same moment. Fails
+     * if the state loop no longer accepts work.
+     */
+    public Future<RaftStatus> status() {
+        Promise<RaftStatus> status = Promise.promise();
+        try {
+            runtime.runOnContext(ignored -> status.tryComplete(new RaftStatus(nodeId, state, currentTerm,
+                    currentLeaderId, commitIndex, lastApplied, lastLogIndex(), snapshotLastIndex, isFenced(),
+                    running)));
+        } catch (java.util.concurrent.RejectedExecutionException stopped) {
+            status.tryFail(stopped);
+        }
+        return status.future();
+    }
+
     public boolean isFenced() {
         return startupFailure != null || transitionSequencer.isFenced();
     }

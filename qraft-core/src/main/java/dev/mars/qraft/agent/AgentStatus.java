@@ -16,120 +16,62 @@
 
 package dev.mars.qraft.agent;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.EnumSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
 /**
- * Enumeration of possible agent states in the Qraft fleet.
- * These states represent the operational status and availability of agents.
+ * Lifecycle status of a client-mode node in the replicated node registry.
  *
- * <p>
- * <strong>State categories:</strong>
- * </p>
  * <ul>
- * <li><strong>Healthy</strong> ({@code HEALTHY}, {@code ACTIVE}, {@code IDLE})
- * —
- * fully operational, in good health, and available for work.</li>
- * <li><strong>Problematic</strong> ({@code DEGRADED}, {@code OVERLOADED},
- * {@code UNREACHABLE}, {@code FAILED}) —
- * experiencing issues that affect availability.</li>
- * <li><strong>Transitional</strong> ({@code REGISTERING}, {@code MAINTENANCE},
- * {@code DRAINING}) —
- * the agent is moving between operational states.</li>
- * <li><strong>Terminal</strong> ({@code DEREGISTERED}) —
- * the agent has been permanently removed; no further transitions are
- * possible.</li>
+ * <li><strong>Healthy</strong> ({@code HEALTHY}): the node is registered and heartbeating.</li>
+ * <li><strong>Problematic</strong> ({@code DEGRADED}, {@code UNREACHABLE}, {@code FAILED}): the node
+ * reports degradation, has stopped heartbeating, or needs intervention.</li>
+ * <li><strong>Transitional</strong> ({@code REGISTERING}, {@code MAINTENANCE}): the node is joining or has
+ * been taken out of service on purpose.</li>
+ * <li><strong>Terminal</strong> ({@code DEREGISTERED}): the node has been removed; no transition follows.</li>
  * </ul>
  *
- * <p>
- * {@code FAILED} is <em>not</em> terminal: a failed agent can still be
- * explicitly
- * deregistered. Only {@code DEREGISTERED} is a true terminal state.
- * </p>
+ * <p>{@code FAILED} is not terminal: a failed node can still be deregistered. The statuses of the job system
+ * Qraft was derived from ({@code active}, {@code idle}, {@code overloaded}, {@code draining}) no longer exist.
+ * Replicated state written before their removal reads through {@link #fromStoredValue}; API input through the
+ * strict {@link #fromValue} rejects them.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2025-08-26
- * @version 1.1
+ * @version 2.0
  */
 public enum AgentStatus {
 
-    /**
-     * Agent is in the process of registering with the controller.
-     * This is the initial state when an agent first connects.
-     */
-    REGISTERING("registering", "Agent is registering with the controller", false, false),
+    /** The node has registered and has not yet sent a heartbeat. */
+    REGISTERING("registering", "Agent is registering with the controller", false),
+
+    /** The node is registered and heartbeating. */
+    HEALTHY("healthy", "Agent is healthy", true),
+
+    /** The node reports degradation but is still operating. */
+    DEGRADED("degraded", "Agent is experiencing performance issues", true),
+
+    /** The node has been taken out of service on purpose. */
+    MAINTENANCE("maintenance", "Agent is in maintenance mode", false),
+
+    /** The node has stopped heartbeating for longer than the node TTL. */
+    UNREACHABLE("unreachable", "Agent is unreachable", false),
 
     /**
-     * Agent is healthy and ready to accept new work.
-     * This is the optimal steady-state for an agent that has no active jobs
-     * but has not yet been classified as {@link #IDLE}.
+     * The node has encountered a critical error and requires intervention. This is not terminal: the node
+     * can still be {@linkplain #DEREGISTERED deregistered}.
      */
-    HEALTHY("healthy", "Agent is healthy and available for work", true, true),
+    FAILED("failed", "Agent has failed and requires intervention", false),
 
-    /**
-     * Legacy alias retained for persisted-state and wire compatibility.
-     * New agents should report {@link #HEALTHY}.
-     */
-    @Deprecated(forRemoval = false)
-    ACTIVE("active", "Legacy alias for a healthy agent", true, true),
-
-    /**
-     * Legacy alias retained for persisted-state and wire compatibility.
-     * New agents should report {@link #HEALTHY}.
-     */
-    @Deprecated(forRemoval = false)
-    IDLE("idle", "Legacy alias for a healthy agent", true, true),
-
-    /**
-     * Agent is experiencing performance issues but still operational.
-     * The agent can accept work but with reduced priority.
-     */
-    DEGRADED("degraded", "Agent is experiencing performance issues", true, false),
-
-    /**
-     * Legacy alias retained for persisted-state and wire compatibility.
-     * New agents should report {@link #DEGRADED}.
-     */
-    @Deprecated(forRemoval = false)
-    OVERLOADED("overloaded", "Legacy alias for a degraded agent", true, false),
-
-    /**
-     * Agent is in planned maintenance mode.
-     * The agent will not accept new work and should drain existing jobs.
-     */
-    MAINTENANCE("maintenance", "Agent is in maintenance mode", false, false),
-
-    /**
-     * Legacy alias retained for persisted-state and wire compatibility.
-     * New agents should report {@link #MAINTENANCE} before shutdown.
-     */
-    @Deprecated(forRemoval = false)
-    DRAINING("draining", "Legacy alias for an agent leaving service", false, false),
-
-    /**
-     * Agent has failed to respond to heartbeat requests.
-     * The agent is considered unreachable and unavailable.
-     */
-    UNREACHABLE("unreachable", "Agent is unreachable", false, false),
-
-    /**
-     * Agent has encountered a critical error.
-     * The agent requires intervention before it can return to service.
-     * This is <em>not</em> a terminal state — the agent can still be
-     * {@linkplain #DEREGISTERED deregistered}.
-     */
-    FAILED("failed", "Agent has failed and requires intervention", false, false),
-
-    /**
-     * Agent has been permanently removed from the fleet.
-     * This is the only terminal state — no outgoing transitions are possible.
-     */
-    DEREGISTERED("deregistered", "Agent has been deregistered", false, false);
+    /** The node has been removed. This is the only terminal status. */
+    DEREGISTERED("deregistered", "Agent has been deregistered", false);
 
     // ── Transition table (single source of truth) ──────────────────────
 
@@ -138,18 +80,9 @@ public enum AgentStatus {
     static {
         var map = new EnumMap<AgentStatus, Set<AgentStatus>>(AgentStatus.class);
         map.put(REGISTERING, EnumSet.of(HEALTHY, FAILED));
-        map.put(HEALTHY, EnumSet.of(ACTIVE, IDLE, DEGRADED, OVERLOADED,
-                MAINTENANCE, DRAINING, UNREACHABLE, FAILED, DEREGISTERED));
-        map.put(ACTIVE, EnumSet.of(HEALTHY, IDLE, DEGRADED, OVERLOADED,
-                DRAINING, UNREACHABLE, FAILED, DEREGISTERED));
-        map.put(IDLE, EnumSet.of(HEALTHY, ACTIVE, DEGRADED, MAINTENANCE,
-                DRAINING, UNREACHABLE, FAILED, DEREGISTERED));
-        map.put(DEGRADED, EnumSet.of(HEALTHY, ACTIVE, IDLE, OVERLOADED,
-                MAINTENANCE, DRAINING, UNREACHABLE, FAILED, DEREGISTERED));
-        map.put(OVERLOADED, EnumSet.of(HEALTHY, ACTIVE, IDLE, DEGRADED,
-                DRAINING, UNREACHABLE, FAILED, DEREGISTERED));
-        map.put(MAINTENANCE, EnumSet.of(HEALTHY, DRAINING, UNREACHABLE, FAILED, DEREGISTERED));
-        map.put(DRAINING, EnumSet.of(HEALTHY, UNREACHABLE, FAILED, DEREGISTERED));
+        map.put(HEALTHY, EnumSet.of(DEGRADED, MAINTENANCE, UNREACHABLE, FAILED, DEREGISTERED));
+        map.put(DEGRADED, EnumSet.of(HEALTHY, MAINTENANCE, UNREACHABLE, FAILED, DEREGISTERED));
+        map.put(MAINTENANCE, EnumSet.of(HEALTHY, UNREACHABLE, FAILED, DEREGISTERED));
         map.put(UNREACHABLE, EnumSet.of(HEALTHY, FAILED, DEREGISTERED));
         map.put(FAILED, EnumSet.of(DEREGISTERED));
         map.put(DEREGISTERED, EnumSet.noneOf(AgentStatus.class));
@@ -157,144 +90,63 @@ public enum AgentStatus {
         TRANSITIONS = Collections.unmodifiableMap(map);
     }
 
-    // ── Instance fields ────────────────────────────────────────────────
-
     private final String value;
     private final String description;
     private final boolean operational;
-    private final boolean availableForWork;
 
     /**
-     * Constructor for agent status.
-     *
-     * @param value            the string representation of the status
-     * @param description      human-readable description of the status
-     * @param operational      whether the agent is operational (can process
-     *                         existing work)
-     * @param availableForWork whether the agent can accept new work
+     * @param value       the status's wire and JSON value
+     * @param description a human-readable description
+     * @param operational whether a node in this status is operating
      */
-    AgentStatus(String value, String description, boolean operational, boolean availableForWork) {
+    AgentStatus(String value, String description, boolean operational) {
         this.value = value;
         this.description = description;
         this.operational = operational;
-        this.availableForWork = availableForWork;
     }
 
-    // ── Accessors ──────────────────────────────────────────────────────
-
-    /**
-     * Get the string representation of the status.
-     *
-     * @return the status value
-     */
+    /** The status's wire and JSON value. */
     @JsonValue
     public String getValue() {
         return value;
     }
 
-    /**
-     * Get the human-readable description of the status.
-     *
-     * @return the status description
-     */
+    /** A human-readable description of the status. */
     public String getDescription() {
         return description;
     }
 
-    /**
-     * Check if the agent is operational.
-     * Operational agents can continue processing existing work.
-     *
-     * @return true if the agent is operational
-     */
+    /** True for {@code HEALTHY} and {@code DEGRADED}: the node is operating. */
     public boolean isOperational() {
         return operational;
     }
 
-    /**
-     * Check if the agent is available for new work.
-     *
-     * @return true if the agent can accept new jobs
-     */
-    public boolean isAvailableForWork() {
-        return availableForWork;
-    }
-
-    // ── Category queries ───────────────────────────────────────────────
-
-    /**
-     * Check if the agent is in a healthy state.
-     * A healthy agent is fully operational with no performance concerns.
-     * This includes {@code HEALTHY}, {@code ACTIVE}, and {@code IDLE}.
-     *
-     * <p>
-     * Note: this is stricter than {@link #isOperational()}, which also
-     * includes {@code DEGRADED} and {@code OVERLOADED} agents.
-     * </p>
-     *
-     * @return true if the agent is healthy
-     */
+    /** True only for {@code HEALTHY}; stricter than {@link #isOperational()}, which includes {@code DEGRADED}. */
     public boolean isHealthy() {
-        return this == HEALTHY || this == ACTIVE || this == IDLE;
+        return this == HEALTHY;
     }
 
-    /**
-     * Check if the agent is in a problematic state.
-     *
-     * @return true if the agent has issues
-     */
+    /** True for {@code DEGRADED}, {@code UNREACHABLE}, and {@code FAILED}. */
     public boolean isProblematic() {
-        return this == DEGRADED || this == OVERLOADED || this == UNREACHABLE || this == FAILED;
+        return this == DEGRADED || this == UNREACHABLE || this == FAILED;
     }
 
-    /**
-     * Check if the agent is in a transitional state.
-     *
-     * @return true if the agent is transitioning
-     */
+    /** True for {@code REGISTERING} and {@code MAINTENANCE}. */
     public boolean isTransitional() {
-        return this == REGISTERING || this == MAINTENANCE || this == DRAINING;
+        return this == REGISTERING || this == MAINTENANCE;
     }
 
-    /**
-     * Check if the agent is in a terminal state.
-     * A terminal state has no valid outgoing transitions.
-     * Only {@link #DEREGISTERED} is terminal.
-     *
-     * @return true if the agent is in a terminal state
-     */
+    /** True only for {@link #DEREGISTERED}, which has no outgoing transition. */
     public boolean isTerminal() {
         return this == DEREGISTERED;
-    }
-
-    // ── Job assignment ─────────────────────────────────────────────────
-
-    /**
-     * Get the priority level for job assignment.
-     * Higher values indicate higher priority for receiving new jobs.
-     *
-     * @return priority level (0-10)
-     */
-    public int getJobAssignmentPriority() {
-        return switch (this) {
-            case IDLE -> 10; // Highest priority — agent is ready
-            case HEALTHY -> 8; // High priority — agent is available
-            case ACTIVE -> 6; // Medium priority — agent is working but can take more
-            case DEGRADED -> 3; // Low priority — agent has issues
-            case REGISTERING -> 1; // Very low priority — agent not ready
-            case OVERLOADED, MAINTENANCE, DRAINING, UNREACHABLE, FAILED, DEREGISTERED -> 0;
-        };
     }
 
     // ── Parsing ────────────────────────────────────────────────────────
 
     /**
-     * Parse a status from its string value.
+     * Parses a status from API input, case-insensitively.
      *
-     * @param value the status value (must not be {@code null})
-     * @return the corresponding AgentStatus
-     * @throws IllegalArgumentException if the value is {@code null} or not
-     *                                  recognized
+     * @throws IllegalArgumentException if the value is {@code null} or not a current status
      */
     public static AgentStatus fromValue(String value) {
         if (value == null) {
@@ -308,42 +160,53 @@ public enum AgentStatus {
         throw new IllegalArgumentException("Unknown agent status: " + value);
     }
 
+    /**
+     * Reads a status from replicated JSON written by any version. A snapshot written before the job system's
+     * statuses were removed may hold {@code active} or {@code idle}, which read as {@link #HEALTHY};
+     * {@code overloaded}, which reads as {@link #DEGRADED}; or {@code draining}, which reads as
+     * {@link #MAINTENANCE}. Every replica therefore restores the same state.
+     */
+    @JsonCreator
+    public static AgentStatus fromStoredValue(String value) {
+        if (value != null) {
+            switch (value.toLowerCase(Locale.ROOT)) {
+                case "active", "idle" -> {
+                    return HEALTHY;
+                }
+                case "overloaded" -> {
+                    return DEGRADED;
+                }
+                case "draining" -> {
+                    return MAINTENANCE;
+                }
+                default -> {
+                    // A current status.
+                }
+            }
+        }
+        return fromValue(value);
+    }
+
     // ── State-machine transitions ──────────────────────────────────────
 
     /**
-     * Checks whether a transition from this status to the given target status is
-     * valid.
+     * Whether a transition from this status to {@code target} is valid:
      *
-     * <p>
-     * <strong>Valid transitions:</strong>
-     * </p>
-     * 
      * <pre>
-     *   REGISTERING → HEALTHY, FAILED
-     *   HEALTHY     → ACTIVE, IDLE, DEGRADED, OVERLOADED, MAINTENANCE, DRAINING, UNREACHABLE, FAILED, DEREGISTERED
-     *   ACTIVE      → HEALTHY, IDLE, DEGRADED, OVERLOADED, DRAINING, UNREACHABLE, FAILED, DEREGISTERED
-     *   IDLE        → HEALTHY, ACTIVE, DEGRADED, MAINTENANCE, DRAINING, UNREACHABLE, FAILED, DEREGISTERED
-     *   DEGRADED    → HEALTHY, ACTIVE, IDLE, OVERLOADED, MAINTENANCE, DRAINING, UNREACHABLE, FAILED, DEREGISTERED
-     *   OVERLOADED  → HEALTHY, ACTIVE, IDLE, DEGRADED, DRAINING, UNREACHABLE, FAILED, DEREGISTERED
-     *   MAINTENANCE → HEALTHY, DRAINING, UNREACHABLE, FAILED, DEREGISTERED
-     *   DRAINING    → HEALTHY, UNREACHABLE, FAILED, DEREGISTERED
-     *   UNREACHABLE → HEALTHY, FAILED, DEREGISTERED
-     *   FAILED      → DEREGISTERED
-     *   DEREGISTERED→ (terminal — no transitions)
+     *   REGISTERING  → HEALTHY, FAILED
+     *   HEALTHY      → DEGRADED, MAINTENANCE, UNREACHABLE, FAILED, DEREGISTERED
+     *   DEGRADED     → HEALTHY, MAINTENANCE, UNREACHABLE, FAILED, DEREGISTERED
+     *   MAINTENANCE  → HEALTHY, UNREACHABLE, FAILED, DEREGISTERED
+     *   UNREACHABLE  → HEALTHY, FAILED, DEREGISTERED
+     *   FAILED       → DEREGISTERED
+     *   DEREGISTERED → (terminal)
      * </pre>
-     *
-     * @param target the target status to transition to
-     * @return {@code true} if the transition is valid, {@code false} otherwise
      */
     public boolean canTransitionTo(AgentStatus target) {
         return TRANSITIONS.getOrDefault(this, EnumSet.noneOf(AgentStatus.class)).contains(target);
     }
 
-    /**
-     * Returns all valid target statuses that this status can transition to.
-     *
-     * @return unmodifiable set of valid target statuses (empty for terminal states)
-     */
+    /** The statuses this status can transition to; empty for the terminal status. */
     public Set<AgentStatus> getValidTransitions() {
         return TRANSITIONS.getOrDefault(this, Collections.emptySet());
     }

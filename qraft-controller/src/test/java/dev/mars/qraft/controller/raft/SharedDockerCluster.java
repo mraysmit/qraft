@@ -287,6 +287,17 @@ public final class SharedDockerCluster {
      */
     public static synchronized void isolateContainerNetwork(
             ComposeContainer cluster, String serviceName) {
+        String containerId = partitionContainer(cluster, serviceName);
+        DockerClientFactory.instance().client().restartContainerCmd(containerId).exec();
+    }
+
+    /**
+     * Disconnects a running service from every Docker network it uses, without restarting it, and returns
+     * its container ID. Its processes keep running but can reach no other service, and published ports
+     * stop reaching it; read its state with {@link #execInService}. {@link #restoreContainerNetwork} heals
+     * the partition.
+     */
+    public static synchronized String partitionContainer(ComposeContainer cluster, String serviceName) {
         var container = cluster.getContainerByServiceName(serviceName)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown compose service: " + serviceName));
         String containerId = container.getContainerId();
@@ -298,7 +309,15 @@ public final class SharedDockerCluster {
                     .withContainerId(containerId).withNetworkId(network).exec();
         }
         DISCONNECTED_NETWORKS.put(containerId, networks);
-        DockerClientFactory.instance().client().restartContainerCmd(containerId).exec();
+        return containerId;
+    }
+
+    /** Runs a command inside a running service's container and returns its standard output. */
+    public static String execInService(ComposeContainer cluster, String serviceName, String... command)
+            throws Exception {
+        return cluster.getContainerByServiceName(serviceName)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown compose service: " + serviceName))
+                .execInContainer(command).getStdout();
     }
 
     /** Reconnects a service to the exact Docker networks and aliases it previously used. */

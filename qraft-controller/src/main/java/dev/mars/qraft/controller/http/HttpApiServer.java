@@ -30,6 +30,10 @@ import dev.mars.qraft.catalog.ServiceInstance;
 import dev.mars.qraft.concurrent.Deadlines;
 import dev.mars.qraft.catalog.ServiceInstanceId;
 import dev.mars.qraft.controller.raft.RaftNode;
+import dev.mars.qraft.controller.raft.RaftStatus;
+import dev.mars.qraft.controller.ui.AdminUiConfig;
+import dev.mars.qraft.controller.ui.AdminUiHandler;
+import dev.mars.qraft.controller.ui.UiAssets;
 import dev.mars.qraft.controller.raft.CommandOutcomeUnknownException;
 import dev.mars.qraft.controller.state.AgentCommand;
 import dev.mars.qraft.controller.state.CatalogCommand;
@@ -46,6 +50,7 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -71,6 +76,7 @@ public final class HttpApiServer implements AutoCloseable {
     private static final Logger LOG = LoggerFactory.getLogger(HttpApiServer.class);
     private static final String REQUEST_ID_HEADER = "X-Request-Id";
     private final int port;
+    private final AdminUiConfig adminUi;
     private final HttpServer server;
     private final ExecutorService executor;
     private final ObjectMapper objectMapper = new ObjectMapper()
@@ -89,9 +95,20 @@ public final class HttpApiServer implements AutoCloseable {
         this(port, raftNode, stateStore, Clock.systemUTC());
     }
 
+    /** A server without the administrative interface. */
     public HttpApiServer(int port, RaftNode raftNode, QraftStateStore stateStore, Clock clock)
             throws IOException {
+        this(port, raftNode, stateStore, clock, AdminUiConfig.disabled(), null);
+    }
+
+    /**
+     * A server that also serves the administrative interface from {@code assets} at {@code ui.path()} when
+     * {@code ui} is enabled; a disabled interface registers no route and needs no assets.
+     */
+    public HttpApiServer(int port, RaftNode raftNode, QraftStateStore stateStore, Clock clock,
+                         AdminUiConfig ui, UiAssets assets) throws IOException {
         this.port = port;
+        this.adminUi = Objects.requireNonNull(ui, "ui");
         this.clock = Objects.requireNonNull(clock, "clock");
         if ((raftNode == null) != (stateStore == null)) {
             throw new IllegalArgumentException("raftNode and stateStore must be configured together");
@@ -106,6 +123,10 @@ public final class HttpApiServer implements AutoCloseable {
         registerHealth("/health", "passing");
         register("/status", 200, "{\"status\":\"running\"}");
         register("/api/v1/info", 200, "{\"version\":\"1.0.0\",\"httpPort\":" + port + "}");
+        if (ui.enabled()) {
+            server.createContext(ui.path(), requestAware(new AdminUiHandler(ui.path(),
+                    Objects.requireNonNull(assets, "assets are required for an enabled interface"))));
+        }
         server.createContext("/raft/status", requestAware(this::raftStatus));
         server.createContext("/api/v1/agents/register", requestAware(this::registerAgent));
         server.createContext("/api/v1/agents/heartbeat", requestAware(this::heartbeatAgent));
@@ -120,6 +141,10 @@ public final class HttpApiServer implements AutoCloseable {
 
     public CompletableFuture<Void> start() {
         server.start();
+        if (adminUi.enabled()) {
+            LOG.warn("Administrative interface enabled at {} and unauthenticated: it is read-only and serves only "
+                    + "data the public API already exposes", adminUi.path());
+        }
         return CompletableFuture.completedFuture(null);
     }
 
@@ -161,12 +186,39 @@ public final class HttpApiServer implements AutoCloseable {
                 respondError(exchange, 405, "method_not_allowed", "Method not allowed", false);
                 return;
             }
-            if ("/health/ready".equals(path) && raftNode != null && raftNode.isFenced()) {
-                respondError(exchange, 503, "fenced", "Raft node is fenced", true);
-                return;
+            if ("/health/ready".equals(path)) {
+                List<String> failed = unmetReadinessConditions();
+                if (!failed.isEmpty()) {
+                    respondError(exchange, 503, "not_ready", "Server is not ready: " + String.join(", ", failed),
+                            true, Map.of("conditions", failed));
+                    return;
+                }
             }
             respond(exchange, 200, "{\"status\":\"" + healthyStatus + "\"}");
         }));
+    }
+
+    /**
+     * The readiness conditions this server does not meet, in a fixed order: {@code draining};
+     * {@code unavailable} when its Raft state cannot be read; {@code fenced}, or else {@code recovering} while
+     * recovery has not finished; and {@code no_leader} unless it is the leader or a follower of a known leader.
+     * A server without a Raft node is judged on draining alone.
+     */
+    private List<String> unmetReadinessConditions() {
+        List<String> failed = new ArrayList<>();
+        if (draining.get()) failed.add("draining");
+        if (raftNode == null) return failed;
+        RaftStatus status;
+        try {
+            status = Deadlines.bound(raftNode.status().toCompletionStage(), 5, TimeUnit.SECONDS).join();
+        } catch (CompletionException unavailable) {
+            failed.add("unavailable");
+            return failed;
+        }
+        if (status.fenced()) failed.add("fenced");
+        else if (!status.running()) failed.add("recovering");
+        if (!status.knowsLeader()) failed.add("no_leader");
+        return failed;
     }
 
     private static void respond(HttpExchange exchange, int status, String body) throws IOException {
@@ -207,14 +259,24 @@ public final class HttpApiServer implements AutoCloseable {
             respondError(exchange, 503, "catalog_unavailable", "Raft state is unavailable", true);
             return;
         }
+        RaftStatus current;
+        try {
+            // Read on the node's state loop: fields read one by one from here could mix two moments.
+            current = Deadlines.bound(raftNode.status().toCompletionStage(), 5, TimeUnit.SECONDS).join();
+        } catch (CompletionException unavailable) {
+            respondError(exchange, 503, "raft_unavailable", "Raft state is unavailable", true);
+            return;
+        }
         Map<String, Object> status = new LinkedHashMap<>();
-        status.put("nodeId", raftNode.getNodeId());
-        status.put("state", raftNode.getState().name());
-        status.put("term", raftNode.getCurrentTerm());
-        status.put("leaderId", raftNode.getLeaderId());
-        status.put("commitIndex", raftNode.getCommitIndex());
-        status.put("snapshotLastIndex", raftNode.getSnapshotLastIndex());
-        status.put("fenced", raftNode.isFenced());
+        status.put("nodeId", current.nodeId());
+        status.put("state", current.state().name());
+        status.put("term", current.term());
+        status.put("leaderId", current.leaderId());
+        status.put("commitIndex", current.commitIndex());
+        status.put("lastApplied", current.lastApplied());
+        status.put("lastLogIndex", current.lastLogIndex());
+        status.put("snapshotLastIndex", current.snapshotLastIndex());
+        status.put("fenced", current.fenced());
         respondJson(exchange, 200, status);
     }
 
@@ -449,13 +511,7 @@ public final class HttpApiServer implements AutoCloseable {
 
     private static AgentStatus heartbeatStatus(String value) {
         if ("passing".equalsIgnoreCase(value)) return AgentStatus.HEALTHY;
-        AgentStatus status = AgentStatus.fromValue(value);
-        return switch (status) {
-            case ACTIVE, IDLE -> AgentStatus.HEALTHY;
-            case OVERLOADED -> AgentStatus.DEGRADED;
-            case DRAINING -> AgentStatus.MAINTENANCE;
-            default -> status;
-        };
+        return AgentStatus.fromValue(value);
     }
 
     private static void respondNoContent(HttpExchange exchange) throws IOException {

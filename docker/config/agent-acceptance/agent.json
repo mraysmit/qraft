@@ -15,7 +15,7 @@
   "catalog": {
     "registrationRetryMinMs": 100,
     "registrationRetryMaxMs": 1000,
-    "contactFreshnessMs": 30000,
+    "contactFreshnessMs": 5000,
     "services": [
       {
         "id": "web",

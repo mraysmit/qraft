@@ -6,16 +6,18 @@ option java_outer_classname = "CommandsProto";
 
 package qraft.raft;
 
+// Values 3, 4, 6, and 8 are the job system's statuses. They are never written, and replicated history that
+// holds them decodes as HEALTHY, HEALTHY, DEGRADED, and MAINTENANCE.
 enum AgentStatusProto {
   AGENT_STATUS_UNSPECIFIED = 0;
   AGENT_STATUS_REGISTERING = 1;
   AGENT_STATUS_HEALTHY = 2;
-  AGENT_STATUS_ACTIVE = 3;
-  AGENT_STATUS_IDLE = 4;
+  AGENT_STATUS_ACTIVE = 3 [deprecated = true];
+  AGENT_STATUS_IDLE = 4 [deprecated = true];
   AGENT_STATUS_DEGRADED = 5;
-  AGENT_STATUS_OVERLOADED = 6;
+  AGENT_STATUS_OVERLOADED = 6 [deprecated = true];
   AGENT_STATUS_MAINTENANCE = 7;
-  AGENT_STATUS_DRAINING = 8;
+  AGENT_STATUS_DRAINING = 8 [deprecated = true];
   AGENT_STATUS_UNREACHABLE = 9;
   AGENT_STATUS_FAILED = 10;
   AGENT_STATUS_DEREGISTERED = 11;

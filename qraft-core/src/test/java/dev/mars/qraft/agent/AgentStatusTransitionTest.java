@@ -45,24 +45,11 @@ class AgentStatusTransitionTest {
     private static EnumSet<AgentStatus> validTargets(AgentStatus from) {
         return switch (from) {
             case REGISTERING -> EnumSet.of(AgentStatus.HEALTHY, AgentStatus.FAILED);
-            case HEALTHY -> EnumSet.of(AgentStatus.ACTIVE, AgentStatus.IDLE, AgentStatus.DEGRADED,
-                    AgentStatus.OVERLOADED, AgentStatus.MAINTENANCE, AgentStatus.DRAINING,
+            case HEALTHY -> EnumSet.of(AgentStatus.DEGRADED, AgentStatus.MAINTENANCE,
                     AgentStatus.UNREACHABLE, AgentStatus.FAILED, AgentStatus.DEREGISTERED);
-            case ACTIVE -> EnumSet.of(AgentStatus.HEALTHY, AgentStatus.IDLE, AgentStatus.DEGRADED,
-                    AgentStatus.OVERLOADED, AgentStatus.DRAINING, AgentStatus.UNREACHABLE,
-                    AgentStatus.FAILED, AgentStatus.DEREGISTERED);
-            case IDLE -> EnumSet.of(AgentStatus.HEALTHY, AgentStatus.ACTIVE, AgentStatus.DEGRADED,
-                    AgentStatus.MAINTENANCE, AgentStatus.DRAINING, AgentStatus.UNREACHABLE,
-                    AgentStatus.FAILED, AgentStatus.DEREGISTERED);
-            case DEGRADED -> EnumSet.of(AgentStatus.HEALTHY, AgentStatus.ACTIVE, AgentStatus.IDLE,
-                    AgentStatus.OVERLOADED, AgentStatus.MAINTENANCE, AgentStatus.DRAINING,
+            case DEGRADED -> EnumSet.of(AgentStatus.HEALTHY, AgentStatus.MAINTENANCE,
                     AgentStatus.UNREACHABLE, AgentStatus.FAILED, AgentStatus.DEREGISTERED);
-            case OVERLOADED -> EnumSet.of(AgentStatus.HEALTHY, AgentStatus.ACTIVE, AgentStatus.IDLE,
-                    AgentStatus.DEGRADED, AgentStatus.DRAINING, AgentStatus.UNREACHABLE,
-                    AgentStatus.FAILED, AgentStatus.DEREGISTERED);
-            case MAINTENANCE -> EnumSet.of(AgentStatus.HEALTHY, AgentStatus.DRAINING,
-                    AgentStatus.UNREACHABLE, AgentStatus.FAILED, AgentStatus.DEREGISTERED);
-            case DRAINING -> EnumSet.of(AgentStatus.HEALTHY, AgentStatus.UNREACHABLE,
+            case MAINTENANCE -> EnumSet.of(AgentStatus.HEALTHY, AgentStatus.UNREACHABLE,
                     AgentStatus.FAILED, AgentStatus.DEREGISTERED);
             case UNREACHABLE -> EnumSet.of(AgentStatus.HEALTHY, AgentStatus.FAILED,
                     AgentStatus.DEREGISTERED);

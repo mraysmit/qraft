@@ -20,7 +20,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
  * System information for a Qraft agent.
- * Contains hardware and OS details used for capacity planning and job assignment.
+ * Contains the hardware and operating-system details an agent reports about its node.
  * 
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2025-08-26

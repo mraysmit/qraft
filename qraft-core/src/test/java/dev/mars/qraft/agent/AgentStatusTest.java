@@ -16,233 +16,98 @@
 
 package dev.mars.qraft.agent;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+
+import java.util.Arrays;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Comprehensive test suite for AgentStatus enum.
+ * Tests {@link AgentStatus}: its values and categories, strict parsing of API input, lenient reading of
+ * replicated JSON written while the job system's statuses existed, and the absence of those statuses.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-03-15
- * @version 1.0
+ * @version 2.0
  */
 class AgentStatusTest {
 
     @Test
-    void testAllStatusValues() {
-        AgentStatus[] statuses = AgentStatus.values();
-        assertEquals(11, statuses.length);
-    }
-
-    @Test
-    void testStatusProperties() {
-        // Test HEALTHY status
-        assertEquals("healthy", AgentStatus.HEALTHY.getValue());
-        assertEquals("Agent is healthy and available for work", AgentStatus.HEALTHY.getDescription());
-        assertTrue(AgentStatus.HEALTHY.isOperational());
-        assertTrue(AgentStatus.HEALTHY.isAvailableForWork());
-
-        // Test REGISTERING status
-        assertEquals("registering", AgentStatus.REGISTERING.getValue());
-        assertFalse(AgentStatus.REGISTERING.isOperational());
-        assertFalse(AgentStatus.REGISTERING.isAvailableForWork());
-
-        // Test ACTIVE status
-        assertEquals("active", AgentStatus.ACTIVE.getValue());
-        assertTrue(AgentStatus.ACTIVE.isOperational());
-        assertTrue(AgentStatus.ACTIVE.isAvailableForWork());
-
-        // Test IDLE status
-        assertEquals("idle", AgentStatus.IDLE.getValue());
-        assertTrue(AgentStatus.IDLE.isOperational());
-        assertTrue(AgentStatus.IDLE.isAvailableForWork());
-
-        // Test DEGRADED status
-        assertEquals("degraded", AgentStatus.DEGRADED.getValue());
-        assertTrue(AgentStatus.DEGRADED.isOperational());
-        assertFalse(AgentStatus.DEGRADED.isAvailableForWork());
-
-        // Test OVERLOADED status
-        assertEquals("overloaded", AgentStatus.OVERLOADED.getValue());
-        assertTrue(AgentStatus.OVERLOADED.isOperational());
-        assertFalse(AgentStatus.OVERLOADED.isAvailableForWork());
-
-        // Test MAINTENANCE status
-        assertEquals("maintenance", AgentStatus.MAINTENANCE.getValue());
-        assertFalse(AgentStatus.MAINTENANCE.isOperational());
-        assertFalse(AgentStatus.MAINTENANCE.isAvailableForWork());
-
-        // Test DRAINING status
-        assertEquals("draining", AgentStatus.DRAINING.getValue());
-        assertFalse(AgentStatus.DRAINING.isOperational());
-        assertFalse(AgentStatus.DRAINING.isAvailableForWork());
-
-        // Test UNREACHABLE status
-        assertEquals("unreachable", AgentStatus.UNREACHABLE.getValue());
-        assertFalse(AgentStatus.UNREACHABLE.isOperational());
-        assertFalse(AgentStatus.UNREACHABLE.isAvailableForWork());
-
-        // Test FAILED status
-        assertEquals("failed", AgentStatus.FAILED.getValue());
-        assertFalse(AgentStatus.FAILED.isOperational());
-        assertFalse(AgentStatus.FAILED.isAvailableForWork());
-
-        // Test DEREGISTERED status
-        assertEquals("deregistered", AgentStatus.DEREGISTERED.getValue());
-        assertFalse(AgentStatus.DEREGISTERED.isOperational());
-        assertFalse(AgentStatus.DEREGISTERED.isAvailableForWork());
-    }
-
-    @Test
-    void testFromValue() {
-        assertEquals(AgentStatus.HEALTHY, AgentStatus.fromValue("healthy"));
-        assertEquals(AgentStatus.ACTIVE, AgentStatus.fromValue("active"));
-        assertEquals(AgentStatus.IDLE, AgentStatus.fromValue("idle"));
-        assertEquals(AgentStatus.FAILED, AgentStatus.fromValue("failed"));
-        assertEquals(AgentStatus.MAINTENANCE, AgentStatus.fromValue("maintenance"));
-    }
-
-    @Test
-    void testFromValueCaseInsensitive() {
-        assertEquals(AgentStatus.HEALTHY, AgentStatus.fromValue("HEALTHY"));
-        assertEquals(AgentStatus.ACTIVE, AgentStatus.fromValue("AcTiVe"));
-        assertEquals(AgentStatus.OVERLOADED, AgentStatus.fromValue("OVERLOADED"));
-    }
-
-    @Test
-    void testFromValueInvalid() {
-        assertThrows(IllegalArgumentException.class, () -> {
-            AgentStatus.fromValue("invalid-status");
-        });
-    }
-
-    @Test
-    void testFromValueNull() {
-        assertThrows(IllegalArgumentException.class, () -> {
-            AgentStatus.fromValue(null);
-        });
-    }
-
-    @Test
-    void testToString() {
-        assertEquals("healthy", AgentStatus.HEALTHY.toString());
-        assertEquals("active", AgentStatus.ACTIVE.toString());
-        assertEquals("failed", AgentStatus.FAILED.toString());
-    }
-
-    @Test
-    void testOperationalStatuses() {
-        assertTrue(AgentStatus.HEALTHY.isOperational());
-        assertTrue(AgentStatus.ACTIVE.isOperational());
-        assertTrue(AgentStatus.IDLE.isOperational());
-        assertTrue(AgentStatus.DEGRADED.isOperational());
-        assertTrue(AgentStatus.OVERLOADED.isOperational());
-    }
-
-    @Test
-    void testNonOperationalStatuses() {
-        assertFalse(AgentStatus.REGISTERING.isOperational());
-        assertFalse(AgentStatus.MAINTENANCE.isOperational());
-        assertFalse(AgentStatus.DRAINING.isOperational());
-        assertFalse(AgentStatus.UNREACHABLE.isOperational());
-        assertFalse(AgentStatus.FAILED.isOperational());
-        assertFalse(AgentStatus.DEREGISTERED.isOperational());
-    }
-
-    @Test
-    void testAvailableForWork() {
-        assertTrue(AgentStatus.HEALTHY.isAvailableForWork());
-        assertTrue(AgentStatus.ACTIVE.isAvailableForWork());
-        assertTrue(AgentStatus.IDLE.isAvailableForWork());
-    }
-
-    @Test
-    void testNotAvailableForWork() {
-        assertFalse(AgentStatus.REGISTERING.isAvailableForWork());
-        assertFalse(AgentStatus.DEGRADED.isAvailableForWork());
-        assertFalse(AgentStatus.OVERLOADED.isAvailableForWork());
-        assertFalse(AgentStatus.MAINTENANCE.isAvailableForWork());
-        assertFalse(AgentStatus.DRAINING.isAvailableForWork());
-        assertFalse(AgentStatus.UNREACHABLE.isAvailableForWork());
-        assertFalse(AgentStatus.FAILED.isAvailableForWork());
-        assertFalse(AgentStatus.DEREGISTERED.isAvailableForWork());
-    }
-
-    @Test
-    void testDescriptions() {
-        assertNotNull(AgentStatus.HEALTHY.getDescription());
-        assertFalse(AgentStatus.HEALTHY.getDescription().isEmpty());
-        
+    void theStatusesAreTheNodeLifecycle() {
+        assertEquals(List.of(AgentStatus.REGISTERING, AgentStatus.HEALTHY, AgentStatus.DEGRADED,
+                AgentStatus.MAINTENANCE, AgentStatus.UNREACHABLE, AgentStatus.FAILED, AgentStatus.DEREGISTERED),
+                List.of(AgentStatus.values()));
         for (AgentStatus status : AgentStatus.values()) {
-            assertNotNull(status.getDescription());
-            assertFalse(status.getDescription().isEmpty());
+            assertEquals(status.name().toLowerCase(Locale.ROOT), status.getValue());
+            assertEquals(status.getValue(), status.toString());
+            assertFalse(status.getDescription().isBlank());
         }
     }
 
     @Test
-    void testIsHealthy() {
-        assertTrue(AgentStatus.HEALTHY.isHealthy());
-        assertTrue(AgentStatus.ACTIVE.isHealthy());
-        assertTrue(AgentStatus.IDLE.isHealthy());
+    void onlyHealthyAndDegradedNodesAreOperational() {
+        Set<AgentStatus> operational = Arrays.stream(AgentStatus.values()).filter(AgentStatus::isOperational)
+                .collect(Collectors.toSet());
 
-        assertFalse(AgentStatus.REGISTERING.isHealthy());
-        assertFalse(AgentStatus.DEGRADED.isHealthy());
-        assertFalse(AgentStatus.OVERLOADED.isHealthy());
-        assertFalse(AgentStatus.MAINTENANCE.isHealthy());
-        assertFalse(AgentStatus.DRAINING.isHealthy());
-        assertFalse(AgentStatus.UNREACHABLE.isHealthy());
-        assertFalse(AgentStatus.FAILED.isHealthy());
-        assertFalse(AgentStatus.DEREGISTERED.isHealthy());
+        assertEquals(Set.of(AgentStatus.HEALTHY, AgentStatus.DEGRADED), operational);
     }
 
     @Test
-    void testIsTerminal() {
-        assertTrue(AgentStatus.DEREGISTERED.isTerminal());
-
-        // FAILED is NOT terminal — it can transition to DEREGISTERED
-        assertFalse(AgentStatus.FAILED.isTerminal());
-
-        assertFalse(AgentStatus.REGISTERING.isTerminal());
-        assertFalse(AgentStatus.HEALTHY.isTerminal());
-        assertFalse(AgentStatus.ACTIVE.isTerminal());
-        assertFalse(AgentStatus.IDLE.isTerminal());
-        assertFalse(AgentStatus.DEGRADED.isTerminal());
-        assertFalse(AgentStatus.OVERLOADED.isTerminal());
-        assertFalse(AgentStatus.MAINTENANCE.isTerminal());
-        assertFalse(AgentStatus.DRAINING.isTerminal());
-        assertFalse(AgentStatus.UNREACHABLE.isTerminal());
+    void categoriesPartitionTheStatuses() {
+        assertEquals(Set.of(AgentStatus.HEALTHY), matching(AgentStatus::isHealthy));
+        assertEquals(Set.of(AgentStatus.DEGRADED, AgentStatus.UNREACHABLE, AgentStatus.FAILED),
+                matching(AgentStatus::isProblematic));
+        assertEquals(Set.of(AgentStatus.REGISTERING, AgentStatus.MAINTENANCE), matching(AgentStatus::isTransitional));
+        assertEquals(Set.of(AgentStatus.DEREGISTERED), matching(AgentStatus::isTerminal));
+        assertFalse(AgentStatus.FAILED.isTerminal(), "a failed node can still be deregistered");
     }
 
     @Test
-    void testIsProblematic() {
-        assertTrue(AgentStatus.DEGRADED.isProblematic());
-        assertTrue(AgentStatus.OVERLOADED.isProblematic());
-        assertTrue(AgentStatus.UNREACHABLE.isProblematic());
-        assertTrue(AgentStatus.FAILED.isProblematic());
-
-        assertFalse(AgentStatus.HEALTHY.isProblematic());
-        assertFalse(AgentStatus.ACTIVE.isProblematic());
-        assertFalse(AgentStatus.IDLE.isProblematic());
-        assertFalse(AgentStatus.REGISTERING.isProblematic());
-        assertFalse(AgentStatus.MAINTENANCE.isProblematic());
-        assertFalse(AgentStatus.DRAINING.isProblematic());
-        assertFalse(AgentStatus.DEREGISTERED.isProblematic());
+    void apiInputIsParsedStrictlyAndCaseInsensitively() {
+        assertEquals(AgentStatus.HEALTHY, AgentStatus.fromValue("healthy"));
+        assertEquals(AgentStatus.HEALTHY, AgentStatus.fromValue("HEALTHY"));
+        assertEquals(AgentStatus.MAINTENANCE, AgentStatus.fromValue("Maintenance"));
+        assertThrows(IllegalArgumentException.class, () -> AgentStatus.fromValue("invalid-status"));
+        assertThrows(IllegalArgumentException.class, () -> AgentStatus.fromValue(null));
     }
 
     @Test
-    void testIsTransitional() {
-        assertTrue(AgentStatus.REGISTERING.isTransitional());
-        assertTrue(AgentStatus.MAINTENANCE.isTransitional());
-        assertTrue(AgentStatus.DRAINING.isTransitional());
+    void theJobSystemsWorkSchedulingStatusesAreGone() {
+        Set<String> names = Arrays.stream(AgentStatus.values()).map(Enum::name).collect(Collectors.toSet());
+        for (String legacy : List.of("ACTIVE", "IDLE", "OVERLOADED", "DRAINING")) {
+            assertFalse(names.contains(legacy), legacy);
+            assertThrows(IllegalArgumentException.class,
+                    () -> AgentStatus.fromValue(legacy.toLowerCase(Locale.ROOT)),
+                    "an API caller can no longer send " + legacy);
+        }
+    }
 
-        assertFalse(AgentStatus.HEALTHY.isTransitional());
-        assertFalse(AgentStatus.ACTIVE.isTransitional());
-        assertFalse(AgentStatus.IDLE.isTransitional());
-        assertFalse(AgentStatus.DEGRADED.isTransitional());
-        assertFalse(AgentStatus.OVERLOADED.isTransitional());
-        assertFalse(AgentStatus.UNREACHABLE.isTransitional());
-        assertFalse(AgentStatus.FAILED.isTransitional());
-        assertFalse(AgentStatus.DEREGISTERED.isTransitional());
+    @Test
+    void replicatedJsonWrittenWithTheJobSystemsStatusesReadsAsTheirCurrentMeaning() throws Exception {
+        ObjectMapper json = new ObjectMapper();
+        Map<String, AgentStatus> legacy = Map.of(
+                "active", AgentStatus.HEALTHY,
+                "idle", AgentStatus.HEALTHY,
+                "overloaded", AgentStatus.DEGRADED,
+                "draining", AgentStatus.MAINTENANCE);
+
+        legacy.forEach((stored, current) -> {
+            assertEquals(current, AgentStatus.fromStoredValue(stored), stored);
+            assertEquals(current, AgentStatus.fromStoredValue(stored.toUpperCase(Locale.ROOT)), stored);
+        });
+        assertEquals(AgentStatus.DEGRADED, json.readValue("\"overloaded\"", AgentStatus.class));
+        assertEquals(AgentStatus.UNREACHABLE, json.readValue("\"unreachable\"", AgentStatus.class));
+        assertEquals("\"healthy\"", json.writeValueAsString(AgentStatus.HEALTHY), "a current value is written");
+        assertThrows(IllegalArgumentException.class, () -> AgentStatus.fromStoredValue("unknown"));
+    }
+
+    private static Set<AgentStatus> matching(java.util.function.Predicate<AgentStatus> predicate) {
+        return Arrays.stream(AgentStatus.values()).filter(predicate).collect(Collectors.toSet());
     }
 }

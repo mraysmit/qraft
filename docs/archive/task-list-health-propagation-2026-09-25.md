@@ -4,7 +4,7 @@
 **Completed:** 2026-09-26
 **Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), Tranche 6
 **Predecessor:** [`task-list-unified-runtime-flow-2026-09-24.md`](task-list-unified-runtime-flow-2026-09-24.md)
-**Successor:** [`task-list-multi-node-container-acceptance-2026-09-26.md`](../task-list-multi-node-container-acceptance-2026-09-26.md)
+**Successor:** [`task-list-multi-node-container-acceptance-2026-09-26.md`](task-list-multi-node-container-acceptance-2026-09-26.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
 This task list is complete and retained as the implementation record for health
@@ -574,4 +574,4 @@ Verification after these changes:
 - Persisting automatically generated node identity.
 
 The next active work is the rest of Tranche 7, multi-node container acceptance,
-tracked in [`task-list-multi-node-container-acceptance-2026-09-26.md`](../task-list-multi-node-container-acceptance-2026-09-26.md).
+tracked in [`task-list-multi-node-container-acceptance-2026-09-26.md`](task-list-multi-node-container-acceptance-2026-09-26.md).

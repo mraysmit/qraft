@@ -20,10 +20,13 @@ import dev.mars.qraft.agent.AgentCapabilities;
 import dev.mars.qraft.agent.AgentInfo;
 import dev.mars.qraft.agent.AgentStatus;
 import dev.mars.qraft.controller.raft.grpc.AgentCommandProto;
+import dev.mars.qraft.controller.raft.grpc.AgentStatusProto;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -55,7 +58,7 @@ class AgentCodecTest {
         List<AgentCommand> commands = List.of(
                 new AgentCommand.Register("agent-1", info, timestamp),
                 new AgentCommand.Deregister("agent-1", timestamp),
-                new AgentCommand.UpdateStatus("agent-1", AgentStatus.HEALTHY, AgentStatus.ACTIVE, timestamp),
+                new AgentCommand.UpdateStatus("agent-1", AgentStatus.HEALTHY, AgentStatus.DEGRADED, timestamp),
                 new AgentCommand.UpdateCapabilities("agent-1", capabilities, timestamp),
                 new AgentCommand.Heartbeat("agent-1", AgentStatus.DEGRADED, timestamp, 42));
 
@@ -88,5 +91,40 @@ class AgentCodecTest {
         assertInstanceOf(AgentCommand.Deregister.class, AgentCommand.deregister("agent"));
         assertInstanceOf(AgentCommand.Heartbeat.class, AgentCommand.heartbeat("agent"));
         assertInstanceOf(AgentCommand.Heartbeat.class, AgentCommand.heartbeat("agent", null, null));
+    }
+
+    /** Statuses inherited from the job system, which replicated history written earlier may still hold. */
+    private static final Map<AgentStatusProto, AgentStatus> LEGACY_STATUSES = Map.of(
+            AgentStatusProto.AGENT_STATUS_ACTIVE, AgentStatus.HEALTHY,
+            AgentStatusProto.AGENT_STATUS_IDLE, AgentStatus.HEALTHY,
+            AgentStatusProto.AGENT_STATUS_OVERLOADED, AgentStatus.DEGRADED,
+            AgentStatusProto.AGENT_STATUS_DRAINING, AgentStatus.MAINTENANCE);
+
+    @Test
+    void legacyStatusesInReplicatedHistoryDecodeToTheirCurrentMeaning() {
+        Instant timestamp = Instant.parse("2026-02-03T04:05:06Z");
+        AgentCommandProto heartbeat = AgentCodec.toProto(
+                new AgentCommand.Heartbeat("agent-1", AgentStatus.HEALTHY, timestamp, 1));
+        AgentCommandProto register = AgentCodec.toProto(new AgentCommand.Register("agent-1",
+                new AgentInfo("agent-1", "host", "10.0.0.1", 8080), timestamp));
+
+        LEGACY_STATUSES.forEach((legacy, current) -> {
+            AgentCommand.Heartbeat decodedHeartbeat = (AgentCommand.Heartbeat) AgentCodec.fromProto(
+                    heartbeat.toBuilder().setNewStatus(legacy).build());
+            AgentCommand.Register decodedRegister = (AgentCommand.Register) AgentCodec.fromProto(register.toBuilder()
+                    .setAgentInfo(register.getAgentInfo().toBuilder().setStatus(legacy)).build());
+            assertEquals(current, decodedHeartbeat.status(), legacy.name());
+            assertEquals(current, decodedRegister.agentInfo().getStatus(), legacy.name());
+        });
+    }
+
+    @Test
+    void noCurrentStatusIsEncodedAsALegacyValue() {
+        Instant timestamp = Instant.parse("2026-02-03T04:05:06Z");
+        for (AgentStatus status : EnumSet.allOf(AgentStatus.class)) {
+            AgentStatusProto encoded = AgentCodec.toProto(
+                    new AgentCommand.Heartbeat("agent-1", status, timestamp, 1)).getNewStatus();
+            assertFalse(LEGACY_STATUSES.containsKey(encoded), status + " encodes as " + encoded);
+        }
     }
 }
