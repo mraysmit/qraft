@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -52,6 +53,7 @@ class DockerDeploymentContractTest {
     private static final List<String> PREBUILT_COMPOSE_FILES = List.of(
             "qraft-controller/src/test/resources/docker-compose-3node-prebuilt.yml",
             "qraft-controller/src/test/resources/docker-compose-3node-agent-prebuilt.yml",
+            "qraft-controller/src/test/resources/docker-compose-3node-agent-restart-prebuilt.yml",
             "qraft-controller/src/test/resources/docker-compose-5node-prebuilt.yml");
 
     @Test
@@ -236,17 +238,37 @@ class DockerDeploymentContractTest {
     }
 
     @Test
-    void agentAcceptanceContainerRunsTheConfiguredHealthChecksAgainstEveryServer() throws IOException {
+    void agentAcceptanceProfilesRunTheirHealthChecksAgainstEveryServer() throws IOException {
         Path root = Path.of("..").toAbsolutePath().normalize();
-        AgentConfiguration configuration = AgentConfiguration.fromFile(
-                root.resolve("docker/config/agent-acceptance/agent.json"));
+        Map<String, String> composeByProfile = Map.of(
+                "agent.json", "docker-compose-3node-agent-prebuilt.yml",
+                "agent-restart.json", "docker-compose-3node-agent-restart-prebuilt.yml");
+        for (Map.Entry<String, String> profile : composeByProfile.entrySet()) {
+            AgentConfiguration configuration = AgentConfiguration.fromFile(
+                    root.resolve("docker/config/agent-acceptance/" + profile.getKey()));
+            assertTrue(configuration.getControllerUrls().size() == 3, profile.getKey());
+            assertTrue(configuration.getHealthChecks().size() == 2, profile.getKey());
+            String compose = Files.readString(root.resolve(
+                    "qraft-controller/src/test/resources/" + profile.getValue()));
+            assertTrue(compose.contains("command: [\"client\", \"--config\", \"/etc/qraft/client.json\"]"));
+            assertTrue(compose.contains("agent-acceptance/" + profile.getKey() + ":/etc/qraft/client.json:ro"),
+                    profile.getValue());
+        }
+    }
 
-        assertTrue(configuration.getControllerUrls().size() == 3);
-        assertTrue(configuration.getHealthChecks().size() == 2);
-        String compose = Files.readString(root.resolve(
-                "qraft-controller/src/test/resources/docker-compose-3node-agent-prebuilt.yml"));
-        assertTrue(compose.contains("command: [\"client\", \"--config\", \"/etc/qraft/client.json\"]"));
-        assertTrue(compose.contains("agent-acceptance/agent.json:/etc/qraft/client.json:ro"));
+    @Test
+    void theRestartProfileLeavesMarginsOfSeveralSecondsForContainerAndJvmStart() {
+        Path root = Path.of("..").toAbsolutePath().normalize();
+        AgentConfiguration restart = AgentConfiguration.fromFile(
+                root.resolve("docker/config/agent-acceptance/agent-restart.json"));
+
+        for (var check : restart.getHealthChecks()) {
+            assertTrue(check.ttl().compareTo(java.time.Duration.ofSeconds(15)) >= 0, check.checkId());
+        }
+        assertTrue(restart.getHealthChecks().stream().anyMatch(check ->
+                check.deregisterAfter().compareTo(java.time.Duration.ofSeconds(30)) >= 0));
+        assertTrue(restart.getContactFreshnessMs() <= 5_000,
+                "an outage becomes visible as unreadiness well before the checks' TTL");
     }
 
     @Test

@@ -1096,13 +1096,24 @@ Leader submission uses this order:
 
 Follower `AppendEntries` handling uses prepare, persist, then apply:
 
-1. Validate the preceding index and term.
+1. Validate the preceding index and term. A preceding index inside the
+   follower's snapshot is accepted without comparison: every entry a snapshot
+   covers is committed, so it is identical on the leader. Rejecting it would
+   leave a follower that compacted after a retransmission unable to catch up.
 2. Calculate a side-effect-free append plan from the request and in-memory log.
 3. If required, call `truncateSuffix(conflictIndex)`.
 4. Append only the new entries from the plan.
 5. Call `sync` once for the complete truncate-and-append batch.
 6. Apply the same plan to memory.
 7. Only then send a successful RPC response.
+
+The request verifies the follower's log only through its last entry, or through
+the snapshot boundary when the request lies inside the snapshot. The follower
+reports that verified index as its match index and advances its commit index to
+no more than `min(leaderCommit, verifiedIndex)`. A longer tail may be an
+uncommitted entry from an earlier term that no conflict has truncated yet.
+Reporting it would let the leader count the follower for entries it does not
+hold, and committing it would apply an entry the cluster never committed.
 
 An append or sync failure leaves the in-memory log unchanged and produces a
 failed response. A durability failure that fences the WAL also fences the Raft
@@ -1121,6 +1132,13 @@ and vote before granting a vote or responding based on the new term. A separate
 `sync` call is neither required nor a substitute for this guarantee.
 
 ### 14.4 Snapshot and prefix-compaction contract
+
+Every server compacts its own log independently, in any role, on the configured
+snapshot interval and threshold. A follower that never compacted would hold every
+entry in memory and in its WAL and replay all of them on restart. Once elected, it
+would also refuse writes at the log hard limit until its first snapshot. A
+snapshot covers only applied, and therefore committed, entries, so it is safe in
+any role; it runs through the transition sequencer like every other state change.
 
 Prefix compaction is safe only after a covering application snapshot is durable.
 The required order is:

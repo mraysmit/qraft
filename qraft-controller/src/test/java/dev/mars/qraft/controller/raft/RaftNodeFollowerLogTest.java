@@ -1,0 +1,207 @@
+/*
+ * Copyright 2025 Mark Andrew Ray-Smith Cityline Ltd
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package dev.mars.qraft.controller.raft;
+
+import com.google.protobuf.ByteString;
+import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
+import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
+import dev.mars.qraft.controller.runtime.JavaRuntime;
+import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
+import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
+import dev.mars.qraft.controller.state.QraftStateStore;
+import dev.mars.qraft.distributedstate.DistributedStateCommand;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * Tests a follower's own log: it reports and commits only the entries a request verified, never a stale
+ * uncommitted tail from an earlier term; it compacts its log on its own snapshot schedule; and it accepts
+ * an append whose previous entry lies inside its snapshot, because everything a snapshot covers is
+ * committed and identical on the leader.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-27
+ * @version 1.0
+ */
+class RaftNodeFollowerLogTest {
+    private static final long SNAPSHOT_INTERVAL_MS = 200;
+    private static final ProtobufRaftCommandCodec CODEC = new ProtobufRaftCommandCodec();
+
+    private final QraftStateStore store = new QraftStateStore();
+    private JavaRuntime runtime;
+    private ManualTimers timers;
+    private RaftNode follower;
+
+    @AfterEach
+    void stop() throws Exception {
+        if (follower != null) follower.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        if (runtime != null) runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+    }
+
+    @Test
+    void aFollowerReportsAndCommitsOnlyWhatTheRequestVerifiedNeverAStaleTail() throws Exception {
+        startFollower();
+        // Term 1: entries 1 to 3 arrive, but only entry 1 commits before that leader is lost.
+        assertTrue(append(1, 0, 0, 1, "k1", "k2-stale", "k3-stale").getSuccess());
+
+        // Term 2: the new leader's log is only [1], so its heartbeat verifies no more than entry 1.
+        AppendEntriesResponse heartbeat = append(2, 1, 1, 3);
+
+        assertTrue(heartbeat.getSuccess());
+        assertEquals(1, heartbeat.getMatchIndex(),
+                "reporting the stale tail would let the new leader count this follower for entries it lacks");
+        assertEquals(1, follower.getCommitIndex(), "a follower commits no further than the request verified");
+        assertEquals(Optional.empty(), store.findMetadata("k2-stale"), "a stale uncommitted entry is never applied");
+    }
+
+    @Test
+    void aFollowerCompactsItsOwnLogOnTheSnapshotSchedule() throws Exception {
+        startFollower();
+        assertTrue(append(1, 0, 0, 3, "k1", "k2", "k3").getSuccess());
+
+        assertTrue(timers.hasPeriodic(SNAPSHOT_INTERVAL_MS), "a follower schedules snapshots as a leader does");
+        timers.firePeriodic(SNAPSHOT_INTERVAL_MS);
+
+        awaitSnapshotAt(3);
+        assertEquals(Optional.of("k3"), store.findMetadata("k3"));
+    }
+
+    @Test
+    void aFollowerAcceptsAnAppendWhosePreviousEntryIsInsideItsSnapshot() throws Exception {
+        startFollower();
+        assertTrue(append(1, 0, 0, 3, "k1", "k2", "k3").getSuccess());
+        timers.firePeriodic(SNAPSHOT_INTERVAL_MS);
+        awaitSnapshotAt(3);
+
+        // A retransmission from before the snapshot, carrying entries it covers and one new entry.
+        AppendEntriesResponse overlapping = append(1, 1, 1, 4, "k2", "k3", "k4");
+        assertTrue(overlapping.getSuccess(), "entries a snapshot covers are committed and match the leader");
+        assertEquals(4, overlapping.getMatchIndex());
+        assertEquals(4, follower.getCommitIndex());
+        assertEquals(Optional.of("k4"), store.findMetadata("k4"));
+
+        AppendEntriesResponse staleHeartbeat = append(1, 2, 1, 4);
+        assertTrue(staleHeartbeat.getSuccess());
+        assertEquals(3, staleHeartbeat.getMatchIndex(),
+                "a heartbeat inside the snapshot verifies the log only through the snapshot boundary");
+        assertFalse(follower.isFenced());
+    }
+
+    private void startFollower() throws Exception {
+        runtime = JavaRuntime.create();
+        timers = new ManualTimers(runtime);
+        TestRaftStorage storage = new TestRaftStorage();
+        storage.open(null).join();
+        follower = RaftNode.builder().runtime(runtime).nodeId("follower")
+                .clusterNodes(Set.of("follower", "leader", "other"))
+                .transport(new InMemoryTransportSimulator("follower"))
+                .stateMachine(store).commandCodec(CODEC)
+                .mode(RaftNodeMode.durable(storage, storage))
+                .snapshotEnabled(true).snapshotThreshold(1).snapshotCheckInterval(SNAPSHOT_INTERVAL_MS)
+                .electionTimeout(60_000).heartbeatInterval(50).timerScheduler(timers).build();
+        follower.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+    }
+
+    /** Sends one AppendEntries whose entries follow {@code prevIndex} and each put {@code key=key}. */
+    private AppendEntriesResponse append(long term, long prevIndex, long prevTerm, long leaderCommit,
+                                         String... keys) throws Exception {
+        AppendEntriesRequest.Builder request = AppendEntriesRequest.newBuilder().setTerm(term).setLeaderId("leader")
+                .setPrevLogIndex(prevIndex).setPrevLogTerm(prevTerm).setLeaderCommit(leaderCommit);
+        long index = prevIndex;
+        for (String key : keys) {
+            index++;
+            byte[] data = CODEC.serialize(new DistributedStateRaftCommand(DistributedStateCommand.put(key, key)));
+            request.addEntries(dev.mars.qraft.controller.raft.grpc.LogEntry.newBuilder()
+                    .setTerm(term).setIndex(index).setData(ByteString.copyFrom(data)));
+        }
+        return follower.handleAppendEntriesRequest(request.build())
+                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+    }
+
+    /** Waits until the follower, read on its own state loop, has compacted through {@code index}. */
+    private void awaitSnapshotAt(long index) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        long snapshotIndex = snapshotIndexOnLoop();
+        while (snapshotIndex != index && System.nanoTime() < deadline) snapshotIndex = snapshotIndexOnLoop();
+        assertEquals(index, snapshotIndex, "the follower compacts every applied entry");
+    }
+
+    private long snapshotIndexOnLoop() throws Exception {
+        CompletableFuture<Long> read = new CompletableFuture<>();
+        runtime.runOnContext(ignored -> read.complete(follower.getSnapshotLastIndex()));
+        return read.get(10, TimeUnit.SECONDS);
+    }
+
+    /** Timers that fire only when a test fires them, on the node's state loop. */
+    private static final class ManualTimers implements RaftTimerScheduler {
+        private final JavaRuntime runtime;
+        private final AtomicLong ids = new AtomicLong();
+        private final Map<Long, Long> periods = new ConcurrentHashMap<>();
+        private final Map<Long, Consumer<Long>> periodics = new ConcurrentHashMap<>();
+
+        ManualTimers(JavaRuntime runtime) {
+            this.runtime = runtime;
+        }
+
+        @Override
+        public long setTimer(long delayMs, Consumer<Long> action) {
+            return ids.incrementAndGet();
+        }
+
+        @Override
+        public long setPeriodic(long periodMs, Consumer<Long> action) {
+            long id = ids.incrementAndGet();
+            periods.put(id, periodMs);
+            periodics.put(id, action);
+            return id;
+        }
+
+        @Override
+        public boolean cancelTimer(long id) {
+            periods.remove(id);
+            return periodics.remove(id) != null;
+        }
+
+        boolean hasPeriodic(long periodMs) {
+            return periods.containsValue(periodMs);
+        }
+
+        void firePeriodic(long periodMs) throws Exception {
+            long id = periods.entrySet().stream().filter(entry -> entry.getValue() == periodMs)
+                    .map(Map.Entry::getKey).findFirst().orElseThrow();
+            CompletableFuture<Void> fired = new CompletableFuture<>();
+            runtime.runOnContext(ignored -> {
+                periodics.get(id).accept(id);
+                fired.complete(null);
+            });
+            fired.get(10, TimeUnit.SECONDS);
+        }
+    }
+}

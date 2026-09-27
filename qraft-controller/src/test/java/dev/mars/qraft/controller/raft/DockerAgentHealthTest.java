@@ -17,7 +17,6 @@
 package dev.mars.qraft.controller.raft;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.Execution;
@@ -25,15 +24,16 @@ import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.testcontainers.containers.ComposeContainer;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static dev.mars.qraft.controller.raft.DockerHealthApi.httpSequence;
+import static dev.mars.qraft.controller.raft.DockerHealthApi.instanceCount;
+import static dev.mars.qraft.controller.raft.DockerHealthApi.leaderIndex;
+import static dev.mars.qraft.controller.raft.DockerHealthApi.passingWithBothChecks;
+import static dev.mars.qraft.controller.raft.DockerHealthApi.webEntry;
 import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -52,8 +52,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Execution(ExecutionMode.SAME_THREAD)
 @ResourceLock("shared-docker-clusters")
 class DockerAgentHealthTest {
-    private static final ObjectMapper JSON = new ObjectMapper();
-    private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
     @Test
     void anAgentContainersChecksReachEveryServerSurviveTheLeaderLossAndDeregisterOnGracefulStop() {
@@ -61,7 +59,8 @@ class DockerAgentHealthTest {
         try {
             List<String> endpoints = SharedDockerCluster.getNodeEndpoints(cluster, 3);
             await().atMost(Duration.ofSeconds(60)).until(() -> leaderIndex(endpoints) >= 0);
-            await().atMost(Duration.ofSeconds(60)).until(() -> endpoints.stream().allMatch(this::passingWithBothChecks));
+            await().atMost(Duration.ofSeconds(60)).until(() ->
+                    endpoints.stream().allMatch(DockerHealthApi::passingWithBothChecks));
 
             int leader = leaderIndex(endpoints);
             long sequenceBeforeLoss = httpSequence(endpoints.get(leader));
@@ -86,13 +85,14 @@ class DockerAgentHealthTest {
         ComposeContainer cluster = SharedDockerCluster.startIsolatedThreeNodeClusterWithAgent();
         try {
             List<String> endpoints = SharedDockerCluster.getNodeEndpoints(cluster, 3);
-            await().atMost(Duration.ofSeconds(60)).until(() -> endpoints.stream().allMatch(this::passingWithBothChecks));
+            await().atMost(Duration.ofSeconds(60)).until(() ->
+                    endpoints.stream().allMatch(DockerHealthApi::passingWithBothChecks));
 
             SharedDockerCluster.killContainer(cluster, "agent");
 
             AtomicBoolean sawExpiry = new AtomicBoolean();
             await().atMost(Duration.ofSeconds(60)).until(() -> {
-                if (endpoints.stream().allMatch(this::expiredAndCritical)) sawExpiry.set(true);
+                if (endpoints.stream().allMatch(DockerAgentHealthTest::expiredAndCritical)) sawExpiry.set(true);
                 return sawExpiry.get() && endpoints.stream().allMatch(endpoint -> instanceCount(endpoint) == 0);
             });
             assertTrue(sawExpiry.get(), "every server showed the unrenewed checks expired before deregistration");
@@ -101,60 +101,11 @@ class DockerAgentHealthTest {
         }
     }
 
-    /** The agent's {@code web} instance is discoverable as passing, with both of its checks passing. */
-    private boolean passingWithBothChecks(String endpoint) {
-        JsonNode entries = get(endpoint + "/v1/health/service/web?passing");
-        if (entries == null || entries.size() != 1) return false;
-        JsonNode checks = entries.get(0).path("checks");
-        return "docker-agent".equals(entries.get(0).path("service").path("nodeId").asText())
-                && checks.size() == 2
-                && "PASSING".equals(checks.get(0).path("status").asText())
-                && "PASSING".equals(checks.get(1).path("status").asText());
-    }
-
-    private boolean expiredAndCritical(String endpoint) {
-        JsonNode entries = get(endpoint + "/v1/health/service/web");
-        if (entries == null || entries.size() != 1) return false;
-        JsonNode entry = entries.get(0);
+    private static boolean expiredAndCritical(String endpoint) {
+        JsonNode entry = webEntry(endpoint);
+        if (entry == null) return false;
         boolean allExpired = entry.path("checks").size() == 2;
         for (JsonNode check : entry.path("checks")) allExpired &= check.path("expired").asBoolean();
         return allExpired && "CRITICAL".equals(entry.path("service").path("health").asText());
-    }
-
-    private long httpSequence(String endpoint) {
-        JsonNode entries = get(endpoint + "/v1/health/service/web");
-        if (entries == null || entries.size() != 1) return -1;
-        for (JsonNode check : entries.get(0).path("checks")) {
-            if ("http".equals(check.path("checkId").asText())) return check.path("sequenceNumber").asLong();
-        }
-        return -1;
-    }
-
-    private int instanceCount(String endpoint) {
-        JsonNode entries = get(endpoint + "/v1/health/service/web");
-        return entries == null ? -1 : entries.size();
-    }
-
-    /** Index of the only reachable server reporting itself leader, or -1 while there is not exactly one. */
-    private static int leaderIndex(List<String> endpoints) {
-        int leader = -1;
-        for (int index = 0; index < endpoints.size(); index++) {
-            JsonNode status = get(endpoints.get(index) + "/raft/status");
-            if (status != null && "LEADER".equals(status.path("state").asText())) {
-                if (leader >= 0) return -1;
-                leader = index;
-            }
-        }
-        return leader;
-    }
-
-    private static JsonNode get(String uri) {
-        try {
-            HttpResponse<String> response = HTTP.send(HttpRequest.newBuilder(URI.create(uri))
-                    .timeout(Duration.ofSeconds(5)).GET().build(), HttpResponse.BodyHandlers.ofString());
-            return response.statusCode() == 200 ? JSON.readTree(response.body()) : null;
-        } catch (Exception unreachable) {
-            return null;
-        }
     }
 }

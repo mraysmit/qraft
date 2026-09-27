@@ -487,6 +487,7 @@ public class RaftNode {
                 transport.start(this::handleMessage);
                 running = true;
                 resetElectionTimer();
+                startSnapshotScheduler();
                 logger.info("Raft node {} started successfully (term={}, logSize={})",
                         nodeId, currentTerm, log.size());
                 completion.tryComplete();
@@ -990,9 +991,14 @@ public class RaftNode {
     }
 
     private void cancelTimers() {
+        cancelRoleTimers();
+        cancelSnapshotTimer();
+    }
+
+    /** Cancels the timers of the current role; every role keeps compacting its own log. */
+    private void cancelRoleTimers() {
         cancelElectionTimer();
         cancelHeartbeatTimer();
-        cancelSnapshotTimer();
         outboundSnapshotTransfers.clear();
     }
 
@@ -1188,7 +1194,6 @@ public class RaftNode {
         appendLeadershipNoOpIfRecoveredEntriesAwaitCommit();
         startHeartbeats();
         sendHeartbeats(); // Immediate
-        startSnapshotScheduler();
     }
 
     /**
@@ -1322,7 +1327,7 @@ public class RaftNode {
         notifyStateChangeListeners(State.FOLLOWER);
         failPendingCommands(new CommandOutcomeUnknownException(
                 "Leadership lost because a majority is unreachable; outcome may be unknown"));
-        cancelTimers();
+        cancelRoleTimers();
         if (running) resetElectionTimer();
     }
 
@@ -1455,7 +1460,7 @@ public class RaftNode {
         notifyStateChangeListeners(State.FOLLOWER);
         failPendingCommands(new CommandOutcomeUnknownException(
                 "Leadership lost before command commit; outcome may be unknown"));
-        cancelTimers();
+        cancelRoleTimers();
         if (running) resetElectionTimer();
         logger.info("Applied durable higher term {}; node is FOLLOWER", currentTerm);
     }
@@ -1539,8 +1544,11 @@ public class RaftNode {
                 ? persistMetadata(request.getTerm(), Optional.empty())
                 : Future.succeededFuture();
 
-        if (!hasLogEntry(request.getPrevLogIndex()) ||
-                log.get(toArrayIndex(request.getPrevLogIndex())).getTerm() != request.getPrevLogTerm()) {
+        // An entry a snapshot covers is committed, so by the Log Matching Property it is identical on the
+        // leader; a retransmission from before this node compacted must not be refused as inconsistent.
+        boolean previousEntryInSnapshot = request.getPrevLogIndex() < snapshotLastIndex;
+        if (!previousEntryInSnapshot && (!hasLogEntry(request.getPrevLogIndex()) ||
+                log.get(toArrayIndex(request.getPrevLogIndex())).getTerm() != request.getPrevLogTerm())) {
             logger.debug("Rejecting AppendEntries: log inconsistent at prevLogIndex={}",
                     request.getPrevLogIndex());
             return termPersistence.map(ignored ->
@@ -1621,7 +1629,6 @@ public class RaftNode {
             MDC.put("raftTerm", String.valueOf(currentTerm));
             notifyStateChangeListeners(State.FOLLOWER);
             cancelHeartbeatTimer();
-            cancelSnapshotTimer();
         }
         currentLeaderId = request.getLeaderId();
         resetElectionTimer();
@@ -1645,8 +1652,14 @@ public class RaftNode {
             if (!hasLogEntry(entry.getIndex())) log.add(entry);
         }
 
-        if (request.getLeaderCommit() > commitIndex) {
-            commitIndex = Math.min(request.getLeaderCommit(), lastLogIndex());
+        // The request verifies this log only through its last entry, or through the snapshot it overlaps.
+        // A tail beyond that may be an uncommitted entry from an earlier term that no conflict has
+        // truncated yet: reporting it would let the leader count this node for entries it does not hold,
+        // and committing it would apply an entry the cluster never committed.
+        long verifiedIndex = Math.max(request.getPrevLogIndex() + request.getEntriesCount(), snapshotLastIndex);
+        long leaderCommit = Math.min(request.getLeaderCommit(), verifiedIndex);
+        if (leaderCommit > commitIndex) {
+            commitIndex = leaderCommit;
             applyLog();
         }
 
@@ -1659,7 +1672,7 @@ public class RaftNode {
         return FollowerAppendResult.response(AppendEntriesResponse.newBuilder()
                 .setTerm(currentTerm)
                 .setSuccess(true)
-                .setMatchIndex(lastLogIndex())
+                .setMatchIndex(verifiedIndex)
                 .build());
     }
 
@@ -1952,9 +1965,11 @@ public class RaftNode {
     // ========== SNAPSHOT SCHEDULING ==========
 
     /**
-     * Starts periodic snapshot eligibility checks (leader only).
-     * The check fires at the configured interval and triggers a snapshot
-     * when (lastApplied - snapshotLastIndex) exceeds the threshold.
+     * Starts periodic snapshot eligibility checks, which run in every role for as long as the node runs.
+     * Each server compacts its own log independently (Raft section 7): a follower that never compacted
+     * would hold every entry in memory and in its WAL, replay all of them on restart, and, once elected,
+     * refuse writes until its first snapshot. The check fires at the configured interval and takes a
+     * snapshot of applied state when (lastApplied - snapshotLastIndex) reaches the threshold.
      */
     private void startSnapshotScheduler() {
         if (!snapshotEnabled) {
@@ -1962,20 +1977,17 @@ public class RaftNode {
         }
         cancelSnapshotTimer();
         long timerGeneration = snapshotTimerGeneration;
-        long term = currentTerm;
-        long leaderGeneration = leadershipGeneration;
         snapshotTimerId = setPeriodic(snapshotCheckIntervalMs,
-                id -> onSnapshotTimer(id, timerGeneration, term, leaderGeneration));
+                id -> onSnapshotTimer(id, timerGeneration));
         logger.info("Snapshot scheduler started: threshold={}, checkInterval={}ms",
                 snapshotThreshold, snapshotCheckIntervalMs);
     }
 
     /**
-     * Checks whether a snapshot is needed and takes one if the threshold is reached.
-     * Only the leader takes snapshots to avoid redundant work.
+     * Checks whether a snapshot is needed and takes one if the threshold is reached. The snapshot covers
+     * only applied, and therefore committed, entries, so it is safe in any role.
      */
-    private void onSnapshotTimer(
-            long timerId, long timerGeneration, long term, long leaderGeneration) {
+    private void onSnapshotTimer(long timerId, long timerGeneration) {
         if (timerId != snapshotTimerId
                 || timerGeneration != snapshotTimerGeneration
                 || snapshotTimerTransitionPending) {
@@ -1988,9 +2000,9 @@ public class RaftNode {
         }
         snapshotTimerTransitionPending = true;
         transitionSequencer.submit(
-                        "snapshot-timer:" + term + ":" + leaderGeneration,
+                        "snapshot-timer",
                         RaftTransitionSequencer.FailurePolicy.FENCE,
-                        () -> prepareScheduledSnapshot(timerGeneration, term, leaderGeneration),
+                        () -> prepareScheduledSnapshot(timerGeneration),
                         this::applyLocalSnapshot)
                 .onComplete(result -> {
                     snapshotTimerTransitionPending = false;
@@ -2008,11 +2020,8 @@ public class RaftNode {
                 });
     }
 
-    private Future<LocalSnapshotDecision> prepareScheduledSnapshot(
-            long timerGeneration, long term, long leaderGeneration) {
-        if (!snapshotEnabled
-                || timerGeneration != snapshotTimerGeneration
-                || !isCurrentLeadership(term, leaderGeneration)) {
+    private Future<LocalSnapshotDecision> prepareScheduledSnapshot(long timerGeneration) {
+        if (!snapshotEnabled || !running || timerGeneration != snapshotTimerGeneration) {
             return Future.succeededFuture(LocalSnapshotDecision.skipped());
         }
 
@@ -2693,7 +2702,6 @@ public class RaftNode {
             failPendingCommands(new CommandOutcomeUnknownException(
                     "Leadership lost before command commit; outcome may be unknown"));
             cancelHeartbeatTimer();
-            cancelSnapshotTimer();
         }
         if (plan.clearAssemblers()) pendingInstalls.clear();
         currentLeaderId = request.getLeaderId();

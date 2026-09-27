@@ -109,4 +109,21 @@ class SharedDockerClusterFreshnessTest {
                 List.of("docker", "kill", "container-id"),
                 List.of("docker", "start", "container-id")), commands);
     }
+
+    @Test
+    void pauseAndUnpauseFreezeAContainerWithoutRestartingOrRemovingIt() {
+        List<List<String>> commands = new ArrayList<>();
+
+        SharedDockerCluster.runDockerLifecycleCommand(
+                "pause", "container-id", command -> commands.add(List.copyOf(command)));
+        SharedDockerCluster.runDockerLifecycleCommand(
+                "unpause", "container-id", command -> commands.add(List.copyOf(command)));
+
+        assertEquals(List.of(
+                List.of("docker", "pause", "container-id"),
+                List.of("docker", "unpause", "container-id")), commands);
+        assertThrows(IllegalArgumentException.class, () -> SharedDockerCluster.runDockerLifecycleCommand(
+                "rm", "container-id", command -> commands.add(List.copyOf(command))),
+                "lifecycle commands never remove a container or its volumes");
+    }
 }

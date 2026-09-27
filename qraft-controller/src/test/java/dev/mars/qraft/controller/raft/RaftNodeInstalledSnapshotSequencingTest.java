@@ -121,7 +121,9 @@ class RaftNodeInstalledSnapshotSequencingTest {
         storage.releaseBlockedSnapshotPublication();
 
         assertTrue(await(install).getSuccess());
-        assertFalse(await(append).getSuccess(), "queued AppendEntries must see the installed boundary");
+        AppendEntriesResponse queued = await(append);
+        assertTrue(queued.getSuccess(), "a previous entry inside the snapshot is committed and matches");
+        assertEquals(5, queued.getMatchIndex(), "queued AppendEntries must see the installed boundary");
         assertSame(runtime, stateMachine.restoreContext());
         assertEquals(5, node.getSnapshotLastIndex());
         assertEquals(5, node.getLastApplied());

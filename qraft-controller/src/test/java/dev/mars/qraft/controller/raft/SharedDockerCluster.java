@@ -60,7 +60,7 @@ import java.util.stream.Stream;
  */
 public final class SharedDockerCluster {
 
-    private static final Set<String> LIFECYCLE_ACTIONS = Set.of("stop", "kill", "start");
+    private static final Set<String> LIFECYCLE_ACTIONS = Set.of("stop", "kill", "start", "pause", "unpause");
 
     private static final Logger logger = Logger.getLogger(SharedDockerCluster.class.getName());
 
@@ -112,13 +112,25 @@ public final class SharedDockerCluster {
     }
 
     /**
-     * Starts a disposable three-node cluster with one client-mode {@code agent} container whose
-     * configuration runs HTTP and TCP health checks.
+     * Starts a disposable three-node cluster with one client-mode {@code agent} container using the expiry
+     * profile: HTTP and TCP checks with a 5-second TTL, so expiry and deregistration are quick to observe.
      */
     public static ComposeContainer startIsolatedThreeNodeClusterWithAgent() {
+        return startIsolatedThreeNodeClusterWithAgent("docker-compose-3node-agent-prebuilt.yml");
+    }
+
+    /**
+     * Starts a disposable three-node cluster with one client-mode {@code agent} container using the restart
+     * profile: a 15-second check TTL, a 30-second deregistration delay, and 5-second controller contact
+     * freshness, which leave margins of several seconds for container and JVM start.
+     */
+    public static ComposeContainer startIsolatedThreeNodeClusterWithRestartAgent() {
+        return startIsolatedThreeNodeClusterWithAgent("docker-compose-3node-agent-restart-prebuilt.yml");
+    }
+
+    private static ComposeContainer startIsolatedThreeNodeClusterWithAgent(String composeFile) {
         ensureImageBuilt();
-        ComposeContainer cluster = new ComposeContainer(
-                new File("src/test/resources/docker-compose-3node-agent-prebuilt.yml"))
+        ComposeContainer cluster = new ComposeContainer(new File("src/test/resources/" + composeFile))
                 .withExposedService("controller1", 8080, Wait.forHttp("/health").forStatusCode(200))
                 .withExposedService("controller2", 8080, Wait.forHttp("/health").forStatusCode(200))
                 .withExposedService("controller3", 8080, Wait.forHttp("/health").forStatusCode(200))
@@ -161,6 +173,21 @@ public final class SharedDockerCluster {
             endpoints.add("http://localhost:" + port);
         }
         return endpoints;
+    }
+
+    /** HTTP endpoint of one compose service's port 8080. */
+    public static String getServiceEndpoint(ComposeContainer cluster, String serviceName) {
+        return "http://localhost:" + cluster.getServicePort(serviceName, 8080);
+    }
+
+    /** Freezes every process in one compose service without stopping, restarting, or removing it. */
+    public static synchronized void pauseContainer(ComposeContainer cluster, String serviceName) {
+        runDockerLifecycleCommand("pause", containerId(cluster, serviceName), SharedDockerCluster::runCommand);
+    }
+
+    /** Resumes a service frozen by {@link #pauseContainer}. */
+    public static synchronized void unpauseContainer(ComposeContainer cluster, String serviceName) {
+        runDockerLifecycleCommand("unpause", containerId(cluster, serviceName), SharedDockerCluster::runCommand);
     }
 
     /** Stops one compose service without removing its container or volume. */

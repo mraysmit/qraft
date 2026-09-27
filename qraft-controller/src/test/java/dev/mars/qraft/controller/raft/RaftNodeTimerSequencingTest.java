@@ -53,7 +53,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests that election, heartbeat and snapshot timers in {@link RaftNode} run through the transition
- * sequencer and cannot act on stale state or while a WAL transition is blocked.
+ * sequencer and cannot act on stale state or while a WAL transition is blocked; a snapshot queued behind
+ * a step-down runs after it, in the follower role, over applied entries only.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-14
@@ -132,7 +133,7 @@ class RaftNodeTimerSequencingTest {
     }
 
     @Test
-    void scheduledSnapshotCannotRunAfterQueuedHigherTermStepDown() throws Exception {
+    void aScheduledSnapshotQueuedBehindAStepDownWaitsForItAndCompactsOnlyAppliedEntries() throws Exception {
         runtime = JavaRuntime.create();
         timers = new ManualTimerScheduler(runtime);
         GatedTimerStorage storage = new GatedTimerStorage();
@@ -154,15 +155,25 @@ class RaftNodeTimerSequencingTest {
         storage.awaitBlockedMetadataUpdate();
         timers.firePeriodic(200);
         awaitStateLoop();
+        assertEquals(0, storage.snapshotSaveCount(),
+                "the snapshot is queued behind the step-down's blocked WAL transition");
 
         storage.releaseBlockedMetadataUpdate();
         assertTrue(await(vote).getVoteGranted());
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (storage.snapshotSaveCount() == 0 && System.nanoTime() < deadline) awaitStateLoop();
         awaitStateLoop();
 
         assertEquals(RaftNode.State.FOLLOWER, node.getState());
-        assertEquals(0, storage.snapshotSaveCount(),
-                "a leader-owned timer must not publish after leadership is lost");
-        assertEquals(0, node.getSnapshotLastIndex());
+        assertEquals(1, storage.snapshotSaveCount(), "every role compacts its own log");
+        assertEquals(node.getCommitIndex(), onStateLoop(node::getSnapshotLastIndex),
+                "the snapshot covers exactly the applied entries");
+    }
+
+    private <T> T onStateLoop(java.util.function.Supplier<T> read) throws Exception {
+        CompletableFuture<T> value = new CompletableFuture<>();
+        runtime.runOnContext(ignored -> value.complete(read.get()));
+        return value.get(10, TimeUnit.SECONDS);
     }
 
     @Test

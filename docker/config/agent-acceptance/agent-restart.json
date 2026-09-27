@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "agent": {
+    "id": "docker-agent",
+    "hostname": "docker-agent",
+    "address": "agent",
+    "httpPort": 8080,
+    "heartbeatIntervalMs": 1000,
+    "shutdownTimeoutMs": 8000
+  },
+  "controllers": {
+    "urls": ["http://controller1:8080", "http://controller2:8080", "http://controller3:8080"],
+    "requestTimeoutMs": 3000
+  },
+  "catalog": {
+    "registrationRetryMinMs": 100,
+    "registrationRetryMaxMs": 1000,
+    "contactFreshnessMs": 5000,
+    "services": [
+      {
+        "id": "web",
+        "name": "web",
+        "address": "agent",
+        "port": 8080,
+        "checks": [
+          {"id": "http", "type": "http", "url": "http://127.0.0.1:8080/health/live",
+           "intervalMs": 1000, "timeoutMs": 1000, "ttlMs": 15000, "deregisterAfterMs": 30000},
+          {"id": "tcp", "type": "tcp", "address": "127.0.0.1",
+           "intervalMs": 1000, "timeoutMs": 1000, "ttlMs": 15000}
+        ]
+      }
+    ]
+  },
+  "logging": {
+    "directory": "/app/logs"
+  }
+}
