@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.runtime;
 
+import dev.mars.qraft.controller.raft.PeerlessTransport;
 import dev.mars.qraft.catalog.ServiceKey;
 import dev.mars.qraft.agent.QraftAgent;
 import dev.mars.qraft.agent.config.AgentConfiguration;
@@ -23,17 +24,8 @@ import dev.mars.qraft.catalog.ServiceDefinition;
 import dev.mars.qraft.controller.http.HttpApiServer;
 import dev.mars.qraft.controller.raft.InMemoryTransportSimulator;
 import dev.mars.qraft.controller.raft.ManualRaftCluster;
-import dev.mars.qraft.controller.raft.RaftMessage;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.raft.RaftNodeMode;
-import dev.mars.qraft.controller.raft.RaftTransport;
-import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
-import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
-import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
-import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
-import dev.mars.qraft.controller.raft.grpc.VoteRequest;
-import dev.mars.qraft.controller.raft.grpc.VoteResponse;
-import dev.mars.qraft.controller.runtime.Future;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import org.junit.jupiter.api.AfterEach;
@@ -47,7 +39,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
-import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -199,7 +190,7 @@ class AgentEndToEndTest {
             JavaRuntime runtime = JavaRuntime.create();
             ManualRaftCluster raft = new ManualRaftCluster(runtime);
             QraftStateStore store = new QraftStateStore();
-            RaftNode node = raft.add(raft.builder("single", Set.of("single"), new SingleNodeTransport(), store,
+            RaftNode node = raft.add(raft.builder("single", Set.of("single"), new PeerlessTransport(), store,
                     RaftNodeMode.volatileMode()));
             ManualRaftCluster.startAll(node);
             raft.elect(node);
@@ -260,22 +251,6 @@ class AgentEndToEndTest {
             cleanup.run(raft::close)
                     .run(() -> runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS))
                     .rethrow();
-        }
-    }
-
-    private static final class SingleNodeTransport implements RaftTransport {
-        @Override public void start(Consumer<RaftMessage> messageHandler) { }
-        @Override public void stop() { }
-        @Override public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
-            return Future.failedFuture("single-node transport has no peers");
-        }
-        @Override public Future<AppendEntriesResponse> sendAppendEntries(
-                String targetId, AppendEntriesRequest request) {
-            return Future.failedFuture("single-node transport has no peers");
-        }
-        @Override public Future<InstallSnapshotResponse> sendInstallSnapshot(
-                String targetId, InstallSnapshotRequest request) {
-            return Future.failedFuture("single-node transport has no peers");
         }
     }
 }

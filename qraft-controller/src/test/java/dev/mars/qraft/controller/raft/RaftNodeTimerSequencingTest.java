@@ -36,6 +36,7 @@ import dev.mars.raftlog.storage.RaftStorage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -48,6 +49,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
+import static dev.mars.qraft.controller.raft.RaftAwait.awaitStateLoop;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -93,11 +95,11 @@ class RaftNodeTimerSequencingTest {
                 .build());
         storage.awaitBlockedMetadataUpdate();
         timers.fireNextOneShot();
-        awaitStateLoop();
+        awaitStateLoop(runtime);
 
         storage.releaseBlockedMetadataUpdate();
         assertTrue(await(vote).getVoteGranted());
-        awaitStateLoop();
+        awaitStateLoop(runtime);
 
         assertEquals(RaftNode.State.FOLLOWER, node.getState(),
                 "the expired timer must be invalid after the granted vote resets it");
@@ -123,13 +125,13 @@ class RaftNodeTimerSequencingTest {
         storage.awaitBlockedSync();
         transport.resetAppendCount();
         timers.firePeriodic(200);
-        awaitStateLoop();
+        awaitStateLoop(runtime);
 
         assertEquals(0, transport.appendCount(),
                 "timer work must wait behind the active WAL transition");
 
         storage.releaseBlockedSync();
-        awaitStateLoop();
+        awaitStateLoop(runtime);
     }
 
     @Test
@@ -154,15 +156,15 @@ class RaftNodeTimerSequencingTest {
                 .build());
         storage.awaitBlockedMetadataUpdate();
         timers.firePeriodic(200);
-        awaitStateLoop();
+        awaitStateLoop(runtime);
         assertEquals(0, storage.snapshotSaveCount(),
                 "the snapshot is queued behind the step-down's blocked WAL transition");
 
         storage.releaseBlockedMetadataUpdate();
         assertTrue(await(vote).getVoteGranted());
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (storage.snapshotSaveCount() == 0 && System.nanoTime() < deadline) awaitStateLoop();
-        awaitStateLoop();
+        while (storage.snapshotSaveCount() == 0 && System.nanoTime() < deadline) awaitStateLoop(runtime);
+        awaitStateLoop(runtime);
 
         assertEquals(RaftNode.State.FOLLOWER, node.getState());
         assertEquals(1, storage.snapshotSaveCount(), "every role compacts its own log");
@@ -194,11 +196,11 @@ class RaftNodeTimerSequencingTest {
         storage.awaitBlockedMetadataUpdate();
 
         Future<Void> stop = node.stop();
-        awaitStateLoop();
+        awaitStateLoop(runtime);
         storage.releaseBlockedMetadataUpdate();
         await(vote);
         await(stop);
-        awaitStateLoop();
+        awaitStateLoop(runtime);
 
         assertEquals(0, timers.oneShotCount(), "a stopped node must not hold an armed election timer");
     }
@@ -232,8 +234,8 @@ class RaftNodeTimerSequencingTest {
         storage.awaitBlockedMetadataUpdate();
 
         timers.fireNextOneShot();
-        awaitStateLoop();
-        awaitStateLoop();
+        awaitStateLoop(runtime);
+        awaitStateLoop(runtime);
 
         assertEquals(1, timers.oneShotCount(),
                 "queue rejection must install a replacement election timer");
@@ -269,14 +271,8 @@ class RaftNodeTimerSequencingTest {
         await(node.awaitState(RaftNode.State.LEADER, 10_000));
     }
 
-    private void awaitStateLoop() throws Exception {
-        CompletableFuture<Void> marker = new CompletableFuture<>();
-        runtime.runOnContext(ignored -> marker.complete(null));
-        marker.get(10, TimeUnit.SECONDS);
-    }
-
     private static <T> T await(Future<T> future) {
-        return future.timeout(15, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
+        return RaftAwait.await(future, Duration.ofSeconds(15));
     }
 
     private static final class AutoTransport implements RaftTransport {

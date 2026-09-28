@@ -16,7 +16,8 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.controller.state.*;
+import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
+import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
@@ -26,37 +27,52 @@ import dev.mars.qraft.controller.raft.grpc.VoteResponse;
 
 
 import dev.mars.qraft.controller.state.QraftStateStore;
-import io.grpc.*;
+import io.grpc.Deadline;
+import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import io.grpc.stub.StreamObserver;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static org.awaitility.Awaitility.await;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Comprehensive edge case tests for GrpcRaftServer.
- * Tests various scenarios including:
- * - Server lifecycle (start/stop)
- * - Connection handling
- * - Request/response handling
- * - Error conditions
- * - Concurrent requests
- * - Network edge cases
- * 
+ * Tests {@link GrpcRaftServer} in front of a real sole-member node: starting and stopping, the vote and
+ * append decisions it returns (including terms adopted and votes spent), rejection of malformed requests as
+ * {@code INVALID_ARGUMENT}, deadlines, concurrent and sustained load, reconnection, and two servers serving
+ * separate nodes.
+ *
+ * <p>Nodes run on manual timers, so a node never elects itself during a test and each decision depends only
+ * on the requests the test sends.
+ *
  * @author Mark Andrew Ray-Smith Cityline Ltd
- * @version 1.0
+ * @version 1.1
  * @since 2026-01-08
  */
 @Execution(ExecutionMode.SAME_THREAD)
@@ -64,6 +80,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class GrpcRaftServerTest {
 
     private JavaRuntime runtime;
+    private ManualRaftCluster cluster;
     private RaftNode raftNode;
     private GrpcRaftServer grpcServer;
     private ManagedChannel channel;
@@ -73,25 +90,23 @@ class GrpcRaftServerTest {
     @BeforeEach
     void setUp() throws Exception {
         runtime = JavaRuntime.create();
+        cluster = new ManualRaftCluster(runtime);
+        // On manual timers the node never elects itself, so it stays a follower in term 0 with no vote until a
+        // request changes that, and every vote decision below is the same on every run.
+        raftNode = node("node1");
+    }
 
-        // Create a minimal RaftNode for testing
-        Set<String> clusterNodes = Set.of("node1");
-        InMemoryTransportSimulator transport = new InMemoryTransportSimulator("node1");
-        QraftStateStore stateMachine = new QraftStateStore();
-        raftNode = RaftNode.builder().runtime(runtime)
-            .nodeId("node1")
-            .clusterNodes(clusterNodes)
-            .transport(transport)
-            .stateMachine(stateMachine).commandCodec(new ProtobufRaftCommandCodec())
-            .mode(RaftNodeMode.volatileMode())
-            .electionTimeout(5000)
-            .heartbeatInterval(1000).build();
-        raftNode.start();
-        
-        // Wait for node to be running (reactive polling instead of fixed sleep)
-        await().atMost(Duration.ofSeconds(10))
-            .pollInterval(Duration.ofMillis(10))
-            .until(() -> raftNode.isRunning());
+    /** A started sole-member node on manual timers, stopped after the test. */
+    private RaftNode node(String nodeId) throws Exception {
+        RaftNode node = cluster.add(cluster.builder(nodeId, Set.of(nodeId), new InMemoryTransportSimulator(nodeId),
+                new QraftStateStore(), RaftNodeMode.volatileMode()));
+        ManualRaftCluster.await(node.start());
+        return node;
+    }
+
+    private static VoteRequest vote(long term, String candidateId) {
+        return VoteRequest.newBuilder()
+                .setTerm(term).setCandidateId(candidateId).setLastLogIndex(0).setLastLogTerm(0).build();
     }
 
     @AfterEach
@@ -103,8 +118,8 @@ class GrpcRaftServerTest {
         if (grpcServer != null) {
             grpcServer.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
-        if (raftNode != null) {
-            raftNode.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        if (cluster != null) {
+            cluster.close();
         }
         if (runtime != null) {
             runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
@@ -128,37 +143,26 @@ class GrpcRaftServerTest {
     // ========== SERVER LIFECYCLE TESTS ==========
 
     @Test
-    @DisplayName("Server should start successfully on available port")
-    void testServerStartSuccess() throws Exception {
-        grpcServer = new GrpcRaftServer(runtime, 0, raftNode);
-        
-        CompletableFuture<Void> startFuture = grpcServer.start()
-                .toCompletionStage().toCompletableFuture();
-        
-        assertDoesNotThrow(() -> startFuture.get(10, TimeUnit.SECONDS));
-    }
-
-    @Test
     @DisplayName("Server should fail to start on occupied port")
-    void testServerStartFailsOnOccupiedPort() throws Exception {
+    void startOnAPortAnotherServerHasBoundFails() throws Exception {
         // Start first server
         grpcServer = new GrpcRaftServer(runtime, 0, raftNode);
         grpcServer.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
 
         // Try to start second server on the port the first one bound
         GrpcRaftServer secondServer = new GrpcRaftServer(runtime, grpcServer.port(), raftNode);
-        
+
         CompletableFuture<Void> startFuture = secondServer.start()
                 .toCompletionStage().toCompletableFuture();
-        
+
         assertThrows(ExecutionException.class, () -> startFuture.get(10, TimeUnit.SECONDS));
     }
 
     @Test
     @DisplayName("Server should stop gracefully")
-    void testServerStopGraceful() throws Exception {
+    void stopCompletesWithoutErrorAndLaterCallsAreRefused() throws Exception {
         startServerAndConnect();
-        
+
         // Verify server is running
         VoteRequest request = VoteRequest.newBuilder()
                 .setTerm(1)
@@ -166,15 +170,15 @@ class GrpcRaftServerTest {
                 .setLastLogIndex(0)
                 .setLastLogTerm(0)
                 .build();
-        
+
         assertDoesNotThrow(() -> blockingStub.requestVote(request));
-        
+
         // Stop server
         CompletableFuture<Void> stopFuture = grpcServer.stop()
                 .toCompletionStage().toCompletableFuture();
-        
+
         assertDoesNotThrow(() -> stopFuture.get(10, TimeUnit.SECONDS));
-        
+
         // Verify server is stopped (requests should fail)
         assertThrows(StatusRuntimeException.class, () -> blockingStub.requestVote(request));
     }
@@ -195,20 +199,23 @@ class GrpcRaftServerTest {
     }
 
     @Test
-    @DisplayName("Stop on null server should complete successfully")
-    void testStopOnNullServer() throws Exception {
+    @DisplayName("Stopping a server that never started leaves it able to start and serve")
+    void stoppingAServerThatNeverStartedLeavesItAbleToStartAndServe() throws Exception {
         grpcServer = new GrpcRaftServer(runtime, 0, raftNode);
-        // Don't start, just stop
-        
-        CompletableFuture<Void> stopFuture = grpcServer.stop()
-                .toCompletionStage().toCompletableFuture();
-        
-        assertDoesNotThrow(() -> stopFuture.get(10, TimeUnit.SECONDS));
+
+        grpcServer.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        assertThrows(IllegalStateException.class, grpcServer::port, "stopping did not bind a port");
+
+        grpcServer.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        channel = ManagedChannelBuilder.forAddress("localhost", grpcServer.port()).usePlaintext().build();
+        VoteResponse response = RaftServiceGrpc.newBlockingStub(channel).withDeadlineAfter(10, TimeUnit.SECONDS)
+                .requestVote(vote(1, "candidate1"));
+        assertTrue(response.getVoteGranted());
     }
 
     @Test
     @DisplayName("Server should handle multiple start-stop cycles")
-    void testMultipleStartStopCycles() throws Exception {
+    void threeSuccessiveServersEachStartAnswerRequestVoteAndStop() throws Exception {
         for (int i = 0; i < 3; i++) {
             GrpcRaftServer server = new GrpcRaftServer(runtime, 0, raftNode);
 
@@ -219,19 +226,19 @@ class GrpcRaftServerTest {
                     .usePlaintext()
                     .build();
             RaftServiceGrpc.RaftServiceBlockingStub stub = RaftServiceGrpc.newBlockingStub(ch);
-            
+
             VoteRequest request = VoteRequest.newBuilder()
                     .setTerm(1)
                     .setCandidateId("candidate")
                     .setLastLogIndex(0)
                     .setLastLogTerm(0)
                     .build();
-            
+
             assertDoesNotThrow(() -> stub.requestVote(request));
-            
+
             ch.shutdownNow();
             ch.awaitTermination(10, TimeUnit.SECONDS);
-            
+
             server.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
     }
@@ -239,106 +246,85 @@ class GrpcRaftServerTest {
     // ========== REQUEST VOTE TESTS ==========
 
     @Test
-    @DisplayName("RequestVote should return valid response for valid request")
-    void testRequestVoteValidRequest() throws Exception {
+    @DisplayName("A fresh follower grants its term-1 vote and reports term 1")
+    void aFreshFollowerGrantsItsTermOneVote() throws Exception {
         startServerAndConnect();
-        
-        VoteRequest request = VoteRequest.newBuilder()
-                .setTerm(1)
-                .setCandidateId("candidate1")
-                .setLastLogIndex(0)
-                .setLastLogTerm(0)
-                .build();
-        
-        VoteResponse response = blockingStub.requestVote(request);
-        
-        assertNotNull(response);
-        assertTrue(response.getTerm() >= 0);
+
+        VoteResponse response = blockingStub.requestVote(vote(1, "candidate1"));
+
+        assertTrue(response.getVoteGranted());
+        assertEquals(1, response.getTerm());
     }
 
     @Test
-    @DisplayName("RequestVote should handle term 0")
-    void testRequestVoteTermZero() throws Exception {
+    @DisplayName("In the node's own term, the vote goes to the first candidate and is refused to the next")
+    void inTheNodesOwnTermTheVoteGoesToTheFirstCandidateOnly() throws Exception {
         startServerAndConnect();
-        
-        VoteRequest request = VoteRequest.newBuilder()
-                .setTerm(0)
-                .setCandidateId("candidate1")
-                .setLastLogIndex(0)
-                .setLastLogTerm(0)
-                .build();
-        
-        VoteResponse response = blockingStub.requestVote(request);
-        
-        assertNotNull(response);
+
+        VoteResponse first = blockingStub.requestVote(vote(0, "candidate1"));
+        VoteResponse second = blockingStub.requestVote(vote(0, "candidate2"));
+        VoteResponse again = blockingStub.requestVote(vote(0, "candidate1"));
+
+        assertEquals(List.of(true, false, true),
+                List.of(first.getVoteGranted(), second.getVoteGranted(), again.getVoteGranted()),
+                "one vote per term, which the same candidate may ask for again");
+        assertEquals(List.of(0L, 0L, 0L), List.of(first.getTerm(), second.getTerm(), again.getTerm()));
     }
 
     @Test
-    @DisplayName("RequestVote should handle very high term number")
-    void testRequestVoteHighTerm() throws Exception {
+    @DisplayName("A candidate at the maximum term has that term adopted and is granted the vote")
+    void aCandidateAtTheMaximumTermHasItAdoptedAndIsGrantedTheVote() throws Exception {
         startServerAndConnect();
-        
-        VoteRequest request = VoteRequest.newBuilder()
-                .setTerm(Long.MAX_VALUE)
-                .setCandidateId("candidate1")
-                .setLastLogIndex(0)
-                .setLastLogTerm(0)
-                .build();
-        
-        VoteResponse response = blockingStub.requestVote(request);
-        
-        assertNotNull(response);
+
+        VoteResponse response = blockingStub.requestVote(vote(Long.MAX_VALUE, "candidate1"));
+
+        assertTrue(response.getVoteGranted());
+        assertEquals(Long.MAX_VALUE, response.getTerm());
+        assertEquals(Long.MAX_VALUE, raftNode.getCurrentTerm());
     }
 
     @Test
-    @DisplayName("RequestVote should handle empty candidate ID")
-    void testRequestVoteEmptyCandidateId() throws Exception {
+    @DisplayName("A vote request naming no candidate is rejected as INVALID_ARGUMENT without spending the vote")
+    void aVoteRequestNamingNoCandidateIsRejectedWithoutSpendingTheVote() throws Exception {
         startServerAndConnect();
-        
-        VoteRequest request = VoteRequest.newBuilder()
-                .setTerm(1)
-                .setCandidateId("")
-                .setLastLogIndex(0)
-                .setLastLogTerm(0)
-                .build();
-        
-        VoteResponse response = blockingStub.requestVote(request);
-        
-        assertNotNull(response);
+
+        StatusRuntimeException rejected = assertThrows(StatusRuntimeException.class,
+                () -> blockingStub.requestVote(vote(1, "")));
+
+        assertEquals(Status.Code.INVALID_ARGUMENT, rejected.getStatus().getCode());
+        assertEquals(0, raftNode.getCurrentTerm(), "a rejected request does not advance the term");
+        assertTrue(blockingStub.requestVote(vote(1, "candidate1")).getVoteGranted(),
+                "the term-1 vote is still free for a real candidate");
     }
 
     @Test
-    @DisplayName("RequestVote should handle negative log index")
-    void testRequestVoteNegativeLogIndex() throws Exception {
+    @DisplayName("A candidate claiming a negative log index is refused, but its higher term is adopted")
+    void aCandidateClaimingANegativeLogIndexIsRefusedButItsTermIsAdopted() throws Exception {
         startServerAndConnect();
-        
-        VoteRequest request = VoteRequest.newBuilder()
-                .setTerm(1)
-                .setCandidateId("candidate1")
-                .setLastLogIndex(-1)
-                .setLastLogTerm(0)
-                .build();
-        
-        // Should not throw, server should handle gracefully
-        assertDoesNotThrow(() -> blockingStub.requestVote(request));
+
+        VoteResponse response = blockingStub.requestVote(VoteRequest.newBuilder()
+                .setTerm(1).setCandidateId("candidate1").setLastLogIndex(-1).setLastLogTerm(0).build());
+
+        assertFalse(response.getVoteGranted(), "a log ending before index 0 is behind the node's");
+        assertEquals(1, response.getTerm());
     }
 
     @Test
     @DisplayName("RequestVote async should complete successfully")
-    void testRequestVoteAsync() throws Exception {
+    void asyncRequestVoteDeliversAResponseAndCompletesWithoutError() throws Exception {
         startServerAndConnect();
-        
+
         VoteRequest request = VoteRequest.newBuilder()
                 .setTerm(1)
                 .setCandidateId("candidate1")
                 .setLastLogIndex(0)
                 .setLastLogTerm(0)
                 .build();
-        
+
         CountDownLatch latch = new CountDownLatch(1);
         AtomicReference<VoteResponse> responseRef = new AtomicReference<>();
         AtomicReference<Throwable> errorRef = new AtomicReference<>();
-        
+
         asyncStub.requestVote(request, new StreamObserver<>() {
             @Override
             public void onNext(VoteResponse response) {
@@ -356,7 +342,7 @@ class GrpcRaftServerTest {
                 latch.countDown();
             }
         });
-        
+
         assertTrue(latch.await(10, TimeUnit.SECONDS));
         assertNull(errorRef.get());
         assertNotNull(responseRef.get());
@@ -365,35 +351,29 @@ class GrpcRaftServerTest {
     // ========== APPEND ENTRIES TESTS ==========
 
     @Test
-    @DisplayName("AppendEntries should return valid response for heartbeat")
-    void testAppendEntriesHeartbeat() throws Exception {
+    @DisplayName("A heartbeat from a leader of a newer term succeeds, and the node follows that leader")
+    void aHeartbeatFromANewerTermLeaderSucceedsAndTheNodeFollowsIt() throws Exception {
         startServerAndConnect();
-        
-        AppendEntriesRequest request = AppendEntriesRequest.newBuilder()
-                .setTerm(1)
-                .setLeaderId("leader1")
-                .setPrevLogIndex(0)
-                .setPrevLogTerm(0)
-                .setLeaderCommit(0)
-                .build();
-        
-        AppendEntriesResponse response = blockingStub.appendEntries(request);
-        
-        assertNotNull(response);
-        assertTrue(response.getTerm() >= 0);
+
+        AppendEntriesResponse response = blockingStub.appendEntries(AppendEntriesRequest.newBuilder()
+                .setTerm(1).setLeaderId("leader1").setPrevLogIndex(0).setPrevLogTerm(0).setLeaderCommit(0).build());
+
+        assertTrue(response.getSuccess());
+        assertEquals(1, response.getTerm());
+        assertEquals("leader1", raftNode.getLeaderId());
     }
 
     @Test
     @DisplayName("AppendEntries should handle entries with log entries")
-    void testAppendEntriesWithEntries() throws Exception {
+    void undecodableEntryDataIsRejectedAsInvalidArgumentAndLaterHeartbeatsStillSucceed() throws Exception {
         startServerAndConnect();
-        
+
         dev.mars.qraft.controller.raft.grpc.LogEntry entry = dev.mars.qraft.controller.raft.grpc.LogEntry.newBuilder()
                 .setTerm(1)
                 .setIndex(1)
                 .setData(com.google.protobuf.ByteString.copyFromUtf8("test-command"))
                 .build();
-        
+
         AppendEntriesRequest request = AppendEntriesRequest.newBuilder()
                 .setTerm(1)
                 .setLeaderId("leader1")
@@ -402,7 +382,7 @@ class GrpcRaftServerTest {
                 .setLeaderCommit(0)
                 .addEntries(entry)
                 .build();
-        
+
         StatusRuntimeException failure = assertThrows(StatusRuntimeException.class,
                 () -> blockingStub.withDeadlineAfter(2, TimeUnit.SECONDS).appendEntries(request));
         assertEquals(Status.Code.INVALID_ARGUMENT, failure.getStatus().getCode());
@@ -420,9 +400,9 @@ class GrpcRaftServerTest {
 
     @Test
     @DisplayName("AppendEntries should handle stale term")
-    void testAppendEntriesStaleTerm() throws Exception {
+    void appendEntriesFromAStaleTermIsRejected() throws Exception {
         startServerAndConnect();
-        
+
         // First, update the term with a higher term request
         VoteRequest voteRequest = VoteRequest.newBuilder()
                 .setTerm(10)
@@ -430,8 +410,9 @@ class GrpcRaftServerTest {
                 .setLastLogIndex(0)
                 .setLastLogTerm(0)
                 .build();
-        blockingStub.requestVote(voteRequest);
-        
+        VoteResponse raised = blockingStub.requestVote(voteRequest);
+        assertEquals(10, raised.getTerm(), "the vote request raised the node to term 10");
+
         // Now send AppendEntries with lower term
         AppendEntriesRequest request = AppendEntriesRequest.newBuilder()
                 .setTerm(1) // Lower than current term
@@ -440,18 +421,18 @@ class GrpcRaftServerTest {
                 .setPrevLogTerm(0)
                 .setLeaderCommit(0)
                 .build();
-        
+
         AppendEntriesResponse response = blockingStub.appendEntries(request);
-        
-        assertNotNull(response);
+
         assertFalse(response.getSuccess());
+        assertEquals(10, response.getTerm(), "the refusal tells the stale leader the current term");
     }
 
     @Test
     @DisplayName("AppendEntries async should complete successfully")
-    void testAppendEntriesAsync() throws Exception {
+    void asyncAppendEntriesDeliversAResponseAndCompletesWithoutError() throws Exception {
         startServerAndConnect();
-        
+
         AppendEntriesRequest request = AppendEntriesRequest.newBuilder()
                 .setTerm(1)
                 .setLeaderId("leader1")
@@ -459,11 +440,11 @@ class GrpcRaftServerTest {
                 .setPrevLogTerm(0)
                 .setLeaderCommit(0)
                 .build();
-        
+
         CountDownLatch latch = new CountDownLatch(1);
         AtomicReference<AppendEntriesResponse> responseRef = new AtomicReference<>();
         AtomicReference<Throwable> errorRef = new AtomicReference<>();
-        
+
         asyncStub.appendEntries(request, new StreamObserver<>() {
             @Override
             public void onNext(AppendEntriesResponse response) {
@@ -481,7 +462,7 @@ class GrpcRaftServerTest {
                 latch.countDown();
             }
         });
-        
+
         assertTrue(latch.await(10, TimeUnit.SECONDS));
         assertNull(errorRef.get());
         assertNotNull(responseRef.get());
@@ -491,15 +472,15 @@ class GrpcRaftServerTest {
 
     @Test
     @DisplayName("Server should handle concurrent RequestVote calls")
-    void testConcurrentRequestVotes() throws Exception {
+    void fiftyConcurrentRequestVoteCallsAreAllAnswered() throws Exception {
         startServerAndConnect();
-        
+
         int numRequests = 50;
         ExecutorService executor = Executors.newFixedThreadPool(10);
         CountDownLatch latch = new CountDownLatch(numRequests);
         AtomicInteger successCount = new AtomicInteger(0);
         AtomicInteger errorCount = new AtomicInteger(0);
-        
+
         for (int i = 0; i < numRequests; i++) {
             final int term = i + 1;
             executor.submit(() -> {
@@ -510,7 +491,7 @@ class GrpcRaftServerTest {
                             .setLastLogIndex(0)
                             .setLastLogTerm(0)
                             .build();
-                    
+
                     VoteResponse response = blockingStub.requestVote(request);
                     if (response != null) {
                         successCount.incrementAndGet();
@@ -522,25 +503,25 @@ class GrpcRaftServerTest {
                 }
             });
         }
-        
+
         assertTrue(latch.await(30, TimeUnit.SECONDS));
         executor.shutdown();
-        
+
         assertEquals(numRequests, successCount.get());
         assertEquals(0, errorCount.get());
     }
 
     @Test
     @DisplayName("Server should handle concurrent AppendEntries calls")
-    void testConcurrentAppendEntries() throws Exception {
+    void fiftyConcurrentHeartbeatAppendEntriesCallsAreAllAnswered() throws Exception {
         startServerAndConnect();
-        
+
         int numRequests = 50;
         ExecutorService executor = Executors.newFixedThreadPool(10);
         CountDownLatch latch = new CountDownLatch(numRequests);
         AtomicInteger successCount = new AtomicInteger(0);
         AtomicInteger errorCount = new AtomicInteger(0);
-        
+
         for (int i = 0; i < numRequests; i++) {
             executor.submit(() -> {
                 try {
@@ -551,7 +532,7 @@ class GrpcRaftServerTest {
                             .setPrevLogTerm(0)
                             .setLeaderCommit(0)
                             .build();
-                    
+
                     AppendEntriesResponse response = blockingStub.appendEntries(request);
                     if (response != null) {
                         successCount.incrementAndGet();
@@ -563,25 +544,25 @@ class GrpcRaftServerTest {
                 }
             });
         }
-        
+
         assertTrue(latch.await(30, TimeUnit.SECONDS));
         executor.shutdown();
-        
+
         assertEquals(numRequests, successCount.get());
         assertEquals(0, errorCount.get());
     }
 
     @Test
     @DisplayName("Server should handle mixed concurrent requests")
-    void testMixedConcurrentRequests() throws Exception {
+    void oneHundredConcurrentMixedVoteAndAppendEntriesCallsAreAllAnswered() throws Exception {
         startServerAndConnect();
-        
+
         int numRequests = 100;
         ExecutorService executor = Executors.newFixedThreadPool(20);
         CountDownLatch latch = new CountDownLatch(numRequests);
         AtomicInteger successCount = new AtomicInteger(0);
         AtomicInteger errorCount = new AtomicInteger(0);
-        
+
         for (int i = 0; i < numRequests; i++) {
             final int index = i;
             executor.submit(() -> {
@@ -612,10 +593,10 @@ class GrpcRaftServerTest {
                 }
             });
         }
-        
+
         assertTrue(latch.await(30, TimeUnit.SECONDS));
         executor.shutdown();
-        
+
         assertEquals(numRequests, successCount.get());
         assertEquals(0, errorCount.get());
     }
@@ -624,9 +605,9 @@ class GrpcRaftServerTest {
 
     @Test
     @DisplayName("Client should handle server disconnect gracefully")
-    void testClientHandlesServerDisconnect() throws Exception {
+    void callsOnAnOpenChannelFailWithAStatusErrorOnceTheServerStops() throws Exception {
         startServerAndConnect();
-        
+
         // Verify connection works
         VoteRequest request = VoteRequest.newBuilder()
                 .setTerm(1)
@@ -634,70 +615,70 @@ class GrpcRaftServerTest {
                 .setLastLogIndex(0)
                 .setLastLogTerm(0)
                 .build();
-        
+
         assertDoesNotThrow(() -> blockingStub.requestVote(request));
-        
+
         // Stop server
         grpcServer.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         grpcServer = null;
-        
+
         // Client should get an error
         assertThrows(StatusRuntimeException.class, () -> blockingStub.requestVote(request));
     }
 
     @Test
     @DisplayName("Server should handle client reconnection")
-    void testClientReconnection() throws Exception {
+    void aNewChannelIsAnsweredAfterThePreviousChannelIsClosed() throws Exception {
         startServerAndConnect();
-        
+
         VoteRequest request = VoteRequest.newBuilder()
                 .setTerm(1)
                 .setCandidateId("candidate1")
                 .setLastLogIndex(0)
                 .setLastLogTerm(0)
                 .build();
-        
+
         // First request
         assertDoesNotThrow(() -> blockingStub.requestVote(request));
-        
+
         // Close channel
         channel.shutdownNow();
         channel.awaitTermination(10, TimeUnit.SECONDS);
-        
+
         // Reconnect
         channel = ManagedChannelBuilder.forAddress("localhost", grpcServer.port())
                 .usePlaintext()
                 .build();
         blockingStub = RaftServiceGrpc.newBlockingStub(channel);
-        
+
         // Second request on new connection
         assertDoesNotThrow(() -> blockingStub.requestVote(request));
     }
 
     @Test
     @DisplayName("Server should handle many sequential connections")
-    void testManySequentialConnections() throws Exception {
+    void twentySequentialShortLivedChannelsAreEachAnswered() throws Exception {
         startServerAndConnect();
         channel.shutdownNow();
         channel.awaitTermination(10, TimeUnit.SECONDS);
         channel = null;
-        
+
         for (int i = 0; i < 20; i++) {
             ManagedChannel ch = ManagedChannelBuilder.forAddress("localhost", grpcServer.port())
                     .usePlaintext()
                     .build();
-            
+
             RaftServiceGrpc.RaftServiceBlockingStub stub = RaftServiceGrpc.newBlockingStub(ch);
-            
+
             VoteRequest request = VoteRequest.newBuilder()
                     .setTerm(i + 1)
                     .setCandidateId("candidate" + i)
                     .setLastLogIndex(0)
                     .setLastLogTerm(0)
                     .build();
-            
+
             assertDoesNotThrow(() -> stub.requestVote(request));
-            
+
             ch.shutdownNow();
             ch.awaitTermination(10, TimeUnit.SECONDS);
         }
@@ -706,36 +687,17 @@ class GrpcRaftServerTest {
     // ========== TIMEOUT AND DEADLINE TESTS ==========
 
     @Test
-    @DisplayName("Request should respect deadline")
-    void testRequestWithDeadline() throws Exception {
-        startServerAndConnect();
-        
-        VoteRequest request = VoteRequest.newBuilder()
-                .setTerm(1)
-                .setCandidateId("candidate1")
-                .setLastLogIndex(0)
-                .setLastLogTerm(0)
-                .build();
-        
-        // Use a very generous deadline - should succeed
-        RaftServiceGrpc.RaftServiceBlockingStub stubWithDeadline = 
-                blockingStub.withDeadlineAfter(10, TimeUnit.SECONDS);
-        
-        assertDoesNotThrow(() -> stubWithDeadline.requestVote(request));
-    }
-
-    @Test
     @DisplayName("Request with an expired deadline fails with DEADLINE_EXCEEDED")
-    void testRequestWithVeryShortDeadline() throws Exception {
+    void requestVoteWithAnAlreadyExpiredDeadlineFailsWithDeadlineExceeded() throws Exception {
         startServerAndConnect();
-        
+
         VoteRequest request = VoteRequest.newBuilder()
                 .setTerm(1)
                 .setCandidateId("candidate1")
                 .setLastLogIndex(0)
                 .setLastLogTerm(0)
                 .build();
-        
+
         // A deadline that has already passed fails the call before it is sent, whatever the timing.
         RaftServiceGrpc.RaftServiceBlockingStub stubWithDeadline =
                 blockingStub.withDeadline(Deadline.after(-1, TimeUnit.SECONDS));
@@ -749,12 +711,12 @@ class GrpcRaftServerTest {
 
     @Test
     @DisplayName("Server should handle burst of requests")
-    void testBurstRequests() throws Exception {
+    void twoHundredRequestVoteCallsIssuedAtOnceAreAllAnswered() throws Exception {
         startServerAndConnect();
-        
+
         int burstSize = 200;
         List<CompletableFuture<VoteResponse>> futures = new ArrayList<>();
-        
+
         for (int i = 0; i < burstSize; i++) {
             final int term = i + 1;
             CompletableFuture<VoteResponse> future = CompletableFuture.supplyAsync(() -> {
@@ -768,11 +730,11 @@ class GrpcRaftServerTest {
             });
             futures.add(future);
         }
-        
+
         // Wait for all to complete
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
                 .get(60, TimeUnit.SECONDS);
-        
+
         // Verify all succeeded
         for (CompletableFuture<VoteResponse> future : futures) {
             assertNotNull(future.get());
@@ -781,7 +743,7 @@ class GrpcRaftServerTest {
 
     @Test
     @DisplayName("Server answers every one of a sustained stream of concurrent requests")
-    void testSustainedLoad() throws Exception {
+    void fiveWorkersSendingOneHundredRequestVoteCallsEachAreAllAnswered() throws Exception {
         startServerAndConnect();
         int workers = 5;
         int requestsPerWorker = 100;
@@ -817,40 +779,21 @@ class GrpcRaftServerTest {
     // ========== MALFORMED REQUEST TESTS ==========
 
     @Test
-    @DisplayName("Server should handle request with all default values")
-    void testRequestWithDefaultValues() throws Exception {
+    @DisplayName("An entirely empty vote request is rejected as INVALID_ARGUMENT")
+    void anEntirelyEmptyVoteRequestIsRejectedAsInvalidArgument() throws Exception {
         startServerAndConnect();
-        
-        VoteRequest request = VoteRequest.newBuilder().build();
-        
-        // Should not crash
-        assertDoesNotThrow(() -> blockingStub.requestVote(request));
-    }
 
-    @Test
-    @DisplayName("Server should handle AppendEntries with empty entries list")
-    void testAppendEntriesEmptyEntries() throws Exception {
-        startServerAndConnect();
-        
-        AppendEntriesRequest request = AppendEntriesRequest.newBuilder()
-                .setTerm(1)
-                .setLeaderId("leader1")
-                .setPrevLogIndex(0)
-                .setPrevLogTerm(0)
-                .setLeaderCommit(0)
-                .clearEntries()
-                .build();
-        
-        AppendEntriesResponse response = blockingStub.appendEntries(request);
-        
-        assertNotNull(response);
+        StatusRuntimeException rejected = assertThrows(StatusRuntimeException.class,
+                () -> blockingStub.requestVote(VoteRequest.newBuilder().build()));
+
+        assertEquals(Status.Code.INVALID_ARGUMENT, rejected.getStatus().getCode());
     }
 
     @Test
     @DisplayName("Server should handle AppendEntries with large entries")
-    void testAppendEntriesLargeEntries() throws Exception {
+    void aOneMegabyteCommandFromAHigherTermIsAppendedAtIndexOne() throws Exception {
         startServerAndConnect();
-        
+
         // A real encoded command about 1 MB long, well inside the transport's message limit. The term is
         // beyond any the single-member node can reach by electing itself.
         byte[] command = new ProtobufRaftCommandCodec().serialize(new DistributedStateRaftCommand(
@@ -876,96 +819,54 @@ class GrpcRaftServerTest {
     }
 
     @Test
-    @DisplayName("Server should handle request with very long candidate ID")
-    void testRequestWithLongCandidateId() throws Exception {
+    @DisplayName("A candidate with a 10,000-character ID is granted the vote")
+    void aCandidateWithATenThousandCharacterIdIsGrantedTheVote() throws Exception {
         startServerAndConnect();
-        
-        String longId = "x".repeat(10000);
-        
-        VoteRequest request = VoteRequest.newBuilder()
-                .setTerm(1)
-                .setCandidateId(longId)
-                .setLastLogIndex(0)
-                .setLastLogTerm(0)
-                .build();
-        
-        assertDoesNotThrow(() -> blockingStub.requestVote(request));
+
+        VoteResponse response = blockingStub.requestVote(vote(1, "x".repeat(10000)));
+
+        assertTrue(response.getVoteGranted());
+        assertEquals(1, response.getTerm());
+        assertFalse(blockingStub.requestVote(vote(1, "x".repeat(9999))).getVoteGranted(),
+                "the whole ID was recorded as the vote, so a candidate differing only in length is refused");
     }
 
     // ========== RAPID START/STOP TESTS ==========
 
-    @Test
-    @DisplayName("Server should handle rapid start/stop cycles")
-    void testRapidStartStopCycles() throws Exception {
-        for (int i = 0; i < 5; i++) {
-            GrpcRaftServer server = new GrpcRaftServer(runtime, 0, raftNode);
-
-            server.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            server.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-        }
-    }
-
     // ========== MULTIPLE RAFT NODES TEST ==========
 
     @Test
-    @DisplayName("Multiple gRPC servers should work independently")
-    void testMultipleServersIndependent() throws Exception {
-
-        // Create two independent RaftNodes
-        Set<String> cluster1 = Set.of("nodeA");
-        Set<String> cluster2 = Set.of("nodeB");
-        
-        InMemoryTransportSimulator transport1 = new InMemoryTransportSimulator("nodeA");
-        InMemoryTransportSimulator transport2 = new InMemoryTransportSimulator("nodeB");
-        
-        QraftStateStore sm1 = new QraftStateStore();
-        QraftStateStore sm2 = new QraftStateStore();
-        
-        RaftNode node1 = RaftNode.builder().runtime(runtime).nodeId("nodeA").clusterNodes(cluster1).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).electionTimeout(5000).heartbeatInterval(1000).commandCodec(new ProtobufRaftCommandCodec()).build();
-        RaftNode node2 = RaftNode.builder().runtime(runtime).nodeId("nodeB").clusterNodes(cluster2).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).electionTimeout(5000).heartbeatInterval(1000).commandCodec(new ProtobufRaftCommandCodec()).build();
-        
-        node1.start();
-        node2.start();
-        await().atMost(Duration.ofSeconds(10))
-            .pollInterval(Duration.ofMillis(10))
-            .until(() -> node1.isRunning() && node2.isRunning());
-        
-        GrpcRaftServer server1 = new GrpcRaftServer(runtime, 0, node1);
-        GrpcRaftServer server2 = new GrpcRaftServer(runtime, 0, node2);
-        
-        server1.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-        server2.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-        
+    @DisplayName("Servers for two nodes serve each node's own state")
+    void serversForTwoNodesServeEachNodesOwnState() throws Exception {
+        RaftNode nodeA = node("nodeA");
+        RaftNode nodeB = node("nodeB");
+        GrpcRaftServer serverA = new GrpcRaftServer(runtime, 0, nodeA);
+        GrpcRaftServer serverB = new GrpcRaftServer(runtime, 0, nodeB);
+        ManagedChannel channelA = null;
+        ManagedChannel channelB = null;
         try {
-            ManagedChannel ch1 = ManagedChannelBuilder.forAddress("localhost", server1.port())
-                    .usePlaintext().build();
-            ManagedChannel ch2 = ManagedChannelBuilder.forAddress("localhost", server2.port())
-                    .usePlaintext().build();
-            
-            RaftServiceGrpc.RaftServiceBlockingStub stub1 = RaftServiceGrpc.newBlockingStub(ch1);
-            RaftServiceGrpc.RaftServiceBlockingStub stub2 = RaftServiceGrpc.newBlockingStub(ch2);
-            
-            VoteRequest request = VoteRequest.newBuilder()
-                    .setTerm(1)
-                    .setCandidateId("testCandidate")
-                    .setLastLogIndex(0)
-                    .setLastLogTerm(0)
-                    .build();
-            
-            // Both should respond independently
-            VoteResponse response1 = stub1.requestVote(request);
-            VoteResponse response2 = stub2.requestVote(request);
-            
-            assertNotNull(response1);
-            assertNotNull(response2);
-            
-            ch1.shutdownNow();
-            ch2.shutdownNow();
+            serverA.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            serverB.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            channelA = ManagedChannelBuilder.forAddress("localhost", serverA.port()).usePlaintext().build();
+            channelB = ManagedChannelBuilder.forAddress("localhost", serverB.port()).usePlaintext().build();
+            RaftServiceGrpc.RaftServiceBlockingStub stubA =
+                    RaftServiceGrpc.newBlockingStub(channelA).withDeadlineAfter(10, TimeUnit.SECONDS);
+            RaftServiceGrpc.RaftServiceBlockingStub stubB =
+                    RaftServiceGrpc.newBlockingStub(channelB).withDeadlineAfter(10, TimeUnit.SECONDS);
+
+            assertTrue(stubA.requestVote(vote(5, "candidate1")).getVoteGranted());
+
+            VoteResponse fromB = stubB.requestVote(vote(1, "candidate2"));
+            assertTrue(fromB.getVoteGranted(), "node B has voted in no term, whatever node A did");
+            assertEquals(1, fromB.getTerm());
+            VoteResponse fromA = stubA.requestVote(vote(1, "candidate2"));
+            assertFalse(fromA.getVoteGranted(), "term 1 is stale for node A");
+            assertEquals(5, fromA.getTerm());
         } finally {
-            server1.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            server2.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            node1.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            node2.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            if (channelA != null) channelA.shutdownNow();
+            if (channelB != null) channelB.shutdownNow();
+            serverA.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            serverB.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
     }
 }

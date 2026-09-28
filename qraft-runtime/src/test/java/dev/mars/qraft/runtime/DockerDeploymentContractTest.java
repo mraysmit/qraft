@@ -24,6 +24,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -46,10 +50,7 @@ class DockerDeploymentContractTest {
             "docker/compose/docker-compose-network-test.yml",
             "docker/compose/docker-compose-observability-cluster.yml",
             "docker/compose/docker-compose-single-controller.yml",
-            "qraft-controller/src/test/resources/docker-compose-test.yml",
-            "qraft-controller/src/test/resources/docker-compose-network-test.yml",
-            "qraft-controller/src/test/resources/docker-compose-build-image.yml",
-            "qraft-controller/src/test/resources/docker-compose-5node-test.yml");
+            "qraft-controller/src/test/resources/docker-compose-build-image.yml");
     private static final List<String> PREBUILT_COMPOSE_FILES = List.of(
             "qraft-controller/src/test/resources/docker-compose-3node-prebuilt.yml",
             "qraft-controller/src/test/resources/docker-compose-3node-agent-prebuilt.yml",
@@ -230,10 +231,10 @@ class DockerDeploymentContractTest {
         AgentConfiguration configuration = AgentConfiguration.fromFile(
                 root.resolve("docker/config/client.json"));
 
-        assertTrue(configuration.getAgentId().equals("agent-example"));
+        assertEquals("agent-example", configuration.getAgentId());
         assertTrue(configuration.getControllerUrls().size() == 1);
         assertTrue(configuration.getServices().size() == 1);
-        assertTrue(configuration.getServices().getFirst().id().equals("web"));
+        assertEquals("web", configuration.getServices().getFirst().id());
     }
 
     @Test
@@ -296,10 +297,29 @@ class DockerDeploymentContractTest {
     }
 
     @Test
-    void corePublishesTheTestFixturesRequiredByController() throws IOException {
+    void everyTestJarAModuleDependsOnIsPublishedByItsModule() throws IOException {
         Path root = Path.of("..").toAbsolutePath().normalize();
-        String corePom = Files.readString(root.resolve("qraft-core/pom.xml"));
-        assertTrue(corePom.contains("<goal>test-jar</goal>"));
+        Pattern dependency = Pattern.compile("<dependency>(.*?)</dependency>", Pattern.DOTALL);
+        Pattern artifactId = Pattern.compile("<artifactId>([^<]+)</artifactId>");
+        Set<String> consumed = new TreeSet<>();
+        try (var modules = Files.list(root)) {
+            for (Path pom : modules.map(module -> module.resolve("pom.xml")).filter(Files::isRegularFile).toList()) {
+                Matcher dependencies = dependency.matcher(Files.readString(pom));
+                while (dependencies.find()) {
+                    if (dependencies.group(1).contains("<type>test-jar</type>")) {
+                        Matcher id = artifactId.matcher(dependencies.group(1));
+                        assertTrue(id.find(), pom.toString());
+                        consumed.add(id.group(1));
+                    }
+                }
+            }
+        }
+
+        assertFalse(consumed.isEmpty(), "the runtime's tests use the controller's test fixtures");
+        for (String module : consumed) {
+            assertTrue(Files.readString(root.resolve(module).resolve("pom.xml")).contains("<goal>test-jar</goal>"),
+                    module + " must publish the test-jar other modules depend on");
+        }
     }
 
     @Test

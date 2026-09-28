@@ -36,7 +36,11 @@ import java.util.function.BooleanSupplier;
 
 import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
 import static dev.mars.qraft.controller.raft.ManualRaftCluster.startAll;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests the InstallSnapshot RPC. A follower cut off while the leader compacted its log is brought up to date
@@ -77,7 +81,7 @@ class InstallSnapshotTest {
     }
 
     @Test
-    void testLeaderSendsSnapshotToLaggingFollower() throws Exception {
+    void aFollowerCutOffDuringCompactionCatchesUpByInstallingTheLeadersSnapshot() throws Exception {
         Cluster nodes = compactWhileNode3IsCutOff(8);
 
         InMemoryTransportSimulator.healPartitions();
@@ -87,7 +91,7 @@ class InstallSnapshotTest {
     }
 
     @Test
-    void testFollowerStateMachineRestoredBySnapshot() throws Exception {
+    void aFollowerRestoredFromASnapshotKeepsReplicatingTheEntriesThatFollowIt() throws Exception {
         Cluster nodes = compactWhileNode3IsCutOff(6);
         InMemoryTransportSimulator.healPartitions();
         cluster.heartbeatUntil(nodes.leader(), () -> nodes.node3().getSnapshotLastIndex() > 0,
@@ -100,7 +104,7 @@ class InstallSnapshotTest {
     }
 
     @Test
-    void testLeaderUpdatesIndicesAfterSnapshotInstall() throws Exception {
+    void theLeaderMovesAFollowersNextIndexPastTheSnapshotItInstalled() throws Exception {
         Cluster nodes = compactWhileNode3IsCutOff(7);
         long leaderSnapshotIndex = nodes.leader().getSnapshotLastIndex();
 
@@ -112,7 +116,7 @@ class InstallSnapshotTest {
     }
 
     @Test
-    void testFollowerRejectsStaleTermSnapshot() throws Exception {
+    void aFollowerRefusesASnapshotFromAStaleTerm() throws Exception {
         TestRaftStorage storage = openStorage();
         QraftStateStore store = new QraftStateStore();
         RaftNode follower = cluster.add(cluster.builder("node1", Set.of("node1", "leader"),
@@ -135,7 +139,7 @@ class InstallSnapshotTest {
     }
 
     @Test
-    void testChunkAssemblerReassemblesData() {
+    void theChunkAssemblerReassemblesDataSplitIntoSeveralChunks() {
         byte[] original = new byte[256];
         for (int i = 0; i < 256; i++) original[i] = (byte) i;
         int chunkSize = 64;
@@ -155,7 +159,7 @@ class InstallSnapshotTest {
     }
 
     @Test
-    void testChunkAssemblerSingleChunk() {
+    void theChunkAssemblerReturnsASingleChunkAsTheWholeData() {
         byte[] data = "snapshot-data-content".getBytes();
         RaftNode.SnapshotChunkAssembler assembler = new RaftNode.SnapshotChunkAssembler(InstallSnapshotRequest
                 .newBuilder().setTerm(1).setLeaderId("leader").setLastIncludedIndex(10)
@@ -169,7 +173,7 @@ class InstallSnapshotTest {
     }
 
     @Test
-    void testFollowerPersistsInstalledSnapshot() throws Exception {
+    void anInstalledSnapshotIsPersistedAndRestoresTheStateMachine() throws Exception {
         TestRaftStorage storage = openStorage();
         QraftStateStore store = new QraftStateStore();
         RaftNode node = cluster.add(cluster.builder("follower-persist", Set.of("follower-persist"),

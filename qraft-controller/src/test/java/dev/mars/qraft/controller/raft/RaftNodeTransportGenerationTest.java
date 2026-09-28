@@ -44,6 +44,8 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
+import static dev.mars.qraft.controller.raft.RaftAwait.awaitStateLoop;
+import static dev.mars.qraft.controller.raft.RaftAwait.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -111,7 +113,7 @@ class RaftNodeTransportGenerationTest {
                 .setSuccess(true)
                 .setMatchIndex(100)
                 .build());
-        awaitStateLoop();
+        awaitStateLoop(runtime);
 
         assertEquals(1, node.getNextIndex("peer-1"),
                 "a completion from an earlier leadership must be ignored");
@@ -155,7 +157,7 @@ class RaftNodeTransportGenerationTest {
                 .setTerm(oldTerm)
                 .setVoteGranted(true)
                 .build());
-        awaitStateLoop();
+        awaitStateLoop(runtime);
 
         assertEquals(RaftNode.State.CANDIDATE, node.getState(),
                 "a vote completion must wait behind the active durable transition");
@@ -176,16 +178,6 @@ class RaftNodeTransportGenerationTest {
         if (!node.isLeader() || node.getCurrentTerm() < minimumTerm) {
             throw new AssertionError("node did not become leader at term " + minimumTerm);
         }
-    }
-
-    private void awaitStateLoop() throws Exception {
-        java.util.concurrent.CompletableFuture<Void> marker = new java.util.concurrent.CompletableFuture<>();
-        runtime.runOnContext(ignored -> marker.complete(null));
-        marker.get(10, TimeUnit.SECONDS);
-    }
-
-    private static <T> T await(Future<T> future) {
-        return future.timeout(10, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
     }
 
     private record PendingAppend(AppendEntriesRequest request, Promise<AppendEntriesResponse> response) {}

@@ -41,6 +41,8 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static dev.mars.qraft.controller.raft.RaftAwait.awaitStateLoop;
+import static dev.mars.qraft.controller.raft.RaftAwait.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -99,7 +101,7 @@ class RaftNodeMetadataSequencingTest {
         storage.awaitBlockedUpdate();
         Future<VoteResponse> candidateB = node.handleVoteRequest(vote(1, "candidate-b"));
 
-        awaitStateLoop();
+        awaitStateLoop(runtime);
         storage.assertUpdateCount(1);
         assertFalse(candidateA.isComplete());
         assertFalse(candidateB.isComplete());
@@ -120,7 +122,7 @@ class RaftNodeMetadataSequencingTest {
         storage.awaitBlockedUpdate();
         Future<VoteResponse> termTwo = node.handleVoteRequest(vote(2, "candidate-b"));
 
-        awaitStateLoop();
+        awaitStateLoop(runtime);
         storage.assertUpdateCount(1);
         assertFalse(termTwo.isComplete());
         storage.releaseBlockedUpdateOffLoop();
@@ -149,7 +151,7 @@ class RaftNodeMetadataSequencingTest {
                         .setPrevLogTerm(0)
                         .build());
 
-        awaitStateLoop();
+        awaitStateLoop(runtime);
         storage.assertUpdateCount(1);
         assertFalse(append.isComplete());
 
@@ -237,20 +239,6 @@ class RaftNodeMetadataSequencingTest {
                 .setLastLogIndex(0)
                 .setLastLogTerm(0)
                 .build();
-    }
-
-    private static <T> T await(Future<T> future) {
-        return future.timeout(10, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
-    }
-
-    private void awaitStateLoop() {
-        CompletableFuture<Void> marker = new CompletableFuture<>();
-        runtime.runOnContext(ignored -> marker.complete(null));
-        try {
-            marker.get(10, TimeUnit.SECONDS);
-        } catch (Exception error) {
-            throw new AssertionError("state-loop marker did not run", error);
-        }
     }
 
     private static final class GatedMetadataStorage implements RaftStorage, SnapshotStore {

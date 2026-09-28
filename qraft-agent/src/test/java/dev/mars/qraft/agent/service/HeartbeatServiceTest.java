@@ -70,7 +70,7 @@ class HeartbeatServiceTest {
 
         AgentConfiguration config = AgentConfiguration.builder()
                 .agentId("agent-1").controllerUrl("http://localhost:" + server.getAddress().getPort())
-                .httpConnectionTimeout(1000).build();
+                .requestTimeoutMs(1000).build();
         AgentRegistrationClient registration = registration(config);
         AgentInfo agent = new AgentInfo("agent-1", "host", "127.0.0.1", 8080);
         assertTrue(registration.register(agent).join());

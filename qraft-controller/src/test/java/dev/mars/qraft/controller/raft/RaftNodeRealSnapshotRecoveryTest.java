@@ -6,20 +6,19 @@
  * You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
-import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
-import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
-import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
-import dev.mars.qraft.controller.raft.grpc.VoteRequest;
-import dev.mars.qraft.controller.raft.grpc.VoteResponse;
 import dev.mars.qraft.controller.raft.storage.RaftStorageFactory;
 import dev.mars.qraft.controller.raft.storage.snapshot.FileSnapshotStore;
 import dev.mars.qraft.controller.raft.storage.snapshot.SnapshotStoreCrashWriter;
-import dev.mars.qraft.controller.runtime.Future;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
@@ -44,8 +43,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
 
+import static dev.mars.qraft.controller.raft.RaftAwait.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -167,7 +166,7 @@ class RaftNodeRealSnapshotRecoveryTest {
                 .runtime(runtime)
                 .nodeId("node-1")
                 .clusterNodes(Set.of("node-1"))
-                .transport(new NoOpTransport())
+                .transport(new PeerlessTransport())
                 .stateMachine(state)
                 .commandCodec(CODEC)
                 .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
@@ -270,10 +269,6 @@ class RaftNodeRealSnapshotRecoveryTest {
         return new RaftStorage.LogEntryData(index, term, CODEC.serialize(put(key, value)));
     }
 
-    private static <T> T await(Future<T> future) {
-        return future.timeout(10, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
-    }
-
     private static String messageChain(Throwable failure) {
         StringBuilder messages = new StringBuilder();
         for (Throwable current = failure; current != null; current = current.getCause()) {
@@ -283,21 +278,5 @@ class RaftNodeRealSnapshotRecoveryTest {
     }
 
     private record ProcessResult(int exitCode, String output) {
-    }
-
-    private static final class NoOpTransport implements RaftTransport {
-        @Override public void start(Consumer<RaftMessage> messageHandler) { }
-        @Override public void stop() { }
-        @Override public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
-            return Future.failedFuture("unexpected vote request");
-        }
-        @Override public Future<AppendEntriesResponse> sendAppendEntries(
-                String targetId, AppendEntriesRequest request) {
-            return Future.failedFuture("unexpected append request");
-        }
-        @Override public Future<InstallSnapshotResponse> sendInstallSnapshot(
-                String targetId, InstallSnapshotRequest request) {
-            return Future.failedFuture("unexpected snapshot request");
-        }
     }
 }

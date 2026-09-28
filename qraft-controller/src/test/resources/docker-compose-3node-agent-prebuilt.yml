@@ -1,5 +1,3 @@
-version: '3.8'
-
 # 3-node Raft cluster and one client-mode agent that runs health checks, using the pre-built image
 # (no Docker build step). Requires qraft-runtime:test image — built by SharedDockerCluster.
 

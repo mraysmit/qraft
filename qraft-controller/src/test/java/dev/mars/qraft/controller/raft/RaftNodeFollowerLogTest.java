@@ -27,14 +27,10 @@ import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -56,7 +52,7 @@ class RaftNodeFollowerLogTest {
 
     private final QraftStateStore store = new QraftStateStore();
     private JavaRuntime runtime;
-    private ManualTimers timers;
+    private ManualRaftTimers timers;
     private RaftNode follower;
 
     @AfterEach
@@ -116,7 +112,7 @@ class RaftNodeFollowerLogTest {
 
     private void startFollower() throws Exception {
         runtime = JavaRuntime.create();
-        timers = new ManualTimers(runtime);
+        timers = new ManualRaftTimers(runtime);
         TestRaftStorage storage = new TestRaftStorage();
         storage.open(null).join();
         follower = RaftNode.builder().runtime(runtime).nodeId("follower")
@@ -160,48 +156,4 @@ class RaftNodeFollowerLogTest {
     }
 
     /** Timers that fire only when a test fires them, on the node's state loop. */
-    private static final class ManualTimers implements RaftTimerScheduler {
-        private final JavaRuntime runtime;
-        private final AtomicLong ids = new AtomicLong();
-        private final Map<Long, Long> periods = new ConcurrentHashMap<>();
-        private final Map<Long, Consumer<Long>> periodics = new ConcurrentHashMap<>();
-
-        ManualTimers(JavaRuntime runtime) {
-            this.runtime = runtime;
-        }
-
-        @Override
-        public long setTimer(long delayMs, Consumer<Long> action) {
-            return ids.incrementAndGet();
-        }
-
-        @Override
-        public long setPeriodic(long periodMs, Consumer<Long> action) {
-            long id = ids.incrementAndGet();
-            periods.put(id, periodMs);
-            periodics.put(id, action);
-            return id;
-        }
-
-        @Override
-        public boolean cancelTimer(long id) {
-            periods.remove(id);
-            return periodics.remove(id) != null;
-        }
-
-        boolean hasPeriodic(long periodMs) {
-            return periods.containsValue(periodMs);
-        }
-
-        void firePeriodic(long periodMs) throws Exception {
-            long id = periods.entrySet().stream().filter(entry -> entry.getValue() == periodMs)
-                    .map(Map.Entry::getKey).findFirst().orElseThrow();
-            CompletableFuture<Void> fired = new CompletableFuture<>();
-            runtime.runOnContext(ignored -> {
-                periodics.get(id).accept(id);
-                fired.complete(null);
-            });
-            fired.get(10, TimeUnit.SECONDS);
-        }
-    }
 }

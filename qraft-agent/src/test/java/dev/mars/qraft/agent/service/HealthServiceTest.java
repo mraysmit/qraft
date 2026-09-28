@@ -46,7 +46,7 @@ class HealthServiceTest {
         HealthService health = new HealthService(config, () -> false);
 
         assertFalse(health.isHealthy());
-        assertTrue(health.agentId().equals("agent-1"));
+        assertEquals("agent-1", health.agentId());
         health.start();
         assertTrue(health.isHealthy());
         health.shutdown();

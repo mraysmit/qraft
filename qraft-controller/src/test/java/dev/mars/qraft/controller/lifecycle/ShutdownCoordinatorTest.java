@@ -25,6 +25,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -32,17 +34,24 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests for {@link ShutdownCoordinator} graceful shutdown functionality.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-01-30
+ * @version 1.1
  */
 @ExtendWith(JavaRuntimeExtension.class)
 @DisplayName("ShutdownCoordinator Tests")
 class ShutdownCoordinatorTest {
+    private static final Logger LOG = LoggerFactory.getLogger(ShutdownCoordinatorTest.class);
 
     @Nested
     @DisplayName("State Management")
@@ -152,7 +161,7 @@ class ShutdownCoordinatorTest {
             
             coordinator.onDrain("failing", () -> {
                 callCount.incrementAndGet();
-                System.out.println("[EXPECTED-TEST-FAILURE] Scenario=shutdown-hook failure message=Simulated failure");
+                LOG.info("[EXPECTED-TEST-FAILURE] Scenario=shutdown-hook failure message=Simulated failure");
                 return Future.failedFuture("Simulated failure");
             });
             coordinator.onDrain("succeeding", () -> {

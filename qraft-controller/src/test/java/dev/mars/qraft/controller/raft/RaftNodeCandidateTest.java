@@ -31,11 +31,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -56,12 +53,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RaftNodeCandidateTest {
     private JavaRuntime runtime;
     private RaftNode node;
-    private ManualTimers timers;
+    private ManualRaftTimers timers;
 
     @BeforeEach
     void becomeCandidateInTermTwo() throws Exception {
         runtime = JavaRuntime.create();
-        timers = new ManualTimers(runtime);
+        timers = new ManualRaftTimers(runtime);
         node = RaftNode.builder()
                 .runtime(runtime).nodeId("node-1").clusterNodes(Set.of("node-1", "peer-2", "peer-3"))
                 .transport(new RefusingTransport())
@@ -70,9 +67,9 @@ class RaftNodeCandidateTest {
                 .electionTimeout(300).heartbeatInterval(100)
                 .timerScheduler(timers).build();
         node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-        timers.fireNextOneShot();
+        timers.fireElectionTimeout();
         awaitCandidacyInTerm(1);
-        timers.fireNextOneShot();
+        timers.fireElectionTimeout();
         awaitCandidacyInTerm(2);
     }
 
@@ -163,34 +160,4 @@ class RaftNodeCandidateTest {
     }
 
     /** Fires one-shot Raft timers only when the test asks, on the node's state loop. */
-    private static final class ManualTimers implements RaftTimerScheduler {
-        private final JavaRuntime runtime;
-        private final AtomicLong ids = new AtomicLong();
-        private final Map<Long, Consumer<Long>> oneShots = new ConcurrentHashMap<>();
-
-        private ManualTimers(JavaRuntime runtime) { this.runtime = runtime; }
-
-        @Override
-        public long setTimer(long delayMs, Consumer<Long> action) {
-            long id = ids.incrementAndGet();
-            oneShots.put(id, action);
-            return id;
-        }
-
-        @Override
-        public long setPeriodic(long periodMs, Consumer<Long> action) {
-            return ids.incrementAndGet();
-        }
-
-        @Override
-        public boolean cancelTimer(long id) {
-            return oneShots.remove(id) != null;
-        }
-
-        void fireNextOneShot() {
-            long id = oneShots.keySet().stream().min(Long::compareTo).orElseThrow();
-            Consumer<Long> action = oneShots.remove(id);
-            runtime.runOnContext(ignored -> action.accept(id));
-        }
-    }
 }

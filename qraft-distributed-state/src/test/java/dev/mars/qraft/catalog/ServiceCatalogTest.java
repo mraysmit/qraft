@@ -110,9 +110,9 @@ class ServiceCatalogTest {
         ServiceInstance registered = instance("payments-1", "payments", 8080);
         catalog.register(registered);
 
-        ServiceInstance unhealthy = catalog.setHealth(registered.identity(), ServiceHealth.FAILING);
+        ServiceInstance unhealthy = catalog.setHealth(registered.identity(), ServiceHealth.CRITICAL);
 
-        assertEquals(ServiceHealth.FAILING, unhealthy.health());
+        assertEquals(ServiceHealth.CRITICAL, unhealthy.health());
         assertEquals("payments-1", unhealthy.serviceId());
         assertEquals(8080, unhealthy.port());
         assertNotSame(registered, unhealthy);

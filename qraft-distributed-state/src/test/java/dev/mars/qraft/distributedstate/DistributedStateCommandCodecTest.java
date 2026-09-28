@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -59,7 +60,9 @@ class DistributedStateCommandCodecTest {
 
     @Test
     void rejectsMalformedPayload() {
-        assertThrows(RuntimeException.class,
+        RuntimeException invalid = assertThrows(RuntimeException.class,
                 () -> codec.deserialize("not-json".getBytes(StandardCharsets.UTF_8)));
+        assertEquals("Failed to deserialize distributed state command", invalid.getMessage());
+        assertInstanceOf(java.io.IOException.class, invalid.getCause());
     }
 }

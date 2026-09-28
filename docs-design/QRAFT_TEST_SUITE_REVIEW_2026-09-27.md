@@ -356,33 +356,54 @@ with a test that failed first.
 - **Names.** About 186 methods named `test…`, concentrated in the older Raft,
   gRPC, and `qraft-core` model tests. Their type Javadoc often does not state
   the behaviour verified. Some names mislead: `RaftFailureTest.testNetworkPartition`
-  stops a node, and the Docker placeholders claim coverage they lack.
+  stops a node, and the Docker placeholders claim coverage they lack. Fixed
+  2026-09-28: the remaining 113 are renamed to state only what they check.
+  That showed about 45 tests that check almost nothing. The task list's Step 8
+  strengthened or deleted each of them on 2026-09-28. Strengthening them found
+  three production defects, all now fixed:
+  - a blank candidate ID could win a vote;
+  - a send after the gRPC transport stopped never completed;
+  - a node accepted a member set without itself.
 - **Headers.** Nine Raft test files have a truncated Apache header, missing the
   "Unless required…" paragraph. `ShutdownCoordinatorTest` and
   `InstallSnapshotTest` lack `@version`. `MockRaftTransport` carries a
-  conflicting proprietary header.
+  conflicting proprietary header. Fixed 2026-09-28, along with three main
+  files with the same truncation.
 - **Dead fixtures.** `MockRaftTransport`, `NetworkTestUtils` (550 lines),
   `TestClusterConfiguration`, which sets a `JAVA_OPTS` environment variable,
   three unused compose files, `ExpectsError` and `ExpectsErrorExtension`,
   `otel-collector-config.yaml` twice, and a legacy
-  `qraft-controller.properties`.
+  `qraft-controller.properties`. Fixed 2026-09-28: all deleted, and so is
+  `qraft-core`'s test-jar, which only `ExpectsError` needed.
 - **Duplication.**
   - `ManualTimers` ×3, `NoOpTransport` ×4, `SingleNodeTransport` ×3.
   - `freePort` ×6.
   - About 12 copies of `await` and `awaitStateLoop`.
   - Single-node election is tested four times.
+
+  Fixed 2026-09-28:
+  - the fakes are shared as `ManualRaftTimers`, `PeerlessTransport`, and
+    `RaftAwait`;
+  - `freePort` went with port 0;
+  - the duplicate election check is deleted. The remaining election tests
+    each cover a different concern.
 - **Debug output.**
   - `System.out` in `RaftNodeTest`, `RaftFailureTest`, and
     `ShutdownCoordinatorTest`.
   - `printStackTrace` in `GrpcRaftIntegrationTest`.
+
+  Fixed 2026-09-28.
 - **Legacy values used as the normal case.** `ServiceHealth.FAILING` is used as
   the unhealthy state in two catalog tests, and the configuration tests assert
-  legacy timeout aliases.
+  legacy timeout aliases. Fixed 2026-09-28: the tests use `CRITICAL`, and the
+  aliases are removed from `AgentConfiguration`.
 - **Style.**
   - Wildcard imports in 7 controller test files.
   - `assertThrows(RuntimeException.class)` that is too broad.
   - `assertTrue(x.equals(y))`.
   - The obsolete `version: '3.8'` key in every compose file.
+
+  Fixed 2026-09-28, including 4 main files with wildcard imports.
 
 ## 8. Recommended remediation
 
@@ -406,7 +427,7 @@ In order:
 4. **Close the coverage gaps** (section 6), starting with the Raft and API
    items.
 5. **Hygiene** (section 7): delete the dead fixtures, extract shared fakes, and
-   rename the `test…` methods to state their behaviour.
+   rename the `test…` methods to state their behaviour. Done 2026-09-28.
 
 Items 1 to 3 should come before new feature work. Until they are done, a clean
 run of the suite overstates the evidence, and its older half remains the

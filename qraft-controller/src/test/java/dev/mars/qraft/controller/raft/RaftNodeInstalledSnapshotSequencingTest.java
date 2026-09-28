@@ -48,6 +48,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static dev.mars.qraft.controller.raft.RaftAwait.awaitStateLoop;
+import static dev.mars.qraft.controller.raft.RaftAwait.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -112,7 +114,7 @@ class RaftNodeInstalledSnapshotSequencingTest {
 
         Future<AppendEntriesResponse> append = node.handleAppendEntriesRequest(
                 heartbeat(1, 0, 0));
-        awaitStateLoop();
+        awaitStateLoop(runtime);
 
         assertFalse(install.isComplete());
         assertFalse(append.isComplete(), "AppendEntries must not prepare across installation publication");
@@ -531,20 +533,6 @@ class RaftNodeInstalledSnapshotSequencingTest {
 
     private static DistributedStateRaftCommand put(String key, String value) {
         return new DistributedStateRaftCommand(DistributedStateCommand.put(key, value));
-    }
-
-    private static <T> T await(Future<T> future) {
-        return future.timeout(10, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
-    }
-
-    private void awaitStateLoop() {
-        CompletableFuture<Void> marker = new CompletableFuture<>();
-        runtime.runOnContext(ignored -> marker.complete(null));
-        try {
-            marker.get(10, TimeUnit.SECONDS);
-        } catch (Exception error) {
-            throw new AssertionError("state-loop marker did not run", error);
-        }
     }
 
     private static final class RecordingStateMachine implements RaftLogApplicator {

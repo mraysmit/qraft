@@ -66,6 +66,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -991,7 +992,7 @@ class HttpApiServerTest {
                 observation("web", "http", "passing", 1, 10_000, "x".repeat(4097)));
 
         for (String invalid : invalidBodies) {
-            assertTrue(!invalid.equals(valid), "invalid fixture must differ from the valid body");
+            assertNotEquals(valid, invalid, "invalid fixture must differ from the valid body");
             HttpResponse<String> response = request(client, "/v1/agent/check/observe", "PUT", invalid, identity);
             assertEquals(400, response.statusCode(), invalid + " -> " + response.body());
             assertErrorEnvelope(response, "invalid_observation", false);

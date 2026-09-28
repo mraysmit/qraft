@@ -55,7 +55,7 @@ class ServiceCatalogValidationTest {
         assertThrows(IllegalArgumentException.class,
                 () -> catalog.setHealth(
                         new ServiceInstanceId("default", "default", "node", "missing"),
-                        ServiceHealth.FAILING));
+                        ServiceHealth.CRITICAL));
     }
 
     @Test

@@ -6,6 +6,12 @@
  * You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package dev.mars.qraft.controller.raft;
@@ -40,6 +46,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
+import static dev.mars.qraft.controller.raft.RaftAwait.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -203,10 +210,6 @@ class RaftNodeRecoverySequencingTest {
         });
         thread.join();
         assertNull(context.get(), "storage completion fixture must run outside the state loop");
-    }
-
-    private static <T> T await(Future<T> future) {
-        return future.timeout(10, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
     }
 
     private static final class RecordingStateMachine implements RaftLogApplicator {

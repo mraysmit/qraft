@@ -37,6 +37,7 @@ import static dev.mars.qraft.controller.raft.DockerHealthApi.leaderIndex;
 import static dev.mars.qraft.controller.raft.DockerHealthApi.passingWithBothChecks;
 import static dev.mars.qraft.controller.raft.DockerHealthApi.webEntry;
 import static org.awaitility.Awaitility.await;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -134,7 +135,7 @@ class DockerAgentHealthTest {
                 return sawExpiry.get() && servers.stream().allMatch(server -> instanceCount(server) == 0)
                         && "503".equals(agentStatus(cluster, "/health/ready"));
             });
-            assertTrue("200".equals(agentStatus(cluster, "/health/live")), "a partition never affects liveness");
+            assertEquals("200", agentStatus(cluster, "/health/live"), "a partition never affects liveness");
 
             SharedDockerCluster.restoreContainerNetwork(cluster, "agent");
             partitioned = false;

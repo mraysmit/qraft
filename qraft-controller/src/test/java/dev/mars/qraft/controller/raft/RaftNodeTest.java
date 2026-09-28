@@ -56,12 +56,19 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests {@link RaftNode} with real components and the in-memory network: elections, replication of
- * catalog and key/value commands, a partitioned leader's lost write, snapshot and WAL recovery, vote
- * decisions, and fencing after uncertain metadata persistence.
+ * Tests {@link RaftNode} with real components and the in-memory network: start and stop, elections,
+ * replication of catalog and key/value commands, a partitioned leader's lost write, snapshot and WAL
+ * recovery, vote decisions, fencing after uncertain metadata persistence, refusals when a higher term
+ * cannot be persisted, rejected vote requests, and timers cancelled on stop.
  *
  * <p>Elections happen only when a test fires a chosen node's election timeout through
  * {@link ManualRaftTimers}, and heartbeats only when it fires the leader's heartbeat, so who leads and
@@ -70,7 +77,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * bounded.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
- * @version 2.0
+ * @version 2.3
  * @since 2025-08-20
  */
 class RaftNodeTest {
@@ -117,7 +124,7 @@ class RaftNodeTest {
     }
 
     @Test
-    void testNodeInitialization() {
+    void aNewlyBuiltNodeIsAFollowerInTermZero() {
         assertEquals("node1", node1.getNodeId());
         assertEquals(RaftNode.State.FOLLOWER, node1.getState());
         assertEquals(0, node1.getCurrentTerm());
@@ -125,7 +132,7 @@ class RaftNodeTest {
     }
 
     @Test
-    void testNodeStartAndStop() throws Exception {
+    void aStartedNodeFollowsWithItsTransportRunningAndStoppingItStopsTheTransport() throws Exception {
         assertFalse(transport1.isRunning());
 
         await(node1.start());
@@ -142,6 +149,7 @@ class RaftNodeTest {
                 RaftNodeMode.volatileMode());
         await(sole.start());
         assertEquals(RaftNode.State.FOLLOWER, sole.getState(), "a started node follows until its election timeout fires");
+        assertNull(sole.getLeaderId(), "no leader is known before an election");
 
         elect(sole);
 
@@ -296,22 +304,6 @@ class RaftNodeTest {
     }
 
     @Test
-    void testStateMachineOperations() {
-        RaftCommandResult<?> result = stateMachine1.apply(distributedPut("version", "2.1"));
-
-        assertInstanceOf(RaftCommandResult.Success.class, result);
-        assertEquals("2.1", ((RaftCommandResult.Success<?>) result).entity());
-        assertEquals("2.1", stateMachine1.getMetadata("version"));
-
-        byte[] snapshot = stateMachine1.takeSnapshot();
-        assertTrue(snapshot.length > 0);
-        stateMachine1.reset();
-        assertEquals("3.0", stateMachine1.getMetadata("version"), "reset restores the default");
-        stateMachine1.restoreSnapshot(snapshot);
-        assertEquals("2.1", stateMachine1.getMetadata("version"), "the snapshot restores the value");
-    }
-
-    @Test
     void theInMemoryTransportDeliversAVoteRequest() throws Exception {
         transport1.start(message -> { });
         InMemoryTransportSimulator transport2 = new InMemoryTransportSimulator("node2-transport-only");
@@ -322,37 +314,6 @@ class RaftNodeTest {
 
         assertEquals(1, response.getTerm());
         transport2.stop();
-    }
-
-    @Test
-    void testLogEntryCreation() {
-        RaftCommand command = distributedPut("test", "value");
-        LogEntry entry = new LogEntry(1, 5, command);
-
-        assertEquals(1, entry.getTerm());
-        assertEquals(5, entry.getIndex());
-        assertEquals(command, entry.getCommand());
-        assertNull(entry.getPayload());
-        byte[] payload = {1, 2, 3};
-        LogEntry replicated = new LogEntry(1, 5, command, payload);
-        payload[0] = 9;
-        assertArrayEquals(new byte[]{1, 2, 3}, replicated.getPayload(), "the payload is copied defensively");
-        assertFalse(entry.isNoOp());
-        assertTrue(new LogEntry(1, 6, null).isNoOp());
-    }
-
-    @Test
-    void testVoteRequestResponse() {
-        VoteRequest request = VoteRequest.newBuilder()
-                .setTerm(2).setCandidateId("candidate1").setLastLogIndex(10).setLastLogTerm(1).build();
-        assertEquals(2, request.getTerm());
-        assertEquals("candidate1", request.getCandidateId());
-        assertEquals(10, request.getLastLogIndex());
-        assertEquals(1, request.getLastLogTerm());
-
-        VoteResponse response = VoteResponse.newBuilder().setTerm(2).setVoteGranted(true).build();
-        assertEquals(2, response.getTerm());
-        assertTrue(response.getVoteGranted());
     }
 
     @Test
@@ -370,7 +331,7 @@ class RaftNodeTest {
     }
 
     @Test
-    void testMultiNodeRecoveryDoesNotApplyUncommittedTail() throws Exception {
+    void aRecoveredMultiMemberFollowerKeepsButDoesNotApplyAnUncommittedLogTail() throws Exception {
         TestRaftStorage storage = new TestRaftStorage();
         storage.open(null).get(10, TimeUnit.SECONDS);
         byte[] payload = new ProtobufRaftCommandCodec().serialize(distributedPut("recovery-key", "tail-value"));
@@ -389,7 +350,7 @@ class RaftNodeTest {
     }
 
     @Test
-    void testSingleNodeRecoveryReappliesLocalLog() throws Exception {
+    void aRecoveredSoleMemberAppliesItsWholeLocalLogBeforeStartCompletes() throws Exception {
         TestRaftStorage storage = new TestRaftStorage();
         storage.open(null).get(10, TimeUnit.SECONDS);
         byte[] payload = new ProtobufRaftCommandCodec().serialize(distributedPut("single-recovery-key", "single-value"));
@@ -461,7 +422,7 @@ class RaftNodeTest {
     }
 
     @Test
-    void testRejectVoteWhenCandidateLogIsBehind() throws Exception {
+    void aVoteIsRefusedToACandidateWhoseLogIsBehind() throws Exception {
         RaftNode sole = node("node1", Set.of("node1"), new InMemoryTransportSimulator("node1"), new QraftStateStore(),
                 RaftNodeMode.volatileMode());
         await(sole.start());
@@ -477,7 +438,54 @@ class RaftNodeTest {
     }
 
     @Test
-    void testUncertainVotePersistenceFailureFencesMetadataTransitions() throws Exception {
+    void stoppingAFollowerCancelsItsElectionTimer() throws Exception {
+        await(node1.start());
+        ManualRaftTimers timers = cluster.timers(node1);
+        assertEquals(1, timers.oneShotCount(), "a follower waits on an election timer");
+
+        await(node1.stop());
+
+        assertFalse(node1.isRunning());
+        assertEquals(0, timers.oneShotCount(), "no election timer is left armed");
+    }
+
+    @Test
+    void stoppingALeaderCancelsItsHeartbeat() throws Exception {
+        RaftNode sole = node("sole", Set.of("sole"), new InMemoryTransportSimulator("sole"), new QraftStateStore(),
+                RaftNodeMode.volatileMode());
+        await(sole.start());
+        elect(sole);
+        ManualRaftTimers timers = cluster.timers(sole);
+        assertTrue(timers.hasPeriodic(ManualRaftCluster.HEARTBEAT_MS), "a leader sends heartbeats");
+
+        await(sole.stop());
+
+        assertFalse(sole.isRunning());
+        assertFalse(timers.hasPeriodic(ManualRaftCluster.HEARTBEAT_MS), "no heartbeat is left scheduled");
+    }
+
+    @Test
+    void aVoteRequestNamingNoCandidateIsRejectedWithoutSpendingTheVote() throws Exception {
+        RaftNode sole = node("node1", Set.of("node1"), new InMemoryTransportSimulator("node1"), new QraftStateStore(),
+                RaftNodeMode.volatileMode());
+        await(sole.start());
+
+        for (String blank : List.of("", " ")) {
+            ExecutionException rejected = assertThrows(ExecutionException.class, () -> await(sole.handleVoteRequest(
+                    VoteRequest.newBuilder().setTerm(1).setCandidateId(blank).build())));
+            assertInstanceOf(IllegalArgumentException.class, rejected.getCause());
+            assertEquals("A vote request must name its candidate", rejected.getCause().getMessage());
+        }
+        assertEquals(0, sole.getCurrentTerm(), "a rejected request does not advance the term");
+
+        VoteResponse real = await(sole.handleVoteRequest(VoteRequest.newBuilder()
+                .setTerm(1).setCandidateId("candidate").setLastLogTerm(0).setLastLogIndex(0).build()));
+        assertTrue(real.getVoteGranted(), "the term's vote is still free for a real candidate");
+        assertEquals(1, real.getTerm());
+    }
+
+    @Test
+    void aFailedVotePersistenceFencesTheNodeAgainstAnyFurtherMetadataWrite() throws Exception {
         TestRaftStorage delegate = new TestRaftStorage();
         MetadataFailureStorage flakyMetadataStorage = MetadataFailureStorage.failFirstUpdate(delegate);
         flakyMetadataStorage.open(null).get(10, TimeUnit.SECONDS);
@@ -507,7 +515,7 @@ class RaftNodeTest {
     }
 
     @Test
-    void testRejectHigherTermVoteWithStaleCandidateLogPersistsTermAcrossRestart() throws Exception {
+    void aHigherTermCandidateWithAStaleLogIsRefusedAndItsTermSurvivesRestart() throws Exception {
         Path storageDir = tempDir.resolve("vote-reject-higher-term");
         RaftNode durableNode = durableSingleNode("node1", new QraftStateStore(), awaitPersistence(storageDir));
         await(durableNode.start());
@@ -529,7 +537,7 @@ class RaftNodeTest {
     }
 
     @Test
-    void testRejectHigherTermVoteWithStaleCandidateLogPersistsEmptyVoteAcrossRestart() throws Exception {
+    void aHigherTermCandidateWithAStaleLogIsRefusedAndItsTermIsPersistedWithNoVote() throws Exception {
         Path storageDir = tempDir.resolve("vote-reject-higher-term-empty-vote");
         RaftNode durableNode = durableSingleNode("node1", new QraftStateStore(), awaitPersistence(storageDir));
         await(durableNode.start());
@@ -557,7 +565,7 @@ class RaftNodeTest {
     }
 
     @Test
-    void testRejectHigherTermVoteWithStaleCandidateLogFailsWhenTermPersistenceFails() throws Exception {
+    void aHigherTermCandidateWithAStaleLogGetsAFailureAndNoDurableTermOrVoteWhenTheTermWriteFails() throws Exception {
         TestRaftStorage delegate = new TestRaftStorage();
         final long higherTerm = 5;
         MetadataFailureStorage flakyMetadataStorage = MetadataFailureStorage.failTermWithEmptyVote(delegate, higherTerm);
@@ -586,7 +594,7 @@ class RaftNodeTest {
     }
 
     @Test
-    void testAppendEntriesRejectsWhenHigherTermMetadataPersistFails() throws Exception {
+    void anAppendIsRefusedWithTheDurableTermWhenItsHigherTermCannotBePersisted() throws Exception {
         TestRaftStorage delegate = new TestRaftStorage();
         MetadataFailureStorage flakyMetadataStorage = MetadataFailureStorage.failFirstUpdate(delegate);
         flakyMetadataStorage.open(null).get(10, TimeUnit.SECONDS);
@@ -605,7 +613,7 @@ class RaftNodeTest {
     }
 
     @Test
-    void testInstallSnapshotRejectsWhenHigherTermMetadataPersistFails() throws Exception {
+    void aSnapshotInstallIsRefusedWithTheDurableTermWhenItsHigherTermCannotBePersisted() throws Exception {
         TestRaftStorage delegate = new TestRaftStorage();
         MetadataFailureStorage flakyMetadataStorage = MetadataFailureStorage.failFirstUpdate(delegate);
         flakyMetadataStorage.open(null).get(10, TimeUnit.SECONDS);

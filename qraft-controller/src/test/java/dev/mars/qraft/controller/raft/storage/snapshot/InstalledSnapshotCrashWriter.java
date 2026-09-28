@@ -17,16 +17,11 @@
 package dev.mars.qraft.controller.raft.storage.snapshot;
 
 import com.google.protobuf.ByteString;
-import dev.mars.qraft.controller.raft.RaftMessage;
+import dev.mars.qraft.controller.raft.PeerlessTransport;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.raft.RaftNodeMode;
-import dev.mars.qraft.controller.raft.RaftTransport;
-import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
-import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
-import dev.mars.qraft.controller.raft.grpc.VoteRequest;
-import dev.mars.qraft.controller.raft.grpc.VoteResponse;
 import dev.mars.qraft.controller.runtime.Future;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
@@ -43,7 +38,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
+
+import static dev.mars.qraft.controller.raft.RaftAwait.await;
 
 /**
  * Child-process fixture for real installed-snapshot and shutdown-drain recovery.
@@ -98,7 +94,7 @@ public final class InstalledSnapshotCrashWriter {
                 .runtime(runtime)
                 .nodeId("follower-1")
                 .clusterNodes(Set.of("follower-1", "leader-1"))
-                .transport(new NoOpTransport())
+                .transport(new PeerlessTransport())
                 .stateMachine(new QraftStateStore())
                 .commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.durable(wal, snapshots))
@@ -161,10 +157,6 @@ public final class InstalledSnapshotCrashWriter {
         return new DistributedStateRaftCommand(DistributedStateCommand.put(key, value));
     }
 
-    private static <T> T await(Future<T> future) {
-        return future.timeout(10, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
-    }
-
     private static final class CompactionGateStorage implements RaftStorage {
         private final FileRaftStorage delegate;
         private final CompletableFuture<Void> compactionReached = new CompletableFuture<>();
@@ -193,21 +185,5 @@ public final class InstalledSnapshotCrashWriter {
         @Override public CompletableFuture<List<LogEntryData>> replayLog() { return delegate.replayLog(); }
         @Override public void close() { delegate.close(); }
         @Override public CompletableFuture<Void> closeAsync() { return delegate.closeAsync(); }
-    }
-
-    private static final class NoOpTransport implements RaftTransport {
-        @Override public void start(Consumer<RaftMessage> messageHandler) { }
-        @Override public void stop() { }
-        @Override public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
-            return Future.failedFuture("unexpected vote request");
-        }
-        @Override public Future<AppendEntriesResponse> sendAppendEntries(
-                String targetId, AppendEntriesRequest request) {
-            return Future.failedFuture("unexpected append request");
-        }
-        @Override public Future<InstallSnapshotResponse> sendInstallSnapshot(
-                String targetId, InstallSnapshotRequest request) {
-            return Future.failedFuture("unexpected snapshot request");
-        }
     }
 }

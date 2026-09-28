@@ -45,6 +45,8 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static dev.mars.qraft.controller.raft.RaftAwait.awaitStateLoop;
+import static dev.mars.qraft.controller.raft.RaftAwait.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -111,7 +113,7 @@ class RaftNodeSnapshotSequencingTest {
         storage.awaitBlockedSnapshotPublication();
         Future<RaftCommandResult<?>> later = node.submitCommand(put("after", "excluded"));
 
-        awaitStateLoop();
+        awaitStateLoop(runtime);
         assertSame(runtime, stateMachine.snapshotContext());
         storage.assertSaveCount(1);
         storage.assertPrefixTruncateCount(0);
@@ -146,7 +148,7 @@ class RaftNodeSnapshotSequencingTest {
         storage.awaitBlockedPrefixCompaction();
         Future<RaftCommandResult<?>> later = node.submitCommand(put("after", "compaction"));
 
-        awaitStateLoop();
+        awaitStateLoop(runtime);
         storage.assertSaveCount(1);
         storage.assertPrefixTruncateCount(1);
         storage.assertAppendCount(1);
@@ -172,7 +174,7 @@ class RaftNodeSnapshotSequencingTest {
         storage.awaitBlockedSync();
         Future<Void> snapshot = node.takeSnapshot();
 
-        awaitStateLoop();
+        awaitStateLoop(runtime);
         storage.assertSaveCount(0);
         assertFalse(command.isComplete());
         assertFalse(snapshot.isComplete());
@@ -205,7 +207,7 @@ class RaftNodeSnapshotSequencingTest {
                 .setLastLogTerm(1)
                 .build());
 
-        awaitStateLoop();
+        awaitStateLoop(runtime);
         storage.assertMetadataUpdateCount(1);
         assertEquals(1, node.getCurrentTerm());
         assertEquals(RaftNode.State.LEADER, node.getState());
@@ -230,7 +232,7 @@ class RaftNodeSnapshotSequencingTest {
         storage.awaitBlockedSnapshotPublication();
         Future<Void> second = node.takeSnapshot();
 
-        awaitStateLoop();
+        awaitStateLoop(runtime);
         storage.assertSaveCount(1);
         storage.assertPrefixTruncateCount(0);
         assertFalse(first.isComplete());
@@ -306,20 +308,6 @@ class RaftNodeSnapshotSequencingTest {
 
     private static DistributedStateRaftCommand put(String key, String value) {
         return new DistributedStateRaftCommand(DistributedStateCommand.put(key, value));
-    }
-
-    private static <T> T await(Future<T> future) {
-        return future.timeout(10, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
-    }
-
-    private void awaitStateLoop() {
-        CompletableFuture<Void> marker = new CompletableFuture<>();
-        runtime.runOnContext(ignored -> marker.complete(null));
-        try {
-            marker.get(10, TimeUnit.SECONDS);
-        } catch (Exception error) {
-            throw new AssertionError("state-loop marker did not run", error);
-        }
     }
 
     private static final class RecordingStateMachine implements RaftLogApplicator {

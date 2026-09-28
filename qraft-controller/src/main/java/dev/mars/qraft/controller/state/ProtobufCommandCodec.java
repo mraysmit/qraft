@@ -24,7 +24,14 @@ import dev.mars.qraft.catalog.HealthObservation;
 import dev.mars.qraft.catalog.ServiceCheckId;
 import dev.mars.qraft.catalog.ServiceInstance;
 import dev.mars.qraft.catalog.ServiceInstanceId;
-import dev.mars.qraft.controller.raft.grpc.*;
+import dev.mars.qraft.controller.raft.grpc.CatalogCommandProto;
+import dev.mars.qraft.controller.raft.grpc.CatalogCommandType;
+import dev.mars.qraft.controller.raft.grpc.HealthExpiryCommandProto;
+import dev.mars.qraft.controller.raft.grpc.HealthObservationCommandProto;
+import dev.mars.qraft.controller.raft.grpc.RaftCommandMessage;
+import dev.mars.qraft.controller.raft.grpc.ServiceInstanceProto;
+import dev.mars.qraft.controller.raft.grpc.SystemMetadataCommandProto;
+import dev.mars.qraft.controller.raft.grpc.SystemMetadataCommandType;
 
 import java.time.Instant;
 

@@ -46,18 +46,22 @@ import java.util.function.Consumer;
 
 import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
 import static dev.mars.qraft.controller.raft.ManualRaftCluster.startAll;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests Raft failure scenarios: commands refused by a follower, repeated start and stop, a new leader after
- * the leader stops, a majority keeping its leader when one member stops, simultaneous candidacies, a transport
- * that cannot start, and message and configuration edge cases.
+ * Tests Raft failure scenarios: repeated start and stop, a new leader after the leader stops, a majority
+ * keeping its leader when one member stops, simultaneous candidacies, a transport that cannot start, and a
+ * node built with no members.
  *
  * <p>Elections and heartbeats happen only when a test fires them through {@link ManualRaftCluster}, so each
  * scenario runs the same way every time. Every node is stopped after the test.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
- * @version 2.0
+ * @version 2.2
  * @since 2025-08-20
  */
 class RaftFailureTest {
@@ -93,19 +97,7 @@ class RaftFailureTest {
     }
 
     @Test
-    void testCommandSubmissionToFollower() throws Exception {
-        await(node1.start());
-        assertEquals(RaftNode.State.FOLLOWER, node1.getState());
-
-        ExecutionException exception = assertThrows(ExecutionException.class,
-                () -> await(node1.submitCommand(distributedPut("key", "value"))));
-
-        assertInstanceOf(IllegalStateException.class, exception.getCause());
-        assertTrue(exception.getCause().getMessage().contains("Not the leader"), exception.getCause().getMessage());
-    }
-
-    @Test
-    void testDoubleStartStop() throws Exception {
+    void startingTwiceKeepsTheTransportRunningAndStoppingTwiceKeepsItStopped() throws Exception {
         await(node1.start());
         assertTrue(transport1.isRunning());
 
@@ -175,16 +167,17 @@ class RaftFailureTest {
     }
 
     @Test
-    void testInvalidClusterConfiguration() {
-        RaftNode emptyClusterNode = cluster.add(cluster.builder("test", Set.of(), transport1, new QraftStateStore(),
-                RaftNodeMode.volatileMode()));
-
-        assertEquals("test", emptyClusterNode.getNodeId());
-        assertEquals(RaftNode.State.FOLLOWER, emptyClusterNode.getState());
+    void aNodeMustBeAMemberOfItsOwnCluster() {
+        // With no members, its own vote would exceed half of zero and it would lead a cluster of nobody.
+        for (Set<String> members : List.of(Set.<String>of(), Set.of("node2", "node3"))) {
+            IllegalStateException refused = assertThrows(IllegalStateException.class, () -> cluster.builder(
+                    "node1", members, transport1, new QraftStateStore(), RaftNodeMode.volatileMode()).build());
+            assertEquals("clusterNodes must include this node, node1", refused.getMessage());
+        }
     }
 
     @Test
-    void testTransportFailures() {
+    void startFailsWithTheTransportsErrorWhenTheTransportCannotStart() {
         RaftTransport failingTransport = new RaftTransport() {
             @Override
             public void start(Consumer<RaftMessage> messageHandler) {
@@ -218,40 +211,6 @@ class RaftFailureTest {
         assertEquals("Transport failed to start", exception.getCause().getMessage());
         LOG.info("[EXPECTED-TEST-FAILURE] Scenario=transport start failure message={}",
                 exception.getCause().getMessage());
-    }
-
-    @Test
-    void testMessageValidation() {
-        VoteRequest voteRequest = VoteRequest.newBuilder()
-                .setTerm(1).setCandidateId("candidate").setLastLogIndex(0).setLastLogTerm(0).build();
-        assertEquals(1, voteRequest.getTerm());
-        assertEquals("candidate", voteRequest.getCandidateId());
-
-        VoteResponse voteResponse = VoteResponse.newBuilder().setTerm(1).setVoteGranted(true).build();
-        assertEquals(1, voteResponse.getTerm());
-        assertTrue(voteResponse.getVoteGranted());
-
-        AppendEntriesRequest appendRequest = AppendEntriesRequest.newBuilder()
-                .setTerm(1).setLeaderId("leader").setPrevLogIndex(0).setPrevLogTerm(0).setLeaderCommit(0).build();
-        assertEquals(0, appendRequest.getEntriesCount());
-
-        AppendEntriesResponse appendResponse = AppendEntriesResponse.newBuilder()
-                .setTerm(1).setSuccess(true).setMatchIndex(0).build();
-        assertTrue(appendResponse.getSuccess());
-    }
-
-    @Test
-    void testNodeIdValidation() throws Exception {
-        assertEquals("node1", node1.getNodeId());
-        assertEquals("node2", node2.getNodeId());
-        assertEquals("node3", node3.getNodeId());
-        assertNull(node1.getLeaderId(), "no leader is known before an election");
-
-        RaftNode single = node("single", Set.of("single"), new InMemoryTransportSimulator("single"));
-        await(single.start());
-        cluster.elect(single);
-
-        assertEquals("single", single.getLeaderId());
     }
 
     // ---------------------------------------------------------------------------------------------------

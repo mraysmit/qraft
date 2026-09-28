@@ -36,13 +36,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
@@ -67,7 +64,7 @@ class RaftNodeLeaderCommitTest {
 
     private JavaRuntime runtime;
     private RaftNode node;
-    private ManualTimers timers;
+    private ManualRaftTimers timers;
     private final HeldTransport transport = new HeldTransport();
 
     @AfterEach
@@ -138,7 +135,7 @@ class RaftNodeLeaderCommitTest {
 
     private void start(Set<String> members) throws Exception {
         runtime = JavaRuntime.create();
-        timers = new ManualTimers(runtime);
+        timers = new ManualRaftTimers(runtime);
         node = RaftNode.builder()
                 .runtime(runtime).nodeId("node-1").clusterNodes(members).transport(transport)
                 .stateMachine(new QraftStateStore()).commandCodec(CODEC)
@@ -149,7 +146,7 @@ class RaftNodeLeaderCommitTest {
     }
 
     private void becomeLeader() throws Exception {
-        timers.fireNextOneShot();
+        timers.fireElectionTimeout();
         node.awaitState(RaftNode.State.LEADER, 10_000).toCompletionStage().toCompletableFuture()
                 .get(15, TimeUnit.SECONDS);
         settle();
@@ -224,34 +221,4 @@ class RaftNodeLeaderCommitTest {
     }
 
     /** Fires one-shot Raft timers only when the test asks, on the node's state loop. */
-    private static final class ManualTimers implements RaftTimerScheduler {
-        private final JavaRuntime runtime;
-        private final AtomicLong ids = new AtomicLong();
-        private final Map<Long, Consumer<Long>> oneShots = new ConcurrentHashMap<>();
-
-        private ManualTimers(JavaRuntime runtime) { this.runtime = runtime; }
-
-        @Override
-        public long setTimer(long delayMs, Consumer<Long> action) {
-            long id = ids.incrementAndGet();
-            oneShots.put(id, action);
-            return id;
-        }
-
-        @Override
-        public long setPeriodic(long periodMs, Consumer<Long> action) {
-            return ids.incrementAndGet();
-        }
-
-        @Override
-        public boolean cancelTimer(long id) {
-            return oneShots.remove(id) != null;
-        }
-
-        void fireNextOneShot() {
-            long id = oneShots.keySet().stream().min(Long::compareTo).orElseThrow();
-            Consumer<Long> action = oneShots.remove(id);
-            runtime.runOnContext(ignored -> action.accept(id));
-        }
-    }
 }

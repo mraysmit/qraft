@@ -48,6 +48,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
+import static dev.mars.qraft.controller.raft.RaftAwait.awaitStateLoop;
+import static dev.mars.qraft.controller.raft.RaftAwait.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -121,7 +123,7 @@ class RaftNodeShutdownSequencingTest {
         Future<RaftCommandResult<?>> queued = node.submitCommand(put("queued", "two"));
 
         Future<Void> stop = node.stop();
-        awaitStateLoop();
+        awaitStateLoop(runtime);
 
         assertFalse(stop.isComplete(), "shutdown must wait for the active WAL transition");
         assertEquals(0, transport.stopCount.get(), "transport must remain open while accepted work drains");
@@ -202,7 +204,7 @@ class RaftNodeShutdownSequencingTest {
         storage.awaitBlockedSnapshotPublication();
 
         Future<Void> stop = node.stop();
-        awaitStateLoop();
+        awaitStateLoop(runtime);
 
         assertFalse(stop.isComplete(), "shutdown must wait for snapshot publication and compaction");
         assertEquals(0, storage.closeCount.get());
@@ -226,7 +228,7 @@ class RaftNodeShutdownSequencingTest {
         storage.awaitBlockedPrefixCompaction();
 
         Future<Void> stop = node.stop();
-        awaitStateLoop();
+        awaitStateLoop(runtime);
 
         assertFalse(snapshot.isComplete(),
                 "snapshot completion must include its post-publication WAL compaction");
@@ -265,7 +267,7 @@ class RaftNodeShutdownSequencingTest {
         Future<Void> start = node.start();
         storage.awaitBlockedMetadataLoad();
         Future<Void> stop = node.stop();
-        awaitStateLoop();
+        awaitStateLoop(runtime);
 
         assertFalse(stop.isComplete(), "shutdown must own an in-flight recovery operation");
         assertEquals(0, storage.closeCount.get());
@@ -331,7 +333,7 @@ class RaftNodeShutdownSequencingTest {
         long nextIndexAtStop = node.getNextIndex("peer-1");
 
         transport.completeHeldAppend(1);
-        awaitStateLoop();
+        awaitStateLoop(runtime);
 
         assertEquals(RaftNode.State.FOLLOWER, node.getState());
         assertEquals(nextIndexAtStop, node.getNextIndex("peer-1"),
@@ -402,20 +404,6 @@ class RaftNodeShutdownSequencingTest {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.onSpinWait();
         if (!node.isLeader()) throw new AssertionError("single node did not become leader");
-    }
-
-    private void awaitStateLoop() {
-        CompletableFuture<Void> marker = new CompletableFuture<>();
-        runtime.runOnContext(ignored -> marker.complete(null));
-        try {
-            marker.get(10, TimeUnit.SECONDS);
-        } catch (Exception error) {
-            throw new AssertionError("state-loop marker did not run", error);
-        }
-    }
-
-    private static <T> T await(Future<T> future) {
-        return future.timeout(10, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
     }
 
     private static final class ShutdownTransport implements RaftTransport {

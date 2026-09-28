@@ -28,6 +28,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -125,7 +126,10 @@ class CatalogCommandCodecTest {
 
     @Test
     void rejectsCorruptAndIncompleteCatalogPayloads() {
-        assertThrows(RuntimeException.class, () -> codec.deserialize(new byte[]{99, 111, 114, 114, 117, 112, 116}));
+        RuntimeException corrupt = assertThrows(RuntimeException.class,
+                () -> codec.deserialize(new byte[]{99, 111, 114, 114, 117, 112, 116}));
+        assertEquals("Failed to deserialize Protobuf command", corrupt.getMessage());
+        assertInstanceOf(com.google.protobuf.InvalidProtocolBufferException.class, corrupt.getCause());
 
         var incomplete = dev.mars.qraft.controller.raft.grpc.RaftCommandMessage.newBuilder()
                 .setCatalogCommand(dev.mars.qraft.controller.raft.grpc.CatalogCommandProto.newBuilder()

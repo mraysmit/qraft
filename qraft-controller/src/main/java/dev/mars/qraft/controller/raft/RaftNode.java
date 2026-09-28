@@ -46,7 +46,14 @@ import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.LongHistogram;
 import io.opentelemetry.api.metrics.Meter;
 import org.slf4j.MDC;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -312,6 +319,10 @@ public class RaftNode {
             if (runtime == null) throw new IllegalStateException("runtime is required");
             if (nodeId == null) throw new IllegalStateException("nodeId is required");
             if (clusterNodes == null) throw new IllegalStateException("clusterNodes is required");
+            // Otherwise the node's own vote could exceed half of a member set it is not counted in.
+            if (!clusterNodes.contains(nodeId)) {
+                throw new IllegalStateException("clusterNodes must include this node, " + nodeId);
+            }
             if (transport == null) throw new IllegalStateException("transport is required");
             if (stateMachine == null) throw new IllegalStateException("stateMachine is required");
                 if (commandCodec == null) throw new IllegalStateException("commandCodec is required");
@@ -1436,6 +1447,10 @@ public class RaftNode {
      */
     public Future<VoteResponse> handleVoteRequest(VoteRequest request) {
         requireNonNull(request, "request");
+        if (request.getCandidateId().isBlank()) {
+            // Granting it would record a blank vote and refuse every real candidate for the rest of the term.
+            return Future.failedFuture(new IllegalArgumentException("A vote request must name its candidate"));
+        }
         return transitionSequencer.submitEssential(
                 "request-vote:" + request.getCandidateId() + ":" + request.getTerm(),
                 RaftTransitionSequencer.FailurePolicy.FENCE,

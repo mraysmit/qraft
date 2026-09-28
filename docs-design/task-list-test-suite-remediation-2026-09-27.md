@@ -1,9 +1,9 @@
 # Task List: Test Suite Remediation
 
 **Date:** 2026-09-27
-**Active work:** Step 6, remaining coverage (Steps 1 to 5 are done)
+**Active work:** none. Steps 1 to 8 are done; the packaged-artifact test waits for the admin interface, and section 6 lists two open questions
 **Source review:** [`QRAFT_TEST_SUITE_REVIEW_2026-09-27.md`](QRAFT_TEST_SUITE_REVIEW_2026-09-27.md), sections 3 to 7
-**Runs alongside:** [`task-list-platform-hygiene-and-readiness-2026-09-27.md`](task-list-platform-hygiene-and-readiness-2026-09-27.md), complete and awaiting archive confirmation
+**Predecessor, run alongside:** [`task-list-platform-hygiene-and-readiness-2026-09-27.md`](../docs/archive/task-list-platform-hygiene-and-readiness-2026-09-27.md), archived 2026-09-28
 **Paused:** [`task-list-embedded-admin-interface-2026-09-27.md`](task-list-embedded-admin-interface-2026-09-27.md), after its Step 1
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
@@ -29,14 +29,19 @@ The five production defects in the review's section 2 are fixed. Steps 1 and
 2 fixed two more: the commit majority in even-sized clusters, and replicas that
 skipped a committed entry they could not apply.
 
-Steps 1 to 5 are done:
+Steps 1 to 8 are done:
 
 - the tests that verified nothing;
 - the placeholder container tests;
 - isolation and cleanup;
-- determinism.
+- determinism;
+- the coverage gaps, except the packaged-artifact test;
+- hygiene;
+- the weak assertions that Step 7's renaming exposed. Strengthening them
+  found three more production defects.
 
-Open: the coverage gaps (Step 6) and hygiene (Step 7).
+Open: the packaged-artifact test, which waits for the admin interface, and the
+two questions in section 6.
 
 ## 3. Rules
 
@@ -47,6 +52,8 @@ Open: the coverage gaps (Step 6) and hygiene (Step 7).
   prohibited.
 - A test that cannot be made meaningful is deleted, not kept for its count.
 - A new or changed concurrency test is run repeatedly before its step is done.
+- A step is verified with `mvn install`, not `mvn test`. The coverage gates run
+  in the `verify` phase, so `mvn test` skips them.
 - A production defect found on the way is fixed test first and recorded here and
   in the review.
 - Every new Java file carries the license header and attributed type Javadoc.
@@ -628,6 +635,93 @@ Review section 6:
 - `qraft-tenant`;
 - the remaining container scenarios.
 
+### Step 7 record (2026-09-28)
+
+Done. Each item of review section 7:
+
+1. **Names.**
+   - 113 `test…` methods in 11 files now state what they check. The
+     remaining three `test…` methods are JUnit `TestWatcher` callbacks.
+   - Each new name claims only what the test's assertions check. For example,
+     "is answered" means the call returned without error, not that the
+     response was right.
+   - Two misleading display names and six class Javadocs were corrected.
+     `GrpcRaftTransportTest` now says it does not test retries or timeouts.
+     `RaftNodeIntegrationTest` now says it does not check timer cleanup.
+2. **Headers.**
+   - The Apache header is complete in six test files and three main files:
+     `RaftPersistence`, `RaftTimerScheduler`, `RaftStorageFactory`.
+   - `ShutdownCoordinatorTest` has `@version`.
+3. **Dead fixtures.** Deleted:
+   - `NetworkTestUtils`;
+   - `ExpectsError` and `ExpectsErrorExtension`;
+   - both test copies of `otel-collector-config.yaml`;
+   - the legacy `qraft-controller.properties`;
+   - the unused `docker-compose-test.yml`, `docker-compose-5node-test.yml`,
+     and test-resource `docker-compose-network-test.yml`.
+
+   `MockRaftTransport` and `TestClusterConfiguration` were already gone. With
+   `ExpectsError` gone, nothing used `qraft-core`'s test-jar, so it and the
+   controller's dependency on it were removed. The contract test that required
+   it now checks that every test-jar a module depends on is published. It was
+   shown to fail when the controller stops publishing its test-jar.
+4. **Duplication.**
+   - `ManualTimers` (4 copies) is replaced by `ManualRaftTimers`, which gained
+     a test for timers armed behind a queued task.
+   - `NoOpTransport` (4) and `SingleNodeTransport` (3) are replaced by
+     `PeerlessTransport`, whose sends fail and name their target.
+   - The `await` (16) and `awaitStateLoop` (8) copies are replaced by
+     `RaftAwait`.
+   - The `freePort` copies went in Step 5.
+   - **Single-node election** had three copies of the same check. The copy in
+     `RaftFailureTest` is deleted. Its one unique check, that no leader is
+     known before an election, moved to `RaftNodeTest`, where a mutation
+     making the node name itself leader fails it. The remaining tests each
+     cover something different:
+     - the election itself;
+     - the durable term and vote;
+     - the order of metadata writes;
+     - election over real gRPC.
+   - Also deleted: a duplicate follower-refusal test, and two tests that only
+     read back protobuf builder fields (generated code).
+5. **Debug output.** None is left. `ShutdownCoordinatorTest` logs through
+   SLF4J. `DirectoryLockProcess` still writes to stdout, because that is how
+   it talks to its parent test.
+6. **Legacy values.**
+   - The catalog tests use `CRITICAL`, not `FAILING`.
+     `LegacyCatalogFixtureTest` keeps `FAILING` on purpose.
+   - The legacy timeout aliases are removed from `AgentConfiguration`
+     (`getHttpConnectionTimeout`, `getHttpIdleTimeout`,
+     `Builder.httpConnectionTimeout`). Their tests use `requestTimeoutMs`.
+7. **Style.**
+   - Wildcard imports are expanded in 23 test files and 4 main files.
+   - `assertTrue(x.equals(y))` is `assertEquals` everywhere.
+   - Broad `assertThrows` calls now pin the message and cause. That covers
+     the codec tests and both state stores' corrupt-snapshot handling, where
+     a failed restore now also leaves the state unchanged. Six mutations
+     were caught.
+   - The compose `version:` key is gone.
+
+**Found on the way.**
+- **`mvn install` failed after Step 6.** `SnapshotDataTest`, the first test in
+  `qraft-raft-engine`, gave its coverage gate data. The gate then found 50%
+  line coverage against a 60% minimum. Step 6 had been verified with
+  `mvn test`, which stops before the gates (see the new rule in section 3).
+  `SnapshotStoreContractTest` now covers the interface's own contract:
+  - the default `closeAsync` closes once, and reports a failed close
+    (including an `Error`) through the future rather than by throwing;
+  - `SnapshotPublicationException` requires and reports its outcome.
+
+  Five mutations were caught.
+- **An assertion tightened earlier in this step named the wrong store's
+  exception.** The full build caught it before the step closed. It is
+  corrected above.
+
+**Verification.**
+- `mvn install`: 732 tests, every coverage gate met.
+- The changed Raft, sequencing, and gRPC tests: 5 runs of 236, all green.
+- The Docker suite, on an image built from the new JAR: 22 of 22.
+
 ### Step 7. Hygiene
 
 Review section 7:
@@ -639,8 +733,139 @@ Review section 7:
 - `System.out` in tests;
 - wildcard imports.
 
+### Step 8 record (2026-09-28)
+
+Done. Every test listed below was strengthened or deleted. Every strengthened
+or new test was shown to fail against a mutation of the behaviour it now
+checks: 26 mutations in process and 1 against the container cluster, all
+caught.
+
+**Production defects, each fixed test first.**
+- **A vote request naming no candidate won the vote.** A fresh node granted
+  term 1 to an empty candidate ID and recorded `""` as its vote. That refused
+  every real candidate for the rest of the term, and a request with every
+  field unset did the same in term 0. `RaftNode.handleVoteRequest` now
+  rejects a blank candidate with `IllegalArgumentException`, before any state
+  changes. The gRPC server reports it as `INVALID_ARGUMENT`.
+- **A send after `GrpcRaftTransport.stop()` never completed.** It opened a
+  new channel that was never closed. The reply's callback went to the
+  shut-down executor, whose `CallerRunsPolicy` silently discards tasks after
+  shutdown. Sends after stop now fail at once with `IllegalStateException`.
+- **A node accepted a member set that did not include itself.** With an empty
+  set, its own vote exceeded half of zero, so it would lead a cluster of
+  nobody. `RaftNode.Builder.build()` now refuses such a set.
+
+**Tests.**
+- **Agent model** (`AgentInfoTest`, `AgentNetworkInfoTest`,
+  `AgentSystemInfoTest`).
+  - The getter echoes and non-null checks are deleted. Round trips of every
+    field replace them, compared against literal values, so a setter that
+    drops its value fails.
+  - New tests cover `AgentInfo.copyOf`, which the state store relies on,
+    `getEndpoint`, equality by agent ID alone, and null metadata.
+  - `toString` is checked as `field=value` pairs, which also removes the
+    `8`-in-`x86_64` false pass. The hash-code inequality assertion is gone.
+- **`GrpcRaftServerTest`.**
+  - Its node runs on manual timers. The real 5 s election timeout could
+    elect the node during a test and change every vote result.
+  - Each vote and heartbeat test now asserts the decision and the term. That
+    covers:
+    - one vote per term;
+    - adopting a higher term;
+    - refusing a log that ends before index 0;
+    - following a new leader;
+    - rejecting a blank or empty request.
+  - The two-server test now shows each server serves its own node's state.
+  - Four tests are deleted: the unasserted start, the rapid start and stop,
+    the generous-deadline test, and the cleared-entries test, which repeated
+    the heartbeat test.
+- **`GrpcRaftTransportTest`.**
+  - Each request is shown to reach the named peer, and the peer's decision
+    and state to come back intact.
+  - The pool test is replaced. It never exceeded the pool, and could not
+    through the public API. The callback pool is now built by a
+    package-private factory, tested directly: a full pool and queue run the
+    callback on the delivering thread, and pool threads are daemons.
+- **Raft node tests.**
+  - `RaftFailureTest`'s empty-membership test now checks the refusal.
+  - `RaftNodeIntegrationTest` is deleted. In its place, `RaftNodeTest` shows
+    that stopping a follower cancels its election timer, and stopping a
+    leader cancels its heartbeat.
+  - `RaftNodeTest`'s `LogEntry` test moved to a new `LogEntryTest`. Its
+    state-store test repeated `ControllerStateStoreTest` and is deleted.
+  - `DockerRaftClusterTest` requires every server to name the same leader in
+    the leader's term. It timed out, as it should, against an image in which
+    followers never record the leader.
+
+**Verification.**
+- `mvn install`: 705 tests, every coverage gate met.
+- The Docker suite, on an image built from the new JAR: 22 of 22.
+
+### Step 8. Weak assertions
+
+Renaming the `test…` methods to say what they check showed that about 45 of
+them check almost nothing:
+- `assertNotNull` on a response;
+- no exception thrown;
+- a getter returning what its setter was given;
+- `getTerm() >= 0`, which always holds.
+
+Each is either strengthened, with a mutation that fails it, or deleted under
+the section 3 rule that a test which cannot be made meaningful is deleted.
+They are:
+
+- **`GrpcRaftServerTest`** (14).
+  - The RequestVote tests at term 0, the maximum term, an empty or 10,000-character
+    candidate ID, a negative log index, and every field unset never check
+    the vote decision or the returned term.
+  - The heartbeat test never checks `getSuccess()`.
+  - The "explicitly cleared entries" test repeats the heartbeat test.
+  - The generous-deadline test adds nothing.
+  - The start and stop tests never show a port bound or released.
+  - The two-server test never shows the servers are independent.
+- **`GrpcRaftTransportTest`** (10).
+  - The responses are only checked non-null. Their term, vote, success, and
+    match index go unchecked.
+  - The two-peer test never shows which peer answered.
+  - The restart test never shows the stopped transport refusing sends.
+  - The pool test never exceeds the pool size or the 500-request queue it
+    was written for.
+- **`AgentInfoTest`, `AgentNetworkInfoTest`, `AgentSystemInfoTest`** (about
+  25). Most are getter and setter echoes, and the default-constructor tests
+  check only non-null. Specific defects:
+  - `toString` "contains `8`" is already satisfied by `x86_64`.
+  - The hash codes of two different agents are required to differ, which the
+    `hashCode` contract does not promise.
+  - Equality is never shown to depend on the agent ID alone.
+  - The network JSON round trip uses the default `false` for NAT traversal
+    and compares list sizes, not contents.
+  - The agent JSON round trip never checks `status`.
+- **Raft node tests.**
+  - `RaftFailureTest.aNodeBuiltWithNoMembersIsAFollower` checks an unstarted
+    node's fields. Decide whether an empty membership is refused, and test
+    that.
+  - `RaftNodeIntegrationTest`'s two tests check only `isRunning`, overlap
+    `RaftNodeTest`, and do not check timer cleanup.
+  - `DockerRaftClusterTest.theClusterElectsExactlyOneLeader` does not check
+    that the followers agree on the leader.
+  - `RaftNodeTest`'s state-store and `LogEntry` tests belong with those types.
+
 ## 5. Out of scope
 
 - New platform features: key/value, consistency modes, sessions, and tenancy
   lifecycle. They follow in their own lists.
 - The administrative interface, which stays paused.
+
+## 6. Open questions
+
+Found in Step 8. Both change Raft behaviour, so they need a decision first.
+
+1. **Votes for candidates outside the member set.** A node grants its vote to
+   any candidate ID, including one not in its `clusterNodes`. With fixed
+   membership, a vote could instead be refused to a non-member. A removed or
+   misconfigured server could then not disrupt an election. The tests use
+   non-member candidate IDs throughout, so the change would touch them too.
+2. **The maximum term.** One vote request at `Long.MAX_VALUE` moves a node to
+   that term. The node's next election would overflow the term to a negative
+   number. A node could instead refuse terms that leave no room for another
+   election.

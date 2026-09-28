@@ -119,9 +119,9 @@ class ServiceReconcilerTest {
         assertEquals(List.of("web", "web", "web"), client.registrations);
         assertEquals(ServiceReconciler.fingerprint(service("web", "web", 8080, true)),
                 ServiceReconciler.fingerprint(web.withCheckIds(List.of())));
-        assertFalse(ServiceReconciler.fingerprint(web.withCheckIds(List.of("a")))
-                .equals(ServiceReconciler.fingerprint(service("web", "web", 8080, true)
-                        .withCheckIds(List.of()))), "the check set is part of the definition fingerprint");
+        assertNotEquals(ServiceReconciler.fingerprint(service("web", "web", 8080, true).withCheckIds(List.of())),
+                ServiceReconciler.fingerprint(web.withCheckIds(List.of("a"))),
+                "the check set is part of the definition fingerprint");
     }
 
     @Test

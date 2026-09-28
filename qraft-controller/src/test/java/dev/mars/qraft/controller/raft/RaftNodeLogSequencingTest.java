@@ -48,6 +48,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static dev.mars.qraft.controller.raft.RaftAwait.awaitStateLoop;
+import static dev.mars.qraft.controller.raft.RaftAwait.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -108,7 +110,7 @@ class RaftNodeLogSequencingTest {
         storage.awaitBlockedAppend();
         Future<RaftCommandResult<?>> second = node.submitCommand(put("second", "two"));
 
-        awaitStateLoop();
+        awaitStateLoop(runtime);
         storage.assertAppendCount(1);
         assertFalse(first.isComplete());
         assertFalse(second.isComplete());
@@ -269,7 +271,7 @@ class RaftNodeLogSequencingTest {
         storage.awaitBlockedSync();
         Future<RaftCommandResult<?>> second = node.submitCommand(put("after-sync", "queued"));
 
-        awaitStateLoop();
+        awaitStateLoop(runtime);
 
         assertEquals(1, node.getLogSize(), "Only the snapshot sentinel may be visible before sync");
         assertFalse(first.isComplete());
@@ -345,7 +347,7 @@ class RaftNodeLogSequencingTest {
         Future<AppendEntriesResponse> stalePlan = node.handleAppendEntriesRequest(appendRequest(
                 1, 1, 1, grpcEntry(1, "later", "must-not-append")));
 
-        awaitStateLoop();
+        awaitStateLoop(runtime);
         storage.assertTruncateCount(1);
         storage.assertAppendCount(1);
         assertFalse(replacement.isComplete());
@@ -375,7 +377,7 @@ class RaftNodeLogSequencingTest {
         Future<AppendEntriesResponse> second = node.handleAppendEntriesRequest(appendRequest(
                 1, 1, 1, grpcEntry(1, "second", "two")));
 
-        awaitStateLoop();
+        awaitStateLoop(runtime);
         storage.assertAppendCount(1);
         assertFalse(first.isComplete());
         assertFalse(second.isComplete());
@@ -404,7 +406,7 @@ class RaftNodeLogSequencingTest {
         Future<AppendEntriesResponse> second = node.handleAppendEntriesRequest(appendRequest(
                 1, 2, 1, grpcEntry(1, "second", "three")));
 
-        awaitStateLoop();
+        awaitStateLoop(runtime);
         storage.assertAppendCount(2);
         storage.assertSyncCount(2);
         assertFalse(first.isComplete());
@@ -456,7 +458,7 @@ class RaftNodeLogSequencingTest {
         Future<AppendEntriesResponse> queued = node.handleAppendEntriesRequest(appendRequest(
                 1, 1, 1, grpcEntry(1, "queued", "must-not-persist")));
 
-        awaitStateLoop();
+        awaitStateLoop(runtime);
         assertFalse(failing.isComplete());
         assertFalse(queued.isComplete());
         storage.failBlockedTruncate();
@@ -532,20 +534,6 @@ class RaftNodeLogSequencingTest {
 
     private static DistributedStateRaftCommand put(String key, String value) {
         return new DistributedStateRaftCommand(DistributedStateCommand.put(key, value));
-    }
-
-    private static <T> T await(Future<T> future) {
-        return future.timeout(10, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
-    }
-
-    private void awaitStateLoop() {
-        CompletableFuture<Void> marker = new CompletableFuture<>();
-        runtime.runOnContext(ignored -> marker.complete(null));
-        try {
-            marker.get(10, TimeUnit.SECONDS);
-        } catch (Exception error) {
-            throw new AssertionError("state-loop marker did not run", error);
-        }
     }
 
     private static final class GatedRaftStorage implements RaftStorage, SnapshotStore {

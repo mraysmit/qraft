@@ -26,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * A {@link RaftTimerScheduler} whose timers fire only when a test asks, on the node's state loop. A node's
@@ -39,7 +40,7 @@ import java.util.function.Consumer;
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-28
- * @version 1.1
+ * @version 1.2
  */
 public final class ManualRaftTimers implements RaftTimerScheduler {
     private final JavaRuntime runtime;
@@ -89,19 +90,36 @@ public final class ManualRaftTimers implements RaftTimerScheduler {
         });
     }
 
+    /** Whether a periodic timer with {@code periodMs} is armed, once the tasks already queued have run. */
+    public boolean hasPeriodic(long periodMs) {
+        return valueOnStateLoop(() -> periodics.values().stream().anyMatch(timer -> timer.periodMs() == periodMs));
+    }
+
+    /** How many one-shot timers are armed, once the tasks already queued have run. */
+    public int oneShotCount() {
+        return valueOnStateLoop(oneShots::size);
+    }
+
     /** Runs {@code fire} behind the tasks already queued on the state loop and waits for it. */
     private void onStateLoop(Runnable fire) {
-        CompletableFuture<Void> fired = new CompletableFuture<>();
+        valueOnStateLoop(() -> {
+            fire.run();
+            return null;
+        });
+    }
+
+    /** Evaluates {@code step} behind the tasks already queued on the state loop and returns its result. */
+    private <T> T valueOnStateLoop(Supplier<T> step) {
+        CompletableFuture<T> fired = new CompletableFuture<>();
         runtime.runOnContext(ignored -> {
             try {
-                fire.run();
-                fired.complete(null);
+                fired.complete(step.get());
             } catch (Throwable failure) {
                 fired.completeExceptionally(failure);
             }
         });
         try {
-            fired.get(10, TimeUnit.SECONDS);
+            return fired.get(10, TimeUnit.SECONDS);
         } catch (ExecutionException failure) {
             // What the timer's action threw reaches the caller unchanged, an assertion error included.
             if (failure.getCause() instanceof Error error) throw error;

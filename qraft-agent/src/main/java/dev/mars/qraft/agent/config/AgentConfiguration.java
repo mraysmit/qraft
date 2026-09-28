@@ -416,8 +416,6 @@ public final class AgentConfiguration {
     public List<URI> getControllerUrls() { return controllerUrls; }
     public long getHeartbeatInterval() { return heartbeatInterval; }
     public long getShutdownTimeoutMs() { return shutdownTimeoutMs; }
-    public int getHttpConnectionTimeout() { return requestTimeoutMs; }
-    public int getHttpIdleTimeout() { return requestTimeoutMs; }
     public int getRequestTimeoutMs() { return requestTimeoutMs; }
     public long getRegistrationRetryMinMs() { return registrationRetryMinMs; }
     public long getRegistrationRetryMaxMs() { return registrationRetryMaxMs; }
@@ -462,7 +460,6 @@ public final class AgentConfiguration {
         public Builder controllerUrls(List<URI> value) { controllerUrls = normalizeControllerUrls(value); return this; }
         public Builder heartbeatInterval(long value) { heartbeatInterval = value; return this; }
         public Builder shutdownTimeoutMs(long value) { shutdownTimeoutMs = value; return this; }
-        public Builder httpConnectionTimeout(int value) { requestTimeoutMs = value; return this; }
         public Builder requestTimeoutMs(int value) { requestTimeoutMs = value; return this; }
         public Builder registrationRetryMinMs(long value) { registrationRetryMinMs = value; return this; }
         public Builder registrationRetryMaxMs(long value) { registrationRetryMaxMs = value; return this; }

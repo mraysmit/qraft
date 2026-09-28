@@ -28,6 +28,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -192,7 +193,7 @@ class HealthCommandStateStoreTest {
                 observation(check, ServiceHealth.PASSING, 1, true, ""), ACCEPTED_AT));
         String current = new String(withoutDelay.takeSnapshot(), java.nio.charset.StandardCharsets.UTF_8);
         String older = current.replace(",\"deregisterAfterMillis\":0", "");
-        assertFalse(older.equals(current), "the fixture must omit the field as older snapshots did");
+        assertNotEquals(current, older, "the fixture must omit the field as older snapshots did");
         restored.restoreSnapshot(older.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         assertEquals(0, restored.findHealthCheck(check).orElseThrow().observation().deregisterAfterMillis());
     }
@@ -273,7 +274,7 @@ class HealthCommandStateStoreTest {
 
         String current = new String(registeredStore().takeSnapshot(), java.nio.charset.StandardCharsets.UTF_8);
         String older = current.replace(",\"declaredChecks\":[]", "");
-        assertFalse(older.equals(current), "the fixture must omit the field as older snapshots did");
+        assertNotEquals(current, older, "the fixture must omit the field as older snapshots did");
         QraftStateStore fromOlder = new QraftStateStore();
         fromOlder.restoreSnapshot(older.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         assertInstanceOf(RaftCommandResult.Success.class, fromOlder.apply(CatalogCommand.observe(

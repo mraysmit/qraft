@@ -38,14 +38,6 @@
             <artifactId>qraft-distributed-state</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <!-- Test utilities from qraft-core (ExpectsError annotation) -->
-        <dependency>
-            <groupId>dev.mars</groupId>
-            <artifactId>qraft-core</artifactId>
-            <version>${project.version}</version>
-            <type>test-jar</type>
-            <scope>test</scope>
-        </dependency>
         <dependency>
             <groupId>dev.mars</groupId>
             <artifactId>qraft-tenant</artifactId>

@@ -49,6 +49,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
+import static dev.mars.qraft.controller.raft.RaftAwait.awaitStateLoop;
+import static dev.mars.qraft.controller.raft.RaftAwait.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -131,7 +133,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
                 .setSuccess(true)
                 .setNextChunkIndex(stale.request().getTotalChunks())
                 .build());
-        awaitStateLoop();
+        awaitStateLoop(runtime);
 
         assertEquals(nextIndex, node.getNextIndex("peer-1"),
                 "an acknowledgement from an old transfer must be ignored");
@@ -174,7 +176,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
         PendingSnapshot current = transport.takeSnapshot();
 
         stale.response().fail(new IllegalStateException("late failure"));
-        awaitStateLoop();
+        awaitStateLoop(runtime);
         current.response().complete(InstallSnapshotResponse.newBuilder()
                 .setTerm(current.request().getTerm())
                 .setSuccess(true)
@@ -193,7 +195,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
         storage.awaitBlockedSnapshotLoad();
 
         Future<Void> stop = node.stop();
-        awaitStateLoop();
+        awaitStateLoop(runtime);
 
         assertTrue(!stop.isComplete(), "shutdown must wait for an accepted snapshot load");
         assertEquals(0, storage.closeCount.get());
@@ -247,7 +249,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
         transport.rejectNextAppend();
         node.submitCommand(put("after", "snapshot"));
         transport.awaitRejectedAppend();
-        awaitStateLoop();
+        awaitStateLoop(runtime);
         node.submitCommand(put("trigger", "snapshot-transfer"));
     }
 
@@ -287,7 +289,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
         while (node.getCommitIndex() < node.getLastLogIndex() && System.nanoTime() < deadline) {
             Thread.onSpinWait();
         }
-        awaitStateLoop();
+        awaitStateLoop(runtime);
         assertEquals(node.getLastLogIndex(), node.getCommitIndex(), "the new leadership's no-op commits");
         assertEquals(node.getLastLogIndex() + 1, node.getNextIndex("peer-1"));
         return node.getNextIndex("peer-1");
@@ -313,17 +315,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
      * A send decided by any of them has then happened, so an empty transport afterwards is exact.
      */
     private void settle() throws Exception {
-        for (int pass = 0; pass < 5; pass++) awaitStateLoop();
-    }
-
-    private void awaitStateLoop() throws Exception {
-        CompletableFuture<Void> marker = new CompletableFuture<>();
-        runtime.runOnContext(ignored -> marker.complete(null));
-        marker.get(10, TimeUnit.SECONDS);
-    }
-
-    private static <T> T await(Future<T> future) {
-        return future.timeout(10, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
+        for (int pass = 0; pass < 5; pass++) awaitStateLoop(runtime);
     }
 
     private record PendingSnapshot(

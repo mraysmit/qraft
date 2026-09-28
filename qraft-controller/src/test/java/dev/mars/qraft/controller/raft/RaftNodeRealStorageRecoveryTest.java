@@ -19,12 +19,7 @@ package dev.mars.qraft.controller.raft;
 import com.google.protobuf.ByteString;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
-import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
-import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
-import dev.mars.qraft.controller.raft.grpc.VoteRequest;
-import dev.mars.qraft.controller.raft.grpc.VoteResponse;
 import dev.mars.qraft.controller.raft.storage.RaftStorageFactory;
-import dev.mars.qraft.controller.runtime.Future;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
@@ -47,8 +42,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Consumer;
 
+import static dev.mars.qraft.controller.raft.RaftAwait.await;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -107,7 +103,7 @@ class RaftNodeRealStorageRecoveryTest {
                 .runtime(runtime)
                 .nodeId("node-1")
                 .clusterNodes(Set.of("node-1", "leader-1"))
-                .transport(new NoOpTransport())
+                .transport(new PeerlessTransport())
                 .stateMachine(new QraftStateStore())
                 .commandCodec(CODEC)
                 .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
@@ -195,7 +191,7 @@ class RaftNodeRealStorageRecoveryTest {
                 .runtime(runtime)
                 .nodeId("node-1")
                 .clusterNodes(Set.of("node-1"))
-                .transport(new NoOpTransport())
+                .transport(new PeerlessTransport())
                 .stateMachine(state)
                 .commandCodec(CODEC)
                 .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
@@ -214,7 +210,7 @@ class RaftNodeRealStorageRecoveryTest {
                 .runtime(runtime)
                 .nodeId("node-1")
                 .clusterNodes(Set.of("node-1"))
-                .transport(new NoOpTransport())
+                .transport(new PeerlessTransport())
                 .stateMachine(new QraftStateStore())
                 .commandCodec(CODEC)
                 .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
@@ -263,7 +259,7 @@ class RaftNodeRealStorageRecoveryTest {
                 .runtime(runtime)
                 .nodeId("node-1")
                 .clusterNodes(Set.of("node-1"))
-                .transport(new NoOpTransport())
+                .transport(new PeerlessTransport())
                 .stateMachine(state)
                 .commandCodec(CODEC)
                 .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
@@ -281,7 +277,7 @@ class RaftNodeRealStorageRecoveryTest {
         assertEquals("one", state.getMetadata("retained-1"));
         assertEquals("two", state.getMetadata("retained-2"));
         assertEquals(expectReplacement, "new".equals(state.getMetadata("replacement")));
-        assertFalse("old".equals(state.getMetadata("obsolete")),
+        assertNotEquals("old", state.getMetadata("obsolete"),
                 "the truncated suffix must never be resurrected");
     }
 
@@ -344,26 +340,6 @@ class RaftNodeRealStorageRecoveryTest {
                 DistributedStateCommand.put(key, value)));
     }
 
-    private static <T> T await(Future<T> future) {
-        return future.timeout(10, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
-    }
-
     private record ProcessResult(int exitCode, String output) {
-    }
-
-    private static final class NoOpTransport implements RaftTransport {
-        @Override public void start(Consumer<RaftMessage> messageHandler) { }
-        @Override public void stop() { }
-        @Override public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
-            return Future.failedFuture("unexpected vote request");
-        }
-        @Override public Future<AppendEntriesResponse> sendAppendEntries(
-                String targetId, AppendEntriesRequest request) {
-            return Future.failedFuture("unexpected append request");
-        }
-        @Override public Future<InstallSnapshotResponse> sendInstallSnapshot(
-                String targetId, InstallSnapshotRequest request) {
-            return Future.failedFuture("unexpected snapshot request");
-        }
     }
 }

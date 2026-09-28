@@ -18,6 +18,7 @@ package dev.mars.qraft.runtime;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import dev.mars.qraft.controller.raft.PeerlessTransport;
 import dev.mars.qraft.catalog.ServiceKey;
 import dev.mars.qraft.agent.QraftAgent;
 import dev.mars.qraft.agent.config.AgentConfiguration;
@@ -31,17 +32,8 @@ import dev.mars.qraft.catalog.ServiceDefinition;
 import dev.mars.qraft.catalog.ServiceHealth;
 import dev.mars.qraft.catalog.ServiceInstanceId;
 import dev.mars.qraft.controller.http.HttpApiServer;
-import dev.mars.qraft.controller.raft.RaftMessage;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.raft.RaftNodeMode;
-import dev.mars.qraft.controller.raft.RaftTransport;
-import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
-import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
-import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
-import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
-import dev.mars.qraft.controller.raft.grpc.VoteRequest;
-import dev.mars.qraft.controller.raft.grpc.VoteResponse;
-import dev.mars.qraft.controller.runtime.Future;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
@@ -64,10 +56,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
-import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -266,7 +256,7 @@ class AgentHealthPublicationTest {
             JavaRuntime runtime = JavaRuntime.create();
             QraftStateStore store = new QraftStateStore();
             RaftNode node = RaftNode.builder().runtime(runtime).nodeId("health-controller")
-                    .clusterNodes(Set.of("health-controller")).transport(new SingleNodeTransport())
+                    .clusterNodes(Set.of("health-controller")).transport(new PeerlessTransport())
                     .stateMachine(store).commandCodec(new ProtobufRaftCommandCodec())
                     .mode(RaftNodeMode.volatileMode()).electionTimeout(25).heartbeatInterval(10_000).build();
             node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
@@ -285,22 +275,6 @@ class AgentHealthPublicationTest {
             server.close();
             node.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
             runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-        }
-    }
-
-    private static final class SingleNodeTransport implements RaftTransport {
-        @Override public void start(Consumer<RaftMessage> messageHandler) { }
-        @Override public void stop() { }
-        @Override public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
-            return Future.failedFuture("single-node transport has no peers");
-        }
-        @Override public Future<AppendEntriesResponse> sendAppendEntries(
-                String targetId, AppendEntriesRequest request) {
-            return Future.failedFuture("single-node transport has no peers");
-        }
-        @Override public Future<InstallSnapshotResponse> sendInstallSnapshot(
-                String targetId, InstallSnapshotRequest request) {
-            return Future.failedFuture("single-node transport has no peers");
         }
     }
 }

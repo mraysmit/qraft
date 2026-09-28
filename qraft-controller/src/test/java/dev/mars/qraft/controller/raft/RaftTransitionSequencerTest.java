@@ -38,6 +38,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static dev.mars.qraft.controller.raft.RaftAwait.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -332,10 +333,6 @@ class RaftTransitionSequencerTest {
 
     private static String observed(ContextKey<String> trace) {
         return MDC.get("requestId") + "/" + Context.current().get(trace);
-    }
-
-    private static <T> T await(Future<T> future) throws Exception {
-        return future.timeout(10, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
     }
 
     private static void awaitHistory(List<String> history, List<String> expected) throws Exception {

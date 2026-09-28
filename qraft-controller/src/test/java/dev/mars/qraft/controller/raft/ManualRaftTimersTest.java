@@ -27,6 +27,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -64,6 +65,28 @@ class ManualRaftTimersTest {
                 () -> timers.setTimer(1_000, id -> fired.add("election")), timers::fireElectionTimeout);
 
         assertEquals(List.of("election"), fired);
+    }
+
+    @Test
+    void armedTimersAreCountedBehindATaskAlreadyQueued() throws Exception {
+        CountDownLatch holding = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        runtime.runOnContext(ignored -> {
+            holding.countDown();
+            await(release);
+        });
+        assertTrue(holding.await(10, TimeUnit.SECONDS), "the context is held");
+        runtime.runOnContext(ignored -> {
+            timers.setPeriodic(200, id -> { });
+            timers.setTimer(1_000, id -> { });
+        });
+        CompletableFuture<List<Object>> seen = CompletableFuture.supplyAsync(
+                () -> List.of(timers.hasPeriodic(200), timers.oneShotCount()));
+        release.countDown();
+
+        assertEquals(List.of(true, 1), seen.get(10, TimeUnit.SECONDS),
+                "the timers a queued task arms are seen once it has run");
+        assertFalse(timers.hasPeriodic(500), "only a timer of the given period counts");
     }
 
     @Test

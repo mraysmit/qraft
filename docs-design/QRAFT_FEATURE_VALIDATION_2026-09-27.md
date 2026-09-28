@@ -91,7 +91,7 @@ Status key:
 ## 4. Consistency of the plans with the code
 
 - **Legacy concepts remained.** Resolved 2026-09-27 by
-  [`task-list-platform-hygiene-and-readiness-2026-09-27.md`](task-list-platform-hygiene-and-readiness-2026-09-27.md).
+  [`task-list-platform-hygiene-and-readiness-2026-09-27.md`](../docs/archive/task-list-platform-hygiene-and-readiness-2026-09-27.md).
   The Consul plan's completion criteria require that no job or workflow concepts
   remain. `AgentStatus` still has
   `getJobAssignmentPriority()`, which nothing calls, and the work-scheduling

@@ -19,6 +19,7 @@ package dev.mars.qraft.runtime;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
+import dev.mars.qraft.controller.raft.PeerlessTransport;
 import dev.mars.qraft.agent.AgentStatus;
 import dev.mars.qraft.agent.QraftAgent;
 import dev.mars.qraft.agent.catalog.CatalogOutcome;
@@ -26,17 +27,8 @@ import dev.mars.qraft.agent.catalog.HttpCatalogClient;
 import dev.mars.qraft.agent.config.AgentConfiguration;
 import dev.mars.qraft.catalog.ServiceDefinition;
 import dev.mars.qraft.controller.http.HttpApiServer;
-import dev.mars.qraft.controller.raft.RaftMessage;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.raft.RaftNodeMode;
-import dev.mars.qraft.controller.raft.RaftTransport;
-import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
-import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
-import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
-import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
-import dev.mars.qraft.controller.raft.grpc.VoteRequest;
-import dev.mars.qraft.controller.raft.grpc.VoteResponse;
-import dev.mars.qraft.controller.runtime.Future;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
@@ -55,7 +47,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -145,7 +136,7 @@ class AgentControllerContractTest {
                 .agentPort(0)
                 .controllerUrl("http://localhost:" + server.port())
                 .heartbeatInterval(25)
-                .httpConnectionTimeout(1_000)
+                .requestTimeoutMs(1_000)
                 .build();
         agent = new QraftAgent(configuration);
 
@@ -170,7 +161,7 @@ class AgentControllerContractTest {
                 .runtime(runtime)
                 .nodeId("contract-node")
                 .clusterNodes(Set.of("contract-node"))
-                .transport(new SingleNodeTransport())
+                .transport(new PeerlessTransport())
                 .stateMachine(store)
                 .commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.volatileMode())
@@ -199,22 +190,6 @@ class AgentControllerContractTest {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
             assertEquals(200, response.statusCode(), response.body());
             return new ObjectMapper().readTree(response.body());
-        }
-    }
-
-    private static final class SingleNodeTransport implements RaftTransport {
-        @Override public void start(Consumer<RaftMessage> messageHandler) { }
-        @Override public void stop() { }
-        @Override public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
-            return Future.failedFuture("single-node transport has no peers");
-        }
-        @Override public Future<AppendEntriesResponse> sendAppendEntries(
-                String targetId, AppendEntriesRequest request) {
-            return Future.failedFuture("single-node transport has no peers");
-        }
-        @Override public Future<InstallSnapshotResponse> sendInstallSnapshot(
-                String targetId, InstallSnapshotRequest request) {
-            return Future.failedFuture("single-node transport has no peers");
         }
     }
 }

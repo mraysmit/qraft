@@ -18,6 +18,7 @@ package dev.mars.qraft.controller.raft;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.MissingNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Logger;
 
@@ -37,18 +39,20 @@ import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
 
 import static org.awaitility.Awaitility.await;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
  * Tests that the shared three-server container cluster starts with every server passing its health check
- * and elects exactly one leader. Failover and partitions are covered by {@link DockerDurableRestartTest}
+ * and elects exactly one leader, which every server names as leader in the leader's own term. Failover and partitions are covered by {@link DockerDurableRestartTest}
  * and {@link DockerRunningPartitionTest}.
  *
  * <p>Requires Docker. Excluded from the default build; run with
  * {@code mvn test -Dgroups=docker -Dtest.excludedGroups=}.</p>
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
- * @version 1.0
+ * @version 1.1
  * @since 2025-08-20
  */
 @Tag("docker")
@@ -78,7 +82,7 @@ public class DockerRaftClusterTest {
     }
 
     @Test
-    void testClusterStartupAndHealthCheck() {
+    void everyServerReportsPassingHealth() {
         // Verify all nodes are running and healthy
         for (int i = 0; i < nodeEndpoints.size(); i++) {
             final int nodeIndex = i;
@@ -102,94 +106,52 @@ public class DockerRaftClusterTest {
     }
 
     @Test
-    void testLeaderElection() {
-        // Wait for leader election to complete with diagnostic logging
+    void theClusterElectsOneLeaderThatEveryServerFollowsInTheSameTerm() {
         await().atMost(Duration.ofSeconds(60))
                 .pollInterval(Duration.ofSeconds(2))
-                .conditionEvaluationListener(condition -> {
-                    if (!condition.isSatisfied()) {
-                        logger.info("Waiting for leader election to complete...");
-                    }
-                })
-                .until(this::hasExactlyOneLeader);
+                .until(() -> agreedLeader(statuses()) != null);
 
-        // Verify exactly one leader exists
-        int leaderCount = 0;
-        String leaderId = null;
-        
-        for (int i = 0; i < nodeEndpoints.size(); i++) {
-            try {
-                String nodeState = getNodeState(i);
-                if ("LEADER".equals(nodeState)) {
-                    leaderCount++;
-                    leaderId = "controller" + (i + 1);
-                }
-            } catch (Exception e) {
-                logger.warning("Failed to get state for node " + (i + 1) + ": " + e.getMessage());
-            }
-        }
-
-        assertEquals(1, leaderCount, "Exactly one leader should be elected");
-        assertNotNull(leaderId, "Leader ID should be identified");
-        logger.info("Leader elected: " + leaderId);
+        List<JsonNode> statuses = statuses();
+        String leader = agreedLeader(statuses);
+        assertNotNull(leader, "one leader, named by every server in one term: " + statuses);
+        logger.info("Leader elected: " + leader + " " + statuses);
     }
 
     // Helper methods
 
-    private boolean allNodesHealthy() {
+    /**
+     * The leader's ID when exactly one server leads and every server names it as leader in the leader's term;
+     * otherwise null.
+     */
+    private static String agreedLeader(List<JsonNode> statuses) {
+        List<JsonNode> leaders = statuses.stream()
+                .filter(status -> "LEADER".equals(status.path("state").asText()))
+                .toList();
+        if (leaders.size() != 1) return null;
+        String leaderId = leaders.getFirst().path("nodeId").asText();
+        long term = leaders.getFirst().path("term").asLong();
+        boolean followed = statuses.stream().allMatch(status ->
+                leaderId.equals(status.path("leaderId").asText()) && status.path("term").asLong() == term);
+        return followed ? leaderId : null;
+    }
+
+    /** Each server's {@code /raft/status}; a server that cannot answer counts as a missing status. */
+    private List<JsonNode> statuses() {
+        List<JsonNode> statuses = new ArrayList<>();
         for (String endpoint : nodeEndpoints) {
             try {
-                HttpRequest request = HttpRequest.newBuilder()
-                        .uri(URI.create(endpoint + "/health"))
+                HttpResponse<String> response = httpClient.send(HttpRequest.newBuilder()
+                        .uri(URI.create(endpoint + "/raft/status"))
                         .timeout(Duration.ofSeconds(5))
-                        .build();
-
-                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-                if (response.statusCode() != 200) {
-                    return false;
-                }
-            } catch (Exception e) {
-                return false;
+                        .build(), HttpResponse.BodyHandlers.ofString());
+                statuses.add(response.statusCode() == 200
+                        ? objectMapper.readTree(response.body())
+                        : MissingNode.getInstance());
+            } catch (Exception unavailable) {
+                logger.warning(endpoint + " status unavailable: " + unavailable.getMessage());
+                statuses.add(MissingNode.getInstance());
             }
         }
-        return true;
-    }
-
-    private boolean hasExactlyOneLeader() {
-        int leaderCount = 0;
-        StringBuilder stateLog = new StringBuilder();
-        for (int i = 0; i < nodeEndpoints.size(); i++) {
-            try {
-                String state = getNodeState(i);
-                stateLog.append("controller").append(i + 1).append("=").append(state).append(" ");
-                if ("LEADER".equals(state)) {
-                    leaderCount++;
-                }
-            } catch (Exception e) {
-                // Node might not be ready yet or HTTP error
-                stateLog.append("controller").append(i + 1).append("=ERROR(").append(e.getClass().getSimpleName()).append(") ");
-                logger.warning("Node " + (i + 1) + " error: " + e.getMessage());
-            }
-        }
-        boolean result = leaderCount == 1;
-        logger.info("Cluster state: " + stateLog + "| leaders=" + leaderCount + " | result=" + result);
-        return result;
-    }
-
-    private String getNodeState(int nodeIndex) throws Exception {
-        String endpoint = nodeEndpoints.get(nodeIndex);
-        
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(endpoint + "/raft/status"))
-                .timeout(Duration.ofSeconds(5))
-                .build();
-
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() == 200) {
-            JsonNode statusData = objectMapper.readTree(response.body());
-            return statusData.get("state").asText();
-        } else {
-            throw new RuntimeException("Failed to get node state: HTTP " + response.statusCode());
-        }
+        return statuses;
     }
 }

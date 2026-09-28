@@ -25,11 +25,15 @@ import dev.mars.qraft.catalog.ServiceHealth;
 import dev.mars.qraft.catalog.ServiceInstance;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.util.Map;
 import java.util.List;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests {@link GenericStateStore} and {@link QraftStateStore} command application, agent and
@@ -61,7 +65,12 @@ class ControllerStateStoreTest {
         store.restoreSnapshot(snapshot);
         assertEquals("saved", store.getMetadata().get("snap"));
         assertEquals(12, store.getLastAppliedIndex());
-        assertThrows(RuntimeException.class, () -> store.restoreSnapshot(new byte[]{1, 2, 3}));
+        RuntimeException corrupt = assertThrows(RuntimeException.class,
+                () -> store.restoreSnapshot(new byte[]{1, 2, 3}));
+        assertEquals("Failed to restore generic state snapshot", corrupt.getMessage());
+        assertInstanceOf(IOException.class, corrupt.getCause(), "the unreadable bytes are the cause");
+        assertEquals("saved", store.getMetadata().get("snap"), "a snapshot that cannot be read changes nothing");
+        assertEquals(12, store.getLastAppliedIndex());
     }
 
     @Test
@@ -117,7 +126,12 @@ class ControllerStateStoreTest {
         store.restoreSnapshot(snapshot);
         assertEquals(21, store.getLastAppliedIndex());
         assertEquals(1, store.getAgents().size());
-        assertThrows(IllegalStateException.class, () -> store.restoreSnapshot(new byte[]{9}));
+        IllegalStateException corrupt = assertThrows(IllegalStateException.class,
+                () -> store.restoreSnapshot(new byte[]{9}));
+        assertEquals("Failed to restore controller snapshot", corrupt.getMessage());
+        assertInstanceOf(IOException.class, corrupt.getCause(), "the unreadable bytes are the cause");
+        assertEquals(21, store.getLastAppliedIndex(), "a snapshot that cannot be read changes nothing");
+        assertEquals(1, store.getAgents().size());
 
         store.reset();
         assertEquals("3.0", store.getMetadata("version"));

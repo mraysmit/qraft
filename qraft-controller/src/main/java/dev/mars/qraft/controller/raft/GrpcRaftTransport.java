@@ -50,7 +50,11 @@ import java.net.SocketAddress;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -82,6 +86,8 @@ public class GrpcRaftTransport implements RaftTransport {
     private final ExecutorService executor;
     private final int poolSize;
     private final int queueSize;
+    /** Set by {@link #stop()}; a send after it fails at once, since its reply could no longer be delivered. */
+    private volatile boolean stopped;
 
     private RaftNode raftNode; // Circular dependency injection
 
@@ -113,9 +119,24 @@ public class GrpcRaftTransport implements RaftTransport {
         this.poolSize = poolSize;
         this.queueSize = queueSize;
         
-        // Create a bounded thread pool with named threads for gRPC callbacks
+        ThreadPoolExecutor threadPool = callbackExecutor(selfId, poolSize, queueSize);
+        this.executor = threadPool;
+        
+        // Register with metrics for monitoring
+        RaftMetrics.getInstance().registerThreadPool(selfId, threadPool);
+        
+        logger.debug("GrpcRaftTransport created with bounded ThreadPoolExecutor (poolSize={}, queueSize={})",
+                poolSize, queueSize);
+    }
+    
+    /**
+     * The bounded pool that runs gRPC reply callbacks: {@code poolSize} named daemon threads and a queue of
+     * {@code queueSize}. When both are full, the thread delivering the reply runs its callback itself, so a reply
+     * is slowed but never dropped.
+     */
+    static ThreadPoolExecutor callbackExecutor(String selfId, int poolSize, int queueSize) {
         AtomicInteger threadCounter = new AtomicInteger(0);
-        ThreadPoolExecutor threadPool = new ThreadPoolExecutor(
+        return new ThreadPoolExecutor(
                 poolSize,           // core pool size
                 poolSize,           // max pool size (fixed)
                 60L, TimeUnit.SECONDS,  // keep-alive for idle threads
@@ -127,15 +148,8 @@ public class GrpcRaftTransport implements RaftTransport {
                 },
                 new ThreadPoolExecutor.CallerRunsPolicy()  // back-pressure when queue is full
         );
-        this.executor = threadPool;
-        
-        // Register with metrics for monitoring
-        RaftMetrics.getInstance().registerThreadPool(selfId, threadPool);
-        
-        logger.debug("GrpcRaftTransport created with bounded ThreadPoolExecutor (poolSize={}, queueSize={})",
-                poolSize, queueSize);
     }
-    
+
     /**
      * Gets the current pool size configuration.
      * 
@@ -167,6 +181,7 @@ public class GrpcRaftTransport implements RaftTransport {
 
     @Override
     public void stop() {
+        stopped = true;
         RaftMetrics.getInstance().unregisterThreadPool(selfId);
         clients.clear();
         for (ManagedChannel channel : channels.values()) {
@@ -201,6 +216,10 @@ public class GrpcRaftTransport implements RaftTransport {
     @Override
     public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
         requireKnownTarget(targetId);
+        if (stopped) {
+            // The callback executor is shut down, so the reply to a call made now would be discarded.
+            return Future.failedFuture(new IllegalStateException("Transport for " + selfId + " is stopped"));
+        }
         String requestId = requestId();
         Span span = tracer.spanBuilder("raft.RequestVote")
                 .setSpanKind(SpanKind.CLIENT)
@@ -231,6 +250,10 @@ public class GrpcRaftTransport implements RaftTransport {
     @Override
     public Future<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
         requireKnownTarget(targetId);
+        if (stopped) {
+            // The callback executor is shut down, so the reply to a call made now would be discarded.
+            return Future.failedFuture(new IllegalStateException("Transport for " + selfId + " is stopped"));
+        }
         String requestId = requestId();
         Span span = tracer.spanBuilder("raft.AppendEntries")
                 .setSpanKind(SpanKind.CLIENT)
@@ -261,6 +284,10 @@ public class GrpcRaftTransport implements RaftTransport {
     @Override
     public Future<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
         requireKnownTarget(targetId);
+        if (stopped) {
+            // The callback executor is shut down, so the reply to a call made now would be discarded.
+            return Future.failedFuture(new IllegalStateException("Transport for " + selfId + " is stopped"));
+        }
         String requestId = requestId();
         Span span = tracer.spanBuilder("raft.InstallSnapshot")
                 .setSpanKind(SpanKind.CLIENT)

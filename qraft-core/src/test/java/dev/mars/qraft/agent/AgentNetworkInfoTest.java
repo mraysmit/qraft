@@ -19,145 +19,51 @@ package dev.mars.qraft.agent;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
-import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Comprehensive test suite for {@link AgentNetworkInfo}.
- * Tests constructors, getters/setters, business logic, and JSON serialization.
+ * Tests the wire form of {@link AgentNetworkInfo}, the network facts an agent reports: the exact JSON field set,
+ * a round trip that keeps every value, the legacy name of the NAT traversal flag, and the fields
+ * {@code toString} names.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2025-08-27
- * @version 1.0
+ * @version 2.0
  */
 class AgentNetworkInfoTest {
 
     @Test
-    void testDefaultConstructor() {
-        AgentNetworkInfo networkInfo = new AgentNetworkInfo();
-        assertNotNull(networkInfo);
-    }
-
-    @Test
-    void testPublicIpAddress() {
-        AgentNetworkInfo networkInfo = new AgentNetworkInfo();
-        
-        networkInfo.setPublicIpAddress("203.0.113.42");
-        assertEquals("203.0.113.42", networkInfo.getPublicIpAddress());
-    }
-
-    @Test
-    void testPrivateIpAddress() {
-        AgentNetworkInfo networkInfo = new AgentNetworkInfo();
-        
-        networkInfo.setPrivateIpAddress("192.168.1.100");
-        assertEquals("192.168.1.100", networkInfo.getPrivateIpAddress());
-    }
-
-    @Test
-    void testNetworkInterfaces() {
-        AgentNetworkInfo networkInfo = new AgentNetworkInfo();
-        
-        List<String> interfaces = Arrays.asList("eth0", "eth1", "wlan0");
-        networkInfo.setNetworkInterfaces(interfaces);
-        
-        assertEquals(3, networkInfo.getNetworkInterfaces().size());
-        assertTrue(networkInfo.getNetworkInterfaces().contains("eth0"));
-        assertTrue(networkInfo.getNetworkInterfaces().contains("wlan0"));
-    }
-
-    @Test
-    void testBandwidthCapacity() {
-        AgentNetworkInfo networkInfo = new AgentNetworkInfo();
-        
-        networkInfo.setBandwidthCapacity(125_000_000L); // 1 Gbps
-        assertEquals(125_000_000L, networkInfo.getBandwidthCapacity());
-    }
-
-    @Test
-    void testCurrentBandwidthUsage() {
-        AgentNetworkInfo networkInfo = new AgentNetworkInfo();
-        
-        networkInfo.setCurrentBandwidthUsage(50_000_000L); // 400 Mbps
-        assertEquals(50_000_000L, networkInfo.getCurrentBandwidthUsage());
-    }
-
-    @Test
-    void testLatencyMs() {
-        AgentNetworkInfo networkInfo = new AgentNetworkInfo();
-        
-        networkInfo.setLatencyMs(25.5);
-        assertEquals(25.5, networkInfo.getLatencyMs(), 0.01);
-    }
-
-    @Test
-    void testPacketLossPercentage() {
-        AgentNetworkInfo networkInfo = new AgentNetworkInfo();
-        
-        networkInfo.setPacketLossPercentage(1.5);
-        assertEquals(1.5, networkInfo.getPacketLossPercentage(), 0.01);
-    }
-
-    @Test
-    void testConnectionType() {
-        AgentNetworkInfo networkInfo = new AgentNetworkInfo();
-        
-        networkInfo.setConnectionType("ethernet");
-        assertEquals("ethernet", networkInfo.getConnectionType());
-        
-        networkInfo.setConnectionType("wifi");
-        assertEquals("wifi", networkInfo.getConnectionType());
-    }
-
-    @Test
-    void testNatTraversal() {
-        AgentNetworkInfo networkInfo = new AgentNetworkInfo();
-        
-        networkInfo.setNatTraversal(true);
-        assertTrue(networkInfo.isNatTraversal());
-        
-        networkInfo.setNatTraversal(false);
-        assertFalse(networkInfo.isNatTraversal());
-    }
-
-    @Test
-    void testFirewallPorts() {
-        AgentNetworkInfo networkInfo = new AgentNetworkInfo();
-        
-        List<Integer> ports = Arrays.asList(8080, 8443, 9000);
-        networkInfo.setFirewallPorts(ports);
-        
-        assertEquals(3, networkInfo.getFirewallPorts().size());
-        assertTrue(networkInfo.getFirewallPorts().contains(8080));
-        assertTrue(networkInfo.getFirewallPorts().contains(8443));
-    }
-
-    @Test
-    void testToString() {
-        AgentNetworkInfo networkInfo = new AgentNetworkInfo();
-        networkInfo.setPublicIpAddress("203.0.113.42");
-        networkInfo.setPrivateIpAddress("192.168.1.100");
-        networkInfo.setConnectionType("ethernet");
-        
-        String str = networkInfo.toString();
-        assertNotNull(str);
-        assertTrue(str.contains("AgentNetworkInfo"));
-        assertTrue(str.contains("203.0.113.42"));
-        assertTrue(str.contains("192.168.1.100"));
-        assertTrue(str.contains("ethernet"));
-    }
-
-    @Test
     void serializesOnlyReportedFieldsAndNoDerivedScores() throws Exception {
-        var fields = new java.util.TreeSet<String>();
+        TreeSet<String> fields = new TreeSet<>();
         new ObjectMapper().readTree(new ObjectMapper().writeValueAsString(new AgentNetworkInfo()))
                 .fieldNames().forEachRemaining(fields::add);
 
-        assertEquals(new java.util.TreeSet<>(java.util.Set.of("publicIpAddress", "privateIpAddress",
+        assertEquals(new TreeSet<>(Set.of("publicIpAddress", "privateIpAddress",
                 "networkInterfaces", "bandwidthCapacity", "currentBandwidthUsage", "latencyMs",
                 "packetLossPercentage", "connectionType", "isNatTraversal", "firewallPorts")), fields);
+    }
+
+    @Test
+    void aJsonRoundTripKeepsEveryValue() throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+
+        AgentNetworkInfo read = mapper.readValue(mapper.writeValueAsString(reported()), AgentNetworkInfo.class);
+
+        assertEquals("203.0.113.42", read.getPublicIpAddress());
+        assertEquals("192.168.1.100", read.getPrivateIpAddress());
+        assertEquals(List.of("eth0", "eth1"), read.getNetworkInterfaces());
+        assertEquals(125_000_000L, read.getBandwidthCapacity());
+        assertEquals(50_000_000L, read.getCurrentBandwidthUsage());
+        assertEquals(25.5, read.getLatencyMs());
+        assertEquals(1.2, read.getPacketLossPercentage());
+        assertEquals("ethernet", read.getConnectionType());
+        assertTrue(read.isNatTraversal(), "the flag is set, so it cannot pass as the default");
+        assertEquals(List.of(8080, 8443), read.getFirewallPorts());
     }
 
     @Test
@@ -170,42 +76,29 @@ class AgentNetworkInfoTest {
     }
 
     @Test
-    void testJsonSerialization() throws Exception {
-        ObjectMapper mapper = new ObjectMapper();
-        mapper.findAndRegisterModules();
-        mapper.configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-        
-        AgentNetworkInfo networkInfo = new AgentNetworkInfo();
-        networkInfo.setPublicIpAddress("203.0.113.42");
-        networkInfo.setPrivateIpAddress("192.168.1.100");
-        networkInfo.setNetworkInterfaces(Arrays.asList("eth0", "eth1"));
-        networkInfo.setBandwidthCapacity(125_000_000L);
-        networkInfo.setCurrentBandwidthUsage(50_000_000L);
-        networkInfo.setLatencyMs(25.5);
-        networkInfo.setPacketLossPercentage(1.2);
-        networkInfo.setConnectionType("ethernet");
-        networkInfo.setNatTraversal(false);
-        networkInfo.setFirewallPorts(Arrays.asList(8080, 8443));
-        
-        // Serialize to JSON
-        String json = mapper.writeValueAsString(networkInfo);
-        assertNotNull(json);
-        assertTrue(json.contains("203.0.113.42"));
-        assertTrue(json.contains("192.168.1.100"));
-        assertTrue(json.contains("ethernet"));
-        
-        // Deserialize from JSON
-        AgentNetworkInfo deserialized = mapper.readValue(json, AgentNetworkInfo.class);
-        assertNotNull(deserialized);
-        assertEquals("203.0.113.42", deserialized.getPublicIpAddress());
-        assertEquals("192.168.1.100", deserialized.getPrivateIpAddress());
-        assertEquals(2, deserialized.getNetworkInterfaces().size());
-        assertEquals(125_000_000L, deserialized.getBandwidthCapacity());
-        assertEquals(50_000_000L, deserialized.getCurrentBandwidthUsage());
-        assertEquals(25.5, deserialized.getLatencyMs(), 0.01);
-        assertEquals(1.2, deserialized.getPacketLossPercentage(), 0.01);
-        assertEquals("ethernet", deserialized.getConnectionType());
-        assertFalse(deserialized.isNatTraversal());
-        assertEquals(2, deserialized.getFirewallPorts().size());
+    void toStringNamesTheAddressesMetricsAndConnectionTypeWithTheirValues() {
+        String text = reported().toString();
+
+        for (String expected : List.of("publicIpAddress='203.0.113.42'", "privateIpAddress='192.168.1.100'",
+                "bandwidthCapacity=125000000", "currentBandwidthUsage=50000000", "latencyMs=25.5",
+                "packetLossPercentage=1.2", "connectionType='ethernet'")) {
+            assertTrue(text.contains(expected), expected + " in " + text);
+        }
+    }
+
+    /** Network facts with every field set to a value that differs from its default. */
+    private static AgentNetworkInfo reported() {
+        AgentNetworkInfo info = new AgentNetworkInfo();
+        info.setPublicIpAddress("203.0.113.42");
+        info.setPrivateIpAddress("192.168.1.100");
+        info.setNetworkInterfaces(List.of("eth0", "eth1"));
+        info.setBandwidthCapacity(125_000_000L);
+        info.setCurrentBandwidthUsage(50_000_000L);
+        info.setLatencyMs(25.5);
+        info.setPacketLossPercentage(1.2);
+        info.setConnectionType("ethernet");
+        info.setNatTraversal(true);
+        info.setFirewallPorts(List.of(8080, 8443));
+        return info;
     }
 }

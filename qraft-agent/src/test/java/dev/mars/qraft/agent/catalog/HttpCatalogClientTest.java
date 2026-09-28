@@ -51,6 +51,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -113,7 +114,7 @@ class HttpCatalogClientTest {
         assertTrue(body.path("enabled").booleanValue());
         assertFalse(body.has("health"));
         assertFalse(first.header("X-Request-Id").isBlank());
-        assertFalse(first.header("X-Request-Id").equals(requests.get(1).header("X-Request-Id")));
+        assertNotEquals(first.header("X-Request-Id"), requests.get(1).header("X-Request-Id"));
     }
 
     @Test

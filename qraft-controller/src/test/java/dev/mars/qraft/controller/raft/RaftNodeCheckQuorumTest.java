@@ -40,7 +40,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -63,7 +62,7 @@ class RaftNodeCheckQuorumTest {
     private static final long HEARTBEAT_MS = 100;
 
     private JavaRuntime runtime;
-    private ManualTimers timers;
+    private ManualRaftTimers timers;
     private RaftNode node;
 
     @AfterEach
@@ -150,7 +149,7 @@ class RaftNodeCheckQuorumTest {
         assertEquals(RaftNode.State.FOLLOWER, node.getState());
 
         transport.respond("peer-2", "peer-3");
-        timers.fireNextOneShot();
+        timers.fireElectionTimeout();
         node.awaitState(RaftNode.State.LEADER, 10_000).toCompletionStage().toCompletableFuture()
                 .get(15, TimeUnit.SECONDS);
         heartbeats(10);
@@ -174,7 +173,7 @@ class RaftNodeCheckQuorumTest {
 
     private void startLeader(Set<String> members, PeerTransport transport) throws Exception {
         runtime = JavaRuntime.create();
-        timers = new ManualTimers(runtime);
+        timers = new ManualRaftTimers(runtime);
         node = RaftNode.builder()
                 .runtime(runtime).nodeId("node-1").clusterNodes(members).transport(transport)
                 .stateMachine(new QraftStateStore()).commandCodec(new ProtobufRaftCommandCodec())
@@ -182,7 +181,7 @@ class RaftNodeCheckQuorumTest {
                 .electionTimeout(ELECTION_TIMEOUT_MS).heartbeatInterval(HEARTBEAT_MS)
                 .timerScheduler(timers).build();
         node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-        timers.fireNextOneShot();
+        timers.fireElectionTimeout();
         node.awaitState(RaftNode.State.LEADER, 10_000).toCompletionStage().toCompletableFuture()
                 .get(15, TimeUnit.SECONDS);
         settle();
@@ -242,53 +241,4 @@ class RaftNodeCheckQuorumTest {
     }
 
     /** Fires one-shot and periodic Raft timers only when the test asks, on the node's state loop. */
-    private static final class ManualTimers implements RaftTimerScheduler {
-        private final JavaRuntime runtime;
-        private final AtomicLong ids = new AtomicLong();
-        private final Map<Long, Scheduled> oneShots = new ConcurrentHashMap<>();
-        private final Map<Long, Scheduled> periodics = new ConcurrentHashMap<>();
-
-        private ManualTimers(JavaRuntime runtime) { this.runtime = runtime; }
-
-        @Override
-        public long setTimer(long delayMs, Consumer<Long> action) {
-            long id = ids.incrementAndGet();
-            oneShots.put(id, new Scheduled(delayMs, action));
-            return id;
-        }
-
-        @Override
-        public long setPeriodic(long periodMs, Consumer<Long> action) {
-            long id = ids.incrementAndGet();
-            periodics.put(id, new Scheduled(periodMs, action));
-            return id;
-        }
-
-        @Override
-        public boolean cancelTimer(long id) {
-            return oneShots.remove(id) != null || periodics.remove(id) != null;
-        }
-
-        void fireNextOneShot() {
-            long id = oneShots.keySet().stream().min(Long::compareTo).orElseThrow();
-            Scheduled scheduled = oneShots.remove(id);
-            runtime.runOnContext(ignored -> scheduled.action().accept(id));
-        }
-
-        int oneShotCount() {
-            return oneShots.size();
-        }
-
-        boolean hasPeriodic(long periodMs) {
-            return periodics.values().stream().anyMatch(scheduled -> scheduled.delayMs() == periodMs);
-        }
-
-        void firePeriodic(long periodMs) {
-            Map.Entry<Long, Scheduled> scheduled = periodics.entrySet().stream()
-                    .filter(entry -> entry.getValue().delayMs() == periodMs).findFirst().orElseThrow();
-            runtime.runOnContext(ignored -> scheduled.getValue().action().accept(scheduled.getKey()));
-        }
-
-        private record Scheduled(long delayMs, Consumer<Long> action) { }
-    }
 }
