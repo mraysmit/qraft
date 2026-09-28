@@ -238,17 +238,17 @@ public final class ServiceReconciler {
         append(canonical, definition.address());
         append(canonical, Integer.toString(definition.port()));
         append(canonical, Boolean.toString(definition.enabled()));
+        // Each list is preceded by its size, so a value cannot move between tags, metadata, and checks
+        // without changing the fingerprint. Fingerprints are held only in memory, so the encoding may change.
+        append(canonical, "tags:" + definition.tags().size());
         definition.tags().forEach(value -> append(canonical, value));
+        append(canonical, "metadata:" + definition.metadata().size());
         new TreeMap<>(definition.metadata()).forEach((key, value) -> {
             append(canonical, key);
             append(canonical, value);
         });
-        // Declared checks are appended only when present, so definitions without checks keep their
-        // fingerprint; the marker separates them from tags and metadata.
-        if (!definition.checkIds().isEmpty()) {
-            append(canonical, "checks:" + definition.checkIds().size());
-            definition.checkIds().forEach(value -> append(canonical, value));
-        }
+        append(canonical, "checks:" + definition.checkIds().size());
+        definition.checkIds().forEach(value -> append(canonical, value));
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
                     .digest(canonical.toString().getBytes(StandardCharsets.UTF_8)));

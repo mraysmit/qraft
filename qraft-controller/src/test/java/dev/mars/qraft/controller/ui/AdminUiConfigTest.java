@@ -79,6 +79,15 @@ class AdminUiConfigTest {
     }
 
     @Test
+    void rejectsAPathWithUppercaseLettersBecauseRoutesAreCaseSensitive() {
+        for (String path : List.of("/UI/", "/Ui/", "/ui/Admin/", "/API/", "/V1/")) {
+            IllegalArgumentException rejected = assertThrows(IllegalArgumentException.class,
+                    () -> parse("{\"path\":\"" + path + "\"}"), path);
+            assertTrue(rejected.getMessage().contains("segments must be lowercase"), rejected.getMessage());
+        }
+    }
+
+    @Test
     void rejectsADevelopmentDirectoryThatIsMissingHasNoIndexOrAccompaniesADisabledInterface() throws Exception {
         Path missing = temporaryDirectory.resolve("missing");
         Path empty = Files.createDirectories(temporaryDirectory.resolve("empty"));

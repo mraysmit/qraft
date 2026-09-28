@@ -26,6 +26,7 @@ import org.slf4j.bridge.SLF4JBridgeHandler;
 
 import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
@@ -159,7 +160,9 @@ public class QraftControllerApplication {
                 }
                 return new ControllerResources(controller, runtime, telemetry);
             } catch (RuntimeException | Error failure) {
-                closePartiallyOpened(runtime, telemetry, failure);
+                JavaRuntime opened = runtime;
+                closePartiallyOpened(opened == null ? null : () -> opened.shutdown().toCompletionStage(),
+                        telemetry, failure);
                 throw failure;
             }
         }
@@ -177,20 +180,30 @@ public class QraftControllerApplication {
             return shutdown;
         }
 
-        private static void closePartiallyOpened(JavaRuntime runtime, AutoCloseable telemetry,
-                                                 Throwable failure) {
-            if (runtime != null) {
-                try {
-                    runtime.shutdown().toCompletionStage().toCompletableFuture().join();
-                } catch (Throwable cleanupFailure) {
-                    failure.addSuppressed(cleanupFailure);
-                }
-            }
+    }
+
+    /**
+     * Releases what a failed startup had already acquired: the runtime, when it was created, and then
+     * telemetry. Every step runs even if an earlier one failed, and each cleanup failure is added to
+     * {@code failure} as suppressed, so the startup failure the caller rethrows stays the reported cause.
+     *
+     * @param runtimeShutdown stops the runtime, or {@code null} when startup failed before creating it
+     */
+    static void closePartiallyOpened(Supplier<? extends CompletionStage<?>> runtimeShutdown, AutoCloseable telemetry,
+                                     Throwable failure) {
+        if (runtimeShutdown != null) {
             try {
-                telemetry.close();
+                runtimeShutdown.get().toCompletableFuture().join();
             } catch (Throwable cleanupFailure) {
-                failure.addSuppressed(cleanupFailure);
+                // Report the runtime's own failure, as releaseAfter does, not the join's wrapper around it.
+                failure.addSuppressed(cleanupFailure instanceof CompletionException completion
+                        && completion.getCause() != null ? completion.getCause() : cleanupFailure);
             }
+        }
+        try {
+            telemetry.close();
+        } catch (Throwable cleanupFailure) {
+            failure.addSuppressed(cleanupFailure);
         }
     }
 

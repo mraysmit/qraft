@@ -127,8 +127,14 @@ public final class HealthPublisher implements CheckResultListener {
             send(unconfirmed);
         }
 
+        /**
+         * A renewal is due half the TTL after acceptance. A clock now behind the acceptance has been stepped
+         * back, so the time actually elapsed is unknown; renewing at once keeps the controller's TTL from
+         * lapsing while this clock catches up.
+         */
         private boolean renewalDue() {
-            return !clock.instant().isBefore(acceptedAt.plus(check.ttl().dividedBy(2)));
+            Instant now = clock.instant();
+            return now.isBefore(acceptedAt) || !now.isBefore(acceptedAt.plus(check.ttl().dividedBy(2)));
         }
 
         private CheckObservation next(CheckResult result) {

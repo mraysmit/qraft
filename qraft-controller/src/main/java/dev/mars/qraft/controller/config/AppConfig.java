@@ -21,6 +21,7 @@ import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import dev.mars.qraft.config.ConfigurationPlaceholders;
 import dev.mars.qraft.controller.ui.AdminUiConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -102,6 +103,7 @@ public final class AppConfig {
         if (root == null || !root.isObject()) {
             throw new IllegalArgumentException("Server configuration must be a JSON object");
         }
+        ConfigurationPlaceholders.reject(root);
         rejectUnknown(root, "root", "version", "server", "logging");
         int version = requiredInt(root, "version");
         if (version != 1) throw new IllegalArgumentException("Unsupported configuration version: " + version);

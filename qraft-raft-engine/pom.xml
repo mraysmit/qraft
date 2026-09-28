@@ -15,4 +15,12 @@
 
     <name>Qraft Raft Engine API</name>
     <description>Reusable Raft engine contracts for command replication and state machines</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
 </project>

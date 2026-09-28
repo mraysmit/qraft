@@ -22,8 +22,11 @@ import dev.mars.qraft.agent.health.TcpCheck;
 import dev.mars.qraft.agent.health.TtlCheck;
 import dev.mars.qraft.catalog.ServiceDefinition;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +34,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests {@link AgentConfiguration} building, JSON parsing, defaults, controller seed normalization,
@@ -135,6 +139,81 @@ class AgentConfigurationTest {
         assertEquals("default", config.getTenant());
         assertEquals("default", config.getNamespace());
         assertEquals(List.of(), config.getServices());
+    }
+
+    @Test
+    void aMinimalDocumentTakesEveryDocumentedDefault() {
+        AgentConfiguration config = AgentConfiguration.fromJson("""
+                {"version":1,"agent":{"id":"agent-a"},"controllers":{"urls":["http://localhost:8080"]}}
+                """);
+
+        assertEquals(8080, config.getAgentPort());
+        assertEquals(30_000, config.getHeartbeatInterval());
+        assertEquals(30_000, config.getShutdownTimeoutMs());
+        assertEquals("default", config.getDatacenter());
+        assertEquals("default", config.getRegion());
+        assertEquals("1.0.0", config.getVersion());
+        assertEquals(5_000, config.getRequestTimeoutMs());
+        assertEquals("default", config.getTenant());
+        assertEquals("default", config.getNamespace());
+        assertEquals(250, config.getRegistrationRetryMinMs());
+        assertEquals(30_000, config.getRegistrationRetryMaxMs());
+        assertEquals(90_000, config.getContactFreshnessMs());
+        assertEquals(List.of(), config.getServices());
+        assertEquals(List.of(), config.getHealthChecks());
+        assertEquals("./logs", config.getLoggingDirectory());
+        assertFalse(config.getHostname().isBlank(), "the hostname defaults to the local host's");
+        assertFalse(config.getAddress().isBlank(), "the address defaults to the local host's");
+    }
+
+    @Test
+    void aDocumentThatIsNotAVersionOneObjectIsRefusedWithTheReason() {
+        assertRefused("{", "Agent configuration is not valid JSON");
+        assertRefused("[]", "Agent configuration must be a JSON object");
+        assertRefused("\"text\"", "Agent configuration must be a JSON object");
+        for (int version : new int[] {0, 2}) {
+            assertRefused("""
+                    {"version":%d,"agent":{"id":"agent-a"},"controllers":{"urls":["http://localhost:8080"]}}
+                    """.formatted(version), "Unsupported configuration version: " + version);
+        }
+    }
+
+    @Test
+    void aFileThatCannotBeReadIsRefusedByName(@TempDir Path directory)
+            throws Exception {
+        Path missing = directory.resolve("missing.json");
+        Path aDirectory = Files.createDirectories(directory.resolve("client.json"));
+
+        for (Path unreadable : List.of(missing, aDirectory)) {
+            IllegalArgumentException refused = assertThrows(IllegalArgumentException.class,
+                    () -> AgentConfiguration.fromFile(unreadable), unreadable.toString());
+            assertTrue(refused.getMessage().contains("Could not read agent configuration " + unreadable),
+                    refused.getMessage());
+        }
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> AgentConfiguration.fromFile(null))
+                .getMessage().contains("configuration path is required"));
+    }
+
+    @Test
+    void anEnvironmentStylePlaceholderIsRefused() {
+        for (String document : List.of(
+                "{\"version\":1,\"agent\":{\"id\":\"${AGENT_ID}\"},\"controllers\":{\"urls\":[\"http://a:8080\"]}}",
+                "{\"version\":1,\"agent\":{\"id\":\"a\"},\"controllers\":{\"urls\":[\"http://${CONTROLLER}:8080\"]}}",
+                minimalJson("[\"http://localhost:8080\"]", """
+                        "services":[{"id":"web","name":"web","address":"${WEB_HOST}","port":8080}]"""),
+                minimalJson("[\"http://localhost:8080\"]", """
+                        "services":[{"id":"web","name":"web","address":"127.0.0.1","port":8080,
+                          "checks":[{"id":"http","type":"http","url":"http://${WEB_HOST}/health"}]}]"""))) {
+            IllegalArgumentException refused = assertThrows(IllegalArgumentException.class,
+                    () -> AgentConfiguration.fromJson(document), document);
+            assertTrue(refused.getMessage().contains("environment-style placeholder"), refused.getMessage());
+        }
+    }
+
+    private static void assertRefused(String document, String reason) {
+        IllegalArgumentException refused = assertThrows(IllegalArgumentException.class,
+                () -> AgentConfiguration.fromJson(document), document);
+        assertEquals(reason, refused.getMessage());
     }
 
     @Test

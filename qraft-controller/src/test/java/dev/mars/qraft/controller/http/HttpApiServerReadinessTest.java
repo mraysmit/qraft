@@ -109,6 +109,25 @@ class HttpApiServerReadinessTest {
     }
 
     @Test
+    void aNotReadyAnswerIsTheRetryableEnvelopeNamingEveryFailedConditionInOrder() throws Exception {
+        // A draining member of a three-member cluster that knows no leader fails two conditions at once.
+        HttpApiServer server = serve(startCluster(Set.of("a", "b", "c"), Set.of("a")).get("a"));
+        server.enterDrainMode().get(10, TimeUnit.SECONDS);
+
+        HttpResponse<String> ready = get(server, "/health/ready");
+
+        assertEquals(503, ready.statusCode());
+        JsonNode body = JSON.readTree(ready.body());
+        assertEquals("not_ready", body.path("code").textValue(), ready.body());
+        assertEquals("not_ready", body.path("error").textValue(), ready.body());
+        assertTrue(body.path("retryable").booleanValue(), "readiness is worth retrying");
+        assertEquals("Server is not ready: draining, no_leader", body.path("message").textValue());
+        assertEquals(List.of("draining", "no_leader"), List.copyOf(conditions(ready)));
+        assertTrue(body.hasNonNull("requestId"), ready.body());
+        assertEquals(200, get(server, "/health/live").statusCode());
+    }
+
+    @Test
     void aNodeThatHasNotFinishedRecoveryIsNotReady() throws Exception {
         runtime = JavaRuntime.create();
         cluster = new ManualRaftCluster(runtime);

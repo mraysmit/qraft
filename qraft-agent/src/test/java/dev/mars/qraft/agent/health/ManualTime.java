@@ -76,6 +76,11 @@ final class ManualTime extends Clock implements CheckScheduler {
         }
     }
 
+    /** Steps the clock back, as a wall clock corrected by time synchronization can; no task runs. */
+    synchronized void rewind(Duration duration) {
+        now = now.minus(duration);
+    }
+
     /** Runs tasks that are already due without moving time. */
     void runDue() {
         advance(Duration.ZERO);

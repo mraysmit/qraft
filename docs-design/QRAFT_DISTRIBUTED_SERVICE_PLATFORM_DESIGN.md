@@ -1471,7 +1471,9 @@ tests. Only the executable boundary discovers and opens the configuration file.
 
 Invalid configuration fails before background work starts. Unknown settings,
 missing files, duplicate JSON keys, and environment-style placeholders are
-invalid.
+invalid. A placeholder is any `${` in a string value or field name, in a server
+or client document. The error names its JSON path, such as
+`controllers.urls[0]`. A lone `$` is ordinary text.
 
 ## 17. Lifecycle and resource ownership
 

@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -43,6 +44,18 @@ class ControllerRetryPolicyTest {
         ControllerRetryPolicy maximumJitter = new ControllerRetryPolicy(100, 1_000, () -> 0.999999);
         assertEquals(100, maximumJitter.delayMillis(0));
         assertEquals(1_000, maximumJitter.delayMillis(20));
+    }
+
+    @Test
+    void aHugeRetryNumberStaysAtTheCapAndInvalidInputsAreRefused() {
+        assertEquals(500, new ControllerRetryPolicy(100, 1_000, () -> 0.0).delayMillis(Integer.MAX_VALUE),
+                "growth stops at the cap instead of overflowing");
+        assertThrows(IllegalArgumentException.class,
+                () -> new ControllerRetryPolicy(100, 1_000, () -> 0.0).delayMillis(-1));
+        for (double sample : new double[] {-0.1, 1.0}) {
+            assertThrows(IllegalStateException.class,
+                    () -> new ControllerRetryPolicy(100, 1_000, () -> sample).delayMillis(0), Double.toString(sample));
+        }
     }
 
     @Test

@@ -526,6 +526,95 @@ Review section 4.
   proposal timeout.
 - **Randomness:** seed `InMemoryTransportSimulator`.
 
+### Step 6 progress (2026-09-28)
+
+Done: items 1 to 5. Every new test of existing behaviour was shown to fail against
+a mutation that removes the behaviour; all 53 mutations were caught. Four
+production changes were made test first:
+
+- **Environment-style placeholders** (design section 16) are now refused in
+  server and client documents. `ConfigurationPlaceholders` in `qraft-core`
+  refuses any `${` in a string value or field name, naming its JSON path.
+- **Defect: the service fingerprint confused tags, metadata, and checks.** A
+  service tagged `env`, `prod` had the same fingerprint as one with metadata
+  `env=prod`. Moving a value between them was therefore never re-registered,
+  and the catalog kept the stale definition. Each list's size is now part of
+  the fingerprint.
+- **Defect: a health publisher whose clock stepped back stopped renewing.** It
+  sent no renewal until the clock passed the last acceptance again plus half
+  the TTL, so the controller could expire a healthy check. A clock behind the
+  last acceptance now renews at once.
+- **Defect: `InMemoryNamespaceService.update` checked, then wrote.** A delete
+  between the two was undone. The update is now one atomic `replace`, proven
+  by a map that runs the delete inside the update. `find(null)` and
+  `delete(null)` are refused like `create(null)`, instead of failing with a
+  bare `NullPointerException`.
+
+The items:
+
+1. **API envelopes.**
+   - Every agent-route rejection returns the structured error envelope.
+   - `service_name_required`.
+   - Blank scope headers on writes.
+   - `raft_unavailable`, and readiness reporting `unavailable`, when the
+     node's state loop is held.
+   - The `leaderId` detail on `outcome_unknown`.
+   - The readiness envelope with several conditions, in order.
+2. **Configuration.**
+   - Every `validate()` bound, at and just past it.
+   - Unreadable files, named in the error.
+   - The agent's defaults, versions, invalid JSON, and non-object roots.
+   - Uppercase UI paths.
+   - Placeholders.
+3. **Agent.**
+   - Each retryable seed tried once per cycle, for registration, lookup,
+     and observation.
+   - The retry policy's cap and input checks.
+   - Fingerprint invariants.
+   - Publisher client failures (throwing, a failed future, `null`), and
+     clock regression.
+   - Disabled services' checks. Backoff growth and reset were already
+     covered.
+4. **`closePartiallyOpened`.** It is now package-private and tested: the
+   runtime is released before telemetry, every step runs, and cleanup failures
+   are suppressed on the startup failure. Its runtime failure is now
+   unwrapped, as `releaseAfter` does.
+5. **`SnapshotData`** (with the module's first test dependency), and
+   **`qraft-tenant`**. The review's "no tenant scope" is a missing feature,
+   left with tenancy lifecycle in section 5.
+
+6. **Containers.** `DockerAgentTopologyTest` adds three scenarios:
+   - **Two agents, one service ID.** A second agent container starts once the
+     leader is known. It has the same local service ID, and its seeds are an
+     offline host, then a follower, then the leader. Each agent's instance is
+     its own, and stopping the second removes only its instance.
+   - **A running leader cut off.** The leader is disconnected but keeps
+     running while the agent publishes. The majority keeps receiving
+     publications, and no check expires.
+   - **A rolling restart.** Every server restarts in turn while the agent
+     publishes. The service is never expired or removed.
+
+   Mutations ran in an isolated copy, with the runtime JAR and image built
+   from the mutated code:
+   - Removing registration failover was caught by the two-agent test.
+   - Removing failover for observations alone was not caught: the agent's
+     registration and heartbeat traffic moves the shared seed preference to
+     the new leader.
+   - Removing failover from both paths was caught by the rolling restart. It
+     was also caught by the partition test, in the partition phase, whenever
+     the cut-off leader was the agent's first seed.
+
+   A diagnostic run found that a Docker network disconnect can leave
+   established connections working, which let the partition test pass once
+   without a real partition. That test now proceeds only once the old leader,
+   read inside its own container, has stepped down.
+
+   **Open.** The packaged-artifact test (design section 19.6) needs the
+   frontend build that the paused admin-interface list adds. Until then an
+   enabled server serves no assets. The test's negative half (client mode and
+   a disabled server do not expose the UI) cannot fail, because every mode
+   answers 404, so it is not written yet.
+
 ### Step 6. Remaining coverage
 
 Review section 6:

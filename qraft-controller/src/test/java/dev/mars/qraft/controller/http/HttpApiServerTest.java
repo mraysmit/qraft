@@ -440,17 +440,32 @@ class HttpApiServerTest {
     }
 
     @Test
-    void validatesAgentEndpointMethodsAndPayloads() throws Exception {
-        startAgentApi();
+    void agentRoutesAnswerEveryRejectionWithTheStructuredEnvelope() throws Exception {
+        QraftStateStore store = startAgentApi();
         HttpClient client = HttpClient.newHttpClient();
 
-        assertEquals(405, request(client, "/api/v1/agents/register", "GET").statusCode());
-        assertEquals(400, request(client, "/api/v1/agents/register", "POST", "{").statusCode());
-        assertEquals(400, request(client, "/api/v1/agents/register", "POST", "{\"agentId\":\" \"}").statusCode());
-        assertEquals(400, request(client, "/api/v1/agents/heartbeat", "POST",
-                "{\"agentId\":\"agent-1\",\"status\":\"not-a-status\"}").statusCode());
-        assertEquals(400, request(client, "/api/v1/agents/heartbeat", "POST",
-                "{\"agentId\":\"agent-1\",\"timestamp\":\"yesterday\"}").statusCode());
+        assertRejected(request(client, "/api/v1/agents/register", "GET"), 405, "method_not_allowed", null);
+        assertRejected(request(client, "/api/v1/agents/register", "POST", "{"), 400, "invalid_agent", null);
+        assertRejected(request(client, "/api/v1/agents/register", "POST", "{\"agentId\":\" \"}"),
+                400, "invalid_agent", "agentId is required");
+        assertRejected(request(client, "/api/v1/agents/heartbeat", "POST",
+                "{\"agentId\":\"agent-1\",\"status\":\"not-a-status\"}"), 400, "invalid_heartbeat", null);
+        assertRejected(request(client, "/api/v1/agents/heartbeat", "POST",
+                "{\"agentId\":\"agent-1\",\"timestamp\":\"yesterday\"}"), 400, "invalid_heartbeat", null);
+        assertRejected(request(client, "/api/v1/agents/heartbeat", "POST", "{\"agentId\":\"\"}"),
+                400, "invalid_heartbeat", "agentId is required");
+        for (String missingId : List.of("/api/v1/agents/", "/api/v1/agents/a/b")) {
+            assertRejected(request(client, missingId, "DELETE"), 400, "agent_id_required", null);
+        }
+        assertTrue(store.getAgents().isEmpty(), "no rejected request registers an agent");
+    }
+
+    /** Asserts the status and the non-retryable envelope, and that the message names {@code reason} when given. */
+    private static void assertRejected(HttpResponse<String> response, int status, String code, String reason)
+            throws Exception {
+        assertEquals(status, response.statusCode(), response.body());
+        JsonNode body = assertErrorEnvelope(response, code, false);
+        if (reason != null) assertTrue(body.path("message").textValue().contains(reason), response.body());
     }
 
     @Test
@@ -472,9 +487,13 @@ class HttpApiServerTest {
         QraftStateStore store = startAgentApi();
         HttpClient client = HttpClient.newHttpClient();
 
-        assertEquals(404, request(client, "/api/v1/agents/heartbeat", "POST",
-                "{\"agentId\":\"unknown\",\"sequenceNumber\":1}").statusCode());
-        assertEquals(404, request(client, "/api/v1/agents/unknown", "DELETE").statusCode());
+        for (HttpResponse<String> missing : List.of(
+                request(client, "/api/v1/agents/heartbeat", "POST", "{\"agentId\":\"unknown\",\"sequenceNumber\":1}"),
+                request(client, "/api/v1/agents/unknown", "DELETE"))) {
+            assertEquals(404, missing.statusCode(), missing.body());
+            assertEquals("unknown", assertErrorEnvelope(missing, "agent_not_found", false).path("agentId").textValue(),
+                    "the envelope names the missing agent");
+        }
 
         assertEquals(201, request(client, "/api/v1/agents/register", "POST", agentRegistration()).statusCode());
         assertEquals(204, request(client, "/api/v1/agents/heartbeat", "POST",
@@ -485,10 +504,84 @@ class HttpApiServerTest {
     @Test
     void rejectsAgentRequestsWhileDraining() throws Exception {
         startAgentApi();
-        server.enterDrainMode().join();
+        server.enterDrainMode().get(10, TimeUnit.SECONDS);
 
-        assertEquals(503, request(HttpClient.newHttpClient(), "/api/v1/agents/register", "POST",
-                agentRegistration()).statusCode());
+        HttpResponse<String> draining = request(HttpClient.newHttpClient(), "/api/v1/agents/register", "POST",
+                agentRegistration());
+
+        assertEquals(503, draining.statusCode());
+        assertErrorEnvelope(draining, "draining", true);
+    }
+
+    @Test
+    void readsWithoutAServiceNameAreRejected() throws Exception {
+        QraftStateStore store = startSingleNode();
+        server = new HttpApiServer(0, node, store);
+        server.start().get(10, TimeUnit.SECONDS);
+        HttpClient client = HttpClient.newHttpClient();
+
+        for (String path : List.of("/v1/catalog/service/", "/v1/health/service/", "/v1/catalog/service/a%2Fb",
+                "/v1/health/service/a%2Fb")) {
+            assertRejected(request(client, path, "GET"), 400, "service_name_required", null);
+        }
+    }
+
+    @Test
+    void writesRejectBlankScopeHeadersAndChangeNothing() throws Exception {
+        QraftStateStore store = startSingleNode();
+        server = new HttpApiServer(0, node, store);
+        server.start().get(10, TimeUnit.SECONDS);
+        HttpClient client = HttpClient.newHttpClient();
+        String registration = """
+                {"serviceId":"web","serviceName":"web","address":"127.0.0.1","port":8080}
+                """;
+
+        for (String header : List.of("X-Qraft-Tenant", "X-Qraft-Namespace")) {
+            Map<String, String> blank = Map.of("X-Qraft-Node", "node-1", header, " ");
+            assertRejected(request(client, "/v1/agent/service/register", "PUT", registration, blank),
+                    400, "invalid_registration", header);
+            assertRejected(request(client, "/v1/agent/service/deregister/web", "PUT", null, blank),
+                    400, "invalid_registration", header);
+            assertRejected(request(client, "/v1/agent/check/observe", "PUT",
+                    observation("web", "ttl", "passing", 1, 30_000, null), blank), 400, "invalid_observation", header);
+        }
+        assertTrue(store.getServiceCatalog().instances().isEmpty(), "no write with a blank scope reaches the catalog");
+        assertTrue(store.healthChecks().isEmpty());
+    }
+
+    @Test
+    void aNodeThatCannotAnswerInTimeIsReportedUnavailable() throws Exception {
+        QraftStateStore store = startSingleNode();
+        server = new HttpApiServer(0, node, store, Clock.systemUTC(), AdminUiConfig.disabled(), null,
+                Duration.ofMillis(200));
+        server.start().get(10, TimeUnit.SECONDS);
+        HttpClient client = HttpClient.newHttpClient();
+        // Hold the node's state loop, where a status read is answered, for as long as the requests take.
+        CountDownLatch holding = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        runtime.runOnContext(ignored -> {
+            holding.countDown();
+            try {
+                release.await(30, TimeUnit.SECONDS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        try {
+            assertTrue(holding.await(10, TimeUnit.SECONDS), "the state loop is held");
+
+            HttpResponse<String> status = request(client, "/raft/status", "GET");
+            HttpResponse<String> ready = request(client, "/health/ready", "GET");
+
+            assertEquals(503, status.statusCode(), status.body());
+            assertErrorEnvelope(status, "raft_unavailable", true);
+            assertEquals(503, ready.statusCode(), ready.body());
+            JsonNode notReady = assertErrorEnvelope(ready, "not_ready", true);
+            assertEquals("[\"unavailable\"]", notReady.path("conditions").toString());
+            assertEquals(200, request(client, "/health/live", "GET").statusCode(), "liveness is unaffected");
+        } finally {
+            release.countDown();
+        }
     }
 
     @Test
@@ -584,9 +677,10 @@ class HttpApiServerTest {
         try {
             HttpResponse<String> response = request.get(10, TimeUnit.SECONDS);
             assertEquals(503, response.statusCode());
-            assertErrorEnvelope(response, "outcome_unknown", true);
-            assertTrue(response.body().contains("\"error\":\"outcome_unknown\""), response.body());
-            assertTrue(response.body().contains("\"retryable\":true"), response.body());
+            JsonNode body = assertErrorEnvelope(response, "outcome_unknown", true);
+            assertEquals("pending-http-node", body.path("leaderId").textValue(),
+                    "the envelope names the leader to retry against");
+            assertEquals("pending-http-node", response.headers().firstValue("X-Qraft-Leader-Id").orElse(null));
         } finally {
             gatedWal.releaseBlockedAppend();
         }

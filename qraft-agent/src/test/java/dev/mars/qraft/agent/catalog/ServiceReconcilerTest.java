@@ -36,6 +36,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -121,6 +122,64 @@ class ServiceReconcilerTest {
         assertFalse(ServiceReconciler.fingerprint(web.withCheckIds(List.of("a")))
                 .equals(ServiceReconciler.fingerprint(service("web", "web", 8080, true)
                         .withCheckIds(List.of()))), "the check set is part of the definition fingerprint");
+    }
+
+    @Test
+    void theFingerprintDoesNotConfuseTagsMetadataAndChecks() {
+        assertNotEquals(fingerprint(List.of("env", "prod"), Map.of(), List.of()),
+                fingerprint(List.of(), Map.of("env", "prod"), List.of()), "a tag pair is not a metadata entry");
+        assertNotEquals(fingerprint(List.of("checks:1", "a"), Map.of(), List.of()),
+                fingerprint(List.of(), Map.of(), List.of("a")), "tags are not declared checks");
+        assertNotEquals(fingerprint(List.of(), Map.of("checks:1", "a"), List.of()),
+                fingerprint(List.of(), Map.of(), List.of("a")), "metadata is not declared checks");
+    }
+
+    @Test
+    void movingAValueFromTagsToMetadataIsReRegistered() {
+        FakeCatalogClient client = new FakeCatalogClient();
+        ServiceDefinition tagged = new ServiceDefinition("web", "web", "127.0.0.1", 8080,
+                List.of("env", "prod"), Map.of(), true);
+        AtomicReference<List<ServiceDefinition>> definitions = new AtomicReference<>(List.of(tagged));
+        ServiceReconciler reconciler = new ServiceReconciler(client, definitions::get, CLOCK);
+        reconciler.trigger().join();
+        client.lookups.put("web", new CatalogLookupOutcome.Present());
+
+        definitions.set(List.of(new ServiceDefinition("web", "web", "127.0.0.1", 8080,
+                List.of(), Map.of("env", "prod"), true)));
+        reconciler.trigger().join();
+
+        assertEquals(List.of("web", "web"), client.registrations, "the changed definition is registered again");
+    }
+
+    @Test
+    void theFingerprintIgnoresMetadataOrderButNotAnyField() {
+        Map<String, String> ab = new java.util.LinkedHashMap<>();
+        ab.put("a", "1");
+        ab.put("b", "2");
+        Map<String, String> ba = new java.util.LinkedHashMap<>();
+        ba.put("b", "2");
+        ba.put("a", "1");
+        ServiceDefinition base = new ServiceDefinition("web", "web", "127.0.0.1", 8080, List.of("blue"), ab, true);
+        assertEquals(ServiceReconciler.fingerprint(base), ServiceReconciler.fingerprint(
+                new ServiceDefinition("web", "web", "127.0.0.1", 8080, List.of("blue"), ba, true)));
+
+        for (ServiceDefinition changed : List.of(
+                new ServiceDefinition("web-2", "web", "127.0.0.1", 8080, List.of("blue"), ab, true),
+                new ServiceDefinition("web", "api", "127.0.0.1", 8080, List.of("blue"), ab, true),
+                new ServiceDefinition("web", "web", "127.0.0.2", 8080, List.of("blue"), ab, true),
+                new ServiceDefinition("web", "web", "127.0.0.1", 8081, List.of("blue"), ab, true),
+                new ServiceDefinition("web", "web", "127.0.0.1", 8080, List.of("blue"), ab, false),
+                new ServiceDefinition("web", "web", "127.0.0.1", 8080, List.of("green"), ab, true),
+                new ServiceDefinition("web", "web", "127.0.0.1", 8080, List.of("blue"), Map.of("a", "9", "b", "2"),
+                        true))) {
+            assertNotEquals(ServiceReconciler.fingerprint(base), ServiceReconciler.fingerprint(changed),
+                    changed.toString());
+        }
+    }
+
+    private static String fingerprint(List<String> tags, Map<String, String> metadata, List<String> checks) {
+        return ServiceReconciler.fingerprint(new ServiceDefinition("web", "web", "127.0.0.1", 8080, tags, metadata,
+                true).withCheckIds(checks));
     }
 
     @Test

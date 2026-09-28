@@ -264,6 +264,48 @@ public final class SharedDockerCluster {
     /** A command's outcome; {@code exited} is false when it was still running at its bound and was removed. */
     public record DockerCommandResult(boolean exited, int exitCode, String output) { }
 
+    /** An agent container started beside a compose cluster; {@link #close()} removes it and its configuration. */
+    public record DetachedAgent(String name, Path config) implements AutoCloseable {
+        /** Stops the agent gracefully, so it deregisters its services, and waits for it to exit. */
+        public void stopGracefully() throws Exception {
+            runCommand(List.of("docker", "stop", "--time", "20", name));
+        }
+
+        @Override
+        public void close() throws Exception {
+            try {
+                new ProcessBuilder("docker", "rm", "-f", name).redirectErrorStream(true).start()
+                        .waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
+            } finally {
+                Files.deleteIfExists(config);
+            }
+        }
+    }
+
+    /**
+     * Starts a client-mode agent on {@code cluster}'s network with a configuration chosen at run time, such as
+     * seeds ordered by which server is the leader. It is reachable on that network as {@code alias}.
+     */
+    public static DetachedAgent startDetachedAgent(ComposeContainer cluster, String alias, String clientJson)
+            throws Exception {
+        String network = cluster.getContainerByServiceName("controller1")
+                .orElseThrow(() -> new IllegalStateException("the cluster has no controller1"))
+                .getContainerInfo().getNetworkSettings().getNetworks().keySet().iterator().next();
+        Path config = Files.createTempFile("qraft-agent-", ".json");
+        Files.writeString(config, clientJson);
+        String name = "qraft-agent-" + alias + "-" + java.util.UUID.randomUUID();
+        try {
+            runCommand(List.of("docker", "run", "-d", "--name", name, "--network", network,
+                    "--network-alias", alias, "--label", "org.testcontainers=true",
+                    "--mount", "type=bind,source=" + config.toAbsolutePath() + ",target=/etc/qraft/client.json,readonly",
+                    "qraft-runtime:test", "client", "--config", "/etc/qraft/client.json"));
+        } catch (Exception failed) {
+            Files.deleteIfExists(config);
+            throw failed;
+        }
+        return new DetachedAgent(name, config);
+    }
+
     /**
      * Disconnects a running service from all of its Docker networks. The container
      * is restarted while disconnected because Docker can otherwise leave an

@@ -304,13 +304,14 @@ with a test that failed first.
   - Multi-chunk `InstallSnapshot`, including out-of-order chunks.
   - A candidate stepping down on a same-term AppendEntries.
   - Command replication over real gRPC.
-- **HTTP API.**
+- **HTTP API.** Fixed 2026-09-28.
   - The readiness 503 envelope, the `unavailable` condition, and several
     conditions failing at once.
   - Error envelopes on the agent routes.
   - `service_name_required`, `service_id_required`, `raft_unavailable`, blank
     scope headers, and the `leaderId` detail on `outcome_unknown`.
-- **Configuration.**
+- **Configuration.** Fixed 2026-09-28. Placeholders are now refused in both
+  server and client documents.
   - The server `validate()` branches: ports, I/O bounds, timing, snapshot, and
     Prometheus port.
   - A missing or unreadable file.
@@ -319,17 +320,25 @@ with a test that failed first.
   - Uppercase UI paths.
   - Environment-style placeholders, which design section 16 forbids: neither
     rejected in production nor tested.
-- **Agent.**
+- **Agent.** Fixed 2026-09-28. Adding these tests found two defects, both now
+  fixed. The service fingerprint confused tags, metadata, and checks, so a
+  moved value was never re-registered. A clock stepped back stopped health
+  renewals.
   - Backoff growth and reset across registration cycles.
   - Every retryable seed tried exactly once per cycle.
   - Fingerprint invariants.
   - `HealthPublisher` client failures and clock regression.
   - Disabled services' checks skipped.
 - **Lifecycle.** `closePartiallyOpened`; `QraftControllerService` wiring.
+  `closePartiallyOpened` is covered as of 2026-09-28.
 - **Other modules.**
   - `qraft-raft-engine`: `SnapshotData` has real validation and defensive
     copies, and no tests.
   - `qraft-tenant`: update, null, and concurrency paths; no tenant scope.
+
+  Fixed 2026-09-28, except the missing tenant scope, which is a feature gap.
+  `InMemoryNamespaceService.update` could undo a concurrent delete; it is now
+  atomic.
 - **Containers.**
   - Two agents with the same local service ID.
   - A first seed offline or a follower.
@@ -338,6 +347,9 @@ with a test that failed first.
   - A rolling server restart.
   - The packaged-artifact test of design section 19.6, which is known to be
     open.
+
+  Fixed 2026-09-28 by `DockerAgentTopologyTest`, except the packaged-artifact
+  test. That test waits for the admin interface's frontend build.
 
 ## 7. Hygiene
 

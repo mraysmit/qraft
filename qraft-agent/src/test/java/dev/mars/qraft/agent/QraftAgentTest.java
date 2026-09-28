@@ -252,6 +252,28 @@ class QraftAgentTest {
     }
 
     @Test
+    void checksOfADisabledServiceAreNeverRun() throws Exception {
+        AgentConfiguration config = AgentConfiguration.builder()
+                .agentId("agent-1").hostname("host").address("127.0.0.1").agentPort(0)
+                .controllerUrl("http://localhost:1")
+                .services(List.of(
+                        new ServiceDefinition("web", "web", "127.0.0.1", 8080, List.of(), Map.of(), true),
+                        new ServiceDefinition("legacy", "legacy", "127.0.0.1", 8081, List.of(), Map.of(), false)))
+                .healthChecks(List.of(
+                        new dev.mars.qraft.agent.health.TtlCheck("web", "app", Duration.ofSeconds(30), true),
+                        new dev.mars.qraft.agent.health.TtlCheck("legacy", "app", Duration.ofSeconds(30), true)))
+                .build();
+        QraftAgent agent = new QraftAgent(config);
+        try {
+            assertTrue(agent.statusReporter("web", "app").isPresent(), "an enabled service's check runs");
+            assertTrue(agent.statusReporter("legacy", "app").isEmpty(),
+                    "a disabled service is not registered, so its checks are never run or reported");
+        } finally {
+            agent.shutdown().get(10, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
     void registrationBackoffGrowsWhileTheControllerIsDownAndRestartsAfterSuccess() throws Exception {
         AtomicInteger registrations = new AtomicInteger();
         AtomicInteger heartbeats = new AtomicInteger();

@@ -26,6 +26,7 @@ import dev.mars.qraft.agent.health.HttpCheck;
 import dev.mars.qraft.agent.health.TcpCheck;
 import dev.mars.qraft.agent.health.TtlCheck;
 import dev.mars.qraft.catalog.ServiceDefinition;
+import dev.mars.qraft.config.ConfigurationPlaceholders;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -121,6 +122,7 @@ public final class AgentConfiguration {
         if (root == null || !root.isObject()) {
             throw new IllegalArgumentException("Agent configuration must be a JSON object");
         }
+        ConfigurationPlaceholders.reject(root);
         rejectUnknown(root, "root", "version", "agent", "controllers", "catalog", "logging");
         int formatVersion = requiredInt(root, "version");
         if (formatVersion != 1) {

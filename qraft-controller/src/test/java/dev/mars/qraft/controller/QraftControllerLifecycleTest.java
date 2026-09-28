@@ -23,6 +23,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CountDownLatch;
@@ -132,6 +133,57 @@ class QraftControllerLifecycleTest {
 
         assertSame(controllerFailure, error.getCause());
         assertArrayEquals(new Throwable[]{runtimeFailure, telemetryFailure}, controllerFailure.getSuppressed());
+    }
+
+    @Test
+    void aFailedStartupReleasesTheRuntimeBeforeTelemetry() {
+        List<String> released = new java.util.concurrent.CopyOnWriteArrayList<>();
+        IllegalStateException startupFailure = new IllegalStateException("startup");
+
+        QraftControllerApplication.closePartiallyOpened(() -> {
+            released.add("runtime");
+            return CompletableFuture.completedFuture(null);
+        }, () -> released.add("telemetry"), startupFailure);
+
+        assertEquals(List.of("runtime", "telemetry"), released);
+        assertArrayEquals(new Throwable[0], startupFailure.getSuppressed(), "a clean release adds nothing");
+    }
+
+    @Test
+    void aStartupThatFailedBeforeCreatingTheRuntimeReleasesOnlyTelemetry() {
+        List<String> released = new java.util.concurrent.CopyOnWriteArrayList<>();
+        IllegalStateException startupFailure = new IllegalStateException("startup");
+
+        QraftControllerApplication.closePartiallyOpened(null, () -> released.add("telemetry"), startupFailure);
+
+        assertEquals(List.of("telemetry"), released);
+        assertArrayEquals(new Throwable[0], startupFailure.getSuppressed(), "an absent runtime is not a failure");
+    }
+
+    @Test
+    void everyStartupReleaseStepRunsAndItsFailuresAreCarriedByTheStartupFailure() {
+        IllegalStateException startupFailure = new IllegalStateException("startup");
+        IllegalStateException runtimeFailure = new IllegalStateException("runtime");
+        IllegalStateException telemetryFailure = new IllegalStateException("telemetry");
+
+        QraftControllerApplication.closePartiallyOpened(() -> CompletableFuture.failedFuture(runtimeFailure),
+                () -> { throw telemetryFailure; }, startupFailure);
+
+        assertArrayEquals(new Throwable[]{runtimeFailure, telemetryFailure}, startupFailure.getSuppressed(),
+                "the runtime's own failure, not a wrapper, and then telemetry's");
+    }
+
+    @Test
+    void aRuntimeShutdownThatThrowsStillLetsTelemetryClose() {
+        AtomicBoolean telemetryClosed = new AtomicBoolean();
+        IllegalStateException startupFailure = new IllegalStateException("startup");
+        IllegalStateException runtimeFailure = new IllegalStateException("runtime");
+
+        QraftControllerApplication.closePartiallyOpened(() -> { throw runtimeFailure; },
+                () -> telemetryClosed.set(true), startupFailure);
+
+        assertTrue(telemetryClosed.get());
+        assertArrayEquals(new Throwable[]{runtimeFailure}, startupFailure.getSuppressed());
     }
 
     private static boolean awaitQuietly(CountDownLatch latch) {

@@ -282,6 +282,37 @@ class HttpCatalogClientTest {
     }
 
     @Test
+    void whenEverySeedIsRetryableEachIsTriedExactlyOnceAndTheLastAnswerIsReturned() throws Exception {
+        List<AtomicInteger> attempts = List.of(new AtomicInteger(), new AtomicInteger(), new AtomicInteger());
+        List<URI> seeds = new java.util.ArrayList<>();
+        for (int seed = 0; seed < attempts.size(); seed++) {
+            AtomicInteger counter = attempts.get(seed);
+            String code = "busy-" + seed;
+            seeds.add(start(exchange -> {
+                counter.incrementAndGet();
+                respond(exchange, 503, "{\"code\":\"" + code + "\",\"message\":\"later\",\"retryable\":true}");
+            }));
+        }
+        HttpCatalogClient client = selectedClient(seeds);
+
+        CatalogOutcome registered = client.register(service()).get(10, TimeUnit.SECONDS);
+        assertEquals(List.of(1, 1, 1), counts(attempts), "a registration cycle tries each seed once");
+        assertEquals("busy-2", assertInstanceOf(CatalogOutcome.Retryable.class, registered).code());
+
+        CatalogLookupOutcome lookedUp = client.lookup(service()).get(10, TimeUnit.SECONDS);
+        assertEquals(List.of(2, 2, 2), counts(attempts), "a lookup cycle tries each seed once");
+        assertEquals("busy-2", assertInstanceOf(CatalogLookupOutcome.Retryable.class, lookedUp).code());
+
+        ObservationOutcome observed = client.observe(observation(7)).get(10, TimeUnit.SECONDS);
+        assertEquals(List.of(3, 3, 3), counts(attempts), "an observation cycle tries each seed once");
+        assertEquals("busy-2", assertInstanceOf(ObservationOutcome.Retryable.class, observed).code());
+    }
+
+    private static List<Integer> counts(List<AtomicInteger> attempts) {
+        return attempts.stream().map(AtomicInteger::get).toList();
+    }
+
+    @Test
     void rejectedOutcomeStopsTheSeedCycle() throws Exception {
         AtomicInteger rejectedAttempts = new AtomicInteger();
         URI rejected = start(exchange -> {

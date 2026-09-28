@@ -22,6 +22,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * Thread-safe in-memory namespace registry used by the pure Java runtime.
@@ -31,7 +32,16 @@ import java.util.concurrent.ConcurrentHashMap;
  * @version 1.0
  */
 public final class InMemoryNamespaceService implements NamespaceService {
-    private final ConcurrentHashMap<String, Namespace> namespaces = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Namespace> namespaces;
+
+    public InMemoryNamespaceService() {
+        this(new ConcurrentHashMap<>());
+    }
+
+    /** Uses {@code namespaces} as the store, so a test can interleave another operation deterministically. */
+    InMemoryNamespaceService(ConcurrentMap<String, Namespace> namespaces) {
+        this.namespaces = namespaces;
+    }
 
     @Override
     public Namespace create(Namespace namespace) throws NamespaceException {
@@ -46,16 +56,16 @@ public final class InMemoryNamespaceService implements NamespaceService {
     @Override
     public Namespace update(Namespace namespace) throws NamespaceException {
         require(namespace);
-        if (!namespaces.containsKey(namespace.name())) {
+        // One atomic step: a check followed by a write could restore a namespace deleted in between.
+        if (namespaces.replace(namespace.name(), namespace) == null) {
             throw new NamespaceException("Namespace not found: " + namespace.name());
         }
-        namespaces.put(namespace.name(), namespace);
         return namespace;
     }
 
     @Override
     public Optional<Namespace> find(String name) {
-        return Optional.ofNullable(namespaces.get(name));
+        return Optional.ofNullable(namespaces.get(requireName(name)));
     }
 
     @Override
@@ -67,7 +77,7 @@ public final class InMemoryNamespaceService implements NamespaceService {
 
     @Override
     public void delete(String name) throws NamespaceException {
-        if (namespaces.remove(name) == null) {
+        if (namespaces.remove(requireName(name)) == null) {
             throw new NamespaceException("Namespace not found: " + name);
         }
     }
@@ -76,5 +86,12 @@ public final class InMemoryNamespaceService implements NamespaceService {
         if (namespace == null) {
             throw new IllegalArgumentException("Namespace cannot be null");
         }
+    }
+
+    private static String requireName(String name) {
+        if (name == null) {
+            throw new IllegalArgumentException("Namespace name cannot be null");
+        }
+        return name;
     }
 }

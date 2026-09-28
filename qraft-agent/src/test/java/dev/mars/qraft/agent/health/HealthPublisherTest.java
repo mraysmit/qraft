@@ -115,6 +115,54 @@ class HealthPublisherTest {
     }
 
     @Test
+    void aClientThatThrowsFailsOrAnswersNothingIsRetriedWithTheSameObservation() {
+        for (String failure : List.of("throws", "fails", "answers null")) {
+            ManualTime clock = new ManualTime(START);
+            List<CheckObservation> attempts = new CopyOnWriteArrayList<>();
+            ObservationClient failingOnce = observation -> {
+                attempts.add(observation);
+                if (attempts.size() > 1) {
+                    return CompletableFuture.completedFuture(new ObservationOutcome.Accepted(
+                            observation.sequenceNumber(), observation.observedAt().plus(observation.ttl())));
+                }
+                return switch (failure) {
+                    case "throws" -> throw new IllegalStateException("client closed");
+                    case "fails" -> CompletableFuture.failedFuture(new java.io.IOException("connection reset"));
+                    default -> null;
+                };
+            };
+            HealthPublisher publishing = new HealthPublisher(failingOnce, clock, clock, attempt -> 1_000L);
+
+            publishing.onResult(HTTP, result(CheckStatus.PASSING, "HTTP 200"));
+            assertEquals(1, clock.pendingTasks(), failure + ": the failure schedules a retry");
+            clock.advance(Duration.ofSeconds(1));
+
+            assertEquals(2, attempts.size(), failure);
+            assertEquals(attempts.get(0), attempts.get(1), failure + ": the retry resends the same observation");
+            assertEquals(0, clock.pendingTasks(), failure + ": once accepted, nothing more is scheduled");
+        }
+    }
+
+    @Test
+    void aClockThatStepsBackRenewsAtOnceAndKeepsSequencesIncreasing() {
+        publisher.onResult(HTTP, result(CheckStatus.PASSING, "HTTP 200"));
+        client.accept(0);
+
+        time.rewind(Duration.ofHours(1));
+        publisher.onResult(HTTP, result(CheckStatus.PASSING, "HTTP 200"));
+
+        assertEquals(2, client.sent().size(), "with the clock behind the last acceptance the elapsed time is "
+                + "unknown, so the check renews rather than let the controller's TTL lapse");
+        assertTrue(client.sent().get(1).sequenceNumber() > client.sent().get(0).sequenceNumber(),
+                "sequence numbers keep increasing although the clock went back");
+        client.accept(1);
+        publisher.onResult(HTTP, result(CheckStatus.PASSING, "HTTP 200"));
+        assertEquals(2, client.sent().size(), "after that renewal, renewals follow the clock again");
+        publisher.onResult(HTTP, result(CheckStatus.CRITICAL, "HTTP 503"));
+        assertTrue(client.sent().get(2).sequenceNumber() > client.sent().get(1).sequenceNumber());
+    }
+
+    @Test
     void aChangedResultSupersedesAnUnconfirmedObservation() {
         publisher.onResult(HTTP, result(CheckStatus.PASSING, "HTTP 200"));
         client.retryable(0);
