@@ -4,7 +4,7 @@
 **Scope:** every test source and test resource in the reactor. The default suite
 has 738 tests; the Docker-tagged suite has 30.
 **Method:** four independent read-only reviews, one per area, against
-[`PROJECT_STANDARDS.md`](PROJECT_STANDARDS.md) section 4 and the design
+[`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md) section 4 and the design
 documents. Every finding that implies a production defect or a production
 deletion was verified against the code before inclusion.
 

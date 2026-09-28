@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-24
 **Completed:** 2026-09-24
-**Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md)
+**Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md)
 **Predecessor:** [`task-list-catalog-identity-2026-09-22.md`](task-list-catalog-identity-2026-09-22.md) (Tranches 1 and 2, complete)
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
@@ -439,4 +439,4 @@ added, and Qraft runtime configuration remains file-only with no environment
 variable configuration or discovery path.
 
 The next active work is Tranche 5, unified runtime flow, tracked in
-[`task-list-unified-runtime-flow-2026-09-24.md`](../task-list-unified-runtime-flow-2026-09-24.md).
+[`task-list-unified-runtime-flow-2026-09-24.md`](task-list-unified-runtime-flow-2026-09-24.md).

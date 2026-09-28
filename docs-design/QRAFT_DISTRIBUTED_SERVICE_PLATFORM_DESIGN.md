@@ -72,7 +72,7 @@ particular:
 - Public HTTP and gRPC request/response DTOs stay at adapter boundaries and are
   mapped explicitly to domain commands.
 
-[`QRAFT_EVENT_ARCHITECTURE.md`](QRAFT_EVENT_ARCHITECTURE.md) proposes an
+[`QRAFT_EVENT_ARCHITECTURE.md`](../docs/QRAFT_EVENT_ARCHITECTURE.md) proposes an
 eighth module, `qraft-events`, for dependency-light event contracts. It is not
 yet part of the reactor and will be added to this table when its first tranche
 is implemented.
@@ -1037,7 +1037,7 @@ materialized state, snapshot contents, snapshot transfer, and the relationship
 between a snapshot boundary and the Raft log.
 
 The detailed test-first migration and removal gates are maintained in
-[`RAFTLOG_EXTERNALISATION_TDD_PLAN.md`](archive/RAFTLOG_EXTERNALISATION_TDD_PLAN.md).
+[`RAFTLOG_EXTERNALISATION_TDD_PLAN.md`](../docs/archive/RAFTLOG_EXTERNALISATION_TDD_PLAN.md).
 
 The storage design therefore has two distinct ports:
 
@@ -1598,14 +1598,14 @@ not expose the administrative routes.
 ## 20. Test-first delivery sequence
 
 Current progress, the active tranche's detailed steps, and the backlog are
-tracked in the current dated task list in `docs/`
+tracked in the current dated task list in `docs-design/`
 ([`task-list-platform-hygiene-and-readiness-2026-09-27.md`](task-list-platform-hygiene-and-readiness-2026-09-27.md); the administrative interface list is paused, see [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md)).
 Completed task lists are moved to `docs/archive/`.
 
 ### Tranche 0: Align the WAL and snapshot contracts
 
 Status: complete (2026-09-22). See the archived
-[`RAFTLOG_EXTERNALISATION_TDD_PLAN.md`](archive/RAFTLOG_EXTERNALISATION_TDD_PLAN.md).
+[`RAFTLOG_EXTERNALISATION_TDD_PLAN.md`](../docs/archive/RAFTLOG_EXTERNALISATION_TDD_PLAN.md).
 
 1. Add real-storage contract tests for persist-before-memory ordering, suffix
    replacement, fencing, and reopen recovery.
@@ -1669,7 +1669,7 @@ Status: complete (verified 2026-09-25).
 ### Tranche 6: Health propagation
 
 Status: complete (2026-09-26). See the archived
-[`task-list-health-propagation-2026-09-25.md`](archive/task-list-health-propagation-2026-09-25.md).
+[`task-list-health-propagation-2026-09-25.md`](../docs/archive/task-list-health-propagation-2026-09-25.md).
 The replicated model, the controller health API, local check
 execution, agent publication, leader-owned expiry, and end-to-end verification are
 done. The end-to-end tests cover servers and an agent started from configuration
@@ -1688,7 +1688,7 @@ includes an agent container that runs health checks.
 ### Tranche 7: Multi-node container acceptance
 
 Status: complete (2026-09-27). See the archived
-[`task-list-multi-node-container-acceptance-2026-09-26.md`](archive/task-list-multi-node-container-acceptance-2026-09-26.md).
+[`task-list-multi-node-container-acceptance-2026-09-26.md`](../docs/archive/task-list-multi-node-container-acceptance-2026-09-26.md).
 The tests fall into two classes:
 
 - `DockerAgentHealthTest` covers items 1 to 3, and a client partitioned from

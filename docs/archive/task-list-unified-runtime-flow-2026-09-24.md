@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-24
 **Completed:** 2026-09-25
-**Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), Tranche 5
+**Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), Tranche 5
 **Predecessor:** [`task-list-agent-catalog-client-2026-09-24.md`](task-list-agent-catalog-client-2026-09-24.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 

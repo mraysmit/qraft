@@ -4,11 +4,11 @@
 **Active work:** Paused after Step 1 on 2026-09-27, until the backend features in [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md) are delivered; Step 2 is next when it resumes
 **Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increments UI-0 and UI-1
 **Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 12.4, 12.4.1, 19.6, and 21; [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md), sections 14 and 15
-**Predecessor:** [`archive/task-list-multi-node-container-acceptance-2026-09-26.md`](archive/task-list-multi-node-container-acceptance-2026-09-26.md)
-**Standards:** [`PROJECT_STANDARDS.md`](PROJECT_STANDARDS.md)
+**Predecessor:** [`archive/task-list-multi-node-container-acceptance-2026-09-26.md`](../docs/archive/task-list-multi-node-container-acceptance-2026-09-26.md)
+**Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
 This is the current task list for the project. When the active work is complete,
-add a completion summary, move this file to `archive/`, and start a new dated task
+add a completion summary, move this file to `docs/archive/`, and start a new dated task
 list for the next backlog item.
 
 ## 1. Goal

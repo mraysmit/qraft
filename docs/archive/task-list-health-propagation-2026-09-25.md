@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-25
 **Completed:** 2026-09-26
-**Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), Tranche 6
+**Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), Tranche 6
 **Predecessor:** [`task-list-unified-runtime-flow-2026-09-24.md`](task-list-unified-runtime-flow-2026-09-24.md)
 **Successor:** [`task-list-multi-node-container-acceptance-2026-09-26.md`](task-list-multi-node-container-acceptance-2026-09-26.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)

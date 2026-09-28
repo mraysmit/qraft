@@ -69,8 +69,8 @@ Status key:
 | Operations | Prometheus metrics | Partial | Raft metrics only. The catalog, health-transition, request, and session metrics of design 18 are absent |
 | Operations | Node and cluster status | Partial | `/raft/status` describes only the answering node: no peers, lag, or quorum |
 | Operations | Health aggregation | Done | Derived service health; `?passing` filter |
-| Operations | Backup, corrupt-replica recovery, upgrade procedures | Done | [`RAFT_STORAGE_OPERATIONS.md`](RAFT_STORAGE_OPERATIONS.md) |
-| Operations | Event journal (design [`QRAFT_EVENT_ARCHITECTURE.md`](QRAFT_EVENT_ARCHITECTURE.md)) | Missing | No `qraft-events` module |
+| Operations | Backup, corrupt-replica recovery, upgrade procedures | Done | [`RAFT_STORAGE_OPERATIONS.md`](../docs/RAFT_STORAGE_OPERATIONS.md) |
+| Operations | Event journal (design [`QRAFT_EVENT_ARCHITECTURE.md`](../docs/QRAFT_EVENT_ARCHITECTURE.md)) | Missing | No `qraft-events` module |
 | Operations | DNS discovery (optional) | Missing | — |
 
 ## 3. Client features

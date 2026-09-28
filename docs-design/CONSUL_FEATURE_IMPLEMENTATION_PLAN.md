@@ -7,7 +7,7 @@ Qraft will evolve into a Consul-like distributed service with Raft-backed state,
 **Delivery status.** This plan defines the target feature set. What is built is
 recorded in
 [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md)
-and in the dated task lists in this directory and its `archive/`. The checklist
+and in the dated task lists in this directory and in `docs/archive/`. The checklist
 at the end of this plan was last reconciled with the code on 2026-09-27.
 
 ## 2. Target Feature Set

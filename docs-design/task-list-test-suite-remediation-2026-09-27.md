@@ -5,10 +5,10 @@
 **Source review:** [`QRAFT_TEST_SUITE_REVIEW_2026-09-27.md`](QRAFT_TEST_SUITE_REVIEW_2026-09-27.md), sections 3 to 7
 **Runs alongside:** [`task-list-platform-hygiene-and-readiness-2026-09-27.md`](task-list-platform-hygiene-and-readiness-2026-09-27.md), complete and awaiting archive confirmation
 **Paused:** [`task-list-embedded-admin-interface-2026-09-27.md`](task-list-embedded-admin-interface-2026-09-27.md), after its Step 1
-**Standards:** [`PROJECT_STANDARDS.md`](PROJECT_STANDARDS.md)
+**Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
 This is the current task list for the project. When the active work is complete,
-add a completion summary, move this file to `archive/` with the user's
+add a completion summary, move this file to `docs/archive/` with the user's
 agreement, and start a new dated task list for the next backlog item.
 
 ## 1. Goal

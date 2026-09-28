@@ -3,12 +3,12 @@
 **Date:** 2026-09-27
 **Active work:** None. All steps are complete; archiving awaits confirmation.
 **Source plan:** [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md), section 5, items 1 and 2
-**Predecessor:** [`archive/task-list-multi-node-container-acceptance-2026-09-26.md`](archive/task-list-multi-node-container-acceptance-2026-09-26.md)
+**Predecessor:** [`archive/task-list-multi-node-container-acceptance-2026-09-26.md`](../docs/archive/task-list-multi-node-container-acceptance-2026-09-26.md)
 **Paused alongside:** [`task-list-embedded-admin-interface-2026-09-27.md`](task-list-embedded-admin-interface-2026-09-27.md), paused after its Step 1
-**Standards:** [`PROJECT_STANDARDS.md`](PROJECT_STANDARDS.md)
+**Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
 This is the current task list for the project. When the active work is complete,
-add a completion summary, move this file to `archive/`, and start a new dated task
+add a completion summary, move this file to `docs/archive/`, and start a new dated task
 list for the next backlog item.
 
 **Completion summary (2026-09-27).**

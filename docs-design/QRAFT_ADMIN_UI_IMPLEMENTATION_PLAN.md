@@ -5,7 +5,7 @@
 **Design:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md) (what the interface is) and
 [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections
 12.4, 12.4.1, and 19.6 (how it is packaged and served)
-**Standards:** [`PROJECT_STANDARDS.md`](PROJECT_STANDARDS.md)
+**Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
 ## 1. Purpose
 
@@ -20,7 +20,7 @@ supplies that.
 - Section 6 orders the work into increments. Each increment names the backend
   prerequisites that must land first.
 
-Each increment is delivered through its own dated task list in `docs/`, as the
+Each increment is delivered through its own dated task list in `docs-design/`, as the
 rest of the platform is. This plan changes only when scope or ordering changes.
 
 ## 2. Delivery principles
