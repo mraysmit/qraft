@@ -19,16 +19,15 @@ package dev.mars.qraft.agent.service;
 import dev.mars.qraft.agent.config.AgentConfiguration;
 import org.junit.jupiter.api.Test;
 
-import java.net.InetSocketAddress;
-import java.net.ServerSocket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -43,7 +42,7 @@ class HealthServiceTest {
     @Test
     void tracksLocalAgentHealth() {
         AgentConfiguration config = AgentConfiguration.builder()
-                .agentId("agent-1").controllerUrl("http://localhost").agentPort(freePort()).build();
+                .agentId("agent-1").controllerUrl("http://localhost").agentPort(0).build();
         HealthService health = new HealthService(config, () -> false);
 
         assertFalse(health.isHealthy());
@@ -57,25 +56,45 @@ class HealthServiceTest {
     @Test
     void servesLivenessAndReadinessEndpoints() throws Exception {
         AgentConfiguration config = AgentConfiguration.builder()
-                .agentId("agent-health").controllerUrl("http://localhost").agentPort(freePort()).build();
+                .agentId("agent-health").controllerUrl("http://localhost").agentPort(0).build();
         AtomicBoolean ready = new AtomicBoolean();
         HealthService health = new HealthService(config, ready::get);
         HttpClient client = HttpClient.newHttpClient();
 
         try {
             health.start();
+            int port = health.port();
 
-            assertEquals(200, get(client, config.getAgentPort(), "/health/live"));
-            assertEquals(503, get(client, config.getAgentPort(), "/health/ready"));
-            assertEquals(503, get(client, config.getAgentPort(), "/health"));
+            assertEquals(200, get(client, port, "/health/live"));
+            assertEquals(503, get(client, port, "/health/ready"));
+            assertEquals(503, get(client, port, "/health"));
 
             ready.set(true);
 
-            assertEquals(200, get(client, config.getAgentPort(), "/health/ready"));
-            assertEquals(200, get(client, config.getAgentPort(), "/health"));
+            assertEquals(200, get(client, port, "/health/ready"));
+            assertEquals(200, get(client, port, "/health"));
         } finally {
             health.shutdown();
         }
+    }
+
+    @Test
+    void reportsThePortItBoundOnlyWhileRunning() throws Exception {
+        AgentConfiguration config = AgentConfiguration.builder()
+                .agentId("agent-port").controllerUrl("http://localhost").agentPort(0).build();
+        HealthService health = new HealthService(config, () -> true);
+
+        assertThrows(IllegalStateException.class, health::port, "no port is bound before start");
+        health.start();
+        int port;
+        try {
+            port = health.port();
+            assertTrue(port > 0, "port 0 is replaced by the port the system chose");
+            assertEquals(200, get(HttpClient.newHttpClient(), port, "/health/live"));
+        } finally {
+            health.shutdown();
+        }
+        assertThrows(IllegalStateException.class, health::port, "no port is bound after shutdown");
     }
 
     private static int get(HttpClient client, int port, String path) throws Exception {
@@ -83,11 +102,4 @@ class HealthServiceTest {
         return client.send(request, HttpResponse.BodyHandlers.discarding()).statusCode();
     }
 
-    private static int freePort() {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        } catch (Exception e) {
-            throw new IllegalStateException("Unable to find a free test port", e);
-        }
-    }
 }

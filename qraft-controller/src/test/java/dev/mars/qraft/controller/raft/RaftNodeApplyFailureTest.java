@@ -132,7 +132,7 @@ class RaftNodeApplyFailureTest {
 
     private void awaitLeader() throws Exception {
         node.awaitState(RaftNode.State.LEADER, 10_000).toCompletionStage().toCompletableFuture()
-                .get(10, TimeUnit.SECONDS);
+                .get(15, TimeUnit.SECONDS);
     }
 
     private CompletableFuture<RaftCommandResult<?>> submit(String key) {

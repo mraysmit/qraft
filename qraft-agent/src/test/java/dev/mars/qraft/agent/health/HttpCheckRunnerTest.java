@@ -116,7 +116,7 @@ class HttpCheckRunnerTest {
         runner = startRunner();
 
         time.runDue();
-        assertTrue(requestEntered.await(5, TimeUnit.SECONDS));
+        assertTrue(requestEntered.await(10, TimeUnit.SECONDS));
         assertEquals(1, time.pendingTasks(), "only the timeout is pending while the probe runs");
         time.advance(TIMEOUT.minusMillis(1));
         results.assertNoResult();
@@ -135,12 +135,12 @@ class HttpCheckRunnerTest {
         statuses.add(200);
         runner = startRunner();
         time.runDue();
-        assertTrue(requestEntered.await(5, TimeUnit.SECONDS));
+        assertTrue(requestEntered.await(10, TimeUnit.SECONDS));
 
         runner.stop();
         assertEquals(0, time.pendingTasks());
         releaseResponse.countDown();
-        responseFinished.await(5, TimeUnit.SECONDS);
+        assertTrue(responseFinished.await(10, TimeUnit.SECONDS), "the server sent its late response");
         results.assertNoResult();
         time.advance(Duration.ofMinutes(5));
         results.assertNoResult();

@@ -56,7 +56,7 @@ class QraftAgentApplicationTest {
     void validatesConfigurationBeforeOpeningAgentResources() throws Exception {
         Path configuration = temporaryDirectory.resolve("invalid-client.json");
         Files.writeString(configuration, """
-                {"version":1,"agent":{"id":"agent-a","httpPort":0},
+                {"version":1,"agent":{"id":"agent-a","httpPort":-1},
                  "controllers":{"urls":["http://127.0.0.1:8080"]}}
                 """);
         AtomicInteger opened = new AtomicInteger();

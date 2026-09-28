@@ -119,6 +119,11 @@ public class QraftControllerApplication {
             return resources.shutdown();
         }
 
+        /** The ports the controller's listeners bound; see {@link QraftControllerService#boundPorts()}. */
+        public java.util.Map<String, Integer> boundPorts() {
+            return resources.controller.boundPorts();
+        }
+
         @Override
         public void close() {
             closeAsync().join();

@@ -97,7 +97,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
     void tearDown() throws Exception {
         if (node != null) await(node.stop());
         if (runtime != null) {
-            runtime.shutdown().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -111,9 +111,9 @@ class RaftNodeOutboundSnapshotGenerationTest {
         long nextIndex = stepDownAndReelect(oldTerm);
 
         storage.releaseBlockedSnapshotLoad();
-        awaitStateLoop();
+        settle();
 
-        assertNull(transport.pollSnapshot(200),
+        assertNull(transport.pollSnapshot(0),
                 "a snapshot loaded for an old leadership must not be transmitted");
         assertEquals(nextIndex, node.getNextIndex("peer-1"));
     }
@@ -202,7 +202,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
         await(stop);
 
         assertEquals(1, storage.closeCount.get());
-        assertNull(transport.pollSnapshot(200),
+        assertNull(transport.pollSnapshot(0),
                 "a transfer invalidated by shutdown must not send after its load completes");
     }
 
@@ -218,9 +218,9 @@ class RaftNodeOutboundSnapshotGenerationTest {
                 .setRejectionReason(
                         InstallSnapshotResponse.RejectionReason.PERSISTENCE_REJECTED)
                 .build());
-        awaitStateLoop();
+        settle();
 
-        assertNull(transport.pollSnapshot(100),
+        assertNull(transport.pollSnapshot(0),
                 "a persistence rejection must not create a tight chunk-zero retry loop");
     }
 
@@ -308,6 +308,14 @@ class RaftNodeOutboundSnapshotGenerationTest {
         }
     }
 
+    /**
+     * Lets the state loop run every continuation already queued, including ones those continuations queue.
+     * A send decided by any of them has then happened, so an empty transport afterwards is exact.
+     */
+    private void settle() throws Exception {
+        for (int pass = 0; pass < 5; pass++) awaitStateLoop();
+    }
+
     private void awaitStateLoop() throws Exception {
         CompletableFuture<Void> marker = new CompletableFuture<>();
         runtime.runOnContext(ignored -> marker.complete(null));
@@ -315,7 +323,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
     }
 
     private static <T> T await(Future<T> future) {
-        return future.timeout(5, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
+        return future.timeout(10, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
     }
 
     private record PendingSnapshot(
@@ -336,7 +344,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
         }
 
         PendingSnapshot takeSnapshot() throws Exception {
-            PendingSnapshot snapshot = snapshots.poll(2, TimeUnit.SECONDS);
+            PendingSnapshot snapshot = snapshots.poll(10, TimeUnit.SECONDS);
             if (snapshot == null) throw new AssertionError("leader did not send a snapshot");
             return snapshot;
         }

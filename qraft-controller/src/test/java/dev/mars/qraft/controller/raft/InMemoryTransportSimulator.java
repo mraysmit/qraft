@@ -41,8 +41,12 @@ import java.util.function.Consumer;
  * - Bandwidth throttling
  * - Crash, slow, and flaky failure modes
  *
+ * <p>No thread sleeps to simulate time: a request delayed by latency, throttling or reordering is held in a
+ * queue and handed to the delivery pool when it falls due. Every request ends in a response or a failure;
+ * stopping a transport fails whatever it still holds or has not yet started.
+ *
  * @author Mark Andrew Ray-Smith Cityline Ltd
- * @version 2.0
+ * @version 3.0
  * @since 2026-01-05
  */
 
@@ -58,13 +62,14 @@ public class InMemoryTransportSimulator implements RaftTransport {
 
     private final String nodeId;
     // Use bounded thread pool (T3.2 consistency with production code)
-    private final ExecutorService executor = Executors.newFixedThreadPool(10);
+    private final ExecutorService executor;
     private volatile Consumer<RaftMessage> messageHandler;
     private volatile boolean running = false;
+    private boolean stopped; // guarded by this: a stopped transport never starts its delivery thread again
     private RaftNode raftNode;
     
     // Chaos Configuration
-    private final Random random = new Random();
+    private final Random random;
     private volatile int minLatencyMs = 5;
     private volatile int maxLatencyMs = 15;
     private volatile double dropRate = 0.0; // 0.0 to 1.0
@@ -96,9 +101,30 @@ public class InMemoryTransportSimulator implements RaftTransport {
         FLAKY           // Node intermittently fails
     }
 
+    /**
+     * A transport whose chaos is seeded from {@code qraft.transport.seed} when set, and otherwise from the
+     * node ID, so a run is repeatable; the seed is logged.
+     */
     public InMemoryTransportSimulator(String nodeId) {
+        this(nodeId, Long.getLong("qraft.transport.seed", nodeId.hashCode()));
+    }
+
+    public InMemoryTransportSimulator(String nodeId, long seed) {
         this.nodeId = nodeId;
-        startReorderProcessor();
+        this.random = new Random(seed);
+        this.executor = Executors.newFixedThreadPool(10,
+                Thread.ofPlatform().daemon().name(threadPrefix() + "send-", 0).factory());
+        logger.debug("In-memory transport for {} uses chaos seed {}", nodeId, seed);
+    }
+
+    /** The name every thread of this transport starts with. */
+    String threadPrefix() {
+        return "in-memory-transport-" + nodeId + "-";
+    }
+
+    /** Requests held for delayed (reordered) delivery. */
+    int queuedMessages() {
+        return messageQueue.size();
     }
 
     public boolean isRunning() {
@@ -212,11 +238,16 @@ public class InMemoryTransportSimulator implements RaftTransport {
     }
     
     /**
-     * Start the background processor for message reordering.
+     * Starts the thread that hands held deliveries to the pool when they fall due. It starts with the transport,
+     * or with the first held delivery, so a transport that is never used holds no thread.
      */
-    private void startReorderProcessor() {
+    private synchronized void startReorderProcessor() {
+        if (stopped) {
+            return;
+        }
         if (reorderExecutor == null || reorderExecutor.isShutdown()) {
-            reorderExecutor = Executors.newSingleThreadScheduledExecutor();
+            reorderExecutor = Executors.newSingleThreadScheduledExecutor(
+                    Thread.ofPlatform().daemon().name(threadPrefix() + "delivery").factory());
             reorderExecutor.scheduleAtFixedRate(this::processReorderedMessages, 
                 10, 10, TimeUnit.MILLISECONDS);
         }
@@ -232,39 +263,52 @@ public class InMemoryTransportSimulator implements RaftTransport {
         while ((message = messageQueue.peek()) != null && message.deliveryTime <= now) {
             message = messageQueue.poll();
             if (message != null) {
-                message.deliver();
+                dispatch(message::deliver, message.failure);
             }
         }
     }
     
     /**
-     * Apply bandwidth throttling if enabled.
+     * The extra delay bandwidth throttling imposes on a message of {@code messageSize} bytes: none while the
+     * current one-second window has room, otherwise until the window ends, when a new one begins.
      */
-    private void applyThrottling(int messageSize) throws InterruptedException {
+    private synchronized long throttleDelay(int messageSize) {
         if (!throttlingEnabled) {
-            return;
+            return 0;
         }
-        
         long now = System.currentTimeMillis();
         if (now - lastResetTime >= 1000) {
             bytesSentThisSecond.set(0);
             lastResetTime = now;
         }
-        
-        long currentBytes = bytesSentThisSecond.addAndGet(messageSize);
-        if (currentBytes > maxBytesPerSecond) {
-            long delayMs = 1000 - (now - lastResetTime);
-            if (delayMs > 0) {
-                Thread.sleep(delayMs);
-                bytesSentThisSecond.set(0);
-                lastResetTime = System.currentTimeMillis();
-            }
+        if (bytesSentThisSecond.addAndGet(messageSize) <= maxBytesPerSecond) {
+            return 0;
         }
+        long delayMs = Math.max(0, 1000 - (now - lastResetTime));
+        bytesSentThisSecond.set(0);
+        lastResetTime = now + delayMs;
+        return delayMs;
+    }
+
+    /** Runs a send on the delivery pool; a send the pool will not take fails its request. */
+    private void dispatch(Runnable send, Consumer<Throwable> failure) {
+        try {
+            executor.execute(new Task(send, failure));
+        } catch (RejectedExecutionException stopped) {
+            failure.accept(new IllegalStateException("Transport stopped: " + nodeId, stopped));
+        }
+    }
+
+    /** Holds a delivery until {@code delayMs} has passed; the reorder processor hands it to the pool. */
+    private void deliverAfter(long delayMs, Runnable delivery, Consumer<Throwable> failure) {
+        startReorderProcessor();
+        messageQueue.offer(new DelayedMessage(System.currentTimeMillis() + delayMs, delivery, failure));
     }
 
     @Override
     public void start(Consumer<RaftMessage> messageHandler) {
         this.messageHandler = messageHandler;
+        startReorderProcessor();
         this.running = true;
         transports.put(nodeId, this);
         logger.info("Started in-memory transport for node: {}", nodeId);
@@ -273,13 +317,30 @@ public class InMemoryTransportSimulator implements RaftTransport {
     @Override
     public void stop() {
         this.running = false;
-        transports.remove(nodeId);
-        executor.shutdownNow();
-        if (reorderExecutor != null) {
-            reorderExecutor.shutdownNow();
+        synchronized (this) {
+            stopped = true;
         }
+        transports.remove(nodeId);
+        for (Runnable neverStarted : executor.shutdownNow()) {
+            if (neverStarted instanceof Task task) {
+                task.failure().accept(new IllegalStateException("Transport stopped before sending: " + nodeId));
+            }
+        }
+        // Sends still running may hold a delivery; they finish before the delivery thread stops, and
+        // whatever they held is failed below.
         awaitTermination(executor, "transport");
-        awaitTermination(reorderExecutor, "reorder");
+        ScheduledExecutorService delivery;
+        synchronized (this) {
+            delivery = reorderExecutor;
+        }
+        if (delivery != null) {
+            delivery.shutdownNow();
+        }
+        awaitTermination(delivery, "reorder");
+        DelayedMessage held;
+        while ((held = messageQueue.poll()) != null) {
+            held.failure.accept(new IllegalStateException("Transport stopped before delivery: " + nodeId));
+        }
         logger.info("Stopped in-memory transport for node: {}", nodeId);
     }
 
@@ -288,7 +349,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
             return;
         }
         try {
-            if (!service.awaitTermination(5, TimeUnit.SECONDS)) {
+            if (!service.awaitTermination(10, TimeUnit.SECONDS)) {
                 logger.warn("Timed out draining in-memory {} executor for node: {}", executorName, nodeId);
             }
         } catch (InterruptedException e) {
@@ -300,7 +361,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
     @Override
     public Future<VoteResponse> sendVoteRequest(String targetNodeId, VoteRequest request) {
         Promise<VoteResponse> promise = Promise.promise();
-        executor.execute(() -> {
+        dispatch(() -> {
             try {
                 // Check if crashed
                 if (crashed) {
@@ -327,41 +388,22 @@ public class InMemoryTransportSimulator implements RaftTransport {
                     promise.fail(new RuntimeException("Target node not available: " + targetNodeId));
                     return;
                 }
-
-                // Apply bandwidth throttling
-                int messageSize = request.getSerializedSize();
-                applyThrottling(messageSize);
-
-                // Simulate network delay based on failure mode
-                long delay = calculateDelay();
-                Thread.sleep(delay);
-
-                // Check for message reordering
-                if (reorderingEnabled && random.nextDouble() < reorderProbability) {
-                    int reorderDelay = random.nextInt(maxReorderDelayMs);
-                    DelayedMessage delayed = new DelayedMessage(
-                        System.currentTimeMillis() + delay + reorderDelay,
-                        () -> {
-                            VoteResponse response = targetTransport.handleVoteRequest(request);
-                            promise.complete(response);
-                        }
-                    );
-                    messageQueue.offer(delayed);
-                    logger.debug("Reordered VoteRequest from {} to {} (delay: {}ms)", nodeId, targetNodeId, reorderDelay);
+                if (targetTransport.crashed) {
+                    promise.fail(new RuntimeException("Target node crashed: " + targetNodeId));
                     return;
                 }
 
-                // Process vote request
-                VoteResponse response = targetTransport.handleVoteRequest(request);
-                
-                
-                logger.debug("Vote request from {} to {}: {}", nodeId, targetNodeId, response.getVoteGranted());
-                
-                promise.complete(response);
+                // Network delay from the failure mode, bandwidth throttling, and any reordering
+                long delay = calculateDelay() + throttleDelay(request.getSerializedSize()) + reorderDelay();
+                deliverAfter(delay, () -> {
+                    VoteResponse response = targetTransport.handleVoteRequest(request);
+                    logger.debug("Vote request from {} to {}: {}", nodeId, targetNodeId, response.getVoteGranted());
+                    promise.complete(response);
+                }, promise::fail);
             } catch (Exception e) {
                 promise.fail(e);
             }
-        });
+        }, promise::fail);
         return promise.future();
     }
 
@@ -369,7 +411,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
     public Future<AppendEntriesResponse> sendAppendEntries(String targetNodeId, 
                                                                      AppendEntriesRequest request) {
         Promise<AppendEntriesResponse> promise = Promise.promise();
-        executor.execute(() -> {
+        dispatch(() -> {
             try {
                 // Check if crashed
                 if (crashed) {
@@ -396,42 +438,31 @@ public class InMemoryTransportSimulator implements RaftTransport {
                     promise.fail(new RuntimeException("Target node not available: " + targetNodeId));
                     return;
                 }
-
-                // Apply bandwidth throttling
-                int messageSize = request.getSerializedSize();
-                applyThrottling(messageSize);
-
-                // Simulate network delay based on failure mode
-                long delay = calculateDelay();
-                Thread.sleep(delay);
-
-                // Check for message reordering
-                if (reorderingEnabled && random.nextDouble() < reorderProbability) {
-                    int reorderDelay = random.nextInt(maxReorderDelayMs);
-                    DelayedMessage delayed = new DelayedMessage(
-                        System.currentTimeMillis() + delay + reorderDelay,
-                        () -> {
-                            AppendEntriesResponse response = targetTransport.handleAppendEntries(request);
-                            promise.complete(response);
-                        }
-                    );
-                    messageQueue.offer(delayed);
-                    logger.debug("Reordered AppendEntries from {} to {} (delay: {}ms)", nodeId, targetNodeId, reorderDelay);
+                if (targetTransport.crashed) {
+                    promise.fail(new RuntimeException("Target node crashed: " + targetNodeId));
                     return;
                 }
 
-                // Process append entries request
-                AppendEntriesResponse response = targetTransport.handleAppendEntries(request);
-                
-                
-                logger.debug("Append entries from {} to {}: {}", nodeId, targetNodeId, response.getSuccess());
-                
-                promise.complete(response);
+                // Network delay from the failure mode, bandwidth throttling, and any reordering
+                long delay = calculateDelay() + throttleDelay(request.getSerializedSize()) + reorderDelay();
+                deliverAfter(delay, () -> {
+                    AppendEntriesResponse response = targetTransport.handleAppendEntries(request);
+                    logger.debug("Append entries from {} to {}: {}", nodeId, targetNodeId, response.getSuccess());
+                    promise.complete(response);
+                }, promise::fail);
             } catch (Exception e) {
                 promise.fail(e);
             }
-        });
+        }, promise::fail);
         return promise.future();
+    }
+
+    /** The extra delay of a reordered message, or none; reordering lets a later message overtake it. */
+    private long reorderDelay() {
+        if (reorderingEnabled && random.nextDouble() < reorderProbability) {
+            return random.nextInt(maxReorderDelayMs);
+        }
+        return 0;
     }
     
     /**
@@ -454,7 +485,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
 
     private VoteResponse handleVoteRequest(VoteRequest request) {
         if (raftNode != null) {
-            return raftNode.handleVoteRequest(request).toCompletionStage().toCompletableFuture().join();
+            return answer(raftNode.handleVoteRequest(request));
         }
         
         if (messageHandler != null) {
@@ -470,7 +501,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
 
     private AppendEntriesResponse handleAppendEntries(AppendEntriesRequest request) {
         if (raftNode != null) {
-            return raftNode.handleAppendEntriesRequest(request).toCompletionStage().toCompletableFuture().join();
+            return answer(raftNode.handleAppendEntriesRequest(request));
         }
 
         if (messageHandler != null) {
@@ -486,7 +517,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
 
     private InstallSnapshotResponse handleInstallSnapshot(InstallSnapshotRequest request) {
         if (raftNode != null) {
-            return raftNode.handleInstallSnapshot(request).toCompletionStage().toCompletableFuture().join();
+            return answer(raftNode.handleInstallSnapshot(request));
         }
 
         logger.warn("RaftNode not set for transport {}, returning failure for InstallSnapshot", nodeId);
@@ -501,7 +532,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
     public Future<InstallSnapshotResponse> sendInstallSnapshot(String targetNodeId,
                                                                 InstallSnapshotRequest request) {
         Promise<InstallSnapshotResponse> promise = Promise.promise();
-        executor.execute(() -> {
+        dispatch(() -> {
             try {
                 // Check if crashed
                 if (crashed) {
@@ -528,22 +559,36 @@ public class InMemoryTransportSimulator implements RaftTransport {
                     promise.fail(new RuntimeException("Target node not available: " + targetNodeId));
                     return;
                 }
+                if (targetTransport.crashed) {
+                    promise.fail(new RuntimeException("Target node crashed: " + targetNodeId));
+                    return;
+                }
 
-                // Simulate network delay
-                long delay = calculateDelay();
-                Thread.sleep(delay);
-
-                // Process install snapshot request
-                InstallSnapshotResponse response = targetTransport.handleInstallSnapshot(request);
-
-                logger.debug("InstallSnapshot from {} to {}: success={}", nodeId, targetNodeId, response.getSuccess());
-
-                promise.complete(response);
+                deliverAfter(calculateDelay(), () -> {
+                    InstallSnapshotResponse response = targetTransport.handleInstallSnapshot(request);
+                    logger.debug("InstallSnapshot from {} to {}: success={}", nodeId, targetNodeId, response.getSuccess());
+                    promise.complete(response);
+                }, promise::fail);
             } catch (Exception e) {
                 promise.fail(e);
             }
-        });
+        }, promise::fail);
         return promise.future();
+    }
+
+    /** Waits a bounded time for the target node's answer; a node that never answers fails the request. */
+    private static <T> T answer(Future<T> response) {
+        try {
+            return response.toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted awaiting the target node", interrupted);
+        } catch (java.util.concurrent.ExecutionException failure) {
+            throw failure.getCause() instanceof RuntimeException runtime ? runtime
+                    : new IllegalStateException(failure.getCause());
+        } catch (java.util.concurrent.TimeoutException timeout) {
+            throw new IllegalStateException("Target node did not answer within 10 s", timeout);
+        }
     }
 
     public static Map<String, InMemoryTransportSimulator> getAllTransports() {
@@ -558,24 +603,35 @@ public class InMemoryTransportSimulator implements RaftTransport {
         healPartitions();
     }
     
+    /** A send or delivery on the pool, with the failure that ends its request if it never runs. */
+    private record Task(Runnable body, Consumer<Throwable> failure) implements Runnable {
+        @Override
+        public void run() {
+            body.run();
+        }
+    }
+
     /**
-     * Helper class for delayed message delivery (message reordering).
+     * A delivery held until its time, by latency, throttling or reordering.
      */
     private static class DelayedMessage implements Comparable<DelayedMessage> {
         final long deliveryTime;
         final Runnable action;
-        
-        DelayedMessage(long deliveryTime, Runnable action) {
+        final Consumer<Throwable> failure;
+
+        DelayedMessage(long deliveryTime, Runnable action, Consumer<Throwable> failure) {
             this.deliveryTime = deliveryTime;
             this.action = action;
+            this.failure = failure;
         }
-        
+
+        /** Delivers the request; a delivery that throws fails the request instead of leaving it waiting. */
         void deliver() {
             try {
                 action.run();
             } catch (Exception e) {
-                logger.error("Error delivering delayed message: {}", e.getMessage());
-                logger.debug("Stack trace for delayed message delivery failure", e);
+                logger.debug("Delayed message delivery failed", e);
+                failure.accept(e);
             }
         }
         

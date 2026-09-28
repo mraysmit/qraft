@@ -75,7 +75,7 @@ class RaftNodeRealStorageRecoveryTest {
     void tearDown() throws Exception {
         if (node != null) await(node.stop());
         if (runtime != null) {
-            runtime.shutdown().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -101,7 +101,7 @@ class RaftNodeRealStorageRecoveryTest {
     void higherTermAppendCompletesThroughTheRealWalExecutor() throws Exception {
         RaftStorageFactory.DurableStorage durable = await(
                 RaftStorageFactory.createDurable(directory, true));
-        durable.wal().updateMetadata(1, Optional.empty()).get(5, TimeUnit.SECONDS);
+        durable.wal().updateMetadata(1, Optional.empty()).get(10, TimeUnit.SECONDS);
         runtime = JavaRuntime.create();
         node = RaftNode.builder()
                 .runtime(runtime)
@@ -247,10 +247,10 @@ class RaftNodeRealStorageRecoveryTest {
         assertEquals(RealStorageCrashWriter.HALT_EXIT_CODE, crash.exitCode(), crash.output());
 
         try (FileRaftStorage reopened = storage()) {
-            reopened.open(directory).get(5, TimeUnit.SECONDS);
+            reopened.open(directory).get(10, TimeUnit.SECONDS);
             assertEquals(new RaftStorage.PersistentMeta(2, Optional.of("node-1")),
-                    reopened.loadMetadata().get(5, TimeUnit.SECONDS));
-            List<RaftStorage.LogEntryData> recovered = reopened.replayLog().get(5, TimeUnit.SECONDS);
+                    reopened.loadMetadata().get(10, TimeUnit.SECONDS));
+            List<RaftStorage.LogEntryData> recovered = reopened.replayLog().get(10, TimeUnit.SECONDS);
             assertEquals(expectedIndexes, recovered.stream().map(RaftStorage.LogEntryData::index).toList());
             assertEquals(expectedTerms, recovered.stream().map(RaftStorage.LogEntryData::term).toList());
         }
@@ -287,13 +287,13 @@ class RaftNodeRealStorageRecoveryTest {
 
     private void seedWal() throws Exception {
         try (FileRaftStorage wal = storage()) {
-            wal.open(directory).get(5, TimeUnit.SECONDS);
-            wal.updateMetadata(2, Optional.of("node-1")).get(5, TimeUnit.SECONDS);
+            wal.open(directory).get(10, TimeUnit.SECONDS);
+            wal.updateMetadata(2, Optional.of("node-1")).get(10, TimeUnit.SECONDS);
             wal.appendEntries(List.of(
                     entry(1, 1, "retained-1", "one"),
                     entry(2, 1, "retained-2", "two"),
-                    entry(3, 1, "obsolete", "old"))).get(5, TimeUnit.SECONDS);
-            wal.sync().get(5, TimeUnit.SECONDS);
+                    entry(3, 1, "obsolete", "old"))).get(10, TimeUnit.SECONDS);
+            wal.sync().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -345,7 +345,7 @@ class RaftNodeRealStorageRecoveryTest {
     }
 
     private static <T> T await(Future<T> future) {
-        return future.timeout(5, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
+        return future.timeout(10, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
     }
 
     private record ProcessResult(int exitCode, String output) {

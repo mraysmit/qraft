@@ -483,7 +483,8 @@ public final class AgentConfiguration {
             requireNonBlank("logging.directory", loggingDirectory);
             requireNonBlank("agent.version", version);
             if (controllerUrls.isEmpty()) throw new IllegalArgumentException("controllers.urls is required");
-            if (agentPort < 1 || agentPort > 65_535) throw new IllegalArgumentException("agent.httpPort is invalid");
+            // Port 0 asks the system for any free port; the agent registers the port it actually bound.
+            if (agentPort < 0 || agentPort > 65_535) throw new IllegalArgumentException("agent.httpPort is invalid");
             if (heartbeatInterval < 1) throw new IllegalArgumentException("agent.heartbeatIntervalMs must be positive");
             if (shutdownTimeoutMs < 1) throw new IllegalArgumentException("agent.shutdownTimeoutMs must be positive");
             if (requestTimeoutMs < 1) throw new IllegalArgumentException("controllers.requestTimeoutMs must be positive");

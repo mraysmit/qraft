@@ -1,7 +1,7 @@
 # Task List: Test Suite Remediation
 
 **Date:** 2026-09-27
-**Active work:** Step 4, isolation and cleanup (Steps 1 to 3 are done)
+**Active work:** Step 6, remaining coverage (Steps 1 to 5 are done)
 **Source review:** [`QRAFT_TEST_SUITE_REVIEW_2026-09-27.md`](QRAFT_TEST_SUITE_REVIEW_2026-09-27.md), sections 3 to 7
 **Runs alongside:** [`task-list-platform-hygiene-and-readiness-2026-09-27.md`](task-list-platform-hygiene-and-readiness-2026-09-27.md), complete and awaiting archive confirmation
 **Paused:** [`task-list-embedded-admin-interface-2026-09-27.md`](task-list-embedded-admin-interface-2026-09-27.md), after its Step 1
@@ -23,21 +23,20 @@ Make a clean run of the suite mean what it claims. When this list is complete:
 
 ## 2. Current state
 
-Updated 2026-09-27.
+Updated 2026-09-28.
 
 The five production defects in the review's section 2 are fixed. Steps 1 and
 2 fixed two more: the commit majority in even-sized clusters, and replicas that
-skipped a committed entry they could not apply. The rest of the review is
-open:
+skipped a committed entry they could not apply.
 
-- **Tests that verify nothing.** About a dozen unit tests cannot fail, catch
-  the failure they exist to detect, or pass for the wrong reason.
-- **Placeholder container tests.** About half the Docker-tagged suite is
-  placeholders: leader failover, partitions, and network stress that kill or
-  partition nothing.
-- **Timing and isolation.** The older Raft, gRPC, runtime, and agent tests use
-  real elections, sleeps, sub-second margins, absence proven by waiting, and
-  free-port races. Global configuration also leaks between tests.
+Steps 1 to 5 are done:
+
+- the tests that verified nothing;
+- the placeholder container tests;
+- isolation and cleanup;
+- determinism.
+
+Open: the coverage gaps (Step 6) and hygiene (Step 7).
 
 ## 3. Rules
 
@@ -255,7 +254,7 @@ Review sections 3 and 6.
 **Exit gate.** The Docker-tagged suite passes, and a mutation disabling each
 mechanism makes its test fail.
 
-**Status: Done 2026-09-27**, pending the mutation gate recorded below.
+**Status: Done 2026-09-27.** The mutation gate is recorded below.
 
 - **Deleted:**
   - `ConfigurableRaftClusterTest` and `TestClusterConfiguration`;
@@ -289,20 +288,39 @@ mechanism makes its test fail.
   from 15 s to 30 s.
 - **Result.** The Docker suite passes 19 of 19, down from 30 after removing 13
   placeholders and adding 2 tests.
+- **Mutation gate, against rebuilt runtime images.**
+  - **Check-quorum.** Making `majorityRecentlyContacted` always true left the
+    partitioned leader leading. The partitioned-leader test failed after its
+    30 s bound.
+  - **Graceful stop.** Making the reconciler deregister nothing on shutdown
+    left the service to expire. The graceful-stop test failed with "a graceful
+    stop deregisters the service; it must not be left to expire".
+  - Both sources were restored and the runtime image rebuilt clean. The clean
+    Docker suite passes 19 of 19.
 
-### Step 4 progress (2026-09-27)
+### Steps 4 and 5 record (2026-09-27 to 2026-09-28)
 
-Done:
+**Step 4, isolation and cleanup: done.**
 
 - **Global state.**
   - `AppConfig.install(AppConfig)` lets a caller reinstall the configuration it
     replaced. `QraftControllerLifecycleTest` restores both the global
     configuration and `qraft.log.dir`.
   - `QraftAgentApplicationTest` restores `qraft.log.dir`.
-- **Teardown.** A shared `Cleanup` in `qraft-runtime` runs every teardown step
-  and rethrows the first failure, in `AgentEndToEndTest`,
-  `AgentHealthPublicationTest`, `AgentControllerContractTest`, and
-  `HealthPropagationEndToEndTest`.
+- **Teardown.**
+  - A shared `Cleanup` in `qraft-runtime` runs every teardown step and rethrows
+    the first failure. It is used in `AgentEndToEndTest`,
+    `AgentHealthPublicationTest`, `AgentControllerContractTest`, and
+    `HealthPropagationEndToEndTest`.
+  - `ManualRaftCluster` tracks every node a test builds and stops it after the
+    test, which also releases its storage. It covers `RaftNodeTest`,
+    `RaftFailureTest`, `InstallSnapshotTest`, and the other tests moved to
+    manual timers.
+  - `GrpcRaftTransportTest` tracks its transports and pools. Its teardown runs
+    every step, and its second target is started inside the `try` that stops
+    it.
+  - `InstallSnapshotTest` no longer names shared `/tmp` paths for its
+    in-memory storage.
 - **Shutdown.** `JavaRuntimeExtension` now waits for each runtime to stop. It
   also closes a runtime injected into a class-level method, which covers
   `RaftNodeIntegrationTest`.
@@ -314,17 +332,165 @@ Done:
   named container that is force-removed if it keeps running. Its result
   records whether it exited, and the test asserts it did, so a contender
   wrongly serving the volume fails the test instead of hanging.
+- **Ports.** Every in-process test binds port 0, and each component reports
+  the port it bound:
+  - agent `HealthService.port()`;
+  - `GrpcRaftServer.port()`;
+  - `GrpcServiceServer.port()`;
+  - `HttpApiServer.port()`;
+  - `RuntimeLifecycle.boundPorts()`.
+
+  Configuration accepts 0 for `agent.httpPort` and for the server's HTTP,
+  Raft, and API gRPC ports, as the design now documents. Raft port 0 is
+  allowed only on a sole member. A three-member runtime reserves its Raft
+  ports together, releases them just before launch, and retries the whole
+  launch, at most three times, only on a bind failure.
+
+  Fixed ports remain in two places. The restart tests rebind the port the
+  agent already knows. The refused-endpoint helpers use a port they just
+  closed.
 - **Ordering.** `EnhancedInMemoryTransportTest` no longer imposes a method
   order.
 - **`WorkerExecutorTest`.** Its tasks now finish one at a time on a semaphore.
   The measured maximum concurrency is exactly the limit, with no sleeps, no
   self-releasing 2 s latches, and no 1 s waits.
 
-Open:
+**Step 5, determinism: done.**
 
-- free-port-then-bind races in the runtime, gRPC, and agent tests;
-- node and durable-storage creation outside try/finally in `RaftNodeTest`,
-  `InstallSnapshotTest`, and `GrpcRaftTransportTest`.
+- **Manual timers.**
+  - `ManualRaftTimers` fires a node's election timeout or heartbeat only when a
+    test asks.
+  - `ManualRaftCluster` builds nodes on those timers and provides `elect`,
+    `heartbeatUntil`, and `heartbeatUntilSteppedDown`.
+  - These tests moved onto it: `RaftNodeTest`, `RaftFailureTest`,
+    `InstallSnapshotTest`, `LeaderHealthExpiryClusterTest`,
+    `HttpApiServerReadinessTest`, `RaftNodeAppliesWhatItLogsTest`,
+    `EnhancedInMemoryTransportTest`, and `AgentEndToEndTest`'s controllers.
+    `GrpcRaftIntegrationTest` and `RaftNodeTransportGenerationTest` moved
+    earlier.
+  - The rewritten classes run in about a second each instead of up to 12 s.
+- **Check-quorum window.** The manual clusters use a 10 s election timeout with
+  200 ms heartbeats. That is a 50-round check-quorum window, and heartbeats
+  are paced at one per 200 ms of polling. A leader therefore steps down only
+  when a majority is silent for as long as a test waits.
+- **Liveness waits.**
+  - 147 waits in 28 files were raised to 10 s.
+  - An outer wait around a 10 s `awaitState` is now 15 s, so the node's own
+    timeout reports first.
+  - The runtime tests' local HTTP timeouts were raised to 5 s: 300 ms connect,
+    500 ms requests, and a 1 s connect. A slow reply from a live server had
+    read as "down".
+  - `AgentHealthPublicationTest`'s HTTP check uses a 1 s interval and timeout
+    and a 5 s TTL, where it used 100 ms and 600 ms. It asserts PASSING straight
+    after waiting for it.
+
+  Timeouts under test stay short: `FutureTest` and the 50 ms client in
+  `HttpCatalogClientTest`.
+- **Absence** is checked immediately once no path can still produce the
+  result:
+  - `RecordingListener`;
+  - `pollSnapshot` after `settle()`;
+  - `GrpcRaftIntegrationTest`;
+  - `JavaRuntimeTest`, which uses the scheduler's queue;
+  - multi-member recovery in `RaftNodeTest`.
+- **Sleeps.**
+  - `InMemoryTransportSimulator` holds a request delayed by latency,
+    throttling, or reordering in a queue. It hands the request to its pool
+    when due, and no longer sleeps a thread.
+  - `MockRaftTransport` is deleted.
+  - The gRPC tests' sleeps are gone.
+- **Production timeout.** `HttpApiServer` takes its Raft timeout as a
+  constructor argument (default 5 s). Its test uses 200 ms.
+- **Randomness.** The simulator is seeded from `qraft.transport.seed` or the
+  node ID, and the seed is logged.
+- **Latch-held deadlines.** `AgentRegistrationClientTest` and `JavaRuntimeTest`
+  are fixed. Their latches are bounded at 30 s and their results are checked.
+
+**Defects found in the test fakes, each fixed test first.**
+
+- **`ManualRaftTimers`.** A new leader announces its leadership before it arms
+  its heartbeat. A test woken by the announcement could fire before the
+  heartbeat existed, which is how two `RaftNodeTest` cases failed. The same
+  race was latent in `GrpcRaftIntegrationTest`.
+
+  A fire now runs on the state loop behind every task already queued, and
+  returns once it has run. `ManualRaftTimersTest` holds the loop with a latch
+  to prove the fire waits.
+- **`InMemoryTransportSimulator.stop()`.** Stopping dropped requests the pool
+  had not yet started, and their callers waited forever. Of 50 requests in
+  transit, 40 never completed. Stopping now fails every request it holds or
+  has not started.
+- **`InstallSnapshotTest`'s stale-term test** passed for the wrong reason. Its
+  node was the leader, and the snapshot data was invalid, so other guards
+  refused it. It now uses a real follower in term 2 and a valid snapshot. The
+  same request in term 2 is then installed, which proves the term alone was
+  refused.
+- **`EnhancedInMemoryTransportTest`'s chaos test** could not detect a double
+  vote. Its candidacies never overlapped. Every other round now fires two
+  candidates at once.
+
+**Mutations.** Each was run in an isolated copy of the tree.
+
+| Mutation | Result |
+|---|---|
+| Multi-member recovery treats the recovered tail as committed | Caught by 2 `RaftNodeTest` cases |
+| A step-down leaves pending commands waiting | Caught by `RaftNodeTest`, majority value wins |
+| The leader never sends InstallSnapshot to a lagging follower | Caught by 3 `InstallSnapshotTest` cases |
+| Check-quorum requires every peer | Caught by `RaftFailureTest`, a leader keeps leading with a majority |
+| The stale-term InstallSnapshot guard is removed | Survived at first (see above); caught after the fix |
+| A new leader's grace period starts at the epoch | Caught by `LeaderHealthExpiryClusterTest` |
+| Every member's expiry acts as leader | Caught by 2 `LeaderHealthExpiryClusterTest` cases |
+| A node grants a second vote in a term | Caught by `RaftFailureTest`; missed by the chaos test at first, caught after the fix |
+
+Earlier in Step 5, two generation-guard mutations survived because a
+redundant guard caught them. Mutating both guards was caught, in
+`RaftNodeOutboundSnapshotGenerationTest` and `RaftNodeTransportGenerationTest`.
+
+**Code review of Steps 4 and 5 (2026-09-28).** Each defect below was fixed,
+test first where it had behaviour to test.
+
+- **Simulator delivery thread (introduced in this step).** Starting the thread
+  lazily let a send still in flight during `stop()` restart it. The stop then
+  waited 10 s for the new thread, and the thread leaked. `stop()` now lets
+  in-flight sends finish before the delivery thread stops, and a stopped
+  transport never restarts it. Found from the test's 10 s duration; the test
+  now also asserts that no transport thread survives `stop()`.
+- **Simulator thread leak (existing).** The constructor started a non-daemon
+  delivery thread even for a transport that is never started. It now starts
+  with the transport or its first held delivery, and all simulator threads are
+  named daemons.
+- **`ManualRaftTimers`.** An `Error` thrown by a fired action, such as a failed
+  assertion in a listener, left the caller waiting 10 s for a misleading
+  timeout. It now reaches the caller unchanged.
+- **`ManualRaftCluster.heartbeatUntil`** now names a leader that stopped
+  leading. It previously reported "no periodic timer is armed".
+- **`HttpApiServer`.** The new Raft timeout was converted with `toMillis()`, so
+  a positive sub-millisecond timeout acted as zero. It is now applied in
+  nanoseconds.
+- **`ManagedRuntimeLifecycle`.** A field had lost its indentation.
+- **`HttpCheckRunnerTest`.** A latch result was ignored; it is now asserted.
+- **`SharedDockerCluster`.** An image-build failure hid the build's output, so
+  the one failure in the first Docker run (a build that exited 1, then
+  succeeded on the next test) could not be diagnosed. The failure now carries
+  the build's last 40 lines. The rerun passed 19 of 19.
+- **Verification tooling.** The isolated copy was refreshed with `robocopy`,
+  which restores a file's older timestamp. After a mutation run, Maven kept the
+  mutated class, and `HttpCheckRunnerTest` failed there although the code was
+  fine. Every copy run now deletes the compiled classes first, and the copy
+  results were rerun clean.
+
+Left as they are:
+
+- `RaftNodeShutdownSequencingTest` elects a single node on a real 25 ms timer
+  over a fake transport. It is the only candidate, so the outcome is fixed.
+- `AgentHealthPublicationTest` runs real checks every second. It is an
+  end-to-end test by design.
+
+**Verification.**
+
+- The default suite passes, 783 tests with no failures: `mvn test -pl qraft-runtime -am`.
+- The Docker suite passes 19 of 19 with a freshly built runtime JAR.
+- The changed concurrency classes: 14 classes (113 tests) passed 10 consecutive runs, compiled clean in the isolated copy.
 
 ### Step 4. Isolation and cleanup
 

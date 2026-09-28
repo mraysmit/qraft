@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.runtime;
 
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -31,11 +32,23 @@ import java.util.function.Supplier;
  */
 final class ManagedRuntimeLifecycle implements RuntimeLifecycle {
     private final Supplier<? extends CompletionStage<?>> shutdown;
+    private final Supplier<Map<String, Integer>> boundPorts;
     private final CompletableFuture<Void> completion = new CompletableFuture<>();
     private boolean closing;
 
     ManagedRuntimeLifecycle(Supplier<? extends CompletionStage<?>> shutdown) {
+        this(shutdown, Map::of);
+    }
+
+    ManagedRuntimeLifecycle(Supplier<? extends CompletionStage<?>> shutdown,
+                            Supplier<Map<String, Integer>> boundPorts) {
         this.shutdown = Objects.requireNonNull(shutdown, "shutdown");
+        this.boundPorts = Objects.requireNonNull(boundPorts, "boundPorts");
+    }
+
+    @Override
+    public Map<String, Integer> boundPorts() {
+        return boundPorts.get();
     }
 
     @Override

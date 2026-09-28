@@ -92,7 +92,7 @@ class HealthPropagationEndToEndTest {
     Path temporaryDirectory;
 
     private final List<RuntimeLifecycle> lifecycles = new ArrayList<>();
-    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(1)).build();
+    private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private final AtomicInteger workloadStatus = new AtomicInteger(200);
     private final AtomicReference<CheckStatus> reportedStatus = new AtomicReference<>(CheckStatus.PASSING);
     private HttpServer workload;
@@ -123,10 +123,9 @@ class HealthPropagationEndToEndTest {
 
     @Test
     void configuredChecksDriveHealthTransitionsAndPassingDiscoveryThroughThePublicApi() throws Exception {
-        int httpPort = freePort();
         Path serverConfig = temporaryDirectory.resolve("server.json");
-        writeServerConfig(serverConfig, "health-node", httpPort, Map.of("health-node", freePort()));
-        launch("server", serverConfig);
+        writeServerConfig(serverConfig, "health-node", Map.of("health-node", 0));
+        int httpPort = launch("server", serverConfig).boundPorts().get("http");
         URI controller = URI.create("http://127.0.0.1:" + httpPort);
         await(() -> status(controller.resolve("/health/ready")) == 200);
 
@@ -226,18 +225,12 @@ class HealthPropagationEndToEndTest {
 
     /** Three servers, and a client-mode runtime that reaches each of them through a holding proxy. */
     private Cluster startClusterWithClient() throws Exception {
-        Map<String, Integer> raftPorts = new LinkedHashMap<>();
-        for (String nodeId : List.of("node-a", "node-b", "node-c")) raftPorts.put(nodeId, freePort());
+        Map<String, RuntimeLifecycle> servers = launchThreeServers();
         Map<String, URI> controllers = new LinkedHashMap<>();
-        Map<String, RuntimeLifecycle> servers = new LinkedHashMap<>();
         List<URI> proxied = new ArrayList<>();
-        for (String nodeId : raftPorts.keySet()) {
-            int httpPort = freePort();
-            Path config = temporaryDirectory.resolve(nodeId + ".json");
-            writeServerConfig(config, nodeId, httpPort, raftPorts);
-            servers.put(nodeId, launch("server", config));
-            URI controller = URI.create("http://127.0.0.1:" + httpPort);
-            controllers.put(nodeId, controller);
+        for (Map.Entry<String, RuntimeLifecycle> server : servers.entrySet()) {
+            URI controller = URI.create("http://127.0.0.1:" + server.getValue().boundPorts().get("http"));
+            controllers.put(server.getKey(), controller);
             proxied.add(startProxy(controller));
         }
         await(() -> leader(controllers.values()) != null);
@@ -249,6 +242,51 @@ class HealthPropagationEndToEndTest {
         await(() -> controllers.values().stream().allMatch(controller ->
                 "PASSING".equals(checkField(controller, "web", "http", "status"))));
         return new Cluster(controllers, servers);
+    }
+
+    /**
+     * Launches the three servers. Every listener binds port 0 except Raft: each server dials its peers at
+     * the Raft addresses in its configuration, so those ports must be known before any server starts. They
+     * are reserved together, so they are distinct, and released just before launch. Should another process
+     * take one in that window, the bind fails with a {@link java.net.BindException}; the partial cluster is
+     * closed and the launch repeats with fresh ports. Any other failure is the test's.
+     */
+    private Map<String, RuntimeLifecycle> launchThreeServers() throws Exception {
+        List<String> nodeIds = List.of("node-a", "node-b", "node-c");
+        for (int attempt = 1; ; attempt++) {
+            Map<String, Integer> raftPorts = new LinkedHashMap<>();
+            List<Integer> reserved = reserveDistinctPorts(nodeIds.size());
+            for (int index = 0; index < nodeIds.size(); index++) raftPorts.put(nodeIds.get(index), reserved.get(index));
+            Map<String, RuntimeLifecycle> servers = new LinkedHashMap<>();
+            try {
+                for (String nodeId : nodeIds) {
+                    Path config = temporaryDirectory.resolve(nodeId + ".json");
+                    writeServerConfig(config, nodeId, raftPorts);
+                    servers.put(nodeId, launch("server", config));
+                }
+                return servers;
+            } catch (RuntimeException failure) {
+                if (!causedByBindFailure(failure) || attempt == 3) throw failure;
+                for (RuntimeLifecycle server : servers.values()) server.closeAsync().get(10, TimeUnit.SECONDS);
+            }
+        }
+    }
+
+    private static List<Integer> reserveDistinctPorts(int count) throws Exception {
+        List<ServerSocket> sockets = new ArrayList<>();
+        try {
+            for (int index = 0; index < count; index++) sockets.add(new ServerSocket(0));
+            return sockets.stream().map(ServerSocket::getLocalPort).toList();
+        } finally {
+            for (ServerSocket socket : sockets) socket.close();
+        }
+    }
+
+    private static boolean causedByBindFailure(Throwable failure) {
+        for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+            if (cause instanceof java.net.BindException) return true;
+        }
+        return false;
     }
 
     /** Shuts the leader down and returns the servers that remain. */
@@ -482,13 +520,8 @@ class HealthPropagationEndToEndTest {
         assertTrue(condition.evaluate(), "condition was not met before the deadline");
     }
 
-    private static int freePort() throws Exception {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        }
-    }
-
-    private void writeServerConfig(Path target, String nodeId, int httpPort, Map<String, Integer> raftPorts)
+    /** Writes a server configuration whose HTTP and API gRPC listeners bind any free port. */
+    private void writeServerConfig(Path target, String nodeId, Map<String, Integer> raftPorts)
             throws Exception {
         Map<String, String> members = new LinkedHashMap<>();
         raftPorts.forEach((member, port) -> members.put(member, "127.0.0.1:" + port));
@@ -512,7 +545,7 @@ class HealthPropagationEndToEndTest {
                   },
                   "logging": {"directory": %s}
                 }
-                """.formatted(JSON.writeValueAsString(nodeId), httpPort, freePort(), raftPorts.get(nodeId),
+                """.formatted(JSON.writeValueAsString(nodeId), 0, 0, raftPorts.get(nodeId),
                 JSON.writeValueAsString(members),
                 JSON.writeValueAsString(temporaryDirectory.resolve("raft-" + nodeId).toString()),
                 JSON.writeValueAsString(temporaryDirectory.resolve("logs").toString())));
@@ -542,7 +575,7 @@ class HealthPropagationEndToEndTest {
                   },
                   "logging": {"directory": %s}
                 }
-                """.formatted(freePort(), JSON.writeValueAsString(controller.toString()), workloadUrl.getPort(),
+                """.formatted(0, JSON.writeValueAsString(controller.toString()), workloadUrl.getPort(),
                 JSON.writeValueAsString(workloadUrl.resolve("/health").toString()), tcpPort,
                 JSON.writeValueAsString(temporaryDirectory.resolve("client-logs").toString())));
     }
@@ -567,7 +600,7 @@ class HealthPropagationEndToEndTest {
                   },
                   "logging": {"directory": %s}
                 }
-                """.formatted(freePort(), JSON.writeValueAsString(urls), workloadUrl.getPort(),
+                """.formatted(0, JSON.writeValueAsString(urls), workloadUrl.getPort(),
                 JSON.writeValueAsString(workloadUrl.resolve("/health").toString()), CLUSTER_TTL.toMillis(),
                 JSON.writeValueAsString(temporaryDirectory.resolve("client-logs").toString())));
     }

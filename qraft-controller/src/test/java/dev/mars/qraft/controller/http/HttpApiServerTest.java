@@ -34,6 +34,7 @@ import dev.mars.qraft.controller.raft.storage.RaftStorageFactory;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.CatalogCommand;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
+import dev.mars.qraft.controller.ui.AdminUiConfig;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.controller.state.RaftCommand;
 import dev.mars.qraft.controller.state.RaftCommandResult;
@@ -92,8 +93,8 @@ class HttpApiServerTest {
         if (server != null) {
             server.close();
         }
-        if (node != null) node.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-        if (runtime != null) runtime.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        if (node != null) node.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        if (runtime != null) runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         InMemoryTransportSimulator.clearAllTransports();
     }
 
@@ -542,11 +543,11 @@ class HttpApiServerTest {
                 .runtime(runtime).nodeId("follower").clusterNodes(Set.of("follower", "peer"))
                 .transport(transport).stateMachine(store).commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.volatileMode()).electionTimeout(10_000).build();
-        node.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         node.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
                         .setTerm(1).setLeaderId("peer").setPrevLogIndex(0).setPrevLogTerm(0)
                         .setLeaderCommit(0).build())
-                .toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         server = new HttpApiServer(0, node, store);
         server.start().join();
         String registration = """
@@ -572,14 +573,16 @@ class HttpApiServerTest {
 
     @Test
     void reportsUnknownOutcomeWhenHttpWriteTimesOut() throws Exception {
-        GatedAppendStorage gatedWal = startGatedHttpNode();
+        // The append is held until the test releases it, so only the write timeout can answer the request;
+        // a short timeout keeps the test from waiting out the production default.
+        GatedAppendStorage gatedWal = startGatedHttpNode(Duration.ofMillis(200));
 
         CompletableFuture<HttpResponse<String>> request = HttpClient.newHttpClient().sendAsync(
                 serviceRegistrationRequest("pending-service"), HttpResponse.BodyHandlers.ofString());
         gatedWal.awaitBlockedAppend();
 
         try {
-            HttpResponse<String> response = request.get(7, TimeUnit.SECONDS);
+            HttpResponse<String> response = request.get(10, TimeUnit.SECONDS);
             assertEquals(503, response.statusCode());
             assertErrorEnvelope(response, "outcome_unknown", true);
             assertTrue(response.body().contains("\"error\":\"outcome_unknown\""), response.body());
@@ -587,6 +590,16 @@ class HttpApiServerTest {
         } finally {
             gatedWal.releaseBlockedAppend();
         }
+    }
+
+    @Test
+    void aRaftTimeoutMustBePositive() {
+        for (Duration invalid : List.of(Duration.ZERO, Duration.ofMillis(-1))) {
+            assertThrows(IllegalArgumentException.class, () -> new HttpApiServer(0, null, null, Clock.systemUTC(),
+                    AdminUiConfig.disabled(), null, invalid), invalid.toString());
+        }
+        assertThrows(NullPointerException.class, () -> new HttpApiServer(0, null, null, Clock.systemUTC(),
+                AdminUiConfig.disabled(), null, null));
     }
 
     @Test
@@ -601,8 +614,8 @@ class HttpApiServerTest {
 
         try {
             gatedWal.releaseBlockedAppend();
-            assertEquals(200, first.get(5, TimeUnit.SECONDS).statusCode());
-            assertEquals(200, retry.get(5, TimeUnit.SECONDS).statusCode());
+            assertEquals(200, first.get(10, TimeUnit.SECONDS).statusCode());
+            assertEquals(200, retry.get(10, TimeUnit.SECONDS).statusCode());
             JsonNode instances = new ObjectMapper().readTree(request(client,
                     "/v1/catalog/service/pending", "GET").body());
             assertEquals(1, instances.size());
@@ -624,8 +637,8 @@ class HttpApiServerTest {
 
         try {
             gatedWal.releaseBlockedAppend();
-            assertEquals(200, nodeA.get(5, TimeUnit.SECONDS).statusCode());
-            assertEquals(200, nodeB.get(5, TimeUnit.SECONDS).statusCode());
+            assertEquals(200, nodeA.get(10, TimeUnit.SECONDS).statusCode());
+            assertEquals(200, nodeB.get(10, TimeUnit.SECONDS).statusCode());
             JsonNode instances = new ObjectMapper().readTree(request(client,
                     "/v1/catalog/service/pending", "GET").body());
             assertEquals(2, instances.size());
@@ -667,7 +680,7 @@ class HttpApiServerTest {
         QraftStateStore store = new QraftStateStore();
         RaftStorageFactory.DurableStorage durable = RaftStorageFactory
                 .createDurable(directory, true).toCompletionStage().toCompletableFuture()
-                .get(5, TimeUnit.SECONDS);
+                .get(10, TimeUnit.SECONDS);
         RaftStorage ambiguousStorage = new AmbiguousAppendStorage(durable.wal());
         node = RaftNode.builder()
                 .runtime(runtime).nodeId("fenced-node").clusterNodes(Set.of("fenced-node"))
@@ -676,7 +689,7 @@ class HttpApiServerTest {
                 .mode(RaftNodeMode.durable(ambiguousStorage, durable.snapshots()))
                 .snapshotEnabled(false).electionTimeout(25).heartbeatInterval(10_000)
                 .build();
-        node.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.onSpinWait();
         assertTrue(node.isLeader());
@@ -705,7 +718,7 @@ class HttpApiServerTest {
     void corruptWalFencesStartupWithoutMutatingTheEvidence() throws Exception {
         RaftStorageFactory.DurableStorage writer = RaftStorageFactory
                 .createDurable(directory, true).toCompletionStage().toCompletableFuture()
-                .get(5, TimeUnit.SECONDS);
+                .get(10, TimeUnit.SECONDS);
         writer.wal().appendEntries(List.of(new RaftStorage.LogEntryData(
                 1, 1, new byte[]{1, 2, 3}))).join();
         writer.wal().sync().join();
@@ -720,7 +733,7 @@ class HttpApiServerTest {
         QraftStateStore store = new QraftStateStore();
         RaftStorageFactory.DurableStorage reopened = RaftStorageFactory
                 .createDurable(directory, true).toCompletionStage().toCompletableFuture()
-                .get(5, TimeUnit.SECONDS);
+                .get(10, TimeUnit.SECONDS);
         node = RaftNode.builder()
                 .runtime(runtime).nodeId("corrupt-node").clusterNodes(Set.of("corrupt-node"))
                 .transport(new InMemoryTransportSimulator("corrupt-node"))
@@ -1153,7 +1166,7 @@ class HttpApiServerTest {
         }
 
         void awaitBlockedAppend() throws InterruptedException {
-            assertTrue(appendBlocked.await(5, TimeUnit.SECONDS), "append did not reach its gate");
+            assertTrue(appendBlocked.await(10, TimeUnit.SECONDS), "append did not reach its gate");
         }
 
         void releaseBlockedAppend() {
@@ -1208,7 +1221,7 @@ class HttpApiServerTest {
                 .electionTimeout(50)
                 .heartbeatInterval(20)
                 .build();
-        node.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.sleep(10);
         assertTrue(node.isLeader());
@@ -1228,11 +1241,15 @@ class HttpApiServerTest {
     }
 
     private GatedAppendStorage startGatedHttpNode() throws Exception {
+        return startGatedHttpNode(HttpApiServer.DEFAULT_RAFT_TIMEOUT);
+    }
+
+    private GatedAppendStorage startGatedHttpNode(Duration raftTimeout) throws Exception {
         runtime = JavaRuntime.create();
         QraftStateStore store = new QraftStateStore();
         RaftStorageFactory.DurableStorage durable = RaftStorageFactory
                 .createDurable(directory, true).toCompletionStage().toCompletableFuture()
-                .get(5, TimeUnit.SECONDS);
+                .get(10, TimeUnit.SECONDS);
         GatedAppendStorage gatedWal = new GatedAppendStorage(durable.wal());
         node = RaftNode.builder()
                 .runtime(runtime).nodeId("pending-http-node").clusterNodes(Set.of("pending-http-node"))
@@ -1241,11 +1258,11 @@ class HttpApiServerTest {
                 .mode(RaftNodeMode.durable(gatedWal, durable.snapshots()))
                 .snapshotEnabled(false).electionTimeout(25).heartbeatInterval(10_000)
                 .build();
-        node.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.onSpinWait();
         assertTrue(node.isLeader());
-        server = new HttpApiServer(0, node, store);
+        server = new HttpApiServer(0, node, store, Clock.systemUTC(), AdminUiConfig.disabled(), null, raftTimeout);
         server.start().join();
         gatedWal.blockNextAppendCompletion();
         return gatedWal;

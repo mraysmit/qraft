@@ -16,600 +16,257 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.controller.state.*;
-
-import dev.mars.qraft.controller.raft.grpc.*;
-
-
-import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
-import org.junit.jupiter.api.*;
+import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
+import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
+import dev.mars.qraft.controller.state.QraftStateStore;
+import dev.mars.qraft.controller.state.RaftCommandResult;
+import dev.mars.qraft.distributedstate.DistributedStateCommand;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
 
-import java.io.IOException;
-import java.net.ServerSocket;
-import java.time.Duration;
-import java.util.*;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 
-import static org.awaitility.Awaitility.await;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Integration tests for gRPC-based Raft communication.
- * Tests full client-server communication patterns including:
- * - Multi-node cluster communication
- * - Leader election over gRPC
- * - Log replication
- * - Network failure scenarios
- * - Cluster reconfiguration
- * 
+ * Tests Raft over real gRPC: {@link GrpcRaftServer} and {@link GrpcRaftTransport} carrying elections,
+ * heartbeats, and replication between {@link RaftNode}s.
+ *
+ * <p>Every server listens on port 0 and peers learn the port it bound before any node starts, so no test
+ * races another process for a port. Elections happen only when a test fires a chosen node's timeout
+ * through {@link ManualRaftTimers}, so who leads, and in which term, is decided by the test.
+ *
  * @author Mark Andrew Ray-Smith Cityline Ltd
- * @version 1.0
+ * @version 2.0
  * @since 2026-01-08
  */
 @Execution(ExecutionMode.SAME_THREAD)
 class GrpcRaftIntegrationTest {
+    private static final long HEARTBEAT_MS = 200;
 
     private JavaRuntime runtime;
-    private List<TestNode> nodes = new ArrayList<>();
+    private final Map<String, String> addresses = new ConcurrentHashMap<>();
+    private final List<Member> members = new ArrayList<>();
 
-    private static class TestNode {
-        final String id;
-        final int port;
-        final RaftNode raftNode;
-        final GrpcRaftServer grpcServer;
-        final GrpcRaftTransport transport;
-
-        TestNode(String id, int port, RaftNode raftNode, GrpcRaftServer grpcServer, GrpcRaftTransport transport) {
-            this.id = id;
-            this.port = port;
-            this.raftNode = raftNode;
-            this.grpcServer = grpcServer;
-            this.transport = transport;
-        }
-
+    private record Member(String id, RaftNode node, GrpcRaftServer server, ManualRaftTimers timers,
+                          QraftStateStore state) {
         void stop() throws Exception {
-            if (grpcServer != null) {
-                grpcServer.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-            }
-            if (raftNode != null) {
-                raftNode.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-            }
+            server.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            node.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
     }
 
     @BeforeEach
     void setUp() {
         runtime = JavaRuntime.create();
-        nodes.clear();
     }
 
     @AfterEach
     void tearDown() throws Exception {
-        for (TestNode node : nodes) {
+        Exception failure = null;
+        for (Member member : members) {
             try {
-                node.stop();
-            } catch (Exception e) {
-                // Ignore cleanup errors
+                member.stop();
+            } catch (Exception error) {
+                if (failure == null) failure = error;
+                else failure.addSuppressed(error);
             }
         }
-        nodes.clear();
-        
-        if (runtime != null) {
-            runtime.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        if (failure != null) throw failure;
+    }
+
+    @Test
+    void aCandidateIsElectedOverGrpcAndEveryPeerFollowsIt() throws Exception {
+        List<Member> cluster = startCluster("node1", "node2", "node3");
+
+        Member leader = elect(cluster.get(0));
+
+        assertEquals(1, leader.node().getCurrentTerm());
+        for (Member follower : cluster.subList(1, 3)) {
+            awaitTrue(() -> "node1".equals(follower.node().getLeaderId()), follower.id() + " follows node1");
+            assertEquals(RaftNode.State.FOLLOWER, follower.node().getState());
+            assertEquals(1, follower.node().getCurrentTerm());
         }
     }
 
-    private int findAvailablePort() throws IOException {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
+    @Test
+    void aCommandCommittedOverGrpcIsAppliedByEveryMember() throws Exception {
+        List<Member> cluster = startCluster("node1", "node2", "node3");
+        Member leader = elect(cluster.get(0));
+
+        RaftCommandResult<?> result = submit(leader, "replicated", "over-grpc");
+
+        assertInstanceOf(RaftCommandResult.Success.class, result);
+        leader.timers().firePeriodic(HEARTBEAT_MS); // carries the leader's commit index to the followers
+        for (Member member : cluster) {
+            awaitTrue(() -> "over-grpc".equals(member.state().getMetadata("replicated")),
+                    member.id() + " applies the committed command");
         }
     }
 
-    private TestNode createNode(String nodeId, Map<String, String> clusterConfig) throws Exception {
-        int port = Integer.parseInt(clusterConfig.get(nodeId).split(":")[1]);
-        Set<String> clusterNodes = clusterConfig.keySet();
-        
-        GrpcRaftTransport transport = new GrpcRaftTransport(runtime, nodeId, clusterConfig);
-        QraftStateStore stateMachine = new QraftStateStore();
-        
-        // Use shorter timeouts for faster tests
-        RaftNode raftNode = RaftNode.builder().runtime(runtime).nodeId(nodeId).clusterNodes(clusterNodes).transport(transport).stateMachine(stateMachine).mode(RaftNodeMode.volatileMode()).electionTimeout(1000).heartbeatInterval(200).commandCodec(new ProtobufRaftCommandCodec()).build();
-        transport.setRaftNode(raftNode);
-        
-        GrpcRaftServer grpcServer = new GrpcRaftServer(runtime, port, raftNode);
-        
-        return new TestNode(nodeId, port, raftNode, grpcServer, transport);
-    }
-
-    private void startNode(TestNode node) throws Exception {
-        node.grpcServer.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-        node.raftNode.start();
-        node.transport.start(msg -> {});
-    }
-
-    // ========== TWO-NODE CLUSTER TESTS ==========
-
     @Test
-    @DisplayName("Two-node cluster should elect leader via gRPC")
-    void testTwoNodeLeaderElection() throws Exception {
-        int port1 = findAvailablePort();
-        int port2 = findAvailablePort();
-        
-        Map<String, String> cluster = new HashMap<>();
-        cluster.put("node1", "localhost:" + port1);
-        cluster.put("node2", "localhost:" + port2);
-        
-        TestNode node1 = createNode("node1", cluster);
-        TestNode node2 = createNode("node2", cluster);
-        nodes.add(node1);
-        nodes.add(node2);
-        
-        startNode(node1);
-        startNode(node2);
-        
-        // Wait for leader election
-        await().atMost(Duration.ofSeconds(15))
-                .pollInterval(Duration.ofMillis(500))
-                .until(() -> {
-                    boolean node1Leader = node1.raftNode.isLeader();
-                    boolean node2Leader = node2.raftNode.isLeader();
-                    return node1Leader || node2Leader;
-                });
-        
-        // Verify exactly one leader
-        int leaderCount = 0;
-        if (node1.raftNode.isLeader()) leaderCount++;
-        if (node2.raftNode.isLeader()) leaderCount++;
-        
-        assertEquals(1, leaderCount, "Should have exactly one leader");
+    void aMajorityKeepsCommittingAfterAFollowerStops() throws Exception {
+        List<Member> cluster = startCluster("node1", "node2", "node3");
+        Member leader = elect(cluster.get(0));
+        cluster.get(2).stop();
+        members.remove(cluster.get(2));
+
+        RaftCommandResult<?> result = submit(leader, "after-stop", "two-of-three");
+
+        assertInstanceOf(RaftCommandResult.Success.class, result, "two of three members are a majority");
+        leader.timers().firePeriodic(HEARTBEAT_MS);
+        awaitTrue(() -> "two-of-three".equals(cluster.get(1).state().getMetadata("after-stop")),
+                "the remaining follower applies it");
     }
 
     @Test
-    @DisplayName("Two-node cluster should exchange heartbeats via gRPC")
-    void testTwoNodeHeartbeats() throws Exception {
-        int port1 = findAvailablePort();
-        int port2 = findAvailablePort();
-        
-        Map<String, String> cluster = new HashMap<>();
-        cluster.put("node1", "localhost:" + port1);
-        cluster.put("node2", "localhost:" + port2);
-        
-        TestNode node1 = createNode("node1", cluster);
-        TestNode node2 = createNode("node2", cluster);
-        nodes.add(node1);
-        nodes.add(node2);
-        
-        startNode(node1);
-        startNode(node2);
-        
-        // Wait for leader election
-        await().atMost(Duration.ofSeconds(15))
-                .pollInterval(Duration.ofMillis(500))
-                .until(() -> node1.raftNode.isLeader() || node2.raftNode.isLeader());
-        
-        // Verify cluster remains stable with exactly one leader
-        await().during(Duration.ofSeconds(2))
-                .atMost(Duration.ofSeconds(5))
-                .pollInterval(Duration.ofMillis(200))
-                .until(() -> {
-                    int lc = 0;
-                    if (node1.raftNode.isLeader()) lc++;
-                    if (node2.raftNode.isLeader()) lc++;
-                    return lc == 1;
-                });
-        
-        // Cluster should remain stable
-        int leaderCount = 0;
-        if (node1.raftNode.isLeader()) leaderCount++;
-        if (node2.raftNode.isLeader()) leaderCount++;
-        
-        assertEquals(1, leaderCount, "Should still have exactly one leader after heartbeats");
-    }
+    void aNewElectionAfterTheLeaderStopsAdvancesTheTerm() throws Exception {
+        List<Member> cluster = startCluster("node1", "node2", "node3");
+        Member first = elect(cluster.get(0));
+        submit(first, "before", "failover");
+        first.stop();
+        members.remove(first);
 
-    // ========== THREE-NODE CLUSTER TESTS ==========
+        Member second = elect(cluster.get(1));
 
-    @Test
-    @DisplayName("Three-node cluster should elect leader via gRPC")
-    void testThreeNodeLeaderElection() throws Exception {
-        int port1 = findAvailablePort();
-        int port2 = findAvailablePort();
-        int port3 = findAvailablePort();
-        
-        Map<String, String> cluster = new HashMap<>();
-        cluster.put("node1", "localhost:" + port1);
-        cluster.put("node2", "localhost:" + port2);
-        cluster.put("node3", "localhost:" + port3);
-        
-        TestNode node1 = createNode("node1", cluster);
-        TestNode node2 = createNode("node2", cluster);
-        TestNode node3 = createNode("node3", cluster);
-        nodes.add(node1);
-        nodes.add(node2);
-        nodes.add(node3);
-        
-        startNode(node1);
-        startNode(node2);
-        startNode(node3);
-        
-        // Wait for leader election
-        await().atMost(Duration.ofSeconds(15))
-                .pollInterval(Duration.ofMillis(500))
-                .until(() -> {
-                    return node1.raftNode.isLeader() || 
-                           node2.raftNode.isLeader() || 
-                           node3.raftNode.isLeader();
-                });
-        
-        // Verify exactly one leader
-        int leaderCount = 0;
-        if (node1.raftNode.isLeader()) leaderCount++;
-        if (node2.raftNode.isLeader()) leaderCount++;
-        if (node3.raftNode.isLeader()) leaderCount++;
-        
-        assertEquals(1, leaderCount, "Should have exactly one leader");
+        assertEquals(2, second.node().getCurrentTerm(), "a new leader is elected in a later term");
+        Member follower = cluster.get(2);
+        awaitTrue(() -> "node2".equals(follower.node().getLeaderId()) && follower.node().getCurrentTerm() == 2,
+                "node3 follows the new leader in its term");
+        // node2 held the entry but never heard it was committed; as leader it commits it together with the
+        // no-op of its own term (Raft section 5.4.2), once node3 acknowledges.
+        awaitTrue(() -> "failover".equals(second.state().getMetadata("before")),
+                "a committed entry survives the change of leader");
     }
 
     @Test
-    @DisplayName("Three-node cluster should have consistent term")
-    void testThreeNodeTermConsistency() throws Exception {
-        int port1 = findAvailablePort();
-        int port2 = findAvailablePort();
-        int port3 = findAvailablePort();
-        
-        Map<String, String> cluster = new HashMap<>();
-        cluster.put("node1", "localhost:" + port1);
-        cluster.put("node2", "localhost:" + port2);
-        cluster.put("node3", "localhost:" + port3);
-        
-        TestNode node1 = createNode("node1", cluster);
-        TestNode node2 = createNode("node2", cluster);
-        TestNode node3 = createNode("node3", cluster);
-        nodes.add(node1);
-        nodes.add(node2);
-        nodes.add(node3);
-        
-        startNode(node1);
-        startNode(node2);
-        startNode(node3);
-        
-        // Wait for leader election
-        await().atMost(Duration.ofSeconds(15))
-                .pollInterval(Duration.ofMillis(500))
-                .until(() -> node1.raftNode.isLeader() || 
-                             node2.raftNode.isLeader() || 
-                             node3.raftNode.isLeader());
-        
-        // Wait for cluster to stabilize (all nodes should agree on term)
-        await().atMost(Duration.ofSeconds(10))
-                .pollInterval(Duration.ofMillis(200))
-                .until(() -> {
-                    long t1 = node1.raftNode.getCurrentTerm();
-                    long t2 = node2.raftNode.getCurrentTerm();
-                    long t3 = node3.raftNode.getCurrentTerm();
-                    long max = Math.max(Math.max(t1, t2), t3);
-                    long min = Math.min(Math.min(t1, t2), t3);
-                    return max - min <= 1;
-                });
-        
-        // Terms should be equal or within 1 of each other
-        long term1 = node1.raftNode.getCurrentTerm();
-        long term2 = node2.raftNode.getCurrentTerm();
-        long term3 = node3.raftNode.getCurrentTerm();
-        
-        long maxTerm = Math.max(Math.max(term1, term2), term3);
-        long minTerm = Math.min(Math.min(term1, term2), term3);
-        
-        assertTrue(maxTerm - minTerm <= 1, 
-                "Terms should be within 1 of each other: " + term1 + ", " + term2 + ", " + term3);
-    }
+    void simultaneousCandidaciesElectExactlyOneLeaderInTheirTerm() throws Exception {
+        List<Member> cluster = startCluster("node1", "node2", "node3");
+        Map<Long, Set<String>> leadersByTerm = recordLeaders(cluster);
 
-    // ========== STAGGERED STARTUP TESTS ==========
+        cluster.get(0).timers().fireElectionTimeout();
+        cluster.get(1).timers().fireElectionTimeout();
 
-    @Test
-    @DisplayName("Cluster should handle staggered node startup")
-    void testStaggeredNodeStartup() throws Exception {
-        int port1 = findAvailablePort();
-        int port2 = findAvailablePort();
-        int port3 = findAvailablePort();
-        
-        Map<String, String> cluster = new HashMap<>();
-        cluster.put("node1", "localhost:" + port1);
-        cluster.put("node2", "localhost:" + port2);
-        cluster.put("node3", "localhost:" + port3);
-        
-        TestNode node1 = createNode("node1", cluster);
-        TestNode node2 = createNode("node2", cluster);
-        TestNode node3 = createNode("node3", cluster);
-        nodes.add(node1);
-        nodes.add(node2);
-        nodes.add(node3);
-        
-        // Start first node
-        startNode(node1);
-        Thread.sleep(200); // Brief stagger to simulate real-world startup delay
-        
-        // Start second node (now quorum possible)
-        startNode(node2);
-        
-        // Wait for leader with 2 nodes
-        await().atMost(Duration.ofSeconds(15))
-                .pollInterval(Duration.ofMillis(500))
-                .until(() -> node1.raftNode.isLeader() || node2.raftNode.isLeader());
-        
-        // Start third node
-        startNode(node3);
-        
-        // Wait for cluster to stabilize with all three nodes
-        await().atMost(Duration.ofSeconds(10))
-                .pollInterval(Duration.ofMillis(200))
-                .until(() -> {
-                    int lc = 0;
-                    if (node1.raftNode.isLeader()) lc++;
-                    if (node2.raftNode.isLeader()) lc++;
-                    if (node3.raftNode.isLeader()) lc++;
-                    return lc == 1;
-                });
-        
-        // Should still have exactly one leader
-        int leaderCount = 0;
-        if (node1.raftNode.isLeader()) leaderCount++;
-        if (node2.raftNode.isLeader()) leaderCount++;
-        if (node3.raftNode.isLeader()) leaderCount++;
-        
-        assertEquals(1, leaderCount, "Should have exactly one leader after all nodes join");
-    }
-
-    // ========== NODE FAILURE TESTS ==========
-
-    @Test
-    @DisplayName("Cluster should survive follower shutdown")
-    void testFollowerShutdown() throws Exception {
-        int port1 = findAvailablePort();
-        int port2 = findAvailablePort();
-        int port3 = findAvailablePort();
-        
-        Map<String, String> cluster = new HashMap<>();
-        cluster.put("node1", "localhost:" + port1);
-        cluster.put("node2", "localhost:" + port2);
-        cluster.put("node3", "localhost:" + port3);
-        
-        TestNode node1 = createNode("node1", cluster);
-        TestNode node2 = createNode("node2", cluster);
-        TestNode node3 = createNode("node3", cluster);
-        nodes.add(node1);
-        nodes.add(node2);
-        nodes.add(node3);
-        
-        startNode(node1);
-        startNode(node2);
-        startNode(node3);
-        
-        // Wait for leader election
-        await().atMost(Duration.ofSeconds(15))
-                .pollInterval(Duration.ofMillis(500))
-                .until(() -> node1.raftNode.isLeader() || 
-                             node2.raftNode.isLeader() || 
-                             node3.raftNode.isLeader());
-        
-        // Find a follower to shut down
-        TestNode follower = null;
-        for (TestNode node : nodes) {
-            if (!node.raftNode.isLeader()) {
-                follower = node;
-                break;
-            }
+        // node3 grants its single term-1 vote to whichever request arrives first, so exactly one candidate
+        // reaches a majority. The other learns of it from the winner's first heartbeat and steps down.
+        awaitTrue(() -> cluster.stream().filter(member -> member.node().isLeader()).count() == 1
+                        && cluster.stream().allMatch(member -> member.node().getLeaderId() != null),
+                "one leader emerges and every member knows it");
+        String leaderId = cluster.stream().filter(member -> member.node().isLeader()).findFirst().orElseThrow().id();
+        for (Member member : cluster) {
+            assertEquals(leaderId, member.node().getLeaderId());
         }
-        assertNotNull(follower, "Should have at least one follower");
-        
-        // Shut down follower
-        follower.stop();
-        nodes.remove(follower);
-        
-        // Wait for cluster to stabilize after follower shutdown
-        await().atMost(Duration.ofSeconds(10))
-                .pollInterval(Duration.ofMillis(200))
-                .until(() -> {
-                    int lc = 0;
-                    for (TestNode n : nodes) {
-                        if (n.raftNode.isLeader()) lc++;
-                    }
-                    return lc == 1;
-                });
-        
-        // Should still have exactly one leader among remaining nodes
-        int leaderCount = 0;
-        for (TestNode node : nodes) {
-            if (node.raftNode.isLeader()) leaderCount++;
+        leadersByTerm.forEach((term, leaders) -> assertEquals(1, leaders.size(), "term " + term + ": " + leaders));
+    }
+
+    @Test
+    void aMemberStartedLaterCatchesUpWithTheLeader() throws Exception {
+        List<Member> cluster = buildCluster("node1", "node2", "node3");
+        start(cluster.get(0));
+        start(cluster.get(1));
+        Member leader = elect(cluster.get(0));
+        submit(leader, "early", "before-node3");
+
+        start(cluster.get(2));
+        leader.timers().firePeriodic(HEARTBEAT_MS);
+
+        Member late = cluster.get(2);
+        awaitTrue(() -> "before-node3".equals(late.state().getMetadata("early")),
+                "the late member receives and applies the entries it missed");
+        assertEquals("node1", late.node().getLeaderId());
+    }
+
+    @Test
+    void aSoleMemberElectsItself() throws Exception {
+        Member solo = startCluster("solo").getFirst();
+
+        elect(solo);
+
+        assertEquals(1, solo.node().getCurrentTerm());
+        assertInstanceOf(RaftCommandResult.Success.class, submit(solo, "solo", "committed-alone"));
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+
+    private List<Member> startCluster(String... ids) throws Exception {
+        List<Member> cluster = buildCluster(ids);
+        for (Member member : cluster) start(member);
+        return cluster;
+    }
+
+    /**
+     * Builds each member with its gRPC server listening on port 0, then records the port every server bound
+     * as that member's address. Transports read the shared address map when they dial, so every address is
+     * real before any node starts.
+     */
+    private List<Member> buildCluster(String... ids) throws Exception {
+        Set<String> memberIds = Set.of(ids);
+        List<Member> cluster = new ArrayList<>();
+        for (String id : ids) {
+            GrpcRaftTransport transport = new GrpcRaftTransport(runtime, id, addresses);
+            ManualRaftTimers timers = new ManualRaftTimers(runtime);
+            QraftStateStore state = new QraftStateStore();
+            RaftNode node = RaftNode.builder().runtime(runtime).nodeId(id).clusterNodes(memberIds)
+                    .transport(transport).stateMachine(state).commandCodec(new ProtobufRaftCommandCodec())
+                    .mode(RaftNodeMode.volatileMode()).snapshotEnabled(false)
+                    .electionTimeout(1_000).heartbeatInterval(HEARTBEAT_MS).timerScheduler(timers)
+                    .build();
+            GrpcRaftServer server = new GrpcRaftServer(runtime, 0, node);
+            server.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            addresses.put(id, "localhost:" + server.port());
+            Member member = new Member(id, node, server, timers, state);
+            cluster.add(member);
+            members.add(member);
         }
-        
-        assertEquals(1, leaderCount, "Should still have exactly one leader after follower shutdown");
+        return cluster;
     }
 
-    // ========== CONCURRENT VOTING TESTS ==========
-
-    @Test
-    @DisplayName("Concurrent elections should converge to single leader")
-    void testConcurrentElectionsConverge() throws Exception {
-        int port1 = findAvailablePort();
-        int port2 = findAvailablePort();
-        int port3 = findAvailablePort();
-        
-        Map<String, String> cluster = new HashMap<>();
-        cluster.put("node1", "localhost:" + port1);
-        cluster.put("node2", "localhost:" + port2);
-        cluster.put("node3", "localhost:" + port3);
-        
-        TestNode node1 = createNode("node1", cluster);
-        TestNode node2 = createNode("node2", cluster);
-        TestNode node3 = createNode("node3", cluster);
-        nodes.add(node1);
-        nodes.add(node2);
-        nodes.add(node3);
-        
-        // Start all nodes simultaneously to maximize election contention
-        ExecutorService executor = Executors.newFixedThreadPool(3);
-        CountDownLatch latch = new CountDownLatch(3);
-        
-        executor.submit(() -> {
-            try {
-                startNode(node1);
-            } catch (Exception e) {
-                e.printStackTrace();
-            } finally {
-                latch.countDown();
-            }
-        });
-        executor.submit(() -> {
-            try {
-                startNode(node2);
-            } catch (Exception e) {
-                e.printStackTrace();
-            } finally {
-                latch.countDown();
-            }
-        });
-        executor.submit(() -> {
-            try {
-                startNode(node3);
-            } catch (Exception e) {
-                e.printStackTrace();
-            } finally {
-                latch.countDown();
-            }
-        });
-        
-        assertTrue(latch.await(10, TimeUnit.SECONDS));
-        executor.shutdown();
-        
-        // Wait for leader election
-        await().atMost(Duration.ofSeconds(20))
-                .pollInterval(Duration.ofMillis(500))
-                .until(() -> node1.raftNode.isLeader() || 
-                             node2.raftNode.isLeader() || 
-                             node3.raftNode.isLeader());
-        
-        // Wait for cluster to converge to one leader
-        await().atMost(Duration.ofSeconds(10))
-                .pollInterval(Duration.ofMillis(200))
-                .until(() -> {
-                    int lc = 0;
-                    if (node1.raftNode.isLeader()) lc++;
-                    if (node2.raftNode.isLeader()) lc++;
-                    if (node3.raftNode.isLeader()) lc++;
-                    return lc == 1;
-                });
-        
-        // Should converge to exactly one leader
-        int leaderCount = 0;
-        if (node1.raftNode.isLeader()) leaderCount++;
-        if (node2.raftNode.isLeader()) leaderCount++;
-        if (node3.raftNode.isLeader()) leaderCount++;
-        
-        assertEquals(1, leaderCount, "Should converge to exactly one leader");
+    private static void start(Member member) throws Exception {
+        member.node().start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
     }
 
-    // ========== TERM ADVANCEMENT TESTS ==========
-
-    @Test
-    @DisplayName("Term should increase with new elections")
-    void testTermAdvancement() throws Exception {
-        int port1 = findAvailablePort();
-        int port2 = findAvailablePort();
-        
-        Map<String, String> cluster = new HashMap<>();
-        cluster.put("node1", "localhost:" + port1);
-        cluster.put("node2", "localhost:" + port2);
-        
-        TestNode node1 = createNode("node1", cluster);
-        TestNode node2 = createNode("node2", cluster);
-        nodes.add(node1);
-        nodes.add(node2);
-        
-        startNode(node1);
-        startNode(node2);
-        
-        // Wait for leader election
-        await().atMost(Duration.ofSeconds(15))
-                .pollInterval(Duration.ofMillis(500))
-                .until(() -> node1.raftNode.isLeader() || node2.raftNode.isLeader());
-        
-        long initialTerm = Math.max(node1.raftNode.getCurrentTerm(), node2.raftNode.getCurrentTerm());
-        
-        // Term should be at least 1 (first election)
-        assertTrue(initialTerm >= 1, "Term should be at least 1 after first election");
+    private static Member elect(Member candidate) throws Exception {
+        candidate.timers().fireElectionTimeout();
+        candidate.node().awaitState(RaftNode.State.LEADER, 10_000)
+                .toCompletionStage().toCompletableFuture().get(15, TimeUnit.SECONDS);
+        return candidate;
     }
 
-    // ========== SINGLE NODE CLUSTER TEST ==========
-
-    @Test
-    @DisplayName("Single node cluster should immediately become leader")
-    void testSingleNodeCluster() throws Exception {
-        int port1 = findAvailablePort();
-        
-        Map<String, String> cluster = new HashMap<>();
-        cluster.put("node1", "localhost:" + port1);
-        
-        TestNode node1 = createNode("node1", cluster);
-        nodes.add(node1);
-        
-        startNode(node1);
-        
-        // Single node should become leader quickly
-        await().atMost(Duration.ofSeconds(10))
-                .pollInterval(Duration.ofMillis(200))
-                .until(() -> node1.raftNode.isLeader());
-        
-        assertTrue(node1.raftNode.isLeader(), "Single node should be leader");
+    private static RaftCommandResult<?> submit(Member leader, String key, String value) throws Exception {
+        return leader.node().submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put(key, value)))
+                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
     }
 
-    // ========== STRESS TEST ==========
+    private static Map<Long, Set<String>> recordLeaders(List<Member> cluster) {
+        Map<Long, Set<String>> leadersByTerm = new ConcurrentHashMap<>();
+        for (Member member : cluster) {
+            member.node().addStateChangeListener(state -> {
+                if (state == RaftNode.State.LEADER) {
+                    leadersByTerm.computeIfAbsent(member.node().getCurrentTerm(),
+                            term -> ConcurrentHashMap.newKeySet()).add(member.id());
+                }
+            });
+        }
+        return leadersByTerm;
+    }
 
-    @Test
-    @DisplayName("Cluster should remain stable under repeated state checks")
-    void testClusterStabilityUnderObservation() throws Exception {
-        int port1 = findAvailablePort();
-        int port2 = findAvailablePort();
-        int port3 = findAvailablePort();
-        
-        Map<String, String> cluster = new HashMap<>();
-        cluster.put("node1", "localhost:" + port1);
-        cluster.put("node2", "localhost:" + port2);
-        cluster.put("node3", "localhost:" + port3);
-        
-        TestNode node1 = createNode("node1", cluster);
-        TestNode node2 = createNode("node2", cluster);
-        TestNode node3 = createNode("node3", cluster);
-        nodes.add(node1);
-        nodes.add(node2);
-        nodes.add(node3);
-        
-        startNode(node1);
-        startNode(node2);
-        startNode(node3);
-        
-        // Wait for leader election
-        await().atMost(Duration.ofSeconds(15))
-                .pollInterval(Duration.ofMillis(500))
-                .until(() -> node1.raftNode.isLeader() || 
-                             node2.raftNode.isLeader() || 
-                             node3.raftNode.isLeader());
-        
-        // Verify cluster stability: exactly one leader for a sustained period
-        // Use Awaitility during() to verify the condition holds continuously for 2s
-        await().during(Duration.ofSeconds(2))
-                .atMost(Duration.ofSeconds(5))
-                .pollInterval(Duration.ofMillis(50))
-                .until(() -> {
-                    int leaderCount = 0;
-                    if (node1.raftNode.isLeader()) leaderCount++;
-                    if (node2.raftNode.isLeader()) leaderCount++;
-                    if (node3.raftNode.isLeader()) leaderCount++;
-                    return leaderCount == 1;
-                });
+    /** Bounds a wait for gRPC round trips; the bound only diagnoses a hang. */
+    private static void awaitTrue(BooleanSupplier condition, String description) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!condition.getAsBoolean() && System.nanoTime() < deadline) Thread.sleep(5);
+        assertTrue(condition.getAsBoolean(), description);
     }
 }

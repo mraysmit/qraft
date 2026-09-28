@@ -78,7 +78,7 @@ public final class InstalledSnapshotCrashWriter {
                 .dataDir(directory)
                 .syncEnabled(true)
                 .build());
-        realWal.open(directory).get(5, TimeUnit.SECONDS);
+        realWal.open(directory).get(10, TimeUnit.SECONDS);
 
         CompactionGateStorage gatedWal = DURING_SHUTDOWN_AFTER_PREFIX_COMPACTION.equals(checkpoint)
                 ? new CompactionGateStorage(realWal)
@@ -91,7 +91,7 @@ public final class InstalledSnapshotCrashWriter {
                 Runtime.getRuntime().halt(HALT_EXIT_CODE);
             }
         });
-        snapshots.open(directory).get(5, TimeUnit.SECONDS);
+        snapshots.open(directory).get(10, TimeUnit.SECONDS);
 
         JavaRuntime runtime = JavaRuntime.create();
         RaftNode node = RaftNode.builder()
@@ -162,7 +162,7 @@ public final class InstalledSnapshotCrashWriter {
     }
 
     private static <T> T await(Future<T> future) {
-        return future.timeout(5, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
+        return future.timeout(10, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
     }
 
     private static final class CompactionGateStorage implements RaftStorage {
@@ -175,7 +175,7 @@ public final class InstalledSnapshotCrashWriter {
         }
 
         void awaitCompaction() throws Exception {
-            compactionReached.get(5, TimeUnit.SECONDS);
+            compactionReached.get(10, TimeUnit.SECONDS);
         }
 
         @Override public CompletableFuture<Void> open(Path dataDir) { return delegate.open(dataDir); }

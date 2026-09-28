@@ -67,7 +67,21 @@ class AgentConfigurationTest {
         assertThrows(IllegalArgumentException.class, () -> AgentConfiguration.builder()
                 .agentId("agent").build());
         assertThrows(IllegalArgumentException.class, () -> AgentConfiguration.builder()
-                .agentId("agent").controllerUrl("http://localhost").agentPort(0).build());
+                .agentId("agent").controllerUrl("http://localhost").agentPort(-1).build());
+        assertThrows(IllegalArgumentException.class, () -> AgentConfiguration.builder()
+                .agentId("agent").controllerUrl("http://localhost").agentPort(65_536).build());
+    }
+
+    @Test
+    void portZeroAsksForAnyFreePort() {
+        assertEquals(0, AgentConfiguration.builder()
+                .agentId("agent").controllerUrl("http://localhost").agentPort(0).build().getAgentPort());
+        assertEquals(0, AgentConfiguration.fromJson("""
+                {"version":1,"agent":{"id":"a","httpPort":0},
+                 "controllers":{"urls":["http://localhost:8080"]},"catalog":{}}
+                """).getAgentPort());
+        assertEquals(65_535, AgentConfiguration.builder()
+                .agentId("agent").controllerUrl("http://localhost").agentPort(65_535).build().getAgentPort());
     }
 
     @Test

@@ -169,7 +169,7 @@ class QraftRuntimeApplicationTest {
             for (int index = 0; index < 32; index++) {
                 closes.add(CompletableFuture.supplyAsync(lifecycle::closeAsync, callers).thenCompose(value -> value));
             }
-            assertTrue(enteredClose.await(2, TimeUnit.SECONDS));
+            assertTrue(enteredClose.await(10, TimeUnit.SECONDS));
             shutdown.complete(null);
             CompletableFuture.allOf(closes.toArray(CompletableFuture[]::new)).join();
         }

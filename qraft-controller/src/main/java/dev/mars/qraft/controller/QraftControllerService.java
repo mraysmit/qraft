@@ -207,15 +207,15 @@ public class QraftControllerService {
                     Duration.ofMillis(config.getHealthExpiryIntervalMs())));
 
             internalRaftServer.start().compose(v1 -> {
-                logger.info("Internal Raft gRPC server started on port {}", raftPort);
+                logger.info("Internal Raft gRPC server started on port {}", internalRaftServer.port());
                 return externalApiServer.start();
             }).onSuccess(v2 -> {
-                logger.info("External API gRPC server started on port {}", apiGrpcPort);
+                logger.info("External API gRPC server started on port {}", externalApiServer.port());
 
                 try {
                     healthServer.start();
                     node.start().onSuccess(v3 -> {
-                        logger.info("HTTP health server started on port {}", config.getHttpPort());
+                        logger.info("HTTP health server started on port {}", healthServer.port());
 
                         // 7. Start Raft (includes recovery from WAL)
                         // 8. Setup shutdown coordinator for graceful shutdown
@@ -291,6 +291,19 @@ public class QraftControllerService {
     private void stopHealthExpiry() {
         healthExpiry.ifPresent(LeaderHealthExpiry::close);
         healthExpiryExecutor.ifPresent(ScheduledExecutorService::shutdownNow);
+    }
+
+    /**
+     * The ports this controller's listeners bound: {@code http}, {@code raft}, and {@code apiGrpc}. A port
+     * configured as 0 is reported as the port the system chose.
+     *
+     * @throws IllegalStateException when the controller has not started its listeners, or has stopped them
+     */
+    public Map<String, Integer> boundPorts() {
+        HttpApiServer http = httpApiServer.orElseThrow(() -> new IllegalStateException("the controller is not running"));
+        GrpcRaftServer raft = raftGrpcServer.orElseThrow(() -> new IllegalStateException("the controller is not running"));
+        GrpcServiceServer api = apiGrpcServer.orElseThrow(() -> new IllegalStateException("the controller is not running"));
+        return Map.of("http", http.port(), "raft", raft.port(), "apiGrpc", api.port());
     }
 
     public Future<Void> stop() {

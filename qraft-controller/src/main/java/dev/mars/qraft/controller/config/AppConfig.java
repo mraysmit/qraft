@@ -291,12 +291,16 @@ public final class AppConfig {
     }
 
     public void validate() {
-        validatePort("server.http.port", getHttpPort());
-        validatePort("server.raft.port", getRaftPort());
-        validatePort("server.apiGrpcPort", getApiGrpcPort());
+        validateListeningPort("server.http.port", getHttpPort());
+        validateListeningPort("server.raft.port", getRaftPort());
+        validateListeningPort("server.apiGrpcPort", getApiGrpcPort());
         validatePort("server.telemetry.prometheusPort", getPrometheusPort());
-        if (getHttpPort() == getRaftPort() || getHttpPort() == getApiGrpcPort()
-                || getRaftPort() == getApiGrpcPort()) {
+        if (getRaftPort() == 0 && hasPeers()) {
+            throw new IllegalStateException("server.raft.port may be 0 only on a cluster's sole member: "
+                    + "peers dial the configured Raft address");
+        }
+        if (clash(getHttpPort(), getRaftPort()) || clash(getHttpPort(), getApiGrpcPort())
+                || clash(getRaftPort(), getApiGrpcPort())) {
             throw new IllegalStateException("HTTP, Raft, and API gRPC ports must be different");
         }
         if (getRaftIoPoolSize() < 1 || getRaftIoPoolSize() > 100) {
@@ -316,6 +320,27 @@ public final class AppConfig {
         }
         if (!getRaftStorageFsync()) throw new IllegalStateException("Raft WAL fsync must be enabled for durability");
         getNodeId();
+    }
+
+    /** A port this server listens on: 0 asks the system for any free port. */
+    private static void validateListeningPort(String name, int port) {
+        if (port < 0 || port > 65_535) {
+            throw new IllegalStateException(name + " must be between 0 and 65535, got: " + port);
+        }
+    }
+
+    /** Two zeros never clash: each asks the system for its own free port. */
+    private static boolean clash(int first, int second) {
+        return first != 0 && first == second;
+    }
+
+    private boolean hasPeers() {
+        String self = getNodeId();
+        for (String entry : getClusterNodes().split(",")) {
+            String member = entry.split("=", 2)[0].trim();
+            if (!member.isEmpty() && !member.equals(self)) return true;
+        }
+        return false;
     }
 
     private static void validatePort(String name, int port) {

@@ -52,7 +52,7 @@ class RaftPersistenceArchitectureTest {
     void tearDown() throws Exception {
         storage.close();
         runtime.shutdown().toCompletionStage().toCompletableFuture()
-                .get(5, TimeUnit.SECONDS);
+                .get(10, TimeUnit.SECONDS);
     }
 
     @Test
@@ -85,7 +85,7 @@ class RaftPersistenceArchitectureTest {
     }
 
     private static <T> T await(Future<T> future) {
-        return future.timeout(5, TimeUnit.SECONDS)
+        return future.timeout(10, TimeUnit.SECONDS)
                 .toCompletionStage().toCompletableFuture().join();
     }
 }

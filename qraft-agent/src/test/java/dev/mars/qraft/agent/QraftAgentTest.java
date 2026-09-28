@@ -29,7 +29,6 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
 import java.net.InetSocketAddress;
-import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
@@ -44,6 +43,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -73,6 +73,39 @@ class QraftAgentTest {
     }
 
     @Test
+    void anAgentOnPortZeroRegistersThePortItActuallyBound() throws Exception {
+        AtomicReference<String> registration = new AtomicReference<>();
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/api/v1/agents/register", exchange -> {
+            registration.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            exchange.sendResponseHeaders(201, -1);
+            exchange.close();
+        });
+        server.createContext("/api/v1/agents/agent-1", exchange -> {
+            exchange.sendResponseHeaders(204, -1);
+            exchange.close();
+        });
+        server.start();
+        AgentConfiguration config = AgentConfiguration.builder()
+                .agentId("agent-1").hostname("host").address("127.0.0.1").agentPort(0)
+                .controllerUrl("http://localhost:" + server.getAddress().getPort())
+                .heartbeatInterval(60_000)
+                .build();
+        QraftAgent agent = manuallyTimedAgent(config);
+
+        try {
+            assertTrue(agent.start().get(10, TimeUnit.SECONDS));
+            int bound = agent.healthService().port();
+            assertTrue(bound > 0);
+            assertEquals(bound, new com.fasterxml.jackson.databind.ObjectMapper()
+                    .readTree(registration.get()).path("port").intValue(),
+                    "the controller must be told the port the agent can actually be reached on");
+        } finally {
+            agent.shutdown().get(10, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
     void startsAndShutsDownAgainstController() throws Exception {
         server = HttpServer.create(new InetSocketAddress(0), 0);
         server.createContext("/api/v1/agents/register", exchange -> {
@@ -89,7 +122,7 @@ class QraftAgentTest {
                 .agentId("agent-1")
                 .hostname("host")
                 .address("127.0.0.1")
-                .agentPort(freePort())
+                .agentPort(0)
                 .controllerUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000)
                 .build();
@@ -115,7 +148,7 @@ class QraftAgentTest {
                 .agentId("agent-1")
                 .hostname("host")
                 .address("127.0.0.1")
-                .agentPort(freePort())
+                .agentPort(0)
                 .controllerUrl("http://localhost:" + server.getAddress().getPort())
                 .build();
         QraftAgent agent = new QraftAgent(config);
@@ -148,7 +181,7 @@ class QraftAgentTest {
         server.start();
         AgentConfiguration config = AgentConfiguration.builder()
                 .agentId("agent-1").hostname("host").address("127.0.0.1")
-                .agentPort(freePort()).controllerUrl("http://localhost:" + server.getAddress().getPort())
+                .agentPort(0).controllerUrl("http://localhost:" + server.getAddress().getPort())
                 .build();
         QraftAgent agent = manuallyTimedAgent(config);
         Logger logger = (Logger) LoggerFactory.getLogger(AgentRegistrationClient.class);
@@ -194,7 +227,7 @@ class QraftAgentTest {
                 .agentId("agent-1")
                 .hostname("host")
                 .address("127.0.0.1")
-                .agentPort(freePort())
+                .agentPort(0)
                 .controllerUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000)
                 .build();
@@ -240,7 +273,7 @@ class QraftAgentTest {
         server.start();
         AgentConfiguration config = AgentConfiguration.builder()
                 .agentId("agent-1").hostname("host").address("127.0.0.1")
-                .agentPort(freePort()).controllerUrl("http://localhost:" + server.getAddress().getPort())
+                .agentPort(0).controllerUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000)
                 .build();
         QraftAgent agent = manuallyTimedAgent(config);
@@ -280,7 +313,7 @@ class QraftAgentTest {
         server.start();
         AgentConfiguration config = AgentConfiguration.builder()
                 .agentId("agent-1").hostname("host").address("127.0.0.1")
-                .agentPort(freePort()).controllerUrl("http://localhost:" + server.getAddress().getPort())
+                .agentPort(0).controllerUrl("http://localhost:" + server.getAddress().getPort())
                 .build();
         QraftAgent agent = manuallyTimedAgent(config);
 
@@ -325,7 +358,7 @@ class QraftAgentTest {
                 .agentId("agent-1")
                 .hostname("host")
                 .address("127.0.0.1")
-                .agentPort(freePort())
+                .agentPort(0)
                 .controllerUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000)
                 .build();
@@ -377,7 +410,7 @@ class QraftAgentTest {
                 .agentId("agent-1")
                 .hostname("host")
                 .address("127.0.0.1")
-                .agentPort(freePort())
+                .agentPort(0)
                 .controllerUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000)
                 .services(List.of(new ServiceDefinition("web", "web", "127.0.0.1", 8080,
@@ -421,7 +454,7 @@ class QraftAgentTest {
         server.start();
         AgentConfiguration config = AgentConfiguration.builder()
                 .agentId("agent-1").hostname("host").address("127.0.0.1")
-                .agentPort(freePort()).controllerUrl("http://localhost:" + server.getAddress().getPort())
+                .agentPort(0).controllerUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000)
                 .services(List.of(new ServiceDefinition("web", "web", "127.0.0.1", 8080,
                         List.of(), Map.of(), true)))
@@ -456,7 +489,7 @@ class QraftAgentTest {
         server.start();
         AgentConfiguration config = AgentConfiguration.builder()
                 .agentId("agent-1").hostname("host").address("127.0.0.1")
-                .agentPort(freePort()).controllerUrl("http://localhost:" + server.getAddress().getPort())
+                .agentPort(0).controllerUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000).contactFreshnessMs(1_000)
                 .build();
         MutableClock clock = new MutableClock(Instant.parse("2026-09-24T10:00:00Z"));
@@ -590,7 +623,7 @@ class QraftAgentTest {
     private AgentConfiguration agentConfigWithServices(long shutdownTimeoutMs) throws Exception {
         return AgentConfiguration.builder()
                 .agentId("agent-1").hostname("host").address("127.0.0.1")
-                .agentPort(freePort()).controllerUrl("http://localhost:" + server.getAddress().getPort())
+                .agentPort(0).controllerUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000).requestTimeoutMs(10_000)
                 .shutdownTimeoutMs(shutdownTimeoutMs)
                 .services(List.of(
@@ -622,11 +655,6 @@ class QraftAgentTest {
         assertTrue(condition.getAsBoolean(), description);
     }
 
-    private static int freePort() throws Exception {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        }
-    }
 
     private static final class MutableClock extends Clock {
         private Instant instant;

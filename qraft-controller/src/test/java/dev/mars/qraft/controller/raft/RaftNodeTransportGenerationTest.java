@@ -49,7 +49,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests that {@link RaftNode} discards delayed append responses from a previous leadership and does
- * not let granted votes overtake a blocked higher-term transition.
+ * not let granted votes overtake a blocked higher-term transition. Elections happen only when a test
+ * fires the election timeout, so no timer can move the term while a transition is held.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-14
@@ -59,18 +60,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RaftNodeTransportGenerationTest {
     private JavaRuntime runtime;
     private RaftNode node;
+    private ManualRaftTimers timers;
 
     @AfterEach
     void tearDown() throws Exception {
         if (node != null) await(node.stop());
         if (runtime != null) {
-            runtime.shutdown().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
     }
 
     @Test
     void delayedAppendSuccessFromPreviousLeadershipCannotAdvancePeerIndexes() throws Exception {
         runtime = JavaRuntime.create();
+        timers = new ManualRaftTimers(runtime);
         ControlledTransport transport = new ControlledTransport();
         node = RaftNode.builder()
                 .runtime(runtime)
@@ -83,8 +86,10 @@ class RaftNodeTransportGenerationTest {
                 .snapshotEnabled(false)
                 .electionTimeout(30)
                 .heartbeatInterval(10_000)
+                .timerScheduler(timers)
                 .build();
         await(node.start());
+        timers.fireElectionTimeout();
         awaitLeaderAtOrAboveTerm(1);
 
         PendingAppend stale = transport.takeAppend();
@@ -97,6 +102,7 @@ class RaftNodeTransportGenerationTest {
                 .build()));
         assertTrue(stepDown.getVoteGranted());
 
+        timers.fireElectionTimeout();
         awaitLeaderAtOrAboveTerm(firstLeadershipTerm + 2);
         assertEquals(1, node.getNextIndex("peer-1"));
 
@@ -114,6 +120,7 @@ class RaftNodeTransportGenerationTest {
     @Test
     void grantedVoteCannotOvertakeBlockedHigherTermTransition() throws Exception {
         runtime = JavaRuntime.create();
+        timers = new ManualRaftTimers(runtime);
         GatedMetadataStorage storage = new GatedMetadataStorage();
         storage.open(null).join();
         ControlledTransport transport = new ControlledTransport(true);
@@ -128,8 +135,10 @@ class RaftNodeTransportGenerationTest {
                 .snapshotEnabled(false)
                 .electionTimeout(100)
                 .heartbeatInterval(10_000)
+                .timerScheduler(timers)
                 .build();
         await(node.start());
+        timers.fireElectionTimeout();
 
         PendingVote oldElection = transport.takeVote();
         long oldTerm = oldElection.request().getTerm();
@@ -176,7 +185,7 @@ class RaftNodeTransportGenerationTest {
     }
 
     private static <T> T await(Future<T> future) {
-        return future.timeout(5, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
+        return future.timeout(10, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
     }
 
     private record PendingAppend(AppendEntriesRequest request, Promise<AppendEntriesResponse> response) {}
@@ -196,13 +205,13 @@ class RaftNodeTransportGenerationTest {
         }
 
         PendingAppend takeAppend() throws InterruptedException {
-            PendingAppend append = appends.poll(2, TimeUnit.SECONDS);
+            PendingAppend append = appends.poll(10, TimeUnit.SECONDS);
             if (append == null) throw new AssertionError("leader did not send AppendEntries");
             return append;
         }
 
         PendingVote takeVote() throws InterruptedException {
-            PendingVote vote = votes.poll(2, TimeUnit.SECONDS);
+            PendingVote vote = votes.poll(10, TimeUnit.SECONDS);
             if (vote == null) throw new AssertionError("candidate did not request a vote");
             return vote;
         }

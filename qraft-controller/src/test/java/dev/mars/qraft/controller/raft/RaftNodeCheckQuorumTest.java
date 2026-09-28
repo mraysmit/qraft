@@ -68,8 +68,8 @@ class RaftNodeCheckQuorumTest {
 
     @AfterEach
     void tearDown() throws Exception {
-        if (node != null) node.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-        if (runtime != null) runtime.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        if (node != null) node.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        if (runtime != null) runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
     }
 
     @Test
@@ -136,7 +136,7 @@ class RaftNodeCheckQuorumTest {
         heartbeats(4);
 
         assertEquals(RaftNode.State.FOLLOWER, node.getState());
-        Throwable failure = write.handle((ignored, error) -> error).get(5, TimeUnit.SECONDS);
+        Throwable failure = write.handle((ignored, error) -> error).get(10, TimeUnit.SECONDS);
         assertInstanceOf(CommandOutcomeUnknownException.class,
                 failure instanceof java.util.concurrent.CompletionException ? failure.getCause() : failure);
     }
@@ -152,7 +152,7 @@ class RaftNodeCheckQuorumTest {
         transport.respond("peer-2", "peer-3");
         timers.fireNextOneShot();
         node.awaitState(RaftNode.State.LEADER, 10_000).toCompletionStage().toCompletableFuture()
-                .get(5, TimeUnit.SECONDS);
+                .get(15, TimeUnit.SECONDS);
         heartbeats(10);
 
         assertTrue(node.isLeader());
@@ -181,10 +181,10 @@ class RaftNodeCheckQuorumTest {
                 .mode(RaftNodeMode.volatileMode()).snapshotEnabled(false)
                 .electionTimeout(ELECTION_TIMEOUT_MS).heartbeatInterval(HEARTBEAT_MS)
                 .timerScheduler(timers).build();
-        node.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         timers.fireNextOneShot();
         node.awaitState(RaftNode.State.LEADER, 10_000).toCompletionStage().toCompletableFuture()
-                .get(5, TimeUnit.SECONDS);
+                .get(15, TimeUnit.SECONDS);
         settle();
     }
 

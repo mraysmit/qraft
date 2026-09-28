@@ -1394,6 +1394,19 @@ A server document uses the same envelope and keeps all server settings beneath
 }
 ```
 
+Listening ports accept 1 to 65535, or 0 to bind any free port:
+
+- This covers `server.http.port`, `server.apiGrpcPort`, `server.raft.port`, and
+  the client's `agent.httpPort`.
+- A component reports the port it actually bound, and its startup log names that
+  port. The runtime lifecycle exposes the bound ports by name: `http`, `raft`,
+  and `apiGrpc` for a server, and `http` for a client.
+- `server.raft.port` may be 0 only on a cluster's sole member, because peers dial
+  the configured Raft address.
+- A server's HTTP, Raft, and API gRPC ports must differ, except that more than
+  one of them may be 0.
+- `server.telemetry.prometheusPort` must be a fixed port.
+
 `server.ui` controls the embedded administrative interface (section 12.4):
 
 - `enabled` defaults to `true`. Until authentication exists, the interface is

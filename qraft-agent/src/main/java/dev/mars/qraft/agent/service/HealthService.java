@@ -82,6 +82,17 @@ public final class HealthService {
         executor = null;
     }
 
+    /**
+     * The port the health endpoint is listening on. It differs from the configured port when that is 0,
+     * which asks the system for any free port.
+     *
+     * @throws IllegalStateException when the service is not running
+     */
+    public synchronized int port() {
+        if (server == null) throw new IllegalStateException("the agent health server is not running");
+        return server.getAddress().getPort();
+    }
+
     public boolean isHealthy() { return running.get(); }
     public boolean isReady() { return running.get() && readiness.getAsBoolean(); }
     public String agentId() { return config.getAgentId(); }

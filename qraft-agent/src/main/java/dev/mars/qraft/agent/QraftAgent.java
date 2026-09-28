@@ -147,7 +147,9 @@ public final class QraftAgent implements AutoCloseable {
             return CompletableFuture.completedFuture(registrationClient.isRegistered());
         }
         healthService.start();
-        AgentInfo agent = new AgentInfo(config.getAgentId(), config.getHostname(), config.getAddress(), config.getAgentPort());
+        // The controller records the port the health endpoint actually bound, not a configured 0.
+        AgentInfo agent = new AgentInfo(config.getAgentId(), config.getHostname(), config.getAddress(),
+                healthService.port());
         agent.setVersion(config.getVersion());
         agent.setRegion(config.getRegion());
         agent.setDatacenter(config.getDatacenter());

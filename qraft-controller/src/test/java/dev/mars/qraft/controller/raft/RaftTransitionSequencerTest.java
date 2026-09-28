@@ -64,7 +64,7 @@ class RaftTransitionSequencerTest {
 
     @AfterEach
     void tearDown() throws Exception {
-        runtime.shutdown().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
     }
 
     @Test

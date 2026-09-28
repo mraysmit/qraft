@@ -231,15 +231,15 @@ with a test that failed first.
 
 | Pattern | Where |
 |---|---|
-| Real elections with 2–5 s waits | `RaftNodeTest`, `RaftFailureTest`, `InstallSnapshotTest`, `LeaderHealthExpiryClusterTest` (250 ms election timeout, exact proposal counts), `AgentEndToEndTest` |
-| Liveness waits below 10 s in process, or below 5 s on local HTTP | About 213 occurrences in 39 files: most `*SequencingTest` `await` helpers (5 s); runtime tests (300–500 ms HTTP, 2 s catalog); agent tests (1 s HTTP timeouts, `RecordingListener` 5 s); `WorkerExecutorTest` (1 s) |
-| Outer 5 s timeouts wrapping 10 s awaits | `RaftNodeCheckQuorumTest:154, 186`, `RaftNodeTimerSequencingTest:269`, `RaftNodeOutboundSnapshotGenerationTest:150` |
-| Absence proven by waiting | `RecordingListener.assertNoResult` (100 ms) in 4 check-runner tests; `pollSnapshot(100–200 ms)`; `during(2s)` in `GrpcRaftIntegrationTest`; `JavaRuntimeTest:114` (80 ms sleep); `WorkerExecutorTest` (50 ms sleeps); `QraftAgentTest:158` (fixed 2026-09-27) |
-| Sleeps and disguised sleeps | `GrpcRaftIntegrationTest:334`; `GrpcRaftServerTest:806, 819`; `InMemoryTransportSimulator` (4); `MockRaftTransport` (3) |
-| Real production timeout in a test | `HttpApiServerTest:480` waits the hard-coded 5 s proposal timeout, with a 2 s upper margin |
-| Real deadlines held by latches | `QraftAgentTest:391-449` (2 s shutdown deadline; fixed 2026-09-27); `AgentRegistrationClientTest:154-168`; `JavaRuntimeTest:71` (2 s latch whose result is ignored) |
-| Unseeded randomness | `InMemoryTransportSimulator:67`, so chaos runs cannot be reproduced |
-| Real-timer race | `RaftNodeTransportGenerationTest:129-143` |
+| Real elections with 2–5 s waits | `RaftNodeTest`, `RaftFailureTest`, `InstallSnapshotTest`, `LeaderHealthExpiryClusterTest` (250 ms election timeout, exact proposal counts), `AgentEndToEndTest`. Fixed 2026-09-28: these, `HttpApiServerReadinessTest`, `RaftNodeAppliesWhatItLogsTest`, and `EnhancedInMemoryTransportTest` run on manual timers (`ManualRaftCluster`) |
+| Liveness waits below 10 s in process, or below 5 s on local HTTP | About 213 occurrences in 39 files: most `*SequencingTest` `await` helpers (5 s); runtime tests (300–500 ms HTTP, 2 s catalog); agent tests (1 s HTTP timeouts, `RecordingListener` 5 s); `WorkerExecutorTest` (1 s). Fixed 2026-09-28: waits are at least 10 s in process and 5 s on local HTTP |
+| Outer 5 s timeouts wrapping 10 s awaits | `RaftNodeCheckQuorumTest:154, 186`, `RaftNodeTimerSequencingTest:269`, `RaftNodeOutboundSnapshotGenerationTest:150`. Fixed 2026-09-28: an outer wait around a 10 s `awaitState` is 15 s |
+| Absence proven by waiting | `RecordingListener.assertNoResult` (100 ms) in 4 check-runner tests; `pollSnapshot(100–200 ms)`; `during(2s)` in `GrpcRaftIntegrationTest`; `JavaRuntimeTest:114` (80 ms sleep); `WorkerExecutorTest` (50 ms sleeps); `QraftAgentTest:158` (fixed 2026-09-27). Fixed 2026-09-28: each is checked immediately once no path can still produce the result |
+| Sleeps and disguised sleeps | `GrpcRaftIntegrationTest:334`; `GrpcRaftServerTest:806, 819`; `InMemoryTransportSimulator` (4); `MockRaftTransport` (3). Fixed 2026-09-28: the simulator holds delayed requests in a queue, and `MockRaftTransport` is deleted |
+| Real production timeout in a test | `HttpApiServerTest:480` waits the hard-coded 5 s proposal timeout, with a 2 s upper margin. Fixed 2026-09-28: the timeout is a constructor argument, and the test uses 200 ms |
+| Real deadlines held by latches | `QraftAgentTest:391-449` (2 s shutdown deadline; fixed 2026-09-27); `AgentRegistrationClientTest:154-168`; `JavaRuntimeTest:71` (2 s latch whose result is ignored). Fixed 2026-09-28 |
+| Unseeded randomness | `InMemoryTransportSimulator:67`, so chaos runs cannot be reproduced. Fixed 2026-09-28: seeded from `qraft.transport.seed` or the node ID |
+| Real-timer race | `RaftNodeTransportGenerationTest:129-143`. Fixed 2026-09-28 |
 
 ## 5. Isolation and cleanup
 
@@ -248,18 +248,24 @@ with a test that failed first.
     restores it, so later tests see node-a's configuration.
   - `QraftAgentApplicationTest` sets the `qraft.log.dir` system property and
     never restores it.
+
+  Fixed 2026-09-27.
 - **Free-port-then-bind races.** In every runtime test (worst:
   `HealthPropagationEndToEndTest`, with 9 ports), the gRPC fixtures, and every
-  `QraftAgentTest`.
+  `QraftAgentTest`. Fixed 2026-09-28: components bind port 0 and report the
+  port they bound. A three-member runtime reserves its Raft ports together and
+  retries the launch only on a bind failure.
 - **Unguarded teardown.** `@AfterEach` methods in `AgentEndToEndTest`,
   `AgentHealthPublicationTest`, `AgentControllerContractTest`, and
   `HealthPropagationEndToEndTest` skip later cleanup when an earlier step
   throws. Nodes and durable storage are created outside try/finally in
   `RaftNodeTest`, `InstallSnapshotTest`, and `GrpcRaftTransportTest`, and
-  durable storage holds Windows file locks.
+  durable storage holds Windows file locks. Fixed 2026-09-27 and 2026-09-28:
+  teardown runs every step, and every node, transport, and pool a test creates
+  is released after it.
 - **Unawaited shutdown.** `JavaRuntimeExtension` and `WorkerExecutorTest` do not
   wait for the runtime to close. `RaftNodeIntegrationTest`'s class-level runtime
-  is never closed.
+  is never closed. Fixed 2026-09-27.
 - **Unbounded or undersized blocking.**
   - `join()` without a timeout (54 in `RaftNodeTest`), bounded only by the
     90-second JUnit default.
@@ -269,14 +275,21 @@ with a test that failed first.
   - The `SharedDockerCluster` lock contender uses an unbounded `waitFor()`.
     Its `docker run` container carries no Testcontainers label, so it could
     leak.
+
+  Fixed 2026-09-27, except `RaftNodeTest`'s joins, which were fixed 2026-09-28.
 - **Order dependence.** `EnhancedInMemoryTransportTest` uses
-  `@TestMethodOrder(OrderAnnotation)`.
+  `@TestMethodOrder(OrderAnnotation)`. Fixed 2026-09-27.
 - **Fake defects.**
   - `InMemoryTransportSimulator` swallows exceptions in delayed delivery, so
     the promise never completes.
   - It drops queued messages on `stop()`.
   - It joins without a timeout.
   - A "crashed" node still receives RPCs.
+
+  Fixed 2026-09-28. Stopping a transport also failed to end requests it had
+  not yet started: they were dropped, and their callers waited forever. That
+  is fixed too. So is a thread leak: every transport started a non-daemon
+  delivery thread in its constructor, even one that was never used.
 
 ## 6. Coverage gaps
 

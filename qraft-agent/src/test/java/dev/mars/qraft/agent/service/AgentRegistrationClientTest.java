@@ -151,7 +151,8 @@ class AgentRegistrationClientTest {
             }
             registrationStarted.countDown();
             try {
-                releaseRegistration.await(2, TimeUnit.SECONDS);
+                // Held until the test has asserted that shutdown waits; the bound only frees a failed test.
+                releaseRegistration.await(30, TimeUnit.SECONDS);
                 exchange.sendResponseHeaders(201, -1);
                 exchange.close();
             } catch (InterruptedException interrupted) {
@@ -161,7 +162,7 @@ class AgentRegistrationClientTest {
         AgentRegistrationClient client = client();
         CompletableFuture<Boolean> registration = client.register(
                 new AgentInfo("agent-1", "host", "127.0.0.1", 8080));
-        assertTrue(registrationStarted.await(1, TimeUnit.SECONDS));
+        assertTrue(registrationStarted.await(10, TimeUnit.SECONDS));
 
         CompletableFuture<Boolean> shutdown = client.beginShutdownAndDeregister("agent-1");
 

@@ -42,7 +42,7 @@ public class GrpcServiceServer {
     private final JavaRuntime runtime;
     private final int port;
     private final BindableService[] services;
-    private Server server;
+    private volatile Server server;
 
     public GrpcServiceServer(JavaRuntime runtime, int port, BindableService... services) {
         this.runtime = runtime;
@@ -60,7 +60,7 @@ public class GrpcServiceServer {
                     builder.addService(service);
                 }
                 server = builder.build().start();
-                logger.info("gRPC API server started on port {}", port);
+                logger.info("gRPC API server started on port {}", server.getPort());
                 return null;
             } catch (IOException e) {
                 throw new RuntimeException("Failed to start gRPC API server on port " + port, e);
@@ -69,6 +69,18 @@ public class GrpcServiceServer {
           .onFailure(promise::fail);
 
         return promise.future();
+    }
+
+    /**
+     * The port this server is listening on. It differs from the configured port when that is 0, which
+     * asks the system for any free port.
+     *
+     * @throws IllegalStateException when the server is not running
+     */
+    public int port() {
+        Server current = server;
+        if (current == null || current.isShutdown()) throw new IllegalStateException("the gRPC server is not running");
+        return current.getPort();
     }
 
     public Future<Void> stop() {

@@ -16,401 +16,252 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.controller.state.*;
-
-
-
-import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
-import org.junit.jupiter.api.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
+import dev.mars.qraft.controller.state.QraftStateStore;
+import dev.mars.qraft.controller.state.RaftCommandResult;
+import dev.mars.qraft.distributedstate.DistributedStateCommand;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 
-import static org.awaitility.Awaitility.await;
-import static org.junit.jupiter.api.Assertions.*;
+import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
+import static dev.mars.qraft.controller.raft.ManualRaftCluster.startAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Comprehensive tests for enhanced InMemoryTransportSimulator features:
- * - Network partitions
- * - Message reordering
- * - Bandwidth throttling
- * - Byzantine and crash failure modes
- * 
+ * Tests Raft over the in-memory network's faults: a partition, reordering, bandwidth throttling, and crashed,
+ * slow and flaky nodes. Each fault leaves the cluster with one leader that every member follows, and
+ * combined chaos never elects two leaders in one term.
+ *
+ * <p>Elections and heartbeats fire only when a test fires them through {@link ManualRaftCluster}, so each
+ * scenario decides who stands for election; the network's faults are seeded, so a run repeats.
+ *
  * @author Mark Andrew Ray-Smith Cityline Ltd
- * @version 2.0
+ * @version 3.0
  * @since 2026-01-20
  */
 class EnhancedInMemoryTransportTest {
-
-    private static final Logger logger = LoggerFactory.getLogger(EnhancedInMemoryTransportTest.class);
-
     private JavaRuntime runtime;
-    private final List<RaftNode> activeNodes = new ArrayList<>();
+    private ManualRaftCluster cluster;
+    private final Map<String, RaftNode> nodes = new LinkedHashMap<>();
+    private final Map<String, InMemoryTransportSimulator> transports = new LinkedHashMap<>();
+    private final Map<String, QraftStateStore> stores = new LinkedHashMap<>();
 
     @BeforeEach
     void setUp() {
         runtime = JavaRuntime.create();
+        cluster = new ManualRaftCluster(runtime);
         InMemoryTransportSimulator.clearAllTransports();
-        activeNodes.clear();
     }
 
     @AfterEach
     void tearDown() throws Exception {
-        InMemoryTransportSimulator.clearAllTransports();
-        for (RaftNode node : activeNodes) {
-            try {
-                node.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-            } catch (Exception ignored) {
-                // Continue closing the remaining test resources.
-            }
-        }
-        activeNodes.clear();
-        if (runtime != null) {
-            runtime.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-        }
-    }
-
-    private long leaderCount(RaftNode... nodes) {
-        return Set.of(nodes).stream().filter(RaftNode::isLeader).count();
-    }
-
-    private void startAndTrack(RaftNode... nodes) {
-        for (RaftNode node : nodes) {
-            node.start();
-            activeNodes.add(node);
-        }
-    }
-
-    @Test
-    @DisplayName("Test network partition prevents communication")
-    void testNetworkPartition() {
-        logger.info("=== Testing Network Partition ===");
-        
-        Set<String> clusterNodes = Set.of("node1", "node2", "node3");
-
-        InMemoryTransportSimulator transport1 = new InMemoryTransportSimulator("node1");
-        InMemoryTransportSimulator transport2 = new InMemoryTransportSimulator("node2");
-        InMemoryTransportSimulator transport3 = new InMemoryTransportSimulator("node3");
-
-        QraftStateStore sm1 = new QraftStateStore();
-        QraftStateStore sm2 = new QraftStateStore();
-        QraftStateStore sm3 = new QraftStateStore();
-
-        RaftNode node1 = RaftNode.builder()
-                .runtime(runtime).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(1000).heartbeatInterval(200).build();
-        RaftNode node2 = RaftNode.builder()
-                .runtime(runtime).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(1000).heartbeatInterval(200).build();
-        RaftNode node3 = RaftNode.builder()
-                .runtime(runtime).nodeId("node3").clusterNodes(clusterNodes).transport(transport3).stateMachine(sm3).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(1000).heartbeatInterval(200).build();
-
-        startAndTrack(node1, node2, node3);
-
-        // Wait for leader election
-        await().atMost(Duration.ofSeconds(10))
-            .pollInterval(Duration.ofMillis(100))
-            .until(() -> leaderCount(node1, node2, node3) == 1);
-        logger.info("Initial leader elected");
-
-        // Create partition: {node1} | {node2, node3}
-        InMemoryTransportSimulator.createPartition(Set.of("node1"), Set.of("node2", "node3"));
-        logger.info("Created network partition: {{node1}} | {{node2, node3}}");
-
-        // Wait for partition to take effect (majority side should have a leader)
-        await().atMost(Duration.ofSeconds(10))
-            .pollInterval(Duration.ofMillis(100))
-            .until(() -> node2.isLeader() || node3.isLeader());
-
-        logger.info("node1 state: {} (leader: {})", node1.getState(), node1.isLeader());
-        logger.info("node2 state: {} (leader: {})", node2.getState(), node2.isLeader());
-        logger.info("node3 state: {} (leader: {})", node3.getState(), node3.isLeader());
-
-        // Heal the partition
         InMemoryTransportSimulator.healPartitions();
-        logger.info("Healed network partition");
-
-        // Wait for cluster to converge to exactly one leader
-        await().atMost(Duration.ofSeconds(10))
-            .pollInterval(Duration.ofMillis(100))
-            .until(() -> leaderCount(node1, node2, node3) == 1);
-
-        assertEquals(1, leaderCount(node1, node2, node3), "Should have exactly one leader after healing");
-    }
-
-    @Test
-    @DisplayName("Test message reordering affects Raft behavior")
-    void testMessageReordering() {
-        logger.info("=== Testing Message Reordering ===");
-        
-        Set<String> clusterNodes = Set.of("leader", "follower");
-
-        InMemoryTransportSimulator transport1 = new InMemoryTransportSimulator("leader");
-        InMemoryTransportSimulator transport2 = new InMemoryTransportSimulator("follower");
-
-        // Enable message reordering
-        transport1.setReorderingConfig(true, 0.3, 50);
-        transport2.setReorderingConfig(true, 0.3, 50);
-
-        QraftStateStore sm1 = new QraftStateStore();
-        QraftStateStore sm2 = new QraftStateStore();
-
-        RaftNode node1 = RaftNode.builder()
-                .runtime(runtime).nodeId("leader").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(1000).heartbeatInterval(200).build();
-        RaftNode node2 = RaftNode.builder()
-                .runtime(runtime).nodeId("follower").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(1000).heartbeatInterval(200).build();
-
-        startAndTrack(node1, node2);
-
-        // Wait for leader election despite reordering
-        await().atMost(Duration.ofSeconds(10))
-            .pollInterval(Duration.ofMillis(100))
-            .until(() -> leaderCount(node1, node2) == 1);
-
-        logger.info("Leader count with reordering: {}", leaderCount(node1, node2));
-        assertEquals(1, leaderCount(node1, node2), "Should still have exactly one leader despite reordering");
-    }
-
-    @Test
-    @DisplayName("Test bandwidth throttling slows down communication")
-    void testBandwidthThrottling() {
-        logger.info("=== Testing Bandwidth Throttling ===");
-        
-        Set<String> clusterNodes = Set.of("node1", "node2");
-
-        InMemoryTransportSimulator transport1 = new InMemoryTransportSimulator("node1");
-        InMemoryTransportSimulator transport2 = new InMemoryTransportSimulator("node2");
-
-        // Enable bandwidth throttling (very low limit)
-        transport1.setThrottlingConfig(true, 1000); // 1KB/sec
-        transport2.setThrottlingConfig(true, 1000);
-
-        QraftStateStore sm1 = new QraftStateStore();
-        QraftStateStore sm2 = new QraftStateStore();
-
-        RaftNode node1 = RaftNode.builder()
-                .runtime(runtime).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(1000).heartbeatInterval(200).build();
-        RaftNode node2 = RaftNode.builder()
-                .runtime(runtime).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(1000).heartbeatInterval(200).build();
-
-        long startTime = System.currentTimeMillis();
-
-        startAndTrack(node1, node2);
-
-        // With throttling, cluster should still elect a leader (may be slower)
-        await().atMost(Duration.ofSeconds(15))
-            .pollInterval(Duration.ofMillis(200))
-            .until(() -> leaderCount(node1, node2) == 1);
-
-        long elapsed = System.currentTimeMillis() - startTime;
-        logger.info("Time to elect leader with throttling: {}ms", elapsed);
-        assertEquals(1, leaderCount(node1, node2), "Should have one leader despite throttling");
-    }
-
-    @Test
-    @DisplayName("Test crash failure mode stops node communication")
-    void testCrashFailureMode() {
-        logger.info("=== Testing Crash Failure Mode ===");
-        
-        Set<String> clusterNodes = Set.of("node1", "node2", "node3");
-
-        InMemoryTransportSimulator transport1 = new InMemoryTransportSimulator("node1");
-        InMemoryTransportSimulator transport2 = new InMemoryTransportSimulator("node2");
-        InMemoryTransportSimulator transport3 = new InMemoryTransportSimulator("node3");
-
-        QraftStateStore sm1 = new QraftStateStore();
-        QraftStateStore sm2 = new QraftStateStore();
-        QraftStateStore sm3 = new QraftStateStore();
-
-        RaftNode node1 = RaftNode.builder()
-                .runtime(runtime).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(800).heartbeatInterval(150).build();
-        RaftNode node2 = RaftNode.builder()
-                .runtime(runtime).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(800).heartbeatInterval(150).build();
-        RaftNode node3 = RaftNode.builder()
-                .runtime(runtime).nodeId("node3").clusterNodes(clusterNodes).transport(transport3).stateMachine(sm3).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(800).heartbeatInterval(150).build();
-
-        startAndTrack(node1, node2, node3);
-
-        // Wait for initial leader election
-        await().atMost(Duration.ofSeconds(10))
-            .pollInterval(Duration.ofMillis(100))
-            .until(() -> leaderCount(node1, node2, node3) == 1);
-
-        assertEquals(1, leaderCount(node1, node2, node3), "Should have one leader initially");
-
-        // Crash node1
-        transport1.setFailureMode(InMemoryTransportSimulator.FailureMode.CRASH);
-        logger.info("Crashed node1");
-
-        // Wait for cluster to adapt — node2 or node3 should be leader
-        await().atMost(Duration.ofSeconds(10))
-            .pollInterval(Duration.ofMillis(100))
-            .until(() -> node2.isLeader() || node3.isLeader());
-
-        logger.info("After crash - node2 leader: {}, node3 leader: {}", node2.isLeader(), node3.isLeader());
-
-        // Recover node1
-        transport1.recoverFromCrash();
-        logger.info("Recovered node1 from crash");
-
-        // Wait for cluster to converge to exactly one leader
-        await().atMost(Duration.ofSeconds(10))
-            .pollInterval(Duration.ofMillis(100))
-            .until(() -> leaderCount(node1, node2, node3) == 1);
-
-        assertEquals(1, leaderCount(node1, node2, node3), "Should have one leader after recovery");
-    }
-
-    @Test
-    @DisplayName("Test SLOW failure mode increases latency")
-    void testSlowFailureMode() {
-        logger.info("=== Testing SLOW Failure Mode ===");
-        
-        Set<String> clusterNodes = Set.of("node1", "node2");
-
-        InMemoryTransportSimulator transport1 = new InMemoryTransportSimulator("node1");
-        InMemoryTransportSimulator transport2 = new InMemoryTransportSimulator("node2");
-
-        // Make node1 slow (10x latency)
-        transport1.setFailureMode(InMemoryTransportSimulator.FailureMode.SLOW);
-
-        QraftStateStore sm1 = new QraftStateStore();
-        QraftStateStore sm2 = new QraftStateStore();
-
-        RaftNode node1 = RaftNode.builder()
-                .runtime(runtime).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(1000).heartbeatInterval(200).build();
-        RaftNode node2 = RaftNode.builder()
-                .runtime(runtime).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(1000).heartbeatInterval(200).build();
-
-        long startTime = System.currentTimeMillis();
-
-        startAndTrack(node1, node2);
-
-        // SLOW mode should still eventually elect a leader
-        await().atMost(Duration.ofSeconds(15))
-            .pollInterval(Duration.ofMillis(200))
-            .until(() -> leaderCount(node1, node2) == 1);
-
-        long elapsed = System.currentTimeMillis() - startTime;
-        logger.info("Time with SLOW mode: {}ms", elapsed);
-        assertEquals(1, leaderCount(node1, node2), "Should eventually have one leader despite slow node");
-    }
-
-    @Test
-    @DisplayName("Test FLAKY failure mode with intermittent issues")
-    void testFlakyFailureMode() {
-        logger.info("=== Testing FLAKY Failure Mode ===");
-        
-        Set<String> clusterNodes = Set.of("node1", "node2", "node3");
-
-        InMemoryTransportSimulator transport1 = new InMemoryTransportSimulator("node1");
-        InMemoryTransportSimulator transport2 = new InMemoryTransportSimulator("node2");
-        InMemoryTransportSimulator transport3 = new InMemoryTransportSimulator("node3");
-
-        // Make node2 flaky (intermittent 50% high latency)
-        transport2.setFailureMode(InMemoryTransportSimulator.FailureMode.FLAKY);
-
-        QraftStateStore sm1 = new QraftStateStore();
-        QraftStateStore sm2 = new QraftStateStore();
-        QraftStateStore sm3 = new QraftStateStore();
-
-        RaftNode node1 = RaftNode.builder()
-                .runtime(runtime).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(800).heartbeatInterval(150).build();
-        RaftNode node2 = RaftNode.builder()
-                .runtime(runtime).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(800).heartbeatInterval(150).build();
-        RaftNode node3 = RaftNode.builder()
-                .runtime(runtime).nodeId("node3").clusterNodes(clusterNodes).transport(transport3).stateMachine(sm3).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(800).heartbeatInterval(150).build();
-
-        startAndTrack(node1, node2, node3);
-
-        // FLAKY mode should still allow cluster to function
-        await().atMost(Duration.ofSeconds(10))
-            .pollInterval(Duration.ofMillis(100))
-            .until(() -> leaderCount(node1, node2, node3) == 1);
-
-        logger.info("Leader count with FLAKY node: {}", leaderCount(node1, node2, node3));
-        assertEquals(1, leaderCount(node1, node2, node3), "Should have one leader despite flaky node");
-    }
-
-    @Test
-    @DisplayName("Combined chaos never elects two leaders in one term, and a leader emerges once it clears")
-    void testCombinedChaos() {
-        logger.info("=== Testing Combined Chaos Scenarios ===");
-        
-        Set<String> clusterNodes = Set.of("node1", "node2", "node3");
-
-        InMemoryTransportSimulator transport1 = new InMemoryTransportSimulator("node1");
-        InMemoryTransportSimulator transport2 = new InMemoryTransportSimulator("node2");
-        InMemoryTransportSimulator transport3 = new InMemoryTransportSimulator("node3");
-
-        // Apply multiple chaos factors
-        transport1.setChaosConfig(10, 30, 0.1);
-        transport2.setChaosConfig(10, 30, 0.1);
-        transport3.setChaosConfig(10, 30, 0.1);
-        
-        transport1.setReorderingConfig(true, 0.2, 40);
-        transport2.setReorderingConfig(true, 0.2, 40);
-        transport3.setReorderingConfig(true, 0.2, 40);
-
-        QraftStateStore sm1 = new QraftStateStore();
-        QraftStateStore sm2 = new QraftStateStore();
-        QraftStateStore sm3 = new QraftStateStore();
-
-        RaftNode node1 = RaftNode.builder()
-                .runtime(runtime).nodeId("node1").clusterNodes(clusterNodes).transport(transport1).stateMachine(sm1).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(1000).heartbeatInterval(200).build();
-        RaftNode node2 = RaftNode.builder()
-                .runtime(runtime).nodeId("node2").clusterNodes(clusterNodes).transport(transport2).stateMachine(sm2).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(1000).heartbeatInterval(200).build();
-        RaftNode node3 = RaftNode.builder()
-                .runtime(runtime).nodeId("node3").clusterNodes(clusterNodes).transport(transport3).stateMachine(sm3).mode(RaftNodeMode.volatileMode()).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(1000).heartbeatInterval(200).build();
-
-        // Every transition to leader is recorded on the node's state loop with its term, so election
-        // safety is checked over the whole run rather than sampled.
-        Map<Long, Set<String>> leadersByTerm = new ConcurrentHashMap<>();
-        for (RaftNode node : List.of(node1, node2, node3)) {
-            node.addStateChangeListener(state -> {
-                if (state == RaftNode.State.LEADER) {
-                    leadersByTerm.computeIfAbsent(node.getCurrentTerm(), term -> ConcurrentHashMap.newKeySet())
-                            .add(node.getNodeId());
-                }
-            });
+        try {
+            cluster.close();
+        } finally {
+            runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            InMemoryTransportSimulator.clearAllTransports();
         }
-        startAndTrack(node1, node2, node3);
+    }
 
-        await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofMillis(50))
-                .until(() -> leaderCount(node1, node2, node3) >= 1);
-        for (InMemoryTransportSimulator transport : List.of(transport1, transport2, transport3)) {
+    @Test
+    void aPartitionedLeaderIsReplacedAndFollowsTheNewLeaderOnceThePartitionHeals() throws Exception {
+        build("node1", "node2", "node3");
+        startAll(nodes.values().toArray(RaftNode[]::new));
+        electAndFollow("node1");
+
+        InMemoryTransportSimulator.createPartition(Set.of("node1"), Set.of("node2", "node3"));
+        cluster.elect(node("node2"));
+        assertEquals(2, node("node2").getCurrentTerm());
+
+        InMemoryTransportSimulator.healPartitions();
+        cluster.heartbeatUntil(node("node2"), () -> everyoneFollows("node2"), "node1 follows node2 once healed");
+        assertEquals(List.of("node2"), leaders());
+    }
+
+    @Test
+    void reorderedMessagesStillElectOneLeaderAndReplicateInOrder() throws Exception {
+        build("leader", "follower");
+        for (InMemoryTransportSimulator transport : transports.values()) transport.setReorderingConfig(true, 0.3, 50);
+        startAll(nodes.values().toArray(RaftNode[]::new));
+
+        electAndFollow("leader");
+        for (int value = 0; value < 5; value++) {
+            assertInstanceOf(RaftCommandResult.Success.class, await(node("leader").submitCommand(put("k", "v" + value))));
+        }
+
+        cluster.heartbeatUntil(node("leader"), () -> "v4".equals(stores.get("follower").getMetadata("k")),
+                "the follower applies the writes in log order");
+        assertEquals("v4", stores.get("leader").getMetadata("k"));
+        assertEquals(List.of("leader"), leaders());
+    }
+
+    @Test
+    void aThrottledNetworkStillElectsOneLeader() throws Exception {
+        build("node1", "node2");
+        for (InMemoryTransportSimulator transport : transports.values()) transport.setThrottlingConfig(true, 1000);
+        startAll(nodes.values().toArray(RaftNode[]::new));
+
+        electAndFollow("node1");
+
+        assertEquals(List.of("node1"), leaders());
+    }
+
+    @Test
+    void aCrashedLeaderIsReplacedAndFollowsTheNewLeaderOnceRecovered() throws Exception {
+        build("node1", "node2", "node3");
+        startAll(nodes.values().toArray(RaftNode[]::new));
+        electAndFollow("node1");
+
+        transports.get("node1").setFailureMode(InMemoryTransportSimulator.FailureMode.CRASH);
+        cluster.elect(node("node2"));
+
+        transports.get("node1").recoverFromCrash();
+        cluster.heartbeatUntil(node("node2"), () -> everyoneFollows("node2"), "node1 follows node2 once recovered");
+        assertEquals(List.of("node2"), leaders());
+    }
+
+    @Test
+    void aSlowNodeIsStillElected() throws Exception {
+        build("node1", "node2");
+        transports.get("node1").setFailureMode(InMemoryTransportSimulator.FailureMode.SLOW);
+        startAll(nodes.values().toArray(RaftNode[]::new));
+
+        electAndFollow("node1");
+
+        assertEquals(List.of("node1"), leaders());
+    }
+
+    @Test
+    void aFlakyFollowerStillFollowsTheLeader() throws Exception {
+        build("node1", "node2", "node3");
+        transports.get("node2").setFailureMode(InMemoryTransportSimulator.FailureMode.FLAKY);
+        startAll(nodes.values().toArray(RaftNode[]::new));
+
+        electAndFollow("node1");
+
+        assertEquals(List.of("node1"), leaders());
+    }
+
+    @Test
+    void combinedChaosNeverElectsTwoLeadersInOneTermAndALeaderEmergesOnceItClears() throws Exception {
+        build("node1", "node2", "node3");
+        for (InMemoryTransportSimulator transport : transports.values()) {
+            transport.setChaosConfig(10, 30, 0.1);
+            transport.setReorderingConfig(true, 0.2, 40);
+        }
+        Map<Long, Set<String>> leadersByTerm = new ConcurrentHashMap<>();
+        nodes.values().forEach(node -> node.addStateChangeListener(state -> {
+            if (state == RaftNode.State.LEADER) {
+                leadersByTerm.computeIfAbsent(node.getCurrentTerm(), term -> ConcurrentHashMap.newKeySet())
+                        .add(node.getNodeId());
+            }
+        }));
+        startAll(nodes.values().toArray(RaftNode[]::new));
+
+        // Seeded candidacies while messages are dropped and reordered. Every other round two members stand at
+        // once: the second fires before the first's vote request can arrive, so both stand in the same term.
+        Random candidacies = new Random(42);
+        for (int round = 0; round < 20; round++) {
+            List<RaftNode> eligible = new ArrayList<>(nodes.values().stream().filter(node -> !node.isLeader()).toList());
+            Collections.shuffle(eligible, candidacies);
+            List<RaftNode> standing = eligible.subList(0, Math.min(eligible.size(), round % 2 == 0 ? 1 : 2));
+            for (RaftNode candidate : standing) {
+                try {
+                    cluster.timers(candidate).fireElectionTimeout();
+                } catch (IllegalStateException notArmed) {
+                    // mid-transition (becoming leader, or between elections): it cannot stand this round
+                }
+            }
+            pollUntil(() -> standing.stream().noneMatch(node -> node.getState() == RaftNode.State.CANDIDATE), 200);
+        }
+        for (InMemoryTransportSimulator transport : transports.values()) {
             transport.setChaosConfig(5, 15, 0.0);
             transport.setReorderingConfig(false, 0.0, 0);
         }
-        await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofMillis(50))
-                .until(() -> leaderCount(node1, node2, node3) == 1);
+        convergeOnTheHighestTerm();
 
         assertFalse(leadersByTerm.isEmpty());
         leadersByTerm.forEach((term, leaders) ->
                 assertEquals(1, leaders.size(), "term " + term + " elected " + leaders));
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+
+    private void build(String... ids) {
+        Set<String> members = Set.of(ids);
+        for (String id : ids) {
+            InMemoryTransportSimulator transport = new InMemoryTransportSimulator(id);
+            QraftStateStore store = new QraftStateStore();
+            transports.put(id, transport);
+            stores.put(id, store);
+            nodes.put(id, cluster.add(cluster.builder(id, members, transport, store, RaftNodeMode.volatileMode())));
+        }
+    }
+
+    private RaftNode node(String id) {
+        return nodes.get(id);
+    }
+
+    private void electAndFollow(String leaderId) throws Exception {
+        cluster.elect(node(leaderId));
+        cluster.heartbeatUntil(node(leaderId), () -> everyoneFollows(leaderId), "every member follows " + leaderId);
+    }
+
+    private boolean everyoneFollows(String leaderId) {
+        return nodes.values().stream().allMatch(node -> leaderId.equals(node.getLeaderId()));
+    }
+
+    private List<String> leaders() {
+        return nodes.values().stream().filter(RaftNode::isLeader).map(RaftNode::getNodeId).toList();
+    }
+
+    /**
+     * Drives the cluster to one leader on a clear network: the member with the highest term either leads, and
+     * its heartbeat brings the others to its term, or stands for the next term, which it wins because every
+     * log is empty.
+     */
+    private void convergeOnTheHighestTerm() throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!(leaders().size() == 1 && everyoneFollows(leaders().getFirst())) && System.nanoTime() < deadline) {
+            RaftNode highest = nodes.values().stream().max(Comparator.comparingLong(RaftNode::getCurrentTerm))
+                    .orElseThrow();
+            try {
+                if (highest.isLeader()) cluster.timers(highest).firePeriodic(ManualRaftCluster.HEARTBEAT_MS);
+                else cluster.timers(highest).fireElectionTimeout();
+            } catch (IllegalStateException roleChanged) {
+                continue; // its role changed between the check and the fire
+            }
+            pollUntil(() -> leaders().size() == 1 && everyoneFollows(leaders().getFirst()), 200);
+        }
+        List<String> leaders = leaders();
+        assertEquals(1, leaders.size(), "one leader once the chaos clears: " + leaders);
+        assertTrue(everyoneFollows(leaders.getFirst()), "every member follows " + leaders.getFirst());
+    }
+
+    private static void pollUntil(BooleanSupplier condition, long millis) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(millis);
+        while (!condition.getAsBoolean() && System.nanoTime() < deadline) Thread.sleep(5);
+    }
+
+    private static DistributedStateRaftCommand put(String key, String value) {
+        return new DistributedStateRaftCommand(DistributedStateCommand.put(key, value));
     }
 }

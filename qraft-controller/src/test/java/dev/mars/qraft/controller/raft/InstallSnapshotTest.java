@@ -16,383 +16,133 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.controller.state.*;
-
+import com.google.protobuf.ByteString;
+import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
-
-import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
-import dev.mars.qraft.controller.state.QraftStateStore;
-import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
-import dev.mars.qraft.distributedstate.DistributedStateCommand;
-import dev.mars.qraft.controller.runtime.Future;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
-import dev.mars.qraft.controller.support.JavaRuntimeExtension;
-import dev.mars.qraft.controller.support.JavaTestContext;
+import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
+import dev.mars.qraft.controller.state.QraftStateStore;
+import dev.mars.qraft.distributedstate.DistributedStateCommand;
+import dev.mars.qraft.raft.api.SnapshotStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
 
-import java.nio.file.Path;
+import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 
-import static org.awaitility.Awaitility.await;
+import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
+import static dev.mars.qraft.controller.raft.ManualRaftCluster.startAll;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Behavioral tests for T5.3: InstallSnapshot RPC.
- * Tests the full path where a leader sends a snapshot to a lagging follower
- * that has fallen behind the compacted log, the follower restores state,
- * and cluster operation continues.
+ * Tests the InstallSnapshot RPC. A follower cut off while the leader compacted its log is brought up to date
+ * with the leader's snapshot, restores its state machine from it, and then keeps replicating ordinary entries;
+ * the leader moves its indices for that follower past the snapshot. A stale-term snapshot is refused, and an
+ * installed snapshot is persisted. The chunk assembler reassembles split data.
+ *
+ * <p>Elections, heartbeats and the leader's snapshot check fire only when a test fires them through
+ * {@link ManualRaftCluster}; the snapshot is still taken by the node's own threshold check, not called
+ * directly. Every node is stopped after the test.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-02-13
+ * @version 2.0
  */
-@ExtendWith(JavaRuntimeExtension.class)
 class InstallSnapshotTest {
+    private static final long SNAPSHOT_CHECK_MS = 300;
+    private static final long SNAPSHOT_THRESHOLD = 5;
 
     private JavaRuntime runtime;
-    private TestRaftStorage leaderStorage;
-    private TestRaftStorage followerStorage;
+    private ManualRaftCluster cluster;
 
     @BeforeEach
-    void setUp(JavaRuntime runtime) {
-        this.runtime = runtime;
+    void setUp() {
+        runtime = JavaRuntime.create();
+        cluster = new ManualRaftCluster(runtime);
         InMemoryTransportSimulator.clearAllTransports();
     }
 
     @AfterEach
-    void tearDown() {
-        InMemoryTransportSimulator.clearAllTransports();
+    void tearDown() throws Exception {
+        try {
+            cluster.close();
+        } finally {
+            runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            InMemoryTransportSimulator.clearAllTransports();
+        }
     }
 
-    /**
-     * Test 1: Leader detects lagging follower and sends snapshot.
-     *
-     * Flow: 3-node cluster starts, leader elected. Partition isolates node3.
-     * Leader commits entries and takes snapshot. Partition heals.
-     * Leader detects node3's nextIndex <= snapshotLastIndex,
-     * triggers sendInstallSnapshot. node3 receives snapshot and restores state.
-     */
     @Test
-    void testLeaderSendsSnapshotToLaggingFollower(JavaTestContext ctx) throws Throwable {
-        leaderStorage = new TestRaftStorage();
-        followerStorage = new TestRaftStorage();
-        TestRaftStorage node2Storage = new TestRaftStorage();
+    void testLeaderSendsSnapshotToLaggingFollower() throws Exception {
+        Cluster nodes = compactWhileNode3IsCutOff(8);
 
-        Set<String> cluster = Set.of("node1", "node2", "node3");
-
-        InMemoryTransportSimulator t1 = new InMemoryTransportSimulator("node1");
-        InMemoryTransportSimulator t2 = new InMemoryTransportSimulator("node2");
-        InMemoryTransportSimulator t3 = new InMemoryTransportSimulator("node3");
-
-        QraftStateStore sm1 = new QraftStateStore();
-        QraftStateStore sm2 = new QraftStateStore();
-        QraftStateStore sm3 = new QraftStateStore();
-
-        RaftNode node1 = RaftNode.builder().runtime(runtime).nodeId("node1").clusterNodes(cluster).transport(t1).stateMachine(sm1).mode(RaftNodeMode.durable(leaderStorage, leaderStorage)).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(1000).heartbeatInterval(200)
-                .snapshotEnabled(true).snapshotThreshold(5).snapshotCheckInterval(300).build();
-        RaftNode node2 = RaftNode.builder().runtime(runtime).nodeId("node2").clusterNodes(cluster).transport(t2).stateMachine(sm2).mode(RaftNodeMode.durable(node2Storage, node2Storage)).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(1500).heartbeatInterval(200)
-                .snapshotEnabled(true).snapshotThreshold(5).snapshotCheckInterval(300).build();
-        RaftNode node3 = RaftNode.builder().runtime(runtime).nodeId("node3").clusterNodes(cluster).transport(t3).stateMachine(sm3).mode(RaftNodeMode.durable(followerStorage, followerStorage)).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(15000).heartbeatInterval(200)
-                .snapshotEnabled(true).snapshotThreshold(5).snapshotCheckInterval(300).build();
-
-        AtomicReference<RaftNode> leaderRef = new AtomicReference<>();
-
-        // Partition node3, then start all nodes and submit commands (fire-and-forget)
-        InMemoryTransportSimulator.createPartition(Set.of("node1", "node2"), Set.of("node3"));
-
-        leaderStorage.open(Path.of("/tmp/t1-1"))
-                .thenCompose(v -> node2Storage.open(Path.of("/tmp/t1-2")))
-                .thenCompose(v -> followerStorage.open(Path.of("/tmp/t1-3"))).join();
-        node1.start().compose(v -> node2.start()).compose(v -> node3.start());
-
-        // Phase 1: Wait for leader election on TEST thread (not event loop)
-        await().atMost(12, TimeUnit.SECONDS).pollInterval(200, TimeUnit.MILLISECONDS)
-                .until(() -> node1.getState() == RaftNode.State.LEADER
-                        || node2.getState() == RaftNode.State.LEADER);
-
-        RaftNode leader = (node1.getState() == RaftNode.State.LEADER) ? node1 : node2;
-        leaderRef.set(leader);
-
-        // Phase 2: Submit commands via event loop, wait for completion on test thread
-        CompletableFuture<Void> commandsDone = new CompletableFuture<>();
-        runtime.runOnContext(v ->
-                submitCommands(leader, 0, 8)
-                        .onSuccess(r -> commandsDone.complete(null))
-                        .onFailure(commandsDone::completeExceptionally));
-        commandsDone.get(15, TimeUnit.SECONDS);
-
-        // Phase 3: Wait for snapshot on test thread
-        await().atMost(12, TimeUnit.SECONDS).pollInterval(200, TimeUnit.MILLISECONDS)
-                .untilAsserted(() -> assertTrue(leader.getSnapshotLastIndex() >= 5,
-                        "Leader should have taken a snapshot"));
-
-        // Phase 4: Heal partition — node3 can now communicate
         InMemoryTransportSimulator.healPartitions();
 
-        // Phase 5: Wait for node3 to receive snapshot via InstallSnapshot
-        await().atMost(15, TimeUnit.SECONDS).pollInterval(300, TimeUnit.MILLISECONDS)
-                .untilAsserted(() -> {
-                    assertTrue(node3.getSnapshotLastIndex() > 0,
-                            "node3 should have received snapshot (snapshotLastIndex=" +
-                                    node3.getSnapshotLastIndex() + ")");
-                    for (int i = 0; i < 8; i++) {
-                        assertEquals("value" + i, sm3.getMetadata("key" + i),
-                                "node3 should have key" + i + " from snapshot");
-                    }
-                });
-
-        awaitStops(node1, node2, node3);
-        ctx.completeNow();
-
-        assertTrue(ctx.awaitCompletion(5, TimeUnit.SECONDS), "Test timed out");
-        if (ctx.failed()) throw ctx.causeOfFailure();
+        cluster.heartbeatUntil(nodes.leader(), () -> nodes.node3().getSnapshotLastIndex() > 0
+                && hasKeys(nodes.store3(), 0, 8), "node3 installs the leader's snapshot");
     }
 
-    /**
-     * Test 2: Follower state machine is correctly restored after snapshot install,
-     * and follower can continue receiving normal log entries after snapshot.
-     */
     @Test
-    void testFollowerStateMachineRestoredBySnapshot(JavaTestContext ctx) throws Throwable {
-        leaderStorage = new TestRaftStorage();
-        followerStorage = new TestRaftStorage();
-        TestRaftStorage node2Storage = new TestRaftStorage();
+    void testFollowerStateMachineRestoredBySnapshot() throws Exception {
+        Cluster nodes = compactWhileNode3IsCutOff(6);
+        InMemoryTransportSimulator.healPartitions();
+        cluster.heartbeatUntil(nodes.leader(), () -> nodes.node3().getSnapshotLastIndex() > 0,
+                "node3 installs the leader's snapshot");
 
-        Set<String> cluster = Set.of("node1", "node2", "node3");
+        submitCommands(nodes.leader(), 6, 3);
 
-        InMemoryTransportSimulator t1 = new InMemoryTransportSimulator("node1");
-        InMemoryTransportSimulator t2 = new InMemoryTransportSimulator("node2");
-        InMemoryTransportSimulator t3 = new InMemoryTransportSimulator("node3");
+        cluster.heartbeatUntil(nodes.leader(), () -> hasKeys(nodes.store3(), 0, 9),
+                "node3 has the snapshot's keys and the entries replicated after it");
+    }
 
-        QraftStateStore sm1 = new QraftStateStore();
-        QraftStateStore sm2 = new QraftStateStore();
-        QraftStateStore sm3 = new QraftStateStore();
+    @Test
+    void testLeaderUpdatesIndicesAfterSnapshotInstall() throws Exception {
+        Cluster nodes = compactWhileNode3IsCutOff(7);
+        long leaderSnapshotIndex = nodes.leader().getSnapshotLastIndex();
 
-        RaftNode node1 = RaftNode.builder().runtime(runtime).nodeId("node1").clusterNodes(cluster).transport(t1).stateMachine(sm1).mode(RaftNodeMode.durable(leaderStorage, leaderStorage)).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(1000).heartbeatInterval(200)
-                .snapshotEnabled(true).snapshotThreshold(5).snapshotCheckInterval(300).build();
-        RaftNode node2 = RaftNode.builder().runtime(runtime).nodeId("node2").clusterNodes(cluster).transport(t2).stateMachine(sm2).mode(RaftNodeMode.durable(node2Storage, node2Storage)).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(1500).heartbeatInterval(200)
-                .snapshotEnabled(true).snapshotThreshold(5).snapshotCheckInterval(300).build();
-        RaftNode node3 = RaftNode.builder().runtime(runtime).nodeId("node3").clusterNodes(cluster).transport(t3).stateMachine(sm3).mode(RaftNodeMode.durable(followerStorage, followerStorage)).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(15000).heartbeatInterval(200)
-                .snapshotEnabled(true).snapshotThreshold(5).snapshotCheckInterval(300).build();
-
-        // Partition node3
-        InMemoryTransportSimulator.createPartition(Set.of("node1", "node2"), Set.of("node3"));
-
-        leaderStorage.open(Path.of("/tmp/t2-1"))
-                .thenCompose(v -> node2Storage.open(Path.of("/tmp/t2-2")))
-                .thenCompose(v -> followerStorage.open(Path.of("/tmp/t2-3"))).join();
-        node1.start().compose(v -> node2.start()).compose(v -> node3.start());
-
-        // Wait for leader election
-        await().atMost(12, TimeUnit.SECONDS).pollInterval(200, TimeUnit.MILLISECONDS)
-                .until(() -> node1.getState() == RaftNode.State.LEADER
-                        || node2.getState() == RaftNode.State.LEADER);
-
-        RaftNode leader = (node1.getState() == RaftNode.State.LEADER) ? node1 : node2;
-
-        // Submit initial commands
-        CompletableFuture<Void> batch1 = new CompletableFuture<>();
-        runtime.runOnContext(v ->
-                submitCommands(leader, 0, 6)
-                        .onSuccess(r -> batch1.complete(null))
-                        .onFailure(batch1::completeExceptionally));
-        batch1.get(15, TimeUnit.SECONDS);
-
-        // Wait for snapshot
-        await().atMost(12, TimeUnit.SECONDS).pollInterval(200, TimeUnit.MILLISECONDS)
-                .untilAsserted(() -> assertTrue(leader.getSnapshotLastIndex() >= 5));
-
-        // Heal partition
         InMemoryTransportSimulator.healPartitions();
 
-        // Wait for node3 to get snapshot
-        await().atMost(15, TimeUnit.SECONDS).pollInterval(300, TimeUnit.MILLISECONDS)
-                .untilAsserted(() -> assertTrue(node3.getSnapshotLastIndex() > 0,
-                        "node3 should have installed snapshot"));
-
-        // Submit MORE commands after snapshot catch-up
-        CompletableFuture<Void> batch2 = new CompletableFuture<>();
-        runtime.runOnContext(v ->
-                submitCommands(leader, 6, 3)
-                        .onSuccess(r -> batch2.complete(null))
-                        .onFailure(batch2::completeExceptionally));
-        batch2.get(15, TimeUnit.SECONDS);
-
-        // Wait for node3 to replicate post-snapshot entries
-        await().atMost(12, TimeUnit.SECONDS).pollInterval(300, TimeUnit.MILLISECONDS)
-                .untilAsserted(() -> {
-                    assertEquals("value0", sm3.getMetadata("key0"), "Snapshot data should be present");
-                    assertEquals("value5", sm3.getMetadata("key5"), "Snapshot data should be present");
-                    assertEquals("value6", sm3.getMetadata("key6"), "Post-snapshot replicated data");
-                    assertEquals("value8", sm3.getMetadata("key8"), "Post-snapshot replicated data");
-                });
-
-        awaitStops(node1, node2, node3);
-        ctx.completeNow();
-
-        assertTrue(ctx.awaitCompletion(5, TimeUnit.SECONDS), "Test timed out");
-        if (ctx.failed()) throw ctx.causeOfFailure();
+        cluster.heartbeatUntil(nodes.leader(), () -> nodes.node3().getSnapshotLastIndex() > 0
+                        && nodes.leader().getNextIndex("node3") > leaderSnapshotIndex,
+                "the leader moves node3's next index past its snapshot");
     }
 
-    /**
-     * Test 3: Leader updates nextIndex/matchIndex after successful InstallSnapshot.
-     */
     @Test
-    void testLeaderUpdatesIndicesAfterSnapshotInstall(JavaTestContext ctx) throws Throwable {
-        leaderStorage = new TestRaftStorage();
-        followerStorage = new TestRaftStorage();
-        TestRaftStorage node2Storage = new TestRaftStorage();
+    void testFollowerRejectsStaleTermSnapshot() throws Exception {
+        TestRaftStorage storage = openStorage();
+        QraftStateStore store = new QraftStateStore();
+        RaftNode follower = cluster.add(cluster.builder("node1", Set.of("node1", "leader"),
+                new InMemoryTransportSimulator("node1"), store, RaftNodeMode.durable(storage, storage))
+                .snapshotEnabled(false));
+        await(follower.start());
+        assertTrue(await(follower.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
+                .setTerm(2).setLeaderId("leader").setPrevLogIndex(0).setPrevLogTerm(0).setLeaderCommit(0).build()))
+                .getSuccess(), "node1 follows leader in term 2");
+        InstallSnapshotRequest fromTerm1 = validSnapshot("leader", 1);
 
-        Set<String> cluster = Set.of("node1", "node2", "node3");
+        InstallSnapshotResponse response = await(follower.handleInstallSnapshot(fromTerm1));
 
-        InMemoryTransportSimulator t1 = new InMemoryTransportSimulator("node1");
-        InMemoryTransportSimulator t2 = new InMemoryTransportSimulator("node2");
-        InMemoryTransportSimulator t3 = new InMemoryTransportSimulator("node3");
-
-        QraftStateStore sm1 = new QraftStateStore();
-        QraftStateStore sm2 = new QraftStateStore();
-        QraftStateStore sm3 = new QraftStateStore();
-
-        RaftNode node1 = RaftNode.builder().runtime(runtime).nodeId("node1").clusterNodes(cluster).transport(t1).stateMachine(sm1).mode(RaftNodeMode.durable(leaderStorage, leaderStorage)).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(1000).heartbeatInterval(200)
-                .snapshotEnabled(true).snapshotThreshold(5).snapshotCheckInterval(300).build();
-        RaftNode node2 = RaftNode.builder().runtime(runtime).nodeId("node2").clusterNodes(cluster).transport(t2).stateMachine(sm2).mode(RaftNodeMode.durable(node2Storage, node2Storage)).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(1500).heartbeatInterval(200)
-                .snapshotEnabled(true).snapshotThreshold(5).snapshotCheckInterval(300).build();
-        RaftNode node3 = RaftNode.builder().runtime(runtime).nodeId("node3").clusterNodes(cluster).transport(t3).stateMachine(sm3).mode(RaftNodeMode.durable(followerStorage, followerStorage)).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(15000).heartbeatInterval(200)
-                .snapshotEnabled(true).snapshotThreshold(5).snapshotCheckInterval(300).build();
-
-        InMemoryTransportSimulator.createPartition(Set.of("node1", "node2"), Set.of("node3"));
-
-        leaderStorage.open(Path.of("/tmp/t3-1"))
-                .thenCompose(v -> node2Storage.open(Path.of("/tmp/t3-2")))
-                .thenCompose(v -> followerStorage.open(Path.of("/tmp/t3-3"))).join();
-        node1.start().compose(v -> node2.start()).compose(v -> node3.start());
-
-        // Wait for leader election
-        await().atMost(12, TimeUnit.SECONDS).pollInterval(200, TimeUnit.MILLISECONDS)
-                .until(() -> node1.getState() == RaftNode.State.LEADER
-                        || node2.getState() == RaftNode.State.LEADER);
-
-        RaftNode leader = (node1.getState() == RaftNode.State.LEADER) ? node1 : node2;
-
-        CompletableFuture<Void> commandsDone = new CompletableFuture<>();
-        runtime.runOnContext(v ->
-                submitCommands(leader, 0, 7)
-                        .onSuccess(r -> commandsDone.complete(null))
-                        .onFailure(commandsDone::completeExceptionally));
-        commandsDone.get(15, TimeUnit.SECONDS);
-
-        await().atMost(12, TimeUnit.SECONDS).pollInterval(200, TimeUnit.MILLISECONDS)
-                .untilAsserted(() -> assertTrue(leader.getSnapshotLastIndex() >= 5));
-
-        long leaderSnapIdx = leader.getSnapshotLastIndex();
-
-        // Heal partition
-        InMemoryTransportSimulator.healPartitions();
-
-        // Wait for snapshot install and index update
-        await().atMost(15, TimeUnit.SECONDS).pollInterval(300, TimeUnit.MILLISECONDS)
-                .untilAsserted(() -> {
-                    assertTrue(node3.getSnapshotLastIndex() > 0,
-                            "node3 should have installed snapshot");
-                    long nextIdx = leader.getNextIndex("node3");
-                    assertTrue(nextIdx > leaderSnapIdx,
-                            "Leader nextIndex for node3 should be > snapshotLastIndex: " +
-                                    "nextIdx=" + nextIdx + ", snapIdx=" + leaderSnapIdx);
-                });
-
-        awaitStops(node1, node2, node3);
-        ctx.completeNow();
-
-        assertTrue(ctx.awaitCompletion(5, TimeUnit.SECONDS), "Test timed out");
-        if (ctx.failed()) throw ctx.causeOfFailure();
+        assertFalse(response.getSuccess(), "an InstallSnapshot from a stale term is refused");
+        assertEquals(2, response.getTerm(), "the refusal reports the follower's current term");
+        assertEquals(0, follower.getSnapshotLastIndex(), "nothing is installed");
+        assertNull(store.getMetadata("snap-key-1"));
+        assertTrue(await(follower.handleInstallSnapshot(fromTerm1.toBuilder().setTerm(2).build())).getSuccess(),
+                "the same snapshot in the current term is installed, so only its term was refused");
     }
 
-    /**
-     * Test 4: Follower rejects InstallSnapshot with stale term.
-     *
-     * Directly calls handleInstallSnapshot on a follower with a term lower
-     * than the follower's current term. The response should indicate rejection.
-     */
-    @Test
-    void testFollowerRejectsStaleTermSnapshot(JavaTestContext ctx) throws Throwable {
-        TestRaftStorage storage = new TestRaftStorage();
-        InMemoryTransportSimulator transport = new InMemoryTransportSimulator("node1");
-        QraftStateStore sm = new QraftStateStore();
-        Set<String> cluster = Set.of("node1");
-
-        RaftNode node = RaftNode.builder().runtime(runtime).nodeId("node1").clusterNodes(cluster).transport(transport).stateMachine(sm).mode(RaftNodeMode.durable(storage, storage)).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(1000).heartbeatInterval(200)
-                .snapshotEnabled(false).snapshotThreshold(100).snapshotCheckInterval(5000).build();
-
-        Future.fromCompletionStage(storage.open(Path.of("/tmp/stale-test"))).onComplete(ctx.succeeding(v -> {
-            node.start().onComplete(ctx.succeeding(v2 -> {
-                node.awaitState(RaftNode.State.LEADER, 10_000).onComplete(ctx.succeeding(state -> {
-
-                    // The node is now leader with currentTerm >= 1
-                    // Send an InstallSnapshot with term 0 (stale)
-                    InstallSnapshotRequest staleRequest = InstallSnapshotRequest.newBuilder()
-                            .setTerm(0) // stale term
-                            .setLeaderId("fake-leader")
-                            .setLastIncludedIndex(10)
-                            .setLastIncludedTerm(0)
-                            .setChunkIndex(0)
-                            .setTotalChunks(1)
-                            .setData(com.google.protobuf.ByteString.copyFrom(new byte[]{1, 2, 3}))
-                            .setDone(true)
-                            .build();
-
-                    node.handleInstallSnapshot(staleRequest).onComplete(ctx.succeeding(response -> {
-                        ctx.verify(() -> {
-                            assertFalse(response.getSuccess(),
-                                    "Should reject InstallSnapshot with stale term");
-                            assertTrue(response.getTerm() > 0,
-                                    "Response should include current term");
-                        });
-                        node.stop().onComplete(ctx.succeeding(v3 -> ctx.completeNow()));
-                    }));
-                }));
-            }));
-        }));
-
-        assertTrue(ctx.awaitCompletion(10, TimeUnit.SECONDS), "Test timed out");
-        if (ctx.failed()) throw ctx.causeOfFailure();
-    }
-
-    /**
-     * Test 5: SnapshotChunkAssembler correctly reassembles multi-chunk snapshot data.
-     *
-     * Unit test for the inner assembler class verifying that chunks split
-     * across multiple calls are correctly reassembled into the original data.
-     */
     @Test
     void testChunkAssemblerReassemblesData() {
         byte[] original = new byte[256];
-        for (int i = 0; i < 256; i++) {
-            original[i] = (byte) i;
-        }
-
-        // Split into 4 chunks of 64 bytes
+        for (int i = 0; i < 256; i++) original[i] = (byte) i;
         int chunkSize = 64;
         int totalChunks = 4;
-        InstallSnapshotRequest identity = InstallSnapshotRequest.newBuilder()
-                .setTerm(1).setLeaderId("leader").setLastIncludedIndex(10)
-                .setLastIncludedTerm(1).setTotalChunks(totalChunks).build();
-        RaftNode.SnapshotChunkAssembler assembler = new RaftNode.SnapshotChunkAssembler(identity);
+        RaftNode.SnapshotChunkAssembler assembler = new RaftNode.SnapshotChunkAssembler(InstallSnapshotRequest
+                .newBuilder().setTerm(1).setLeaderId("leader").setLastIncludedIndex(10)
+                .setLastIncludedTerm(1).setTotalChunks(totalChunks).build());
 
         for (int i = 0; i < totalChunks; i++) {
             byte[] chunk = new byte[chunkSize];
@@ -401,119 +151,118 @@ class InstallSnapshotTest {
             assertEquals(i + 1, assembler.getNextExpectedChunk());
         }
 
-        byte[] reassembled = assembler.assemble();
-        assertArrayEquals(original, reassembled, "Reassembled data should match original");
+        assertArrayEquals(original, assembler.assemble(), "the reassembled data matches the original");
     }
 
-    /**
-     * Test 6: SnapshotChunkAssembler handles single-chunk snapshot correctly.
-     */
     @Test
     void testChunkAssemblerSingleChunk() {
         byte[] data = "snapshot-data-content".getBytes();
-        InstallSnapshotRequest identity = InstallSnapshotRequest.newBuilder()
-                .setTerm(1).setLeaderId("leader").setLastIncludedIndex(10)
-                .setLastIncludedTerm(1).setTotalChunks(1).build();
-        RaftNode.SnapshotChunkAssembler assembler = new RaftNode.SnapshotChunkAssembler(identity);
+        RaftNode.SnapshotChunkAssembler assembler = new RaftNode.SnapshotChunkAssembler(InstallSnapshotRequest
+                .newBuilder().setTerm(1).setLeaderId("leader").setLastIncludedIndex(10)
+                .setLastIncludedTerm(1).setTotalChunks(1).build());
         assertEquals(0, assembler.getNextExpectedChunk());
 
         assembler = assembler.withChunk(0, data);
-        assertEquals(1, assembler.getNextExpectedChunk());
 
-        byte[] result = assembler.assemble();
-        assertArrayEquals(data, result);
+        assertEquals(1, assembler.getNextExpectedChunk());
+        assertArrayEquals(data, assembler.assemble());
     }
 
-    /**
-     * Test 7: Follower saves snapshot to storage upon install completion.
-     *
-     * After a follower receives a complete snapshot via handleInstallSnapshot,
-     * the snapshot data must be persisted in the follower's RaftStorage.
-     */
     @Test
-    void testFollowerPersistsInstalledSnapshot(JavaTestContext ctx) throws Throwable {
-        TestRaftStorage storage = new TestRaftStorage();
-        InMemoryTransportSimulator transport = new InMemoryTransportSimulator("follower-persist");
-        QraftStateStore sm = new QraftStateStore();
-        Set<String> cluster = Set.of("follower-persist");
+    void testFollowerPersistsInstalledSnapshot() throws Exception {
+        TestRaftStorage storage = openStorage();
+        QraftStateStore store = new QraftStateStore();
+        RaftNode node = cluster.add(cluster.builder("follower-persist", Set.of("follower-persist"),
+                new InMemoryTransportSimulator("follower-persist"), store, RaftNodeMode.durable(storage, storage))
+                .snapshotEnabled(false));
+        await(node.start());
 
-        RaftNode node = RaftNode.builder().runtime(runtime).nodeId("follower-persist").clusterNodes(cluster).transport(transport).stateMachine(sm).mode(RaftNodeMode.durable(storage, storage)).commandCodec(new ProtobufRaftCommandCodec())
-                .electionTimeout(15000).heartbeatInterval(200)
-                .snapshotEnabled(false).snapshotThreshold(100).snapshotCheckInterval(5000).build();
+        InstallSnapshotResponse response = await(node.handleInstallSnapshot(validSnapshot("some-leader", 1)));
 
-        Future.fromCompletionStage(storage.open(Path.of("/tmp/persist-test"))).onComplete(ctx.succeeding(v -> {
-            node.start().onComplete(ctx.succeeding(v2 -> {
-
-                // Build a realistic snapshot: serialize some state machine data
-                QraftStateStore tempSM = new QraftStateStore();
-                tempSM.apply(distributedPut("snap-key-1", "snap-val-1"));
-                tempSM.apply(distributedPut("snap-key-2", "snap-val-2"));
-                byte[] snapshotData = tempSM.takeSnapshot();
-
-                // Send a single-chunk InstallSnapshot directly
-                InstallSnapshotRequest request = InstallSnapshotRequest.newBuilder()
-                        .setTerm(1)
-                        .setLeaderId("some-leader")
-                        .setLastIncludedIndex(10)
-                        .setLastIncludedTerm(1)
-                        .setChunkIndex(0)
-                        .setTotalChunks(1)
-                        .setData(com.google.protobuf.ByteString.copyFrom(snapshotData))
-                        .setDone(true)
-                        .build();
-
-                node.handleInstallSnapshot(request).onComplete(ctx.succeeding(response -> {
-                    ctx.verify(() -> {
-                        assertTrue(response.getSuccess(), "InstallSnapshot should succeed");
-                    });
-
-                    // Verify snapshot was persisted in storage
-                    Future.fromCompletionStage(storage.loadLatest()).onComplete(ctx.succeeding(snapshotOpt -> {
-                        ctx.verify(() -> {
-                            assertTrue(snapshotOpt.isPresent(), "Snapshot should be saved in follower's storage");
-                            var saved = snapshotOpt.get();
-                            assertEquals(10, saved.lastIncludedIndex());
-                            assertEquals(1, saved.lastIncludedTerm());
-                            assertTrue(saved.data().length > 0);
-
-                            // Verify state machine was restored
-                            assertEquals("snap-val-1", sm.getMetadata("snap-key-1"));
-                            assertEquals("snap-val-2", sm.getMetadata("snap-key-2"));
-
-                            // Verify node index tracking was updated
-                            assertEquals(10, node.getSnapshotLastIndex());
-                            assertEquals(1, node.getSnapshotLastTerm());
-                        });
-                        node.stop().onComplete(ctx.succeeding(v3 -> ctx.completeNow()));
-                    }));
-                }));
-            }));
-        }));
-
-        assertTrue(ctx.awaitCompletion(10, TimeUnit.SECONDS), "Test timed out");
-        if (ctx.failed()) throw ctx.causeOfFailure();
+        assertTrue(response.getSuccess(), "the snapshot is installed");
+        Optional<SnapshotStore.SnapshotData> saved = storage.loadLatest().get(10, TimeUnit.SECONDS);
+        assertTrue(saved.isPresent(), "the snapshot is saved in the follower's storage");
+        assertEquals(10, saved.get().lastIncludedIndex());
+        assertEquals(1, saved.get().lastIncludedTerm());
+        assertTrue(saved.get().data().length > 0);
+        assertEquals("snap-val-1", store.getMetadata("snap-key-1"));
+        assertEquals("snap-val-2", store.getMetadata("snap-key-2"));
+        assertEquals(10, node.getSnapshotLastIndex());
+        assertEquals(1, node.getSnapshotLastTerm());
     }
 
     // ========== Helpers ==========
 
-    private Future<Void> submitCommands(RaftNode node, int startIdx, int count) {
-        Future<Void> chain = Future.succeededFuture();
-        for (int i = startIdx; i < startIdx + count; i++) {
-            final int idx = i;
-            chain = chain.compose(v ->
-                                        node.submitCommand(distributedPut("key" + idx, "value" + idx))
-                            .mapEmpty());
-        }
-        return chain;
+    private record Cluster(RaftNode leader, RaftNode node3, QraftStateStore store3) { }
+
+    /** A complete single-chunk snapshot through index 10 of term 1, holding snap-key-1 and snap-key-2. */
+    private static InstallSnapshotRequest validSnapshot(String leaderId, long term) {
+        QraftStateStore leaderState = new QraftStateStore();
+        leaderState.apply(distributedPut("snap-key-1", "snap-val-1"));
+        leaderState.apply(distributedPut("snap-key-2", "snap-val-2"));
+        return InstallSnapshotRequest.newBuilder()
+                .setTerm(term).setLeaderId(leaderId).setLastIncludedIndex(10).setLastIncludedTerm(1)
+                .setChunkIndex(0).setTotalChunks(1).setData(ByteString.copyFrom(leaderState.takeSnapshot()))
+                .setDone(true).build();
     }
 
-    private static void awaitStops(RaftNode... nodes) throws Exception {
-        Future<?>[] stops = new Future<?>[nodes.length];
-        for (int i = 0; i < nodes.length; i++) stops[i] = nodes[i].stop();
-        Future.all(stops).toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+    /**
+     * Starts three durable nodes with node3 cut off, elects node1 with node2's vote, commits {@code commands}
+     * entries, and fires node1's snapshot check so it compacts them away. node3 has none of them.
+     */
+    private Cluster compactWhileNode3IsCutOff(int commands) throws Exception {
+        Set<String> members = Set.of("node1", "node2", "node3");
+        QraftStateStore store3 = new QraftStateStore();
+        RaftNode node1 = snapshottingNode("node1", members, new QraftStateStore());
+        RaftNode node2 = snapshottingNode("node2", members, new QraftStateStore());
+        RaftNode node3 = snapshottingNode("node3", members, store3);
+        InMemoryTransportSimulator.createPartition(Set.of("node1", "node2"), Set.of("node3"));
+        startAll(node1, node2, node3);
+        cluster.elect(node1);
+
+        submitCommands(node1, 0, commands);
+        cluster.timers(node1).firePeriodic(SNAPSHOT_CHECK_MS);
+
+        awaitTrue(() -> node1.getSnapshotLastIndex() >= SNAPSHOT_THRESHOLD, "the leader compacts its log");
+        assertEquals(0, node3.getLastLogIndex(), "node3 was cut off throughout");
+        return new Cluster(node1, node3, store3);
     }
 
-        private static DistributedStateRaftCommand distributedPut(String key, String value) {
-                return new DistributedStateRaftCommand(DistributedStateCommand.put(key, value));
+    private RaftNode snapshottingNode(String nodeId, Set<String> members, QraftStateStore store) throws Exception {
+        TestRaftStorage storage = openStorage();
+        return cluster.add(cluster.builder(nodeId, members, new InMemoryTransportSimulator(nodeId), store,
+                        RaftNodeMode.durable(storage, storage))
+                .snapshotEnabled(true).snapshotThreshold(SNAPSHOT_THRESHOLD).snapshotCheckInterval(SNAPSHOT_CHECK_MS));
+    }
+
+    /** In-memory storage: the directory is ignored. */
+    private static TestRaftStorage openStorage() throws Exception {
+        TestRaftStorage storage = new TestRaftStorage();
+        storage.open(null).get(10, TimeUnit.SECONDS);
+        return storage;
+    }
+
+    private static void submitCommands(RaftNode leader, int first, int count) throws Exception {
+        for (int i = first; i < first + count; i++) {
+            await(leader.submitCommand(distributedPut("key" + i, "value" + i)));
         }
+    }
+
+    private static boolean hasKeys(QraftStateStore store, int first, int count) {
+        for (int i = first; i < first + count; i++) {
+            if (!("value" + i).equals(store.getMetadata("key" + i))) return false;
+        }
+        return true;
+    }
+
+    private static DistributedStateRaftCommand distributedPut(String key, String value) {
+        return new DistributedStateRaftCommand(DistributedStateCommand.put(key, value));
+    }
+
+    /** Bounds a wait for in-memory work; the bound only diagnoses a hang. */
+    private static void awaitTrue(BooleanSupplier condition, String description) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!condition.getAsBoolean() && System.nanoTime() < deadline) Thread.sleep(5);
+        assertTrue(condition.getAsBoolean(), description);
+    }
 }

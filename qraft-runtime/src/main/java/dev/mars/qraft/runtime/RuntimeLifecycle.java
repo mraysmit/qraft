@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.runtime;
 
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -29,6 +30,14 @@ public interface RuntimeLifecycle extends AutoCloseable {
     CompletableFuture<Void> completion();
 
     CompletableFuture<Void> closeAsync();
+
+    /**
+     * The ports this runtime listens on, by listener: {@code http} in both modes, and {@code raft} and
+     * {@code apiGrpc} for a server. A port configured as 0 is reported as the port the system chose.
+     *
+     * @throws IllegalStateException when the runtime is no longer listening
+     */
+    Map<String, Integer> boundPorts();
 
     @Override
     default void close() {

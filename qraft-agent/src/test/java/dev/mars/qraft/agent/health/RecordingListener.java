@@ -43,13 +43,19 @@ final class RecordingListener implements CheckResultListener {
     }
 
     Delivery nextDelivery() throws InterruptedException {
-        Delivery delivery = deliveries.poll(5, TimeUnit.SECONDS);
+        Delivery delivery = deliveries.poll(10, TimeUnit.SECONDS);
         assertNotNull(delivery, "expected a check result");
         return delivery;
     }
 
-    void assertNoResult() throws InterruptedException {
-        assertNull(deliveries.poll(100, TimeUnit.MILLISECONDS), "unexpected check result");
+    /**
+     * Asserts that nothing has been delivered, without waiting. Every caller reaches this after each path
+     * that could deliver a result has either run on the calling thread (a manual-time task, a fake probe
+     * completed by the test) or been closed off (a response still held, a runner already stopped, whose
+     * cancelled probe has already been refused). A wait would only add time, never evidence.
+     */
+    void assertNoResult() {
+        assertNull(deliveries.peek(), "unexpected check result");
     }
 
     record Delivery(HealthCheckDefinition check, CheckResult result) {

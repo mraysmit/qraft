@@ -151,7 +151,7 @@ class RaftNodeLeaderCommitTest {
     private void becomeLeader() throws Exception {
         timers.fireNextOneShot();
         node.awaitState(RaftNode.State.LEADER, 10_000).toCompletionStage().toCompletableFuture()
-                .get(10, TimeUnit.SECONDS);
+                .get(15, TimeUnit.SECONDS);
         settle();
     }
 

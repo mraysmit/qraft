@@ -33,8 +33,6 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
 
-import java.io.IOException;
-import java.net.ServerSocket;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -71,13 +69,11 @@ class GrpcRaftServerTest {
     private ManagedChannel channel;
     private RaftServiceGrpc.RaftServiceBlockingStub blockingStub;
     private RaftServiceGrpc.RaftServiceStub asyncStub;
-    private int serverPort;
 
     @BeforeEach
     void setUp() throws Exception {
         runtime = JavaRuntime.create();
-        serverPort = findAvailablePort();
-        
+
         // Create a minimal RaftNode for testing
         Set<String> clusterNodes = Set.of("node1");
         InMemoryTransportSimulator transport = new InMemoryTransportSimulator("node1");
@@ -93,7 +89,7 @@ class GrpcRaftServerTest {
         raftNode.start();
         
         // Wait for node to be running (reactive polling instead of fixed sleep)
-        await().atMost(Duration.ofSeconds(5))
+        await().atMost(Duration.ofSeconds(10))
             .pollInterval(Duration.ofMillis(10))
             .until(() -> raftNode.isRunning());
     }
@@ -102,34 +98,30 @@ class GrpcRaftServerTest {
     void tearDown() throws Exception {
         if (channel != null && !channel.isShutdown()) {
             channel.shutdownNow();
-            channel.awaitTermination(5, TimeUnit.SECONDS);
+            channel.awaitTermination(10, TimeUnit.SECONDS);
         }
         if (grpcServer != null) {
-            grpcServer.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            grpcServer.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
         if (raftNode != null) {
-            raftNode.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            raftNode.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
         if (runtime != null) {
-            runtime.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
     }
 
-    private int findAvailablePort() throws IOException {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        }
-    }
-
+    /** Starts the server on any free port and connects to the port it actually bound. */
     private void startServerAndConnect() throws Exception {
-        grpcServer = new GrpcRaftServer(runtime, serverPort, raftNode);
-        grpcServer.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-        
-        channel = ManagedChannelBuilder.forAddress("localhost", serverPort)
+        grpcServer = new GrpcRaftServer(runtime, 0, raftNode);
+        grpcServer.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+
+        channel = ManagedChannelBuilder.forAddress("localhost", grpcServer.port())
                 .usePlaintext()
                 .build();
+        // The deadline is fixed now, not per call, so it must outlast any test using this stub.
         blockingStub = RaftServiceGrpc.newBlockingStub(channel)
-                .withDeadlineAfter(5, TimeUnit.SECONDS);
+                .withDeadlineAfter(30, TimeUnit.SECONDS);
         asyncStub = RaftServiceGrpc.newStub(channel);
     }
 
@@ -138,28 +130,28 @@ class GrpcRaftServerTest {
     @Test
     @DisplayName("Server should start successfully on available port")
     void testServerStartSuccess() throws Exception {
-        grpcServer = new GrpcRaftServer(runtime, serverPort, raftNode);
+        grpcServer = new GrpcRaftServer(runtime, 0, raftNode);
         
         CompletableFuture<Void> startFuture = grpcServer.start()
                 .toCompletionStage().toCompletableFuture();
         
-        assertDoesNotThrow(() -> startFuture.get(5, TimeUnit.SECONDS));
+        assertDoesNotThrow(() -> startFuture.get(10, TimeUnit.SECONDS));
     }
 
     @Test
     @DisplayName("Server should fail to start on occupied port")
     void testServerStartFailsOnOccupiedPort() throws Exception {
         // Start first server
-        grpcServer = new GrpcRaftServer(runtime, serverPort, raftNode);
-        grpcServer.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-        
-        // Try to start second server on same port
-        GrpcRaftServer secondServer = new GrpcRaftServer(runtime, serverPort, raftNode);
+        grpcServer = new GrpcRaftServer(runtime, 0, raftNode);
+        grpcServer.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+
+        // Try to start second server on the port the first one bound
+        GrpcRaftServer secondServer = new GrpcRaftServer(runtime, grpcServer.port(), raftNode);
         
         CompletableFuture<Void> startFuture = secondServer.start()
                 .toCompletionStage().toCompletableFuture();
         
-        assertThrows(ExecutionException.class, () -> startFuture.get(5, TimeUnit.SECONDS));
+        assertThrows(ExecutionException.class, () -> startFuture.get(10, TimeUnit.SECONDS));
     }
 
     @Test
@@ -188,28 +180,42 @@ class GrpcRaftServerTest {
     }
 
     @Test
+    @DisplayName("A server on port 0 reports the port it bound, and only while running")
+    void reportsTheBoundPortOnlyWhileRunning() throws Exception {
+        grpcServer = new GrpcRaftServer(runtime, 0, raftNode);
+        assertThrows(IllegalStateException.class, grpcServer::port, "no port is bound before start");
+
+        startServerAndConnect();
+        assertTrue(grpcServer.port() > 0);
+        assertDoesNotThrow(() -> blockingStub.requestVote(VoteRequest.newBuilder()
+                .setTerm(1).setCandidateId("candidate").setLastLogIndex(0).setLastLogTerm(0).build()));
+
+        grpcServer.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        assertThrows(IllegalStateException.class, grpcServer::port, "no port is bound after stop");
+    }
+
+    @Test
     @DisplayName("Stop on null server should complete successfully")
     void testStopOnNullServer() throws Exception {
-        grpcServer = new GrpcRaftServer(runtime, serverPort, raftNode);
+        grpcServer = new GrpcRaftServer(runtime, 0, raftNode);
         // Don't start, just stop
         
         CompletableFuture<Void> stopFuture = grpcServer.stop()
                 .toCompletionStage().toCompletableFuture();
         
-        assertDoesNotThrow(() -> stopFuture.get(5, TimeUnit.SECONDS));
+        assertDoesNotThrow(() -> stopFuture.get(10, TimeUnit.SECONDS));
     }
 
     @Test
     @DisplayName("Server should handle multiple start-stop cycles")
     void testMultipleStartStopCycles() throws Exception {
         for (int i = 0; i < 3; i++) {
-            int port = findAvailablePort();
-            GrpcRaftServer server = new GrpcRaftServer(runtime, port, raftNode);
-            
-            server.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-            
+            GrpcRaftServer server = new GrpcRaftServer(runtime, 0, raftNode);
+
+            server.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+
             // Quick health check
-            ManagedChannel ch = ManagedChannelBuilder.forAddress("localhost", port)
+            ManagedChannel ch = ManagedChannelBuilder.forAddress("localhost", server.port())
                     .usePlaintext()
                     .build();
             RaftServiceGrpc.RaftServiceBlockingStub stub = RaftServiceGrpc.newBlockingStub(ch);
@@ -224,9 +230,9 @@ class GrpcRaftServerTest {
             assertDoesNotThrow(() -> stub.requestVote(request));
             
             ch.shutdownNow();
-            ch.awaitTermination(2, TimeUnit.SECONDS);
+            ch.awaitTermination(10, TimeUnit.SECONDS);
             
-            server.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            server.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -351,7 +357,7 @@ class GrpcRaftServerTest {
             }
         });
         
-        assertTrue(latch.await(5, TimeUnit.SECONDS));
+        assertTrue(latch.await(10, TimeUnit.SECONDS));
         assertNull(errorRef.get());
         assertNotNull(responseRef.get());
     }
@@ -476,7 +482,7 @@ class GrpcRaftServerTest {
             }
         });
         
-        assertTrue(latch.await(5, TimeUnit.SECONDS));
+        assertTrue(latch.await(10, TimeUnit.SECONDS));
         assertNull(errorRef.get());
         assertNotNull(responseRef.get());
     }
@@ -632,7 +638,7 @@ class GrpcRaftServerTest {
         assertDoesNotThrow(() -> blockingStub.requestVote(request));
         
         // Stop server
-        grpcServer.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        grpcServer.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         grpcServer = null;
         
         // Client should get an error
@@ -656,10 +662,10 @@ class GrpcRaftServerTest {
         
         // Close channel
         channel.shutdownNow();
-        channel.awaitTermination(2, TimeUnit.SECONDS);
+        channel.awaitTermination(10, TimeUnit.SECONDS);
         
         // Reconnect
-        channel = ManagedChannelBuilder.forAddress("localhost", serverPort)
+        channel = ManagedChannelBuilder.forAddress("localhost", grpcServer.port())
                 .usePlaintext()
                 .build();
         blockingStub = RaftServiceGrpc.newBlockingStub(channel);
@@ -673,11 +679,11 @@ class GrpcRaftServerTest {
     void testManySequentialConnections() throws Exception {
         startServerAndConnect();
         channel.shutdownNow();
-        channel.awaitTermination(2, TimeUnit.SECONDS);
+        channel.awaitTermination(10, TimeUnit.SECONDS);
         channel = null;
         
         for (int i = 0; i < 20; i++) {
-            ManagedChannel ch = ManagedChannelBuilder.forAddress("localhost", serverPort)
+            ManagedChannel ch = ManagedChannelBuilder.forAddress("localhost", grpcServer.port())
                     .usePlaintext()
                     .build();
             
@@ -693,7 +699,7 @@ class GrpcRaftServerTest {
             assertDoesNotThrow(() -> stub.requestVote(request));
             
             ch.shutdownNow();
-            ch.awaitTermination(1, TimeUnit.SECONDS);
+            ch.awaitTermination(10, TimeUnit.SECONDS);
         }
     }
 
@@ -774,53 +780,38 @@ class GrpcRaftServerTest {
     }
 
     @Test
-    @DisplayName("Server should remain stable under sustained load")
+    @DisplayName("Server answers every one of a sustained stream of concurrent requests")
     void testSustainedLoad() throws Exception {
         startServerAndConnect();
-        
-        int durationSeconds = 2;
-        int requestsPerSecond = 50;
-        AtomicBoolean running = new AtomicBoolean(true);
-        AtomicInteger successCount = new AtomicInteger(0);
-        AtomicInteger errorCount = new AtomicInteger(0);
-        
-        ExecutorService executor = Executors.newFixedThreadPool(5);
-        
-        // Submit continuous load
-        for (int i = 0; i < 5; i++) {
-            executor.submit(() -> {
-                while (running.get()) {
-                    try {
-                        VoteRequest request = VoteRequest.newBuilder()
-                                .setTerm(1)
-                                .setCandidateId("candidate")
-                                .setLastLogIndex(0)
-                                .setLastLogTerm(0)
-                                .build();
-                        blockingStub.requestVote(request);
-                        successCount.incrementAndGet();
-                        Thread.sleep(1000 / requestsPerSecond);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    } catch (Exception e) {
-                        errorCount.incrementAndGet();
+        int workers = 5;
+        int requestsPerWorker = 100;
+        AtomicInteger successCount = new AtomicInteger();
+        List<Throwable> failures = new java.util.concurrent.CopyOnWriteArrayList<>();
+        VoteRequest request = VoteRequest.newBuilder()
+                .setTerm(1).setCandidateId("candidate").setLastLogIndex(0).setLastLogTerm(0).build();
+
+        // A fixed amount of work rather than a fixed duration: the result does not depend on machine speed,
+        // and each call carries its own deadline instead of sharing one fixed when the stub was built.
+        try (ExecutorService executor = Executors.newFixedThreadPool(workers)) {
+            List<java.util.concurrent.Future<?>> running = new ArrayList<>();
+            for (int worker = 0; worker < workers; worker++) {
+                running.add(executor.submit(() -> {
+                    for (int sent = 0; sent < requestsPerWorker; sent++) {
+                        try {
+                            RaftServiceGrpc.newBlockingStub(channel).withDeadlineAfter(10, TimeUnit.SECONDS)
+                                    .requestVote(request);
+                            successCount.incrementAndGet();
+                        } catch (RuntimeException failure) {
+                            failures.add(failure);
+                        }
                     }
-                }
-            });
+                }));
+            }
+            for (java.util.concurrent.Future<?> worker : running) worker.get(60, TimeUnit.SECONDS);
         }
-        
-        // Let it run for the specified duration
-        await().pollDelay(Duration.ofSeconds(durationSeconds))
-            .atMost(Duration.ofSeconds(durationSeconds + 1))
-            .until(() -> true);
-        running.set(false);
-        executor.shutdownNow();
-        executor.awaitTermination(5, TimeUnit.SECONDS);
-        
-        assertTrue(successCount.get() > 0, "Should have processed some requests");
-        assertTrue(errorCount.get() < successCount.get() / 10, 
-                "Error rate should be less than 10%");
+
+        assertEquals(List.of(), failures);
+        assertEquals(workers * requestsPerWorker, successCount.get());
     }
 
     // ========== MALFORMED REQUEST TESTS ==========
@@ -907,11 +898,10 @@ class GrpcRaftServerTest {
     @DisplayName("Server should handle rapid start/stop cycles")
     void testRapidStartStopCycles() throws Exception {
         for (int i = 0; i < 5; i++) {
-            int port = findAvailablePort();
-            GrpcRaftServer server = new GrpcRaftServer(runtime, port, raftNode);
-            
-            server.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-            server.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            GrpcRaftServer server = new GrpcRaftServer(runtime, 0, raftNode);
+
+            server.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            server.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -920,9 +910,7 @@ class GrpcRaftServerTest {
     @Test
     @DisplayName("Multiple gRPC servers should work independently")
     void testMultipleServersIndependent() throws Exception {
-        int port1 = findAvailablePort();
-        int port2 = findAvailablePort();
-        
+
         // Create two independent RaftNodes
         Set<String> cluster1 = Set.of("nodeA");
         Set<String> cluster2 = Set.of("nodeB");
@@ -938,20 +926,20 @@ class GrpcRaftServerTest {
         
         node1.start();
         node2.start();
-        await().atMost(Duration.ofSeconds(5))
+        await().atMost(Duration.ofSeconds(10))
             .pollInterval(Duration.ofMillis(10))
             .until(() -> node1.isRunning() && node2.isRunning());
         
-        GrpcRaftServer server1 = new GrpcRaftServer(runtime, port1, node1);
-        GrpcRaftServer server2 = new GrpcRaftServer(runtime, port2, node2);
+        GrpcRaftServer server1 = new GrpcRaftServer(runtime, 0, node1);
+        GrpcRaftServer server2 = new GrpcRaftServer(runtime, 0, node2);
         
-        server1.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-        server2.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        server1.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        server2.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         
         try {
-            ManagedChannel ch1 = ManagedChannelBuilder.forAddress("localhost", port1)
+            ManagedChannel ch1 = ManagedChannelBuilder.forAddress("localhost", server1.port())
                     .usePlaintext().build();
-            ManagedChannel ch2 = ManagedChannelBuilder.forAddress("localhost", port2)
+            ManagedChannel ch2 = ManagedChannelBuilder.forAddress("localhost", server2.port())
                     .usePlaintext().build();
             
             RaftServiceGrpc.RaftServiceBlockingStub stub1 = RaftServiceGrpc.newBlockingStub(ch1);
@@ -974,10 +962,10 @@ class GrpcRaftServerTest {
             ch1.shutdownNow();
             ch2.shutdownNow();
         } finally {
-            server1.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-            server2.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-            node1.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-            node2.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            server1.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            server2.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            node1.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            node2.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
     }
 }

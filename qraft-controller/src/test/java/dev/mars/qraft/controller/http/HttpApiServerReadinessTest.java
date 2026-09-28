@@ -19,10 +19,10 @@ package dev.mars.qraft.controller.http;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.mars.qraft.controller.raft.InMemoryTransportSimulator;
+import dev.mars.qraft.controller.raft.ManualRaftCluster;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.raft.RaftNodeMode;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
-import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -39,7 +39,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -49,9 +48,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * fenced or draining, and knows a current leader. A 503 names every failed condition; liveness is never
  * affected. A server cut off from the majority becomes unready and is ready again once the partition heals.
  *
+ * <p>Elections and heartbeats fire only when a test fires them through {@link ManualRaftCluster}, so the
+ * leader a test observes stays the leader until the test changes it.
+ *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-27
- * @version 1.0
+ * @version 2.0
  */
 class HttpApiServerReadinessTest {
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -60,20 +62,24 @@ class HttpApiServerReadinessTest {
     private final Map<String, RaftNode> nodes = new LinkedHashMap<>();
     private final List<HttpApiServer> servers = new ArrayList<>();
     private JavaRuntime runtime;
+    private ManualRaftCluster cluster;
 
     @AfterEach
     void stop() throws Exception {
         servers.forEach(HttpApiServer::close);
-        for (RaftNode node : nodes.values()) node.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-        if (runtime != null) runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-        InMemoryTransportSimulator.clearAllTransports();
-        http.close();
+        try {
+            if (cluster != null) cluster.close();
+        } finally {
+            if (runtime != null) runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            InMemoryTransportSimulator.clearAllTransports();
+            http.close();
+        }
     }
 
     @Test
     void aLeaderIsReady() throws Exception {
         HttpApiServer server = serve(startCluster(Set.of("a"), Set.of("a")).get("a"));
-        await(() -> nodes.get("a").isLeader());
+        cluster.elect(nodes.get("a"));
 
         HttpResponse<String> ready = get(server, "/health/ready");
 
@@ -84,9 +90,8 @@ class HttpApiServerReadinessTest {
     @Test
     void aFollowerOfAKnownLeaderIsReady() throws Exception {
         startCluster(Set.of("a", "b", "c"), Set.of("a", "b", "c"));
-        await(() -> leader() != null);
-        String follower = nodes.keySet().stream().filter(id -> !id.equals(leader())).findFirst().orElseThrow();
-        HttpApiServer server = serve(nodes.get(follower));
+        electAndFollow("a");
+        HttpApiServer server = serve(nodes.get("b"));
 
         await(() -> get(server, "/health/ready").statusCode() == 200);
     }
@@ -106,6 +111,7 @@ class HttpApiServerReadinessTest {
     @Test
     void aNodeThatHasNotFinishedRecoveryIsNotReady() throws Exception {
         runtime = JavaRuntime.create();
+        cluster = new ManualRaftCluster(runtime);
         QraftStateStore store = new QraftStateStore();
         RaftNode unstarted = node("a", Set.of("a"), store);
         HttpApiServer server = new HttpApiServer(0, unstarted, store);
@@ -121,7 +127,7 @@ class HttpApiServerReadinessTest {
     @Test
     void aDrainingServerIsNotReadyButIsLive() throws Exception {
         HttpApiServer server = serve(startCluster(Set.of("a"), Set.of("a")).get("a"));
-        await(() -> nodes.get("a").isLeader());
+        cluster.elect(nodes.get("a"));
 
         server.enterDrainMode().get(10, TimeUnit.SECONDS);
         HttpResponse<String> ready = get(server, "/health/ready");
@@ -134,40 +140,47 @@ class HttpApiServerReadinessTest {
     @Test
     void aServerCutOffFromTheMajorityBecomesUnreadyAndIsReadyAgainWhenThePartitionHeals() throws Exception {
         startCluster(Set.of("a", "b", "c"), Set.of("a", "b", "c"));
-        await(() -> leader() != null);
-        String isolated = nodes.keySet().stream().filter(id -> !id.equals(leader())).findFirst().orElseThrow();
+        electAndFollow("a");
+        String isolated = "b";
         HttpApiServer server = serve(nodes.get(isolated));
         await(() -> get(server, "/health/ready").statusCode() == 200);
 
-        Set<String> majority = new LinkedHashSet<>(nodes.keySet());
-        majority.remove(isolated);
-        InMemoryTransportSimulator.createPartition(Set.of(isolated), majority);
+        InMemoryTransportSimulator.createPartition(Set.of(isolated), Set.of("a", "c"));
+        // Hearing from no leader for a whole timeout, it stands for election and knows no leader.
+        cluster.timers(nodes.get(isolated)).fireElectionTimeout();
         await(() -> {
             HttpResponse<String> ready = get(server, "/health/ready");
             return ready.statusCode() == 503 && conditions(ready).contains("no_leader");
         });
 
         InMemoryTransportSimulator.healPartitions();
+        // Its higher term would unseat a, and every log is equally empty, so its next candidacy wins.
+        cluster.elect(nodes.get(isolated));
         await(() -> get(server, "/health/ready").statusCode() == 200);
     }
 
     private Map<String, RaftNode> startCluster(Set<String> members, Set<String> started) throws Exception {
         InMemoryTransportSimulator.clearAllTransports();
         runtime = JavaRuntime.create();
+        cluster = new ManualRaftCluster(runtime);
         for (String id : members.stream().sorted().toList()) {
             if (!started.contains(id)) continue;
-            RaftNode node = node(id, members, new QraftStateStore());
-            nodes.put(id, node);
+            nodes.put(id, node(id, members, new QraftStateStore()));
         }
-        for (RaftNode node : nodes.values()) node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        ManualRaftCluster.startAll(nodes.values().toArray(RaftNode[]::new));
         return nodes;
     }
 
     private RaftNode node(String id, Set<String> members, QraftStateStore store) {
-        return RaftNode.builder().runtime(runtime).nodeId(id).clusterNodes(members)
-                .transport(new InMemoryTransportSimulator(id)).stateMachine(store)
-                .commandCodec(new ProtobufRaftCommandCodec()).mode(RaftNodeMode.volatileMode())
-                .electionTimeout(150).heartbeatInterval(30).build();
+        return cluster.add(cluster.builder(id, members, new InMemoryTransportSimulator(id), store,
+                RaftNodeMode.volatileMode()));
+    }
+
+    /** Elects {@code leaderId} and fires its heartbeat until every member follows it. */
+    private void electAndFollow(String leaderId) throws Exception {
+        RaftNode leader = cluster.elect(nodes.get(leaderId));
+        cluster.heartbeatUntil(leader, () -> nodes.values().stream().allMatch(node -> leaderId.equals(node.getLeaderId())),
+                "every member follows " + leaderId);
     }
 
     private HttpApiServer serve(RaftNode node) throws Exception {
@@ -175,11 +188,6 @@ class HttpApiServerReadinessTest {
         servers.add(server);
         server.start().get(10, TimeUnit.SECONDS);
         return server;
-    }
-
-    private String leader() {
-        return nodes.entrySet().stream().filter(entry -> entry.getValue().isLeader()).map(Map.Entry::getKey)
-                .findFirst().orElse(null);
     }
 
     private static Set<String> conditions(HttpResponse<String> response) throws Exception {

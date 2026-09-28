@@ -50,6 +50,7 @@ import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -87,6 +88,10 @@ public final class HttpApiServer implements AutoCloseable {
     private final QraftStateStore stateStore;
     private final AtomicBoolean draining = new AtomicBoolean();
     private final Clock clock;
+    private final Duration raftTimeout;
+
+    /** How long a request waits for the Raft node to answer a status read or commit a write. */
+    public static final Duration DEFAULT_RAFT_TIMEOUT = Duration.ofSeconds(5);
 
     public HttpApiServer(int port) throws IOException {
         this(port, null, null);
@@ -108,6 +113,19 @@ public final class HttpApiServer implements AutoCloseable {
      */
     public HttpApiServer(int port, RaftNode raftNode, QraftStateStore stateStore, Clock clock,
                          AdminUiConfig ui, UiAssets assets) throws IOException {
+        this(port, raftNode, stateStore, clock, ui, assets, DEFAULT_RAFT_TIMEOUT);
+    }
+
+    /**
+     * @param raftTimeout how long a request waits for the Raft node to answer a status read or commit a
+     *                    write before answering that the outcome is unknown; it must be positive
+     */
+    public HttpApiServer(int port, RaftNode raftNode, QraftStateStore stateStore, Clock clock,
+                         AdminUiConfig ui, UiAssets assets, Duration raftTimeout) throws IOException {
+        this.raftTimeout = Objects.requireNonNull(raftTimeout, "raftTimeout");
+        if (raftTimeout.isNegative() || raftTimeout.isZero()) {
+            throw new IllegalArgumentException("raftTimeout must be positive: " + raftTimeout);
+        }
         this.port = port;
         this.adminUi = Objects.requireNonNull(ui, "ui");
         this.clock = Objects.requireNonNull(clock, "clock");
@@ -211,7 +229,8 @@ public final class HttpApiServer implements AutoCloseable {
         if (raftNode == null) return failed;
         RaftStatus status;
         try {
-            status = Deadlines.bound(raftNode.status().toCompletionStage(), 5, TimeUnit.SECONDS).join();
+            status = Deadlines.bound(raftNode.status().toCompletionStage(),
+                    raftTimeout.toNanos(), TimeUnit.NANOSECONDS).join();
         } catch (CompletionException unavailable) {
             failed.add("unavailable");
             return failed;
@@ -266,7 +285,8 @@ public final class HttpApiServer implements AutoCloseable {
         RaftStatus current;
         try {
             // Read on the node's state loop: fields read one by one from here could mix two moments.
-            current = Deadlines.bound(raftNode.status().toCompletionStage(), 5, TimeUnit.SECONDS).join();
+            current = Deadlines.bound(raftNode.status().toCompletionStage(),
+                    raftTimeout.toNanos(), TimeUnit.NANOSECONDS).join();
         } catch (CompletionException unavailable) {
             respondError(exchange, 503, "raft_unavailable", "Raft state is unavailable", true);
             return;
@@ -537,7 +557,8 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     private RaftCommandResult<?> submit(RaftCommand command) {
-        return Deadlines.bound(raftNode.submitCommand(command).toCompletionStage(), 5, TimeUnit.SECONDS)
+        return Deadlines.bound(raftNode.submitCommand(command).toCompletionStage(),
+                raftTimeout.toNanos(), TimeUnit.NANOSECONDS)
                 .join();
     }
 

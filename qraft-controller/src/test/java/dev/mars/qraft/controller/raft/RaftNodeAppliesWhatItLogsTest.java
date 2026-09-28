@@ -36,7 +36,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -47,22 +46,27 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * its followers reach by decoding the replicated bytes; and that entries are compared by their
  * replicated bytes, so a retransmitted entry whose re-encoding differs does not fence a follower.
  *
+ * <p>The cluster runs on manual timers ({@link ManualRaftCluster}): node a is elected by the test, and
+ * followers learn the commit when the test fires a's heartbeat.
+ *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-26
- * @version 1.0
+ * @version 2.0
  */
 class RaftNodeAppliesWhatItLogsTest {
     private final Map<String, RaftNode> nodes = new LinkedHashMap<>();
     private final Map<String, QraftStateStore> stores = new LinkedHashMap<>();
-    private JavaRuntime runtime;
+    private final JavaRuntime runtime = JavaRuntime.create();
+    private final ManualRaftCluster cluster = new ManualRaftCluster(runtime);
 
     @AfterEach
     void stopCluster() throws Exception {
-        for (RaftNode node : nodes.values()) {
-            node.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        try {
+            cluster.close();
+        } finally {
+            runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            InMemoryTransportSimulator.clearAllTransports();
         }
-        if (runtime != null) runtime.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-        InMemoryTransportSimulator.clearAllTransports();
     }
 
     @Test
@@ -70,9 +74,10 @@ class RaftNodeAppliesWhatItLogsTest {
         String leader = startCluster("a", "b", "c");
 
         nodes.get(leader).submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put("key", "value")))
-                .toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
 
-        waitUntil(() -> stores.values().stream().allMatch(store -> store.findMetadata("key").isPresent()));
+        cluster.heartbeatUntil(nodes.get(leader), () -> stores.values().stream()
+                .allMatch(store -> store.findMetadata("key").isPresent()), "every replica applies the command");
         assertEquals(Optional.of("value|decoded"), stores.get(leader).findMetadata("key"),
                 "the leader applies the command as decoded from its own log entry");
         assertEquals(1, stores.values().stream().map(store -> store.findMetadata("key")).distinct().count(),
@@ -81,14 +86,10 @@ class RaftNodeAppliesWhatItLogsTest {
 
     @Test
     void aRetransmittedEntryIsComparedByItsReplicatedBytesAndDoesNotFenceTheFollower() throws Exception {
-        runtime = JavaRuntime.create();
         QraftStateStore store = new QraftStateStore();
-        RaftNode follower = RaftNode.builder().runtime(runtime).nodeId("follower")
-                .clusterNodes(Set.of("follower", "leader")).transport(new InMemoryTransportSimulator("follower"))
-                .stateMachine(store).commandCodec(new ProtobufRaftCommandCodec()).mode(RaftNodeMode.volatileMode())
-                .electionTimeout(60_000).heartbeatInterval(50).build();
-        nodes.put("follower", follower);
-        follower.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        RaftNode follower = cluster.add(cluster.builder("follower", Set.of("follower", "leader"),
+                new InMemoryTransportSimulator("follower"), store, RaftNodeMode.volatileMode()));
+        follower.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         byte[] entry = registrationWhoseEncodingIsNotReproducedByReEncoding();
         AppendEntriesRequest request = AppendEntriesRequest.newBuilder().setTerm(1).setLeaderId("leader")
                 .setPrevLogIndex(0).setPrevLogTerm(0).setLeaderCommit(1)
@@ -97,9 +98,9 @@ class RaftNodeAppliesWhatItLogsTest {
                 .build();
 
         AppendEntriesResponse first = follower.handleAppendEntriesRequest(request)
-                .toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         AppendEntriesResponse retransmitted = follower.handleAppendEntriesRequest(request)
-                .toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
 
         assertTrue(first.getSuccess());
         assertTrue(retransmitted.getSuccess(), "a duplicate of an identical entry is not a divergent log");
@@ -131,28 +132,19 @@ class RaftNodeAppliesWhatItLogsTest {
         throw new IllegalStateException("could not construct an encoding that re-encoding changes");
     }
 
+    /** Starts the members with the normalizing codec and elects the first. */
     private String startCluster(String... nodeIds) throws Exception {
         InMemoryTransportSimulator.clearAllTransports();
-        runtime = JavaRuntime.create();
         Set<String> members = new LinkedHashSet<>(List.of(nodeIds));
         for (String nodeId : nodeIds) {
             QraftStateStore store = new QraftStateStore();
-            nodes.put(nodeId, RaftNode.builder().runtime(runtime).nodeId(nodeId).clusterNodes(members)
-                    .transport(new InMemoryTransportSimulator(nodeId)).stateMachine(store)
-                    .commandCodec(new NormalizingCodec()).mode(RaftNodeMode.volatileMode())
-                    .electionTimeout(250).heartbeatInterval(50).build());
+            nodes.put(nodeId, cluster.add(cluster.builder(nodeId, members, new InMemoryTransportSimulator(nodeId),
+                    store, RaftNodeMode.volatileMode()).commandCodec(new NormalizingCodec())));
             stores.put(nodeId, store);
         }
-        for (RaftNode node : nodes.values()) node.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-        waitUntil(() -> nodes.values().stream().filter(RaftNode::isLeader).count() == 1);
-        return nodes.entrySet().stream().filter(entry -> entry.getValue().isLeader())
-                .map(Map.Entry::getKey).findFirst().orElseThrow();
-    }
-
-    private static void waitUntil(BooleanSupplier condition) throws Exception {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (!condition.getAsBoolean() && System.nanoTime() < deadline) Thread.sleep(10);
-        assertTrue(condition.getAsBoolean(), "condition was not met before the deadline");
+        ManualRaftCluster.startAll(nodes.values().toArray(RaftNode[]::new));
+        cluster.elect(nodes.get(nodeIds[0]));
+        return nodeIds[0];
     }
 
     /** A codec whose decoding normalizes a value, standing in for any lossy or canonicalizing field. */

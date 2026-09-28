@@ -59,12 +59,13 @@ public final class QraftRuntimeApplication {
     private static RuntimeLifecycle launchServer(Path configurationPath) {
         QraftControllerApplication.RunningController controller =
                 QraftControllerApplication.launch(configurationPath);
-        return new ManagedRuntimeLifecycle(controller::closeAsync);
+        return new ManagedRuntimeLifecycle(controller::closeAsync, controller::boundPorts);
     }
 
     private static RuntimeLifecycle launchClient(Path configurationPath) {
         QraftAgent agent = QraftAgent.launch(configurationPath);
-        return new ManagedRuntimeLifecycle(() -> agent.shutdown().thenApply(ignored -> null));
+        return new ManagedRuntimeLifecycle(() -> agent.shutdown().thenApply(ignored -> null),
+                () -> java.util.Map.of("http", agent.healthService().port()));
     }
 
     static Startup parseArguments(String[] args) {

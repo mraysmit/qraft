@@ -45,7 +45,7 @@ class JavaRuntimeTest {
 
     @AfterEach
     void tearDown() throws Exception {
-        runtime.shutdown().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
     }
 
     @Test
@@ -68,7 +68,9 @@ class JavaRuntimeTest {
         // The task waits until the callback is registered; otherwise a completion that wins the race runs
         // the late-registered callback inline on the test thread instead of on the runtime context.
         Future<Boolean> operation = runtime.executeBlocking(() -> {
-            callbackRegistered.await(2, TimeUnit.SECONDS);
+            if (!callbackRegistered.await(30, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("the callback was never registered");
+            }
             return Thread.currentThread().isVirtual();
         });
         operation.onSuccess(ignored -> callbackOnRuntime.complete(JavaRuntime.currentContext() == runtime));
@@ -106,14 +108,24 @@ class JavaRuntimeTest {
     }
 
     @Test
-    void cancelledTimerDoesNotRun() throws Exception {
-        AtomicBoolean invoked = new AtomicBoolean();
-        long timerId = runtime.setTimer(30, ignored -> invoked.set(true));
+    void cancelledTimerIsRemovedFromTheSchedulerSoItCanNeverRun() throws Exception {
+        java.util.concurrent.ScheduledThreadPoolExecutor scheduler = new java.util.concurrent.ScheduledThreadPoolExecutor(1);
+        scheduler.setRemoveOnCancelPolicy(true);
+        JavaRuntime timed = new JavaRuntime(scheduler);
+        try {
+            AtomicBoolean invoked = new AtomicBoolean();
+            long timerId = timed.setTimer(60_000, ignored -> invoked.set(true));
+            assertEquals(1, scheduler.getQueue().size());
 
-        assertTrue(runtime.cancelTimer(timerId));
-        Thread.sleep(80);
+            assertTrue(timed.cancelTimer(timerId));
 
-        assertFalse(invoked.get());
+            assertEquals(0, scheduler.getQueue().size(), "a cancelled timer leaves nothing that could still run");
+            assertEquals(0, timed.pendingTimerCount());
+            assertFalse(invoked.get());
+            assertFalse(timed.cancelTimer(timerId), "a timer is cancelled at most once");
+        } finally {
+            timed.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        }
     }
 
     @Test

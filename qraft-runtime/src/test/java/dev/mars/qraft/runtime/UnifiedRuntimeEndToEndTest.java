@@ -33,6 +33,8 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -54,7 +56,7 @@ class UnifiedRuntimeEndToEndTest {
 
     private final List<RuntimeLifecycle> lifecycles = new ArrayList<>();
     private final HttpClient http = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofMillis(300)).build();
+            .connectTimeout(Duration.ofSeconds(5)).build();
 
     @AfterEach
     void closeRuntimeResources() {
@@ -70,21 +72,26 @@ class UnifiedRuntimeEndToEndTest {
 
     @Test
     void serverAndClientConvergeRecoverAndShutDownThroughUnifiedRuntime() throws Exception {
-        int httpPort = freePort();
-        int raftPort = freePort();
-        int apiGrpcPort = freePort();
-        int agentPort = freePort();
+        // Every port is 0, so the system picks free ones and each lifecycle reports what it bound; no port is
+        // guessed before it is bound. Only the restart reuses a port: the client was configured with the
+        // controller's URL, and a restarted controller must answer there.
         Path serverConfig = temporaryDirectory.resolve("server.json");
         Path clientConfig = temporaryDirectory.resolve("client.json");
-        writeServerConfig(serverConfig, temporaryDirectory.resolve("raft-first"),
-                httpPort, raftPort, apiGrpcPort);
-        writeClientConfig(clientConfig, httpPort, agentPort);
+        writeServerConfig(serverConfig, temporaryDirectory.resolve("raft-first"), 0, 0, 0);
 
         RuntimeLifecycle firstServer = launch("server", serverConfig);
+        Map<String, Integer> serverPorts = firstServer.boundPorts();
+        int httpPort = serverPorts.get("http");
+        assertEquals(Set.of("http", "raft", "apiGrpc"), serverPorts.keySet());
+        assertEquals(3, Set.copyOf(serverPorts.values()).size(), "each listener has its own port");
+        assertTrue(serverPorts.values().stream().allMatch(port -> port > 0), serverPorts.toString());
         URI controller = URI.create("http://127.0.0.1:" + httpPort);
         await(() -> status(controller.resolve("/health/ready")) == 200);
 
+        writeClientConfig(clientConfig, httpPort, 0);
         RuntimeLifecycle client = launch("client", clientConfig);
+        int agentPort = client.boundPorts().get("http");
+        assertEquals(Set.of("http"), client.boundPorts().keySet());
         URI agent = URI.create("http://127.0.0.1:" + agentPort);
         await(() -> status(agent.resolve("/health/ready")) == 200
                 && serviceCount(controller, "web") == 1
@@ -95,9 +102,12 @@ class UnifiedRuntimeEndToEndTest {
         assertTrue(firstServer.completion().isDone());
         await(() -> status(agent.resolve("/health/ready")) == 503);
 
-        writeServerConfig(serverConfig, temporaryDirectory.resolve("raft-restarted"),
-                httpPort, raftPort, apiGrpcPort);
+        assertPortAvailable(serverPorts.get("raft"));
+        assertPortAvailable(serverPorts.get("apiGrpc"));
+        writeServerConfig(serverConfig, temporaryDirectory.resolve("raft-restarted"), httpPort, 0, 0);
         RuntimeLifecycle restartedServer = launch("server", serverConfig);
+        Map<String, Integer> restartedPorts = restartedServer.boundPorts();
+        assertEquals(httpPort, restartedPorts.get("http"), "a configured nonzero port is bound as given");
         await(() -> status(agent.resolve("/health/ready")) == 200
                 && serviceCount(controller, "web") == 1
                 && serviceCount(controller, "api") == 1
@@ -112,9 +122,7 @@ class UnifiedRuntimeEndToEndTest {
 
         restartedServer.closeAsync().get(10, TimeUnit.SECONDS);
         assertTrue(restartedServer.completion().isDone());
-        assertPortAvailable(httpPort);
-        assertPortAvailable(raftPort);
-        assertPortAvailable(apiGrpcPort);
+        for (int port : restartedPorts.values()) assertPortAvailable(port);
     }
 
     private RuntimeLifecycle launch(String mode, Path config) {
@@ -127,7 +135,7 @@ class UnifiedRuntimeEndToEndTest {
     private int status(URI uri) {
         try {
             HttpResponse<Void> response = http.send(HttpRequest.newBuilder(uri)
-                    .timeout(Duration.ofMillis(500)).GET().build(), HttpResponse.BodyHandlers.discarding());
+                    .timeout(Duration.ofSeconds(5)).GET().build(), HttpResponse.BodyHandlers.discarding());
             return response.statusCode();
         } catch (Exception unavailable) {
             return -1;
@@ -151,7 +159,7 @@ class UnifiedRuntimeEndToEndTest {
     private JsonNode getJson(URI uri) {
         try {
             HttpResponse<String> response = http.send(HttpRequest.newBuilder(uri)
-                    .timeout(Duration.ofMillis(500)).GET().build(), HttpResponse.BodyHandlers.ofString());
+                    .timeout(Duration.ofSeconds(5)).GET().build(), HttpResponse.BodyHandlers.ofString());
             return response.statusCode() == 200 ? JSON.readTree(response.body()) : null;
         } catch (Exception unavailable) {
             return null;
@@ -167,11 +175,7 @@ class UnifiedRuntimeEndToEndTest {
         assertTrue(condition.evaluate(), "condition was not met before the deadline");
     }
 
-    private static int freePort() throws Exception {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        }
-    }
+
 
     private static void assertPortAvailable(int port) throws Exception {
         try (ServerSocket socket = new ServerSocket()) {

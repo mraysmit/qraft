@@ -85,7 +85,7 @@ public class GrpcRaftServer {
     private final int port;
     private final RaftNode raftNode;
     private final BindableService[] extraServices;
-    private Server server;
+    private volatile Server server;
 
     public GrpcRaftServer(JavaRuntime runtime, int port, RaftNode raftNode) {
         this(runtime, port, raftNode, new BindableService[0]);
@@ -117,7 +117,7 @@ public class GrpcRaftServer {
             }
 
             server = builder.build().start();
-                logger.info("gRPC Raft server started on port {}", port);
+                logger.info("gRPC Raft server started on port {}", server.getPort());
                 return null;
             } catch (IOException e) {
                 throw new RuntimeException("Failed to start gRPC server on port " + port, e);
@@ -126,6 +126,18 @@ public class GrpcRaftServer {
           .onFailure(promise::fail);
 
         return promise.future();
+    }
+
+    /**
+     * The port this server is listening on. It differs from the configured port when that is 0, which
+     * asks the system for any free port.
+     *
+     * @throws IllegalStateException when the server is not running
+     */
+    public int port() {
+        Server current = server;
+        if (current == null || current.isShutdown()) throw new IllegalStateException("the gRPC server is not running");
+        return current.getPort();
     }
 
     /**

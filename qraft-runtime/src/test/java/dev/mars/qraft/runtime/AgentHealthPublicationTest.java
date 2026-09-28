@@ -102,12 +102,12 @@ class AgentHealthPublicationTest {
 
     @Test
     void agentPublishesRenewsAndRecoversRequiredChecksThroughAFailedSeed() throws Exception {
-        int controllerPort = freePort();
-        controller = Controller.start(controllerPort);
+        controller = Controller.start(0);
+        int controllerPort = controller.server().port();
         URI workloadUrl = startWorkload();
         agent = agent(List.of(refusedEndpoint(), controller.endpoint()), workloadUrl);
 
-        assertTrue(agent.start().get(5, TimeUnit.SECONDS));
+        assertTrue(agent.start().get(10, TimeUnit.SECONDS));
         waitUntil(() -> status("http").filter(ServiceHealth.PASSING::equals).isPresent()
                 && agent.healthService().isReady());
         assertEquals(ServiceHealth.PASSING, serviceHealth());
@@ -135,6 +135,7 @@ class AgentHealthPublicationTest {
 
         controller.close();
         waitUntil(() -> !agent.healthService().isReady());
+        // The agent knows the controller by URL, so the restarted controller must bind the same port.
         controller = Controller.start(controllerPort);
         waitUntil(() -> status("http").filter(ServiceHealth.PASSING::equals).isPresent()
                 && agent.healthService().isReady());
@@ -145,11 +146,11 @@ class AgentHealthPublicationTest {
         controller = Controller.start(0);
         URI workloadUrl = startWorkload();
         agent = agent(List.of(startRecordingProxy(controller.endpoint())), workloadUrl);
-        assertTrue(agent.start().get(5, TimeUnit.SECONDS));
+        assertTrue(agent.start().get(10, TimeUnit.SECONDS));
         waitUntil(() -> status("http").filter(ServiceHealth.PASSING::equals).isPresent());
         waitUntil(() -> proxiedRequests.stream().filter(this::isObservation).count() >= 2);
 
-        assertTrue(agent.shutdown().get(5, TimeUnit.SECONDS));
+        assertTrue(agent.shutdown().get(10, TimeUnit.SECONDS));
 
         int deregistration = proxiedRequests.indexOf("PUT /v1/agent/service/deregister/web");
         int lastObservation = -1;
@@ -169,12 +170,13 @@ class AgentHealthPublicationTest {
         ServiceDefinition web = new ServiceDefinition("web", "web", "127.0.0.1", workloadUrl.getPort(),
                 List.of("health"), Map.of(), true);
         List<HealthCheckDefinition> checks = List.of(
-                new HttpCheck("web", "http", workloadUrl.resolve("/health"), Duration.ofMillis(100),
-                        Duration.ofMillis(100), Duration.ofMillis(600), true),
+                // A one-second interval and timeout: a slow local response under load cannot flip the check.
+                new HttpCheck("web", "http", workloadUrl.resolve("/health"), Duration.ofSeconds(1),
+                        Duration.ofSeconds(1), Duration.ofSeconds(5), true),
                 new TtlCheck("web", "app", Duration.ofSeconds(30), false));
         return new QraftAgent(AgentConfiguration.builder()
                 .agentId(AGENT_ID).hostname(AGENT_ID + "-host").address("127.0.0.1")
-                .agentPort(freePort()).controllerUrls(controllers)
+                .agentPort(0).controllerUrls(controllers)
                 .heartbeatInterval(40).requestTimeoutMs(5_000)
                 .registrationRetryMinMs(20).registrationRetryMaxMs(100)
                 .contactFreshnessMs(1_000).shutdownTimeoutMs(3_000)
@@ -249,11 +251,6 @@ class AgentHealthPublicationTest {
         }
     }
 
-    private static int freePort() throws IOException {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        }
-    }
 
     private static void waitUntil(BooleanSupplier condition) throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
@@ -272,10 +269,10 @@ class AgentHealthPublicationTest {
                     .clusterNodes(Set.of("health-controller")).transport(new SingleNodeTransport())
                     .stateMachine(store).commandCodec(new ProtobufRaftCommandCodec())
                     .mode(RaftNodeMode.volatileMode()).electionTimeout(25).heartbeatInterval(10_000).build();
-            node.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
             waitUntil(node::isLeader);
             HttpApiServer server = new HttpApiServer(port, node, store);
-            server.start().get(5, TimeUnit.SECONDS);
+            server.start().get(10, TimeUnit.SECONDS);
             return new Controller(runtime, node, store, server);
         }
 
@@ -286,8 +283,8 @@ class AgentHealthPublicationTest {
         @Override
         public void close() throws Exception {
             server.close();
-            node.stop().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-            runtime.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            node.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
     }
 

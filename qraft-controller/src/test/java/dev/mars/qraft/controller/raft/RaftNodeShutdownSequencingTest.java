@@ -109,7 +109,7 @@ class RaftNodeShutdownSequencingTest {
             }
         }
         if (runtime != null) {
-            runtime.shutdown().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -415,7 +415,7 @@ class RaftNodeShutdownSequencingTest {
     }
 
     private static <T> T await(Future<T> future) {
-        return future.timeout(5, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
+        return future.timeout(10, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
     }
 
     private static final class ShutdownTransport implements RaftTransport {

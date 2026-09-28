@@ -396,19 +396,22 @@ public final class SharedDockerCluster {
 
             Process process = pb.start();
 
-            // Drain output to prevent blocking
+            // Drain output to prevent blocking, keeping the last lines to explain a failure.
+            java.util.ArrayDeque<String> lastLines = new java.util.ArrayDeque<>();
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(process.getInputStream()))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
                     logger.fine("[Docker Build] " + line);
+                    if (lastLines.size() == 40) lastLines.removeFirst();
+                    lastLines.addLast(line);
                 }
             }
 
             int exitCode = process.waitFor();
             if (exitCode != 0) {
-                throw new RuntimeException(
-                        "Docker image build failed with exit code: " + exitCode);
+                throw new RuntimeException("Docker image build failed with exit code: " + exitCode
+                        + "; its last output was:\n" + String.join("\n", lastLines));
             }
 
             imageBuilt = true;

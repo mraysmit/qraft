@@ -74,12 +74,13 @@ class CrashedAgentExpiryEndToEndTest {
 
     @Test
     void theLeaderExpiresAndDeregistersTheServicesOfAKilledClient() throws Exception {
-        int httpPort = freePort();
         Path serverConfig = temporaryDirectory.resolve("server.json");
         Path clientConfig = temporaryDirectory.resolve("client.json");
-        writeServerConfig(serverConfig, httpPort, freePort(), freePort());
-        writeClientConfig(clientConfig, httpPort, freePort());
-        lifecycles.add(QraftRuntimeApplication.launch(new String[]{"server", "--config", serverConfig.toString()}));
+        writeServerConfig(serverConfig, 0, 0, 0);
+        RuntimeLifecycle server = QraftRuntimeApplication.launch(new String[]{"server", "--config", serverConfig.toString()});
+        lifecycles.add(server);
+        int httpPort = server.boundPorts().get("http");
+        writeClientConfig(clientConfig, httpPort, 0);
         URI controller = URI.create("http://127.0.0.1:" + httpPort);
         await(Duration.ofSeconds(10), () -> status(controller.resolve("/health/ready")) == 200);
 
@@ -110,12 +111,13 @@ class CrashedAgentExpiryEndToEndTest {
 
     @Test
     void theLeaderMarksAKilledClientUnreachableThenReapsItWithItsCheckFreeServices() throws Exception {
-        int httpPort = freePort();
         Path serverConfig = temporaryDirectory.resolve("server.json");
         Path clientConfig = temporaryDirectory.resolve("client.json");
-        writeServerConfig(serverConfig, httpPort, freePort(), freePort());
-        writeCheckFreeClientConfig(clientConfig, httpPort, freePort());
-        lifecycles.add(QraftRuntimeApplication.launch(new String[]{"server", "--config", serverConfig.toString()}));
+        writeServerConfig(serverConfig, 0, 0, 0);
+        RuntimeLifecycle server = QraftRuntimeApplication.launch(new String[]{"server", "--config", serverConfig.toString()});
+        lifecycles.add(server);
+        int httpPort = server.boundPorts().get("http");
+        writeCheckFreeClientConfig(clientConfig, httpPort, 0);
         URI controller = URI.create("http://127.0.0.1:" + httpPort);
         await(Duration.ofSeconds(10), () -> status(controller.resolve("/health/ready")) == 200);
 
@@ -218,12 +220,6 @@ class CrashedAgentExpiryEndToEndTest {
             Thread.sleep(25);
         }
         assertTrue(condition.evaluate(), "condition was not met before the deadline");
-    }
-
-    private static int freePort() throws Exception {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        }
     }
 
     private void writeServerConfig(Path target, int httpPort, int raftPort, int apiGrpcPort) throws Exception {

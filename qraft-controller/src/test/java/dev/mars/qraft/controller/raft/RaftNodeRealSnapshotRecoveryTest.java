@@ -74,7 +74,7 @@ class RaftNodeRealSnapshotRecoveryTest {
     void tearDown() throws Exception {
         if (node != null) await(node.stop());
         if (runtime != null) {
-            runtime.shutdown().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+            runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -141,9 +141,9 @@ class RaftNodeRealSnapshotRecoveryTest {
         assertEquals(SnapshotStoreCrashWriter.HALT_EXIT_CODE, crash.exitCode(), crash.output());
 
         try (FileSnapshotStore reopened = new FileSnapshotStore()) {
-            reopened.open(directory).get(5, TimeUnit.SECONDS);
+            reopened.open(directory).get(10, TimeUnit.SECONDS);
             SnapshotStore.SnapshotData latest = reopened.loadLatest()
-                    .get(5, TimeUnit.SECONDS).orElseThrow();
+                    .get(10, TimeUnit.SECONDS).orElseThrow();
             assertEquals(expectedSnapshotIndex, latest.lastIncludedIndex());
             assertEquals(expectedSnapshotIndex == 2 ? 1 : 2, latest.lastIncludedTerm());
         }
@@ -151,10 +151,10 @@ class RaftNodeRealSnapshotRecoveryTest {
                 "recovery must remove a non-authoritative temporary snapshot");
 
         try (FileRaftStorage reopened = wal()) {
-            reopened.open(directory).get(5, TimeUnit.SECONDS);
+            reopened.open(directory).get(10, TimeUnit.SECONDS);
             assertEquals(new RaftStorage.PersistentMeta(3, Optional.of("node-1")),
-                    reopened.loadMetadata().get(5, TimeUnit.SECONDS));
-            List<RaftStorage.LogEntryData> entries = reopened.replayLog().get(5, TimeUnit.SECONDS);
+                    reopened.loadMetadata().get(10, TimeUnit.SECONDS));
+            List<RaftStorage.LogEntryData> entries = reopened.replayLog().get(10, TimeUnit.SECONDS);
             assertEquals(expectedWalIndexes,
                     entries.stream().map(RaftStorage.LogEntryData::index).toList());
         }
@@ -194,8 +194,8 @@ class RaftNodeRealSnapshotRecoveryTest {
         SnapshotStore.SnapshotData published = new SnapshotStore.SnapshotData(
                 snapshotState.takeSnapshot(), 2, 1);
         try (FileSnapshotStore snapshots = new FileSnapshotStore()) {
-            snapshots.open(directory).get(5, TimeUnit.SECONDS);
-            snapshots.saveAtomically(published).get(5, TimeUnit.SECONDS);
+            snapshots.open(directory).get(10, TimeUnit.SECONDS);
+            snapshots.saveAtomically(published).get(10, TimeUnit.SECONDS);
         }
 
         SnapshotStore.SnapshotData replacement = replacementSnapshot();
@@ -205,14 +205,14 @@ class RaftNodeRealSnapshotRecoveryTest {
 
     private void seedWal() throws Exception {
         try (FileRaftStorage wal = wal()) {
-            wal.open(directory).get(5, TimeUnit.SECONDS);
-            wal.updateMetadata(3, Optional.of("node-1")).get(5, TimeUnit.SECONDS);
+            wal.open(directory).get(10, TimeUnit.SECONDS);
+            wal.updateMetadata(3, Optional.of("node-1")).get(10, TimeUnit.SECONDS);
             wal.appendEntries(List.of(
                     entry(1, 1, "key-1", "one"),
                     entry(2, 1, "key-2", "two"),
                     entry(3, 2, "key-3", "three"),
-                    entry(4, 2, "key-4", "four"))).get(5, TimeUnit.SECONDS);
-            wal.sync().get(5, TimeUnit.SECONDS);
+                    entry(4, 2, "key-4", "four"))).get(10, TimeUnit.SECONDS);
+            wal.sync().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -271,7 +271,7 @@ class RaftNodeRealSnapshotRecoveryTest {
     }
 
     private static <T> T await(Future<T> future) {
-        return future.timeout(5, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
+        return future.timeout(10, TimeUnit.SECONDS).toCompletionStage().toCompletableFuture().join();
     }
 
     private static String messageChain(Throwable failure) {

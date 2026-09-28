@@ -67,7 +67,7 @@ class QraftControllerLifecycleTest {
     void validatesConfigurationBeforeOpeningControllerResources() throws Exception {
         Path configuration = temporaryDirectory.resolve("invalid-server.json");
         Files.writeString(configuration, """
-                {"version":1,"server":{"id":"node-a","http":{"port":0}}}
+                {"version":1,"server":{"id":"node-a","http":{"port":-1}}}
                 """);
         AtomicInteger opened = new AtomicInteger();
 

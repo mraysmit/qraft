@@ -89,7 +89,7 @@ class LocalHealthChecksTest {
 
         checks.start();
         time.runDue();
-        assertTrue(httpEntered.await(5, TimeUnit.SECONDS));
+        assertTrue(httpEntered.await(10, TimeUnit.SECONDS));
         RecordingListener.Delivery first = results.nextDelivery();
         assertEquals(tcp, first.check());
         for (int interval = 1; interval <= 3; interval++) {

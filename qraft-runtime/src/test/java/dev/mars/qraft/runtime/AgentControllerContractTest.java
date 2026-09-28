@@ -120,7 +120,7 @@ class AgentControllerContractTest {
                 List.of("blue"), Map.of("team", "platform"), true);
 
         CatalogOutcome.Success registered = assertInstanceOf(CatalogOutcome.Success.class,
-                catalogClient.register(service).get(5, TimeUnit.SECONDS));
+                catalogClient.register(service).get(10, TimeUnit.SECONDS));
         assertTrue(registered.changed());
         assertEquals(1, retryableAttempts.get());
         JsonNode afterRegistration = readCatalog(endpoint, "payments");
@@ -129,7 +129,7 @@ class AgentControllerContractTest {
         assertEquals("catalog-agent", afterRegistration.get(0).path("nodeId").textValue());
 
         CatalogOutcome.Success deregistered = assertInstanceOf(CatalogOutcome.Success.class,
-                catalogClient.deregister("payments-1").get(5, TimeUnit.SECONDS));
+                catalogClient.deregister("payments-1").get(10, TimeUnit.SECONDS));
         assertTrue(deregistered.changed());
         assertEquals(1, retryableAttempts.get(), "the successful controller must be preferred next");
         assertTrue(readCatalog(endpoint, "payments").isEmpty());
@@ -142,14 +142,14 @@ class AgentControllerContractTest {
                 .agentId("contract-agent")
                 .hostname("contract-host")
                 .address("127.0.0.1")
-                .agentPort(freePort())
+                .agentPort(0)
                 .controllerUrl("http://localhost:" + server.port())
                 .heartbeatInterval(25)
                 .httpConnectionTimeout(1_000)
                 .build();
         agent = new QraftAgent(configuration);
 
-        assertTrue(agent.start().get(5, TimeUnit.SECONDS),
+        assertTrue(agent.start().get(10, TimeUnit.SECONDS),
                 () -> "the real agent rejected the controller response; replicated state="
                         + store.findAgent("contract-agent"));
         assertTrue(agent.healthService().isReady());
@@ -157,7 +157,7 @@ class AgentControllerContractTest {
                 .filter(info -> info.getStatus() == AgentStatus.HEALTHY && info.getLastHeartbeat() != null)
                 .isPresent());
 
-        assertTrue(agent.shutdown().get(5, TimeUnit.SECONDS));
+        assertTrue(agent.shutdown().get(10, TimeUnit.SECONDS));
         waitUntil(() -> store.findAgent("contract-agent").isEmpty());
         assertFalse(agent.isRunning());
         assertEquals(0, store.getAgents().size());
@@ -177,10 +177,10 @@ class AgentControllerContractTest {
                 .electionTimeout(25)
                 .heartbeatInterval(10_000)
                 .build();
-        node.start().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         waitUntil(node::isLeader);
         server = new HttpApiServer(0, node, store);
-        server.start().get(5, TimeUnit.SECONDS);
+        server.start().get(10, TimeUnit.SECONDS);
         return store;
     }
 
@@ -190,11 +190,6 @@ class AgentControllerContractTest {
         assertTrue(condition.getAsBoolean(), "condition was not met before the deadline");
     }
 
-    private static int freePort() throws Exception {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        }
-    }
 
     private static JsonNode readCatalog(URI endpoint, String serviceName) throws Exception {
         HttpRequest request = HttpRequest.newBuilder(
