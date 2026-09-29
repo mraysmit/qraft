@@ -20,12 +20,14 @@ package dev.mars.qraft.controller.raft;
  * One consistent view of a node's Raft state, captured on its state loop. Its indexes belong to the same
  * moment: {@code snapshotLastIndex <= lastApplied <= commitIndex <= lastLogIndex} holds. {@code running} is
  * false until recovery has finished and again once the node begins to stop.
+ * {@code serverId} is the durable identity kept in the node's data directory; {@code nodeId} is its
+ * configured name.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-27
- * @version 1.0
+ * @version 1.1
  */
-public record RaftStatus(String nodeId, RaftNode.State state, long term, String leaderId, long commitIndex,
+public record RaftStatus(String nodeId, String serverId, RaftNode.State state, long term, String leaderId, long commitIndex,
                          long lastApplied, long lastLogIndex, long snapshotLastIndex, boolean fenced,
                          boolean running) {
 

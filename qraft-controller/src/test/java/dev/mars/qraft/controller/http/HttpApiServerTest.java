@@ -402,6 +402,8 @@ class HttpApiServerTest {
 
         assertEquals(200, response.statusCode());
         assertTrue(response.body().contains("\"nodeId\":\"" + node.getNodeId() + "\""));
+        assertTrue(response.body().contains("\"serverId\":\"" + node.getServerId() + "\""),
+                "operators need the durable identity as well as the name: " + response.body());
         assertTrue(response.body().contains("\"state\":\"LEADER\""));
         assertTrue(response.body().contains("\"term\":" + node.getCurrentTerm()));
         assertTrue(response.body().contains("\"snapshotLastIndex\":" + node.getSnapshotLastIndex()));

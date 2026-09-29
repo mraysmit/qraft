@@ -31,8 +31,11 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -41,12 +44,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Docker tests for durable restart of a three-node cluster: catalog, term and snapshot survival,
+ * Docker tests for durable restart of a three-node cluster: catalog, term, snapshot and server ID survival,
  * killed follower and leader recovery, corrupt-follower readiness, and volume ownership.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-22
- * @version 1.0
+ * @version 1.1
  */
 @Tag("docker")
 // Each test waits only on bounded conditions, up to about 270 s in all; the method budget exceeds that,
@@ -85,6 +88,8 @@ class DockerDurableRestartTest {
         await().atMost(Duration.ofSeconds(30))
                 .until(() -> everyNodeContains(endpoints, serviceName, serviceIds));
         long termBeforeRestart = maximumTerm(endpoints);
+        List<String> serverIdsBeforeRestart = serverIds(endpoints);
+        assertEquals(3, Set.copyOf(serverIdsBeforeRestart).size(), "each server has its own ID: " + serverIdsBeforeRestart);
 
         SharedDockerCluster.restartCluster(CLUSTER, 3);
 
@@ -94,6 +99,18 @@ class DockerDurableRestartTest {
                 .until(() -> everyNodeContains(endpoints, serviceName, serviceIds));
         assertTrue(maximumTerm(endpoints) >= termBeforeRestart,
                 "the recovered cluster must not move its durable term backwards");
+        assertEquals(serverIdsBeforeRestart, serverIds(endpoints),
+                "a server restarted on its own storage keeps its server ID");
+    }
+
+    private static List<String> serverIds(List<String> endpoints) throws Exception {
+        List<String> ids = new ArrayList<>();
+        for (String endpoint : endpoints) {
+            String id = status(endpoint).path("serverId").asText("");
+            assertEquals(id, UUID.fromString(id).toString(), endpoint + " reports a server ID");
+            ids.add(id);
+        }
+        return ids;
     }
 
     @Test
@@ -306,7 +323,7 @@ class DockerDurableRestartTest {
                 .toList();
         long snapshotBefore = maximumSnapshotIndex(majorityEndpoints);
         String serviceName = "partition-snapshot-" + System.nanoTime();
-        List<String> serviceIds = new java.util.ArrayList<>();
+        List<String> serviceIds = new ArrayList<>();
 
         SharedDockerCluster.isolateContainerNetwork(CLUSTER, followerService);
         try {

@@ -92,6 +92,8 @@ public class RaftNode {
 
     private final JavaRuntime runtime;
     private final String nodeId;
+    /** Durable identity from the data directory; every Raft message this node sends names it. */
+    private final String serverId;
     private final Set<String> clusterNodes;
     private final RaftTransport transport;
     private final RaftLogApplicator stateMachine;
@@ -249,6 +251,7 @@ public class RaftNode {
         private RaftNodeMode mode;
 
         // Optional with defaults
+        private String serverId;               // null = a new random UUID
         private long electionTimeoutMs = 5000;
         private long heartbeatIntervalMs = 1000;
         private Boolean snapshotEnabled;       // null = derive from mode
@@ -265,6 +268,17 @@ public class RaftNode {
 
         /** Unique node identifier (required). */
         public Builder nodeId(String nodeId) { this.nodeId = nodeId; return this; }
+
+        /**
+         * The server's durable Raft identity, kept in its data directory by
+         * {@link dev.mars.qraft.controller.raft.storage.ServerIdentity} (default: a new random UUID, which suits
+         * a node whose storage does not outlive it).
+         */
+        public Builder serverId(String serverId) {
+            if (serverId == null || serverId.isBlank()) throw new IllegalArgumentException("serverId must not be blank");
+            this.serverId = serverId;
+            return this;
+        }
 
         /** Set of all node IDs in the cluster (required). */
         public Builder clusterNodes(Set<String> clusterNodes) { this.clusterNodes = clusterNodes; return this; }
@@ -329,7 +343,9 @@ public class RaftNode {
             if (mode == null) throw new IllegalStateException("mode is required");
 
             boolean snap = (snapshotEnabled != null) ? snapshotEnabled : mode.isDurable();
-            return new RaftNode(runtime, nodeId, clusterNodes, transport, stateMachine,
+            return new RaftNode(runtime, nodeId,
+                    serverId != null ? serverId : java.util.UUID.randomUUID().toString(),
+                    clusterNodes, transport, stateMachine,
                     commandCodec, mode, electionTimeoutMs, heartbeatIntervalMs, snap,
                     snapshotThreshold, snapshotCheckIntervalMs, logHardLimit, timerScheduler,
                     transitionQueueCapacity);
@@ -338,7 +354,8 @@ public class RaftNode {
 
     // ========== CONSTRUCTOR (private) ==========
 
-    private RaftNode(JavaRuntime runtime, String nodeId, Set<String> clusterNodes, RaftTransport transport,
+    private RaftNode(JavaRuntime runtime, String nodeId, String serverId, Set<String> clusterNodes,
+            RaftTransport transport,
             RaftLogApplicator stateMachine, CommandCodec<RaftCommand> commandCodec,
             RaftNodeMode mode, long electionTimeoutMs, long heartbeatIntervalMs,
             boolean snapshotEnabled, long snapshotThreshold, long snapshotCheckIntervalMs,
@@ -346,6 +363,7 @@ public class RaftNode {
             int transitionQueueCapacity) {
         this.runtime = runtime;
         this.nodeId = nodeId;
+        this.serverId = serverId;
         this.clusterNodes = new HashSet<>(clusterNodes);
         this.transport = transport;
         this.stateMachine = stateMachine;
@@ -845,7 +863,7 @@ public class RaftNode {
     public Future<RaftStatus> status() {
         Promise<RaftStatus> status = Promise.promise();
         try {
-            runtime.runOnContext(ignored -> status.tryComplete(new RaftStatus(nodeId, state, currentTerm,
+            runtime.runOnContext(ignored -> status.tryComplete(new RaftStatus(nodeId, serverId, state, currentTerm,
                     currentLeaderId, commitIndex, lastApplied, lastLogIndex(), snapshotLastIndex, isFenced(),
                     running)));
         } catch (java.util.concurrent.RejectedExecutionException stopped) {
@@ -876,6 +894,11 @@ public class RaftNode {
 
     public String getNodeId() {
         return nodeId;
+    }
+
+    /** The server's durable Raft identity, which every message it sends names as the sender. */
+    public String getServerId() {
+        return serverId;
     }
 
     public boolean isLeader() {
@@ -1174,6 +1197,7 @@ public class RaftNode {
                 VoteRequest request = VoteRequest.newBuilder()
                         .setTerm(term)
                         .setCandidateId(nodeId)
+                        .setCandidateServerId(serverId)
                         .setLastLogIndex(lastLogIdx)
                         .setLastLogTerm(lastLogTrm)
                         .build();
@@ -1514,6 +1538,7 @@ public class RaftNode {
         }
         return VoteResponse.newBuilder()
                 .setTerm(currentTerm)
+                .setVoterServerId(serverId)
                 .setVoteGranted(decision.granted())
                 .build();
     }
@@ -1592,7 +1617,11 @@ public class RaftNode {
                 response.tryComplete(result.result().response());
             }
         });
-        return response.future();
+        return response.future().map(this::fromThisFollower);
+    }
+
+    private AppendEntriesResponse fromThisFollower(AppendEntriesResponse response) {
+        return response.toBuilder().setFollowerServerId(serverId).build();
     }
 
     private Future<FollowerAppendDecision> prepareAndPersistFollowerAppend(
@@ -1850,6 +1879,7 @@ public class RaftNode {
         AppendEntriesRequest.Builder builder = AppendEntriesRequest.newBuilder()
                 .setTerm(originatingTerm)
                 .setLeaderId(nodeId)
+                .setLeaderServerId(serverId)
                 .setPrevLogIndex(prevLogIndex)
                 .setPrevLogTerm(prevLogTerm)
                 .setLeaderCommit(commitIndex);
@@ -2416,6 +2446,7 @@ public class RaftNode {
         InstallSnapshotRequest request = InstallSnapshotRequest.newBuilder()
                 .setTerm(transfer.term())
                 .setLeaderId(nodeId)
+                .setLeaderServerId(serverId)
                 .setLastIncludedIndex(snapshot.lastIncludedIndex())
                 .setLastIncludedTerm(snapshot.lastIncludedTerm())
                 .setChunkIndex(chunkIndex)
@@ -2628,7 +2659,11 @@ public class RaftNode {
                         .build());
             }
         });
-        return promise.future();
+        return promise.future().map(this::fromThisFollower);
+    }
+
+    private InstallSnapshotResponse fromThisFollower(InstallSnapshotResponse response) {
+        return response.toBuilder().setFollowerServerId(serverId).build();
     }
 
     private Future<InstalledSnapshotPlan> prepareAndPersistInstalledSnapshot(

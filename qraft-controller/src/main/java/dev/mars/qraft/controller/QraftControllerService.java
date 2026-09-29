@@ -36,6 +36,7 @@ import dev.mars.qraft.controller.raft.GrpcServiceServer;
 import dev.mars.qraft.controller.raft.GrpcRaftTransport;
 import dev.mars.qraft.controller.raft.GrpcRaftServer;
 import dev.mars.qraft.controller.raft.storage.RaftStorageFactory;
+import dev.mars.qraft.controller.raft.storage.ServerIdentity;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.controller.http.HttpApiServer;
@@ -156,7 +157,12 @@ public class QraftControllerService {
                                  String nodeId, int raftPort, int apiGrpcPort,
                                  Set<String> clusterNodeIds) {
         try {
-            // 5. Create Raft Node with storage
+            // 5. Load the server's durable identity. The open WAL holds the data directory's lock, so no other
+            //    process can create a competing identity there.
+            String serverId = ServerIdentity.loadOrCreate(Path.of(config.getRaftStoragePath()));
+            logger.info("Raft server identity: nodeId={}, serverId={}", nodeId, serverId);
+
+            // 6. Create Raft Node with storage
             Map<String, String> initialMetadata = new HashMap<>();
             initialMetadata.put("version", config.getVersion());
 
@@ -166,6 +172,7 @@ public class QraftControllerService {
             RaftNode node = RaftNode.builder()
                     .runtime(runtime)
                     .nodeId(nodeId)
+                    .serverId(serverId)
                     .clusterNodes(clusterNodeIds)
                     .transport(transport)
                     .stateMachine(stateMachine)
@@ -182,7 +189,7 @@ public class QraftControllerService {
 
             transport.setRaftNode(node);
 
-            // 6. Create and start separate gRPC servers: internal Raft RPC and external API RPC
+            // 7. Create and start separate gRPC servers: internal Raft RPC and external API RPC
             GrpcRaftServer internalRaftServer = new GrpcRaftServer(runtime, raftPort, node);
             this.raftGrpcServer = Optional.of(internalRaftServer);
 
@@ -217,8 +224,8 @@ public class QraftControllerService {
                     node.start().onSuccess(v3 -> {
                         logger.info("HTTP health server started on port {}", healthServer.port());
 
-                        // 7. Start Raft (includes recovery from WAL)
-                        // 8. Setup shutdown coordinator for graceful shutdown
+                        // 8. Start Raft (includes recovery from WAL)
+                        // 9. Setup shutdown coordinator for graceful shutdown
                         setupShutdownCoordinator();
 
                         logger.info("QraftControllerService started successfully (gRPC and HTTP health mode)");

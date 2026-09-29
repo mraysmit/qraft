@@ -860,11 +860,19 @@ They are:
 
 Found in Step 8. Both change Raft behaviour, so they need a decision first.
 
-1. **Votes for candidates outside the member set.** A node grants its vote to
-   any candidate ID, including one not in its `clusterNodes`. With fixed
-   membership, a vote could instead be refused to a non-member. A removed or
-   misconfigured server could then not disrupt an election. The tests use
-   non-member candidate IDs throughout, so the change would touch them too.
+1. **Membership changes, and servers that disrupt elections.**
+   - Membership is fixed at startup. `clusterNodes` never changes, and there
+     is no configuration-change log entry. Adding a server therefore means
+     editing every server's configuration and restarting. During that
+     rollout, old and new configurations can each form a majority.
+   - Refusing votes to candidates outside `clusterNodes` is not the fix. Raft
+     (thesis section 4.1) has servers process requests without consulting
+     their configuration, so that a joining server, or one whose log lags,
+     is not locked out.
+   - Protection from a removed or misconfigured server belongs to the
+     leader-stickiness rule or pre-vote (thesis section 4.2.3).
+   - Membership changes now have their own list:
+     [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md).
 2. **The maximum term.** One vote request at `Long.MAX_VALUE` moves a node to
    that term. The node's next election would overflow the term to a negative
    number. A node could instead refuse terms that leave no room for another

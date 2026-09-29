@@ -38,6 +38,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -87,6 +88,9 @@ class UnifiedRuntimeEndToEndTest {
         assertTrue(serverPorts.values().stream().allMatch(port -> port > 0), serverPorts.toString());
         URI controller = URI.create("http://127.0.0.1:" + httpPort);
         await(() -> status(controller.resolve("/health/ready")) == 200);
+        String firstId = serverId(controller);
+        assertEquals(Files.readString(temporaryDirectory.resolve("raft-first").resolve("server-id")), firstId,
+                "the server reports the ID kept in its data directory");
 
         writeClientConfig(clientConfig, httpPort, 0);
         RuntimeLifecycle client = launch("client", clientConfig);
@@ -112,6 +116,9 @@ class UnifiedRuntimeEndToEndTest {
                 && serviceCount(controller, "web") == 1
                 && serviceCount(controller, "api") == 1
                 && agentPresent(controller, "runtime-agent"));
+        String restartedId = serverId(controller);
+        assertEquals(Files.readString(temporaryDirectory.resolve("raft-restarted").resolve("server-id")), restartedId);
+        assertNotEquals(firstId, restartedId, "a server started on empty storage is a new server");
 
         client.closeAsync().get(10, TimeUnit.SECONDS);
         assertTrue(client.completion().isDone());
@@ -140,6 +147,11 @@ class UnifiedRuntimeEndToEndTest {
         } catch (Exception unavailable) {
             return -1;
         }
+    }
+
+    private String serverId(URI controller) {
+        JsonNode status = getJson(controller.resolve("/raft/status"));
+        return status == null ? null : status.path("serverId").asText(null);
     }
 
     private int serviceCount(URI controller, String serviceName) {

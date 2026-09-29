@@ -293,6 +293,7 @@ public final class HttpApiServer implements AutoCloseable {
         }
         Map<String, Object> status = new LinkedHashMap<>();
         status.put("nodeId", current.nodeId());
+        status.put("serverId", current.serverId());
         status.put("state", current.state().name());
         status.put("term", current.term());
         status.put("leaderId", current.leaderId());

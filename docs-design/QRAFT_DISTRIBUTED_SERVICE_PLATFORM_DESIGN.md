@@ -195,6 +195,32 @@ Server mode currently owns:
   worth of heartbeat rounds. Counting applied rounds rather than wall-clock time
   means a delayed state loop cannot cause a false step-down, and a single-node
   cluster never steps down.
+- Raft membership is currently fixed at startup. Each server reads the voters
+  from `server.raft.nodes` on every start, and votes and replication are
+  addressed by configured name. So membership cannot change while the cluster
+  runs. A server whose storage is lost would rejoin as the voter it used to
+  be, which can lose committed data.
+- Each server has a durable **server ID**, a UUID generated at its first start
+  and kept in `server-id` in the Raft data directory.
+  - A restart on the same storage keeps the ID. A wiped data directory gives a
+    new one.
+  - A data directory from before server IDs gets one at its next start.
+  - A file that exists but cannot be read stops the start; it is never
+    replaced.
+  - Every Raft request and response names its sender's server ID, and
+    `/raft/status` and the startup log report it.
+  - Nothing counts votes or acknowledgements by it yet. That is the next step
+    of the membership plan, and is what makes a wiped server unable to pass
+    for its old self.
+
+  Planned, decided 2026-09-29: Consul's membership model.
+  - `server.raft.nodes` forms the cluster once, with an expected server count.
+  - From then on, membership lives in the replicated log.
+  - Each server is identified by its server ID.
+  - New servers join as non-voters and are promoted once caught up.
+  - Failed servers are removed automatically, within quorum limits.
+
+  See [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md).
 - Durable Raft storage.
 - The replicated key/value, service-catalog, and health-check state machine.
 - Internal Raft gRPC transport.
@@ -1065,7 +1091,9 @@ storage interface. No semantic storage adapter exists, so prefix compaction and
 every other WAL operation reach the external implementation.
 
 The snapshot store may share a node data directory with the WAL, but it is a
-separate ownership and durability contract. Snapshot data, last included index,
+separate ownership and durability contract. The same directory holds the
+server's `server-id` (section 4.2). It is written atomically and made durable
+once, at the server's first start, while the WAL holds the directory's lock. Snapshot data, last included index,
 last included term, format version, and checksum are published atomically as one
 recoverable unit.
 
@@ -1403,6 +1431,11 @@ Listening ports accept 1 to 65535, or 0 to bind any free port:
   and `apiGrpc` for a server, and `http` for a client.
 - `server.raft.port` may be 0 only on a cluster's sole member, because peers dial
   the configured Raft address.
+
+`server.raft.nodes` is currently the complete, fixed list of Raft voters, and
+every server must be given the same list. Under the planned membership model
+(section 4.2) it becomes the servers to contact when forming or joining a
+cluster, used together with an expected server count.
 - A server's HTTP, Raft, and API gRPC ports must differ, except that more than
   one of them may be 0.
 - `server.telemetry.prometheusPort` must be a fixed port.
@@ -1520,9 +1553,9 @@ Required signals include:
 - Request latency and errors by stable route and error code.
 - Session count, expiry count, and lock contention.
 
-`/raft/status` reports the node ID, role, term, leader, commit index, last
-applied index, last log index, snapshot index, and fenced flag as one consistent
-view read on the node's state loop.
+`/raft/status` reports the node ID, server ID, role, term, leader, commit index,
+last applied index, last log index, snapshot index, and fenced flag as one
+consistent view read on the node's state loop.
 
 Logs carry request ID, node ID, Raft role and term where applicable, tenant, and
 namespace. Sensitive tokens and health-output secrets are never logged.
