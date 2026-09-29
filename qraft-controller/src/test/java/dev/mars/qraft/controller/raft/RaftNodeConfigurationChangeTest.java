@@ -50,7 +50,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *   <li>only one change is in flight: another waits until the first is committed;</li>
  *   <li>a change may add, remove, or alter one server, and must change something;</li>
  *   <li>the same rules hold for a configuration entry submitted as an ordinary command;</li>
- *   <li>an added server is replicated to until it holds the new configuration.</li>
+ *   <li>an added server is replicated to until it holds the new configuration;</li>
+ *   <li>a server joins as a non-voter, and once promoted counts towards the leader's quorum.</li>
  * </ul>
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
@@ -148,24 +149,26 @@ class RaftNodeConfigurationChangeTest {
         RaftConfiguration withD = with(new Server(serverIdOf("d"), "d", "d", false));
 
         await(a.proposeConfiguration(withD));
-        cluster.heartbeatUntil(a, () -> d.getConfiguration().equals(Optional.of(withD))
-                && d.getLastLogIndex() == a.getLastLogIndex(), "d catches up with the leader");
+        // Once caught up, d is also promoted; either way it holds the leader's configuration, which includes it.
+        cluster.heartbeatUntil(a, () -> d.getConfiguration().equals(a.getConfiguration())
+                && d.getLastLogIndex() == a.getLastLogIndex() && d.getCommitIndex() == a.getCommitIndex(),
+                "d catches up with the leader and learns what it has committed");
 
-        assertEquals(a.getCommitIndex(), d.getCommitIndex());
+        assertTrue(d.getConfiguration().orElseThrow().server(serverIdOf("d")).isPresent());
     }
 
     @Test
-    void anAddedVoterCountsTowardsTheLeadersQuorum() throws Exception {
+    void aPromotedServerCountsTowardsTheLeadersQuorum() throws Exception {
         commitACommand();
         RaftNode d = cluster.add(cluster.unconfiguredBuilder("d", Set.of("a", "b", "c", "d"),
                 new InMemoryTransportSimulator("d"), new QraftStateStore(), RaftNodeMode.volatileMode())
                 .serverId(serverIdOf("d")));
         await(d.start());
+        await(a.proposeConfiguration(with(new Server(serverIdOf("d"), "d", "d", false))));
         RaftConfiguration withVoterD = with(new Server(serverIdOf("d"), "d", "d", true));
-        await(a.proposeConfiguration(withVoterD));
         cluster.heartbeatUntil(a, () -> d.getConfiguration().equals(Optional.of(withVoterD))
                 && d.getLastLogIndex() == a.getLastLogIndex() && a.getCommitIndex() == a.getLastLogIndex(),
-                "d joins and catches up");
+                "d joins, catches up, and is promoted");
 
         // Four voters need three; with c cut off, only d's answers keep a in office.
         InMemoryTransportSimulator.createPartition(Set.of("a", "b", "d"), Set.of("c"));
@@ -199,9 +202,10 @@ class RaftNodeConfigurationChangeTest {
 
         await(a.proposeConfiguration(withReplacement));
 
-        cluster.heartbeatUntil(a, () -> replacement.getConfiguration().equals(Optional.of(withReplacement))
+        cluster.heartbeatUntil(a, () -> replacement.getConfiguration().equals(a.getConfiguration())
                         && replacement.getLastLogIndex() == a.getLastLogIndex(),
                 "the replacement is replicated to from its own empty log");
+        assertTrue(replacement.getConfiguration().orElseThrow().server("replacement-of-c").isPresent());
     }
 
     @Test
@@ -210,9 +214,11 @@ class RaftNodeConfigurationChangeTest {
                 () -> await(b.proposeConfiguration(with(new Server(serverIdOf("d"), "d", "d", false)))));
     }
 
+    /** A member that promotes a healthy non-voter after one heartbeat round, rather than Consul's 10 seconds. */
     private RaftNode node(String name) {
         return cluster.add(cluster.builder(name, MEMBERS, new InMemoryTransportSimulator(name),
-                new QraftStateStore(), RaftNodeMode.volatileMode()));
+                new QraftStateStore(), RaftNodeMode.volatileMode())
+                .promotionStabilization(ManualRaftCluster.HEARTBEAT_MS));
     }
 
     private void commitACommand() throws Exception {

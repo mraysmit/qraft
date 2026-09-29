@@ -11,6 +11,40 @@ service RaftService {
   rpc AppendEntries (AppendEntriesRequest) returns (AppendEntriesResponse) {}
   rpc InstallSnapshot (InstallSnapshotRequest) returns (InstallSnapshotResponse) {}
   rpc Describe (DescribeRequest) returns (DescribeResponse) {}
+  rpc Join (JoinRequest) returns (MembershipResponse) {}
+  rpc RemoveServer (RemoveServerRequest) returns (MembershipResponse) {}
+}
+
+// A server with no Raft state asking an existing cluster to add it. Any server forwards it to the leader.
+message JoinRequest {
+  string server_id = 1;                // The joining server's durable server ID
+  string name = 2;                     // Its configured name
+  string address = 3;                  // Its Raft address
+  bool forwarded = 4;                  // Set by the server that forwarded it; it is never forwarded again
+}
+
+// An operator removing a server, named by server ID or by name. Any server forwards it to the leader.
+message RemoveServerRequest {
+  string server_id = 1;
+  string name = 2;
+  string token = 3;                    // The operator token; the forwarding server and the leader both check it
+  bool forwarded = 4;
+}
+
+message MembershipResponse {
+  enum Status {
+    UNSPECIFIED = 0;
+    JOINED = 1;                        // Added as a non-voter
+    ALREADY_MEMBER = 2;                // Already configured under this server ID
+    REPLACING = 3;                     // An old entry with its name or address was removed; ask again
+    REMOVED = 4;
+    NOT_FOUND = 5;                     // No configured server has that ID or name
+    REFUSED = 6;                       // The change breaks a rule, such as the quorum rule; see message
+    NO_LEADER = 7;                     // No leader could be reached; try again
+    UNAUTHORIZED = 8;                  // The operator token is missing, wrong, or not configured
+  }
+  Status status = 1;
+  string message = 2;
 }
 
 // Asks a server for the facts another server needs before bootstrapping a new cluster.

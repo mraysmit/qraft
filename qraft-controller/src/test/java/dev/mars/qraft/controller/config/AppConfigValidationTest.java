@@ -21,8 +21,10 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -76,6 +78,17 @@ class AppConfigValidationTest {
         rejected("\"telemetry\":{\"prometheusPort\":0}", "server.telemetry.prometheusPort must be between 1 and 65535");
         rejected("\"telemetry\":{\"prometheusPort\":65536}",
                 "server.telemetry.prometheusPort must be between 1 and 65535");
+    }
+
+    @Test
+    void theOperatorTokenIsOptionalAndAtLeastSixteenCharacters() {
+        assertEquals(Optional.empty(), config("").getOperatorToken(), "no token means removals are refused");
+        assertEquals(Optional.of("sixteen-chars-ok"),
+                config("\"operator\":{\"token\":\"sixteen-chars-ok\"}").getOperatorToken());
+        rejected("\"operator\":{\"token\":\"too-short\"}", "server.operator.token must be at least 16 characters");
+        IllegalArgumentException unknown = assertThrows(IllegalArgumentException.class,
+                () -> config("\"operator\":{\"secret\":\"x\"}"));
+        assertTrue(unknown.getMessage().contains("secret"), unknown.getMessage());
     }
 
     @Test

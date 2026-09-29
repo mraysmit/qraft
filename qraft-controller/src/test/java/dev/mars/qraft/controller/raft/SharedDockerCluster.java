@@ -480,8 +480,7 @@ public final class SharedDockerCluster {
         if (!Files.isRegularFile(runtimeJar)) {
             throw new IllegalStateException(
                     "Host-built runtime JAR not found: " + runtimeJar.toAbsolutePath()
-                    + " -- run docker/build-runtime.ps1 or docker/build-runtime.sh "
-                    + "from the repository before Docker integration tests");
+                    + " -- run mvn install from the repository before the Docker tests (docs/TESTING.md)");
         }
 
         try {
@@ -492,8 +491,7 @@ public final class SharedDockerCluster {
                 throw new IllegalStateException(
                         "Host-built runtime JAR is older than build input "
                         + repositoryRoot.relativize(newestInput)
-                        + " -- rebuild it with docker/build-runtime.ps1 or docker/build-runtime.sh "
-                        + "before Docker integration tests");
+                        + " -- run mvn install before the Docker tests (docs/TESTING.md)");
             }
         } catch (IOException error) {
             throw new IllegalStateException("Could not verify runtime JAR freshness", error);

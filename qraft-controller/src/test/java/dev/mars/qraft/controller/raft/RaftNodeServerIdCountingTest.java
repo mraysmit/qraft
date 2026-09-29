@@ -16,9 +16,7 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
-import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.controller.raft.grpc.VoteRequest;
 import dev.mars.qraft.controller.raft.grpc.VoteResponse;
@@ -34,10 +32,8 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
-import java.util.function.Consumer;
 
 import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
 import static dev.mars.qraft.controller.raft.ManualRaftCluster.serverIdOf;
@@ -65,14 +61,14 @@ class RaftNodeServerIdCountingTest {
 
     private JavaRuntime runtime;
     private ManualRaftCluster cluster;
-    private HeldTransport transport;
+    private HeldRaftTransport transport;
     private RaftNode node;
 
     @BeforeEach
     void setUp() throws Exception {
         runtime = JavaRuntime.create();
         cluster = new ManualRaftCluster(runtime);
-        transport = new HeldTransport();
+        transport = new HeldRaftTransport();
         node = cluster.add(cluster.builder("a", MEMBERS, transport, new QraftStateStore(), RaftNodeMode.volatileMode()));
         await(node.start());
     }
@@ -168,7 +164,7 @@ class RaftNodeServerIdCountingTest {
 
     @Test
     void aNonVotersAcknowledgementIsNotCountedTowardsACommit() throws Exception {
-        HeldTransport held = new HeldTransport();
+        HeldRaftTransport held = new HeldRaftTransport();
         RaftConfiguration withLearner = new RaftConfiguration(List.of(
                 new RaftConfiguration.Server(serverIdOf("x"), "x", "x", true),
                 new RaftConfiguration.Server(serverIdOf("y"), "y", "y", true),
@@ -199,7 +195,7 @@ class RaftNodeServerIdCountingTest {
 
     @Test
     void aSnapshotInstallAnswerFromAnotherServerIdIsIgnored() throws Exception {
-        HeldTransport held = new HeldTransport();
+        HeldRaftTransport held = new HeldRaftTransport();
         TestRaftStorage storage = new TestRaftStorage();
         storage.open(null).get(10, TimeUnit.SECONDS);
         RaftNode leader = cluster.add(cluster.builder("a", MEMBERS, held, new QraftStateStore(),
@@ -236,7 +232,7 @@ class RaftNodeServerIdCountingTest {
 
     @Test
     void aServerThatIsNotAVoterInAnyConfigurationNeverCampaigns() throws Exception {
-        HeldTransport unconfiguredTransport = new HeldTransport();
+        HeldRaftTransport unconfiguredTransport = new HeldRaftTransport();
         RaftNode unconfigured = cluster.add(cluster.unconfiguredBuilder("d", Set.of("d", "e", "f"),
                 unconfiguredTransport, new QraftStateStore(), RaftNodeMode.volatileMode()));
         await(unconfigured.start());
@@ -276,49 +272,4 @@ class RaftNodeServerIdCountingTest {
         assertTrue(condition.getAsBoolean(), description);
     }
 
-    private record Held<Q, R>(String target, Q request, Promise<R> response) { }
-
-    /** Holds every request, for the test to answer by hand. */
-    private static final class HeldTransport implements RaftTransport {
-        private final List<Held<VoteRequest, VoteResponse>> votes = new CopyOnWriteArrayList<>();
-        private final List<Held<AppendEntriesRequest, AppendEntriesResponse>> appends = new CopyOnWriteArrayList<>();
-        private final List<Held<InstallSnapshotRequest, InstallSnapshotResponse>> snapshots =
-                new CopyOnWriteArrayList<>();
-
-        Promise<VoteResponse> vote(String target) {
-            return votes.stream().filter(held -> held.target().equals(target)).findFirst().orElseThrow().response();
-        }
-
-        /** The latest append to {@code target} carrying the entry at {@code index}, or null if none was sent. */
-        Promise<AppendEntriesResponse> appendCarrying(long index, String target) {
-            return appends.reversed().stream()
-                    .filter(held -> held.target().equals(target) && held.request().getEntriesList().stream()
-                            .anyMatch(entry -> entry.getIndex() == index))
-                    .map(Held::response).findFirst().orElse(null);
-        }
-
-        @Override public void start(Consumer<RaftMessage> messageHandler) { }
-        @Override public void stop() { }
-
-        @Override
-        public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
-            Promise<VoteResponse> response = Promise.promise();
-            votes.add(new Held<>(targetId, request, response));
-            return response.future();
-        }
-
-        @Override
-        public Future<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
-            Promise<AppendEntriesResponse> response = Promise.promise();
-            appends.add(new Held<>(targetId, request, response));
-            return response.future();
-        }
-
-        @Override
-        public Future<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
-            Promise<InstallSnapshotResponse> response = Promise.promise();
-            snapshots.add(new Held<>(targetId, request, response));
-            return response.future();
-        }
-    }
 }

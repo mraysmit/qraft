@@ -211,18 +211,59 @@ Server mode currently owns:
   - **Changes.** A leader changes the configuration one server at a time. It
     may start a change only after it has committed an entry in its current
     term, and only when no other change is uncommitted. Any configuration
-    entry, however it is submitted, meets these rules.
+    entry, however it is submitted, meets these rules. A server is added as a
+    non-voter; a change that adds a voter is refused.
+  - **Promotion**, as Consul's autopilot does it. A non-voter is replicated to
+    but not counted. At each heartbeat round the leader judges each non-voter
+    healthy when both hold:
+    - it has answered this leader within the last 2 heartbeat rounds. Only
+      replies to the current leadership are recorded, so this also means its
+      term matches the leader's (Consul's `LastContactThreshold` is 200 ms);
+    - its log trails the leader's by at most
+      `promotionMaxTrailingEntries` entries (default 250, Consul's
+      `MaxTrailingLogs`).
+
+    Once a non-voter has been healthy for `promotionStabilization` (default
+    10 s, Consul's `ServerStabilizationTime`, counted in heartbeat rounds),
+    the leader proposes the configuration with it as a voter. A lapse in
+    health starts the period again. One server is promoted at a time; a
+    promotion refused, for example while another change is uncommitted, is
+    tried at the next round. A new leader starts every period afresh.
   - **Log invariants.** Index 1 always holds the bootstrap configuration, in
     term 0. A follower refuses an append that would replace a committed
     entry.
   - **No upgrade.** A data directory that holds Raft state but no
     configuration, which is data from before configurations were recorded,
     refuses to start.
-  - Steps 3 to 8 of
+  - **Joining.** A server with no Raft state that finds a listed server
+    already in a cluster asks that server to add it, as Consul's
+    `retry_join` does, and asks again every second until the leader has
+    replicated the configuration to it. Any server forwards the request to
+    the leader over the Raft port. The leader adds the server as a
+    non-voter, and promotes it as above. There is no operator command to add
+    a server, as in Consul.
+  - **Rejoining after lost storage.** A server that lost its storage comes
+    back under a new server ID. If another server ID holds its name or
+    address, the leader first removes that entry, within the quorum rule
+    below, as Consul's autopilot does. It adds the new server when it asks
+    again.
+  - **Removal.** An operator removes a server by ID or by name (section
+    12.5). A removal of a voter is refused unless the voters left, among
+    those the leader has heard from within its check-quorum window, are a
+    quorum. A non-voter can always be removed. A leader that removes itself
+    steps down once the removal commits, and never campaigns again; the
+    servers left elect a leader.
+  - **Addresses.** The Raft transport reaches each configured server at the
+    address in the configuration, which overrides `server.raft.nodes`. A
+    joined server is in no server's list, and a rejoined server may have a
+    new address.
+  - **The Raft port is trusted.** Anyone who can reach it can join a server
+    that is later promoted, as they can already send Raft messages. It
+    belongs on a private network until transport security exists.
+  - Steps 5 to 8 of
     [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md)
-    add promotion of non-voters, operator commands to add and remove servers,
-    automatic removal of failed servers, protection from disruptive servers,
-    and recovery from lost quorum.
+    add automatic removal of failed servers, protection from disruptive
+    servers, recovery from lost quorum, and container scenarios.
 - **Bootstrapping.** A server with no Raft state asks every server in
   `server.raft.nodes` to describe itself over the Raft port. It then decides:
   - **Bootstrap.** Every listed server answers, none holds Raft state, and all
@@ -230,8 +271,9 @@ Server mode currently owns:
     term 0, treated as committed. The configuration is built from each
     server's own answer, so every server that bootstraps writes the identical
     entry.
-  - **Wait for replication.** A listed server already holds state. A leader
-    of that cluster will replicate the configuration to it.
+  - **Join.** A listed server already holds state. The server asks it to be
+    added (see Joining, above), and a leader of that cluster replicates the
+    configuration to it.
   - **Retry.** Some listed server has not answered; it tries again every
     second until it holds a configuration.
   - **Never bootstrap.** The lists differ.
@@ -1022,6 +1064,47 @@ protected key/value contents are never exposed without an explicit permission.
 This section defines capabilities only. Presentation layout, navigation,
 interaction patterns, and visual design are intentionally outside this document.
 
+
+### 12.5 Raft operator endpoints and commands
+
+After Consul's `/v1/operator/raft` and `consul operator raft`:
+
+```text
+GET    /v1/operator/raft/configuration
+DELETE /v1/operator/raft/peer?id={serverId} | ?name={name}
+```
+
+- **Listing.** `GET` lists each configured server: `serverId`, `name`,
+  `address`, `voter`, and `leader`, as this server holds them (Consul's
+  `?stale` read). It needs no token, like `/raft/status`.
+- **Removal.** `DELETE` needs the operator token (`server.operator.token`),
+  sent as `X-Qraft-Token` or `Authorization: Bearer`. Consul uses its ACLs
+  (`operator:write`) and binds its HTTP API to `127.0.0.1` by default; Qraft
+  has neither yet, so the token stands in for both. Any server takes the
+  request and forwards it to the leader over the Raft port, with the token,
+  which the leader checks again. The answers:
+  - `200`: removed.
+  - `400`: neither or both of `id` and `name`.
+  - `403` (`permission_denied`): the token is missing or wrong, or none is
+    configured.
+  - `404`: no configured server has that ID or name.
+  - `409` (`refused`): the change breaks a rule, such as the quorum rule or
+    another change in flight; the message gives the node's reason.
+  - `503` (`leader_unavailable`, retryable): no leader could be reached.
+
+The same operations from the command line, against any server's HTTP address:
+
+```text
+qraft operator raft list-peers  [--http-addr <host:port>]
+qraft operator raft remove-peer (--id <server-id> | --name <name>)
+                                [--http-addr <host:port>] (--token <t> | --token-file <path>)
+```
+
+The address defaults to `127.0.0.1:8080`. As everywhere in Qraft, nothing is
+read from environment variables; `--token-file` keeps the token out of the
+shell's history and the process list. The exit code is 0 when done, 1 when
+refused or unreachable, and 2 on misuse.
+
 ## 13. Consistency model
 
 Every write is acknowledged after commit and state-machine application. Read modes
@@ -1468,6 +1551,12 @@ longer changes it.
   one of them may be 0.
 - `server.telemetry.prometheusPort` must be a fixed port.
 
+`server.operator.token` is the token a Raft operator's removal of a server must
+carry (section 12.5). It is optional; without it, every removal is refused. It
+must be at least 16 characters, it is never logged, and every server should
+have the same one, since the server that receives a removal and the leader both
+check it.
+
 `server.ui` controls the embedded administrative interface (section 12.4):
 
 - `enabled` defaults to `true`. Until authentication exists, the interface is
@@ -1583,7 +1672,8 @@ Required signals include:
 
 `/raft/status` reports the node ID, server ID, role, term, leader, commit index,
 last applied index, last log index, snapshot index, and fenced flag as one
-consistent view read on the node's state loop.
+consistent view read on the node's state loop. `/v1/operator/raft/configuration`
+lists the servers in the Raft configuration (section 12.5).
 
 Logs carry request ID, node ID, Raft role and term where applicable, tenant, and
 namespace. Sensitive tokens and health-output secrets are never logged.

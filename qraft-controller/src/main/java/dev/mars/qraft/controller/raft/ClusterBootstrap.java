@@ -17,6 +17,7 @@
 package dev.mars.qraft.controller.raft;
 
 import dev.mars.qraft.controller.raft.grpc.DescribeResponse;
+import dev.mars.qraft.controller.raft.grpc.JoinRequest;
 import dev.mars.qraft.controller.runtime.Future;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,8 +36,9 @@ import java.util.Optional;
  *   <li>each answers under the name this server lists it by, and lists exactly the same servers.</li>
  * </ul>
  * The configuration is built from each server's own answer, its server ID and address, so every server that
- * bootstraps writes the identical entry. A server that finds an existing cluster does not bootstrap: a leader of
- * that cluster replicates the configuration to it.
+ * bootstraps writes the identical entry. A server that finds an existing cluster does not bootstrap. It asks that
+ * member to add it, as Consul's {@code retry_join} does, and a leader of that cluster replicates the configuration
+ * to it.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-29
@@ -51,7 +53,7 @@ public final class ClusterBootstrap {
         BOOTSTRAPPED,
         /** The node already has a configuration, so there is nothing to do. */
         CONFIGURED,
-        /** A listed server already belongs to a cluster; this server waits for its leader to replicate to it. */
+        /** A listed server already belongs to a cluster; this server asked to join, and waits for its leader. */
         JOINING_EXISTING,
         /** A listed server could not be reached; another attempt may succeed. */
         WAITING,
@@ -87,6 +89,27 @@ public final class ClusterBootstrap {
         });
     }
 
+    /**
+     * Asks {@code member}, which belongs to a cluster, to add this server; it forwards the request to its leader.
+     * Whatever the answer, this server waits for the leader to replicate the configuration to it, and the next
+     * attempt asks again, as when an old entry for this server had to be removed first.
+     */
+    private Future<Outcome> askToJoin(DescribeResponse self, String member) {
+        JoinRequest request = JoinRequest.newBuilder().setServerId(self.getServerId()).setName(self.getName())
+                .setAddress(self.getAddress()).build();
+        return transport.join(member, request)
+                .map(answer -> {
+                    logger.info("Bootstrap: {} belongs to a cluster; asked to join: {} {}",
+                            member, answer.getStatus(), answer.getMessage());
+                    return Outcome.JOINING_EXISTING;
+                })
+                .recover(unreachable -> {
+                    logger.info("Bootstrap: {} belongs to a cluster; could not ask to join: {}",
+                            member, unreachable.getMessage());
+                    return Future.succeededFuture(Outcome.JOINING_EXISTING);
+                });
+    }
+
     private Future<Outcome> decide(
             DescribeResponse self, List<String> peers, List<Future<Optional<DescribeResponse>>> answers) {
         List<DescribeResponse> described = new ArrayList<>();
@@ -99,10 +122,7 @@ public final class ClusterBootstrap {
                 continue;
             }
             DescribeResponse peer = answer.get();
-            if (peer.getHasState()) {
-                logger.info("Bootstrap: {} already belongs to a cluster; waiting for its leader", peers.get(i));
-                return Future.succeededFuture(Outcome.JOINING_EXISTING);
-            }
+            if (peer.getHasState()) return askToJoin(self, peers.get(i));
             if (!peer.getName().equals(peers.get(i)) || !peer.getListedServersList().equals(self.getListedServersList())) {
                 logger.error("Bootstrap refused: {} answers as {} and lists {}, but this server lists {}",
                         peers.get(i), peer.getName(), peer.getListedServersList(), self.getListedServersList());

@@ -34,6 +34,9 @@ public final class QraftRuntimeApplication {
     private QraftRuntimeApplication() { }
 
     public static void main(String[] args) {
+        if (args != null && args.length > 0 && "operator".equals(args[0])) {
+            System.exit(RaftOperatorCommand.run(Arrays.copyOfRange(args, 1, args.length), System.out, System.err));
+        }
         RuntimeLifecycle lifecycle = launch(args);
         Thread shutdownHook = Thread.ofPlatform().name("qraft-runtime-shutdown").unstarted(() ->
                 lifecycle.closeAsync().join());
@@ -70,7 +73,8 @@ public final class QraftRuntimeApplication {
 
     static Startup parseArguments(String[] args) {
         if (args == null || args.length == 0 || args[0] == null || args[0].isBlank()) {
-            throw new IllegalArgumentException("Usage: qraft <server|client> [--config <path>]");
+            throw new IllegalArgumentException(
+                    "Usage: qraft <server|client> [--config <path>], or qraft operator raft <command>");
         }
         String mode = args[0].trim().toLowerCase(java.util.Locale.ROOT);
         if (!mode.equals("server") && !mode.equals("client")) {

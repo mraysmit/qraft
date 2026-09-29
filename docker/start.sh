@@ -29,7 +29,7 @@ case "$service" in
     echo "Grafana available at http://localhost:3000 (admin/admin)"
     ;;
   stop)
-    for file in docker-compose-controller-first.yml docker-compose-cluster.yml docker-compose.yml docker-compose-loki.yml; do
+    for file in docker-compose-single-controller.yml docker-compose-controller-first.yml docker-compose-cluster.yml docker-compose-5node.yml docker-compose-network-test.yml docker-compose-loki.yml; do
       docker compose -f "compose/$file" down >/dev/null 2>&1 || true
     done
     echo "Services stopped."

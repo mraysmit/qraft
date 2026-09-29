@@ -15,6 +15,12 @@
     <name>Qraft Runtime</name>
     <description>Single executable Qraft runtime with server and client startup modes</description>
 
+    <properties>
+        <!-- Default: skip the end-to-end tests that wait out real TTLs and elections (docs/TESTING.md).
+             Run them with the Docker suite: -Dgroups=docker,e2e -Dtest.excludedGroups= -->
+        <test.excludedGroups>e2e</test.excludedGroups>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>dev.mars</groupId>
@@ -43,6 +49,13 @@
     <build>
         <finalName>qraft-runtime</finalName>
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <excludedGroups>${test.excludedGroups}</excludedGroups>
+                </configuration>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>

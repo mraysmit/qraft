@@ -16,6 +16,9 @@
 
 package dev.mars.qraft.controller.raft;
 
+import dev.mars.qraft.controller.raft.grpc.JoinRequest;
+import dev.mars.qraft.controller.raft.grpc.MembershipResponse;
+import dev.mars.qraft.controller.raft.grpc.RemoveServerRequest;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
@@ -55,13 +58,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Execution(ExecutionMode.SAME_THREAD)
 class GrpcRaftIntegrationTest {
     private static final long HEARTBEAT_MS = 200;
+    private static final String OPERATOR_TOKEN = "operator-secret";
 
     private JavaRuntime runtime;
     private final Map<String, String> addresses = new ConcurrentHashMap<>();
     private final List<Member> members = new ArrayList<>();
+    /** The configuration the members bootstrap with, at the addresses their servers bound. */
+    private RaftConfiguration configuration;
 
     private record Member(String id, RaftNode node, GrpcRaftServer server, ManualRaftTimers timers,
-                          QraftStateStore state) {
+                          QraftStateStore state, GrpcRaftTransport transport) {
         void stop() throws Exception {
             server.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
             node.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
@@ -190,6 +196,54 @@ class GrpcRaftIntegrationTest {
     }
 
     @Test
+    void aConfiguredServerIsReachedAtItsConfiguredAddressAlone() throws Exception {
+        List<Member> cluster = buildCluster("node1", "node2", "node3");
+        // No transport lists node3 any more: only the configuration gives its address.
+        addresses.remove("node3");
+        for (Member member : cluster) start(member);
+        Member leader = elect(cluster.get(0));
+
+        submit(leader, "k", "reached");
+        leader.timers().firePeriodic(HEARTBEAT_MS);
+
+        awaitTrue(() -> "reached".equals(cluster.get(2).state().getMetadata("k")),
+                "node3 is replicated to at its configured address");
+    }
+
+    @Test
+    void aJoinSentToAFollowerIsForwardedOverGrpcToTheLeader() throws Exception {
+        List<Member> cluster = startCluster("node1", "node2", "node3");
+        Member leader = elect(cluster.get(0));
+        submit(leader, "k", "v");
+        leader.timers().firePeriodic(HEARTBEAT_MS);
+        awaitTrue(() -> "node1".equals(cluster.get(1).node().getLeaderId()), "node2 knows the leader");
+
+        MembershipResponse answer = cluster.get(2).transport().join("node2", JoinRequest.newBuilder()
+                .setServerId("joining-id").setName("node4").setAddress("localhost:1").build())
+                .toCompletionStage().toCompletableFuture().get(15, TimeUnit.SECONDS);
+
+        assertEquals(MembershipResponse.Status.JOINED, answer.getStatus(), answer.getMessage());
+        assertEquals(new RaftConfiguration.Server("joining-id", "node4", "localhost:1", false),
+                leader.node().getConfiguration().orElseThrow().server("joining-id").orElseThrow());
+    }
+
+    @Test
+    void aRemovalSentToAFollowerIsForwardedWithItsTokenToTheLeader() throws Exception {
+        List<Member> cluster = startCluster("node1", "node2", "node3");
+        Member leader = elect(cluster.get(0));
+        submit(leader, "k", "v");
+        leader.timers().firePeriodic(HEARTBEAT_MS);
+        awaitTrue(() -> "node1".equals(cluster.get(1).node().getLeaderId()), "node2 knows the leader");
+
+        MembershipResponse answer = cluster.get(2).transport().removeServer("node2", RemoveServerRequest.newBuilder()
+                .setName("node3").setToken(OPERATOR_TOKEN).build())
+                .toCompletionStage().toCompletableFuture().get(15, TimeUnit.SECONDS);
+
+        assertEquals(MembershipResponse.Status.REMOVED, answer.getStatus(), answer.getMessage());
+        assertTrue(leader.node().getConfiguration().orElseThrow().serverNamed("node3").isEmpty());
+    }
+
+    @Test
     void aSoleMemberElectsItself() throws Exception {
         Member solo = startCluster("solo").getFirst();
 
@@ -210,7 +264,8 @@ class GrpcRaftIntegrationTest {
     /**
      * Builds each member with its gRPC server listening on port 0, then records the port every server bound
      * as that member's address. Transports read the shared address map when they dial, so every address is
-     * real before any node starts.
+     * real before any node starts. The members bootstrap as they start, as a new cluster does, with a
+     * configuration of those real addresses: a transport dials a configured server at its configured address.
      */
     private List<Member> buildCluster(String... ids) throws Exception {
         Set<String> memberIds = Set.of(ids);
@@ -219,26 +274,32 @@ class GrpcRaftIntegrationTest {
             GrpcRaftTransport transport = new GrpcRaftTransport(runtime, id, addresses);
             ManualRaftTimers timers = new ManualRaftTimers(runtime);
             QraftStateStore state = new QraftStateStore();
-            // Every member bootstraps with the same configuration of all members, as a new cluster does.
             RaftNode node = RaftNode.builder().runtime(runtime).nodeId(id).clusterNodes(memberIds)
                     .serverId(ManualRaftCluster.serverIdOf(id))
-                    .initialConfiguration(ManualRaftCluster.configurationOf(memberIds))
                     .transport(transport).stateMachine(state).commandCodec(new ProtobufRaftCommandCodec())
                     .mode(RaftNodeMode.volatileMode()).snapshotEnabled(false)
                     .electionTimeout(1_000).heartbeatInterval(HEARTBEAT_MS).timerScheduler(timers)
                     .build();
-            GrpcRaftServer server = new GrpcRaftServer(runtime, 0, node);
+            GrpcRaftServer server = new GrpcRaftServer(runtime, 0, node,
+                    new MembershipService(node, transport, OPERATOR_TOKEN));
             server.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
             addresses.put(id, "localhost:" + server.port());
-            Member member = new Member(id, node, server, timers, state);
+            Member member = new Member(id, node, server, timers, state, transport);
             cluster.add(member);
             members.add(member);
         }
+        configuration = new RaftConfiguration(cluster.stream().map(member -> new RaftConfiguration.Server(
+                ManualRaftCluster.serverIdOf(member.id()), member.id(), addresses.get(member.id()), true)).toList());
         return cluster;
     }
 
-    private static void start(Member member) throws Exception {
+    /** Starts the member and bootstraps it; a sole member bootstraps itself as it starts. */
+    private void start(Member member) throws Exception {
         member.node().start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        if (member.node().getConfiguration().isEmpty()) {
+            member.node().bootstrap(configuration).toCompletionStage().toCompletableFuture()
+                    .get(10, TimeUnit.SECONDS);
+        }
     }
 
     private static Member elect(Member candidate) throws Exception {

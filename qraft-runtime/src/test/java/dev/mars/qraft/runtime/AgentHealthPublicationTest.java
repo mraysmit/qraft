@@ -38,6 +38,7 @@ import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -70,6 +71,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @since 2026-09-26
  * @version 1.0
  */
+@Tag("e2e")
 class AgentHealthPublicationTest {
     private static final String AGENT_ID = "health-agent";
 

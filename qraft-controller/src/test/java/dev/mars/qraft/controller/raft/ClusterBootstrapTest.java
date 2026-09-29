@@ -19,7 +19,9 @@ package dev.mars.qraft.controller.raft;
 import dev.mars.qraft.controller.raft.ClusterBootstrap.Outcome;
 import dev.mars.qraft.controller.raft.RaftConfiguration.Server;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
+import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.QraftStateStore;
+import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -120,6 +122,24 @@ class ClusterBootstrapTest {
     }
 
     @Test
+    void aServerThatFindsAnExistingClusterAsksToJoinItThroughAnyMember() throws Exception {
+        RaftNode a = configured("a");
+        configured("b");
+        configured("c");
+        cluster.elect(a);
+        await(a.submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put("k", "v"))));
+        // d lists only b, a follower, which forwards the request to a.
+        RaftNode d = fresh("d", Set.of("b", "d"));
+
+        assertEquals(Outcome.JOINING_EXISTING, await(bootstrapOf(d).attempt()));
+
+        assertEquals(Optional.of(new Server(d.getServerId(), "d", "d:9080", false)),
+                a.getConfiguration().orElseThrow().serverNamed("d"), "d joins as a non-voter, at its own address");
+        cluster.heartbeatUntil(a, () -> d.getConfiguration().equals(a.getConfiguration()),
+                "a replicates the configuration to d");
+    }
+
+    @Test
     void aNodeThatHasAConfigurationHasNothingToDo() throws Exception {
         RaftNode configured = cluster.add(cluster.builder("a", MEMBERS, new InMemoryTransportSimulator("a"),
                 new QraftStateStore(), RaftNodeMode.volatileMode()));
@@ -127,6 +147,16 @@ class ClusterBootstrapTest {
 
         assertEquals(Outcome.CONFIGURED, await(bootstrapOf(configured).attempt()));
         assertEquals(1, configured.getLastLogIndex(), "no second configuration is written");
+    }
+
+    /** A member of a cluster of a, b and c that serves joins, with its promotions left to their default. */
+    private RaftNode configured(String name) throws Exception {
+        InMemoryTransportSimulator transport = new InMemoryTransportSimulator(name);
+        RaftNode node = cluster.add(cluster.builder(name, MEMBERS, transport,
+                new QraftStateStore(), RaftNodeMode.volatileMode()));
+        transport.serveMembership(new MembershipService(node, transport, null));
+        await(node.start());
+        return node;
     }
 
     private RaftNode fresh(String name, Set<String> members) throws Exception {

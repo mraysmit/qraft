@@ -22,6 +22,9 @@ import dev.mars.qraft.controller.raft.grpc.DescribeRequest;
 import dev.mars.qraft.controller.raft.grpc.DescribeResponse;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
+import dev.mars.qraft.controller.raft.grpc.JoinRequest;
+import dev.mars.qraft.controller.raft.grpc.MembershipResponse;
+import dev.mars.qraft.controller.raft.grpc.RemoveServerRequest;
 import dev.mars.qraft.controller.raft.grpc.RaftServiceGrpc;
 import dev.mars.qraft.controller.raft.grpc.VoteRequest;
 import dev.mars.qraft.controller.raft.grpc.VoteResponse;
@@ -86,6 +89,7 @@ public class GrpcRaftServer {
     private final JavaRuntime runtime;
     private final int port;
     private final RaftNode raftNode;
+    private final MembershipService membership;
     private final BindableService[] extraServices;
     private volatile Server server;
 
@@ -94,9 +98,19 @@ public class GrpcRaftServer {
     }
 
     public GrpcRaftServer(JavaRuntime runtime, int port, RaftNode raftNode, BindableService... extraServices) {
+        this(runtime, port, raftNode, null, extraServices);
+    }
+
+    /**
+     * A server that also serves joins and removals through {@code membership}; without it, both are answered
+     * {@code NO_LEADER}.
+     */
+    public GrpcRaftServer(JavaRuntime runtime, int port, RaftNode raftNode, MembershipService membership,
+                          BindableService... extraServices) {
         this.runtime = runtime;
         this.port = port;
         this.raftNode = raftNode;
+        this.membership = membership;
         this.extraServices = extraServices != null ? extraServices : new BindableService[0];
     }
 
@@ -247,6 +261,30 @@ public class GrpcRaftServer {
                 failRpc("AppendEntries", span, error, responseObserver);
             }
             }
+        }
+
+        @Override
+        public void join(JoinRequest request, StreamObserver<MembershipResponse> responseObserver) {
+            answer(membership == null ? null : membership.join(request), responseObserver);
+        }
+
+        @Override
+        public void removeServer(RemoveServerRequest request, StreamObserver<MembershipResponse> responseObserver) {
+            answer(membership == null ? null : membership.remove(request), responseObserver);
+        }
+
+        private void answer(Future<MembershipResponse> response, StreamObserver<MembershipResponse> observer) {
+            if (response == null) {
+                response = Future.succeededFuture(MembershipResponse.newBuilder()
+                        .setStatus(MembershipResponse.Status.NO_LEADER)
+                        .setMessage(raftNode.getNodeId() + " does not serve membership changes").build());
+            }
+            response.onSuccess(answer -> {
+                        observer.onNext(answer);
+                        observer.onCompleted();
+                    })
+                    .onFailure(error -> observer.onError(Status.UNAVAILABLE
+                            .withDescription("Membership change failed").withCause(error).asRuntimeException()));
         }
 
         @Override

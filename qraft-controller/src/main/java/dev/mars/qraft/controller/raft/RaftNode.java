@@ -170,6 +170,14 @@ public class RaftNode {
     private long heartbeatRound;
     private final Map<String, Long> lastContactRound = new HashMap<>();
 
+    // ========== PROMOTION (state loop only) ==========
+    /** A non-voter counts as in contact while it has answered within this many heartbeat rounds. */
+    static final long PROMOTION_CONTACT_ROUNDS = 2;
+    /** The peers that have answered in this leadership; a peer that has not has no contact to count. */
+    private final Set<String> answeredPeers = new HashSet<>();
+    /** The round from which each non-voter has been continuously healthy. */
+    private final Map<String, Long> healthySinceRound = new HashMap<>();
+
     // ========== STATE CHANGE LISTENERS ==========
     private final List<java.util.function.Consumer<State>> stateChangeListeners = new CopyOnWriteArrayList<>();
 
@@ -185,6 +193,9 @@ public class RaftNode {
     private final long snapshotThreshold;
     private final long snapshotCheckIntervalMs;
     private final long logHardLimit;
+    /** Heartbeat rounds a non-voter must stay healthy before it is promoted. */
+    private final long promotionStabilizationRounds;
+    private final long promotionMaxTrailingEntries;
 
     // ========== INSTALL SNAPSHOT STATE ==========
     /** Maximum chunk size for InstallSnapshot RPC (default 1 MB). */
@@ -276,6 +287,8 @@ public class RaftNode {
         private long snapshotThreshold = 10000;
         private long snapshotCheckIntervalMs = 60000;
         private long logHardLimit = 100000;
+        private long promotionStabilizationMs = 10_000;
+        private long promotionMaxTrailingEntries = 250;
         private RaftTimerScheduler timerScheduler;
         private int transitionQueueCapacity = 1024;
 
@@ -349,6 +362,26 @@ public class RaftNode {
         /** Maximum in-memory log entries before rejecting commands (default: 100000). */
         public Builder logHardLimit(long limit) { this.logHardLimit = limit; return this; }
 
+        /**
+         * How long a non-voter must stay healthy before the leader promotes it to a voter, in milliseconds,
+         * counted in heartbeat rounds (default: 10000, Consul's {@code ServerStabilizationTime}).
+         */
+        public Builder promotionStabilization(long ms) {
+            if (ms < 0) throw new IllegalArgumentException("promotionStabilization must not be negative");
+            this.promotionStabilizationMs = ms;
+            return this;
+        }
+
+        /**
+         * How many entries a healthy non-voter may trail the leader's log by (default: 250, Consul's
+         * {@code MaxTrailingLogs}).
+         */
+        public Builder promotionMaxTrailingEntries(long entries) {
+            if (entries < 0) throw new IllegalArgumentException("promotionMaxTrailingEntries must not be negative");
+            this.promotionMaxTrailingEntries = entries;
+            return this;
+        }
+
         Builder timerScheduler(RaftTimerScheduler timerScheduler) {
             this.timerScheduler = requireNonNull(timerScheduler, "timerScheduler");
             return this;
@@ -369,7 +402,8 @@ public class RaftNode {
             if (runtime == null) throw new IllegalStateException("runtime is required");
             if (nodeId == null) throw new IllegalStateException("nodeId is required");
             if (clusterNodes == null) throw new IllegalStateException("clusterNodes is required");
-            // Otherwise the node's own vote could exceed half of a member set it is not counted in.
+            // The list is where a server learns its own address, which it gives when it bootstraps or joins.
+            // Votes and commits are counted from the configuration in the log, not from this list.
             if (!clusterNodes.contains(nodeId)) {
                 throw new IllegalStateException("clusterNodes must include this node, " + nodeId);
             }
@@ -389,8 +423,8 @@ public class RaftNode {
             return new RaftNode(runtime, nodeId, resolvedServerId, initialConfiguration, listed,
                     clusterNodes, transport, stateMachine,
                     commandCodec, mode, electionTimeoutMs, heartbeatIntervalMs, snap,
-                    snapshotThreshold, snapshotCheckIntervalMs, logHardLimit, timerScheduler,
-                    transitionQueueCapacity);
+                    snapshotThreshold, snapshotCheckIntervalMs, logHardLimit, promotionStabilizationMs,
+                    promotionMaxTrailingEntries, timerScheduler, transitionQueueCapacity);
         }
     }
 
@@ -402,7 +436,8 @@ public class RaftNode {
             RaftLogApplicator stateMachine, CommandCodec<RaftCommand> commandCodec,
             RaftNodeMode mode, long electionTimeoutMs, long heartbeatIntervalMs,
             boolean snapshotEnabled, long snapshotThreshold, long snapshotCheckIntervalMs,
-            long logHardLimit, RaftTimerScheduler configuredTimerScheduler,
+            long logHardLimit, long promotionStabilizationMs, long promotionMaxTrailingEntries,
+            RaftTimerScheduler configuredTimerScheduler,
             int transitionQueueCapacity) {
         this.runtime = runtime;
         this.nodeId = nodeId;
@@ -433,6 +468,8 @@ public class RaftNode {
         this.snapshotThreshold = snapshotThreshold;
         this.snapshotCheckIntervalMs = snapshotCheckIntervalMs;
         this.logHardLimit = logHardLimit;
+        this.promotionStabilizationRounds = (promotionStabilizationMs + heartbeatIntervalMs - 1) / heartbeatIntervalMs;
+        this.promotionMaxTrailingEntries = promotionMaxTrailingEntries;
 
         // Initialize log with a dummy entry
         log.add(new LogEntry(0, 0, null));
@@ -929,6 +966,87 @@ public class RaftNode {
         return submitCommand(new ConfigurationCommand(requireNonNull(next, "next"))).mapEmpty();
     }
 
+    /**
+     * Admits a server asking to join, as a non-voter; {@link #considerPromotions} promotes it once it has caught
+     * up. A server already configured under its server ID is left as it is. If another server ID holds its name
+     * or address, as after the server lost its storage, that entry is removed first, as Consul's autopilot does,
+     * and the server is added when it asks again. Each change completes once committed.
+     */
+    public Future<JoinResult> admit(RaftConfiguration.Server joining) {
+        requireNonNull(joining, "joining");
+        if (joining.voter()) {
+            return Future.failedFuture(new IllegalArgumentException(
+                    "A server joins as a non-voter and is promoted once it has caught up"));
+        }
+        return onStateLoop(() -> {
+            RaftConfiguration current = configuration;
+            if (state != State.LEADER || current == null) {
+                return Future.failedFuture(new IllegalStateException("Not the leader. Current state: " + state));
+            }
+            if (current.server(joining.serverId()).isPresent()) {
+                return Future.succeededFuture(JoinResult.ALREADY_MEMBER);
+            }
+            Optional<RaftConfiguration.Server> displaced = current.servers().stream()
+                    .filter(server -> server.name().equals(joining.name())
+                            || server.address().equals(joining.address()))
+                    .findFirst();
+            if (displaced.isPresent()) {
+                logger.info("Server {} at {} rejoins as {}; removing its old entry {} first",
+                        joining.name(), joining.address(), joining.serverId(), displaced.get().serverId());
+                return proposeConfiguration(without(current, displaced.get().serverId()))
+                        .map(ignored -> JoinResult.REPLACING);
+            }
+            List<RaftConfiguration.Server> servers = new ArrayList<>(current.servers());
+            servers.add(joining);
+            return proposeConfiguration(new RaftConfiguration(servers)).map(ignored -> JoinResult.JOINED);
+        });
+    }
+
+    /**
+     * Removes the server with {@code removedServerId}, completing once the change is committed. A leader that
+     * removes itself steps down then. The removal is refused if the voters left, among those this leader has
+     * heard from recently, would not be a quorum.
+     */
+    public Future<Void> removeServer(String removedServerId) {
+        requireNonNull(removedServerId, "removedServerId");
+        return onStateLoop(() -> {
+            RaftConfiguration current = configuration;
+            if (state != State.LEADER || current == null) {
+                return Future.failedFuture(new IllegalStateException("Not the leader. Current state: " + state));
+            }
+            if (current.server(removedServerId).isEmpty()) {
+                return Future.failedFuture(new IllegalArgumentException(
+                        "Server " + removedServerId + " is not in the configuration"));
+            }
+            return proposeConfiguration(without(current, removedServerId));
+        });
+    }
+
+    private static RaftConfiguration without(RaftConfiguration configuration, String removedServerId) {
+        return new RaftConfiguration(configuration.servers().stream()
+                .filter(server -> !server.serverId().equals(removedServerId)).toList());
+    }
+
+    /** Runs {@code step} on the state loop, so it sees one moment of the node's state. */
+    private <T> Future<T> onStateLoop(java.util.function.Supplier<Future<T>> step) {
+        Promise<T> result = Promise.promise();
+        try {
+            runOnContext(ignored -> {
+                try {
+                    step.get().onComplete(outcome -> {
+                        if (outcome.succeeded()) result.tryComplete(outcome.result());
+                        else result.tryFail(outcome.cause());
+                    });
+                } catch (RuntimeException error) {
+                    result.tryFail(error);
+                }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException stopped) {
+            result.tryFail(stopped);
+        }
+        return result.future();
+    }
+
     private Future<LeaderAppendDecision> prepareAndPersistLeaderAppend(RaftCommand command) {
         if (state != State.LEADER) {
             return Future.succeededFuture(LeaderAppendDecision.rejected(
@@ -1007,6 +1125,29 @@ public class RaftNode {
         if (changed.size() > 1) {
             return new IllegalArgumentException("A configuration change may add, remove, or alter one server at a "
                     + "time; this one changes " + changed.size() + ": " + changed);
+        }
+        String changedId = changed.iterator().next();
+        if (configuration.server(changedId).isEmpty() && next.isVoter(changedId)) {
+            return new IllegalArgumentException("A server joins as a non-voter and is promoted once it has caught "
+                    + "up; " + changedId + " was added as a voter");
+        }
+        if (configuration.isVoter(changedId) && !next.isVoter(changedId)) {
+            // The voters left must still be able to commit: those this leader has heard from must be a quorum.
+            Set<String> reachable = new HashSet<>();
+            reachable.add(serverId);
+            for (RaftConfiguration.Server peer : peers()) {
+                Long round = lastContactRound.get(peer.name());
+                if (answeredPeers.contains(peer.name()) && round != null
+                        && heartbeatRound - round <= quorumContactRounds) {
+                    reachable.add(peer.serverId());
+                }
+            }
+            reachable.retainAll(next.voterIds());
+            if (!next.hasQuorum(reachable)) {
+                return new IllegalStateException("Removing voter " + changedId + " would leave "
+                        + next.voterIds().size() + " voters, of which this leader has recently heard from "
+                        + reachable.size() + ": not a quorum");
+            }
         }
         return null;
     }
@@ -1143,6 +1284,8 @@ public class RaftNode {
         nextIndex.keySet().retainAll(configured);
         matchIndex.keySet().retainAll(configured);
         lastContactRound.keySet().retainAll(configured);
+        answeredPeers.retainAll(configured);
+        healthySinceRound.keySet().retainAll(configured);
         unavailablePeers.retainAll(configured);
         for (RaftConfiguration.Server peer : peers()) {
             nextIndex.putIfAbsent(peer.name(), lastLogIndex() + 1);
@@ -1158,6 +1301,14 @@ public class RaftNode {
 
     private void refreshConfiguration() {
         configuration = logConfigurations.isEmpty() ? snapshotConfiguration : logConfigurations.lastEntry().getValue();
+        RaftConfiguration current = configuration;
+        if (current != null) {
+            Map<String, String> addresses = new HashMap<>();
+            for (RaftConfiguration.Server server : current.servers()) {
+                if (!server.serverId().equals(serverId)) addresses.put(server.name(), server.address());
+            }
+            transport.useAddresses(addresses);
+        }
     }
 
     /** The server's durable Raft identity, which every message it sends names as the sender. */
@@ -1554,6 +1705,8 @@ public class RaftNode {
         heartbeatRound = 0;
         lastContactRound.clear();
         for (RaftConfiguration.Server peer : peers()) lastContactRound.put(peer.name(), 0L);
+        answeredPeers.clear();
+        healthySinceRound.clear();
         appendLeadershipNoOpIfRecoveredEntriesAwaitCommit();
         startHeartbeats();
         sendHeartbeats(); // Immediate
@@ -1653,8 +1806,49 @@ public class RaftNode {
                 return null;
             }
             sendHeartbeats();
+            considerPromotions();
         }
         return null;
+    }
+
+    /**
+     * Promotes a non-voter that has stayed healthy for the stabilization period, as Consul's autopilot does.
+     * Healthy means it has answered this leader within {@link #PROMOTION_CONTACT_ROUNDS} heartbeat rounds, which
+     * also means its term matches the leader's, since only replies to this leadership are recorded; and its log
+     * trails the leader's by at most the allowed number of entries. One server is promoted at a time; a
+     * promotion refused, for example because another change is uncommitted, is tried again next round.
+     */
+    private void considerPromotions() {
+        RaftConfiguration current = configuration;
+        if (current == null) return;
+        RaftConfiguration.Server promote = null;
+        for (RaftConfiguration.Server peer : peers()) {
+            if (peer.voter()) continue;
+            if (!isHealthyNonVoter(peer.name())) {
+                healthySinceRound.remove(peer.name());
+                continue;
+            }
+            long since = healthySinceRound.computeIfAbsent(peer.name(), ignored -> heartbeatRound);
+            if (promote == null && heartbeatRound - since >= promotionStabilizationRounds) promote = peer;
+        }
+        if (promote == null) return;
+        List<RaftConfiguration.Server> servers = new ArrayList<>();
+        for (RaftConfiguration.Server server : current.servers()) {
+            servers.add(server.serverId().equals(promote.serverId())
+                    ? new RaftConfiguration.Server(server.serverId(), server.name(), server.address(), true)
+                    : server);
+        }
+        String promoted = promote.name();
+        proposeConfiguration(new RaftConfiguration(servers))
+                .onSuccess(ignored -> logger.info("Promoted {} to a voter", promoted))
+                .onFailure(error -> logger.debug("Promotion of {} deferred: {}", promoted, error.getMessage()));
+    }
+
+    private boolean isHealthyNonVoter(String peerName) {
+        Long contact = lastContactRound.get(peerName);
+        return answeredPeers.contains(peerName) && contact != null
+                && heartbeatRound - contact <= PROMOTION_CONTACT_ROUNDS
+                && matchIndex.getOrDefault(peerName, 0L) >= lastLogIndex() - promotionMaxTrailingEntries;
     }
 
     /**
@@ -1675,7 +1869,10 @@ public class RaftNode {
     }
 
     private void recordPeerContact(String peerId) {
-        if (lastContactRound.containsKey(peerId)) lastContactRound.put(peerId, heartbeatRound);
+        if (lastContactRound.containsKey(peerId)) {
+            lastContactRound.put(peerId, heartbeatRound);
+            answeredPeers.add(peerId);
+        }
     }
 
     /**
@@ -2343,7 +2540,30 @@ public class RaftNode {
         if (N > commitIndex && hasLogEntry(N) && log.get(toArrayIndex(N)).getTerm() == currentTerm) {
             commitIndex = N;
             applyLog();
+            stepDownIfRemoved();
         }
+    }
+
+    /**
+     * A leader whose removal has committed steps down. Outside the configuration it never campaigns, so the
+     * servers left elect a leader among themselves.
+     */
+    private void stepDownIfRemoved() {
+        RaftConfiguration current = configuration;
+        if (state != State.LEADER || current == null || current.server(serverId).isPresent()
+                || configurationAt(commitIndex).server(serverId).isPresent()) {
+            return;
+        }
+        state = State.FOLLOWER;
+        currentLeaderId = null;
+        MDC.put("raftRole", "FOLLOWER");
+        logger.info("Node {} stepping down in term {}: its removal from the configuration has committed",
+                nodeId, currentTerm);
+        notifyStateChangeListeners(State.FOLLOWER);
+        failPendingCommands(new CommandOutcomeUnknownException(
+                "Leadership ended because this server was removed; outcome may be unknown"));
+        cancelRoleTimers();
+        if (running) resetElectionTimer();
     }
 
     /**

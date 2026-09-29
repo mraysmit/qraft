@@ -1,7 +1,7 @@
 # Task List: Raft Membership Changes
 
 **Date:** 2026-09-29
-**Active work:** Step 3, non-voters and promotion. Steps 1 and 2 were done
+**Active work:** Step 4, operator add and remove. Steps 1 to 3 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
 **Predecessor:** [`task-list-test-suite-remediation-2026-09-27.md`](task-list-test-suite-remediation-2026-09-27.md).
@@ -506,14 +506,106 @@ Slices, each red before green:
   - it has stayed healthy for a stabilization period.
 - The criteria and their defaults are recorded in the design document.
 
-### Step 4. Operator add and remove
+### Step 3 record (2026-09-29)
 
-- Server API and CLI commands to list the Raft configuration, add a server,
-  and remove one.
-- A removal that would leave fewer voters than a quorum can survive is refused.
+**Built:**
+- **Joining.** A configuration change that adds a server as a voter is
+  refused: a server joins as a non-voter. Changing an existing non-voter to a
+  voter is allowed. A non-voter already never campaigned (Step 2) and is not
+  counted.
+- **Health.** At each heartbeat round, the leader judges each non-voter
+  healthy when:
+  - it has answered this leadership within the last 2 heartbeat rounds, and
+    has answered at all. The contact round a new peer starts with is only a
+    placeholder, so it does not count. Only replies to the current leadership
+    are recorded, which covers "its term matches the leader's";
+  - its match index is at least the leader's last index less
+    `promotionMaxTrailingEntries` (default 250).
+- **Promotion.** Once a non-voter has been healthy for
+  `promotionStabilization` (default 10 s, rounded up to heartbeat rounds),
+  the leader proposes the configuration with it as a voter. A lapse restarts
+  the period, and a new leader starts afresh. It promotes one server per
+  round; a refused promotion, such as one made while another change is
+  uncommitted, is retried at the next round.
+- **Builder options:** `promotionStabilization(ms)` and
+  `promotionMaxTrailingEntries(n)`. They are not yet exposed in the server
+  configuration, and the operator commands of Step 4 are where a server gets
+  added.
+- **Test support.** `HeldRaftTransport` is extracted from
+  `RaftNodeServerIdCountingTest`. It holds every request for the test to
+  answer, so `RaftNodePromotionTest` counts heartbeat rounds exactly.
+
+**Tests:**
+- `RaftNodePromotionTest`, with 6 tests: joining as a non-voter; promotion at
+  exactly the round the stabilization period ends; the trailing-entries
+  boundary (two behind is refused, one behind with the limit at one is
+  promoted); answering every other round stays in contact; answering every
+  third round never stabilizes; a server that never answers is not promoted.
+- `RaftNodeConfigurationChangeTest`: the voter test now adds d as a
+  non-voter and waits for its promotion before showing that d counts towards
+  the quorum. Two replication tests now compare the added server's
+  configuration with the leader's, since the server is promoted once it
+  catches up. One of them checked the commit index after the wait instead of
+  in it, which became a race once promotion added an entry. It is now part of
+  the wait condition.
+
+**Evidence:**
+- The new tests were red before the code (the builder options were added
+  first, so the tests failed on behaviour, not compilation).
+- 10 in-process mutations were caught:
+  - the voter-add refusal removed;
+  - the answered check removed;
+  - the contact-recency check removed;
+  - the contact threshold set to 1, and to 3;
+  - the trailing check made strict, and removed;
+  - the stabilization check made strict;
+  - the health reset removed;
+  - promotion never run.
+- The changed tests passed 5 repeated runs.
+- `mvn install`: 762 tests, every coverage gate met.
+- The Docker suite, on an image built from the final code: 23 of 23. Its
+  clusters bootstrap with every server a voter, so promotion is not exercised
+  there; Step 8's container scenarios will add a server.
+
+### Step 4. Joining, and operator list and remove
+
+Revised 2026-09-29 to follow Consul more closely (decisions 6 and 7 below).
+It was "Operator add and remove".
+
+- A server with no Raft state that finds an existing cluster asks to join,
+  as Consul's `retry_join` does. Any server forwards the request to the
+  leader, which adds it as a non-voter; Step 3 promotes it. There is no
+  operator add command, as in Consul.
+- A server that rejoins under a new server ID, after losing its storage,
+  replaces its old entry, as Consul's autopilot does: the leader first
+  removes the entry with the same name or address (within the quorum rule
+  below), and adds the new one when the joining server asks again.
+- Server API and CLI commands to list the Raft configuration and remove a
+  server. Removal needs the operator token (decision 6); any server forwards
+  it to the leader (decision 7).
+- A removal that would leave fewer voters than a quorum can survive is
+  refused: the voters left, among those the leader has heard from recently,
+  must still be a quorum.
 - A leader that removes itself steps down after the change commits.
-- A node outside the configuration never starts an election. This replaces the
-  builder check from 2026-09-28.
+- A node outside the configuration never starts an election (true since
+  Step 2). The builder check that a server's list includes itself stays: the
+  list is where a server learns its own address.
+- The Raft transport reaches servers at the addresses in the configuration,
+  not only those in `server.raft.nodes`, so a joined server is reachable.
+
+**Decisions made 2026-09-29 for this step:**
+
+6. **Protecting changes.** Consul protects its operator endpoints with ACLs
+   (`operator:read` to list, `operator:write` to remove), and with its HTTP
+   API bound to `127.0.0.1` by default. Qraft has no ACLs yet, and its HTTP
+   API listens on all interfaces. So a removal needs the operator token
+   (`server.operator.token`), sent as `X-Qraft-Token` or `Authorization:
+   Bearer`. With no token configured, removals are refused. Listing stays
+   open, like `/raft/status`. A forwarded removal carries the token, and the
+   leader checks it too.
+7. **Forwarding.** As in Consul, any server forwards a join or a removal to
+   the leader over the Raft port, and returns the leader's answer. A
+   forwarded request is never forwarded again.
 
 ### Step 5. Failed-server cleanup
 

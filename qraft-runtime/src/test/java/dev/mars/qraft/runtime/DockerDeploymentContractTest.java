@@ -43,7 +43,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class DockerDeploymentContractTest {
     private static final List<String> BUILD_COMPOSE_FILES = List.of(
-            "docker/compose/docker-compose.yml",
             "docker/compose/docker-compose-5node.yml",
             "docker/compose/docker-compose-cluster.yml",
             "docker/compose/docker-compose-controller-first.yml",

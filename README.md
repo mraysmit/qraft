@@ -37,9 +37,11 @@ Qraft is a good fit for:
 ## Quick Start
 
 ```bash
-# Build and test the complete reactor
-mvn clean test
+# Build and test the complete reactor, with the coverage gates
+mvn clean install
 ```
+
+See [docs/TESTING.md](docs/TESTING.md) for the test suites, running a single test class, and the Docker suite.
 
 ## Local Cluster and Observability
 

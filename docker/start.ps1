@@ -7,13 +7,13 @@ switch ($Service) {
     "cluster" {
         & (Join-Path $PSScriptRoot "build-runtime.ps1")
         Write-Host "Starting Qraft single-controller development environment..." -ForegroundColor Green
-        docker-compose -f compose/docker-compose-single-controller.yml up -d
+        docker compose -f compose/docker-compose-single-controller.yml up -d
         Write-Host "Controller with embedded HTTP API available at http://localhost:8080" -ForegroundColor Cyan
     }
     "multinode" {
         & (Join-Path $PSScriptRoot "build-runtime.ps1")
         Write-Host "Starting Qraft multi-node cluster..." -ForegroundColor Green
-        docker-compose -f compose/docker-compose-cluster.yml up -d
+        docker compose -f compose/docker-compose-cluster.yml up -d
         Write-Host "Multi-node cluster available at:" -ForegroundColor Cyan
         Write-Host "  - API Node 1: http://localhost:8081" -ForegroundColor White
         Write-Host "  - API Node 2: http://localhost:8082" -ForegroundColor White
@@ -22,7 +22,7 @@ switch ($Service) {
     "controllers" {
         & (Join-Path $PSScriptRoot "build-runtime.ps1")
         Write-Host "Starting Qraft controller-first cluster..." -ForegroundColor Green
-        docker-compose -f compose/docker-compose-controller-first.yml up -d
+        docker compose -f compose/docker-compose-controller-first.yml up -d
         Write-Host "Controller cluster available at:" -ForegroundColor Cyan
         Write-Host "  - Load Balanced API: http://localhost:8080" -ForegroundColor Yellow
         Write-Host "  - Controller 1: http://localhost:8081" -ForegroundColor White
@@ -31,15 +31,17 @@ switch ($Service) {
     }
     "logging" {
         Write-Host "Starting log aggregation..." -ForegroundColor Green
-        docker-compose -f compose/docker-compose-loki.yml up -d
+        docker compose -f compose/docker-compose-loki.yml up -d
         Write-Host "Grafana available at http://localhost:3000 (admin/admin)" -ForegroundColor Cyan
     }
     "stop" {
         Write-Host "Stopping services..." -ForegroundColor Yellow
-        docker-compose -f compose/docker-compose-controller-first.yml down 2>$null
-        docker-compose -f compose/docker-compose-cluster.yml down 2>$null
-        docker-compose -f compose/docker-compose.yml down 2>$null
-        docker-compose -f compose/docker-compose-loki.yml down 2>$null
+        docker compose -f compose/docker-compose-single-controller.yml down 2>$null
+        docker compose -f compose/docker-compose-controller-first.yml down 2>$null
+        docker compose -f compose/docker-compose-cluster.yml down 2>$null
+        docker compose -f compose/docker-compose-5node.yml down 2>$null
+        docker compose -f compose/docker-compose-network-test.yml down 2>$null
+        docker compose -f compose/docker-compose-loki.yml down 2>$null
         Write-Host "Services stopped." -ForegroundColor Green
     }
     "status" {

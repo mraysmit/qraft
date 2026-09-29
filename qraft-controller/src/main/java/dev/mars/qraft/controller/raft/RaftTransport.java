@@ -21,10 +21,14 @@ import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.controller.raft.grpc.DescribeResponse;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
+import dev.mars.qraft.controller.raft.grpc.JoinRequest;
+import dev.mars.qraft.controller.raft.grpc.MembershipResponse;
+import dev.mars.qraft.controller.raft.grpc.RemoveServerRequest;
 import dev.mars.qraft.controller.raft.grpc.VoteRequest;
 import dev.mars.qraft.controller.raft.grpc.VoteResponse;
 import dev.mars.qraft.controller.runtime.Future;
 
+import java.util.Map;
 import java.util.function.Consumer;
 
 /**
@@ -60,6 +64,29 @@ public interface RaftTransport {
     default Future<DescribeResponse> describe(String targetId) {
         return Future.failedFuture(new UnsupportedOperationException(
                 getClass().getSimpleName() + " cannot ask " + targetId + " to describe itself"));
+    }
+
+    /**
+     * Forwards a server's request to join to {@code targetId}, the leader as this server knows it. A transport
+     * that cannot forward fails, and the joining server asks again.
+     */
+    default Future<MembershipResponse> join(String targetId, JoinRequest request) {
+        return Future.failedFuture(new UnsupportedOperationException(
+                getClass().getSimpleName() + " cannot forward a join to " + targetId));
+    }
+
+    /** Forwards an operator's removal of a server to {@code targetId}, the leader as this server knows it. */
+    default Future<MembershipResponse> removeServer(String targetId, RemoveServerRequest request) {
+        return Future.failedFuture(new UnsupportedOperationException(
+                getClass().getSimpleName() + " cannot forward a removal to " + targetId));
+    }
+
+    /**
+     * The Raft addresses of the configured servers other than this one, by name, whenever the configuration
+     * in force changes. A server that joined is in no server's {@code server.raft.nodes}, so its address is
+     * known only from here.
+     */
+    default void useAddresses(Map<String, String> addresses) {
     }
 
     /**

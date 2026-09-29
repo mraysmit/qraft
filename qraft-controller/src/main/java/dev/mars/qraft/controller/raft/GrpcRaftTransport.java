@@ -25,6 +25,9 @@ import dev.mars.qraft.controller.raft.grpc.DescribeRequest;
 import dev.mars.qraft.controller.raft.grpc.DescribeResponse;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
+import dev.mars.qraft.controller.raft.grpc.JoinRequest;
+import dev.mars.qraft.controller.raft.grpc.MembershipResponse;
+import dev.mars.qraft.controller.raft.grpc.RemoveServerRequest;
 import dev.mars.qraft.controller.raft.grpc.RaftServiceGrpc;
 import dev.mars.qraft.controller.raft.grpc.VoteRequest;
 import dev.mars.qraft.controller.raft.grpc.VoteResponse;
@@ -85,6 +88,8 @@ public class GrpcRaftTransport implements RaftTransport {
     private final JavaRuntime runtime;
     private final String selfId;
     private final Map<String, String> clusterNodes; // nodeId -> host:port
+    /** Addresses from the configuration in force, which override the listed ones; see {@link #useAddresses}. */
+    private final Map<String, String> configuredAddresses = new ConcurrentHashMap<>();
     private final Map<String, RaftServiceGrpc.RaftServiceFutureStub> clients = new ConcurrentHashMap<>();
     private final Map<String, ManagedChannel> channels = new ConcurrentHashMap<>();
     private final ExecutorService executor;
@@ -286,6 +291,57 @@ public class GrpcRaftTransport implements RaftTransport {
     }
 
     @Override
+    public Future<MembershipResponse> join(String targetId, JoinRequest request) {
+        requireKnownTarget(targetId);
+        if (stopped) {
+            return Future.failedFuture(new IllegalStateException("Transport for " + selfId + " is stopped"));
+        }
+        try {
+            return toFuture(getStub(targetId)
+                    .withDeadlineAfter(MembershipService.TIMEOUT_SECONDS, TimeUnit.SECONDS).join(request));
+        } catch (Throwable error) {
+            return Future.failedFuture(error);
+        }
+    }
+
+    @Override
+    public Future<MembershipResponse> removeServer(String targetId, RemoveServerRequest request) {
+        requireKnownTarget(targetId);
+        if (stopped) {
+            return Future.failedFuture(new IllegalStateException("Transport for " + selfId + " is stopped"));
+        }
+        try {
+            return toFuture(getStub(targetId)
+                    .withDeadlineAfter(MembershipService.TIMEOUT_SECONDS, TimeUnit.SECONDS).removeServer(request));
+        } catch (Throwable error) {
+            return Future.failedFuture(error);
+        }
+    }
+
+    /**
+     * Takes the configured servers' addresses. A server whose address changed is dialled afresh; a listed
+     * server stays reachable at its listed address, for joining and bootstrapping.
+     */
+    @Override
+    public void useAddresses(Map<String, String> addresses) {
+        for (Map.Entry<String, String> entry : addresses.entrySet()) {
+            if (entry.getKey().equals(selfId)) continue;
+            String previous = configuredAddresses.put(entry.getKey(), entry.getValue());
+            String dialled = previous != null ? previous : clusterNodes.get(entry.getKey());
+            if (dialled != null && !dialled.equals(entry.getValue())) {
+                clients.remove(entry.getKey());
+                ManagedChannel channel = channels.remove(entry.getKey());
+                if (channel != null) channel.shutdown();
+            }
+        }
+    }
+
+    private String addressOf(String targetId) {
+        String configured = configuredAddresses.get(targetId);
+        return configured != null ? configured : clusterNodes.get(targetId);
+    }
+
+    @Override
     public Future<DescribeResponse> describe(String targetId) {
         requireKnownTarget(targetId);
         if (stopped) {
@@ -334,7 +390,7 @@ public class GrpcRaftTransport implements RaftTransport {
 
     private RaftServiceGrpc.RaftServiceFutureStub getStub(String targetId) {
         return clients.computeIfAbsent(targetId, id -> {
-            String addr = clusterNodes.get(id);
+            String addr = addressOf(id);
             if (addr == null) {
                 throw new IllegalArgumentException("Unknown node: " + id);
             }
@@ -359,7 +415,7 @@ public class GrpcRaftTransport implements RaftTransport {
     }
 
     private void requireKnownTarget(String targetId) {
-        if (!clusterNodes.containsKey(targetId)) {
+        if (addressOf(targetId) == null) {
             throw new IllegalArgumentException("Unknown node: " + targetId);
         }
     }

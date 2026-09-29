@@ -11,17 +11,17 @@ $ComposeFile = "$PSScriptRoot\compose\docker-compose-observability.yml"
 
 if ($Down) {
     Write-Host "Stopping observability stack..." -ForegroundColor Yellow
-    docker-compose -f $ComposeFile down -v
+    docker compose -f $ComposeFile down -v
     exit 0
 }
 
 if ($Logs) {
-    docker-compose -f $ComposeFile logs -f
+    docker compose -f $ComposeFile logs -f
     exit 0
 }
 
 if ($Status) {
-    docker-compose -f $ComposeFile ps
+    docker compose -f $ComposeFile ps
     exit 0
 }
 
@@ -39,7 +39,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "[1/3] Starting observability stack..." -ForegroundColor Green
-docker-compose -f $ComposeFile up -d
+docker compose -f $ComposeFile up -d
 
 Write-Host ""
 Write-Host "[2/3] Waiting for services to be healthy..." -ForegroundColor Green
@@ -60,7 +60,7 @@ while ($waited -lt $maxWait) {
 }
 
 if (-not $healthy) {
-    Write-Host "[WARN] Services may not be fully ready. Check 'docker-compose ps'" -ForegroundColor Yellow
+    Write-Host "[WARN] Services may not be fully ready. Check 'docker compose ps'" -ForegroundColor Yellow
 }
 
 Write-Host ""

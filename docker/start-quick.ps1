@@ -15,23 +15,24 @@ function Show-Help {
     Write-Host "Qraft Docker Quick Start" -ForegroundColor Green
     Write-Host "=========================" -ForegroundColor Green
     Write-Host ""
-    Write-Host "Usage: .\quick-start.ps1 <action> [cluster-type]" -ForegroundColor Yellow
+    Write-Host "Usage: .\start-quick.ps1 <action> [cluster-type]" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "Actions:" -ForegroundColor Yellow
     Write-Host "  cluster [3node|5node|network-test]  - Start Qraft cluster" -ForegroundColor White
     Write-Host "  logging                             - Start log aggregation stack" -ForegroundColor White
-    Write-Host "  test                                - Run test scenarios" -ForegroundColor White
+    Write-Host "  test                                - Run test scenarios against http://localhost:8080," -ForegroundColor White
+    Write-Host "                                        which .\start.ps1 cluster or controllers serves" -ForegroundColor White
     Write-Host "  stop                                - Stop all services" -ForegroundColor White
     Write-Host "  clean                               - Clean up containers and volumes" -ForegroundColor White
     Write-Host "  status                              - Show service status" -ForegroundColor White
     Write-Host "  help                                - Show this help" -ForegroundColor White
     Write-Host ""
     Write-Host "Examples:" -ForegroundColor Yellow
-    Write-Host "  .\quick-start.ps1 cluster           # Start 3-node cluster" -ForegroundColor Gray
-    Write-Host "  .\quick-start.ps1 cluster 5node     # Start 5-node cluster" -ForegroundColor Gray
-    Write-Host "  .\quick-start.ps1 logging           # Start log aggregation" -ForegroundColor Gray
-    Write-Host "  .\quick-start.ps1 test              # Run test scenarios" -ForegroundColor Gray
-    Write-Host "  .\quick-start.ps1 status            # Check service status" -ForegroundColor Gray
+    Write-Host "  .\start-quick.ps1 cluster           # Start 3-node cluster" -ForegroundColor Gray
+    Write-Host "  .\start-quick.ps1 cluster 5node     # Start 5-node cluster" -ForegroundColor Gray
+    Write-Host "  .\start-quick.ps1 logging           # Start log aggregation" -ForegroundColor Gray
+    Write-Host "  .\start-quick.ps1 test              # Run test scenarios" -ForegroundColor Gray
+    Write-Host "  .\start-quick.ps1 status            # Check service status" -ForegroundColor Gray
 }
 
 function Start-Cluster {
@@ -40,20 +41,19 @@ function Start-Cluster {
     & (Join-Path $PSScriptRoot "build-runtime.ps1")
     
     $composeFile = switch ($Type) {
-        "3node" { "compose/docker-compose.yml" }
+        "3node" { "compose/docker-compose-cluster.yml" }
         "5node" { "compose/docker-compose-5node.yml" }
         "network-test" { "compose/docker-compose-network-test.yml" }
-        default { "compose/docker-compose.yml" }
+        default { "compose/docker-compose-cluster.yml" }
     }
     
     Write-Host "Starting $Type cluster..." -ForegroundColor Green
-    docker-compose -f $composeFile up -d
+    docker compose -f $composeFile up -d
     
     if ($LASTEXITCODE -eq 0) {
         Write-Host "Cluster started successfully!" -ForegroundColor Green
         Write-Host ""
         Write-Host "Services available at:" -ForegroundColor Yellow
-        Write-Host "  - Qraft API: http://localhost:8080" -ForegroundColor White
         Write-Host "  - Controller 1: http://localhost:8081" -ForegroundColor White
         Write-Host "  - Controller 2: http://localhost:8082" -ForegroundColor White
         Write-Host "  - Controller 3: http://localhost:8083" -ForegroundColor White
@@ -69,7 +69,7 @@ function Start-Cluster {
 
 function Start-Logging {
     Write-Host "Starting log aggregation stack..." -ForegroundColor Green
-    docker-compose -f compose/docker-compose-loki.yml up -d
+    docker compose -f compose/docker-compose-loki.yml up -d
     
     if ($LASTEXITCODE -eq 0) {
         Write-Host "Log aggregation started successfully!" -ForegroundColor Green
@@ -108,10 +108,12 @@ function Stop-Services {
     Write-Host "Stopping all Qraft services..." -ForegroundColor Yellow
     
     # Stop all possible compose configurations
-    docker-compose -f compose/docker-compose.yml down 2>$null
-    docker-compose -f compose/docker-compose-5node.yml down 2>$null
-    docker-compose -f compose/docker-compose-network-test.yml down 2>$null
-    docker-compose -f compose/docker-compose-loki.yml down 2>$null
+    docker compose -f compose/docker-compose-single-controller.yml down 2>$null
+    docker compose -f compose/docker-compose-controller-first.yml down 2>$null
+    docker compose -f compose/docker-compose-cluster.yml down 2>$null
+    docker compose -f compose/docker-compose-5node.yml down 2>$null
+    docker compose -f compose/docker-compose-network-test.yml down 2>$null
+    docker compose -f compose/docker-compose-loki.yml down 2>$null
     
     Write-Host "All services stopped." -ForegroundColor Green
 }

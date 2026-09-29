@@ -29,8 +29,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -42,9 +45,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>A node elects itself only when {@link #elect} fires its election timeout, and a leader heartbeats only
  * when {@link #heartbeatUntil} fires it. The election timeout is set long relative to the heartbeat because
- * it sizes the leader's check-quorum window in heartbeat rounds: fifty rounds, paced at one per
- * {@value #HEARTBEAT_POLL_MS} ms of polling, so a leader steps down only if a majority is silent for as long
- * as a test is prepared to wait. Every wait is bounded at ten seconds.
+ * it sizes the leader's check-quorum window in heartbeat rounds: fifty rounds, each of which settles before
+ * the next is fired, so a leader steps down only if a majority is silent for fifty whole rounds; a follower
+ * that is merely slow still answers within its round. Every wait is bounded at ten seconds.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-28
@@ -53,7 +56,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public final class ManualRaftCluster implements AutoCloseable {
     public static final long HEARTBEAT_MS = 200;
     public static final long ELECTION_TIMEOUT_MS = 10_000;
-    private static final long HEARTBEAT_POLL_MS = 200;
+    /** Passes over an idle network and state loop before a heartbeat round counts as settled. */
+    private static final int QUIET_PASSES = 3;
     private static final long WAIT_SECONDS = 10;
 
     private final JavaRuntime runtime;
@@ -140,7 +144,9 @@ public final class ManualRaftCluster implements AutoCloseable {
 
     /**
      * Fires {@code leader}'s heartbeat until {@code condition} holds. A heartbeat carries the leader's commit
-     * index, and any entries or snapshot a follower lacks; catching up can take several rounds.
+     * index, and any entries or snapshot a follower lacks; catching up can take several rounds. After each
+     * heartbeat it waits only until the round has settled (see {@link #settle}), not for a fixed time, so a
+     * round costs the simulated latency and no more.
      */
     public void heartbeatUntil(RaftNode leader, BooleanSupplier condition, String description) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(WAIT_SECONDS);
@@ -151,10 +157,39 @@ public final class ManualRaftCluster implements AutoCloseable {
                 throw new AssertionError(leader.getNodeId() + " stopped leading (" + leader.getState()
                         + ") before: " + description, disarmed);
             }
-            long round = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(HEARTBEAT_POLL_MS);
-            while (!condition.getAsBoolean() && System.nanoTime() < Math.min(round, deadline)) Thread.sleep(5);
+            settle(deadline);
         }
         assertTrue(condition.getAsBoolean(), description);
+    }
+
+    /**
+     * Waits until no simulated message is in flight and the state loop has run everything queued, on
+     * {@value #QUIET_PASSES} passes in a row, since a node's handling can send more. It only saves time: a
+     * round that settles too early costs one more heartbeat in {@link #heartbeatUntil}, never a wrong answer.
+     */
+    private void settle(long deadline) throws InterruptedException {
+        int quiet = 0;
+        while (quiet < QUIET_PASSES && System.nanoTime() < deadline) {
+            if (InMemoryTransportSimulator.hasMessagesInFlight()) {
+                quiet = 0;
+                Thread.sleep(1);
+                continue;
+            }
+            drainStateLoop();
+            quiet = InMemoryTransportSimulator.hasMessagesInFlight() ? 0 : quiet + 1;
+        }
+    }
+
+    /** Returns once the state loop has run every task queued before this call. */
+    private void drainStateLoop() throws InterruptedException {
+        CompletableFuture<Void> marker = new CompletableFuture<>();
+        runtime.runOnContext(ignored -> marker.complete(null));
+        try {
+            marker.get(WAIT_SECONDS, TimeUnit.SECONDS);
+        } catch (ExecutionException | TimeoutException stalled) {
+            throw new AssertionError("the state loop did not run a queued task within " + WAIT_SECONDS + " s",
+                    stalled);
+        }
     }
 
     /**

@@ -35,6 +35,7 @@ import dev.mars.qraft.controller.raft.RaftTransport;
 import dev.mars.qraft.controller.raft.GrpcServiceServer;
 import dev.mars.qraft.controller.raft.GrpcRaftTransport;
 import dev.mars.qraft.controller.raft.ClusterBootstrap;
+import dev.mars.qraft.controller.raft.MembershipService;
 import dev.mars.qraft.controller.raft.GrpcRaftServer;
 import dev.mars.qraft.controller.raft.storage.RaftStorageFactory;
 import dev.mars.qraft.controller.raft.storage.ServerIdentity;
@@ -199,14 +200,21 @@ public class QraftControllerService {
             transport.setRaftNode(node);
 
             // 7. Create and start separate gRPC servers: internal Raft RPC and external API RPC
-            GrpcRaftServer internalRaftServer = new GrpcRaftServer(runtime, raftPort, node);
+            // Joins and operator removals reach any server, over HTTP or the Raft port, and go to the leader.
+            MembershipService membership = new MembershipService(node, transport,
+                    config.getOperatorToken().orElse(null));
+            if (config.getOperatorToken().isEmpty()) {
+                logger.info("No server.operator.token is configured: Raft operator removals are refused");
+            }
+            GrpcRaftServer internalRaftServer = new GrpcRaftServer(runtime, raftPort, node, membership);
             this.raftGrpcServer = Optional.of(internalRaftServer);
 
             DistributedStateGrpcService distributedStateService = new DistributedStateGrpcService(node, stateMachine);
             GrpcServiceServer externalApiServer = new GrpcServiceServer(runtime, apiGrpcPort, distributedStateService);
             this.apiGrpcServer = Optional.of(externalApiServer);
             HttpApiServer healthServer = new HttpApiServer(config.getHttpPort(), node, stateMachine, Clock.systemUTC(),
-                    config.getAdminUi(), UiAssets.forConfig(config.getAdminUi()));
+                    config.getAdminUi(), UiAssets.forConfig(config.getAdminUi()), HttpApiServer.DEFAULT_RAFT_TIMEOUT,
+                    membership);
             this.httpApiServer = Optional.of(healthServer);
 
             // Only the leader evaluates health-check deadlines; followers apply committed expiry commands.

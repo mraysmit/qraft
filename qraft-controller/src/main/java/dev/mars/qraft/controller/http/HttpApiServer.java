@@ -30,6 +30,10 @@ import dev.mars.qraft.catalog.ServiceInstance;
 import dev.mars.qraft.concurrent.Deadlines;
 import dev.mars.qraft.catalog.ServiceInstanceId;
 import dev.mars.qraft.catalog.ServiceKey;
+import dev.mars.qraft.controller.raft.MembershipService;
+import dev.mars.qraft.controller.raft.RaftConfiguration;
+import dev.mars.qraft.controller.raft.grpc.MembershipResponse;
+import dev.mars.qraft.controller.raft.grpc.RemoveServerRequest;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.raft.RaftStatus;
 import dev.mars.qraft.controller.ui.AdminUiConfig;
@@ -57,6 +61,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -89,6 +94,7 @@ public final class HttpApiServer implements AutoCloseable {
     private final AtomicBoolean draining = new AtomicBoolean();
     private final Clock clock;
     private final Duration raftTimeout;
+    private final MembershipService membership;
 
     /** How long a request waits for the Raft node to answer a status read or commit a write. */
     public static final Duration DEFAULT_RAFT_TIMEOUT = Duration.ofSeconds(5);
@@ -122,6 +128,17 @@ public final class HttpApiServer implements AutoCloseable {
      */
     public HttpApiServer(int port, RaftNode raftNode, QraftStateStore stateStore, Clock clock,
                          AdminUiConfig ui, UiAssets assets, Duration raftTimeout) throws IOException {
+        this(port, raftNode, stateStore, clock, ui, assets, raftTimeout, null);
+    }
+
+    /**
+     * @param membership serves the Raft operator's removals; without it they are answered as unavailable, and
+     *                   the configuration is still listed
+     */
+    public HttpApiServer(int port, RaftNode raftNode, QraftStateStore stateStore, Clock clock,
+                         AdminUiConfig ui, UiAssets assets, Duration raftTimeout, MembershipService membership)
+            throws IOException {
+        this.membership = membership;
         this.raftTimeout = Objects.requireNonNull(raftTimeout, "raftTimeout");
         if (raftTimeout.isNegative() || raftTimeout.isZero()) {
             throw new IllegalArgumentException("raftTimeout must be positive: " + raftTimeout);
@@ -147,6 +164,8 @@ public final class HttpApiServer implements AutoCloseable {
                     Objects.requireNonNull(assets, "assets are required for an enabled interface"))));
         }
         server.createContext("/raft/status", requestAware(this::raftStatus));
+        server.createContext("/v1/operator/raft/configuration", requestAware(this::raftConfiguration));
+        server.createContext("/v1/operator/raft/peer", requestAware(this::removeRaftPeer));
         server.createContext("/api/v1/agents/register", requestAware(this::registerAgent));
         server.createContext("/api/v1/agents/heartbeat", requestAware(this::heartbeatAgent));
         server.createContext("/api/v1/agents", requestAware(this::agents));
@@ -303,6 +322,108 @@ public final class HttpApiServer implements AutoCloseable {
         status.put("snapshotLastIndex", current.snapshotLastIndex());
         status.put("fenced", current.fenced());
         respondJson(exchange, 200, status);
+    }
+
+    /**
+     * Lists the Raft configuration as this server holds it, after Consul's
+     * {@code GET /v1/operator/raft/configuration?stale}: each server's ID, name, address, whether it votes, and
+     * whether it is the leader this server knows. Open without a token, like {@code /raft/status}.
+     */
+    private void raftConfiguration(HttpExchange exchange) throws IOException {
+        if (!prepareStateRequest(exchange, "GET")) return;
+        Optional<RaftConfiguration> configuration = raftNode.getConfiguration();
+        if (configuration.isEmpty()) {
+            respondError(exchange, 503, "not_configured", "This server has no Raft configuration yet", true);
+            return;
+        }
+        String leaderName = raftNode.getLeaderId();
+        List<Map<String, Object>> servers = new ArrayList<>();
+        for (RaftConfiguration.Server server : configuration.get().servers()) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("serverId", server.serverId());
+            entry.put("name", server.name());
+            entry.put("address", server.address());
+            entry.put("voter", server.voter());
+            entry.put("leader", server.name().equals(leaderName));
+            servers.add(entry);
+        }
+        respondJson(exchange, 200, Map.of("servers", servers));
+    }
+
+    /**
+     * Removes a server, named by {@code id} or {@code name}, after Consul's {@code DELETE /v1/operator/raft/peer}.
+     * It needs the operator token, as {@code X-Qraft-Token} or {@code Authorization: Bearer}. Any server forwards
+     * the removal to the leader.
+     */
+    private void removeRaftPeer(HttpExchange exchange) throws IOException {
+        if (!prepareStateRequest(exchange, "DELETE")) return;
+        if (membership == null) {
+            respondError(exchange, 503, "membership_unavailable", "This server does not serve membership changes",
+                    false);
+            return;
+        }
+        Map<String, String> query;
+        try {
+            query = operatorQuery(exchange.getRequestURI().getRawQuery());
+        } catch (IllegalArgumentException invalid) {
+            respondError(exchange, 400, "invalid_request", safeMessage(invalid), false);
+            return;
+        }
+        String id = query.getOrDefault("id", "");
+        String name = query.getOrDefault("name", "");
+        if (id.isBlank() == name.isBlank()) {
+            respondError(exchange, 400, "invalid_request", "Name the server to remove by id or by name, not both",
+                    false);
+            return;
+        }
+        RemoveServerRequest request = RemoveServerRequest.newBuilder().setServerId(id).setName(name)
+                .setToken(operatorToken(exchange)).build();
+        MembershipResponse answer;
+        try {
+            answer = Deadlines.bound(membership.remove(request).toCompletionStage(),
+                    MembershipService.TIMEOUT_SECONDS * 2, TimeUnit.SECONDS).join();
+        } catch (CompletionException unavailable) {
+            respondUnavailable(exchange, unavailable);
+            return;
+        }
+        switch (answer.getStatus()) {
+            case REMOVED -> respondJson(exchange, 200, Map.of("status", answer.getStatus().name(),
+                    "message", answer.getMessage()));
+            case UNAUTHORIZED -> respondError(exchange, 403, "permission_denied", answer.getMessage(), false);
+            case NOT_FOUND -> respondError(exchange, 404, "not_found", answer.getMessage(), false);
+            case NO_LEADER -> respondError(exchange, 503, "leader_unavailable", answer.getMessage(), true);
+            default -> respondError(exchange, 409, "refused", answer.getMessage(), false);
+        }
+    }
+
+    /** The operator token, from {@code X-Qraft-Token} or else a bearer {@code Authorization} header. */
+    private static String operatorToken(HttpExchange exchange) {
+        String token = exchange.getRequestHeaders().getFirst("X-Qraft-Token");
+        if (token != null) return token;
+        String authorization = exchange.getRequestHeaders().getFirst("Authorization");
+        if (authorization != null && authorization.regionMatches(true, 0, "Bearer ", 0, 7)) {
+            return authorization.substring(7).trim();
+        }
+        return "";
+    }
+
+    /** Parses {@code id} and {@code name}, the only parameters a removal takes. */
+    private static Map<String, String> operatorQuery(String rawQuery) {
+        Map<String, String> parameters = new LinkedHashMap<>();
+        if (rawQuery == null || rawQuery.isEmpty()) return parameters;
+        for (String parameter : rawQuery.split("&")) {
+            if (parameter.isEmpty()) continue;
+            int separator = parameter.indexOf('=');
+            String name = URLDecoder.decode(separator < 0 ? parameter : parameter.substring(0, separator),
+                    StandardCharsets.UTF_8);
+            String value = separator < 0 ? "" : URLDecoder.decode(parameter.substring(separator + 1),
+                    StandardCharsets.UTF_8);
+            if (!name.equals("id") && !name.equals("name")) {
+                throw new IllegalArgumentException("Unsupported query parameter: " + name);
+            }
+            parameters.put(name, value);
+        }
+        return parameters;
     }
 
     private void registerAgent(HttpExchange exchange) throws IOException {

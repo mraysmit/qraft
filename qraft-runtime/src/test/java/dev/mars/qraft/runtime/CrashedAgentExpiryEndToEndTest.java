@@ -19,6 +19,7 @@ package dev.mars.qraft.runtime;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -46,6 +47,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @since 2026-09-26
  * @version 1.0
  */
+@Tag("e2e")
 class CrashedAgentExpiryEndToEndTest {
     private static final ObjectMapper JSON = new ObjectMapper();
 

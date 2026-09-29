@@ -413,6 +413,26 @@ class GrpcRaftTransportTest {
         }
     }
 
+    @Test
+    @DisplayName("A server known only from the configuration is reached, and redialled when its address changes")
+    void aConfiguredServerIsReachedAtItsConfiguredAddressAndRedialledWhenItChanges() throws Exception {
+        RaftNode secondNode = node("target2");
+        GrpcRaftServer secondServer = new GrpcRaftServer(runtime, 0, secondNode);
+        try {
+            secondServer.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            GrpcRaftTransport transport = startedTransport(Map.of());
+
+            transport.useAddresses(Map.of("peer", "localhost:" + targetPort));
+            assertEquals(targetNode.getServerId(), decided(transport.describe("peer")).getServerId());
+
+            // As a server that lost its storage rejoins under the same name at a new address.
+            transport.useAddresses(Map.of("peer", "localhost:" + secondServer.port()));
+            assertEquals(secondNode.getServerId(), decided(transport.describe("peer")).getServerId());
+        } finally {
+            secondServer.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        }
+    }
+
     // ========== REQUEST CONTENT TESTS ==========
 
     @Test

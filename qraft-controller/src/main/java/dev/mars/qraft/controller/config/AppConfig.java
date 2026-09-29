@@ -53,6 +53,7 @@ public final class AppConfig {
     private static final String DEFAULT_RESOURCE = "qraft-controller.json";
     /** An unreachable node is reaped with its services after 72 hours, the reconnect window Consul uses. */
     private static final long DEFAULT_NODE_REAP_AFTER_MS = 72L * 60 * 60 * 1000;
+    private static final int MIN_OPERATOR_TOKEN_LENGTH = 16;
     private static volatile AppConfig instance = loadDefault();
 
     private final Map<String, Object> values;
@@ -118,9 +119,10 @@ public final class AppConfig {
         JsonNode shutdown = optionalObject(server, "shutdown");
         JsonNode health = optionalObject(server, "health");
         JsonNode ui = optionalObject(server, "ui");
+        JsonNode operator = optionalObject(server, "operator");
         JsonNode logging = optionalObject(root, "logging");
         rejectUnknown(server, "server", "id", "applicationVersion", "http", "apiGrpcPort",
-                "raft", "telemetry", "shutdown", "health", "ui");
+                "raft", "telemetry", "shutdown", "health", "ui", "operator");
         rejectUnknown(http, "server.http", "host", "port");
         rejectUnknown(raft, "server.raft", "port", "nodes", "electionTimeoutMs",
                 "heartbeatIntervalMs", "storage", "snapshot", "logHardLimit", "io");
@@ -132,6 +134,7 @@ public final class AppConfig {
         rejectUnknown(shutdown, "server.shutdown", "drainTimeoutMs", "timeoutMs");
         rejectUnknown(health, "server.health", "expiryIntervalMs", "nodeTtlMs", "nodeReapAfterMs");
         rejectUnknown(ui, "server.ui", "enabled", "path", "devAssetsDirectory");
+        rejectUnknown(operator, "server.operator", "token");
         rejectUnknown(logging, "logging", "directory");
 
         Map<String, Object> values = new LinkedHashMap<>();
@@ -152,6 +155,7 @@ public final class AppConfig {
         values.put("qraft.raft.snapshot.check-interval-ms",
                 optionalLong(snapshot, "checkIntervalMs", 60_000));
         values.put("qraft.raft.log.hard-limit", optionalLong(raft, "logHardLimit", 100_000));
+        values.put("qraft.operator.token", optionalText(operator, "token", ""));
         values.put("qraft.raft.io.pool-size", optionalInt(io, "poolSize", 10));
         values.put("qraft.raft.io.queue-size", optionalInt(io, "queueSize", 1000));
         values.put("qraft.telemetry.enabled", optionalBoolean(telemetry, "enabled", true));
@@ -253,6 +257,15 @@ public final class AppConfig {
     public String getServiceName() {
         return getString("qraft.telemetry.service.name", "qraft-controller");
     }
+    /**
+     * The token a Raft operator's removal of a server must carry (see {@code MembershipService}); empty when
+     * none is configured, and then every removal is refused. Never logged.
+     */
+    public Optional<String> getOperatorToken() {
+        String token = getString("qraft.operator.token", "");
+        return token.isBlank() ? Optional.empty() : Optional.of(token);
+    }
+
     public int getRaftIoPoolSize() { return getInt("qraft.raft.io.pool-size", 10); }
     public int getRaftIoQueueSize() { return getInt("qraft.raft.io.queue-size", 1000); }
     public String getVersion() { return getString("qraft.version", "2.0-ext"); }
@@ -293,6 +306,10 @@ public final class AppConfig {
     }
 
     public void validate() {
+        if (getOperatorToken().filter(token -> token.length() < MIN_OPERATOR_TOKEN_LENGTH).isPresent()) {
+            throw new IllegalStateException("server.operator.token must be at least " + MIN_OPERATOR_TOKEN_LENGTH
+                    + " characters");
+        }
         validateListeningPort("server.http.port", getHttpPort());
         validateListeningPort("server.raft.port", getRaftPort());
         validateListeningPort("server.apiGrpcPort", getApiGrpcPort());

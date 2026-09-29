@@ -21,6 +21,9 @@ import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.controller.raft.grpc.DescribeResponse;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
+import dev.mars.qraft.controller.raft.grpc.JoinRequest;
+import dev.mars.qraft.controller.raft.grpc.MembershipResponse;
+import dev.mars.qraft.controller.raft.grpc.RemoveServerRequest;
 import dev.mars.qraft.controller.raft.grpc.VoteRequest;
 import dev.mars.qraft.controller.raft.grpc.VoteResponse;
 import dev.mars.qraft.controller.runtime.Future;
@@ -41,6 +44,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 /**
@@ -68,6 +72,11 @@ public class InMemoryTransportSimulator implements RaftTransport {
 
     // Global registry of all transport instances
     private static final Map<String, InMemoryTransportSimulator> transports = new ConcurrentHashMap<>();
+    /**
+     * Sends and deliveries not yet finished, across every transport: queued or running on a pool, or held for
+     * their latency. A test waits for it to reach zero rather than for a fixed time.
+     */
+    private static final AtomicInteger IN_FLIGHT = new AtomicInteger();
     
     // Network partition state (set of isolated node groups)
     private static final Set<Set<String>> networkPartitions = ConcurrentHashMap.newKeySet();
@@ -79,6 +88,8 @@ public class InMemoryTransportSimulator implements RaftTransport {
     private volatile boolean running = false;
     private boolean stopped; // guarded by this: a stopped transport never starts its delivery thread again
     private RaftNode raftNode;
+    /** Serves joins and removals forwarded to this node, as its Raft port would; null serves none. */
+    private volatile MembershipService membership;
     
     // Chaos Configuration
     private final Random random;
@@ -276,6 +287,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
             message = messageQueue.poll();
             if (message != null) {
                 dispatch(message::deliver, message.failure);
+                IN_FLIGHT.decrementAndGet(); // held until now; the dispatch above counts it from here
             }
         }
     }
@@ -304,17 +316,28 @@ public class InMemoryTransportSimulator implements RaftTransport {
 
     /** Runs a send on the delivery pool; a send the pool will not take fails its request. */
     private void dispatch(Runnable send, Consumer<Throwable> failure) {
+        IN_FLIGHT.incrementAndGet();
         try {
             executor.execute(new Task(send, failure));
         } catch (RejectedExecutionException stopped) {
+            IN_FLIGHT.decrementAndGet();
             failure.accept(new IllegalStateException("Transport stopped: " + nodeId, stopped));
         }
     }
 
     /** Holds a delivery until {@code delayMs} has passed; the reorder processor hands it to the pool. */
     private void deliverAfter(long delayMs, Runnable delivery, Consumer<Throwable> failure) {
+        IN_FLIGHT.incrementAndGet();
         startReorderProcessor();
         messageQueue.offer(new DelayedMessage(System.currentTimeMillis() + delayMs, delivery, failure));
+    }
+
+    /**
+     * Whether any send or delivery, on any transport, has not yet finished. Once none has, every reply sent
+     * so far has reached the node that asked, though the node may still be handling it on its state loop.
+     */
+    public static boolean hasMessagesInFlight() {
+        return IN_FLIGHT.get() > 0;
     }
 
     @Override
@@ -335,6 +358,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
         transports.remove(nodeId);
         for (Runnable neverStarted : executor.shutdownNow()) {
             if (neverStarted instanceof Task task) {
+                IN_FLIGHT.decrementAndGet();
                 task.failure().accept(new IllegalStateException("Transport stopped before sending: " + nodeId));
             }
         }
@@ -351,6 +375,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
         awaitTermination(delivery, "reorder");
         DelayedMessage held;
         while ((held = messageQueue.poll()) != null) {
+            IN_FLIGHT.decrementAndGet();
             held.failure.accept(new IllegalStateException("Transport stopped before delivery: " + nodeId));
         }
         logger.info("Stopped in-memory transport for node: {}", nodeId);
@@ -368,6 +393,33 @@ public class InMemoryTransportSimulator implements RaftTransport {
             Thread.currentThread().interrupt();
             logger.warn("Interrupted while draining in-memory {} executor for node: {}", executorName, nodeId);
         }
+    }
+
+    /** Serves joins and removals that reach this node through {@code membership}. */
+    public void serveMembership(MembershipService membership) {
+        this.membership = membership;
+    }
+
+    @Override
+    public Future<MembershipResponse> join(String targetNodeId, JoinRequest request) {
+        return membershipOf(targetNodeId).compose(target -> target.join(request));
+    }
+
+    @Override
+    public Future<MembershipResponse> removeServer(String targetNodeId, RemoveServerRequest request) {
+        return membershipOf(targetNodeId).compose(target -> target.remove(request));
+    }
+
+    private Future<MembershipService> membershipOf(String targetNodeId) {
+        if (crashed || !canCommunicate(nodeId, targetNodeId)) {
+            return Future.failedFuture(new RuntimeException("Cannot reach " + targetNodeId));
+        }
+        InMemoryTransportSimulator targetTransport = transports.get(targetNodeId);
+        if (targetTransport == null || !targetTransport.running || targetTransport.crashed
+                || targetTransport.membership == null) {
+            return Future.failedFuture(new RuntimeException("Target node not available: " + targetNodeId));
+        }
+        return Future.succeededFuture(targetTransport.membership);
     }
 
     @Override
@@ -626,13 +678,19 @@ public class InMemoryTransportSimulator implements RaftTransport {
     public static void clearAllTransports() {
         transports.clear();
         healPartitions();
+        // A count left by an earlier test must not make every later round wait out its deadline.
+        IN_FLIGHT.set(0);
     }
     
     /** A send or delivery on the pool, with the failure that ends its request if it never runs. */
     private record Task(Runnable body, Consumer<Throwable> failure) implements Runnable {
         @Override
         public void run() {
-            body.run();
+            try {
+                body.run();
+            } finally {
+                IN_FLIGHT.decrementAndGet();
+            }
         }
     }
 
