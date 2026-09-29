@@ -52,14 +52,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Tests that {@link RaftNode} discards delayed append responses from a previous leadership and does
  * not let granted votes overtake a blocked higher-term transition. Elections happen only when a test
- * fires the election timeout, so no timer can move the term while a transition is held.
+ * fires the election timeout, so no timer can move the term while a transition is held. The node bootstraps
+ * its configuration at index 1, and every simulated answer carries the server ID configured for its peer, so
+ * an answer that is discarded is discarded for its leadership or its ordering, not for its sender.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-14
- * @version 1.0
+ * @version 1.1
  */
 @RemediationTest(phase = "5", scenarioPrefix = "RAFT-TRANSPORT-GENERATION")
 class RaftNodeTransportGenerationTest {
+    private static final Set<String> MEMBERS = Set.of("node-1", "peer-1");
+
     private JavaRuntime runtime;
     private RaftNode node;
     private ManualRaftTimers timers;
@@ -80,7 +84,9 @@ class RaftNodeTransportGenerationTest {
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
-                .clusterNodes(Set.of("node-1", "peer-1"))
+                .serverId(ManualRaftCluster.serverIdOf("node-1"))
+                .initialConfiguration(ManualRaftCluster.configurationOf(MEMBERS))
+                .clusterNodes(MEMBERS)
                 .transport(transport)
                 .stateMachine(new QraftStateStore())
                 .commandCodec(new ProtobufRaftCommandCodec())
@@ -99,23 +105,26 @@ class RaftNodeTransportGenerationTest {
         VoteResponse stepDown = await(node.handleVoteRequest(VoteRequest.newBuilder()
                 .setTerm(firstLeadershipTerm + 1)
                 .setCandidateId("peer-1")
-                .setLastLogIndex(0)
+                .setCandidateServerId(ManualRaftCluster.serverIdOf("peer-1"))
+                .setLastLogIndex(1)
                 .setLastLogTerm(0)
                 .build()));
         assertTrue(stepDown.getVoteGranted());
 
         timers.fireElectionTimeout();
         awaitLeaderAtOrAboveTerm(firstLeadershipTerm + 2);
-        assertEquals(1, node.getNextIndex("peer-1"));
+        // The new leader's log holds only the bootstrap configuration, so it starts peer-1 after index 1.
+        assertEquals(2, node.getNextIndex("peer-1"));
 
         stale.response().complete(AppendEntriesResponse.newBuilder()
                 .setTerm(firstLeadershipTerm)
                 .setSuccess(true)
                 .setMatchIndex(100)
+                .setFollowerServerId(ManualRaftCluster.serverIdOf("peer-1"))
                 .build());
         awaitStateLoop(runtime);
 
-        assertEquals(1, node.getNextIndex("peer-1"),
+        assertEquals(2, node.getNextIndex("peer-1"),
                 "a completion from an earlier leadership must be ignored");
     }
 
@@ -129,7 +138,9 @@ class RaftNodeTransportGenerationTest {
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
-                .clusterNodes(Set.of("node-1", "peer-1"))
+                .serverId(ManualRaftCluster.serverIdOf("node-1"))
+                .initialConfiguration(ManualRaftCluster.configurationOf(MEMBERS))
+                .clusterNodes(MEMBERS)
                 .transport(transport)
                 .stateMachine(new QraftStateStore())
                 .commandCodec(new ProtobufRaftCommandCodec())
@@ -148,7 +159,8 @@ class RaftNodeTransportGenerationTest {
         Future<VoteResponse> higherTermVote = node.handleVoteRequest(VoteRequest.newBuilder()
                 .setTerm(oldTerm + 1)
                 .setCandidateId("peer-1")
-                .setLastLogIndex(0)
+                .setCandidateServerId(ManualRaftCluster.serverIdOf("peer-1"))
+                .setLastLogIndex(1)
                 .setLastLogTerm(0)
                 .build());
         storage.awaitBlockedMetadataUpdate();
@@ -156,6 +168,7 @@ class RaftNodeTransportGenerationTest {
         oldElection.response().complete(VoteResponse.newBuilder()
                 .setTerm(oldTerm)
                 .setVoteGranted(true)
+                .setVoterServerId(ManualRaftCluster.serverIdOf("peer-1"))
                 .build());
         awaitStateLoop(runtime);
 
@@ -217,7 +230,8 @@ class RaftNodeTransportGenerationTest {
                 return response.future();
             }
             return Future.succeededFuture(VoteResponse.newBuilder()
-                    .setTerm(request.getTerm()).setVoteGranted(true).build());
+                    .setTerm(request.getTerm()).setVoteGranted(true)
+                    .setVoterServerId(ManualRaftCluster.serverIdOf(targetId)).build());
         }
         @Override public Future<AppendEntriesResponse> sendAppendEntries(
                 String targetId, AppendEntriesRequest request) {
@@ -229,7 +243,8 @@ class RaftNodeTransportGenerationTest {
                 String targetId, InstallSnapshotRequest request) {
             return Future.succeededFuture(InstallSnapshotResponse.newBuilder()
                     .setTerm(request.getTerm()).setSuccess(true)
-                    .setNextChunkIndex(request.getTotalChunks()).build());
+                    .setNextChunkIndex(request.getTotalChunks())
+                    .setFollowerServerId(ManualRaftCluster.serverIdOf(targetId)).build());
         }
     }
 

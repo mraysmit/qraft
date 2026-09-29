@@ -51,11 +51,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Tests when a leader may commit: only once a majority of the whole cluster holds an entry, counted
  * correctly for even cluster sizes, and never by counting replicas of an entry from an earlier term
  * (Raft section 5.4.2, Figure 8). The transport holds every AppendEntries until the test answers it, so
- * each test decides exactly which replicas the leader has heard from.
+ * each test decides exactly which replicas the leader has heard from, and answers as the server configured
+ * under that peer's name. The leader's log begins with its bootstrap configuration, committed at index 1.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-27
- * @version 1.0
+ * @version 1.1
  */
 class RaftNodeLeaderCommitTest {
     private static final ProtobufRaftCommandCodec CODEC = new ProtobufRaftCommandCodec();
@@ -76,26 +77,27 @@ class RaftNodeLeaderCommitTest {
     @Test
     void anEntryFromAnEarlierTermIsNotCommittedByCountingReplicas() throws Exception {
         start(Set.of("node-1", "peer-2", "peer-3"));
+        // peer-2 leads term 1 and replicates an entry after the bootstrap configuration, which it does not commit.
         AppendEntriesResponse followed = node.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
-                        .setTerm(1).setLeaderId("peer-2").setPrevLogIndex(0).setPrevLogTerm(0).setLeaderCommit(0)
-                        .addEntries(entry(1, 1, "earlier-term")).build())
+                        .setTerm(1).setLeaderId("peer-2").setPrevLogIndex(1).setPrevLogTerm(0).setLeaderCommit(1)
+                        .addEntries(entry(2, 1, "earlier-term")).build())
                 .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         assertTrue(followed.getSuccess());
         becomeLeader();
         assertEquals(2, status().term());
-        assertEquals(2, status().lastLogIndex(), "the new leader appended its own no-op at index 2");
+        assertEquals(3, status().lastLogIndex(), "the new leader appended its own no-op at index 3");
 
-        // A majority (this leader and peer-2) now holds index 1, which is from term 1.
-        transport.answer("peer-2", request -> request.getEntriesCount() == 0 && request.getPrevLogIndex() == 1);
+        // A majority (this leader and peer-2) now holds index 2, which is from term 1.
+        transport.answer("peer-2", request -> request.getEntriesCount() == 0 && request.getPrevLogIndex() == 2);
         settle();
-        assertEquals(0, status().commitIndex(),
+        assertEquals(1, status().commitIndex(),
                 "an entry from an earlier term is never committed by counting replicas");
 
         transport.answer("peer-2", request -> request.getEntriesCount() > 0);
         settle();
-        assertEquals(2, status().commitIndex(),
+        assertEquals(3, status().commitIndex(),
                 "committing an entry of the current term commits the earlier entry with it");
-        assertEquals(2, status().lastApplied());
+        assertEquals(3, status().lastApplied());
     }
 
     @Test
@@ -107,12 +109,12 @@ class RaftNodeLeaderCommitTest {
 
         transport.answer("peer-2", request -> request.getEntriesCount() > 0);
         settle();
-        assertEquals(0, status().commitIndex(), "two copies of four are not a majority");
+        assertEquals(1, status().commitIndex(), "two copies of four are not a majority");
         assertFalse(write.isDone());
 
         transport.answer("peer-3", request -> request.getEntriesCount() > 0);
         settle();
-        assertEquals(1, status().commitIndex(), "three copies of four are a majority");
+        assertEquals(2, status().commitIndex(), "three copies of four are a majority");
         write.get(10, TimeUnit.SECONDS);
     }
 
@@ -123,21 +125,24 @@ class RaftNodeLeaderCommitTest {
         CompletableFuture<RaftCommandResult<?>> write = submit("two-members");
         settle();
 
-        assertEquals(1, status().lastLogIndex());
-        assertEquals(0, status().commitIndex(), "the leader's own copy is one of two, not a majority");
+        assertEquals(2, status().lastLogIndex());
+        assertEquals(1, status().commitIndex(), "the leader's own copy is one of two, not a majority");
         assertFalse(write.isDone());
 
         transport.answer("peer-2", request -> request.getEntriesCount() > 0);
         settle();
-        assertEquals(1, status().commitIndex());
+        assertEquals(2, status().commitIndex());
         write.get(10, TimeUnit.SECONDS);
     }
 
+    /** Starts node-1 bootstrapped: its configuration is committed at index 1, so its first write takes index 2. */
     private void start(Set<String> members) throws Exception {
         runtime = JavaRuntime.create();
         timers = new ManualRaftTimers(runtime);
         node = RaftNode.builder()
                 .runtime(runtime).nodeId("node-1").clusterNodes(members).transport(transport)
+                .serverId(ManualRaftCluster.serverIdOf("node-1"))
+                .initialConfiguration(ManualRaftCluster.configurationOf(members))
                 .stateMachine(new QraftStateStore()).commandCodec(CODEC)
                 .mode(RaftNodeMode.volatileMode()).snapshotEnabled(false)
                 .electionTimeout(ELECTION_TIMEOUT_MS).heartbeatInterval(HEARTBEAT_MS)
@@ -194,7 +199,8 @@ class RaftNodeLeaderCommitTest {
                 AppendEntriesRequest request = entry.request();
                 entry.response().complete(AppendEntriesResponse.newBuilder()
                         .setTerm(request.getTerm()).setSuccess(true)
-                        .setMatchIndex(request.getPrevLogIndex() + request.getEntriesCount()).build());
+                        .setMatchIndex(request.getPrevLogIndex() + request.getEntriesCount())
+                        .setFollowerServerId(ManualRaftCluster.serverIdOf(target)).build());
             }
         }
 
@@ -204,7 +210,8 @@ class RaftNodeLeaderCommitTest {
         @Override
         public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
             return Future.succeededFuture(VoteResponse.newBuilder()
-                    .setTerm(request.getTerm()).setVoteGranted(true).build());
+                    .setTerm(request.getTerm()).setVoteGranted(true)
+                    .setVoterServerId(ManualRaftCluster.serverIdOf(targetId)).build());
         }
 
         @Override
@@ -219,6 +226,4 @@ class RaftNodeLeaderCommitTest {
             return Promise.<InstallSnapshotResponse>promise().future();
         }
     }
-
-    /** Fires one-shot Raft timers only when the test asks, on the node's state loop. */
 }

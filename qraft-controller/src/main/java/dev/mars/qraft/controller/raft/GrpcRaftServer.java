@@ -18,6 +18,8 @@ package dev.mars.qraft.controller.raft;
 
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
+import dev.mars.qraft.controller.raft.grpc.DescribeRequest;
+import dev.mars.qraft.controller.raft.grpc.DescribeResponse;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.controller.raft.grpc.RaftServiceGrpc;
@@ -245,6 +247,17 @@ public class GrpcRaftServer {
                 failRpc("AppendEntries", span, error, responseObserver);
             }
             }
+        }
+
+        @Override
+        public void describe(DescribeRequest request, StreamObserver<DescribeResponse> responseObserver) {
+            raftNode.describe()
+                    .onSuccess(description -> {
+                        responseObserver.onNext(description);
+                        responseObserver.onCompleted();
+                    })
+                    .onFailure(error -> responseObserver.onError(Status.UNAVAILABLE
+                            .withDescription("Describe failed").withCause(error).asRuntimeException()));
         }
 
         @Override

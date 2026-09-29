@@ -61,12 +61,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Tests that {@link RaftNode} serializes leader and follower log appends, truncations and syncs,
  * reserves admission for peer traffic, and fences on uncertain WAL failures.
  *
+ * <p>The leader is the sole member of its cluster, so it bootstraps its configuration at index 1 in term 0:
+ * that entry is the WAL's first append and sync, and its first command takes index 2. A hand-crafted leader
+ * sending to it behaves as a real one, whose log also begins with that entry. The follower has no
+ * configuration of its own, as a server waiting for a leader to replicate one, so its log starts empty.
+ *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-14
- * @version 1.0
+ * @version 1.1
  */
 @RemediationTest(phase = "3", scenarioPrefix = "RAFT-LOG")
 class RaftNodeLogSequencingTest {
+    /** The WAL appends and syncs a bootstrapped leader made before any test step: its configuration entry. */
+    private static final int BOOTSTRAP_WRITES = 1;
+
     private JavaRuntime runtime;
     private GatedRaftStorage storage;
     private RaftNode node;
@@ -111,7 +119,7 @@ class RaftNodeLogSequencingTest {
         Future<RaftCommandResult<?>> second = node.submitCommand(put("second", "two"));
 
         awaitStateLoop(runtime);
-        storage.assertAppendCount(1);
+        storage.assertAppendCount(BOOTSTRAP_WRITES + 1);
         assertFalse(first.isComplete());
         assertFalse(second.isComplete());
 
@@ -119,11 +127,11 @@ class RaftNodeLogSequencingTest {
 
         assertInstanceOf(RaftCommandResult.Success.class, await(first));
         assertInstanceOf(RaftCommandResult.Success.class, await(second));
-        assertEquals(List.of(1L, 2L), storage.logEntries().stream()
+        assertEquals(List.of(1L, 2L, 3L), storage.logEntries().stream()
                 .map(RaftStorage.LogEntryData::index)
                 .toList());
-        assertEquals(3, node.getLogSize());
-        storage.assertSyncCount(2);
+        assertEquals(4, node.getLogSize());
+        storage.assertSyncCount(BOOTSTRAP_WRITES + 2);
     }
 
     @Test
@@ -131,7 +139,8 @@ class RaftNodeLogSequencingTest {
         await(node.stop());
         storage = new GatedRaftStorage();
         storage.open(null).join();
-        AtomicBoolean rejectEncoding = new AtomicBoolean(true);
+        // Encoding is rejected only once the node leads: its bootstrap configuration must encode.
+        AtomicBoolean rejectEncoding = new AtomicBoolean(false);
         ProtobufRaftCommandCodec delegate = new ProtobufRaftCommandCodec();
         CommandCodec<RaftCommand> codec = new CommandCodec<>() {
             @Override public byte[] serialize(RaftCommand command) {
@@ -155,17 +164,18 @@ class RaftNodeLogSequencingTest {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.onSpinWait();
         assertTrue(node.isLeader());
+        rejectEncoding.set(true);
 
         CompletionException failure = assertThrows(CompletionException.class,
                 () -> await(node.submitCommand(put("invalid", "encoding"))));
         assertInstanceOf(IllegalArgumentException.class, failure.getCause());
         assertFalse(node.isFenced());
-        storage.assertAppendCount(0);
+        storage.assertAppendCount(BOOTSTRAP_WRITES);
 
         rejectEncoding.set(false);
         assertInstanceOf(RaftCommandResult.Success.class,
                 await(node.submitCommand(put("valid", "encoding"))));
-        storage.assertAppendCount(1);
+        storage.assertAppendCount(BOOTSTRAP_WRITES + 1);
     }
 
     @Test
@@ -206,7 +216,7 @@ class RaftNodeLogSequencingTest {
         assertInstanceOf(RaftCommandResult.Success.class, await(active));
         assertTrue(await(higherTerm).getSuccess());
         assertEquals(RaftNode.State.FOLLOWER, node.getState());
-        storage.assertAppendCount(1);
+        storage.assertAppendCount(BOOTSTRAP_WRITES + 1);
     }
 
     @Test
@@ -214,13 +224,13 @@ class RaftNodeLogSequencingTest {
         storage.completeNextMetadataOffLoop();
 
         AppendEntriesResponse response = await(node.handleAppendEntriesRequest(appendRequest(
-                node.getCurrentTerm() + 1, 0, 0, grpcEntry(node.getCurrentTerm() + 1,
+                node.getCurrentTerm() + 1, 1, 0, grpcEntry(node.getCurrentTerm() + 1,
                         "foreign", "completion"))));
 
         assertTrue(response.getSuccess());
         assertEquals(2, node.getCurrentTerm());
         assertFalse(node.isFenced());
-        assertEquals(List.of(1L), storage.logEntries().stream()
+        assertEquals(List.of(1L, 2L), storage.logEntries().stream()
                 .map(RaftStorage.LogEntryData::index).toList());
     }
 
@@ -230,13 +240,14 @@ class RaftNodeLogSequencingTest {
         storage.rejectNextAppendBeforeWrite();
 
         AppendEntriesResponse rejected = await(node.handleAppendEntriesRequest(appendRequest(
-                higherTerm, 0, 0, grpcEntry(higherTerm, "too", "large"))));
+                higherTerm, 1, 0, grpcEntry(higherTerm, "too", "large"))));
 
         assertFalse(rejected.getSuccess());
         assertEquals(higherTerm, rejected.getTerm());
         assertEquals(higherTerm, node.getCurrentTerm());
         assertFalse(node.isFenced());
-        assertTrue(storage.logEntries().isEmpty());
+        assertEquals(List.of(1L), storage.logEntries().stream()
+                .map(RaftStorage.LogEntryData::index).toList(), "only the bootstrap configuration is in the WAL");
 
         AppendEntriesResponse heartbeat = await(node.handleAppendEntriesRequest(
                 appendRequest(higherTerm, 0, 0)));
@@ -250,15 +261,16 @@ class RaftNodeLogSequencingTest {
         storage.rejectNextMetadataWithPrewriteShapedFailure();
 
         AppendEntriesResponse rejected = await(node.handleAppendEntriesRequest(appendRequest(
-                originalTerm + 1, 0, 0, grpcEntry(originalTerm + 1,
+                originalTerm + 1, 1, 0, grpcEntry(originalTerm + 1,
                         "metadata", "must-remain-durable"))));
 
         assertFalse(rejected.getSuccess());
         assertEquals(originalTerm, rejected.getTerm());
         assertEquals(originalTerm, node.getCurrentTerm());
         assertTrue(node.isFenced());
-        assertTrue(storage.logEntries().isEmpty());
-        storage.assertAppendCount(0);
+        assertEquals(List.of(1L), storage.logEntries().stream()
+                .map(RaftStorage.LogEntryData::index).toList(), "only the bootstrap configuration is in the WAL");
+        storage.assertAppendCount(BOOTSTRAP_WRITES);
     }
 
     @Test
@@ -273,20 +285,21 @@ class RaftNodeLogSequencingTest {
 
         awaitStateLoop(runtime);
 
-        assertEquals(1, node.getLogSize(), "Only the snapshot sentinel may be visible before sync");
+        assertEquals(2, node.getLogSize(),
+                "Only the snapshot sentinel and the bootstrap configuration may be visible before sync");
         assertFalse(first.isComplete());
         assertFalse(second.isComplete());
-        storage.assertAppendCount(1);
-        storage.assertSyncCount(1);
+        storage.assertAppendCount(BOOTSTRAP_WRITES + 1);
+        storage.assertSyncCount(BOOTSTRAP_WRITES + 1);
 
         storage.releaseBlockedSync();
 
         assertSame(runtime, completionContext.get(10, TimeUnit.SECONDS));
         assertInstanceOf(RaftCommandResult.Success.class, await(first));
         assertInstanceOf(RaftCommandResult.Success.class, await(second));
-        assertEquals(3, node.getLogSize());
-        storage.assertAppendCount(2);
-        storage.assertSyncCount(2);
+        assertEquals(4, node.getLogSize());
+        storage.assertAppendCount(BOOTSTRAP_WRITES + 2);
+        storage.assertSyncCount(BOOTSTRAP_WRITES + 2);
     }
 
     @Test
@@ -298,15 +311,15 @@ class RaftNodeLogSequencingTest {
         CompletionException failedSync = assertThrows(CompletionException.class,
                 () -> await(node.submitCommand(put("first", "uncertain"))));
         assertSame(storage.syncFailure, failedSync.getCause());
-        assertEquals(1, node.getLogSize());
-        storage.assertAppendCount(1);
-        storage.assertSyncCount(1);
+        assertEquals(2, node.getLogSize(), "the log holds only the sentinel and the bootstrap configuration");
+        storage.assertAppendCount(BOOTSTRAP_WRITES + 1);
+        storage.assertSyncCount(BOOTSTRAP_WRITES + 1);
 
         CompletionException fenced = assertThrows(CompletionException.class,
                 () -> await(node.submitCommand(put("second", "blocked"))));
         assertInstanceOf(RaftTransitionSequencer.FencedException.class, fenced.getCause());
-        storage.assertAppendCount(1);
-        storage.assertSyncCount(1);
+        storage.assertAppendCount(BOOTSTRAP_WRITES + 1);
+        storage.assertSyncCount(BOOTSTRAP_WRITES + 1);
     }
 
     /**
@@ -323,33 +336,37 @@ class RaftNodeLogSequencingTest {
                 () -> await(node.submitCommand(put("rejected", "write"))));
 
         assertInstanceOf(FileRaftStorage.WriteRejectedException.class, failed.getCause());
-        assertEquals(1, node.getLogSize(), "the in-memory log holds only the sentinel");
-        assertTrue(storage.logEntries().isEmpty());
+        assertEquals(2, node.getLogSize(),
+                "the in-memory log holds only the sentinel and the bootstrap configuration");
+        assertEquals(List.of(1L), storage.logEntries().stream()
+                .map(RaftStorage.LogEntryData::index).toList(), "only the bootstrap configuration is in the WAL");
         assertFalse(node.isFenced());
         assertInstanceOf(RaftCommandResult.Success.class, await(node.submitCommand(put("after", "rejection"))));
-        assertEquals(2, node.getLogSize(), "the next write takes index 1, the rejected one left no gap");
-        storage.assertAppendCount(2);
+        assertEquals(3, node.getLogSize(), "the next write takes index 2, the rejected one left no gap");
+        assertEquals(List.of(1L, 2L), storage.logEntries().stream()
+                .map(RaftStorage.LogEntryData::index).toList());
+        storage.assertAppendCount(BOOTSTRAP_WRITES + 2);
     }
 
     @Test
     void followerRequestCannotPrepareFromLogBeingReplacedByEarlierRequest() {
         restartAsFollower();
         AppendEntriesResponse seed = await(node.handleAppendEntriesRequest(appendRequest(
-                1, 0, 0, grpcEntry(1, "seed", "original"))));
+                1, 1, 0, grpcEntry(1, "seed", "original"))));
         assertTrue(seed.getSuccess());
-        storage.assertAppendCount(1);
+        storage.assertAppendCount(BOOTSTRAP_WRITES + 1);
 
         storage.blockNextTruncateCompletion();
         Future<AppendEntriesResponse> replacement = node.handleAppendEntriesRequest(appendRequest(
-                1, 0, 0, grpcEntry(2, "seed", "replacement")));
+                1, 1, 0, grpcEntry(2, "seed", "replacement")));
         storage.awaitBlockedTruncate();
 
         Future<AppendEntriesResponse> stalePlan = node.handleAppendEntriesRequest(appendRequest(
-                1, 1, 1, grpcEntry(1, "later", "must-not-append")));
+                1, 2, 1, grpcEntry(1, "later", "must-not-append")));
 
         awaitStateLoop(runtime);
         storage.assertTruncateCount(1);
-        storage.assertAppendCount(1);
+        storage.assertAppendCount(BOOTSTRAP_WRITES + 1);
         assertFalse(replacement.isComplete());
         assertFalse(stalePlan.isComplete());
 
@@ -358,10 +375,10 @@ class RaftNodeLogSequencingTest {
         assertTrue(await(replacement).getSuccess());
         assertFalse(await(stalePlan).getSuccess(),
                 "The second request's prevLogTerm is stale after the first replacement applies");
-        assertEquals(List.of(1L), storage.logEntries().stream()
+        assertEquals(List.of(1L, 2L), storage.logEntries().stream()
                 .map(RaftStorage.LogEntryData::index)
                 .toList());
-        assertEquals(List.of(2L), storage.logEntries().stream()
+        assertEquals(List.of(0L, 2L), storage.logEntries().stream()
                 .map(RaftStorage.LogEntryData::term)
                 .toList());
     }
@@ -372,13 +389,13 @@ class RaftNodeLogSequencingTest {
         storage.blockNextAppendCompletion();
 
         Future<AppendEntriesResponse> first = node.handleAppendEntriesRequest(appendRequest(
-                1, 0, 0, grpcEntry(1, "first", "one")));
+                1, 1, 0, grpcEntry(1, "first", "one")));
         storage.awaitBlockedAppend();
         Future<AppendEntriesResponse> second = node.handleAppendEntriesRequest(appendRequest(
-                1, 1, 1, grpcEntry(1, "second", "two")));
+                1, 2, 1, grpcEntry(1, "second", "two")));
 
         awaitStateLoop(runtime);
-        storage.assertAppendCount(1);
+        storage.assertAppendCount(BOOTSTRAP_WRITES + 1);
         assertFalse(first.isComplete());
         assertFalse(second.isComplete());
 
@@ -386,29 +403,29 @@ class RaftNodeLogSequencingTest {
 
         assertTrue(await(first).getSuccess());
         assertTrue(await(second).getSuccess());
-        assertEquals(List.of(1L, 2L), storage.logEntries().stream()
+        assertEquals(List.of(1L, 2L, 3L), storage.logEntries().stream()
                 .map(RaftStorage.LogEntryData::index)
                 .toList());
-        storage.assertAppendCount(2);
-        storage.assertSyncCount(2);
+        storage.assertAppendCount(BOOTSTRAP_WRITES + 2);
+        storage.assertSyncCount(BOOTSTRAP_WRITES + 2);
     }
 
     @Test
     void followerRequestCannotObserveAppendUntilEarlierSyncCompletes() {
         restartAsFollower();
         assertTrue(await(node.handleAppendEntriesRequest(appendRequest(
-                1, 0, 0, grpcEntry(1, "seed", "one")))).getSuccess());
+                1, 1, 0, grpcEntry(1, "seed", "one")))).getSuccess());
 
         storage.blockNextSyncCompletion();
         Future<AppendEntriesResponse> first = node.handleAppendEntriesRequest(appendRequest(
-                1, 1, 1, grpcEntry(1, "first", "two")));
+                1, 2, 1, grpcEntry(1, "first", "two")));
         storage.awaitBlockedSync();
         Future<AppendEntriesResponse> second = node.handleAppendEntriesRequest(appendRequest(
-                1, 2, 1, grpcEntry(1, "second", "three")));
+                1, 3, 1, grpcEntry(1, "second", "three")));
 
         awaitStateLoop(runtime);
-        storage.assertAppendCount(2);
-        storage.assertSyncCount(2);
+        storage.assertAppendCount(BOOTSTRAP_WRITES + 2);
+        storage.assertSyncCount(BOOTSTRAP_WRITES + 2);
         assertFalse(first.isComplete());
         assertFalse(second.isComplete());
 
@@ -416,47 +433,47 @@ class RaftNodeLogSequencingTest {
 
         assertTrue(await(first).getSuccess());
         assertTrue(await(second).getSuccess());
-        assertEquals(List.of(1L, 2L, 3L), storage.logEntries().stream()
+        assertEquals(List.of(1L, 2L, 3L, 4L), storage.logEntries().stream()
                 .map(RaftStorage.LogEntryData::index)
                 .toList());
-        storage.assertAppendCount(3);
-        storage.assertSyncCount(3);
+        storage.assertAppendCount(BOOTSTRAP_WRITES + 3);
+        storage.assertSyncCount(BOOTSTRAP_WRITES + 3);
     }
 
     @Test
     void uncertainFollowerTruncateFailureFencesLaterAppend() {
         restartAsFollower();
         assertTrue(await(node.handleAppendEntriesRequest(appendRequest(
-                1, 0, 0, grpcEntry(1, "seed", "original")))).getSuccess());
+                1, 1, 0, grpcEntry(1, "seed", "original")))).getSuccess());
         storage.failNextTruncate();
         RemediationTestExtension.logExpectedFailure(
                 "follower-suffix-truncate", storage.truncateFailure);
 
         AppendEntriesResponse failed = await(node.handleAppendEntriesRequest(appendRequest(
-                1, 0, 0, grpcEntry(2, "seed", "replacement"))));
+                1, 1, 0, grpcEntry(2, "seed", "replacement"))));
         assertFalse(failed.getSuccess());
         storage.assertTruncateCount(1);
-        storage.assertAppendCount(1);
+        storage.assertAppendCount(BOOTSTRAP_WRITES + 1);
 
         AppendEntriesResponse fenced = await(node.handleAppendEntriesRequest(appendRequest(
-                1, 0, 0, grpcEntry(1, "later", "blocked"))));
+                1, 1, 0, grpcEntry(1, "later", "blocked"))));
         assertFalse(fenced.getSuccess());
         storage.assertTruncateCount(1);
-        storage.assertAppendCount(1);
+        storage.assertAppendCount(BOOTSTRAP_WRITES + 1);
     }
 
     @Test
     void uncertainFollowerFailureFencesWorkThatWasAlreadyQueued() {
         restartAsFollower();
         assertTrue(await(node.handleAppendEntriesRequest(appendRequest(
-                1, 0, 0, grpcEntry(1, "seed", "original")))).getSuccess());
+                1, 1, 0, grpcEntry(1, "seed", "original")))).getSuccess());
         storage.blockNextTruncateCompletion();
 
         Future<AppendEntriesResponse> failing = node.handleAppendEntriesRequest(appendRequest(
-                1, 0, 0, grpcEntry(2, "seed", "replacement")));
+                1, 1, 0, grpcEntry(2, "seed", "replacement")));
         storage.awaitBlockedTruncate();
         Future<AppendEntriesResponse> queued = node.handleAppendEntriesRequest(appendRequest(
-                1, 1, 1, grpcEntry(1, "queued", "must-not-persist")));
+                1, 2, 1, grpcEntry(1, "queued", "must-not-persist")));
 
         awaitStateLoop(runtime);
         assertFalse(failing.isComplete());
@@ -467,32 +484,33 @@ class RaftNodeLogSequencingTest {
         assertFalse(await(queued).getSuccess());
         assertTrue(node.isFenced());
         storage.assertTruncateCount(1);
-        storage.assertAppendCount(1);
+        storage.assertAppendCount(BOOTSTRAP_WRITES + 1);
     }
 
     @Test
     void prewriteAppendRejectionAfterSuffixTruncationFencesNode() {
         restartAsFollower();
         assertTrue(await(node.handleAppendEntriesRequest(appendRequest(
-                1, 0, 0, grpcEntry(1, "seed", "original")))).getSuccess());
+                1, 1, 0, grpcEntry(1, "seed", "original")))).getSuccess());
         storage.rejectNextAppendBeforeWrite();
 
         AppendEntriesResponse failed = await(node.handleAppendEntriesRequest(appendRequest(
-                1, 0, 0, grpcEntry(2, "seed", "oversized-replacement"))));
+                1, 1, 0, grpcEntry(2, "seed", "oversized-replacement"))));
 
         assertFalse(failed.getSuccess());
         assertTrue(node.isFenced(),
                 "The suffix was already truncated before append rejection, so the outcome is partial");
         storage.assertTruncateCount(1);
-        storage.assertAppendCount(2);
+        storage.assertAppendCount(BOOTSTRAP_WRITES + 2);
 
         AppendEntriesResponse fenced = await(node.handleAppendEntriesRequest(
                 appendRequest(1, 0, 0)));
         assertFalse(fenced.getSuccess());
         storage.assertTruncateCount(1);
-        storage.assertAppendCount(2);
+        storage.assertAppendCount(BOOTSTRAP_WRITES + 2);
     }
 
+    /** Restarts as a bootstrapped follower: its log holds the committed configuration at index 1. */
     private void restartAsFollower() {
         await(node.stop());
         storage = new GatedRaftStorage();
@@ -500,6 +518,8 @@ class RaftNodeLogSequencingTest {
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("follower-1")
+                .serverId(ManualRaftCluster.serverIdOf("follower-1"))
+                .initialConfiguration(ManualRaftCluster.configurationOf(Set.of("follower-1", "leader-1")))
                 .clusterNodes(Set.of("follower-1", "leader-1"))
                 .transport(new InMemoryTransportSimulator("follower-1"))
                 .stateMachine(new QraftStateStore())

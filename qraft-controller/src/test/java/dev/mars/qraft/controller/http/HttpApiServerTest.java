@@ -1232,7 +1232,12 @@ class HttpApiServerTest {
             return delegate.updateMetadata(term, votedFor);
         }
         @Override public CompletableFuture<PersistentMeta> loadMetadata() { return delegate.loadMetadata(); }
+        /**
+         * Persists every append, but reports each one after the bootstrap configuration at index 1 as failed,
+         * so the node starts normally and its first uncertain append is the event that fences it.
+         */
         @Override public CompletableFuture<Void> appendEntries(List<LogEntryData> entries) {
+            if (!entries.isEmpty() && entries.getFirst().index() == 1) return delegate.appendEntries(entries);
             return delegate.appendEntries(entries).thenCompose(ignored -> CompletableFuture.failedFuture(
                     new IllegalStateException("append persisted before completion failed")));
         }

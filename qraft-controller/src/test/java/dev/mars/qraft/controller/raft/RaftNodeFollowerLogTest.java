@@ -44,7 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-27
- * @version 1.0
+ * @version 1.1
  */
 class RaftNodeFollowerLogTest {
     private static final long SNAPSHOT_INTERVAL_MS = 200;
@@ -64,59 +64,67 @@ class RaftNodeFollowerLogTest {
     @Test
     void aFollowerReportsAndCommitsOnlyWhatTheRequestVerifiedNeverAStaleTail() throws Exception {
         startFollower();
-        // Term 1: entries 1 to 3 arrive, but only entry 1 commits before that leader is lost.
-        assertTrue(append(1, 0, 0, 1, "k1", "k2-stale", "k3-stale").getSuccess());
+        // Term 1: entries 2 to 4 follow the bootstrap configuration, but only entry 2 commits before that
+        // leader is lost.
+        assertTrue(append(1, 1, 0, 2, "k1", "k2-stale", "k3-stale").getSuccess());
 
-        // Term 2: the new leader's log is only [1], so its heartbeat verifies no more than entry 1.
-        AppendEntriesResponse heartbeat = append(2, 1, 1, 3);
+        // Term 2: the new leader's log is only [1, 2], so its heartbeat verifies no more than entry 2.
+        AppendEntriesResponse heartbeat = append(2, 2, 1, 4);
 
         assertTrue(heartbeat.getSuccess());
-        assertEquals(1, heartbeat.getMatchIndex(),
+        assertEquals(2, heartbeat.getMatchIndex(),
                 "reporting the stale tail would let the new leader count this follower for entries it lacks");
-        assertEquals(1, follower.getCommitIndex(), "a follower commits no further than the request verified");
+        assertEquals(2, follower.getCommitIndex(), "a follower commits no further than the request verified");
         assertEquals(Optional.empty(), store.findMetadata("k2-stale"), "a stale uncommitted entry is never applied");
     }
 
     @Test
     void aFollowerCompactsItsOwnLogOnTheSnapshotSchedule() throws Exception {
         startFollower();
-        assertTrue(append(1, 0, 0, 3, "k1", "k2", "k3").getSuccess());
+        assertTrue(append(1, 1, 0, 4, "k1", "k2", "k3").getSuccess());
 
         assertTrue(timers.hasPeriodic(SNAPSHOT_INTERVAL_MS), "a follower schedules snapshots as a leader does");
         timers.firePeriodic(SNAPSHOT_INTERVAL_MS);
 
-        awaitSnapshotAt(3);
+        awaitSnapshotAt(4);
         assertEquals(Optional.of("k3"), store.findMetadata("k3"));
     }
 
     @Test
     void aFollowerAcceptsAnAppendWhosePreviousEntryIsInsideItsSnapshot() throws Exception {
         startFollower();
-        assertTrue(append(1, 0, 0, 3, "k1", "k2", "k3").getSuccess());
+        assertTrue(append(1, 1, 0, 4, "k1", "k2", "k3").getSuccess());
         timers.firePeriodic(SNAPSHOT_INTERVAL_MS);
-        awaitSnapshotAt(3);
+        awaitSnapshotAt(4);
 
         // A retransmission from before the snapshot, carrying entries it covers and one new entry.
-        AppendEntriesResponse overlapping = append(1, 1, 1, 4, "k2", "k3", "k4");
+        AppendEntriesResponse overlapping = append(1, 2, 1, 5, "k2", "k3", "k4");
         assertTrue(overlapping.getSuccess(), "entries a snapshot covers are committed and match the leader");
-        assertEquals(4, overlapping.getMatchIndex());
-        assertEquals(4, follower.getCommitIndex());
+        assertEquals(5, overlapping.getMatchIndex());
+        assertEquals(5, follower.getCommitIndex());
         assertEquals(Optional.of("k4"), store.findMetadata("k4"));
 
-        AppendEntriesResponse staleHeartbeat = append(1, 2, 1, 4);
+        AppendEntriesResponse staleHeartbeat = append(1, 3, 1, 5);
         assertTrue(staleHeartbeat.getSuccess());
-        assertEquals(3, staleHeartbeat.getMatchIndex(),
+        assertEquals(4, staleHeartbeat.getMatchIndex(),
                 "a heartbeat inside the snapshot verifies the log only through the snapshot boundary");
         assertFalse(follower.isFenced());
     }
 
+    /**
+     * Starts a bootstrapped follower: its log begins with the configuration at index 1 in term 0, as a real
+     * leader's does, so every entry the test sends follows it.
+     */
     private void startFollower() throws Exception {
         runtime = JavaRuntime.create();
         timers = new ManualRaftTimers(runtime);
         TestRaftStorage storage = new TestRaftStorage();
         storage.open(null).join();
+        Set<String> members = Set.of("follower", "leader", "other");
         follower = RaftNode.builder().runtime(runtime).nodeId("follower")
-                .clusterNodes(Set.of("follower", "leader", "other"))
+                .serverId(ManualRaftCluster.serverIdOf("follower"))
+                .initialConfiguration(ManualRaftCluster.configurationOf(members))
+                .clusterNodes(members)
                 .transport(new InMemoryTransportSimulator("follower"))
                 .stateMachine(store).commandCodec(CODEC)
                 .mode(RaftNodeMode.durable(storage, storage))
@@ -154,6 +162,4 @@ class RaftNodeFollowerLogTest {
         runtime.runOnContext(ignored -> read.complete(follower.getSnapshotLastIndex()));
         return read.get(10, TimeUnit.SECONDS);
     }
-
-    /** Timers that fire only when a test fires them, on the node's state loop. */
 }

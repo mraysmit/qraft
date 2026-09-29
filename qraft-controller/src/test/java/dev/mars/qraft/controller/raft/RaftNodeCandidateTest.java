@@ -44,13 +44,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Tests how a candidate answers AppendEntries (Raft section 5.2). A leader of the candidate's own term
  * won that election, so the candidate becomes its follower and accepts the append. A leader of a later
  * term is followed in that term. A leader of an earlier term is refused, and the candidate keeps
- * campaigning.
+ * campaigning. The node bootstraps its configuration at index 1, so it can campaign.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-27
- * @version 1.0
+ * @version 1.1
  */
 class RaftNodeCandidateTest {
+    private static final Set<String> MEMBERS = Set.of("node-1", "peer-2", "peer-3");
+
     private JavaRuntime runtime;
     private RaftNode node;
     private ManualRaftTimers timers;
@@ -60,7 +62,9 @@ class RaftNodeCandidateTest {
         runtime = JavaRuntime.create();
         timers = new ManualRaftTimers(runtime);
         node = RaftNode.builder()
-                .runtime(runtime).nodeId("node-1").clusterNodes(Set.of("node-1", "peer-2", "peer-3"))
+                .runtime(runtime).nodeId("node-1").clusterNodes(MEMBERS)
+                .serverId(ManualRaftCluster.serverIdOf("node-1"))
+                .initialConfiguration(ManualRaftCluster.configurationOf(MEMBERS))
                 .transport(new RefusingTransport())
                 .stateMachine(new QraftStateStore()).commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.volatileMode()).snapshotEnabled(false)
@@ -126,10 +130,11 @@ class RaftNodeCandidateTest {
         assertNull(status.leaderId());
     }
 
+    /** A heartbeat from peer-2, whose log, like every member's, begins with the bootstrap configuration. */
     private AppendEntriesResponse append(long term) throws Exception {
         return node.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
-                        .setTerm(term).setLeaderId("peer-2").setPrevLogIndex(0).setPrevLogTerm(0)
-                        .setLeaderCommit(0).build())
+                        .setTerm(term).setLeaderId("peer-2").setPrevLogIndex(1).setPrevLogTerm(0)
+                        .setLeaderCommit(1).build())
                 .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
     }
 
@@ -137,7 +142,10 @@ class RaftNodeCandidateTest {
         return node.status().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
     }
 
-    /** Refuses every vote, so the node stays a candidate, and never answers anything else. */
+    /**
+     * Refuses every vote as the server configured under the peer's name, so the node stays a candidate, and
+     * never answers anything else.
+     */
     private static final class RefusingTransport implements RaftTransport {
         @Override public void start(Consumer<RaftMessage> messageHandler) { }
         @Override public void stop() { }
@@ -145,7 +153,8 @@ class RaftNodeCandidateTest {
         @Override
         public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
             return Future.succeededFuture(VoteResponse.newBuilder()
-                    .setTerm(request.getTerm()).setVoteGranted(false).build());
+                    .setTerm(request.getTerm()).setVoteGranted(false)
+                    .setVoterServerId(ManualRaftCluster.serverIdOf(targetId)).build());
         }
 
         @Override
@@ -158,6 +167,4 @@ class RaftNodeCandidateTest {
             return Promise.<InstallSnapshotResponse>promise().future();
         }
     }
-
-    /** Fires one-shot Raft timers only when the test asks, on the node's state loop. */
 }

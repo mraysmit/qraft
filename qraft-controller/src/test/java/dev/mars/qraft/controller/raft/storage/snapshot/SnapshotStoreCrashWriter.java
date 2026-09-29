@@ -24,11 +24,13 @@ import java.nio.file.Path;
 import java.util.Base64;
 
 /**
- * Child-process fixture that halts at an observable snapshot/WAL boundary.
+ * Child-process fixture that halts at an observable snapshot/WAL boundary. It publishes the snapshot bytes it is
+ * given as they are, so a caller passes them as a node stores them, configuration envelope included, and then,
+ * for {@link #AFTER_PREFIX_COMPACTION}, compacts the WAL up to the snapshot's last included index.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-14
- * @version 1.0
+ * @version 1.1
  */
 public final class SnapshotStoreCrashWriter {
     public static final int HALT_EXIT_CODE = 92;
@@ -40,20 +42,22 @@ public final class SnapshotStoreCrashWriter {
     }
 
     public static void main(String[] args) {
-        if (args.length != 4) {
-            throw new IllegalArgumentException(
-                    "expected: <directory> <checkpoint> <snapshot-data-base64> <format-version>");
+        if (args.length != 6) {
+            throw new IllegalArgumentException("expected: <directory> <checkpoint> <snapshot-data-base64> "
+                    + "<format-version> <last-included-index> <last-included-term>");
         }
 
         Path directory = Path.of(args[0]);
         String selected = args[1];
         byte[] snapshotData = Base64.getDecoder().decode(args[2]);
         int formatVersion = Integer.parseInt(args[3]);
+        long lastIncludedIndex = Long.parseLong(args[4]);
+        long lastIncludedTerm = Long.parseLong(args[5]);
         FileSnapshotStore snapshots = new FileSnapshotStore(
                 checkpoint -> haltAt(selected, checkpoint.name()));
         snapshots.open(directory).join();
         snapshots.saveAtomically(new SnapshotStore.SnapshotData(
-                snapshotData, 3, 2, formatVersion)).join();
+                snapshotData, lastIncludedIndex, lastIncludedTerm, formatVersion)).join();
 
         if (AFTER_PUBLICATION_BEFORE_COMPACTION.equals(selected)) {
             Runtime.getRuntime().halt(HALT_EXIT_CODE);
@@ -64,7 +68,7 @@ public final class SnapshotStoreCrashWriter {
                     .syncEnabled(true)
                     .build());
             wal.open(directory).join();
-            wal.truncatePrefix(3).join();
+            wal.truncatePrefix(lastIncludedIndex).join();
             Runtime.getRuntime().halt(HALT_EXIT_CODE);
         }
         throw new AssertionError("checkpoint was not reached: " + selected);

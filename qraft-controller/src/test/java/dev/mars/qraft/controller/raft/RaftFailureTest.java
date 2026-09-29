@@ -168,9 +168,10 @@ class RaftFailureTest {
 
     @Test
     void aNodeMustBeAMemberOfItsOwnCluster() {
-        // With no members, its own vote would exceed half of zero and it would lead a cluster of nobody.
+        // With no members, its own vote would exceed half of zero and it would lead a cluster of nobody. The
+        // builder is unconfigured, so the refusal comes from build, not from making a configuration of nobody.
         for (Set<String> members : List.of(Set.<String>of(), Set.of("node2", "node3"))) {
-            IllegalStateException refused = assertThrows(IllegalStateException.class, () -> cluster.builder(
+            IllegalStateException refused = assertThrows(IllegalStateException.class, () -> cluster.unconfiguredBuilder(
                     "node1", members, transport1, new QraftStateStore(), RaftNodeMode.volatileMode()).build());
             assertEquals("clusterNodes must include this node, node1", refused.getMessage());
         }

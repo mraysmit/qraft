@@ -28,6 +28,7 @@ import dev.mars.qraft.controller.raft.grpc.CatalogCommandProto;
 import dev.mars.qraft.controller.raft.grpc.CatalogCommandType;
 import dev.mars.qraft.controller.raft.grpc.HealthExpiryCommandProto;
 import dev.mars.qraft.controller.raft.grpc.HealthObservationCommandProto;
+import dev.mars.qraft.controller.raft.RaftConfigurationCodec;
 import dev.mars.qraft.controller.raft.grpc.RaftCommandMessage;
 import dev.mars.qraft.controller.raft.grpc.ServiceInstanceProto;
 import dev.mars.qraft.controller.raft.grpc.SystemMetadataCommandProto;
@@ -73,6 +74,8 @@ public final class ProtobufCommandCodec {
                 .setSystemMetadataCommand(toSystemMetadataProto(cmd.delegate())).build();
             case CatalogCommand cmd -> RaftCommandMessage.newBuilder()
                     .setCatalogCommand(toCatalogProto(cmd)).build();
+            case ConfigurationCommand cmd -> RaftCommandMessage.newBuilder()
+                    .setConfiguration(RaftConfigurationCodec.toProto(cmd.configuration())).build();
                 default -> throw new IllegalArgumentException(
                     "Unsupported RaftCommand type for protobuf codec: " + command.getClass().getName());
         };
@@ -93,6 +96,7 @@ public final class ProtobufCommandCodec {
                 case AGENT_COMMAND -> AgentCodec.fromProto(raftMessage.getAgentCommand());
                 case SYSTEM_METADATA_COMMAND -> fromSystemMetadataProto(raftMessage.getSystemMetadataCommand());
                 case CATALOG_COMMAND -> fromCatalogProto(raftMessage.getCatalogCommand());
+                case CONFIGURATION -> new ConfigurationCommand(RaftConfigurationCodec.fromProto(raftMessage.getConfiguration()));
                 case COMMAND_NOT_SET -> null; // No-op entry
                 default -> throw new IllegalArgumentException(
                         "Unsupported protobuf command case: " + raftMessage.getCommandCase());

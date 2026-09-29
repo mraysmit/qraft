@@ -104,9 +104,10 @@ class GrpcRaftServerTest {
         return node;
     }
 
+    /** A vote request from a candidate whose log, like the node's, holds only the bootstrap configuration. */
     private static VoteRequest vote(long term, String candidateId) {
         return VoteRequest.newBuilder()
-                .setTerm(term).setCandidateId(candidateId).setLastLogIndex(0).setLastLogTerm(0).build();
+                .setTerm(term).setCandidateId(candidateId).setLastLogIndex(1).setLastLogTerm(0).build();
     }
 
     @AfterEach
@@ -368,16 +369,17 @@ class GrpcRaftServerTest {
     void undecodableEntryDataIsRejectedAsInvalidArgumentAndLaterHeartbeatsStillSucceed() throws Exception {
         startServerAndConnect();
 
+        // The entry follows the bootstrap configuration at index 1 in term 0, as a real leader's would.
         dev.mars.qraft.controller.raft.grpc.LogEntry entry = dev.mars.qraft.controller.raft.grpc.LogEntry.newBuilder()
                 .setTerm(1)
-                .setIndex(1)
+                .setIndex(2)
                 .setData(com.google.protobuf.ByteString.copyFromUtf8("test-command"))
                 .build();
 
         AppendEntriesRequest request = AppendEntriesRequest.newBuilder()
                 .setTerm(1)
                 .setLeaderId("leader1")
-                .setPrevLogIndex(0)
+                .setPrevLogIndex(1)
                 .setPrevLogTerm(0)
                 .setLeaderCommit(0)
                 .addEntries(entry)
@@ -791,22 +793,23 @@ class GrpcRaftServerTest {
 
     @Test
     @DisplayName("Server should handle AppendEntries with large entries")
-    void aOneMegabyteCommandFromAHigherTermIsAppendedAtIndexOne() throws Exception {
+    void aOneMegabyteCommandFromAHigherTermIsAppendedAtIndexTwo() throws Exception {
         startServerAndConnect();
 
         // A real encoded command about 1 MB long, well inside the transport's message limit. The term is
-        // beyond any the single-member node can reach by electing itself.
+        // beyond any the single-member node can reach by electing itself. It follows the bootstrap
+        // configuration at index 1 in term 0, as a real leader's entry would.
         byte[] command = new ProtobufRaftCommandCodec().serialize(new DistributedStateRaftCommand(
                 dev.mars.qraft.distributedstate.DistributedStateCommand.put("large", "X".repeat(1024 * 1024))));
         dev.mars.qraft.controller.raft.grpc.LogEntry entry = dev.mars.qraft.controller.raft.grpc.LogEntry.newBuilder()
                 .setTerm(100)
-                .setIndex(1)
+                .setIndex(2)
                 .setData(com.google.protobuf.ByteString.copyFrom(command))
                 .build();
         AppendEntriesRequest request = AppendEntriesRequest.newBuilder()
                 .setTerm(100)
                 .setLeaderId("leader1")
-                .setPrevLogIndex(0)
+                .setPrevLogIndex(1)
                 .setPrevLogTerm(0)
                 .setLeaderCommit(0)
                 .addEntries(entry)
@@ -815,7 +818,7 @@ class GrpcRaftServerTest {
         AppendEntriesResponse response = blockingStub.withDeadlineAfter(10, TimeUnit.SECONDS).appendEntries(request);
 
         assertTrue(response.getSuccess(), response.toString());
-        assertEquals(1, response.getMatchIndex());
+        assertEquals(2, response.getMatchIndex());
     }
 
     @Test

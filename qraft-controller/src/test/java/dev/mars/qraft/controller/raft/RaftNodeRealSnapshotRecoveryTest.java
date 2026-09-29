@@ -62,6 +62,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @RemediationTest(phase = "6-real-snapshot", scenarioPrefix = "RAFT-SNAPSHOT-RECOVERY")
 class RaftNodeRealSnapshotRecoveryTest {
     private static final ProtobufRaftCommandCodec CODEC = new ProtobufRaftCommandCodec();
+    private static final Set<String> MEMBERS = Set.of("node-1");
 
     @TempDir
     Path directory;
@@ -79,17 +80,17 @@ class RaftNodeRealSnapshotRecoveryTest {
 
     @Test
     void restartBeforeTemporaryCreationKeepsPublishedSnapshot() throws Exception {
-        verifyRecovery("BEFORE_TEMPORARY_CREATE", 2, List.of(1L, 2L, 3L, 4L));
+        verifyRecovery("BEFORE_TEMPORARY_CREATE", 3, List.of(1L, 2L, 3L, 4L, 5L));
     }
 
     @Test
     void restartAfterTemporaryWriteKeepsPublishedSnapshotAndDiscardsTemporary() throws Exception {
-        verifyRecovery("AFTER_TEMPORARY_WRITE", 2, List.of(1L, 2L, 3L, 4L));
+        verifyRecovery("AFTER_TEMPORARY_WRITE", 3, List.of(1L, 2L, 3L, 4L, 5L));
     }
 
     @Test
     void restartAfterTemporaryForceKeepsPublishedSnapshotAndDiscardsTemporary() throws Exception {
-        verifyRecovery("AFTER_TEMPORARY_FORCE", 2, List.of(1L, 2L, 3L, 4L));
+        verifyRecovery("AFTER_TEMPORARY_FORCE", 3, List.of(1L, 2L, 3L, 4L, 5L));
     }
 
     @Test
@@ -115,18 +116,18 @@ class RaftNodeRealSnapshotRecoveryTest {
 
     @Test
     void restartAfterAtomicPublicationUsesNewSnapshotWithUntrimmedWal() throws Exception {
-        verifyRecovery("AFTER_ATOMIC_PUBLICATION", 3, List.of(1L, 2L, 3L, 4L));
+        verifyRecovery("AFTER_ATOMIC_PUBLICATION", 4, List.of(1L, 2L, 3L, 4L, 5L));
     }
 
     @Test
     void restartAfterPublicationBeforeCompactionUsesNewSnapshotWithUntrimmedWal() throws Exception {
         verifyRecovery(SnapshotStoreCrashWriter.AFTER_PUBLICATION_BEFORE_COMPACTION,
-                3, List.of(1L, 2L, 3L, 4L));
+                4, List.of(1L, 2L, 3L, 4L, 5L));
     }
 
     @Test
     void restartAfterPrefixCompactionUsesNewSnapshotAndWalSuffix() throws Exception {
-        verifyRecovery(SnapshotStoreCrashWriter.AFTER_PREFIX_COMPACTION, 3, List.of(4L));
+        verifyRecovery(SnapshotStoreCrashWriter.AFTER_PREFIX_COMPACTION, 4, List.of(5L));
     }
 
     private void verifyRecovery(
@@ -144,7 +145,7 @@ class RaftNodeRealSnapshotRecoveryTest {
             SnapshotStore.SnapshotData latest = reopened.loadLatest()
                     .get(10, TimeUnit.SECONDS).orElseThrow();
             assertEquals(expectedSnapshotIndex, latest.lastIncludedIndex());
-            assertEquals(expectedSnapshotIndex == 2 ? 1 : 2, latest.lastIncludedTerm());
+            assertEquals(expectedSnapshotIndex == 3 ? 1 : 2, latest.lastIncludedTerm());
         }
         assertFalse(Files.exists(directory.resolve("snapshot.dat.tmp")),
                 "recovery must remove a non-authoritative temporary snapshot");
@@ -165,7 +166,8 @@ class RaftNodeRealSnapshotRecoveryTest {
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
-                .clusterNodes(Set.of("node-1"))
+                .serverId(ManualRaftCluster.serverIdOf("node-1"))
+                .clusterNodes(MEMBERS)
                 .transport(new PeerlessTransport())
                 .stateMachine(state)
                 .commandCodec(CODEC)
@@ -179,7 +181,7 @@ class RaftNodeRealSnapshotRecoveryTest {
         assertTrue(node.isRunning());
         assertEquals(3, node.getCurrentTerm());
         assertEquals(expectedSnapshotIndex, node.getSnapshotLastIndex());
-        assertEquals(4, node.getLastApplied());
+        assertEquals(5, node.getLastApplied());
         assertEquals("one", state.getMetadata("key-1"));
         assertEquals("two", state.getMetadata("key-2"));
         assertEquals("three", state.getMetadata("key-3"));
@@ -191,7 +193,7 @@ class RaftNodeRealSnapshotRecoveryTest {
         snapshotState.apply(put("key-1", "one"));
         snapshotState.apply(put("key-2", "two"));
         SnapshotStore.SnapshotData published = new SnapshotStore.SnapshotData(
-                snapshotState.takeSnapshot(), 2, 1);
+                ManualRaftCluster.snapshotOf(MEMBERS, snapshotState.takeSnapshot()), 3, 1);
         try (FileSnapshotStore snapshots = new FileSnapshotStore()) {
             snapshots.open(directory).get(10, TimeUnit.SECONDS);
             snapshots.saveAtomically(published).get(10, TimeUnit.SECONDS);
@@ -207,10 +209,11 @@ class RaftNodeRealSnapshotRecoveryTest {
             wal.open(directory).get(10, TimeUnit.SECONDS);
             wal.updateMetadata(3, Optional.of("node-1")).get(10, TimeUnit.SECONDS);
             wal.appendEntries(List.of(
-                    entry(1, 1, "key-1", "one"),
-                    entry(2, 1, "key-2", "two"),
-                    entry(3, 2, "key-3", "three"),
-                    entry(4, 2, "key-4", "four"))).get(10, TimeUnit.SECONDS);
+                    ManualRaftCluster.bootstrapEntry(MEMBERS),
+                    entry(2, 1, "key-1", "one"),
+                    entry(3, 1, "key-2", "two"),
+                    entry(4, 2, "key-3", "three"),
+                    entry(5, 2, "key-4", "four"))).get(10, TimeUnit.SECONDS);
             wal.sync().get(10, TimeUnit.SECONDS);
         }
     }
@@ -220,7 +223,8 @@ class RaftNodeRealSnapshotRecoveryTest {
         state.apply(put("key-1", "one"));
         state.apply(put("key-2", "two"));
         state.apply(put("key-3", "three"));
-        return new SnapshotStore.SnapshotData(state.takeSnapshot(), 3, 2);
+        return new SnapshotStore.SnapshotData(
+                ManualRaftCluster.snapshotOf(MEMBERS, state.takeSnapshot()), 4, 2);
     }
 
     private ProcessResult runCrashWriter(
@@ -238,7 +242,9 @@ class RaftNodeRealSnapshotRecoveryTest {
                 directory.toString(),
                 checkpoint,
                 Base64.getEncoder().encodeToString(replacement.data()),
-                Integer.toString(replacement.formatVersion()))
+                Integer.toString(replacement.formatVersion()),
+                Long.toString(replacement.lastIncludedIndex()),
+                Long.toString(replacement.lastIncludedTerm()))
                 .redirectErrorStream(true)
                 .redirectOutput(outputFile.toFile())
                 .start();

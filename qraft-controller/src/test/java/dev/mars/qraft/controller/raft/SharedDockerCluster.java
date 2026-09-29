@@ -215,6 +215,17 @@ public final class SharedDockerCluster {
         }
     }
 
+    /** Empties a stopped container's durable data directory without recreating its volume, as a lost disk would. */
+    public static synchronized void wipeDataDirectory(ComposeContainer cluster, String serviceName) {
+        try {
+            runCommand(List.of("docker", "run", "--rm", "--volumes-from",
+                    containerId(cluster, serviceName), "alpine:3.20", "sh", "-c",
+                    "rm -rf /app/data/* /app/data/.[!.]*"));
+        } catch (Exception error) {
+            throw new IllegalStateException("Could not wipe the data directory of " + serviceName, error);
+        }
+    }
+
     /** Runs a second controller against an active controller's volume and captures its exit. */
     public static DockerCommandResult runStorageLockContender(
             ComposeContainer cluster, String ownerService) {

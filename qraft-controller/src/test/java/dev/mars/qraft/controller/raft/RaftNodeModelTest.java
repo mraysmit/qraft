@@ -22,6 +22,7 @@ import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.controller.raft.grpc.VoteRequest;
 import dev.mars.qraft.controller.raft.grpc.VoteResponse;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
+import dev.mars.qraft.controller.state.ConfigurationCommand;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
@@ -48,14 +49,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Seeded model tests comparing generated follower histories on {@link RaftNode} against an
  * independent reference model, including fencing after an ambiguous sync failure. The histories include
- * leaders behind the follower's tail, where only the verified prefix may be matched or committed.
+ * leaders behind the follower's tail, where only the verified prefix may be matched or committed. The
+ * follower is a bootstrapped member, so both it and the model begin with the committed configuration entry at
+ * index 1, in term 0.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-17
- * @version 1.0
+ * @version 1.1
  */
 @RemediationTest(phase = "7-node-model", scenarioPrefix = "RAFT-NODE-MODEL")
 class RaftNodeModelTest {
+    private static final Set<String> MEMBERS = Set.of("follower", "leader", "candidate-a", "candidate-b");
     private static final long[] REGRESSION_SEEDS = {
             0x4E4F_4445L, 0x5141_4654L, 0x5EED_1001L, 0x5EED_1002L
     };
@@ -145,7 +149,9 @@ class RaftNodeModelTest {
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("follower")
-                .clusterNodes(Set.of("follower", "leader", "candidate-a", "candidate-b"))
+                .serverId(ManualRaftCluster.serverIdOf("follower"))
+                .initialConfiguration(ManualRaftCluster.configurationOf(MEMBERS))
+                .clusterNodes(MEMBERS)
                 .transport(new InMemoryTransportSimulator("follower"))
                 .stateMachine(stateStore)
                 .commandCodec(new ProtobufRaftCommandCodec())
@@ -340,8 +346,10 @@ class RaftNodeModelTest {
                 .setLeaderCommit(leaderCommit);
         ProtobufRaftCommandCodec codec = new ProtobufRaftCommandCodec();
         for (ModelEntry entry : entries) {
-            byte[] bytes = codec.serialize(new DistributedStateRaftCommand(
-                    DistributedStateCommand.put(entry.key(), entry.value())));
+            byte[] bytes = entry == ModelEntry.BOOTSTRAP
+                    ? codec.serialize(new ConfigurationCommand(ManualRaftCluster.configurationOf(MEMBERS)))
+                    : codec.serialize(new DistributedStateRaftCommand(
+                            DistributedStateCommand.put(entry.key(), entry.value())));
             request.addEntries(dev.mars.qraft.controller.raft.grpc.LogEntry.newBuilder()
                     .setTerm(entry.term())
                     .setData(ByteString.copyFrom(bytes))
@@ -452,7 +460,10 @@ class RaftNodeModelTest {
         HEARTBEAT, INCONSISTENT_HEARTBEAT, EXTEND, REPLACE_UNCOMMITTED, LAGGING_HEARTBEAT, LAGGING_RESEND
     }
 
-    private record ModelEntry(long term, String key, String value) { }
+    private record ModelEntry(long term, String key, String value) {
+        /** The committed configuration entry at index 1; it is never applied to the state machine. */
+        static final ModelEntry BOOTSTRAP = new ModelEntry(0, null, null);
+    }
 
     private record ExpectedResult(ReferenceState state, boolean accepted, long matchIndex) {
         ExpectedResult(ReferenceState state, boolean accepted) {
@@ -468,7 +479,7 @@ class RaftNodeModelTest {
             long lastApplied,
             Map<String, String> applied) {
         static ReferenceState initial() {
-            return new ReferenceState(0, null, List.of(), 0, 0, Map.of());
+            return new ReferenceState(0, null, List.of(ModelEntry.BOOTSTRAP), 1, 1, Map.of());
         }
 
         long lastIndex() {

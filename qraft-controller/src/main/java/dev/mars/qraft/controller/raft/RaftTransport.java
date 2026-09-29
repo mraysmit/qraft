@@ -18,6 +18,7 @@ package dev.mars.qraft.controller.raft;
 
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
+import dev.mars.qraft.controller.raft.grpc.DescribeResponse;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.controller.raft.grpc.VoteRequest;
@@ -50,6 +51,16 @@ public interface RaftTransport {
     Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request);
 
     Future<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request);
+
+    /**
+     * Asks {@code targetId} to describe itself, for a server deciding whether to bootstrap a new cluster. A
+     * transport that cannot reach peers this way fails, and such a server never bootstraps a cluster of more
+     * than one.
+     */
+    default Future<DescribeResponse> describe(String targetId) {
+        return Future.failedFuture(new UnsupportedOperationException(
+                getClass().getSimpleName() + " cannot ask " + targetId + " to describe itself"));
+    }
 
     /**
      * Sends an InstallSnapshot RPC to a target node.

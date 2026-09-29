@@ -18,6 +18,7 @@ package dev.mars.qraft.controller.raft;
 
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
+import dev.mars.qraft.controller.raft.grpc.DescribeResponse;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.controller.raft.grpc.VoteRequest;
@@ -367,6 +368,19 @@ public class InMemoryTransportSimulator implements RaftTransport {
             Thread.currentThread().interrupt();
             logger.warn("Interrupted while draining in-memory {} executor for node: {}", executorName, nodeId);
         }
+    }
+
+    @Override
+    public Future<DescribeResponse> describe(String targetNodeId) {
+        if (crashed || !canCommunicate(nodeId, targetNodeId)) {
+            return Future.failedFuture(new RuntimeException("Cannot reach " + targetNodeId));
+        }
+        InMemoryTransportSimulator targetTransport = transports.get(targetNodeId);
+        if (targetTransport == null || !targetTransport.running || targetTransport.crashed
+                || targetTransport.raftNode == null) {
+            return Future.failedFuture(new RuntimeException("Target node not available: " + targetNodeId));
+        }
+        return targetTransport.raftNode.describe();
     }
 
     @Override

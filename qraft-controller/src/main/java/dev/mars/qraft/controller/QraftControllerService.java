@@ -34,6 +34,7 @@ import dev.mars.qraft.controller.raft.RaftNodeMode;
 import dev.mars.qraft.controller.raft.RaftTransport;
 import dev.mars.qraft.controller.raft.GrpcServiceServer;
 import dev.mars.qraft.controller.raft.GrpcRaftTransport;
+import dev.mars.qraft.controller.raft.ClusterBootstrap;
 import dev.mars.qraft.controller.raft.GrpcRaftServer;
 import dev.mars.qraft.controller.raft.storage.RaftStorageFactory;
 import dev.mars.qraft.controller.raft.storage.ServerIdentity;
@@ -52,6 +53,8 @@ import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 /**
  * Main service host for the Qraft Controller.
@@ -65,6 +68,7 @@ public class QraftControllerService {
     private static final Logger logger = LoggerFactory.getLogger(QraftControllerService.class);
     /** Bounds an expiry proposal, so a proposal that never completes cannot suppress re-evaluation. */
     private static final long HEALTH_EXPIRY_PROPOSAL_TIMEOUT_MS = 5_000;
+    private static final long BOOTSTRAP_RETRY_MS = 1_000;
 
     private final JavaRuntime runtime;
 
@@ -77,6 +81,7 @@ public class QraftControllerService {
     private Optional<LeaderHealthExpiry> healthExpiry = Optional.empty();
     private Optional<ScheduledExecutorService> healthExpiryExecutor = Optional.empty();
     private Optional<ShutdownCoordinator> shutdownCoordinator = Optional.empty();
+    private volatile Optional<Long> bootstrapTimer = Optional.empty();
 
     public QraftControllerService(JavaRuntime runtime) {
         this.runtime = runtime;
@@ -102,6 +107,7 @@ public class QraftControllerService {
 
             // 2. Parse cluster configuration
             Map<String, String> peerAddresses = new HashMap<>();
+            Map<String, String> listedAddresses = new HashMap<>();
             Set<String> clusterNodeIds = new HashSet<>();
             for (String entry : clusterNodesEnv.split(",")) {
                 String[] parts = entry.trim().split("=");
@@ -109,6 +115,7 @@ public class QraftControllerService {
                     String peerNodeId = parts[0].trim();
                     String peerAddress = parts[1].trim();
                     clusterNodeIds.add(peerNodeId);
+                    listedAddresses.put(peerNodeId, peerAddress);
                     if (!peerNodeId.equals(nodeId)) {
                         peerAddresses.put(peerNodeId, peerAddress);
                     }
@@ -138,7 +145,8 @@ public class QraftControllerService {
             RaftStorageFactory.createDurable(storagePath, fsyncEnabled)
                 .onSuccess(storage -> {
                     this.raftStorage = storage;
-                    continueStartup(startPromise, config, nodeId, raftPort, apiGrpcPort, clusterNodeIds);
+                    continueStartup(startPromise, config, nodeId, raftPort, apiGrpcPort, clusterNodeIds,
+                            listedAddresses);
                 })
                 .onFailure(err -> {
                     logger.error("Failed to initialize Raft storage: {}", err.getMessage(), err);
@@ -155,7 +163,7 @@ public class QraftControllerService {
      */
     private void continueStartup(Promise<Void> startPromise, AppConfig config,
                                  String nodeId, int raftPort, int apiGrpcPort,
-                                 Set<String> clusterNodeIds) {
+                                 Set<String> clusterNodeIds, Map<String, String> listedAddresses) {
         try {
             // 5. Load the server's durable identity. The open WAL holds the data directory's lock, so no other
             //    process can create a competing identity there.
@@ -174,6 +182,7 @@ public class QraftControllerService {
                     .nodeId(nodeId)
                     .serverId(serverId)
                     .clusterNodes(clusterNodeIds)
+                    .addresses(listedAddresses)
                     .transport(transport)
                     .stateMachine(stateMachine)
                     .commandCodec(new ProtobufRaftCommandCodec())
@@ -227,6 +236,8 @@ public class QraftControllerService {
                         // 8. Start Raft (includes recovery from WAL)
                         // 9. Setup shutdown coordinator for graceful shutdown
                         setupShutdownCoordinator();
+                        // 10. A server with no configuration bootstraps a new cluster or waits to join one
+                        startClusterBootstrap(node);
 
                         logger.info("QraftControllerService started successfully (gRPC and HTTP health mode)");
                         startPromise.complete();
@@ -263,6 +274,34 @@ public class QraftControllerService {
      *   <li>CLOSE_RESOURCES: Close storage and other resources</li>
      * </ol>
      */
+    /**
+     * Until the node has a configuration, attempts to bootstrap a new cluster at once and then every
+     * {@value #BOOTSTRAP_RETRY_MS} ms, one attempt at a time. It stops once the node is configured, whether this
+     * server bootstrapped it or a leader of an existing cluster replicated it.
+     */
+    private void startClusterBootstrap(RaftNode node) {
+        if (node.getConfiguration().isPresent()) return;
+        ClusterBootstrap bootstrap = new ClusterBootstrap(node, transport);
+        AtomicBoolean attempting = new AtomicBoolean();
+        Consumer<Long> attempt = ignored -> {
+            if (!attempting.compareAndSet(false, true)) return;
+            bootstrap.attempt().onComplete(result -> {
+                attempting.set(false);
+                if (result.failed()) {
+                    logger.warn("Cluster bootstrap attempt failed: {}", result.cause().getMessage());
+                } else if (result.result() == ClusterBootstrap.Outcome.BOOTSTRAPPED
+                        || result.result() == ClusterBootstrap.Outcome.CONFIGURED) {
+                    logger.info("Cluster configuration established: {}", node.getConfiguration().orElse(null));
+                    bootstrapTimer.ifPresent(runtime::cancelTimer);
+                } else {
+                    logger.info("Cluster bootstrap: {}", result.result());
+                }
+            });
+        };
+        bootstrapTimer = Optional.of(runtime.setPeriodic(BOOTSTRAP_RETRY_MS, attempt));
+        attempt.accept(0L);
+    }
+
     private void setupShutdownCoordinator() {
         AppConfig config = AppConfig.get();
         long drainTimeoutMs = config.getLong("qraft.shutdown.drain.timeout.ms", 5000L);
@@ -321,6 +360,7 @@ public class QraftControllerService {
 
     public void stop(Promise<Void> stopPromise) {
         logger.info("Stopping QraftControllerService...");
+        bootstrapTimer.ifPresent(runtime::cancelTimer);
 
         shutdownCoordinator.ifPresentOrElse(
             coordinator -> coordinator.shutdown()

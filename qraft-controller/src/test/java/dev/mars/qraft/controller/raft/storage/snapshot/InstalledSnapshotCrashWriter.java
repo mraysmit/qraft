@@ -17,9 +17,11 @@
 package dev.mars.qraft.controller.raft.storage.snapshot;
 
 import com.google.protobuf.ByteString;
+import dev.mars.qraft.controller.raft.ManualRaftCluster;
 import dev.mars.qraft.controller.raft.PeerlessTransport;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.raft.RaftNodeMode;
+import dev.mars.qraft.controller.raft.SnapshotEnvelope;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.controller.runtime.Future;
@@ -59,6 +61,10 @@ public final class InstalledSnapshotCrashWriter {
     /** Halts once a snapshot whose boundary term conflicts with the WAL is durable, before the WAL is trimmed. */
     public static final String AFTER_DIVERGENT_SNAPSHOT_PUBLICATION =
             "AFTER_DIVERGENT_SNAPSHOT_PUBLICATION";
+    /** The follower's cluster; the WAL the test seeds begins with its bootstrap configuration. */
+    public static final Set<String> MEMBERS = Set.of("follower-1", "leader-1");
+    /** The installed snapshot's boundary: the seeded WAL holds key-3 there, in term 2. */
+    private static final long SNAPSHOT_INDEX = 4;
 
     private InstalledSnapshotCrashWriter() {
     }
@@ -93,7 +99,8 @@ public final class InstalledSnapshotCrashWriter {
         RaftNode node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("follower-1")
-                .clusterNodes(Set.of("follower-1", "leader-1"))
+                .serverId(ManualRaftCluster.serverIdOf("follower-1"))
+                .clusterNodes(MEMBERS)
                 .transport(new PeerlessTransport())
                 .stateMachine(new QraftStateStore())
                 .commandCodec(new ProtobufRaftCommandCodec())
@@ -108,7 +115,7 @@ public final class InstalledSnapshotCrashWriter {
                 InstallSnapshotRequest.newBuilder()
                         .setTerm(3)
                         .setLeaderId("leader-1")
-                        .setLastIncludedIndex(3)
+                        .setLastIncludedIndex(SNAPSHOT_INDEX)
                         .setLastIncludedTerm(AFTER_DIVERGENT_SUFFIX_INSTALL.equals(checkpoint)
                                 || AFTER_DIVERGENT_SNAPSHOT_PUBLICATION.equals(checkpoint) ? 99 : 2)
                         .setChunkIndex(0)
@@ -124,7 +131,7 @@ public final class InstalledSnapshotCrashWriter {
                     InstallSnapshotRequest.newBuilder()
                             .setTerm(3)
                             .setLeaderId("leader-1")
-                            .setLastIncludedIndex(4)
+                            .setLastIncludedIndex(SNAPSHOT_INDEX + 1)
                             .setLastIncludedTerm(2)
                             .setChunkIndex(0)
                             .setTotalChunks(1)
@@ -149,8 +156,8 @@ public final class InstalledSnapshotCrashWriter {
         state.apply(put("key-1", "one"));
         state.apply(put("key-2", "two"));
         state.apply(put("key-3", "three"));
-        state.setLastAppliedIndex(3);
-        return state.takeSnapshot();
+        state.setLastAppliedIndex(SNAPSHOT_INDEX);
+        return SnapshotEnvelope.wrap(ManualRaftCluster.configurationOf(MEMBERS), state.takeSnapshot());
     }
 
     private static DistributedStateRaftCommand put(String key, String value) {

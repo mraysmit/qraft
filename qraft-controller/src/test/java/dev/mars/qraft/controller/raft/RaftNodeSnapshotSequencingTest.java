@@ -117,7 +117,7 @@ class RaftNodeSnapshotSequencingTest {
         assertSame(runtime, stateMachine.snapshotContext());
         storage.assertSaveCount(1);
         storage.assertPrefixTruncateCount(0);
-        storage.assertAppendCount(1);
+        storage.assertAppendCount(2);
         assertEquals(0, node.getSnapshotLastIndex());
         assertFalse(snapshot.isComplete());
         assertFalse(later.isComplete());
@@ -126,16 +126,16 @@ class RaftNodeSnapshotSequencingTest {
 
         await(snapshot);
         assertInstanceOf(RaftCommandResult.Success.class, await(later));
-        assertEquals(1, node.getSnapshotLastIndex());
+        assertEquals(2, node.getSnapshotLastIndex());
         SnapshotStore.SnapshotData published = storage.latestSnapshot().orElseThrow();
-        assertEquals(1, published.lastIncludedIndex());
+        assertEquals(2, published.lastIncludedIndex());
         assertEquals(1, published.lastIncludedTerm());
         QraftStateStore restored = new QraftStateStore();
-        restored.restoreSnapshot(published.data());
+        restored.restoreSnapshot(SnapshotEnvelope.unwrap(published.data()).stateMachineSnapshot());
         assertEquals("captured", restored.getMetadata("before"));
         assertNull(restored.getMetadata("after"));
         assertEquals(published.lastIncludedIndex(), restored.getLastAppliedIndex());
-        assertEquals(List.of(2L), storage.logEntries().stream()
+        assertEquals(List.of(3L), storage.logEntries().stream()
                 .map(RaftStorage.LogEntryData::index)
                 .toList());
     }
@@ -151,7 +151,7 @@ class RaftNodeSnapshotSequencingTest {
         awaitStateLoop(runtime);
         storage.assertSaveCount(1);
         storage.assertPrefixTruncateCount(1);
-        storage.assertAppendCount(1);
+        storage.assertAppendCount(2);
         assertEquals(0, node.getSnapshotLastIndex());
         assertFalse(snapshot.isComplete());
         assertFalse(later.isComplete());
@@ -160,8 +160,8 @@ class RaftNodeSnapshotSequencingTest {
 
         await(snapshot);
         assertInstanceOf(RaftCommandResult.Success.class, await(later));
-        assertEquals(1, node.getSnapshotLastIndex());
-        assertEquals(List.of(2L), storage.logEntries().stream()
+        assertEquals(2, node.getSnapshotLastIndex());
+        assertEquals(List.of(3L), storage.logEntries().stream()
                 .map(RaftStorage.LogEntryData::index)
                 .toList());
     }
@@ -184,10 +184,10 @@ class RaftNodeSnapshotSequencingTest {
         assertInstanceOf(RaftCommandResult.Success.class, await(command));
         await(snapshot);
         SnapshotStore.SnapshotData published = storage.latestSnapshot().orElseThrow();
-        assertEquals(2, published.lastIncludedIndex());
+        assertEquals(3, published.lastIncludedIndex());
         assertEquals(1, published.lastIncludedTerm());
         QraftStateStore restored = new QraftStateStore();
-        restored.restoreSnapshot(published.data());
+        restored.restoreSnapshot(SnapshotEnvelope.unwrap(published.data()).stateMachineSnapshot());
         assertEquals("captured", restored.getMetadata("before"));
         assertEquals("included", restored.getMetadata("during"));
         assertEquals(published.lastIncludedIndex(), restored.getLastAppliedIndex());
@@ -203,7 +203,7 @@ class RaftNodeSnapshotSequencingTest {
         Future<VoteResponse> vote = node.handleVoteRequest(VoteRequest.newBuilder()
                 .setTerm(2)
                 .setCandidateId("candidate-2")
-                .setLastLogIndex(1)
+                .setLastLogIndex(2)
                 .setLastLogTerm(1)
                 .build());
 
@@ -219,7 +219,7 @@ class RaftNodeSnapshotSequencingTest {
         VoteResponse response = await(vote);
         assertTrue(response.getVoteGranted());
         assertEquals(2, response.getTerm());
-        assertEquals(1, node.getSnapshotLastIndex());
+        assertEquals(2, node.getSnapshotLastIndex());
         assertEquals(RaftNode.State.FOLLOWER, node.getState());
         storage.assertMetadataUpdateCount(2);
     }
@@ -244,7 +244,7 @@ class RaftNodeSnapshotSequencingTest {
         await(second);
         storage.assertSaveCount(1);
         storage.assertPrefixTruncateCount(1);
-        assertEquals(1, node.getSnapshotLastIndex());
+        assertEquals(2, node.getSnapshotLastIndex());
     }
 
     @Test
@@ -258,13 +258,13 @@ class RaftNodeSnapshotSequencingTest {
         assertSame(storage.publicationFailure, failure.getCause());
         assertEquals(0, node.getSnapshotLastIndex());
         storage.assertPrefixTruncateCount(0);
-        assertEquals(List.of(1L), storage.logEntries().stream()
+        assertEquals(List.of(1L, 2L), storage.logEntries().stream()
                 .map(RaftStorage.LogEntryData::index)
                 .toList());
 
         assertInstanceOf(RaftCommandResult.Success.class,
                 await(node.submitCommand(put("after", "publication-failure"))));
-        storage.assertAppendCount(2);
+        storage.assertAppendCount(3);
     }
 
     @Test
@@ -284,7 +284,7 @@ class RaftNodeSnapshotSequencingTest {
         CompletionException fenced = assertThrows(CompletionException.class,
                 () -> await(node.submitCommand(put("after", "ambiguous-publication"))));
         assertInstanceOf(RaftTransitionSequencer.FencedException.class, fenced.getCause());
-        storage.assertAppendCount(1);
+        storage.assertAppendCount(2);
     }
 
     @Test
@@ -303,7 +303,7 @@ class RaftNodeSnapshotSequencingTest {
         CompletionException fenced = assertThrows(CompletionException.class,
                 () -> await(node.submitCommand(put("after", "must-not-run"))));
         assertInstanceOf(RaftTransitionSequencer.FencedException.class, fenced.getCause());
-        storage.assertAppendCount(1);
+        storage.assertAppendCount(2);
     }
 
     private static DistributedStateRaftCommand put(String key, String value) {

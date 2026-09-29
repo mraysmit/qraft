@@ -219,7 +219,10 @@ class GrpcRaftIntegrationTest {
             GrpcRaftTransport transport = new GrpcRaftTransport(runtime, id, addresses);
             ManualRaftTimers timers = new ManualRaftTimers(runtime);
             QraftStateStore state = new QraftStateStore();
+            // Every member bootstraps with the same configuration of all members, as a new cluster does.
             RaftNode node = RaftNode.builder().runtime(runtime).nodeId(id).clusterNodes(memberIds)
+                    .serverId(ManualRaftCluster.serverIdOf(id))
+                    .initialConfiguration(ManualRaftCluster.configurationOf(memberIds))
                     .transport(transport).stateMachine(state).commandCodec(new ProtobufRaftCommandCodec())
                     .mode(RaftNodeMode.volatileMode()).snapshotEnabled(false)
                     .electionTimeout(1_000).heartbeatInterval(HEARTBEAT_MS).timerScheduler(timers)

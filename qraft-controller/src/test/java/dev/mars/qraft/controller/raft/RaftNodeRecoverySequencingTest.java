@@ -84,7 +84,8 @@ class RaftNodeRecoverySequencingTest {
         storage = new AsyncRecoveryStorage(
                 new RaftStorage.PersistentMeta(7, Optional.of("node-1")),
                 Optional.empty(),
-                List.of(new RaftStorage.LogEntryData(1, 7, codec.serialize(command))));
+                List.of(ManualRaftCluster.bootstrapEntry(Set.of("node-1")),
+                        new RaftStorage.LogEntryData(2, 7, codec.serialize(command))));
         RecordingStateMachine stateMachine = new RecordingStateMachine();
         node = buildNode(storage, stateMachine);
 
@@ -114,7 +115,7 @@ class RaftNodeRecoverySequencingTest {
         snapshotSource.apply(put("snapshot", "restored"));
         snapshotSource.setLastAppliedIndex(5);
         SnapshotStore.SnapshotData snapshot = new SnapshotStore.SnapshotData(
-                snapshotSource.takeSnapshot(), 5, 3, 1);
+                ManualRaftCluster.snapshotOf(Set.of("node-1"), snapshotSource.takeSnapshot()), 5, 3, 1);
         DistributedStateRaftCommand suffix = put("suffix", "replayed");
         storage = new AsyncRecoveryStorage(
                 new RaftStorage.PersistentMeta(4, Optional.empty()),
@@ -187,6 +188,7 @@ class RaftNodeRecoverySequencingTest {
         return RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
+                .serverId(ManualRaftCluster.serverIdOf("node-1"))
                 .clusterNodes(members)
                 .transport(new RecoveryTransport())
                 .stateMachine(stateMachine)

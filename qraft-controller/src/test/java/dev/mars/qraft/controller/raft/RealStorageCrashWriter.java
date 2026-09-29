@@ -25,11 +25,12 @@ import java.util.Base64;
 import java.util.List;
 
 /**
- * Child-process fixture that halts at an observable real-WAL call boundary.
+ * Child-process fixture that halts at an observable real-WAL call boundary: it truncates the WAL from the
+ * replacement index, appends the replacement there in term 2, and syncs.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-14
- * @version 1.0
+ * @version 1.1
  */
 public final class RealStorageCrashWriter {
     static final int HALT_EXIT_CODE = 91;
@@ -38,13 +39,15 @@ public final class RealStorageCrashWriter {
     }
 
     public static void main(String[] args) {
-        if (args.length != 3) {
-            throw new IllegalArgumentException("expected: <directory> <checkpoint> <replacement-payload-base64>");
+        if (args.length != 4) {
+            throw new IllegalArgumentException(
+                    "expected: <directory> <checkpoint> <replacement-payload-base64> <replacement-index>");
         }
 
         Path directory = Path.of(args[0]);
         Checkpoint checkpoint = Checkpoint.valueOf(args[1]);
         byte[] replacementPayload = Base64.getDecoder().decode(args[2]);
+        long replacementIndex = Long.parseLong(args[3]);
         FileRaftStorage wal = new FileRaftStorage(RaftStorageConfig.builder()
                 .dataDir(directory)
                 .syncEnabled(true)
@@ -52,10 +55,10 @@ public final class RealStorageCrashWriter {
 
         wal.open(directory).join();
         wal.replayLog().join();
-        wal.truncateSuffix(3).join();
+        wal.truncateSuffix(replacementIndex).join();
         haltAt(checkpoint, Checkpoint.AFTER_TRUNCATE);
 
-        wal.appendEntries(List.of(new RaftStorage.LogEntryData(3, 2, replacementPayload))).join();
+        wal.appendEntries(List.of(new RaftStorage.LogEntryData(replacementIndex, 2, replacementPayload))).join();
         haltAt(checkpoint, Checkpoint.AFTER_APPEND);
 
         wal.sync().join();

@@ -68,6 +68,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 @RemediationTest(phase = "5", scenarioPrefix = "RAFT-INSTALLED-SNAPSHOT")
 class RaftNodeInstalledSnapshotSequencingTest {
+    private static final Set<String> MEMBERS = Set.of("follower-1", "leader-1");
+    /** The follower bootstraps its configuration at index 1, so a leader's first command is at index 2. */
+    private static final long FIRST_COMMAND_INDEX = 2;
+
     private JavaRuntime runtime;
     private GatedStorage storage;
     private RecordingStateMachine stateMachine;
@@ -84,7 +88,9 @@ class RaftNodeInstalledSnapshotSequencingTest {
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("follower-1")
-                .clusterNodes(Set.of("follower-1", "leader-1"))
+                .serverId(ManualRaftCluster.serverIdOf("follower-1"))
+                .clusterNodes(MEMBERS)
+                .initialConfiguration(ManualRaftCluster.configurationOf(MEMBERS))
                 .transport(new InMemoryTransportSimulator("follower-1"))
                 .stateMachine(stateMachine)
                 .commandCodec(codec)
@@ -113,7 +119,7 @@ class RaftNodeInstalledSnapshotSequencingTest {
         storage.awaitBlockedSnapshotPublication();
 
         Future<AppendEntriesResponse> append = node.handleAppendEntriesRequest(
-                heartbeat(1, 0, 0));
+                heartbeat(1, 1, 0));
         awaitStateLoop(runtime);
 
         assertFalse(install.isComplete());
@@ -137,16 +143,16 @@ class RaftNodeInstalledSnapshotSequencingTest {
 
     @Test
     void staleSnapshotCannotRollCommittedApplicationStateBackwards() {
-        AppendEntriesResponse appended = await(node.handleAppendEntriesRequest(appendPut(1, 1, "new", "value")));
+        AppendEntriesResponse appended = await(node.handleAppendEntriesRequest(appendPut(1, 2, "new", "value")));
         assertTrue(appended.getSuccess());
-        assertEquals(1, node.getLastApplied());
+        assertEquals(2, node.getLastApplied());
 
         InstallSnapshotResponse stale = await(node.handleInstallSnapshot(
-                installRequest(1, 0, 0, 0, 1, snapshotBytes(0, "old", "value"), true)));
+                installRequest(1, 1, 0, 0, 1, snapshotBytes(1, "old", "value"), true)));
 
         assertFalse(stale.getSuccess());
-        assertEquals(1, node.getLastApplied());
-        assertEquals(1, node.getCommitIndex());
+        assertEquals(2, node.getLastApplied());
+        assertEquals(2, node.getCommitIndex());
         assertEquals("value", stateMachine.getMetadata("new"));
         assertNull(stateMachine.getMetadata("old"));
         assertEquals(0, storage.saveCount());
@@ -324,9 +330,9 @@ class RaftNodeInstalledSnapshotSequencingTest {
         assertEquals(1, storage.prefixTruncateCount());
         assertEquals(0, node.getSnapshotLastIndex());
 
-        AppendEntriesResponse later = await(node.handleAppendEntriesRequest(appendPut(1, 1, "after", "forbidden")));
+        AppendEntriesResponse later = await(node.handleAppendEntriesRequest(appendPut(1, 2, "after", "forbidden")));
         assertFalse(later.getSuccess());
-        assertEquals(0, storage.appendCount());
+        assertEquals(1, storage.appendCount(), "only the bootstrap configuration entry was appended");
         assertNull(stateMachine.getMetadata("after"));
     }
 
@@ -367,44 +373,44 @@ class RaftNodeInstalledSnapshotSequencingTest {
         assertEquals(0, node.getSnapshotLastIndex());
 
         AppendEntriesResponse later = await(node.handleAppendEntriesRequest(
-                appendPut(1, 1, "after", "forbidden")));
+                appendPut(1, 2, "after", "forbidden")));
         assertFalse(later.getSuccess());
-        assertEquals(0, storage.appendCount());
+        assertEquals(1, storage.appendCount(), "only the bootstrap configuration entry was appended");
     }
 
     @Test
     void matchingUncommittedSuffixIsRetainedAcrossInstallation() {
-        assertTrue(await(node.handleAppendEntriesRequest(appendPut(1, 1, "one", "1"))).getSuccess());
-        assertTrue(await(node.handleAppendEntriesRequest(appendPutUncommitted(1, 2, "two", "2"))).getSuccess());
-        assertTrue(await(node.handleAppendEntriesRequest(appendPutUncommitted(1, 3, "three", "3"))).getSuccess());
+        assertTrue(await(node.handleAppendEntriesRequest(appendPut(1, 2, "one", "1"))).getSuccess());
+        assertTrue(await(node.handleAppendEntriesRequest(appendPutUncommitted(1, 3, "two", "2"))).getSuccess());
+        assertTrue(await(node.handleAppendEntriesRequest(appendPutUncommitted(1, 4, "three", "3"))).getSuccess());
 
         InstallSnapshotResponse installed = await(node.handleInstallSnapshot(
-                installRequest(1, 2, 1, 0, 1, snapshotBytes(2, "snapshot", "two"), true)));
+                installRequest(1, 3, 1, 0, 1, snapshotBytes(3, "snapshot", "two"), true)));
 
         assertTrue(installed.getSuccess());
-        assertEquals(3, node.getLastLogIndex());
-        assertTrue(await(node.handleAppendEntriesRequest(heartbeat(1, 3, 1))).getSuccess());
+        assertEquals(4, node.getLastLogIndex());
+        assertTrue(await(node.handleAppendEntriesRequest(heartbeat(1, 4, 1))).getSuccess());
     }
 
     @Test
     void nonMatchingSuffixIsRemovedFromMemoryAndWalBeforeNewAppend() {
-        assertTrue(await(node.handleAppendEntriesRequest(appendPut(1, 1, "one", "1"))).getSuccess());
-        assertTrue(await(node.handleAppendEntriesRequest(appendPutUncommitted(1, 2, "two", "2"))).getSuccess());
-        assertTrue(await(node.handleAppendEntriesRequest(appendPutUncommitted(1, 3, "stale", "3"))).getSuccess());
+        assertTrue(await(node.handleAppendEntriesRequest(appendPut(1, 2, "one", "1"))).getSuccess());
+        assertTrue(await(node.handleAppendEntriesRequest(appendPutUncommitted(1, 3, "two", "2"))).getSuccess());
+        assertTrue(await(node.handleAppendEntriesRequest(appendPutUncommitted(1, 4, "stale", "3"))).getSuccess());
 
         InstallSnapshotResponse installed = await(node.handleInstallSnapshot(
-                installRequest(1, 2, 99, 0, 1,
-                        snapshotBytes(2, "snapshot", "replacement"), true)));
+                installRequest(1, 3, 99, 0, 1,
+                        snapshotBytes(3, "snapshot", "replacement"), true)));
 
         assertTrue(installed.getSuccess());
-        assertEquals(2, node.getLastLogIndex());
+        assertEquals(3, node.getLastLogIndex());
         assertEquals(1, storage.suffixTruncateCount());
         assertEquals(List.of(), storage.logEntries().stream()
                 .map(RaftStorage.LogEntryData::index).toList());
 
         assertTrue(await(node.handleAppendEntriesRequest(appendPutWithPreviousTerm(
-                1, 3, 99, "fresh", "3"))).getSuccess());
-        assertEquals(List.of(3L), storage.logEntries().stream()
+                1, 4, 99, "fresh", "3"))).getSuccess());
+        assertEquals(List.of(4L), storage.logEntries().stream()
                 .map(RaftStorage.LogEntryData::index).toList());
     }
 
@@ -439,8 +445,8 @@ class RaftNodeInstalledSnapshotSequencingTest {
         assertEquals(1, storage.saveCount());
         assertEquals(1, storage.prefixTruncateCount());
         assertEquals(0, node.getSnapshotLastIndex());
-        assertFalse(await(node.handleAppendEntriesRequest(appendPut(1, 1, "after", "forbidden"))).getSuccess());
-        assertEquals(0, storage.appendCount());
+        assertFalse(await(node.handleAppendEntriesRequest(appendPut(1, 2, "after", "forbidden"))).getSuccess());
+        assertEquals(1, storage.appendCount(), "only the bootstrap configuration entry was appended");
     }
 
     private AppendEntriesRequest heartbeat(long term, long previousIndex, long previousTerm) {
@@ -457,8 +463,9 @@ class RaftNodeInstalledSnapshotSequencingTest {
         return appendPut(term, index, index, key, value);
     }
 
+    /** Commits only the leader's first command, so this entry and any after it stay uncommitted. */
     private AppendEntriesRequest appendPutUncommitted(long term, long index, String key, String value) {
-        return appendPut(term, index, 1, key, value);
+        return appendPut(term, index, FIRST_COMMAND_INDEX, key, value);
     }
 
     private AppendEntriesRequest appendPut(
@@ -468,7 +475,8 @@ class RaftNodeInstalledSnapshotSequencingTest {
                 .setTerm(term)
                 .setLeaderId("leader-1")
                 .setPrevLogIndex(index - 1)
-                .setPrevLogTerm(index == 1 ? 0 : term)
+                // The entry before the first command is the bootstrap configuration, written in term 0
+                .setPrevLogTerm(index == FIRST_COMMAND_INDEX ? 0 : term)
                 .setLeaderCommit(leaderCommit)
                 .addEntries(dev.mars.qraft.controller.raft.grpc.LogEntry.newBuilder()
                         .setTerm(term)
@@ -518,7 +526,7 @@ class RaftNodeInstalledSnapshotSequencingTest {
         QraftStateStore state = new QraftStateStore();
         state.apply(put(key, value));
         state.setLastAppliedIndex(index);
-        return state.takeSnapshot();
+        return ManualRaftCluster.snapshotOf(MEMBERS, state.takeSnapshot());
     }
 
     private static byte[][] thirds(byte[] bytes) {

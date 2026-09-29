@@ -235,12 +235,7 @@ class GrpcRaftTransportTest {
         transport.start(msg -> {});
 
         // First request should work
-        VoteRequest request = VoteRequest.newBuilder()
-                .setTerm(1)
-                .setCandidateId("client")
-                .setLastLogIndex(0)
-                .setLastLogTerm(0)
-                .build();
+        VoteRequest request = vote(1, "client");
 
         VoteResponse response1 = transport.sendVoteRequest("target", request)
                 .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
@@ -422,7 +417,7 @@ class GrpcRaftTransportTest {
 
     @Test
     @DisplayName("Transport should handle large append entries")
-    void anAppendCarryingAHundredKilobyteEntryIsAcceptedAtMatchIndexOne() throws Exception {
+    void anAppendCarryingAHundredKilobyteEntryIsAcceptedAtMatchIndexTwo() throws Exception {
         Map<String, String> cluster = new HashMap<>();
         cluster.put("target", "localhost:" + targetPort);
 
@@ -430,49 +425,51 @@ class GrpcRaftTransportTest {
         transport.start(msg -> {});
 
         // A real encoded command about 100 KB long. The term is beyond any the single-member target can
-        // reach by electing itself, so the append is always from its current leader.
+        // reach by electing itself, so the append is always from its current leader. Like the target, the
+        // leader's log begins with the bootstrap configuration at index 1 in term 0.
         String largeValue = "X".repeat(100 * 1024);
         AppendEntriesRequest request = AppendEntriesRequest.newBuilder()
                 .setTerm(100)
                 .setLeaderId("client")
-                .setPrevLogIndex(0)
+                .setPrevLogIndex(1)
                 .setPrevLogTerm(0)
                 .setLeaderCommit(0)
-                .addEntries(encodedEntry(1, 100, "large", largeValue))
+                .addEntries(encodedEntry(2, 100, "large", largeValue))
                 .build();
 
         AppendEntriesResponse response = transport.sendAppendEntries("target", request)
                 .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
 
         assertTrue(response.getSuccess(), response.toString());
-        assertEquals(1, response.getMatchIndex());
+        assertEquals(2, response.getMatchIndex());
         transport.stop();
     }
 
     @Test
     @DisplayName("Transport should handle multiple log entries in single request")
-    void anAppendCarryingAHundredEntriesIsAcceptedAtMatchIndexOneHundred() throws Exception {
+    void anAppendCarryingAHundredEntriesIsAcceptedAtMatchIndexOneHundredAndOne() throws Exception {
         Map<String, String> cluster = new HashMap<>();
         cluster.put("target", "localhost:" + targetPort);
 
         GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime, "client", cluster));
         transport.start(msg -> {});
 
+        // The batch follows the bootstrap configuration at index 1 in term 0.
         AppendEntriesRequest.Builder requestBuilder = AppendEntriesRequest.newBuilder()
                 .setTerm(100)
                 .setLeaderId("client")
-                .setPrevLogIndex(0)
+                .setPrevLogIndex(1)
                 .setPrevLogTerm(0)
                 .setLeaderCommit(0);
         for (int i = 0; i < 100; i++) {
-            requestBuilder.addEntries(encodedEntry(i + 1, 100, "command-" + i, "value-" + i));
+            requestBuilder.addEntries(encodedEntry(i + 2, 100, "command-" + i, "value-" + i));
         }
 
         AppendEntriesResponse response = transport.sendAppendEntries("target", requestBuilder.build())
                 .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
 
         assertTrue(response.getSuccess(), response.toString());
-        assertEquals(100, response.getMatchIndex(), "every entry of the batch is verified");
+        assertEquals(101, response.getMatchIndex(), "every entry of the batch is verified");
         transport.stop();
     }
 
@@ -504,9 +501,10 @@ class GrpcRaftTransportTest {
         return future.toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
     }
 
+    /** A vote request from a candidate whose log, like the target's, holds only the bootstrap configuration. */
     private static VoteRequest vote(long term, String candidateId) {
         return VoteRequest.newBuilder()
-                .setTerm(term).setCandidateId(candidateId).setLastLogIndex(0).setLastLogTerm(0).build();
+                .setTerm(term).setCandidateId(candidateId).setLastLogIndex(1).setLastLogTerm(0).build();
     }
 
     @Test

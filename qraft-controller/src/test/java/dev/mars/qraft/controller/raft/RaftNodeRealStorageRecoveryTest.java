@@ -60,6 +60,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @RemediationTest(phase = "6-real-storage", scenarioPrefix = "RAFT-REAL-RECOVERY")
 class RaftNodeRealStorageRecoveryTest {
     private static final ProtobufRaftCommandCodec CODEC = new ProtobufRaftCommandCodec();
+    private static final Set<String> MEMBERS = Set.of("node-1");
+    /** The index of the obsolete entry the crash writer replaces; the bootstrap configuration is index 1. */
+    private static final long REPLACEMENT_INDEX = 4;
 
     @TempDir
     Path directory;
@@ -78,19 +81,19 @@ class RaftNodeRealStorageRecoveryTest {
     @Test
     void restartAfterSuffixTruncationRecoversTheRetainedPrefix() throws Exception {
         verifyRecovery(RealStorageCrashWriter.Checkpoint.AFTER_TRUNCATE,
-                List.of(1L, 2L), List.of(1L, 1L), 2, false);
+                List.of(1L, 2L, 3L), List.of(0L, 1L, 1L), 3, false);
     }
 
     @Test
     void restartAfterReplacementAppendRecoversTheWrittenReplacement() throws Exception {
         verifyRecovery(RealStorageCrashWriter.Checkpoint.AFTER_APPEND,
-                List.of(1L, 2L, 3L), List.of(1L, 1L, 2L), 3, true);
+                List.of(1L, 2L, 3L, 4L), List.of(0L, 1L, 1L, 2L), 4, true);
     }
 
     @Test
     void restartAfterStorageSyncRecoversTheDurableReplacement() throws Exception {
         verifyRecovery(RealStorageCrashWriter.Checkpoint.AFTER_SYNC,
-                List.of(1L, 2L, 3L), List.of(1L, 1L, 2L), 3, true);
+                List.of(1L, 2L, 3L, 4L), List.of(0L, 1L, 1L, 2L), 4, true);
     }
 
     @Test
@@ -102,6 +105,8 @@ class RaftNodeRealStorageRecoveryTest {
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
+                .serverId(ManualRaftCluster.serverIdOf("node-1"))
+                .initialConfiguration(ManualRaftCluster.configurationOf(Set.of("node-1", "leader-1")))
                 .clusterNodes(Set.of("node-1", "leader-1"))
                 .transport(new PeerlessTransport())
                 .stateMachine(new QraftStateStore())
@@ -117,7 +122,7 @@ class RaftNodeRealStorageRecoveryTest {
                 AppendEntriesRequest.newBuilder()
                         .setTerm(2)
                         .setLeaderId("leader-1")
-                        .setPrevLogIndex(0)
+                        .setPrevLogIndex(1)
                         .setPrevLogTerm(0)
                         .addEntries(dev.mars.qraft.controller.raft.grpc.LogEntry.newBuilder()
                                 .setTerm(2)
@@ -127,7 +132,7 @@ class RaftNodeRealStorageRecoveryTest {
 
         assertTrue(response.getSuccess());
         assertEquals(2, node.getCurrentTerm());
-        assertEquals(1, node.getLastLogIndex());
+        assertEquals(2, node.getLastLogIndex(), "after the bootstrap configuration at index 1");
         assertFalse(node.isFenced());
     }
 
@@ -147,7 +152,8 @@ class RaftNodeRealStorageRecoveryTest {
         await(node.start());
 
         assertTrue(node.isRunning());
-        assertEquals(2, node.getLastApplied(), "the two complete records are recovered and applied");
+        assertEquals(3, node.getLastApplied(),
+                "the bootstrap configuration and the two complete records are recovered and applied");
         assertEquals("one", state.getMetadata("retained-1"));
         assertEquals("two", state.getMetadata("retained-2"));
         assertEquals(null, state.getMetadata("obsolete"), "the torn record is not applied");
@@ -190,7 +196,8 @@ class RaftNodeRealStorageRecoveryTest {
         return RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
-                .clusterNodes(Set.of("node-1"))
+                .serverId(ManualRaftCluster.serverIdOf("node-1"))
+                .clusterNodes(MEMBERS)
                 .transport(new PeerlessTransport())
                 .stateMachine(state)
                 .commandCodec(CODEC)
@@ -258,7 +265,8 @@ class RaftNodeRealStorageRecoveryTest {
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
-                .clusterNodes(Set.of("node-1"))
+                .serverId(ManualRaftCluster.serverIdOf("node-1"))
+                .clusterNodes(MEMBERS)
                 .transport(new PeerlessTransport())
                 .stateMachine(state)
                 .commandCodec(CODEC)
@@ -286,9 +294,10 @@ class RaftNodeRealStorageRecoveryTest {
             wal.open(directory).get(10, TimeUnit.SECONDS);
             wal.updateMetadata(2, Optional.of("node-1")).get(10, TimeUnit.SECONDS);
             wal.appendEntries(List.of(
-                    entry(1, 1, "retained-1", "one"),
-                    entry(2, 1, "retained-2", "two"),
-                    entry(3, 1, "obsolete", "old"))).get(10, TimeUnit.SECONDS);
+                    ManualRaftCluster.bootstrapEntry(MEMBERS),
+                    entry(2, 1, "retained-1", "one"),
+                    entry(3, 1, "retained-2", "two"),
+                    entry(REPLACEMENT_INDEX, 1, "obsolete", "old"))).get(10, TimeUnit.SECONDS);
             wal.sync().get(10, TimeUnit.SECONDS);
         }
     }
@@ -308,7 +317,8 @@ class RaftNodeRealStorageRecoveryTest {
                 RealStorageCrashWriter.class.getName(),
                 directory.toString(),
                 checkpoint.name(),
-                Base64.getEncoder().encodeToString(replacementPayload))
+                Base64.getEncoder().encodeToString(replacementPayload),
+                Long.toString(REPLACEMENT_INDEX))
                 .redirectErrorStream(true)
                 .redirectOutput(outputFile.toFile())
                 .start();

@@ -64,7 +64,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-14
- * @version 1.0
+ * @version 1.1
  */
 @RemediationTest(phase = "6-shutdown", scenarioPrefix = "RAFT-SHUTDOWN")
 class RaftNodeShutdownSequencingTest {
@@ -142,7 +142,8 @@ class RaftNodeShutdownSequencingTest {
         assertEquals(1, storage.closeCount.get(),
                 "one object serving both storage contracts must be closed once");
         assertTrue(storage.closed);
-        assertEquals(List.of(1L, 2L), storage.appendedIndexes);
+        assertEquals(List.of(1L, 2L, 3L), storage.appendedIndexes,
+                "the bootstrap configuration at index 1, then both accepted writes");
     }
 
     @Test
@@ -151,8 +152,11 @@ class RaftNodeShutdownSequencingTest {
         clusterStorage.open(null).join();
         ShutdownTransport silentPeers = new ShutdownTransport(closeEvents);
         silentPeers.holdAppendResponses();
+        Set<String> members = Set.of("leader", "peer-2", "peer-3");
         RaftNode leader = RaftNode.builder().runtime(runtime).nodeId("leader")
-                .clusterNodes(Set.of("leader", "peer-2", "peer-3")).transport(silentPeers)
+                .serverId(ManualRaftCluster.serverIdOf("leader"))
+                .initialConfiguration(ManualRaftCluster.configurationOf(members))
+                .clusterNodes(members).transport(silentPeers)
                 .stateMachine(new QraftStateStore()).commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.durable(clusterStorage, clusterStorage)).snapshotEnabled(false)
                 .electionTimeout(25).heartbeatInterval(10_000).build();
@@ -332,7 +336,8 @@ class RaftNodeShutdownSequencingTest {
         await(stop);
         long nextIndexAtStop = node.getNextIndex("peer-1");
 
-        transport.completeHeldAppend(1);
+        // The command sits at index 2, after the bootstrap configuration; the late answer acknowledges it.
+        transport.completeHeldAppend(2);
         awaitStateLoop(runtime);
 
         assertEquals(RaftNode.State.FOLLOWER, node.getState());
@@ -385,6 +390,8 @@ class RaftNodeShutdownSequencingTest {
         return RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
+                .serverId(ManualRaftCluster.serverIdOf("node-1"))
+                .initialConfiguration(ManualRaftCluster.configurationOf(members))
                 .clusterNodes(members)
                 .transport(transport)
                 .stateMachine(new QraftStateStore())
@@ -450,9 +457,11 @@ class RaftNodeShutdownSequencingTest {
             stopCount.incrementAndGet();
             if (stopFailure != null) throw stopFailure;
         }
+        // Each simulated peer answers as the server configured under its name.
         @Override public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
             return Future.succeededFuture(VoteResponse.newBuilder()
-                    .setTerm(request.getTerm()).setVoteGranted(true).build());
+                    .setTerm(request.getTerm()).setVoteGranted(true)
+                    .setVoterServerId(ManualRaftCluster.serverIdOf(targetId)).build());
         }
         @Override public Future<AppendEntriesResponse> sendAppendEntries(
                 String targetId, AppendEntriesRequest request) {
@@ -461,15 +470,18 @@ class RaftNodeShutdownSequencingTest {
                         dev.mars.qraft.controller.runtime.Promise.promise();
                 heldAppends.add(heldAppend);
                 appendHeld.complete(null);
-                return heldAppend.future();
+                return heldAppend.future().map(response -> response.toBuilder()
+                        .setFollowerServerId(ManualRaftCluster.serverIdOf(targetId)).build());
             }
             return Future.succeededFuture(AppendEntriesResponse.newBuilder()
-                    .setTerm(request.getTerm()).setSuccess(true).build());
+                    .setTerm(request.getTerm()).setSuccess(true)
+                    .setFollowerServerId(ManualRaftCluster.serverIdOf(targetId)).build());
         }
         @Override public Future<InstallSnapshotResponse> sendInstallSnapshot(
                 String targetId, InstallSnapshotRequest request) {
             return Future.succeededFuture(InstallSnapshotResponse.newBuilder()
-                    .setTerm(request.getTerm()).setSuccess(true).build());
+                    .setTerm(request.getTerm()).setSuccess(true)
+                    .setFollowerServerId(ManualRaftCluster.serverIdOf(targetId)).build());
         }
     }
 

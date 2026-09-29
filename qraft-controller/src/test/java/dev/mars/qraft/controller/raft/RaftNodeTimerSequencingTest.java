@@ -60,10 +60,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-14
- * @version 1.0
+ * @version 1.1
  */
 @RemediationTest(phase = "5", scenarioPrefix = "RAFT-TIMER")
 class RaftNodeTimerSequencingTest {
+    private static final Set<String> MEMBERS = Set.of("node-1", "peer-1");
+
     private JavaRuntime runtime;
     private ManualTimerScheduler timers;
     private RaftNode node;
@@ -84,13 +86,14 @@ class RaftNodeTimerSequencingTest {
         storage.open(null).join();
         storage.blockNextMetadataUpdate();
         node = newNode(storage, new AutoTransport(false),
-                Set.of("node-1", "peer-1"), 200, 10_000, false, 60_000);
+                MEMBERS, 200, 10_000, false, 60_000);
         await(node.start());
 
         Future<VoteResponse> vote = node.handleVoteRequest(VoteRequest.newBuilder()
                 .setTerm(1)
                 .setCandidateId("peer-1")
-                .setLastLogIndex(0)
+                .setCandidateServerId(ManualRaftCluster.serverIdOf("peer-1"))
+                .setLastLogIndex(1)
                 .setLastLogTerm(0)
                 .build());
         storage.awaitBlockedMetadataUpdate();
@@ -114,7 +117,7 @@ class RaftNodeTimerSequencingTest {
         storage.open(null).join();
         AutoTransport transport = new AutoTransport(true);
         node = newNode(storage, transport,
-                Set.of("node-1", "peer-1"), 25, 200, false, 60_000);
+                MEMBERS, 25, 200, false, 60_000);
         await(node.start());
         electLeader();
         transport.resetAppendCount();
@@ -184,7 +187,9 @@ class RaftNodeTimerSequencingTest {
         timers = new ManualTimerScheduler(runtime);
         GatedTimerStorage storage = new GatedTimerStorage();
         storage.open(null).join();
-        node = RaftNode.builder().runtime(runtime).nodeId("node-1").clusterNodes(Set.of("node-1", "peer-1"))
+        node = RaftNode.builder().runtime(runtime).nodeId("node-1").clusterNodes(MEMBERS)
+                .serverId(ManualRaftCluster.serverIdOf("node-1"))
+                .initialConfiguration(ManualRaftCluster.configurationOf(MEMBERS))
                 .transport(new AutoTransport(false)).stateMachine(new QraftStateStore())
                 .commandCodec(new ProtobufRaftCommandCodec()).mode(RaftNodeMode.durable(storage, storage))
                 .snapshotEnabled(false).electionTimeout(10_000).heartbeatInterval(10_000)
@@ -192,7 +197,8 @@ class RaftNodeTimerSequencingTest {
         await(node.start());
         storage.blockNextMetadataUpdate();
         Future<VoteResponse> vote = node.handleVoteRequest(VoteRequest.newBuilder()
-                .setTerm(1).setCandidateId("peer-1").setLastLogIndex(0).setLastLogTerm(0).build());
+                .setTerm(1).setCandidateId("peer-1").setCandidateServerId(ManualRaftCluster.serverIdOf("peer-1"))
+                .setLastLogIndex(1).setLastLogTerm(0).build());
         storage.awaitBlockedMetadataUpdate();
 
         Future<Void> stop = node.stop();
@@ -215,7 +221,9 @@ class RaftNodeTimerSequencingTest {
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
-                .clusterNodes(Set.of("node-1", "peer-1"))
+                .serverId(ManualRaftCluster.serverIdOf("node-1"))
+                .initialConfiguration(ManualRaftCluster.configurationOf(MEMBERS))
+                .clusterNodes(MEMBERS)
                 .transport(new AutoTransport(false))
                 .stateMachine(new QraftStateStore())
                 .commandCodec(new ProtobufRaftCommandCodec())
@@ -229,8 +237,8 @@ class RaftNodeTimerSequencingTest {
         await(node.start());
 
         Future<VoteResponse> vote = node.handleVoteRequest(VoteRequest.newBuilder()
-                .setTerm(1).setCandidateId("peer-1")
-                .setLastLogIndex(0).setLastLogTerm(0).build());
+                .setTerm(1).setCandidateId("peer-1").setCandidateServerId(ManualRaftCluster.serverIdOf("peer-1"))
+                .setLastLogIndex(1).setLastLogTerm(0).build());
         storage.awaitBlockedMetadataUpdate();
 
         timers.fireNextOneShot();
@@ -252,6 +260,8 @@ class RaftNodeTimerSequencingTest {
         return RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
+                .serverId(ManualRaftCluster.serverIdOf("node-1"))
+                .initialConfiguration(ManualRaftCluster.configurationOf(members))
                 .clusterNodes(members)
                 .transport(transport)
                 .stateMachine(new QraftStateStore())
@@ -293,7 +303,8 @@ class RaftNodeTimerSequencingTest {
         public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
             if (!grantVotes) return Promise.<VoteResponse>promise().future();
             return Future.succeededFuture(VoteResponse.newBuilder()
-                    .setTerm(request.getTerm()).setVoteGranted(true).build());
+                    .setTerm(request.getTerm()).setVoteGranted(true)
+                    .setVoterServerId(ManualRaftCluster.serverIdOf(targetId)).build());
         }
 
         @Override
@@ -304,7 +315,8 @@ class RaftNodeTimerSequencingTest {
                     ? request.getPrevLogIndex()
                     : request.getEntries(request.getEntriesCount() - 1).getIndex();
             return Future.succeededFuture(AppendEntriesResponse.newBuilder()
-                    .setTerm(request.getTerm()).setSuccess(true).setMatchIndex(matchIndex).build());
+                    .setTerm(request.getTerm()).setSuccess(true).setMatchIndex(matchIndex)
+                    .setFollowerServerId(ManualRaftCluster.serverIdOf(targetId)).build());
         }
 
         @Override
@@ -312,7 +324,8 @@ class RaftNodeTimerSequencingTest {
                 String targetId, InstallSnapshotRequest request) {
             return Future.succeededFuture(InstallSnapshotResponse.newBuilder()
                     .setTerm(request.getTerm()).setSuccess(true)
-                    .setNextChunkIndex(request.getTotalChunks()).build());
+                    .setNextChunkIndex(request.getTotalChunks())
+                    .setFollowerServerId(ManualRaftCluster.serverIdOf(targetId)).build());
         }
     }
 

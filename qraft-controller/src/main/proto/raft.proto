@@ -10,6 +10,19 @@ service RaftService {
   rpc RequestVote (VoteRequest) returns (VoteResponse) {}
   rpc AppendEntries (AppendEntriesRequest) returns (AppendEntriesResponse) {}
   rpc InstallSnapshot (InstallSnapshotRequest) returns (InstallSnapshotResponse) {}
+  rpc Describe (DescribeRequest) returns (DescribeResponse) {}
+}
+
+// Asks a server for the facts another server needs before bootstrapping a new cluster.
+message DescribeRequest {
+}
+
+message DescribeResponse {
+  string server_id = 1;                // The server's durable server ID
+  string name = 2;                     // Its configured name
+  string address = 3;                  // Its Raft address, as it lists itself
+  repeated string listed_servers = 4;  // Every server it lists, as "name=address", sorted
+  bool has_state = 5;                  // Whether it holds Raft state, and so belongs to a cluster
 }
 
 message VoteRequest {

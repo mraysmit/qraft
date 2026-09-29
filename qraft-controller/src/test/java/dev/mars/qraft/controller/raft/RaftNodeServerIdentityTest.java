@@ -61,11 +61,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 class RaftNodeServerIdentityTest {
-    private static final String LEADER_ID = "11111111-1111-1111-1111-111111111111";
+    private static final String LEADER_ID = ManualRaftCluster.serverIdOf("node1");
     private static final Map<String, String> SERVER_IDS = Map.of(
             "node1", LEADER_ID,
-            "node2", "22222222-2222-2222-2222-222222222222",
-            "node3", "33333333-3333-3333-3333-333333333333");
+            "node2", ManualRaftCluster.serverIdOf("node2"),
+            "node3", ManualRaftCluster.serverIdOf("node3"));
     private static final long SNAPSHOT_THRESHOLD = 5;
     private static final long SNAPSHOT_CHECK_MS = 300;
 
@@ -91,8 +91,9 @@ class RaftNodeServerIdentityTest {
 
     @Test
     void aNodeReportsTheServerIdItWasBuiltWith() throws Exception {
-        RaftNode node = cluster.add(cluster.builder("node1", Set.of("node1"), new InMemoryTransportSimulator("node1"),
-                new QraftStateStore(), RaftNodeMode.volatileMode()).serverId(LEADER_ID));
+        RaftNode node = cluster.add(cluster.unconfiguredBuilder("node1", Set.of("node1"),
+                new InMemoryTransportSimulator("node1"), new QraftStateStore(), RaftNodeMode.volatileMode())
+                .serverId(LEADER_ID));
         await(node.start());
 
         assertEquals(LEADER_ID, node.getServerId());
@@ -101,10 +102,10 @@ class RaftNodeServerIdentityTest {
 
     @Test
     void aNodeBuiltWithoutAServerIdGetsItsOwnUuid() {
-        RaftNode first = cluster.add(cluster.builder("node1", Set.of("node1"), new InMemoryTransportSimulator("node1"),
-                new QraftStateStore(), RaftNodeMode.volatileMode()));
-        RaftNode second = cluster.add(cluster.builder("node2", Set.of("node2"), new InMemoryTransportSimulator("node2"),
-                new QraftStateStore(), RaftNodeMode.volatileMode()));
+        RaftNode first = cluster.add(cluster.unconfiguredBuilder("node1", Set.of("node1"),
+                new InMemoryTransportSimulator("node1"), new QraftStateStore(), RaftNodeMode.volatileMode()));
+        RaftNode second = cluster.add(cluster.unconfiguredBuilder("node2", Set.of("node2"),
+                new InMemoryTransportSimulator("node2"), new QraftStateStore(), RaftNodeMode.volatileMode()));
 
         assertEquals(first.getServerId(), UUID.fromString(first.getServerId()).toString());
         assertNotEquals(first.getServerId(), second.getServerId());
@@ -151,8 +152,7 @@ class RaftNodeServerIdentityTest {
     void refusalsAlsoNameTheRespondersServerId() throws Exception {
         String followerId = SERVER_IDS.get("node2");
         RaftNode follower = cluster.add(cluster.builder("node2", Set.of("node1", "node2"),
-                new InMemoryTransportSimulator("node2"), new QraftStateStore(), RaftNodeMode.volatileMode())
-                .serverId(followerId));
+                new InMemoryTransportSimulator("node2"), new QraftStateStore(), RaftNodeMode.volatileMode()));
         await(follower.start());
         assertTrue(await(follower.handleAppendEntriesRequest(append(2, 0))).getSuccess(), "node2 follows in term 2");
 
@@ -184,7 +184,6 @@ class RaftNodeServerIdentityTest {
         storage.open(null).get(10, TimeUnit.SECONDS);
         return cluster.add(cluster.builder(nodeId, members, transport, new QraftStateStore(),
                         RaftNodeMode.durable(storage, storage))
-                .serverId(SERVER_IDS.get(nodeId))
                 .snapshotEnabled(true).snapshotThreshold(SNAPSHOT_THRESHOLD).snapshotCheckInterval(SNAPSHOT_CHECK_MS));
     }
 

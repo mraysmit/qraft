@@ -119,14 +119,15 @@ class InstallSnapshotTest {
     void aFollowerRefusesASnapshotFromAStaleTerm() throws Exception {
         TestRaftStorage storage = openStorage();
         QraftStateStore store = new QraftStateStore();
-        RaftNode follower = cluster.add(cluster.builder("node1", Set.of("node1", "leader"),
+        Set<String> members = Set.of("node1", "leader");
+        RaftNode follower = cluster.add(cluster.builder("node1", members,
                 new InMemoryTransportSimulator("node1"), store, RaftNodeMode.durable(storage, storage))
                 .snapshotEnabled(false));
         await(follower.start());
         assertTrue(await(follower.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
                 .setTerm(2).setLeaderId("leader").setPrevLogIndex(0).setPrevLogTerm(0).setLeaderCommit(0).build()))
                 .getSuccess(), "node1 follows leader in term 2");
-        InstallSnapshotRequest fromTerm1 = validSnapshot("leader", 1);
+        InstallSnapshotRequest fromTerm1 = validSnapshot("leader", 1, members);
 
         InstallSnapshotResponse response = await(follower.handleInstallSnapshot(fromTerm1));
 
@@ -181,7 +182,8 @@ class InstallSnapshotTest {
                 .snapshotEnabled(false));
         await(node.start());
 
-        InstallSnapshotResponse response = await(node.handleInstallSnapshot(validSnapshot("some-leader", 1)));
+        InstallSnapshotResponse response = await(node.handleInstallSnapshot(
+                validSnapshot("some-leader", 1, Set.of("follower-persist"))));
 
         assertTrue(response.getSuccess(), "the snapshot is installed");
         Optional<SnapshotStore.SnapshotData> saved = storage.loadLatest().get(10, TimeUnit.SECONDS);
@@ -199,14 +201,18 @@ class InstallSnapshotTest {
 
     private record Cluster(RaftNode leader, RaftNode node3, QraftStateStore store3) { }
 
-    /** A complete single-chunk snapshot through index 10 of term 1, holding snap-key-1 and snap-key-2. */
-    private static InstallSnapshotRequest validSnapshot(String leaderId, long term) {
+    /**
+     * A complete single-chunk snapshot through index 10 of term 1, holding snap-key-1 and snap-key-2, and
+     * recording the configuration of {@code members}.
+     */
+    private static InstallSnapshotRequest validSnapshot(String leaderId, long term, Set<String> members) {
         QraftStateStore leaderState = new QraftStateStore();
         leaderState.apply(distributedPut("snap-key-1", "snap-val-1"));
         leaderState.apply(distributedPut("snap-key-2", "snap-val-2"));
         return InstallSnapshotRequest.newBuilder()
                 .setTerm(term).setLeaderId(leaderId).setLastIncludedIndex(10).setLastIncludedTerm(1)
-                .setChunkIndex(0).setTotalChunks(1).setData(ByteString.copyFrom(leaderState.takeSnapshot()))
+                .setChunkIndex(0).setTotalChunks(1)
+                .setData(ByteString.copyFrom(ManualRaftCluster.snapshotOf(members, leaderState.takeSnapshot())))
                 .setDone(true).build();
     }
 
@@ -228,7 +234,8 @@ class InstallSnapshotTest {
         cluster.timers(node1).firePeriodic(SNAPSHOT_CHECK_MS);
 
         awaitTrue(() -> node1.getSnapshotLastIndex() >= SNAPSHOT_THRESHOLD, "the leader compacts its log");
-        assertEquals(0, node3.getLastLogIndex(), "node3 was cut off throughout");
+        assertEquals(1, node3.getLastLogIndex(),
+                "node3 was cut off throughout: it holds only its bootstrap configuration entry");
         return new Cluster(node1, node3, store3);
     }
 

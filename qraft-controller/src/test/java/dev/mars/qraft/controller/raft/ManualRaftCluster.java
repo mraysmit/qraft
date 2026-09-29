@@ -18,13 +18,17 @@ package dev.mars.qraft.controller.raft;
 
 import dev.mars.qraft.controller.runtime.Future;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
+import dev.mars.qraft.controller.state.ConfigurationCommand;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
+import dev.mars.raftlog.storage.RaftStorage.LogEntryData;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
@@ -44,7 +48,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-28
- * @version 1.0
+ * @version 1.1
  */
 public final class ManualRaftCluster implements AutoCloseable {
     public static final long HEARTBEAT_MS = 200;
@@ -60,12 +64,50 @@ public final class ManualRaftCluster implements AutoCloseable {
         this.runtime = runtime;
     }
 
-    /** A builder on this cluster's runtime and timing, with the protobuf codec; finish it with {@link #add}. */
+    /**
+     * A builder on this cluster's runtime and timing, with the protobuf codec, for a bootstrapped member of
+     * {@code members}: its server ID is {@link #serverIdOf} its name, and a node with no Raft state bootstraps
+     * with {@link #configurationOf} the members, as every real member of a new cluster does. Finish it with
+     * {@link #add}.
+     */
     public RaftNode.Builder builder(String nodeId, Set<String> members, RaftTransport transport, QraftStateStore store,
                              RaftNodeMode mode) {
+        return unconfiguredBuilder(nodeId, members, transport, store, mode)
+                .serverId(serverIdOf(nodeId)).initialConfiguration(configurationOf(members));
+    }
+
+    /**
+     * As {@link #builder}, but with a random server ID and no initial configuration, for a test that sets its
+     * own or that needs a node with none; a sole member still bootstraps itself.
+     */
+    public RaftNode.Builder unconfiguredBuilder(String nodeId, Set<String> members, RaftTransport transport,
+                                               QraftStateStore store, RaftNodeMode mode) {
         return RaftNode.builder().runtime(runtime).nodeId(nodeId).clusterNodes(members).transport(transport)
                 .stateMachine(store).commandCodec(new ProtobufRaftCommandCodec()).mode(mode)
                 .electionTimeout(ELECTION_TIMEOUT_MS).heartbeatInterval(HEARTBEAT_MS);
+    }
+
+    /** The server ID {@link #builder} gives the member named {@code name}; a simulated peer answers with it. */
+    public static String serverIdOf(String name) {
+        return UUID.nameUUIDFromBytes(("qraft-test:" + name).getBytes(StandardCharsets.UTF_8)).toString();
+    }
+
+    /** Every member a voter, each addressed by its name, with the server IDs {@link #builder} gives them. */
+    public static RaftConfiguration configurationOf(Set<String> members) {
+        return new RaftConfiguration(members.stream()
+                .map(name -> new RaftConfiguration.Server(serverIdOf(name), name, name, true))
+                .toList());
+    }
+
+    /** The bootstrap entry at index 1 in term 0 that a member of {@code members} holds, for a stored log. */
+    public static LogEntryData bootstrapEntry(Set<String> members) {
+        return new LogEntryData(1, 0, new ProtobufRaftCommandCodec().serialize(
+                new ConfigurationCommand(configurationOf(members))));
+    }
+
+    /** A state machine snapshot as a node stores and sends it, recording {@code members}' configuration. */
+    public static byte[] snapshotOf(Set<String> members, byte[] stateMachineSnapshot) {
+        return SnapshotEnvelope.wrap(configurationOf(members), stateMachineSnapshot);
     }
 
     /** Builds the node on manual timers and tracks it, so {@link #close()} stops it. */

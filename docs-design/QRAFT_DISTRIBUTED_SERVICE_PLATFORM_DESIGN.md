@@ -195,11 +195,48 @@ Server mode currently owns:
   worth of heartbeat rounds. Counting applied rounds rather than wall-clock time
   means a delayed state loop cannot cause a false step-down, and a single-node
   cluster never steps down.
-- Raft membership is currently fixed at startup. Each server reads the voters
-  from `server.raft.nodes` on every start, and votes and replication are
-  addressed by configured name. So membership cannot change while the cluster
-  runs. A server whose storage is lost would rejoin as the voter it used to
-  be, which can lose committed data.
+- **Raft membership is recorded in the replicated log**, as in Consul.
+  - **The configuration.** Each voter and non-voter is listed with its server
+    ID, name and address. Each server uses the latest configuration in its log,
+    committed or not. A snapshot records the configuration it covers, in an
+    envelope around the state machine's own snapshot. Truncating an
+    uncommitted configuration reverts to the one before.
+  - **Counting.** Elections, commits and check-quorum count only voters, by
+    server ID. A reply counts, and is listened to at all (its term included),
+    only when the server ID it names is the one the configuration records for
+    that peer. A server that lost its storage comes back with a new server ID,
+    so it cannot vote or be counted for the server it replaced.
+  - **Campaigning.** A server that is not a voter in its configuration never
+    campaigns.
+  - **Changes.** A leader changes the configuration one server at a time. It
+    may start a change only after it has committed an entry in its current
+    term, and only when no other change is uncommitted. Any configuration
+    entry, however it is submitted, meets these rules.
+  - **Log invariants.** Index 1 always holds the bootstrap configuration, in
+    term 0. A follower refuses an append that would replace a committed
+    entry.
+  - **No upgrade.** A data directory that holds Raft state but no
+    configuration, which is data from before configurations were recorded,
+    refuses to start.
+  - Steps 3 to 8 of
+    [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md)
+    add promotion of non-voters, operator commands to add and remove servers,
+    automatic removal of failed servers, protection from disruptive servers,
+    and recovery from lost quorum.
+- **Bootstrapping.** A server with no Raft state asks every server in
+  `server.raft.nodes` to describe itself over the Raft port. It then decides:
+  - **Bootstrap.** Every listed server answers, none holds Raft state, and all
+    list exactly the same servers. It writes the configuration at index 1, in
+    term 0, treated as committed. The configuration is built from each
+    server's own answer, so every server that bootstraps writes the identical
+    entry.
+  - **Wait for replication.** A listed server already holds state. A leader
+    of that cluster will replicate the configuration to it.
+  - **Retry.** Some listed server has not answered; it tries again every
+    second until it holds a configuration.
+  - **Never bootstrap.** The lists differ.
+
+  A sole member bootstraps itself.
 - Each server has a durable **server ID**, a UUID generated at its first start
   and kept in `server-id` in the Raft data directory.
   - A restart on the same storage keeps the ID. A wiped data directory gives a
@@ -209,18 +246,6 @@ Server mode currently owns:
     replaced.
   - Every Raft request and response names its sender's server ID, and
     `/raft/status` and the startup log report it.
-  - Nothing counts votes or acknowledgements by it yet. That is the next step
-    of the membership plan, and is what makes a wiped server unable to pass
-    for its old self.
-
-  Planned, decided 2026-09-29: Consul's membership model.
-  - `server.raft.nodes` forms the cluster once, with an expected server count.
-  - From then on, membership lives in the replicated log.
-  - Each server is identified by its server ID.
-  - New servers join as non-voters and are promoted once caught up.
-  - Failed servers are removed automatically, within quorum limits.
-
-  See [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md).
 - Durable Raft storage.
 - The replicated key/value, service-catalog, and health-check state machine.
 - Internal Raft gRPC transport.
@@ -1092,7 +1117,9 @@ every other WAL operation reach the external implementation.
 
 The snapshot store may share a node data directory with the WAL, but it is a
 separate ownership and durability contract. The same directory holds the
-server's `server-id` (section 4.2). It is written atomically and made durable
+server's `server-id` (section 4.2). Snapshot data is an envelope: the cluster
+configuration at the snapshot's last included index, then the state machine's
+snapshot. It is restored with the snapshot and sent with an install. It is written atomically and made durable
 once, at the server's first start, while the WAL holds the directory's lock. Snapshot data, last included index,
 last included term, format version, and checksum are published atomically as one
 recoverable unit.
@@ -1432,10 +1459,11 @@ Listening ports accept 1 to 65535, or 0 to bind any free port:
 - `server.raft.port` may be 0 only on a cluster's sole member, because peers dial
   the configured Raft address.
 
-`server.raft.nodes` is currently the complete, fixed list of Raft voters, and
-every server must be given the same list. Under the planned membership model
-(section 4.2) it becomes the servers to contact when forming or joining a
-cluster, used together with an expected server count.
+`server.raft.nodes` lists the servers a server contacts when it forms or joins
+a cluster (section 4.2). A new cluster forms only when every server lists
+exactly the same servers, with the same addresses. Once a server holds Raft
+state, its membership comes from the replicated log, and this setting no
+longer changes it.
 - A server's HTTP, Raft, and API gRPC ports must differ, except that more than
   one of them may be 0.
 - `server.telemetry.prometheusPort` must be a fixed port.

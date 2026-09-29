@@ -17,6 +17,7 @@
 package dev.mars.qraft.controller.raft;
 
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
+import dev.mars.qraft.controller.raft.grpc.DescribeResponse;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
@@ -29,6 +30,7 @@ import dev.mars.qraft.raft.api.SnapshotStore;
 import dev.mars.qraft.raft.api.SnapshotStore.PublicationOutcome;
 import dev.mars.qraft.raft.api.SnapshotStore.SnapshotData;
 import dev.mars.qraft.raft.api.SnapshotStore.SnapshotPublicationException;
+import dev.mars.qraft.controller.state.ConfigurationCommand;
 import dev.mars.qraft.controller.state.RaftCommandResult;
 import dev.mars.qraft.controller.state.RaftCommand;
 import dev.mars.qraft.raft.api.CommandCodec;
@@ -52,8 +54,10 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -94,6 +98,10 @@ public class RaftNode {
     private final String nodeId;
     /** Durable identity from the data directory; every Raft message this node sends names it. */
     private final String serverId;
+    /** The configuration to bootstrap with when there is no Raft state; null if none was given. */
+    private final RaftConfiguration initialConfiguration;
+    /** The listed servers' names and Raft addresses, in name order, as this server's configuration gives them. */
+    private final Map<String, String> listedServers;
     private final Set<String> clusterNodes;
     private final RaftTransport transport;
     private final RaftLogApplicator stateMachine;
@@ -106,6 +114,14 @@ public class RaftNode {
     private volatile long currentTerm = 0;
     private String votedFor = null;
     private final List<LogEntry> log = new ArrayList<>();
+
+    // ========== CONFIGURATION STATE ==========
+    /** Configuration entries in the in-memory log, by index. The latest, committed or not, is in force. */
+    private final NavigableMap<Long, RaftConfiguration> logConfigurations = new TreeMap<>();
+    /** The configuration at the snapshot boundary, from the snapshot's envelope; null before any snapshot. */
+    private RaftConfiguration snapshotConfiguration;
+    /** The configuration in force, published for readers off the state loop; null until there is one. */
+    private volatile RaftConfiguration configuration;
 
     // ========== VOLATILE STATE ==========
     private volatile State state = State.FOLLOWER;
@@ -252,6 +268,8 @@ public class RaftNode {
 
         // Optional with defaults
         private String serverId;               // null = a new random UUID
+        private RaftConfiguration initialConfiguration; // null = none, unless this node is the sole member
+        private Map<String, String> addresses = Map.of(); // listed servers' Raft addresses; default: the name
         private long electionTimeoutMs = 5000;
         private long heartbeatIntervalMs = 1000;
         private Boolean snapshotEnabled;       // null = derive from mode
@@ -277,6 +295,24 @@ public class RaftNode {
         public Builder serverId(String serverId) {
             if (serverId == null || serverId.isBlank()) throw new IllegalArgumentException("serverId must not be blank");
             this.serverId = serverId;
+            return this;
+        }
+
+        /**
+         * The configuration a node with no Raft state bootstraps with: it is written at index 1 in term 0 and
+         * treated as committed. It must include this server. A sole member bootstraps itself without one.
+         */
+        public Builder initialConfiguration(RaftConfiguration initialConfiguration) {
+            this.initialConfiguration = requireNonNull(initialConfiguration, "initialConfiguration");
+            return this;
+        }
+
+        /**
+         * The Raft addresses of the listed servers ({@link #clusterNodes}), as this server's configuration gives
+         * them. It reports them to servers bootstrapping a new cluster (default: each server's name).
+         */
+        public Builder addresses(Map<String, String> addresses) {
+            this.addresses = Map.copyOf(requireNonNull(addresses, "addresses"));
             return this;
         }
 
@@ -343,8 +379,14 @@ public class RaftNode {
             if (mode == null) throw new IllegalStateException("mode is required");
 
             boolean snap = (snapshotEnabled != null) ? snapshotEnabled : mode.isDurable();
-            return new RaftNode(runtime, nodeId,
-                    serverId != null ? serverId : java.util.UUID.randomUUID().toString(),
+            String resolvedServerId = serverId != null ? serverId : java.util.UUID.randomUUID().toString();
+            if (initialConfiguration != null && initialConfiguration.server(resolvedServerId).isEmpty()) {
+                throw new IllegalStateException(
+                        "initialConfiguration must include this server, " + resolvedServerId);
+            }
+            Map<String, String> listed = new TreeMap<>();
+            for (String name : clusterNodes) listed.put(name, addresses.getOrDefault(name, name));
+            return new RaftNode(runtime, nodeId, resolvedServerId, initialConfiguration, listed,
                     clusterNodes, transport, stateMachine,
                     commandCodec, mode, electionTimeoutMs, heartbeatIntervalMs, snap,
                     snapshotThreshold, snapshotCheckIntervalMs, logHardLimit, timerScheduler,
@@ -354,7 +396,8 @@ public class RaftNode {
 
     // ========== CONSTRUCTOR (private) ==========
 
-    private RaftNode(JavaRuntime runtime, String nodeId, String serverId, Set<String> clusterNodes,
+    private RaftNode(JavaRuntime runtime, String nodeId, String serverId,
+            RaftConfiguration initialConfiguration, Map<String, String> listedServers, Set<String> clusterNodes,
             RaftTransport transport,
             RaftLogApplicator stateMachine, CommandCodec<RaftCommand> commandCodec,
             RaftNodeMode mode, long electionTimeoutMs, long heartbeatIntervalMs,
@@ -364,6 +407,8 @@ public class RaftNode {
         this.runtime = runtime;
         this.nodeId = nodeId;
         this.serverId = serverId;
+        this.initialConfiguration = initialConfiguration;
+        this.listedServers = listedServers;
         this.clusterNodes = new HashSet<>(clusterNodes);
         this.transport = transport;
         this.stateMachine = stateMachine;
@@ -493,7 +538,7 @@ public class RaftNode {
             MDC.put("raftRole", "FOLLOWER");
             MDC.put("raftTerm", String.valueOf(currentTerm));
             transport.setRaftNode(this);
-            recoverFromStorage().onComplete(result ->
+            composeOnStateLoop(recoverFromStorage(), ignored -> establishConfiguration()).onComplete(result ->
                     runOnContext(v -> finishStart(result, completion)));
         } catch (Throwable error) {
             finishOwnedAsyncOperation();
@@ -533,6 +578,96 @@ public class RaftNode {
         }
     }
 
+    /**
+     * After recovery: a node with Raft state must have a configuration, since data from before configurations
+     * were recorded is not upgraded; a node with none bootstraps with its initial configuration, or as the sole
+     * member of a cluster of one, or waits for a leader to replicate one.
+     */
+    private Future<Void> establishConfiguration() {
+        if (hasRaftState()) {
+            return configuration != null ? Future.succeededFuture() : Future.failedFuture(new IllegalStateException(
+                    "Node " + nodeId + " holds Raft state but no cluster configuration: the data predates "
+                            + "configurations in the log and is not upgraded; start it on an empty data directory"));
+        }
+        RaftConfiguration initial = initialConfiguration != null ? initialConfiguration
+                : clusterNodes.equals(Set.of(nodeId))
+                        ? new RaftConfiguration(List.of(
+                                new RaftConfiguration.Server(serverId, nodeId, listedServers.get(nodeId), true)))
+                        : null;
+        return initial == null ? Future.succeededFuture() : writeBootstrapEntry(initial);
+    }
+
+    /**
+     * Writes {@code initial} at index 1 in term 0 and treats it as committed. Every server that holds an entry
+     * at index 1 wrote this same entry or received it from a leader, and a server with no configuration cannot
+     * lead, so no other entry can ever take index 1.
+     */
+    private Future<Void> writeBootstrapEntry(RaftConfiguration initial) {
+        ConfigurationCommand command = new ConfigurationCommand(initial);
+        LogEntry entry = new LogEntry(0, 1, command, serialize(command).toByteArray());
+        return transitionSequencer.submit(
+                "bootstrap-configuration",
+                RaftTransitionSequencer.FailurePolicy.FENCE,
+                () -> hasRaftState()
+                        // Checked in the transition, so an append that arrived first cannot be overwritten.
+                        ? Future.failedFuture(new IllegalStateException(
+                                "Node " + nodeId + " already holds Raft state and cannot be bootstrapped"))
+                        : persistLogEntry(entry).map(ignored -> entry),
+                persisted -> {
+                    log.add(persisted);
+                    recordIfConfiguration(persisted);
+                    commitIndex = 1;
+                    applyLog();
+                    if (running) resetElectionTimer();
+                    logger.info("Bootstrapped with configuration {}", initial);
+                    return null;
+                });
+    }
+
+    /**
+     * Bootstraps a running node that holds no Raft state with {@code configuration}, as the first entry of a new
+     * cluster's log. Fails if the node already holds state, for instance because a leader replicated to it first.
+     */
+    public Future<Void> bootstrap(RaftConfiguration configuration) {
+        requireNonNull(configuration, "configuration");
+        if (configuration.server(serverId).isEmpty()) {
+            return Future.failedFuture(new IllegalArgumentException(
+                    "The configuration must include this server, " + serverId));
+        }
+        return writeBootstrapEntry(configuration);
+    }
+
+    private boolean hasRaftState() {
+        return lastLogIndex() > 0 || snapshotLastIndex > 0;
+    }
+
+    /**
+     * What a server bootstrapping a new cluster needs to know of this one, read on the state loop: its server ID,
+     * name and address, the servers it lists, and whether it holds Raft state.
+     */
+    public Future<DescribeResponse> describe() {
+        Promise<DescribeResponse> description = Promise.promise();
+        try {
+            runtime.runOnContext(ignored -> description.tryComplete(DescribeResponse.newBuilder()
+                    .setServerId(serverId)
+                    .setName(nodeId)
+                    .setAddress(listedServers.get(nodeId))
+                    .addAllListedServers(listedServers.entrySet().stream()
+                            .map(listed -> listed.getKey() + "=" + listed.getValue()).toList())
+                    .setHasState(hasRaftState())
+                    .build()));
+        } catch (java.util.concurrent.RejectedExecutionException stopped) {
+            description.tryFail(stopped);
+        }
+        return description.future();
+    }
+
+    /** Whether index 1 holds a bootstrap configuration: a configuration entry written in term 0. */
+    private boolean holdsBootstrapEntry() {
+        return hasLogEntry(1) && log.get(toArrayIndex(1)).getTerm() == 0
+                && log.get(toArrayIndex(1)).getCommand() instanceof ConfigurationCommand;
+    }
+
     private void rollbackFailedStart(Promise<Void> completion, Throwable startupFailure) {
         stop().onComplete(rollback -> {
             Throwable combined = combineFailures(startupFailure, rollback.cause());
@@ -567,8 +702,12 @@ public class RaftNode {
                     logger.info("Restoring from snapshot: lastIncludedIndex={}, lastIncludedTerm={}",
                             snapshot.lastIncludedIndex(), snapshot.lastIncludedTerm());
 
-                    // Restore state machine from snapshot
-                    stateMachine.restoreSnapshot(snapshot.data());
+                    // Restore the state machine and the configuration the snapshot covers
+                    SnapshotEnvelope envelope = SnapshotEnvelope.unwrap(snapshot.data());
+                    stateMachine.restoreSnapshot(envelope.stateMachineSnapshot());
+                    snapshotConfiguration = envelope.configuration();
+                    logConfigurations.clear();
+                    refreshConfiguration();
 
                     // Set snapshot boundaries
                     snapshotLastIndex = snapshot.lastIncludedIndex();
@@ -601,7 +740,9 @@ public class RaftNode {
                                                 + expectedIndex + " but found " + entry.index()));
                             }
                             RaftCommand command = deserialize(ByteString.copyFrom(entry.payload()));
-                            log.add(new LogEntry(entry.term(), entry.index(), command, entry.payload()));
+                            LogEntry replayed = new LogEntry(entry.term(), entry.index(), command, entry.payload());
+                            log.add(replayed);
+                            recordIfConfiguration(replayed);
                             replayedCount++;
                             expectedIndex++;
                         }
@@ -611,7 +752,7 @@ public class RaftNode {
 
                     // Safety first: on multi-node recovery, do not assume replayed
                     // entries were committed before crash. Wait for leaderCommit updates.
-                    if (clusterNodes.size() == 1) {
+                    if (isSoleVoter()) {
                         commitIndex = Math.max(snapshotLastIndex, lastLogIndex());
                         applyLog();
                     } else {
@@ -630,7 +771,9 @@ public class RaftNode {
                                             + " but found " + entry.index()));
                         }
                         RaftCommand command = deserialize(ByteString.copyFrom(entry.payload()));
-                        log.add(new LogEntry(entry.term(), entry.index(), command, entry.payload()));
+                        LogEntry replayed = new LogEntry(entry.term(), entry.index(), command, entry.payload());
+                        log.add(replayed);
+                        recordIfConfiguration(replayed);
                         expectedIndex++;
                     }
                     logger.info("Recovered {} log entries from storage", entries.size());
@@ -694,14 +837,15 @@ public class RaftNode {
 
         // Safety first: only single-node recovery can treat the full local log
         // as committed without additional quorum confirmation.
-        if (clusterNodes.size() == 1) {
+        if (isSoleVoter()) {
             commitIndex = Math.max(snapshotLastIndex, lastLogIndex());
             logger.info("Single-node recovery: restoring committed log up to index {}", commitIndex);
         } else {
-            commitIndex = snapshotLastIndex;
+            // The bootstrap configuration at index 1 is committed by definition (see bootstrap).
+            commitIndex = Math.max(snapshotLastIndex, holdsBootstrapEntry() ? 1 : 0);
             logger.info("Multi-node recovery: deferring log application until leader commit advances");
         }
-        
+
         applyLog();
         return Future.succeededFuture();
     }
@@ -776,10 +920,25 @@ public class RaftNode {
         return promise.future();
     }
 
+    /**
+     * Proposes {@code next} as the cluster's configuration. It takes effect as soon as it is in this leader's
+     * log, and completes once committed. It is refused unless this node leads, has committed an entry in its
+     * current term, has no other change in flight, and {@code next} adds, removes, or alters exactly one server.
+     */
+    public Future<Void> proposeConfiguration(RaftConfiguration next) {
+        return submitCommand(new ConfigurationCommand(requireNonNull(next, "next"))).mapEmpty();
+    }
+
     private Future<LeaderAppendDecision> prepareAndPersistLeaderAppend(RaftCommand command) {
         if (state != State.LEADER) {
             return Future.succeededFuture(LeaderAppendDecision.rejected(
                     new IllegalStateException("Not the leader. Current state: " + state)));
+        }
+        if (command instanceof ConfigurationCommand change) {
+            // Checked here, in the sequenced transition, so every configuration entry meets the rules however
+            // it was submitted.
+            Throwable refusal = configurationChangeRefusal(change.configuration());
+            if (refusal != null) return Future.succeededFuture(LeaderAppendDecision.rejected(refusal));
         }
 
         if (log.size() >= logHardLimit) {
@@ -811,14 +970,44 @@ public class RaftNode {
 
         LogEntry entry = decision.entry();
         log.add(entry);
+        recordIfConfiguration(entry);
         pendingCommands.put(entry.getIndex(), commandPromise);
         logger.info("Command submitted at index {} term {}", entry.getIndex(), entry.getTerm());
 
-        for (String peer : clusterNodes) {
-            if (!peer.equals(nodeId)) sendAppendEntries(peer, false);
-        }
+        for (RaftConfiguration.Server peer : peers()) sendAppendEntries(peer.name(), false);
 
         updateCommitIndex();
+        return null;
+    }
+
+    /**
+     * Why {@code next} may not follow the configuration in force, or null if it may. A single-server change is
+     * safe only if the leader has committed an entry in its own term (Raft thesis 4.1, and Ongaro's correction
+     * of 2015) and no other change is uncommitted.
+     */
+    private Throwable configurationChangeRefusal(RaftConfiguration next) {
+        long committedTerm = commitIndex == snapshotLastIndex ? snapshotLastTerm
+                : hasLogEntry(commitIndex) ? log.get(toArrayIndex(commitIndex)).getTerm() : -1;
+        if (committedTerm != currentTerm) {
+            return new IllegalStateException("A configuration change waits until this leader has committed an "
+                    + "entry in its term " + currentTerm);
+        }
+        if (!logConfigurations.isEmpty() && logConfigurations.lastKey() > commitIndex) {
+            return new IllegalStateException("A configuration change is already in progress at index "
+                    + logConfigurations.lastKey());
+        }
+        Set<RaftConfiguration.Server> before = new HashSet<>(configuration.servers());
+        Set<RaftConfiguration.Server> after = new HashSet<>(next.servers());
+        Set<String> changed = new HashSet<>();
+        before.stream().filter(server -> !after.contains(server)).forEach(server -> changed.add(server.serverId()));
+        after.stream().filter(server -> !before.contains(server)).forEach(server -> changed.add(server.serverId()));
+        if (changed.isEmpty()) {
+            return new IllegalArgumentException("The configuration is unchanged");
+        }
+        if (changed.size() > 1) {
+            return new IllegalArgumentException("A configuration change may add, remove, or alter one server at a "
+                    + "time; this one changes " + changed.size() + ": " + changed);
+        }
         return null;
     }
 
@@ -894,6 +1083,81 @@ public class RaftNode {
 
     public String getNodeId() {
         return nodeId;
+    }
+
+    /** The configuration in force: the latest in the log, committed or not, or else the snapshot's. */
+    public Optional<RaftConfiguration> getConfiguration() {
+        return Optional.ofNullable(configuration);
+    }
+
+    /** The configuration in force at {@code index}: the latest entry at or before it, or else the snapshot's. */
+    private RaftConfiguration configurationAt(long index) {
+        Map.Entry<Long, RaftConfiguration> entry = logConfigurations.floorEntry(index);
+        return entry != null ? entry.getValue() : snapshotConfiguration;
+    }
+
+    /** The configured servers other than this one: every server a leader replicates to. */
+    private List<RaftConfiguration.Server> peers() {
+        RaftConfiguration current = configuration;
+        if (current == null) return List.of();
+        return current.servers().stream().filter(server -> !server.serverId().equals(serverId)).toList();
+    }
+
+    private boolean isVoter() {
+        RaftConfiguration current = configuration;
+        return current != null && current.isVoter(serverId);
+    }
+
+    private boolean isSoleVoter() {
+        RaftConfiguration current = configuration;
+        return current != null && current.voterIds().equals(Set.of(serverId));
+    }
+
+    /**
+     * Whether a response from the peer named {@code peerName} came from the server configured under that name.
+     * A server that lost its storage answers with a new server ID, so it is neither counted nor listened to.
+     */
+    private boolean fromConfiguredServer(String peerName, String senderServerId) {
+        RaftConfiguration current = configuration;
+        return current != null && current.serverNamed(peerName)
+                .map(server -> server.serverId().equals(senderServerId)).orElse(false);
+    }
+
+    private void recordIfConfiguration(LogEntry entry) {
+        if (entry.getCommand() instanceof ConfigurationCommand command) {
+            logConfigurations.put(entry.getIndex(), command.configuration());
+            refreshConfiguration();
+            if (state == State.LEADER) trackNewPeers();
+        }
+    }
+
+    /**
+     * Brings the leader's per-peer tracking in line with the configuration in force. A server no longer
+     * configured is forgotten, so a server later added under the same name starts afresh rather than inheriting
+     * its predecessor's match index and contact round. A server just added gets no check-quorum credit until it
+     * answers: its last contact is set to round 0, long past.
+     */
+    private void trackNewPeers() {
+        Set<String> configured = new HashSet<>();
+        for (RaftConfiguration.Server peer : peers()) configured.add(peer.name());
+        nextIndex.keySet().retainAll(configured);
+        matchIndex.keySet().retainAll(configured);
+        lastContactRound.keySet().retainAll(configured);
+        unavailablePeers.retainAll(configured);
+        for (RaftConfiguration.Server peer : peers()) {
+            nextIndex.putIfAbsent(peer.name(), lastLogIndex() + 1);
+            matchIndex.putIfAbsent(peer.name(), 0L);
+            lastContactRound.putIfAbsent(peer.name(), 0L);
+        }
+    }
+
+    private void forgetConfigurationsFrom(long index) {
+        logConfigurations.tailMap(index, true).clear();
+        refreshConfiguration();
+    }
+
+    private void refreshConfiguration() {
+        configuration = logConfigurations.isEmpty() ? snapshotConfiguration : logConfigurations.lastEntry().getValue();
     }
 
     /** The server's durable Raft identity, which every message it sends names as the sender. */
@@ -1154,6 +1418,10 @@ public class RaftNode {
                 || timerGeneration != electionTimerGeneration) {
             return Future.succeededFuture(new ElectionDecision(false, currentTerm));
         }
+        if (!isVoter()) {
+            logger.debug("Not campaigning: this server is not a voter in its configuration");
+            return Future.succeededFuture(new ElectionDecision(false, currentTerm));
+        }
 
         long electionTerm = currentTerm + 1;
         logger.info("Preparing election for node {} at term {}", nodeId, electionTerm);
@@ -1185,15 +1453,17 @@ public class RaftNode {
                 ? log.get(toArrayIndex(lastLogIdx)).getTerm()
                 : snapshotLastTerm;
 
-        AtomicLong voteCount = new AtomicLong(1); // Self vote
+        Set<String> granted = ConcurrentHashMap.newKeySet();
+        granted.add(serverId); // Self vote
 
-        if (clusterNodes.size() == 1) {
+        if (isSoleVoter()) {
             becomeLeader();
             return;
         }
 
-        for (String peerId : clusterNodes) {
-            if (!peerId.equals(nodeId)) {
+        for (RaftConfiguration.Server peer : peers()) {
+            if (peer.voter()) {
+                String peerId = peer.name();
                 VoteRequest request = VoteRequest.newBuilder()
                         .setTerm(term)
                         .setCandidateId(nodeId)
@@ -1204,7 +1474,7 @@ public class RaftNode {
 
                 // Using transport (Wait for Future integration)
                 transport.sendVoteRequest(peerId, request)
-                        .onSuccess(response -> sequenceVoteResponse(response, term, voteCount))
+                        .onSuccess(response -> sequenceVoteResponse(peerId, response, term, granted))
                         .onFailure(e -> logger.error("Failed to retrieve vote from {}", peerId, e));
 
                 // Record edge metric for nodeGraph visualization
@@ -1218,18 +1488,23 @@ public class RaftNode {
     }
 
     private void sequenceVoteResponse(
-            VoteResponse response, long electionTerm, AtomicLong voteCount) {
+            String peerId, VoteResponse response, long electionTerm, Set<String> granted) {
         transitionSequencer.submit(
                         "vote-response:" + electionTerm + ":" + response.getTerm(),
                         RaftTransitionSequencer.FailurePolicy.FENCE,
-                        () -> prepareVoteResponse(response),
-                        decision -> applyVoteResponse(decision, electionTerm, voteCount))
+                        () -> prepareVoteResponse(peerId, response),
+                        decision -> applyVoteResponse(decision, electionTerm, granted))
                 .onFailure(error -> logger.error(
                         "Failed to process vote response for election term {}: {}",
                         electionTerm, error.getMessage(), error));
     }
 
-    private Future<VoteResponseDecision> prepareVoteResponse(VoteResponse response) {
+    private Future<VoteResponseDecision> prepareVoteResponse(String peerId, VoteResponse response) {
+        if (!fromConfiguredServer(peerId, response.getVoterServerId())) {
+            logger.warn("Ignoring a vote response from {} with server ID {}, which is not the configured server",
+                    peerId, response.getVoterServerId());
+            return Future.succeededFuture(null);
+        }
         if (response.getTerm() <= currentTerm) {
             return Future.succeededFuture(new VoteResponseDecision(response, false));
         }
@@ -1238,7 +1513,8 @@ public class RaftNode {
     }
 
     private Void applyVoteResponse(
-            VoteResponseDecision decision, long electionTerm, AtomicLong voteCount) {
+            VoteResponseDecision decision, long electionTerm, Set<String> granted) {
+        if (decision == null) return null;
         VoteResponse response = decision.response();
         if (decision.higherTerm()) {
             applyDurableHigherTerm(response.getTerm(), null);
@@ -1247,9 +1523,10 @@ public class RaftNode {
         if (state != State.CANDIDATE || currentTerm != electionTerm) {
             return null;
         }
-        if (response.getVoteGranted()) {
-            long votes = voteCount.incrementAndGet();
-            if (votes > clusterNodes.size() / 2) {
+        RaftConfiguration current = configuration;
+        if (response.getVoteGranted() && current != null) {
+            granted.add(response.getVoterServerId());
+            if (current.hasQuorum(granted)) {
                 becomeLeader();
             }
         }
@@ -1276,9 +1553,7 @@ public class RaftNode {
         initializeLeaderState();
         heartbeatRound = 0;
         lastContactRound.clear();
-        for (String peer : clusterNodes) {
-            if (!peer.equals(nodeId)) lastContactRound.put(peer, 0L);
-        }
+        for (RaftConfiguration.Server peer : peers()) lastContactRound.put(peer.name(), 0L);
         appendLeadershipNoOpIfRecoveredEntriesAwaitCommit();
         startHeartbeats();
         sendHeartbeats(); // Immediate
@@ -1313,8 +1588,8 @@ public class RaftNode {
                             log.add(noOp);
                             logger.info("Leadership no-op submitted at index {} term {}",
                                     noOp.getIndex(), noOp.getTerm());
-                            for (String peer : clusterNodes) {
-                                if (!peer.equals(nodeId)) sendAppendEntries(peer, false);
+                            for (RaftConfiguration.Server peer : peers()) {
+                                sendAppendEntries(peer.name(), false);
                             }
                             updateCommitIndex();
                             return null;
@@ -1326,11 +1601,9 @@ public class RaftNode {
 
     private void initializeLeaderState() {
         long nextIndexValue = lastLogIndex() + 1;
-        for (String peer : clusterNodes) {
-            if (!peer.equals(nodeId)) {
-                nextIndex.put(peer, nextIndexValue);
-                matchIndex.put(peer, 0L);
-            }
+        for (RaftConfiguration.Server peer : peers()) {
+            nextIndex.put(peer.name(), nextIndexValue);
+            matchIndex.put(peer.name(), 0L);
         }
     }
 
@@ -1390,10 +1663,15 @@ public class RaftNode {
      * majority.
      */
     private boolean majorityRecentlyContacted() {
-        long reachable = 1 + lastContactRound.values().stream()
-                .filter(round -> heartbeatRound - round <= quorumContactRounds)
-                .count();
-        return reachable >= clusterNodes.size() / 2 + 1;
+        RaftConfiguration current = configuration;
+        if (current == null) return false;
+        Set<String> reached = new HashSet<>();
+        reached.add(serverId);
+        for (RaftConfiguration.Server peer : peers()) {
+            Long round = lastContactRound.get(peer.name());
+            if (round != null && heartbeatRound - round <= quorumContactRounds) reached.add(peer.serverId());
+        }
+        return current.hasQuorum(reached);
     }
 
     private void recordPeerContact(String peerId) {
@@ -1426,11 +1704,7 @@ public class RaftNode {
         if (state != State.LEADER)
             return;
 
-        for (String peer : clusterNodes) {
-            if (!peer.equals(nodeId)) {
-                sendAppendEntries(peer, true);
-            }
-        }
+        for (RaftConfiguration.Server peer : peers()) sendAppendEntries(peer.name(), true);
     }
 
     private void failPendingCommands(Throwable cause) {
@@ -1676,6 +1950,20 @@ public class RaftNode {
                     FollowerAppendDecision.invalid(request, higherTerm, requestFailure));
         }
 
+        for (LogEntry incoming : incomingEntries) {
+            if (incoming.getIndex() == 1
+                    && (incoming.getTerm() != 0 || !(incoming.getCommand() instanceof ConfigurationCommand))) {
+                // Every cluster's log begins with its bootstrap configuration; anything else would leave this
+                // server holding Raft state without a configuration.
+                logger.warn("Rejecting AppendEntries from leader {}: index 1 is not a bootstrap configuration",
+                        request.getLeaderId());
+                IllegalArgumentException requestFailure = new IllegalArgumentException(
+                        "Log index 1 must hold the bootstrap configuration, in term 0");
+                return termPersistence.map(ignored ->
+                        FollowerAppendDecision.invalid(request, higherTerm, requestFailure));
+            }
+        }
+
         // Exclude Qraft's in-memory snapshot sentinel. RaftLog receives absolute
         // indices plus the inclusive snapshot/compaction boundary.
         List<LogEntryData> currentEntryData = log.stream().skip(1)
@@ -1685,6 +1973,15 @@ public class RaftNode {
         AppendPlan appendPlan = AppendPlan.from(
                 startIndex, incomingEntryData, currentEntryData, snapshotLastIndex);
         Long truncateFromIndex = appendPlan.truncateFromIndex();
+        if (truncateFromIndex != null && truncateFromIndex <= commitIndex) {
+            // A correct leader never conflicts with a committed entry. Replacing it would lose the entry, which
+            // is never applied again, and at index 1 the cluster's configuration with it.
+            logger.error("Refusing AppendEntries from leader {}: it would replace the committed entry at index {} "
+                    + "(commit index {})", request.getLeaderId(), truncateFromIndex, commitIndex);
+            IllegalStateException refusal = new IllegalStateException("AppendEntries would replace the committed "
+                    + "entry at index " + truncateFromIndex + " (commit index " + commitIndex + ")");
+            return termPersistence.map(ignored -> FollowerAppendDecision.invalid(request, higherTerm, refusal));
+        }
         Set<Long> indicesToAppend = appendPlan.entriesToAppend().stream()
                 .map(LogEntryData::index)
                 .collect(java.util.stream.Collectors.toSet());
@@ -1744,9 +2041,13 @@ public class RaftNode {
         if (decision.truncateFromIndex() != null) {
             int truncateArrayIdx = toArrayIndex(decision.truncateFromIndex());
             log.subList(truncateArrayIdx, log.size()).clear();
+            forgetConfigurationsFrom(decision.truncateFromIndex());
         }
         for (LogEntry entry : decision.entriesToPersist()) {
-            if (!hasLogEntry(entry.getIndex())) log.add(entry);
+            if (!hasLogEntry(entry.getIndex())) {
+                log.add(entry);
+                recordIfConfiguration(entry);
+            }
         }
 
         // The request verifies this log only through its last entry, or through the snapshot it overlaps.
@@ -1936,6 +2237,11 @@ public class RaftNode {
     private Future<AppendResponseDecision> prepareAppendEntriesResponse(
             String peerId, AppendEntriesResponse response,
             long originatingTerm, long originatingGeneration) {
+        if (!fromConfiguredServer(peerId, response.getFollowerServerId())) {
+            logger.warn("Ignoring an AppendEntries response from {} with server ID {}, which is not the "
+                    + "configured server", peerId, response.getFollowerServerId());
+            return Future.succeededFuture(null);
+        }
         if (response.getTerm() > currentTerm) {
             return persistMetadata(response.getTerm(), Optional.empty())
                     .map(ignored -> new AppendResponseDecision(
@@ -1946,6 +2252,7 @@ public class RaftNode {
     }
 
     private Void applyAppendEntriesResponse(AppendResponseDecision decision) {
+        if (decision == null) return null;
         AppendEntriesResponse response = decision.response();
         if (decision.higherTerm()) {
             applyDurableHigherTerm(response.getTerm(), null);
@@ -1962,8 +2269,11 @@ public class RaftNode {
             logger.info("Raft peer {} is reachable again", decision.peerId());
         }
         if (response.getSuccess()) {
-            matchIndex.put(decision.peerId(), response.getMatchIndex());
-            nextIndex.put(decision.peerId(), response.getMatchIndex() + 1);
+            // Replies can arrive out of order: one to an earlier, shorter request must not move the follower
+            // back, or the leader stops counting entries the follower holds until they are sent again.
+            long matched = Math.max(matchIndex.getOrDefault(decision.peerId(), 0L), response.getMatchIndex());
+            matchIndex.put(decision.peerId(), matched);
+            nextIndex.put(decision.peerId(), Math.max(nextIndex.getOrDefault(decision.peerId(), 1L), matched + 1));
             updateCommitIndex();
         } else {
             long next = nextIndex.getOrDefault(decision.peerId(), 1L);
@@ -2015,14 +2325,20 @@ public class RaftNode {
         // >= N,
         // and log[N].term == currentTerm: set commitIndex = N
 
-        List<Long> indices = new ArrayList<>(matchIndex.values());
-        indices.add(lastLogIndex()); // Leader's match index
+        RaftConfiguration current = configuration;
+        if (current == null) return;
+        List<Long> indices = new ArrayList<>();
+        for (RaftConfiguration.Server server : current.servers()) {
+            if (!server.voter()) continue;
+            indices.add(server.serverId().equals(serverId)
+                    ? lastLogIndex()
+                    : matchIndex.getOrDefault(server.name(), 0L));
+        }
         Collections.sort(indices);
-        // The highest index held by a majority: in ascending order, the members at and after this
-        // position number exactly size / 2 + 1. Taking size / 2 instead counts only half of an even-sized
-        // cluster, letting two of four members, or the leader of two alone, commit.
-        int majority = indices.size() / 2 + 1;
-        long N = indices.get(indices.size() - majority);
+        // The highest index held by a majority of the voters: in ascending order, the voters at and after
+        // this position number exactly the quorum, voters / 2 + 1. Taking voters / 2 instead counts only
+        // half of an even-sized cluster, letting two of four voters, or the leader of two alone, commit.
+        long N = indices.get(indices.size() - current.quorum());
 
         if (N > commitIndex && hasLogEntry(N) && log.get(toArrayIndex(N)).getTerm() == currentTerm) {
             commitIndex = N;
@@ -2048,7 +2364,7 @@ public class RaftNode {
             LogEntry entry = log.get(toArrayIndex(index));
             RaftCommandResult<?> result = null;
             try {
-                if (entry.getCommand() != null) {
+                if (entry.getCommand() != null && !(entry.getCommand() instanceof ConfigurationCommand)) {
                     result = stateMachine.apply(entry.getCommand());
                 }
                 stateMachine.setLastAppliedIndex(index);
@@ -2193,8 +2509,12 @@ public class RaftNode {
         long startTime = System.currentTimeMillis();
         SnapshotData snapshot;
         try {
+            RaftConfiguration covered = configurationAt(snapshotIndex);
+            if (covered == null) {
+                throw new IllegalStateException("No configuration is in force at snapshot index " + snapshotIndex);
+            }
             snapshot = new SnapshotData(
-                    stateMachine.takeSnapshot(), snapshotIndex, snapshotTerm);
+                    SnapshotEnvelope.wrap(covered, stateMachine.takeSnapshot()), snapshotIndex, snapshotTerm);
         } catch (RuntimeException error) {
             return Future.succeededFuture(
                     LocalSnapshotDecision.failedBeforePublication(error));
@@ -2242,6 +2562,9 @@ public class RaftNode {
                     + snapshotIndex + ", term=" + snapshotTerm);
         }
 
+        snapshotConfiguration = configurationAt(snapshotIndex);
+        logConfigurations.headMap(snapshotIndex, true).clear();
+        refreshConfiguration();
         int removeCount = toArrayIndex(snapshotIndex);
         if (removeCount > 0) log.subList(0, removeCount).clear();
         snapshotLastIndex = snapshotIndex;
@@ -2490,6 +2813,11 @@ public class RaftNode {
             OutboundSnapshotTransfer transfer, SnapshotData snapshot, byte[] data,
             int chunkIndex, int totalChunks, boolean last,
             InstallSnapshotResponse response) {
+        if (!fromConfiguredServer(transfer.target(), response.getFollowerServerId())) {
+            logger.warn("Ignoring an InstallSnapshot response from {} with server ID {}, which is not the "
+                    + "configured server", transfer.target(), response.getFollowerServerId());
+            return Future.succeededFuture(null);
+        }
         OutboundSnapshotResponseDecision decision = new OutboundSnapshotResponseDecision(
                 transfer, snapshot, data, chunkIndex, totalChunks, last, response,
                 response.getTerm() > currentTerm);
@@ -2498,6 +2826,7 @@ public class RaftNode {
     }
 
     private Void applyOutboundSnapshotResponse(OutboundSnapshotResponseDecision decision) {
+        if (decision == null) return null;
         InstallSnapshotResponse response = decision.response();
         if (decision.higherTerm()) {
             applyDurableHigherTerm(response.getTerm(), null);
@@ -2768,6 +3097,13 @@ public class RaftNode {
     private Future<InstalledSnapshotPlan> persistInstalledSnapshot(InstalledSnapshotPlan plan) {
         RaftTransitionSequencer.Ownership ownership = transitionSequencer.currentOwnership();
         if (plan.snapshot() == null) return Future.succeededFuture(plan);
+        try {
+            // Refused before it is saved, so a damaged snapshot never replaces this node's state.
+            SnapshotEnvelope.unwrap(plan.snapshot().data());
+        } catch (IllegalStateException unreadable) {
+            logger.error("Refusing an installed snapshot: {}", unreadable.getMessage());
+            return Future.succeededFuture(plan.publicationFailed(unreadable));
+        }
         // Read loop-owned log state here, on the state loop: the continuations below run on the
         // snapshot store's thread once publication completes.
         long boundary = plan.snapshot().lastIncludedIndex();
@@ -2848,11 +3184,16 @@ public class RaftNode {
             retainedSuffix = new ArrayList<>(log.subList(suffixStart, log.size()));
         }
 
-        stateMachine.restoreSnapshot(snapshot.data());
+        SnapshotEnvelope envelope = SnapshotEnvelope.unwrap(snapshot.data());
+        stateMachine.restoreSnapshot(envelope.stateMachineSnapshot());
         stateMachine.setLastAppliedIndex(lastIncludedIndex);
         log.clear();
         log.add(new LogEntry(lastIncludedTerm, lastIncludedIndex, null));
         log.addAll(retainedSuffix);
+        snapshotConfiguration = envelope.configuration();
+        logConfigurations.clear();
+        refreshConfiguration();
+        retainedSuffix.forEach(this::recordIfConfiguration);
         snapshotLastIndex = lastIncludedIndex;
         snapshotLastTerm = lastIncludedTerm;
         lastApplied = lastIncludedIndex;

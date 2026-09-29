@@ -54,7 +54,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-26
- * @version 1.0
+ * @version 1.1
  */
 class RaftNodeCheckQuorumTest {
     /** Election timeout 300 ms over 100 ms heartbeats: contact must be no older than three rounds. */
@@ -176,6 +176,8 @@ class RaftNodeCheckQuorumTest {
         timers = new ManualRaftTimers(runtime);
         node = RaftNode.builder()
                 .runtime(runtime).nodeId("node-1").clusterNodes(members).transport(transport)
+                .serverId(ManualRaftCluster.serverIdOf("node-1"))
+                .initialConfiguration(ManualRaftCluster.configurationOf(members))
                 .stateMachine(new QraftStateStore()).commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.volatileMode()).snapshotEnabled(false)
                 .electionTimeout(ELECTION_TIMEOUT_MS).heartbeatInterval(HEARTBEAT_MS)
@@ -204,7 +206,10 @@ class RaftNodeCheckQuorumTest {
         }
     }
 
-    /** Grants every vote and answers AppendEntries per peer: success, rejection, or silence. */
+    /**
+     * Grants every vote and answers AppendEntries per peer: success, rejection, or silence. Every answer comes
+     * from the server configured under the peer's name.
+     */
     private static final class PeerTransport implements RaftTransport {
         private enum Mode { RESPOND, REJECT, SILENT }
 
@@ -220,7 +225,8 @@ class RaftNodeCheckQuorumTest {
         @Override
         public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
             return Future.succeededFuture(VoteResponse.newBuilder()
-                    .setTerm(request.getTerm()).setVoteGranted(true).build());
+                    .setTerm(request.getTerm()).setVoteGranted(true)
+                    .setVoterServerId(ManualRaftCluster.serverIdOf(targetId)).build());
         }
 
         @Override
@@ -231,7 +237,8 @@ class RaftNodeCheckQuorumTest {
                     ? request.getPrevLogIndex()
                     : request.getEntries(request.getEntriesCount() - 1).getIndex();
             return Future.succeededFuture(AppendEntriesResponse.newBuilder().setTerm(request.getTerm())
-                    .setSuccess(mode == Mode.RESPOND).setMatchIndex(mode == Mode.RESPOND ? matchIndex : 0).build());
+                    .setSuccess(mode == Mode.RESPOND).setMatchIndex(mode == Mode.RESPOND ? matchIndex : 0)
+                    .setFollowerServerId(ManualRaftCluster.serverIdOf(targetId)).build());
         }
 
         @Override
@@ -239,6 +246,4 @@ class RaftNodeCheckQuorumTest {
             return Promise.<InstallSnapshotResponse>promise().future();
         }
     }
-
-    /** Fires one-shot and periodic Raft timers only when the test asks, on the node's state loop. */
 }

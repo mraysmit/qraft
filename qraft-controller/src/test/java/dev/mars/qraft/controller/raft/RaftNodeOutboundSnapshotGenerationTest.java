@@ -65,6 +65,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 @RemediationTest(phase = "5", scenarioPrefix = "RAFT-OUTBOUND-SNAPSHOT")
 class RaftNodeOutboundSnapshotGenerationTest {
+    private static final String PEER_SERVER_ID = ManualRaftCluster.serverIdOf("peer-1");
+
     private JavaRuntime runtime;
     private GatedSnapshotLoadStorage storage;
     private SnapshotTransport transport;
@@ -79,7 +81,9 @@ class RaftNodeOutboundSnapshotGenerationTest {
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
+                .serverId(ManualRaftCluster.serverIdOf("node-1"))
                 .clusterNodes(Set.of("node-1", "peer-1"))
+                .initialConfiguration(ManualRaftCluster.configurationOf(Set.of("node-1", "peer-1")))
                 .transport(transport)
                 .stateMachine(new QraftStateStore())
                 .commandCodec(new ProtobufRaftCommandCodec())
@@ -92,7 +96,8 @@ class RaftNodeOutboundSnapshotGenerationTest {
         awaitLeaderAtOrAboveTerm(1);
         await(node.submitCommand(put("before", "snapshot")));
         await(node.takeSnapshot());
-        assertEquals(1, node.getSnapshotLastIndex());
+        // The bootstrap configuration is index 1, so the command is index 2.
+        assertEquals(2, node.getSnapshotLastIndex());
     }
 
     @AfterEach
@@ -130,6 +135,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
 
         stale.response().complete(InstallSnapshotResponse.newBuilder()
                 .setTerm(oldTerm)
+                .setFollowerServerId(PEER_SERVER_ID)
                 .setSuccess(true)
                 .setNextChunkIndex(stale.request().getTotalChunks())
                 .build());
@@ -150,6 +156,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
         Future<RaftNode.State> follower = node.awaitState(RaftNode.State.FOLLOWER, 10_000);
         stale.response().complete(InstallSnapshotResponse.newBuilder()
                 .setTerm(responseTerm)
+                .setFollowerServerId(PEER_SERVER_ID)
                 .setSuccess(false)
                 .build());
         await(follower);
@@ -179,12 +186,13 @@ class RaftNodeOutboundSnapshotGenerationTest {
         awaitStateLoop(runtime);
         current.response().complete(InstallSnapshotResponse.newBuilder()
                 .setTerm(current.request().getTerm())
+                .setFollowerServerId(PEER_SERVER_ID)
                 .setSuccess(true)
                 .setNextChunkIndex(current.request().getTotalChunks())
                 .build());
-        awaitNextIndex(2);
+        awaitNextIndex(3);
 
-        assertEquals(2, node.getNextIndex("peer-1"),
+        assertEquals(3, node.getNextIndex("peer-1"),
                 "a stale failure must not remove the current transfer before its acknowledgement");
     }
 
@@ -215,6 +223,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
 
         rejected.response().complete(InstallSnapshotResponse.newBuilder()
                 .setTerm(rejected.request().getTerm())
+                .setFollowerServerId(PEER_SERVER_ID)
                 .setSuccess(false)
                 .setNextChunkIndex(0)
                 .setRejectionReason(
@@ -233,6 +242,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
 
         rejected.response().complete(InstallSnapshotResponse.newBuilder()
                 .setTerm(rejected.request().getTerm())
+                .setFollowerServerId(PEER_SERVER_ID)
                 .setSuccess(false)
                 .setNextChunkIndex(0)
                 .setRejectionReason(
@@ -351,7 +361,8 @@ class RaftNodeOutboundSnapshotGenerationTest {
         @Override
         public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
             return Future.succeededFuture(VoteResponse.newBuilder()
-                    .setTerm(request.getTerm()).setVoteGranted(true).build());
+                    .setTerm(request.getTerm()).setVoterServerId(ManualRaftCluster.serverIdOf(targetId))
+                    .setVoteGranted(true).build());
         }
 
         @Override
@@ -360,13 +371,15 @@ class RaftNodeOutboundSnapshotGenerationTest {
             if (rejectNextAppend.compareAndSet(true, false)) {
                 rejectedAppend.complete(null);
                 return Future.succeededFuture(AppendEntriesResponse.newBuilder()
-                        .setTerm(request.getTerm()).setSuccess(false).build());
+                        .setTerm(request.getTerm()).setFollowerServerId(ManualRaftCluster.serverIdOf(targetId))
+                        .setSuccess(false).build());
             }
             long matchIndex = request.getEntriesCount() == 0
                     ? request.getPrevLogIndex()
                     : request.getEntries(request.getEntriesCount() - 1).getIndex();
             return Future.succeededFuture(AppendEntriesResponse.newBuilder()
-                    .setTerm(request.getTerm()).setSuccess(true).setMatchIndex(matchIndex).build());
+                    .setTerm(request.getTerm()).setFollowerServerId(ManualRaftCluster.serverIdOf(targetId))
+                    .setSuccess(true).setMatchIndex(matchIndex).build());
         }
 
         @Override

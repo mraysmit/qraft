@@ -275,8 +275,8 @@ class RaftNodeTest {
             byte[] legacy = new DistributedStateCommandCodec()
                     .serialize(DistributedStateCommand.put("legacy-key", "legacy-value"));
             byte[] protobuf = new ProtobufRaftCommandCodec().serialize(CatalogCommand.register(instance));
-            writerStorage.wal().appendEntries(List.of(new RaftStorage.LogEntryData(1, 1, legacy),
-                            new RaftStorage.LogEntryData(2, 1, protobuf)))
+            writerStorage.wal().appendEntries(List.of(ManualRaftCluster.bootstrapEntry(Set.of("catalog-mixed")),
+                            new RaftStorage.LogEntryData(2, 1, legacy), new RaftStorage.LogEntryData(3, 1, protobuf)))
                     .thenCompose(ignored -> writerStorage.wal().sync()).get(10, TimeUnit.SECONDS);
         } finally {
             writerStorage.snapshots().close();
@@ -334,11 +334,13 @@ class RaftNodeTest {
     void aRecoveredMultiMemberFollowerKeepsButDoesNotApplyAnUncommittedLogTail() throws Exception {
         TestRaftStorage storage = new TestRaftStorage();
         storage.open(null).get(10, TimeUnit.SECONDS);
+        Set<String> members = Set.of("node1", "node2", "node3");
         byte[] payload = new ProtobufRaftCommandCodec().serialize(distributedPut("recovery-key", "tail-value"));
-        storage.appendEntries(List.of(new LogEntryData(1L, 1L, payload))).get(10, TimeUnit.SECONDS);
+        storage.appendEntries(List.of(ManualRaftCluster.bootstrapEntry(members), new LogEntryData(2L, 1L, payload)))
+                .get(10, TimeUnit.SECONDS);
         storage.updateMetadata(1L, Optional.empty()).get(10, TimeUnit.SECONDS);
         QraftStateStore recoveredState = new QraftStateStore();
-        RaftNode recovered = node("node1", Set.of("node1", "node2", "node3"), new InMemoryTransportSimulator("node1"),
+        RaftNode recovered = node("node1", members, new InMemoryTransportSimulator("node1"),
                 recoveredState, RaftNodeMode.durable(storage, storage));
 
         await(recovered.start());
@@ -346,7 +348,7 @@ class RaftNodeTest {
         // Recovery completes before start does, and no election runs, so nothing else can apply the tail.
         assertNull(recoveredState.getMetadata("recovery-key"),
                 "a recovered follower must not apply an uncertain log tail before a leader commits it");
-        assertEquals(1, recovered.getLastLogIndex(), "the tail is kept, only not applied");
+        assertEquals(2, recovered.getLastLogIndex(), "the tail is kept, only not applied");
     }
 
     @Test
@@ -354,7 +356,8 @@ class RaftNodeTest {
         TestRaftStorage storage = new TestRaftStorage();
         storage.open(null).get(10, TimeUnit.SECONDS);
         byte[] payload = new ProtobufRaftCommandCodec().serialize(distributedPut("single-recovery-key", "single-value"));
-        storage.appendEntries(List.of(new LogEntryData(1L, 1L, payload))).get(10, TimeUnit.SECONDS);
+        storage.appendEntries(List.of(ManualRaftCluster.bootstrapEntry(Set.of("node1")),
+                new LogEntryData(2L, 1L, payload))).get(10, TimeUnit.SECONDS);
         storage.updateMetadata(1L, Optional.of("node1")).get(10, TimeUnit.SECONDS);
         QraftStateStore recoveredState = new QraftStateStore();
         RaftNode recovered = node("node1", Set.of("node1"), new InMemoryTransportSimulator("node1"),
@@ -376,11 +379,13 @@ class RaftNodeTest {
         snapshots.open(storageDirectory).get(10, TimeUnit.SECONDS);
         QraftStateStore snapshottedState = new QraftStateStore();
         snapshottedState.apply(distributedPut("before-snapshot", "preserved"));
+        // The snapshot covers the bootstrap configuration at index 1 and the command at index 2.
         snapshots.saveAtomically(new dev.mars.qraft.raft.api.SnapshotStore.SnapshotData(
-                snapshottedState.takeSnapshot(), 1L, 1L)).get(10, TimeUnit.SECONDS);
+                ManualRaftCluster.snapshotOf(Set.of("node1"), snapshottedState.takeSnapshot()), 2L, 1L))
+                .get(10, TimeUnit.SECONDS);
         byte[] postSnapshotCommand = new ProtobufRaftCommandCodec().serialize(distributedPut("after-snapshot", "replayed"));
-        wal.truncatePrefix(1L).get(10, TimeUnit.SECONDS);
-        wal.appendEntries(List.of(new RaftStorage.LogEntryData(2L, 1L, postSnapshotCommand))).get(10, TimeUnit.SECONDS);
+        wal.truncatePrefix(2L).get(10, TimeUnit.SECONDS);
+        wal.appendEntries(List.of(new RaftStorage.LogEntryData(3L, 1L, postSnapshotCommand))).get(10, TimeUnit.SECONDS);
         wal.sync().get(10, TimeUnit.SECONDS);
         QraftStateStore recoveredState = new QraftStateStore();
         RaftNode recovered = node("node1", Set.of("node1"), new InMemoryTransportSimulator("node1"),
@@ -390,7 +395,7 @@ class RaftNodeTest {
 
         assertEquals("preserved", recoveredState.getMetadata("before-snapshot"));
         assertEquals("replayed", recoveredState.getMetadata("after-snapshot"));
-        assertEquals(1L, recovered.getSnapshotLastIndex());
+        assertEquals(2L, recovered.getSnapshotLastIndex());
     }
 
     @Test
@@ -398,13 +403,15 @@ class RaftNodeTest {
         TestRaftStorage storage = new TestRaftStorage();
         storage.open(tempDir.resolve("compacted-conflict")).get(10, TimeUnit.SECONDS);
         ProtobufRaftCommandCodec codec = new ProtobufRaftCommandCodec();
+        Set<String> members = Set.of("node1", "leader");
         storage.saveAtomically(new dev.mars.qraft.raft.api.SnapshotStore.SnapshotData(
-                new QraftStateStore().takeSnapshot(), 5L, 2L)).get(10, TimeUnit.SECONDS);
+                ManualRaftCluster.snapshotOf(members, new QraftStateStore().takeSnapshot()), 5L, 2L))
+                .get(10, TimeUnit.SECONDS);
         storage.appendEntries(List.of(
                 new LogEntryData(6, 2, codec.serialize(distributedPut("six", "old"))),
                 new LogEntryData(7, 2, codec.serialize(distributedPut("seven", "old"))),
                 new LogEntryData(8, 3, codec.serialize(distributedPut("eight", "old-suffix"))))).get(10, TimeUnit.SECONDS);
-        RaftNode follower = node("node1", Set.of("node1", "leader"), new InMemoryTransportSimulator("compacted-follower"),
+        RaftNode follower = node("node1", members, new InMemoryTransportSimulator("compacted-follower"),
                 new QraftStateStore(), RaftNodeMode.durable(storage, storage));
         await(follower.start());
 
@@ -432,7 +439,7 @@ class RaftNodeTest {
 
         VoteResponse response = await(sole.handleVoteRequest(VoteRequest.newBuilder()
                 .setTerm(sole.getCurrentTerm() + 1).setCandidateId("candidate-behind")
-                .setLastLogTerm(0).setLastLogIndex(0).build()));
+                .setLastLogTerm(0).setLastLogIndex(1).build()));
 
         assertFalse(response.getVoteGranted(), "a vote is refused to a candidate whose log is behind");
     }
@@ -479,7 +486,7 @@ class RaftNodeTest {
         assertEquals(0, sole.getCurrentTerm(), "a rejected request does not advance the term");
 
         VoteResponse real = await(sole.handleVoteRequest(VoteRequest.newBuilder()
-                .setTerm(1).setCandidateId("candidate").setLastLogTerm(0).setLastLogIndex(0).build()));
+                .setTerm(1).setCandidateId("candidate").setLastLogTerm(0).setLastLogIndex(1).build()));
         assertTrue(real.getVoteGranted(), "the term's vote is still free for a real candidate");
         assertEquals(1, real.getTerm());
     }
@@ -525,7 +532,7 @@ class RaftNodeTest {
         long higherTerm = durableNode.getCurrentTerm() + 5;
 
         VoteResponse response = await(durableNode.handleVoteRequest(VoteRequest.newBuilder()
-                .setTerm(higherTerm).setCandidateId("candidate-behind").setLastLogTerm(0).setLastLogIndex(0).build()));
+                .setTerm(higherTerm).setCandidateId("candidate-behind").setLastLogTerm(0).setLastLogIndex(1).build()));
 
         assertFalse(response.getVoteGranted(), "a vote is refused to a candidate whose log is behind");
         assertEquals(higherTerm, response.getTerm(), "the node reports the higher term it observed");
@@ -547,7 +554,7 @@ class RaftNodeTest {
         long higherTerm = durableNode.getCurrentTerm() + 7;
 
         VoteResponse response = await(durableNode.handleVoteRequest(VoteRequest.newBuilder()
-                .setTerm(higherTerm).setCandidateId("candidate-behind-2").setLastLogTerm(0).setLastLogIndex(0).build()));
+                .setTerm(higherTerm).setCandidateId("candidate-behind-2").setLastLogTerm(0).setLastLogIndex(1).build()));
 
         assertFalse(response.getVoteGranted());
         assertEquals(higherTerm, response.getTerm());
@@ -580,7 +587,7 @@ class RaftNodeTest {
         ExecutionException voteFailure = assertThrows(ExecutionException.class,
                 () -> durableNode.handleVoteRequest(VoteRequest.newBuilder()
                                 .setTerm(higherTerm).setCandidateId("candidate-behind-failing-persist")
-                                .setLastLogTerm(0).setLastLogIndex(0).build())
+                                .setLastLogTerm(0).setLastLogIndex(1).build())
                         .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
 
         assertInstanceOf(IllegalStateException.class, voteFailure.getCause());
@@ -622,9 +629,11 @@ class RaftNodeTest {
         await(durableNode.start());
 
         InstallSnapshotResponse response = await(durableNode.handleInstallSnapshot(InstallSnapshotRequest.newBuilder()
-                .setTerm(11).setLeaderId("leader-y").setLastIncludedIndex(1).setLastIncludedTerm(1)
+                .setTerm(11).setLeaderId("leader-y").setLastIncludedIndex(2).setLastIncludedTerm(1)
                 .setChunkIndex(0).setTotalChunks(1)
-                .setData(com.google.protobuf.ByteString.copyFrom(new byte[]{1})).setDone(false).build()));
+                .setData(com.google.protobuf.ByteString.copyFrom(
+                        ManualRaftCluster.snapshotOf(Set.of("node1", "leader-y"), new byte[]{1})))
+                .setDone(false).build()));
 
         assertFalse(response.getSuccess(), "an installation is refused unless the higher term is durably persisted first");
         assertEquals(0, response.getTerm(), "a refusal reports the last durable local term, not the observed one");

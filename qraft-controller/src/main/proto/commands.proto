@@ -179,10 +179,24 @@ message HealthExpiryCommandProto {
   bool deregister_service = 8;
 }
 
+// A server in a Raft configuration: its durable server ID, name, address, and whether it votes.
+message RaftServerProto {
+  string server_id = 1;
+  string name = 2;
+  string address = 3;
+  bool voter = 4;
+}
+
+// The servers a cluster replicates to. Handled by the Raft node itself, never by the state machine.
+message RaftConfigurationProto {
+  repeated RaftServerProto servers = 1;
+}
+
 message RaftCommandMessage {
   oneof command {
     AgentCommandProto agent_command = 1;
     SystemMetadataCommandProto system_metadata_command = 2;
     CatalogCommandProto catalog_command = 3;
+    RaftConfigurationProto configuration = 4;
   }
 }

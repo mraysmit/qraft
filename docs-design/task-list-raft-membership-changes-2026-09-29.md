@@ -1,7 +1,7 @@
 # Task List: Raft Membership Changes
 
 **Date:** 2026-09-29
-**Active work:** Step 2, configuration entries in the log. Step 1 was done
+**Active work:** Step 3, non-voters and promotion. Steps 1 and 2 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
 **Predecessor:** [`task-list-test-suite-remediation-2026-09-27.md`](task-list-test-suite-remediation-2026-09-27.md).
@@ -220,11 +220,12 @@ Decisions 1, 2, 4, and 5 follow from this. Decision 3 was made the same day.
      the health criteria use the leader's contact record.
 4. **Automatic cleanup. Decided 2026-09-29:** failed servers are removed
    automatically, as in Consul, within the quorum limits of Step 5.
-5. **Bootstrapping. Decided:** an expected server count, like Consul's
-   `bootstrap_expect`, with `server.raft.nodes` as the servers to contact. A
-   server bootstraps only when all of these hold:
-   - it can reach the expected number of servers;
-   - they all report the same count;
+5. **Bootstrapping. Decided:** like Consul's `bootstrap_expect`, with
+   `server.raft.nodes` as the servers to contact and its size as the expected
+   count (refined in the Step 2 plan). A server bootstraps only when all of
+   these hold:
+   - every listed server answers;
+   - they all report the same list;
    - none of them already has a cluster;
    - it has no Raft state of its own.
 
@@ -315,6 +316,154 @@ The work:
 
 **Not yet:** nothing counts votes or acknowledgements by server ID. That is
 Step 2.
+
+### Step 2 plan (2026-09-29)
+
+Two further decisions, taken on the recommendations:
+- **No in-place upgrade of data from before Step 2.** A data directory that
+  holds Raft state but no configuration stops the server, with a message
+  saying so. Qraft has no deployments to migrate. Deriving a configuration
+  from `server.raft.nodes` would bring back the name-based trust this step
+  removes.
+- **Decision 5 refined: the expected count is the size of
+  `server.raft.nodes`, with no separate setting.**
+  - If two servers bootstrapped with different configurations, each would
+    write a different entry at index 1 in the same term. Raft's log matching
+    rule would then treat the two entries as one.
+  - An expected count smaller than the list, or lists that differ between
+    servers, allow that.
+  - So a server bootstraps only when every server in its list answers, has no
+    Raft state, and reports the same list.
+  - The configuration is built from each server's own report of its server
+    ID and address, so every bootstrapping server writes the identical entry.
+- **The bootstrap entry.** It is written at index 1 with term 0, so no term
+  is spent, and is treated as committed. Any server that holds an entry at
+  index 1 wrote this identical entry, or received it from a leader. A server
+  with no configuration cannot lead, so no other entry can take index 1.
+
+Slices, each red before green:
+- **2a. Values.**
+  - `RaftConfiguration`: servers with ID, name, address, and voter flag.
+  - A configuration log entry, carried by the command codec and never
+    applied to the state machine.
+  - A snapshot envelope that records the configuration a snapshot covers.
+- **2b. `RaftNode` tracks its configuration.**
+  - The latest configuration comes from the log, or else the snapshot.
+  - Truncation reverts to the previous configuration.
+  - Recovery restores it from the WAL and the snapshot.
+  - A node with no state can be bootstrapped with an initial configuration.
+    A single-member node bootstraps itself.
+  - Raft state without a configuration refuses to start.
+- **2c. Counting by server ID.**
+  - Elections, commits, replication targets, and check-quorum use the
+    voters of the latest configuration.
+  - A vote or acknowledgement counts only when its sender's server ID is the
+    configured voter's.
+  - A node that is not a voter in its configuration never campaigns.
+  - The gRPC transport keeps its addresses from `server.raft.nodes`. Every
+    configured server is listed there until Step 3 adds servers, and taking
+    addresses from the configuration moves there.
+  - The test suite's simulated peers stamp their server IDs.
+- **2d. Bootstrapping a server.**
+  - A new `Describe` RPC on the server port reports server ID, name,
+    address, listed servers, and whether the server has Raft state.
+  - The controller bootstraps under decision 5's checks, or waits for the
+    configuration to be replicated to it.
+- **2e. Configuration changes.** The leader proposes a change only after it
+  has committed an entry in its current term, and only one change is in
+  flight at a time. Steps 3 and 4 use this.
+- **2f. Containers and docs.**
+  - Form a cluster from empty storage.
+  - A wiped server is counted towards no election or commit.
+  - Update the design document.
+
+### Step 2 record (2026-09-29)
+
+**Built:**
+- **2a. Values.**
+  - `RaftConfiguration`, in name order, with a quorum of voters.
+  - `ConfigurationCommand` and its codec: a stored configuration is rebuilt
+    through its constructor, so one that breaks the rules is refused.
+  - `SnapshotEnvelope`, which puts the configuration before the state
+    machine's bytes and refuses data from before configurations were
+    recorded.
+- **2b. The node tracks its configuration.**
+  - The configuration in force is the latest in the log, or else the
+    snapshot's.
+  - Truncation reverts to the one before. Compaction keeps the configuration
+    in force.
+  - Recovery restores it from the WAL or the snapshot, and an installed
+    snapshot brings its own.
+  - A node with no state bootstraps at index 1, in term 0, as committed. On
+    recovery, the bootstrap entry is committed again.
+  - A node holding Raft state but no configuration refuses to start.
+- **2c. Counting by server ID.**
+  - Votes, acknowledgements, and check-quorum count only configured voters,
+    by server ID. A reply from another ID is ignored, term included.
+  - Commits count only voters.
+  - A server that is not a voter never campaigns.
+- **2d. Bootstrapping.**
+  - A `Describe` RPC reports a server's ID, name, address, listed servers,
+    and whether it holds state.
+  - `RaftNode.bootstrap` works only while the node holds no state, checked
+    inside its transition.
+  - `ClusterBootstrap` decides by decision 5's rules.
+  - The controller retries every second until the node is configured, and
+    stops at shutdown.
+- **2e. Changes.** `RaftNode.proposeConfiguration` makes single-server
+  changes, and only after a commit in the leader's term, with no other change
+  in flight. The rules apply to any configuration entry. An added server is
+  tracked at once, but earns check-quorum credit only by answering.
+- **2f.** A container test covers the wiped server, and the design document
+  is updated.
+
+**Defects found and fixed on the way, each test first:**
+- **A follower replaced committed entries.** It accepted an append that
+  replaced an entry at or below its commit index, and silently never applied
+  the replacement. Such an append is now refused. Two migration agents found
+  this independently.
+- **Index 1 accepted any entry.** An unconfigured follower took an ordinary
+  command at index 1, and then held Raft state with no configuration. Index 1
+  must now hold a term-0 configuration.
+- **A late reply moved a follower back.** A reply to an earlier, shorter
+  append could arrive last and lower the leader's match index for that
+  follower, stalling commits until the entry was sent again. The match index
+  now only rises within a term. The four-voter check-quorum test found this
+  as an intermittent failure.
+- **A removed server stayed tracked** (found in the code review of this
+  step). The leader's per-peer next index, match index, contact round, and
+  unavailability were keyed by name and never dropped, so a server added
+  later under the same name, such as a wiped server's replacement, inherited
+  its predecessor's values. Its stale match index could not commit anything
+  unsafe: the removal was committed by a majority already past it, and the
+  commit index never moves back. But the replacement was credited with
+  contact it never made, and was sent entries from a next index it could not
+  accept. Tracking now follows the configuration in force.
+
+**Test migration.**
+- About 108 existing tests assumed the old model. Four agents migrated them
+  in parallel under written rules: index shifts for the bootstrap entry,
+  bootstrap fixtures, envelope snapshots, and server-ID stamps on simulated
+  peers. I reviewed their reports and a sample of the diffs.
+- `ManualRaftCluster.builder` now gives each node the ID `serverIdOf(name)`
+  and a configuration of its members. `unconfiguredBuilder` is the old
+  behaviour.
+- Several tests that had passed without testing anything now exercise what
+  they claim. For example, the timer test's stale election could never have
+  raised the term on a node that never campaigns.
+
+**Evidence:**
+- Every new test was red before its code, or shown to fail against a
+  mutation. 39 in-process mutations were caught: 10 in 2a, 15 in 2b and 2c,
+  3 on the two log guards, 6 in 2d, and 5 in 2e. There is also one Docker
+  mutation (see below).
+- The changed leader tests passed 5 repeated runs.
+- `mvn install`: 755 tests, every coverage gate met.
+- The Docker suite, on an image built from the final code: 23 of 23. Its
+  three-server clusters are formed by `Describe` and bootstrap.
+- The wiped-server container test fails against an image in which the
+  leader listens to replies from an unconfigured server ID. In that image,
+  the leader and the wiped server committed a write together.
 
 ### Step 2. Configuration entries in the log
 

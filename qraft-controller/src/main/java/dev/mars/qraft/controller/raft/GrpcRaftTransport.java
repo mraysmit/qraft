@@ -21,6 +21,8 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
+import dev.mars.qraft.controller.raft.grpc.DescribeRequest;
+import dev.mars.qraft.controller.raft.grpc.DescribeResponse;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.controller.raft.grpc.RaftServiceGrpc;
@@ -72,6 +74,8 @@ public class GrpcRaftTransport implements RaftTransport {
 
     private static final Logger logger = LoggerFactory.getLogger(GrpcRaftTransport.class);
     private static final String THREAD_NAME_PREFIX = "raft-grpc-io-";
+    /** A server that cannot describe itself this quickly is treated as unreachable for this bootstrap attempt. */
+    private static final long DESCRIBE_DEADLINE_SECONDS = 5;
     private static final Metadata.Key<String> REQUEST_ID_HEADER =
             Metadata.Key.of("x-request-id", Metadata.ASCII_STRING_MARSHALLER);
     private static final TextMapSetter<Metadata> METADATA_SETTER = (carrier, key, value) ->
@@ -277,6 +281,20 @@ public class GrpcRaftTransport implements RaftTransport {
                 });
         } catch (Throwable error) {
             finishSpanWithError(span, error);
+            return Future.failedFuture(error);
+        }
+    }
+
+    @Override
+    public Future<DescribeResponse> describe(String targetId) {
+        requireKnownTarget(targetId);
+        if (stopped) {
+            return Future.failedFuture(new IllegalStateException("Transport for " + selfId + " is stopped"));
+        }
+        try {
+            return toFuture(getStub(targetId).withDeadlineAfter(DESCRIBE_DEADLINE_SECONDS, TimeUnit.SECONDS)
+                    .describe(DescribeRequest.getDefaultInstance()));
+        } catch (Throwable error) {
             return Future.failedFuture(error);
         }
     }

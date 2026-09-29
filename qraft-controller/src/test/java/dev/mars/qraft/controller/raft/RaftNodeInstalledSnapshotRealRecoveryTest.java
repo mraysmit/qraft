@@ -66,6 +66,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @RemediationTest(phase = "6-installed-recovery", scenarioPrefix = "RAFT-INSTALLED-RECOVERY")
 class RaftNodeInstalledSnapshotRealRecoveryTest {
     private static final ProtobufRaftCommandCodec CODEC = new ProtobufRaftCommandCodec();
+    /** The follower's cluster, as the crash writer's follower and every restart of it know it. */
+    private static final Set<String> MEMBERS = InstalledSnapshotCrashWriter.MEMBERS;
 
     @TempDir
     Path directory;
@@ -84,19 +86,19 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
     @Test
     void restartDuringInstalledSnapshotPublicationUsesSnapshotAndUntrimmedWal() throws Exception {
         verifyRecovery(InstalledSnapshotCrashWriter.AFTER_INSTALLED_SNAPSHOT_PUBLICATION,
-                List.of(1L, 2L, 3L, 4L), 2, 4, true);
+                List.of(1L, 2L, 3L, 4L, 5L), 2, true);
     }
 
     @Test
     void restartWhileShutdownDrainsCompactedInstallationUsesExactSuffix() throws Exception {
         verifyRecovery(InstalledSnapshotCrashWriter.DURING_SHUTDOWN_AFTER_PREFIX_COMPACTION,
-                List.of(4L), 2, 4, true);
+                List.of(5L), 2, true);
     }
 
     @Test
     void divergentSuffixIsAbsentFromWalAndRecoveryAfterInstallation() throws Exception {
         verifyRecovery(InstalledSnapshotCrashWriter.AFTER_DIVERGENT_SUFFIX_INSTALL,
-                List.of(), 99, 3, false);
+                List.of(), 99, false);
     }
 
     /**
@@ -114,27 +116,27 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
                 "fixture halts after publishing a conflicting installed snapshot");
         ProcessResult crash = runCrashWriter(InstalledSnapshotCrashWriter.AFTER_DIVERGENT_SNAPSHOT_PUBLICATION);
         assertEquals(InstalledSnapshotCrashWriter.HALT_EXIT_CODE, crash.exitCode(), crash.output());
-        assertDurableState(3, 99, List.of(1L, 2L, 3L, 4L));
+        assertDurableState(4, 99, List.of(1L, 2L, 3L, 4L, 5L));
 
         QraftStateStore state = new QraftStateStore();
         node = follower(state);
         await(node.start());
 
         RaftStatus recovered = await(node.status());
-        assertEquals(3, recovered.snapshotLastIndex());
-        assertEquals(3, recovered.lastLogIndex(), "no WAL entry of the replaced history is in the log");
-        assertEquals(3, recovered.lastApplied());
+        assertEquals(4, recovered.snapshotLastIndex());
+        assertEquals(4, recovered.lastLogIndex(), "no WAL entry of the replaced history is in the log");
+        assertEquals(4, recovered.lastApplied());
         assertEquals("three", state.getMetadata("key-3"));
         assertNull(state.getMetadata("key-4"));
 
         AppendEntriesResponse appended = await(node.handleAppendEntriesRequest(appendAfterBoundary()));
         assertTrue(appended.getSuccess(), appended.toString());
-        awaitApplied(4);
+        awaitApplied(5);
         assertEquals("after-recovery", state.getMetadata("key-5"));
 
         await(node.stop());
         node = null;
-        assertDurableState(3, 99, List.of(4L));
+        assertDurableState(4, 99, List.of(5L));
     }
 
     /**
@@ -148,9 +150,10 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
             wal.open(directory).get(10, TimeUnit.SECONDS);
             wal.updateMetadata(3, Optional.of("follower-1")).get(10, TimeUnit.SECONDS);
             wal.appendEntries(List.of(
-                    entry(1, 1, "key-1", "one"),
-                    entry(2, 1, "key-2", "two"),
-                    entry(3, 2, "key-3", "three"))).get(10, TimeUnit.SECONDS);
+                    ManualRaftCluster.bootstrapEntry(MEMBERS),
+                    entry(2, 1, "key-1", "one"),
+                    entry(3, 1, "key-2", "two"),
+                    entry(4, 2, "key-3", "three"))).get(10, TimeUnit.SECONDS);
             wal.sync().get(10, TimeUnit.SECONDS);
         }
         saveConflictingSnapshot();
@@ -159,11 +162,11 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
         node = follower(state);
         await(node.start());
 
-        assertEquals(3, await(node.status()).lastLogIndex());
+        assertEquals(4, await(node.status()).lastLogIndex());
         assertEquals("leader-three", state.getMetadata("key-3"));
         await(node.stop());
         node = null;
-        assertDurableState(3, 99, List.of());
+        assertDurableState(4, 99, List.of());
     }
 
     /**
@@ -178,7 +181,8 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
                 RaftStorageFactory.createDurable(directory, true));
         runtime = JavaRuntime.create();
         node = RaftNode.builder()
-                .runtime(runtime).nodeId("follower-1").clusterNodes(Set.of("follower-1", "leader-1"))
+                .runtime(runtime).nodeId("follower-1").serverId(ManualRaftCluster.serverIdOf("follower-1"))
+                .clusterNodes(MEMBERS)
                 .transport(new PeerlessTransport()).stateMachine(new QraftStateStore()).commandCodec(CODEC)
                 .mode(RaftNodeMode.durable(new FailingSyncStorage(durable.wal()), durable.snapshots()))
                 .snapshotEnabled(false).electionTimeout(60_000).heartbeatInterval(60_000)
@@ -195,32 +199,38 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
         node = null;
         runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         runtime = null;
-        assertDurableState(3, 99, List.of(1L, 2L, 3L));
+        assertDurableState(4, 99, List.of(1L, 2L, 3L, 4L));
 
         QraftStateStore state = new QraftStateStore();
         node = follower(state);
         await(node.start());
 
-        assertEquals(3, await(node.status()).lastLogIndex());
+        assertEquals(4, await(node.status()).lastLogIndex());
         await(node.stop());
         node = null;
-        assertDurableState(3, 99, List.of());
+        assertDurableState(4, 99, List.of());
     }
 
+    /**
+     * A server added to a running cluster starts with an empty WAL and no configuration, so it does not
+     * bootstrap: it waits for its leader, which here brings it up to date with a snapshot.
+     */
     @Test
     void emptyWalFollowerCanInstallSnapshotBeyondItsLastIndex() throws Exception {
         RaftStorageFactory.DurableStorage durable = await(
                 RaftStorageFactory.createDurable(directory, true));
         runtime = JavaRuntime.create();
         QraftStateStore state = new QraftStateStore();
+        Set<String> members = Set.of("leader", "empty-follower", "peer");
         node = RaftNode.builder()
-                .runtime(runtime).nodeId("empty-follower")
-                .clusterNodes(Set.of("leader", "empty-follower", "peer"))
+                .runtime(runtime).nodeId("empty-follower").serverId(ManualRaftCluster.serverIdOf("empty-follower"))
+                .clusterNodes(members)
                 .transport(new PeerlessTransport()).stateMachine(state).commandCodec(CODEC)
                 .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
                 .snapshotEnabled(false).electionTimeout(60_000).heartbeatInterval(60_000)
                 .build();
         await(node.start());
+        assertEquals(0, node.getLastLogIndex(), "a server with no configuration does not bootstrap");
         QraftStateStore source = new QraftStateStore();
         source.apply(new DistributedStateRaftCommand(
                 DistributedStateCommand.put("installed", "snapshot")));
@@ -230,17 +240,25 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
                         .setTerm(1).setLeaderId("leader")
                         .setLastIncludedIndex(6).setLastIncludedTerm(1)
                         .setChunkIndex(0).setTotalChunks(1).setDone(true)
-                        .setData(ByteString.copyFrom(source.takeSnapshot()))
+                        .setData(ByteString.copyFrom(ManualRaftCluster.snapshotOf(members, source.takeSnapshot())))
                         .build()));
 
         assertTrue(response.getSuccess(), response.toString());
         assertEquals(6, node.getSnapshotLastIndex());
         assertEquals("snapshot", state.getMetadata("installed"));
+        assertEquals(Optional.of(ManualRaftCluster.configurationOf(members)), node.getConfiguration(),
+                "the installed snapshot brings the cluster configuration with it");
     }
 
+    /**
+     * Seeds the WAL, halts the crash writer at {@code checkpoint}, checks what is durable, and restarts the
+     * follower in its cluster. The snapshot is at index 4; the WAL entry after it, key-4 at index 5, is kept
+     * unless the snapshot's term conflicts with the WAL. A restarted follower of a two-member cluster treats
+     * only its snapshot as committed, so a kept entry is proved recovered by being in the log, matching its
+     * leader's previous entry, and being applied once the leader commits it.
+     */
     private void verifyRecovery(String checkpoint, List<Long> expectedWalIndexes,
-                                long expectedSnapshotTerm, long expectedLastApplied,
-                                boolean expectFourthEntry) throws Exception {
+                                long expectedSnapshotTerm, boolean expectFourthEntry) throws Exception {
         seedWal();
         RemediationTestExtension.logExpectedFailure(
                 checkpoint, "ProcessHalt", "fixture halts an active installed-snapshot transition");
@@ -251,7 +269,7 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
             snapshots.open(directory).get(10, TimeUnit.SECONDS);
             SnapshotStore.SnapshotData snapshot = snapshots.loadLatest()
                     .get(10, TimeUnit.SECONDS).orElseThrow();
-            assertEquals(3, snapshot.lastIncludedIndex());
+            assertEquals(4, snapshot.lastIncludedIndex());
             assertEquals(expectedSnapshotTerm, snapshot.lastIncludedTerm());
         }
 
@@ -264,17 +282,24 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
         }
 
         QraftStateStore state = new QraftStateStore();
-        node = singleNode(state);
+        node = follower(state);
         await(node.start());
 
         assertTrue(node.isRunning());
         assertEquals(3, node.getCurrentTerm());
-        assertEquals(3, node.getSnapshotLastIndex());
-        assertEquals(expectedLastApplied, node.getLastApplied());
+        assertEquals(4, node.getSnapshotLastIndex());
+        assertEquals(4, node.getLastApplied(), "a restarted follower treats only its snapshot as committed");
+        assertEquals(expectFourthEntry ? 5 : 4, node.getLastLogIndex());
         assertEquals("one", state.getMetadata("key-1"));
         assertEquals("two", state.getMetadata("key-2"));
         assertEquals("three", state.getMetadata("key-3"));
-        assertEquals(expectFourthEntry ? "four" : null, state.getMetadata("key-4"));
+        assertNull(state.getMetadata("key-4"), "key-4 is not applied before its leader commits it");
+        if (expectFourthEntry) {
+            AppendEntriesResponse committed = await(node.handleAppendEntriesRequest(commitRecoveredEntry()));
+            assertTrue(committed.getSuccess(), "the recovered entry matches its leader's: " + committed);
+            awaitApplied(5);
+            assertEquals("four", state.getMetadata("key-4"));
+        }
         assertFalse(Files.exists(directory.resolve("snapshot.dat.tmp")));
     }
 
@@ -284,7 +309,8 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
                 DistributedStateCommand.put("key-3", "leader-three")));
         try (FileSnapshotStore snapshots = new FileSnapshotStore()) {
             snapshots.open(directory).get(10, TimeUnit.SECONDS);
-            snapshots.saveAtomically(new SnapshotStore.SnapshotData(installed.takeSnapshot(), 3, 99))
+            snapshots.saveAtomically(new SnapshotStore.SnapshotData(
+                            ManualRaftCluster.snapshotOf(MEMBERS, installed.takeSnapshot()), 4, 99))
                     .get(10, TimeUnit.SECONDS);
         }
     }
@@ -328,7 +354,8 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
         return RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("follower-1")
-                .clusterNodes(Set.of("follower-1", "leader-1"))
+                .serverId(ManualRaftCluster.serverIdOf("follower-1"))
+                .clusterNodes(MEMBERS)
                 .transport(new PeerlessTransport())
                 .stateMachine(state)
                 .commandCodec(CODEC)
@@ -339,14 +366,22 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
                 .build();
     }
 
-    /** A leader of the next term appending index 4 directly after the conflicting snapshot boundary. */
+    /** A leader of the next term appending index 5 directly after the conflicting snapshot boundary. */
     private static AppendEntriesRequest appendAfterBoundary() {
         return AppendEntriesRequest.newBuilder()
                 .setTerm(4).setLeaderId("leader-1")
-                .setPrevLogIndex(3).setPrevLogTerm(99).setLeaderCommit(4)
+                .setPrevLogIndex(4).setPrevLogTerm(99).setLeaderCommit(5)
                 .addEntries(dev.mars.qraft.controller.raft.grpc.LogEntry.newBuilder()
-                        .setTerm(4).setIndex(4)
-                        .setData(ByteString.copyFrom(entry(4, 4, "key-5", "after-recovery").payload())))
+                        .setTerm(4).setIndex(5)
+                        .setData(ByteString.copyFrom(entry(5, 4, "key-5", "after-recovery").payload())))
+                .build();
+    }
+
+    /** The term-3 leader's heartbeat whose previous entry is key-4 at index 5, committing through it. */
+    private static AppendEntriesRequest commitRecoveredEntry() {
+        return AppendEntriesRequest.newBuilder()
+                .setTerm(3).setLeaderId("leader-1")
+                .setPrevLogIndex(5).setPrevLogTerm(2).setLeaderCommit(5)
                 .build();
     }
 
@@ -374,33 +409,17 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
         }
     }
 
-    private RaftNode singleNode(QraftStateStore state) {
-        RaftStorageFactory.DurableStorage durable = await(
-                RaftStorageFactory.createDurable(directory, true));
-        runtime = JavaRuntime.create();
-        return RaftNode.builder()
-                .runtime(runtime)
-                .nodeId("follower-1")
-                .clusterNodes(Set.of("follower-1"))
-                .transport(new PeerlessTransport())
-                .stateMachine(state)
-                .commandCodec(CODEC)
-                .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
-                .snapshotEnabled(false)
-                .electionTimeout(60_000)
-                .heartbeatInterval(60_000)
-                .build();
-    }
-
+    /** The follower's WAL: its bootstrap configuration, then key-1 to key-4 at indexes 2 to 5. */
     private void seedWal() throws Exception {
         try (FileRaftStorage wal = wal()) {
             wal.open(directory).get(10, TimeUnit.SECONDS);
             wal.updateMetadata(3, Optional.of("follower-1")).get(10, TimeUnit.SECONDS);
             wal.appendEntries(List.of(
-                    entry(1, 1, "key-1", "one"),
-                    entry(2, 1, "key-2", "two"),
-                    entry(3, 2, "key-3", "three"),
-                    entry(4, 2, "key-4", "four"))).get(10, TimeUnit.SECONDS);
+                    ManualRaftCluster.bootstrapEntry(MEMBERS),
+                    entry(2, 1, "key-1", "one"),
+                    entry(3, 1, "key-2", "two"),
+                    entry(4, 2, "key-3", "three"),
+                    entry(5, 2, "key-4", "four"))).get(10, TimeUnit.SECONDS);
             wal.sync().get(10, TimeUnit.SECONDS);
         }
     }

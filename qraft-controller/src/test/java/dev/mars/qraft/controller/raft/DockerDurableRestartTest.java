@@ -245,6 +245,69 @@ class DockerDurableRestartTest {
                         TEST_TENANT, TEST_NAMESPACE, TEST_NODE));
     }
 
+    /**
+     * A follower whose disk is lost restarts with a new server ID. The configuration still records its old one,
+     * so it cannot stand in for the server it replaced: with the other follower stopped, the leader and the
+     * wiped server cannot commit. Before server IDs, the wiped server rejoined as its old self, was refilled, and
+     * was counted, so the write committed.
+     */
+    @Test
+    void aWipedFollowerRejoinsAsANewServerAndIsNotCountedTowardsACommit() throws Exception {
+        ComposeContainer cluster = SharedDockerCluster.startIsolatedThreeNodeCluster();
+        try {
+            List<String> endpoints = SharedDockerCluster.getNodeEndpoints(cluster, 3);
+            await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
+            int leaderIndex = leaderIndex(endpoints);
+            int wipedIndex = (leaderIndex + 1) % endpoints.size();
+            int otherIndex = (leaderIndex + 2) % endpoints.size();
+            String leader = endpoints.get(leaderIndex);
+            String wipedService = "controller" + (wipedIndex + 1);
+            String otherService = "controller" + (otherIndex + 1);
+            String oldServerId = status(endpoints.get(wipedIndex)).path("serverId").asText();
+            String serviceName = "wiped-" + System.nanoTime();
+            registerOnLeader(endpoints, serviceName + "-before", serviceName, 8701);
+            await().atMost(Duration.ofSeconds(30))
+                    .until(() -> everyNodeContains(endpoints, serviceName, List.of(serviceName + "-before")));
+
+            SharedDockerCluster.stopContainer(cluster, wipedService);
+            SharedDockerCluster.wipeDataDirectory(cluster, wipedService);
+            SharedDockerCluster.startContainer(cluster, wipedService);
+            await().atMost(Duration.ofSeconds(60)).until(() -> {
+                try {
+                    String id = status(endpoints.get(wipedIndex)).path("serverId").asText("");
+                    return !id.isEmpty() && !id.equals(oldServerId);
+                } catch (Exception notYetUp) {
+                    return false;
+                }
+            });
+
+            SharedDockerCluster.stopContainer(cluster, otherService);
+            long commitBefore = status(leader).path("commitIndex").asLong();
+            HttpResponse<String> write;
+            try {
+                write = send(leader + "/v1/agent/service/register", "PUT",
+                        registrationBody(serviceName + "-during", serviceName, 8702), REGISTRATION_HEADERS);
+            } catch (java.io.IOException timedOut) {
+                write = null;
+            }
+            assertTrue(write == null || write.statusCode() == 503,
+                    "the leader and a wiped server are not a majority: " + (write == null ? "timed out" : write.body()));
+            assertEquals(commitBefore, status(leader).path("commitIndex").asLong(), "nothing was committed");
+
+            SharedDockerCluster.startContainer(cluster, otherService);
+            await().atMost(Duration.ofSeconds(60)).until(() -> {
+                try {
+                    registerOnLeader(endpoints, serviceName + "-after", serviceName, 8703);
+                    return true;
+                } catch (AssertionError notYet) {
+                    return false;
+                }
+            });
+        } finally {
+            cluster.stop();
+        }
+    }
+
     @Test
     void corruptFollowerStaysLiveButUnreadyWhileHealthyQuorumServes() throws Exception {
         ComposeContainer cluster = SharedDockerCluster.startIsolatedThreeNodeCluster();

@@ -96,33 +96,35 @@ class RaftNodeApplyFailureTest {
     void aFollowerStopsApplyingAtTheEntryItCannotApply() throws Exception {
         start(Set.of("node-1", "leader"));
         AppendEntriesResponse response = node.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
-                        .setTerm(1).setLeaderId("leader").setPrevLogIndex(0).setPrevLogTerm(0).setLeaderCommit(3)
-                        .addEntries(entry(1, "first"))
-                        .addEntries(entry(2, PoisonedStateMachine.POISON))
-                        .addEntries(entry(3, "third"))
+                        .setTerm(1).setLeaderId("leader").setPrevLogIndex(1).setPrevLogTerm(0).setLeaderCommit(4)
+                        .addEntries(entry(2, "first"))
+                        .addEntries(entry(3, PoisonedStateMachine.POISON))
+                        .addEntries(entry(4, "third"))
                         .build())
                 .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
 
         assertTrue(response.getSuccess(), "the entries were durably appended before application failed");
         RaftStatus status = status();
         assertTrue(status.fenced());
-        assertEquals(1, status.lastApplied());
+        assertEquals(2, status.lastApplied(), "the bootstrap configuration and the first command");
         assertEquals("first", state.store.getMetadata("first"));
         assertNull(state.store.getMetadata("third"), "nothing after the failed entry is applied");
 
         AppendEntriesResponse later = node.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
-                        .setTerm(1).setLeaderId("leader").setPrevLogIndex(3).setPrevLogTerm(1).setLeaderCommit(3)
+                        .setTerm(1).setLeaderId("leader").setPrevLogIndex(4).setPrevLogTerm(1).setLeaderCommit(4)
                         .build())
                 .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         assertEquals(false, later.getSuccess(), "a fenced follower accepts no further appends");
-        assertEquals(1, status().lastApplied());
+        assertEquals(2, status().lastApplied());
     }
 
     private void start(Set<String> members) throws Exception {
         runtime = JavaRuntime.create();
         state = new PoisonedStateMachine();
         node = RaftNode.builder()
-                .runtime(runtime).nodeId("node-1").clusterNodes(members).transport(new SilentTransport())
+                .runtime(runtime).nodeId("node-1").serverId(ManualRaftCluster.serverIdOf("node-1"))
+                .initialConfiguration(ManualRaftCluster.configurationOf(members))
+                .clusterNodes(members).transport(new SilentTransport())
                 .stateMachine(state).commandCodec(CODEC)
                 .mode(RaftNodeMode.volatileMode()).snapshotEnabled(false)
                 .electionTimeout(members.size() == 1 ? 30 : 60_000).heartbeatInterval(60_000)

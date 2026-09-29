@@ -92,9 +92,9 @@ class RaftNodeAppliesWhatItLogsTest {
         follower.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         byte[] entry = registrationWhoseEncodingIsNotReproducedByReEncoding();
         AppendEntriesRequest request = AppendEntriesRequest.newBuilder().setTerm(1).setLeaderId("leader")
-                .setPrevLogIndex(0).setPrevLogTerm(0).setLeaderCommit(1)
+                .setPrevLogIndex(1).setPrevLogTerm(0).setLeaderCommit(2)
                 .addEntries(dev.mars.qraft.controller.raft.grpc.LogEntry.newBuilder()
-                        .setTerm(1).setIndex(1).setData(com.google.protobuf.ByteString.copyFrom(entry)))
+                        .setTerm(1).setIndex(2).setData(com.google.protobuf.ByteString.copyFrom(entry)))
                 .build();
 
         AppendEntriesResponse first = follower.handleAppendEntriesRequest(request)
@@ -104,7 +104,7 @@ class RaftNodeAppliesWhatItLogsTest {
 
         assertTrue(first.getSuccess());
         assertTrue(retransmitted.getSuccess(), "a duplicate of an identical entry is not a divergent log");
-        assertEquals(1, retransmitted.getMatchIndex());
+        assertEquals(2, retransmitted.getMatchIndex());
         assertTrue(!follower.isFenced(), "the follower must not fence itself");
         assertEquals(1, store.getServiceCatalog().instances(ServiceKey.inDefaultScope("web")).size());
     }
