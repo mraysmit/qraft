@@ -235,11 +235,14 @@ Server mode currently owns:
   - **No upgrade.** A data directory that holds Raft state but no
     configuration, which is data from before configurations were recorded,
     refuses to start.
-  - **Joining.** A server with no Raft state that finds a listed server
-    already in a cluster asks that server to add it, as Consul's
-    `retry_join` does, and asks again every second until the leader has
-    replicated the configuration to it. Any server forwards the request to
-    the leader over the Raft port. The leader adds the server as a
+  - **Joining.** A server with no Raft state that finds listed servers
+    already in a cluster asks them, in turn, to add it, as Consul's
+    `retry_join` tries every address. It stops at the first that answers for
+    a leader, passing over one that cannot be reached or knows no leader, and
+    asks again every second until the leader has replicated the
+    configuration to it. Any server forwards the request to the leader over
+    the Raft port; a server that cannot reach the leader answers that no
+    leader could be reached. The leader adds the server as a
     non-voter, and promotes it as above. There is no operator command to add
     a server, as in Consul.
   - **Rejoining after lost storage.** A server that lost its storage comes
@@ -247,12 +250,19 @@ Server mode currently owns:
     address, the leader first removes that entry, within the quorum rule
     below, as Consul's autopilot does. It adds the new server when it asks
     again.
+  - **Moving with its storage.** A server that comes back under its server
+    ID and name, but at a new address, has its configured address updated,
+    and keeps its vote, as Consul's `AddServer` does. A request under
+    another name, or for an address another server holds, is refused.
   - **Removal.** An operator removes a server by ID or by name (section
     12.5). A removal of a voter is refused unless the voters left, among
     those the leader has heard from within its check-quorum window, are a
     quorum. A non-voter can always be removed. A leader that removes itself
     steps down once the removal commits, and never campaigns again; the
-    servers left elect a leader.
+    servers left elect a leader. It keeps running, but reports `removed` in
+    `/raft/status` and on `/health/ready`, and refuses writes as any
+    follower does, so it can be stopped. A follower removed by another
+    leader is no longer replicated to, so it may never learn of its removal.
   - **Addresses.** The Raft transport reaches each configured server at the
     address in the configuration, which overrides `server.raft.nodes`. A
     joined server is in no server's list, and a rejoined server may have a
@@ -469,7 +479,8 @@ only when all of the following hold:
 
 Otherwise it returns 503 with the error envelope. The code is `not_ready` and a
 `conditions` list names every failed condition: `draining`, `unavailable` (its
-Raft state cannot be read), `fenced`, or else `recovering`, and `no_leader`. The
+Raft state cannot be read), `fenced`, or else `recovering`, `removed` (its
+removal from the Raft configuration has committed), and `no_leader`. The
 conditions are read as one consistent view on the Raft state loop. A candidate,
 or a server cut off from the majority, is unready until it rejoins a leader.
 Readiness does not yet depend on read consistency, because consistency modes do

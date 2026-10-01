@@ -103,6 +103,27 @@ class RaftNodeMembershipTest {
     }
 
     @Test
+    void aServerRejoiningUnderItsIdAtANewAddressHasItsAddressUpdated() throws Exception {
+        leadWithACommit();
+
+        assertEquals(JoinResult.ADDRESS_UPDATED, await(a.admit(new Server(serverIdOf("c"), "c", "c-moved", false))));
+
+        assertEquals(Optional.of(new Server(serverIdOf("c"), "c", "c-moved", true)),
+                a.getConfiguration().orElseThrow().server(serverIdOf("c")), "c keeps its vote at its new address");
+    }
+
+    @Test
+    void anAddressUpdateIsRefusedWhenItWouldTakeAnotherServersAddressOrRenameTheServer() throws Exception {
+        leadWithACommit();
+
+        assertRefused(IllegalArgumentException.class, "belongs to",
+                () -> await(a.admit(new Server(serverIdOf("c"), "c", "b", false))));
+        assertRefused(IllegalArgumentException.class, "configured as c",
+                () -> await(a.admit(new Server(serverIdOf("c"), "renamed", "c", false))));
+        assertEquals(Optional.of(ManualRaftCluster.configurationOf(MEMBERS)), a.getConfiguration());
+    }
+
+    @Test
     void aServerRejoiningUnderANewIdReplacesItsOldEntryAndThenJoins() throws Exception {
         leadWithACommit();
         Server wipedC = new Server("new-id-of-c", "c", "c", false);
@@ -187,6 +208,8 @@ class RaftNodeMembershipTest {
         // The removal completes as it is applied; a steps down straight after, on its state loop.
         await(a.awaitState(RaftNode.State.FOLLOWER, 10_000));
         assertEquals(Optional.of(without("a")), a.getConfiguration());
+        assertTrue(await(a.status()).removed(), "a reports that it has been removed");
+        assertFalse(await(b.status()).removed());
         cluster.elect(b);
         assertFalse(a.isLeader());
         assertTrue(b.getConfiguration().orElseThrow().server(serverIdOf("a")).isEmpty());

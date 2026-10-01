@@ -239,7 +239,8 @@ public final class HttpApiServer implements AutoCloseable {
     /**
      * The readiness conditions this server does not meet, in a fixed order: {@code draining};
      * {@code unavailable} when its Raft state cannot be read; {@code fenced}, or else {@code recovering} while
-     * recovery has not finished; and {@code no_leader} unless it is the leader or a follower of a known leader.
+     * recovery has not finished; {@code removed} once its removal from the configuration has committed; and
+     * {@code no_leader} unless it is the leader or a follower of a known leader.
      * A server without a Raft node is judged on draining alone.
      */
     private List<String> unmetReadinessConditions() {
@@ -256,6 +257,7 @@ public final class HttpApiServer implements AutoCloseable {
         }
         if (status.fenced()) failed.add("fenced");
         else if (!status.running()) failed.add("recovering");
+        if (status.removed()) failed.add("removed");
         if (!status.knowsLeader()) failed.add("no_leader");
         return failed;
     }
@@ -321,6 +323,7 @@ public final class HttpApiServer implements AutoCloseable {
         status.put("lastLogIndex", current.lastLogIndex());
         status.put("snapshotLastIndex", current.snapshotLastIndex());
         status.put("fenced", current.fenced());
+        status.put("removed", current.removed());
         respondJson(exchange, 200, status);
     }
 

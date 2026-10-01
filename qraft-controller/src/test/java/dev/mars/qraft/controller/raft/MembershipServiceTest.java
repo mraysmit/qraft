@@ -138,6 +138,30 @@ class MembershipServiceTest {
     }
 
     @Test
+    void aForwarderThatThrowsIsAnsweredAsNoLeaderReachable() throws Exception {
+        leadWithACommit();
+        MembershipService follower = new MembershipService(b, new ThrowingForwarder(), TOKEN);
+
+        MembershipResponse join = await(follower.join(JOIN_D));
+        MembershipResponse removal = await(follower.remove(removal().setName("c").setToken(TOKEN).build()));
+
+        assertEquals(Status.NO_LEADER, join.getStatus(), join.getMessage());
+        assertTrue(join.getMessage().contains("could not be reached"), join.getMessage());
+        assertEquals(Status.NO_LEADER, removal.getStatus(), removal.getMessage());
+    }
+
+    @Test
+    void aMemberAtANewAddressIsToldItsAddressWasUpdated() throws Exception {
+        leadWithACommit();
+
+        MembershipResponse answer = await(services.get("a").join(JoinRequest.newBuilder()
+                .setServerId(serverIdOf("c")).setName("c").setAddress("c-moved").build()));
+
+        assertEquals(Status.ALREADY_MEMBER, answer.getStatus());
+        assertTrue(answer.getMessage().contains("c-moved"), answer.getMessage());
+    }
+
+    @Test
     void aRejoiningServerIsToldTheOldEntryIsBeingReplaced() throws Exception {
         leadWithACommit();
 
@@ -230,6 +254,37 @@ class MembershipServiceTest {
     private RaftNode node(String name) {
         return cluster.add(cluster.builder(name, MEMBERS, new InMemoryTransportSimulator(name),
                 new QraftStateStore(), RaftNodeMode.volatileMode()));
+    }
+
+    /** Throws as it is asked to forward, as a transport given a leader it cannot address once did. */
+    private static final class ThrowingForwarder implements RaftTransport {
+        @Override
+        public Future<MembershipResponse> join(String targetId, JoinRequest request) {
+            throw new IllegalArgumentException("Unknown node: " + targetId);
+        }
+
+        @Override
+        public Future<MembershipResponse> removeServer(String targetId, RemoveServerRequest request) {
+            throw new IllegalArgumentException("Unknown node: " + targetId);
+        }
+
+        @Override public void start(Consumer<RaftMessage> messageHandler) { }
+        @Override public void stop() { }
+
+        @Override
+        public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Future<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Future<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
+            throw new UnsupportedOperationException();
+        }
     }
 
     /** Carries a forwarded request to the target's service, as the Raft port would. */

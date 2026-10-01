@@ -607,6 +607,19 @@ It was "Operator add and remove".
    the leader over the Raft port, and returns the leader's answer. A
    forwarded request is never forwarded again.
 
+**Review fixes (2026-10-01),** from the code review of commit `05a2055`.
+Written test first; not yet run:
+- A forward to a leader the transport cannot address failed by throwing,
+  which escaped both servers. The transport now fails the future, and
+  forwarding answers `NO_LEADER`.
+- A joining server asked only the first listed member with state, so a
+  member that took no requests, such as a leader that removed itself,
+  stalled it for ever. It now asks each member in turn.
+- A leader that removed itself idled unnoticed. It now reports `removed` in
+  `/raft/status` and on `/health/ready`.
+- A known server at a new address was left at its old one. Its address is
+  now updated, and it keeps its vote.
+
 ### Step 5. Failed-server cleanup
 
 - The leader marks a voter failed after it has been unreachable past a

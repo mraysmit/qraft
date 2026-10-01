@@ -20,6 +20,8 @@ import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
+import dev.mars.qraft.controller.raft.grpc.JoinRequest;
+import dev.mars.qraft.controller.raft.grpc.RemoveServerRequest;
 import dev.mars.qraft.controller.raft.grpc.VoteRequest;
 import dev.mars.qraft.controller.raft.grpc.VoteResponse;
 
@@ -431,6 +433,22 @@ class GrpcRaftTransportTest {
         } finally {
             secondServer.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
+    }
+
+    @Test
+    @DisplayName("A join or removal for a server the transport cannot address fails the returned future")
+    void aMembershipRequestToAnUnaddressableServerFailsTheReturnedFutureInsteadOfThrowing() {
+        GrpcRaftTransport transport = startedTransport(Map.of());
+
+        // A caller forwarding to the leader it was told of must get a failed future it can turn into an answer.
+        ExecutionException join = assertThrows(ExecutionException.class, () -> transport
+                .join("nobody", JoinRequest.getDefaultInstance())
+                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
+        assertInstanceOf(IllegalArgumentException.class, join.getCause());
+        ExecutionException removal = assertThrows(ExecutionException.class, () -> transport
+                .removeServer("nobody", RemoveServerRequest.getDefaultInstance())
+                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
+        assertInstanceOf(IllegalArgumentException.class, removal.getCause());
     }
 
     // ========== REQUEST CONTENT TESTS ==========

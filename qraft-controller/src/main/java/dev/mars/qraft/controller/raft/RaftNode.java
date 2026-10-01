@@ -968,7 +968,8 @@ public class RaftNode {
 
     /**
      * Admits a server asking to join, as a non-voter; {@link #considerPromotions} promotes it once it has caught
-     * up. A server already configured under its server ID is left as it is. If another server ID holds its name
+     * up. A server already configured under its server ID is left as it is, or has its address updated (see
+     * {@link #readmit}). If another server ID holds its name
      * or address, as after the server lost its storage, that entry is removed first, as Consul's autopilot does,
      * and the server is added when it asks again. Each change completes once committed.
      */
@@ -983,9 +984,8 @@ public class RaftNode {
             if (state != State.LEADER || current == null) {
                 return Future.failedFuture(new IllegalStateException("Not the leader. Current state: " + state));
             }
-            if (current.server(joining.serverId()).isPresent()) {
-                return Future.succeededFuture(JoinResult.ALREADY_MEMBER);
-            }
+            Optional<RaftConfiguration.Server> known = current.server(joining.serverId());
+            if (known.isPresent()) return readmit(current, known.get(), joining);
             Optional<RaftConfiguration.Server> displaced = current.servers().stream()
                     .filter(server -> server.name().equals(joining.name())
                             || server.address().equals(joining.address()))
@@ -1000,6 +1000,38 @@ public class RaftNode {
             servers.add(joining);
             return proposeConfiguration(new RaftConfiguration(servers)).map(ignored -> JoinResult.JOINED);
         });
+    }
+
+    /**
+     * A configured server asking to join again: left as it is, or, if it asks from a new address, as after it
+     * moved with its storage, given that address and its vote kept, as Consul's {@code AddServer} does. Its name
+     * is how every server addresses it, so a request under another name is refused, as is an address another
+     * server holds.
+     */
+    private Future<JoinResult> readmit(RaftConfiguration current, RaftConfiguration.Server known,
+                                       RaftConfiguration.Server joining) {
+        if (!known.name().equals(joining.name())) {
+            return Future.failedFuture(new IllegalArgumentException("Server " + known.serverId()
+                    + " is configured as " + known.name() + "; it cannot rejoin as " + joining.name()));
+        }
+        if (known.address().equals(joining.address())) return Future.succeededFuture(JoinResult.ALREADY_MEMBER);
+        Optional<RaftConfiguration.Server> holder = current.servers().stream()
+                .filter(server -> !server.serverId().equals(known.serverId())
+                        && server.address().equals(joining.address()))
+                .findFirst();
+        if (holder.isPresent()) {
+            return Future.failedFuture(new IllegalArgumentException("Address " + joining.address()
+                    + " belongs to server " + holder.get().name() + " (" + holder.get().serverId() + ")"));
+        }
+        logger.info("Server {} ({}) moved from {} to {}; updating its address", known.name(), known.serverId(),
+                known.address(), joining.address());
+        List<RaftConfiguration.Server> servers = new ArrayList<>();
+        for (RaftConfiguration.Server server : current.servers()) {
+            servers.add(server.serverId().equals(known.serverId())
+                    ? new RaftConfiguration.Server(known.serverId(), known.name(), joining.address(), known.voter())
+                    : server);
+        }
+        return proposeConfiguration(new RaftConfiguration(servers)).map(ignored -> JoinResult.ADDRESS_UPDATED);
     }
 
     /**
@@ -1195,7 +1227,7 @@ public class RaftNode {
         try {
             runtime.runOnContext(ignored -> status.tryComplete(new RaftStatus(nodeId, serverId, state, currentTerm,
                     currentLeaderId, commitIndex, lastApplied, lastLogIndex(), snapshotLastIndex, isFenced(),
-                    running)));
+                    running, isRemoved())));
         } catch (java.util.concurrent.RejectedExecutionException stopped) {
             status.tryFail(stopped);
         }
@@ -2545,15 +2577,24 @@ public class RaftNode {
     }
 
     /**
+     * Whether this server knows that its removal has committed: both the latest configuration and the one in
+     * force at its commit index leave it out. A leader that removes itself knows this; a follower removed by
+     * another leader is no longer replicated to, so it may never learn it.
+     */
+    private boolean isRemoved() {
+        RaftConfiguration current = configuration;
+        if (current == null || current.server(serverId).isPresent()) return false;
+        RaftConfiguration committed = configurationAt(commitIndex);
+        return committed != null && committed.server(serverId).isEmpty();
+    }
+
+    /**
      * A leader whose removal has committed steps down. Outside the configuration it never campaigns, so the
      * servers left elect a leader among themselves.
      */
     private void stepDownIfRemoved() {
         RaftConfiguration current = configuration;
-        if (state != State.LEADER || current == null || current.server(serverId).isPresent()
-                || configurationAt(commitIndex).server(serverId).isPresent()) {
-            return;
-        }
+        if (state != State.LEADER || !isRemoved()) return;
         state = State.FOLLOWER;
         currentLeaderId = null;
         MDC.put("raftRole", "FOLLOWER");

@@ -26,8 +26,13 @@ package dev.mars.qraft.controller.raft;
 public enum JoinResult {
     /** The server was added as a non-voter; the leader promotes it once it has caught up. */
     JOINED,
-    /** The server is already in the configuration, under the same server ID. */
+    /** The server is already in the configuration, under the same server ID, name, and address. */
     ALREADY_MEMBER,
+    /**
+     * The server is already in the configuration under its server ID and name, but asked from a new address, as
+     * after it moved with its storage; its configured address was updated, and it keeps its vote.
+     */
+    ADDRESS_UPDATED,
     /**
      * Another server ID held the joining server's name or address, as after a server loses its storage, and
      * that entry was removed. The server is added when it asks again.

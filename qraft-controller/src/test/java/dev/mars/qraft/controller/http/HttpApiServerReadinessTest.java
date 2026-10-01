@@ -23,7 +23,9 @@ import dev.mars.qraft.controller.raft.ManualRaftCluster;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.raft.RaftNodeMode;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
+import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.QraftStateStore;
+import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -105,6 +107,24 @@ class HttpApiServerReadinessTest {
 
         assertEquals(503, ready.statusCode());
         assertEquals(Set.of("no_leader"), conditions(ready));
+        assertEquals(200, get(server, "/health/live").statusCode());
+    }
+
+    @Test
+    void aServerRemovedFromTheConfigurationIsNotReadyButIsLive() throws Exception {
+        startCluster(Set.of("a", "b", "c"), Set.of("a", "b", "c"));
+        electAndFollow("a");
+        RaftNode a = nodes.get("a");
+        ManualRaftCluster.await(a.submitCommand(new DistributedStateRaftCommand(
+                DistributedStateCommand.put("k", "v"))));
+        ManualRaftCluster.await(a.removeServer(a.getServerId()));
+        ManualRaftCluster.await(a.awaitState(RaftNode.State.FOLLOWER, 10_000));
+        HttpApiServer server = serve(a);
+
+        HttpResponse<String> ready = get(server, "/health/ready");
+
+        assertEquals(503, ready.statusCode());
+        assertEquals(List.of("removed", "no_leader"), List.copyOf(conditions(ready)));
         assertEquals(200, get(server, "/health/live").statusCode());
     }
 

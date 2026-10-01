@@ -35,6 +35,7 @@ import java.util.concurrent.TimeUnit;
 
 import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests {@link ClusterBootstrap} with real nodes on the in-memory network, none of which starts with a
@@ -123,9 +124,9 @@ class ClusterBootstrapTest {
 
     @Test
     void aServerThatFindsAnExistingClusterAsksToJoinItThroughAnyMember() throws Exception {
-        RaftNode a = configured("a");
-        configured("b");
-        configured("c");
+        RaftNode a = configured("a", true);
+        configured("b", true);
+        configured("c", true);
         cluster.elect(a);
         await(a.submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put("k", "v"))));
         // d lists only b, a follower, which forwards the request to a.
@@ -140,6 +141,24 @@ class ClusterBootstrapTest {
     }
 
     @Test
+    void aServerAsksEachMemberInTurnUntilOneTakesItsRequest() throws Exception {
+        RaftNode a = configured("a", true);
+        // b belongs to the cluster but takes no requests, as a server that removed itself would not.
+        configured("b", false);
+        RaftNode c = configured("c", true);
+        cluster.elect(a);
+        await(a.submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put("k", "v"))));
+        cluster.heartbeatUntil(a, () -> "a".equals(c.getLeaderId()), "c knows its leader");
+        // d lists b before c, so it asks b first.
+        RaftNode d = fresh("d", Set.of("b", "c", "d"));
+
+        assertEquals(Outcome.JOINING_EXISTING, await(bootstrapOf(d).attempt()));
+
+        assertTrue(a.getConfiguration().orElseThrow().serverNamed("d").isPresent(),
+                "b could not take d's request, so d asked c, which forwarded it to a");
+    }
+
+    @Test
     void aNodeThatHasAConfigurationHasNothingToDo() throws Exception {
         RaftNode configured = cluster.add(cluster.builder("a", MEMBERS, new InMemoryTransportSimulator("a"),
                 new QraftStateStore(), RaftNodeMode.volatileMode()));
@@ -150,11 +169,11 @@ class ClusterBootstrapTest {
     }
 
     /** A member of a cluster of a, b and c that serves joins, with its promotions left to their default. */
-    private RaftNode configured(String name) throws Exception {
+    private RaftNode configured(String name, boolean servesJoins) throws Exception {
         InMemoryTransportSimulator transport = new InMemoryTransportSimulator(name);
         RaftNode node = cluster.add(cluster.builder(name, MEMBERS, transport,
                 new QraftStateStore(), RaftNodeMode.volatileMode()));
-        transport.serveMembership(new MembershipService(node, transport, null));
+        if (servesJoins) transport.serveMembership(new MembershipService(node, transport, null));
         await(node.start());
         return node;
     }

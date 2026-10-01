@@ -410,6 +410,7 @@ class HttpApiServerTest {
         assertTrue(response.body().contains("\"lastLogIndex\":" + node.getLastLogIndex()),
                 "operators and acceptance tests need the node's last log index: " + response.body());
         assertTrue(response.body().contains("\"lastApplied\":" + node.getLastApplied()), response.body());
+        assertTrue(response.body().contains("\"removed\":false"), response.body());
     }
 
     @Test

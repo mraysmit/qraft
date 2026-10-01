@@ -290,13 +290,14 @@ public class GrpcRaftTransport implements RaftTransport {
         }
     }
 
+    /** Like every send here, but an unaddressable target fails the future: a forwarder answers from it. */
     @Override
     public Future<MembershipResponse> join(String targetId, JoinRequest request) {
-        requireKnownTarget(targetId);
         if (stopped) {
             return Future.failedFuture(new IllegalStateException("Transport for " + selfId + " is stopped"));
         }
         try {
+            requireKnownTarget(targetId);
             return toFuture(getStub(targetId)
                     .withDeadlineAfter(MembershipService.TIMEOUT_SECONDS, TimeUnit.SECONDS).join(request));
         } catch (Throwable error) {
@@ -306,11 +307,11 @@ public class GrpcRaftTransport implements RaftTransport {
 
     @Override
     public Future<MembershipResponse> removeServer(String targetId, RemoveServerRequest request) {
-        requireKnownTarget(targetId);
         if (stopped) {
             return Future.failedFuture(new IllegalStateException("Transport for " + selfId + " is stopped"));
         }
         try {
+            requireKnownTarget(targetId);
             return toFuture(getStub(targetId)
                     .withDeadlineAfter(MembershipService.TIMEOUT_SECONDS, TimeUnit.SECONDS).removeServer(request));
         } catch (Throwable error) {

@@ -87,6 +87,8 @@ public final class MembershipService {
         return outcome(node.admit(joining).map(result -> switch (result) {
             case JOINED -> response(Status.JOINED, "Added " + joining.name() + " as a non-voter");
             case ALREADY_MEMBER -> response(Status.ALREADY_MEMBER, joining.name() + " is already a member");
+            case ADDRESS_UPDATED -> response(Status.ALREADY_MEMBER,
+                    joining.name() + " is already a member; its address is now " + joining.address());
             case REPLACING -> response(Status.REPLACING,
                     "Removed the old entry at " + joining.name() + "'s name or address; ask again to join");
         }));
@@ -131,7 +133,14 @@ public final class MembershipService {
             return Future.succeededFuture(response(Status.NO_LEADER,
                     node.getNodeId() + " is not the leader and knows of none; try again"));
         }
-        return send.apply(leader)
+        Future<MembershipResponse> answer;
+        try {
+            answer = send.apply(leader);
+        } catch (RuntimeException unaddressable) {
+            // A leader this server has heard of but cannot address yet, for one.
+            answer = Future.failedFuture(unaddressable);
+        }
+        return answer
                 .timeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .recover(unreachable -> Future.succeededFuture(response(Status.NO_LEADER,
                         "The leader " + leader + " could not be reached: " + unreachable.getMessage())));

@@ -21,7 +21,8 @@ package dev.mars.qraft.controller.raft;
  * moment: {@code snapshotLastIndex <= lastApplied <= commitIndex <= lastLogIndex} holds. {@code running} is
  * false until recovery has finished and again once the node begins to stop.
  * {@code serverId} is the durable identity kept in the node's data directory; {@code nodeId} is its
- * configured name.
+ * configured name. {@code removed} is true once the node knows a committed configuration that leaves it out,
+ * as a leader that removed itself does; such a node never campaigns again.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-27
@@ -29,7 +30,7 @@ package dev.mars.qraft.controller.raft;
  */
 public record RaftStatus(String nodeId, String serverId, RaftNode.State state, long term, String leaderId, long commitIndex,
                          long lastApplied, long lastLogIndex, long snapshotLastIndex, boolean fenced,
-                         boolean running) {
+                         boolean running, boolean removed) {
 
     /** True when this node is the leader, or a follower that knows its current leader. */
     public boolean knowsLeader() {

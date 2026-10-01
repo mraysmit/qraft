@@ -18,6 +18,7 @@ package dev.mars.qraft.controller.raft;
 
 import dev.mars.qraft.controller.raft.grpc.DescribeResponse;
 import dev.mars.qraft.controller.raft.grpc.JoinRequest;
+import dev.mars.qraft.controller.raft.grpc.MembershipResponse;
 import dev.mars.qraft.controller.runtime.Future;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,8 +37,8 @@ import java.util.Optional;
  *   <li>each answers under the name this server lists it by, and lists exactly the same servers.</li>
  * </ul>
  * The configuration is built from each server's own answer, its server ID and address, so every server that
- * bootstraps writes the identical entry. A server that finds an existing cluster does not bootstrap. It asks that
- * member to add it, as Consul's {@code retry_join} does, and a leader of that cluster replicates the configuration
+ * bootstraps writes the identical entry. A server that finds an existing cluster does not bootstrap. It asks its
+ * members, in turn, to add it, as Consul's {@code retry_join} does, and a leader of that cluster replicates the configuration
  * to it.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
@@ -90,28 +91,57 @@ public final class ClusterBootstrap {
     }
 
     /**
-     * Asks {@code member}, which belongs to a cluster, to add this server; it forwards the request to its leader.
-     * Whatever the answer, this server waits for the leader to replicate the configuration to it, and the next
-     * attempt asks again, as when an old entry for this server had to be removed first.
+     * Asks the {@code members} that belong to a cluster, in turn, to add this server, as Consul's
+     * {@code retry_join} tries every address. Each forwards the request to its leader. It stops at the first
+     * that answers for a leader; a member that cannot be reached, or knows no leader, as a server that removed
+     * itself does not, is passed over. Whatever the answer, this server waits for the leader to replicate the
+     * configuration to it, and the next attempt asks again, as when an old entry for it had to be removed first.
      */
-    private Future<Outcome> askToJoin(DescribeResponse self, String member) {
+    private Future<Outcome> askToJoin(DescribeResponse self, List<String> members) {
         JoinRequest request = JoinRequest.newBuilder().setServerId(self.getServerId()).setName(self.getName())
                 .setAddress(self.getAddress()).build();
-        return transport.join(member, request)
-                .map(answer -> {
-                    logger.info("Bootstrap: {} belongs to a cluster; asked to join: {} {}",
-                            member, answer.getStatus(), answer.getMessage());
-                    return Outcome.JOINING_EXISTING;
-                })
+        return askToJoin(request, members, 0);
+    }
+
+    private Future<Outcome> askToJoin(JoinRequest request, List<String> members, int next) {
+        if (next == members.size()) return Future.succeededFuture(Outcome.JOINING_EXISTING);
+        String member = members.get(next);
+        Future<MembershipResponse> answer;
+        try {
+            answer = transport.join(member, request);
+        } catch (RuntimeException unaddressable) {
+            answer = Future.failedFuture(unaddressable);
+        }
+        return answer.map(Optional::of)
                 .recover(unreachable -> {
-                    logger.info("Bootstrap: {} belongs to a cluster; could not ask to join: {}",
+                    logger.info("Bootstrap: could not ask {} to join its cluster: {}",
                             member, unreachable.getMessage());
+                    return Future.succeededFuture(Optional.<MembershipResponse>empty());
+                })
+                .compose(response -> {
+                    if (response.isEmpty()) return askToJoin(request, members, next + 1);
+                    MembershipResponse.Status status = response.get().getStatus();
+                    if (status == MembershipResponse.Status.NO_LEADER
+                            || status == MembershipResponse.Status.UNSPECIFIED) {
+                        logger.info("Bootstrap: {} could not take the request to join: {}",
+                                member, response.get().getMessage());
+                        return askToJoin(request, members, next + 1);
+                    }
+                    logger.info("Bootstrap: asked {} to join its cluster: {} {}",
+                            member, status, response.get().getMessage());
                     return Future.succeededFuture(Outcome.JOINING_EXISTING);
                 });
     }
 
     private Future<Outcome> decide(
             DescribeResponse self, List<String> peers, List<Future<Optional<DescribeResponse>>> answers) {
+        List<String> members = new ArrayList<>();
+        for (int i = 0; i < peers.size(); i++) {
+            Optional<DescribeResponse> answer = answers.get(i).result();
+            if (answer.isPresent() && answer.get().getHasState()) members.add(peers.get(i));
+        }
+        if (!members.isEmpty()) return askToJoin(self, members);
+
         List<DescribeResponse> described = new ArrayList<>();
         described.add(self);
         boolean everyoneAnswered = true;
@@ -122,7 +152,6 @@ public final class ClusterBootstrap {
                 continue;
             }
             DescribeResponse peer = answer.get();
-            if (peer.getHasState()) return askToJoin(self, peers.get(i));
             if (!peer.getName().equals(peers.get(i)) || !peer.getListedServersList().equals(self.getListedServersList())) {
                 logger.error("Bootstrap refused: {} answers as {} and lists {}, but this server lists {}",
                         peers.get(i), peer.getName(), peer.getListedServersList(), self.getListedServersList());
