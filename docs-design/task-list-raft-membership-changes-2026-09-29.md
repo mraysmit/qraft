@@ -2,7 +2,8 @@
 
 **Date:** 2026-09-29
 **Active work:** Step 4, joining, and operator list and remove. It is built,
-and its verification is not yet recorded (Step 4 record). Steps 1 to 3 were done
+and the full suites passed on 2026-10-02; its mutation evidence is outstanding
+(Step 4 record). Steps 1 to 3 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
 **Predecessor:** [`task-list-test-suite-remediation-2026-09-27.md`](../docs/archive/task-list-test-suite-remediation-2026-09-27.md),
@@ -666,8 +667,9 @@ The code and its tests are in commits `05a2055` (2026-09-29) and `d081c7a`
   `HttpApiServerReadinessTest` (a removed server is live but not ready).
 
 **Not yet:**
-- Docker and mutation validation for this step remain outstanding. The
-  remediation build and focused regression runs are recorded below.
+- Mutation validation for this step remains outstanding. The remediation
+  build, the focused regression runs, and the full-suite run of 2026-10-02 are
+  recorded below.
 - `promotionStabilization` and `promotionMaxTrailingEntries` are still builder
   options only, not server configuration (Step 3 record).
 - No container test adds or removes a server; that is Step 8.
@@ -750,6 +752,19 @@ Found in the review of the remediation above.
   start the empty server. Its corrupt-replica procedure, which still said the
   server rejoins by itself, now points there. The procedure has no container
   test; that is Step 8.
+
+### Full-suite run (2026-10-02)
+
+Run on the working tree that holds the review remediation, the target server
+ID, and the chaos-test fix, on JDK 27:
+
+- `mvn install`: 812 tests, no failures, every coverage gate met.
+- The Docker suite, on an image built from that install's JAR: 23 of 23.
+- The end-to-end suite: 7 of 7.
+
+Still outstanding: mutation evidence for the stickiness, collision, moved
+server, and target server ID tests. No container test yet adds, removes, or
+replaces a server; that is Step 8.
 
 ### Step 5. Failed-server cleanup
 

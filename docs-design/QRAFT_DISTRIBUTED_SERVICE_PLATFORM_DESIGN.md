@@ -1942,7 +1942,7 @@ Evidence as of 2026-09-27, except where a row gives a later date:
 | Leadership change keeps committed registrations | Met | `DockerDurableRestartTest.killedLeaderIsReplacedAndRejoinsWithCompleteCatalog`, `DockerAgentHealthTest` |
 | Bounded graceful deregistration; expiry handles crashes | Met | `QraftAgentTest.unreachableControllerCannotExtendShutdownPastDeadlineAndLogsOnce`, `DockerAgentHealthTest`, `CrashedAgentExpiryEndToEndTest` |
 | Embedded administrative interface | Open | Not implemented (sections 12.4 and 19.6) |
-| Full default reactor and container suite pass | Met | 762 default tests and 23 Docker-tagged tests, as last recorded on 2026-09-29 (membership list, Step 3 record). The counts fell from 807 and 30 when the test-suite remediation deleted tests that verified nothing |
+| Full default reactor and container suite pass | Met | 812 default tests, 23 Docker-tagged tests, and 7 end-to-end tests, run on 2026-10-02 (membership list, full-suite run). The counts fell from 807 and 30 when the test-suite remediation deleted tests that verified nothing |
 
 ## 22. Open decisions
 
