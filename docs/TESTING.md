@@ -60,6 +60,16 @@ line coverage (JaCoCo). The gates run in the `verify` phase, so **`mvn test` doe
 a change can pass `mvn test` but break `mvn install`. `mvn install` also packages
 `qraft-runtime/target/qraft-runtime.jar`, which the Docker suite needs.
 
+**After changing a dependency version, run `mvn clean install`.** `qraft-controller` shades its
+dependencies into its own jar. Without `clean`, that step starts from the previous shaded jar and keeps
+the old dependency's classes, and `qraft-runtime.jar` inherits them. The unit tests still run against the
+new version, so nothing fails: only the packaged jar, and therefore the Docker suite and any deployment,
+runs the old one. Found on 2026-10-02 when RaftLog went from 1.4.0 to 1.4.1. To check what a jar holds:
+
+```bash
+unzip -p qraft-runtime/target/qraft-runtime.jar META-INF/maven/io.github.mraysmit/raftlog-core/pom.properties
+```
+
 ## When the change touches the runtime: the end-to-end and Docker suites
 
 Run them when a change touches server or agent start-up, health checks and their TTLs, ports,

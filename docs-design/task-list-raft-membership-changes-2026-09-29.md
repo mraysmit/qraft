@@ -766,6 +766,39 @@ Still outstanding: mutation evidence for the stickiness, collision, moved
 server, and target server ID tests. No container test yet adds, removes, or
 replaces a server; that is Step 8.
 
+### RaftLog 1.4.1 (2026-10-02)
+
+Not part of the membership work; recorded here because this is the current
+list.
+
+- **Change.** The root POM pins `raftlog.version` 1.4.1, up from 1.4.0. The
+  WAL and metadata formats are unchanged. Design section 14.7 names the new
+  version.
+- **1.4.1 against Qraft's use of it:**
+  - The removed `FileRaftStorage(boolean)` constructors: Qraft already builds
+    the storage from `RaftStorageConfig` everywhere.
+  - `updateMetadata` refuses a null vote: Qraft passes an `Optional`.
+  - Narrower torn-tail repair, `LogEntryData` compared by content, and the
+    inferred compaction boundary: covered by the storage contract tests
+    below, which pass unchanged.
+- **Defect in the build, found by this upgrade.** After `mvn install`, the
+  runtime JAR still held RaftLog 1.4.0 classes. `qraft-controller` shades its
+  dependencies into its own jar; without `clean`, the shade step starts from
+  the previous shaded jar, whose copy of a dependency wins over the new one.
+  Qraft's own classes were current, so earlier Docker results stand for Qraft
+  code. `docs/TESTING.md` now says to run `mvn clean install` after a
+  dependency change. The cause is not fixed: the controller still replaces
+  its jar with a shaded one that `qraft-runtime` shades again.
+- **Validation,** after `mvn clean install`:
+  - 812 tests, every coverage gate met, including the contract tests of
+    design section 14.7: `RaftLogStorageIntegrationTest`,
+    `RaftNodeRealStorageRecoveryTest`, `RaftNodeRealSnapshotRecoveryTest`,
+    `RaftNodeInstalledSnapshotRealRecoveryTest`, `FileSnapshotStoreTest`, and
+    `RaftStorageProcessLockTest`.
+  - The runtime JAR reports `raftlog-core` 1.4.1.
+  - The Docker suite on that JAR: 23 of 23.
+  - The end-to-end suite was not rerun.
+
 ### Step 5. Failed-server cleanup
 
 - The leader marks a voter failed after it has been unreachable past a
