@@ -21,12 +21,15 @@ import dev.mars.qraft.controller.raft.RaftConfiguration.Server;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.QraftStateStore;
+import dev.mars.qraft.controller.raft.storage.RaftStorageFactory;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.util.HashMap;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -59,6 +62,7 @@ class ClusterBootstrapTest {
 
     private JavaRuntime runtime;
     private ManualRaftCluster cluster;
+    @TempDir Path storageDirectory;
 
     @BeforeEach
     void setUp() {
@@ -156,6 +160,46 @@ class ClusterBootstrapTest {
 
         assertTrue(a.getConfiguration().orElseThrow().serverNamed("d").isPresent(),
                 "b could not take d's request, so d asked c, which forwarded it to a");
+    }
+
+    @Test
+    void aConfiguredMemberAtANewAddressAsksToRejoinUntilItsAddressIsReplicated() throws Exception {
+        RaftNode a = configured("a", true);
+        configured("b", true);
+        var originalStorage = await(RaftStorageFactory.createDurable(storageDirectory, true));
+        RaftNode original = cluster.add(cluster.builder("c", MEMBERS, new InMemoryTransportSimulator("c"),
+                new QraftStateStore(), RaftNodeMode.durable(originalStorage.wal(), originalStorage.snapshots())));
+        await(original.start());
+        await(original.stop());
+        var recoveredStorage = await(RaftStorageFactory.createDurable(storageDirectory, true));
+        // Recover the same server ID and configuration from the real WAL at a changed address.
+        InMemoryTransportSimulator movedTransport = new InMemoryTransportSimulator("c");
+        RaftNode moved = cluster.add(cluster.unconfiguredBuilder("c", MEMBERS, movedTransport,
+                new QraftStateStore(), RaftNodeMode.durable(recoveredStorage.wal(), recoveredStorage.snapshots()))
+                .serverId(original.getServerId())
+                .addresses(Map.of("a", "a", "b", "b", "c", "c-moved")));
+        movedTransport.serveMembership(new MembershipService(moved, movedTransport, null));
+        await(moved.start());
+        cluster.elect(a);
+        cluster.heartbeatUntil(a, () -> a.getCommitIndex() >= 2, "leadership no-op commits");
+
+        assertEquals(Outcome.JOINING_EXISTING, await(bootstrapOf(moved).attempt()));
+        assertEquals("c-moved", a.getConfiguration().orElseThrow().serverNamed("c").orElseThrow().address());
+        assertTrue(a.getConfiguration().orElseThrow().serverNamed("c").orElseThrow().voter());
+        cluster.heartbeatUntil(a, () -> moved.getConfiguration().equals(a.getConfiguration()), "new address replicated");
+        assertEquals(Outcome.CONFIGURED, await(bootstrapOf(moved).attempt()));
+    }
+
+    @Test
+    void aMovedLeaderUpdatesItsOwnAddressWithoutAnotherMember() throws Exception {
+        RaftNode moved = cluster.add(cluster.builder("a", Set.of("a"), new InMemoryTransportSimulator("a"),
+                new QraftStateStore(), RaftNodeMode.volatileMode()).addresses(Map.of("a", "a-moved")));
+        await(moved.start());
+        cluster.elect(moved);
+        cluster.heartbeatUntil(moved, () -> moved.getCommitIndex() >= 2, "leadership no-op commits");
+        assertEquals(Outcome.JOINING_EXISTING, await(bootstrapOf(moved).attempt()));
+        assertEquals("a-moved", moved.getConfiguration().orElseThrow().serverNamed("a").orElseThrow().address());
+        assertEquals(Outcome.CONFIGURED, await(bootstrapOf(moved).attempt()));
     }
 
     @Test

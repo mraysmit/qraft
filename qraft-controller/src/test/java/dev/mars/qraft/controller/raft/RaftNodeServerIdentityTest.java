@@ -47,6 +47,7 @@ import static dev.mars.qraft.controller.raft.ManualRaftCluster.startAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -146,6 +147,44 @@ class RaftNodeServerIdentityTest {
             assertEquals(SERVER_IDS.get(answer.peer()), senderOf(answer.message()),
                     answer.message().getClass().getSimpleName() + " from " + answer.peer());
         }
+        for (Exchange sent : leaderTransport.sent) {
+            switch (sent.message()) {
+                case AppendEntriesRequest request -> assertEquals(SERVER_IDS.get(sent.peer()),
+                        request.getTargetServerId(), "an append names the server it is meant for");
+                case InstallSnapshotRequest request -> assertEquals(SERVER_IDS.get(sent.peer()),
+                        request.getTargetServerId(), "a snapshot install names the server it is meant for");
+                default -> { }
+            }
+        }
+    }
+
+    @Test
+    void aRequestMeantForAnotherServerIdIsRefusedWithoutChangingAnything() throws Exception {
+        RaftNode follower = cluster.add(cluster.builder("node2", Set.of("node1", "node2"),
+                new InMemoryTransportSimulator("node2"), new QraftStateStore(), RaftNodeMode.volatileMode()));
+        await(follower.start());
+        long term = follower.getCurrentTerm();
+        long lastIndex = follower.getLastLogIndex();
+
+        AppendEntriesResponse append = await(follower.handleAppendEntriesRequest(
+                append(term + 3, 0).toBuilder().setTargetServerId("another-server").build()));
+        InstallSnapshotResponse snapshot = await(follower.handleInstallSnapshot(InstallSnapshotRequest.newBuilder()
+                .setTerm(term + 3).setLeaderId("node1").setLeaderServerId(LEADER_ID)
+                .setTargetServerId("another-server").setLastIncludedIndex(3).setLastIncludedTerm(1)
+                .setChunkIndex(0).setTotalChunks(1)
+                .setData(ByteString.copyFrom(ManualRaftCluster.snapshotOf(Set.of("node1", "node2"), new byte[0])))
+                .setDone(true).build()));
+
+        assertFalse(append.getSuccess());
+        assertFalse(snapshot.getSuccess());
+        assertEquals(term, follower.getCurrentTerm(), "a request for another server does not move the term");
+        assertEquals(lastIndex, follower.getLastLogIndex());
+        assertEquals(0, follower.getSnapshotLastIndex());
+        assertNull(follower.getLeaderId(), "nor does its sender become this server's leader");
+
+        assertTrue(await(follower.handleAppendEntriesRequest(append(term + 3, 0).toBuilder()
+                .setTargetServerId(follower.getServerId()).build())).getSuccess(),
+                "the same request under this server's own ID is accepted");
     }
 
     @Test

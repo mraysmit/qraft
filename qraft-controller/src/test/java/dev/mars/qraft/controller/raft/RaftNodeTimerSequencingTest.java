@@ -151,11 +151,11 @@ class RaftNodeTimerSequencingTest {
                 DistributedStateCommand.put("snapshot", "candidate"))));
 
         storage.blockNextMetadataUpdate();
-        Future<VoteResponse> vote = node.handleVoteRequest(VoteRequest.newBuilder()
+        Future<AppendEntriesResponse> vote = node.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
                 .setTerm(node.getCurrentTerm() + 1)
-                .setCandidateId("peer-1")
-                .setLastLogIndex(node.getLastLogIndex())
-                .setLastLogTerm(node.getLastLogTerm())
+                .setLeaderId("peer-1")
+                .setPrevLogIndex(node.getLastLogIndex())
+                .setPrevLogTerm(node.getLastLogTerm())
                 .build());
         storage.awaitBlockedMetadataUpdate();
         timers.firePeriodic(200);
@@ -164,7 +164,7 @@ class RaftNodeTimerSequencingTest {
                 "the snapshot is queued behind the step-down's blocked WAL transition");
 
         storage.releaseBlockedMetadataUpdate();
-        assertTrue(await(vote).getVoteGranted());
+        assertTrue(await(vote).getSuccess());
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (storage.snapshotSaveCount() == 0 && System.nanoTime() < deadline) awaitStateLoop(runtime);
         awaitStateLoop(runtime);

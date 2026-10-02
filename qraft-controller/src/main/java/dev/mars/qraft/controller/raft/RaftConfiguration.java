@@ -40,6 +40,11 @@ public record RaftConfiguration(List<Server> servers) implements Serializable {
 
     /** One server in a configuration; a non-voter receives the log but is not counted towards any majority. */
     public record Server(String serverId, String name, String address, boolean voter) implements Serializable {
+        public Server {
+            if (isBlank(serverId) || isBlank(name) || isBlank(address)) {
+                throw new IllegalArgumentException("a server needs an ID, a name, and an address");
+            }
+        }
     }
 
     public RaftConfiguration {

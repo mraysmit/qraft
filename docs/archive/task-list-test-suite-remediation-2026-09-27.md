@@ -1,15 +1,49 @@
 # Task List: Test Suite Remediation
 
 **Date:** 2026-09-27
-**Active work:** none. Steps 1 to 8 are done; the packaged-artifact test waits for the admin interface, and section 6 lists two open questions
-**Source review:** [`QRAFT_TEST_SUITE_REVIEW_2026-09-27.md`](QRAFT_TEST_SUITE_REVIEW_2026-09-27.md), sections 3 to 7
-**Predecessor, run alongside:** [`task-list-platform-hygiene-and-readiness-2026-09-27.md`](../docs/archive/task-list-platform-hygiene-and-readiness-2026-09-27.md), archived 2026-09-28
-**Paused:** [`task-list-embedded-admin-interface-2026-09-27.md`](task-list-embedded-admin-interface-2026-09-27.md), after its Step 1
-**Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
+**Active work:** None. Steps 1 to 8 are complete. Archived 2026-10-02 with the user's agreement.
+**Source review:** [`QRAFT_TEST_SUITE_REVIEW_2026-09-27.md`](../../docs-design/QRAFT_TEST_SUITE_REVIEW_2026-09-27.md), sections 3 to 7
+**Predecessor, run alongside:** [`task-list-platform-hygiene-and-readiness-2026-09-27.md`](task-list-platform-hygiene-and-readiness-2026-09-27.md), archived 2026-09-28
+**Successor:** [`task-list-raft-membership-changes-2026-09-29.md`](../../docs-design/task-list-raft-membership-changes-2026-09-29.md)
+**Paused:** [`task-list-embedded-admin-interface-2026-09-27.md`](../../docs-design/task-list-embedded-admin-interface-2026-09-27.md), after its Step 1
+**Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
-This is the current task list for the project. When the active work is complete,
-add a completion summary, move this file to `docs/archive/` with the user's
-agreement, and start a new dated task list for the next backlog item.
+This was the current task list for the project until 2026-09-29. When the
+active work is complete, add a completion summary, move this file to
+`docs/archive/` with the user's agreement, and start a new dated task list for
+the next backlog item.
+
+**Completion summary (2026-09-28).**
+
+- Every test can now fail, and fails for the reason its name gives. The tests
+  that verified nothing were rewritten or deleted, and the placeholder container
+  tests were replaced by real partition and topology tests.
+- The older Raft, gRPC, runtime, and agent tests run on manual timers, bind
+  port 0, prove absence exactly, and release what they create.
+- The coverage gaps of the review's section 6 are closed, and the hygiene items
+  of its section 7 are done.
+- Nine production defects were found and fixed test first, beyond the five in
+  the review's section 2:
+  - a commit without a majority in even-sized clusters;
+  - a replica that skipped a committed entry it could not apply;
+  - the service fingerprint, the health publisher's clock regression, and the
+    namespace update race;
+  - a blank candidate winning a vote, a send after the gRPC transport stopped,
+    and a member set without the node itself;
+  - a sub-millisecond Raft timeout acting as zero.
+- Defects in the test fakes were fixed too, among them the transport
+  simulator's dropped requests and thread leak.
+- Last recorded verification: `mvn install` with 705 tests and every coverage
+  gate met, and the Docker suite 22 of 22.
+
+**Carried forward.**
+
+- The packaged-artifact test (design section 19.6) waits for the frontend build
+  in the paused administrative-interface list.
+- Membership changes (section 6, question 1) have their own list, the
+  successor above.
+- The maximum-term question (section 6, question 2) is still open. It has no
+  list yet.
 
 ## 1. Goal
 
@@ -872,7 +906,7 @@ Found in Step 8. Both change Raft behaviour, so they need a decision first.
    - Protection from a removed or misconfigured server belongs to the
      leader-stickiness rule or pre-vote (thesis section 4.2.3).
    - Membership changes now have their own list:
-     [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md).
+     [`task-list-raft-membership-changes-2026-09-29.md`](../../docs-design/task-list-raft-membership-changes-2026-09-29.md).
 2. **The maximum term.** One vote request at `Long.MAX_VALUE` moves a node to
    that term. The node's next election would overflow the term to a negative
    number. A node could instead refuse terms that leave no room for another

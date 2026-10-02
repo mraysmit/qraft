@@ -61,6 +61,7 @@ class GrpcRaftIntegrationTest {
     private static final String OPERATOR_TOKEN = "operator-secret";
 
     private JavaRuntime runtime;
+    private final java.util.concurrent.atomic.AtomicLong clock = new java.util.concurrent.atomic.AtomicLong();
     private final Map<String, String> addresses = new ConcurrentHashMap<>();
     private final List<Member> members = new ArrayList<>();
     /** The configuration the members bootstrap with, at the addresses their servers bound. */
@@ -272,7 +273,7 @@ class GrpcRaftIntegrationTest {
         List<Member> cluster = new ArrayList<>();
         for (String id : ids) {
             GrpcRaftTransport transport = new GrpcRaftTransport(runtime, id, addresses);
-            ManualRaftTimers timers = new ManualRaftTimers(runtime);
+            ManualRaftTimers timers = new ManualRaftTimers(runtime, clock);
             QraftStateStore state = new QraftStateStore();
             RaftNode node = RaftNode.builder().runtime(runtime).nodeId(id).clusterNodes(memberIds)
                     .serverId(ManualRaftCluster.serverIdOf(id))

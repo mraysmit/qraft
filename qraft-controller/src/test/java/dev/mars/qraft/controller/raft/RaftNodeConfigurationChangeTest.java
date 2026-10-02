@@ -92,12 +92,7 @@ class RaftNodeConfigurationChangeTest {
     @Test
     void aChangeWaitsUntilTheLeaderHasCommittedAnEntryInItsTerm() throws Exception {
         RaftConfiguration withD = with(new Server(serverIdOf("d"), "d", "d", false));
-
-        assertRefused(IllegalStateException.class, "has committed an entry in its term",
-                () -> await(a.proposeConfiguration(withD)));
-        assertEquals(Optional.of(ManualRaftCluster.configurationOf(MEMBERS)), a.getConfiguration());
-
-        commitACommand();
+        cluster.heartbeatUntil(a, () -> a.getCommitIndex() >= 2, "leadership no-op commits without client writes");
         await(a.proposeConfiguration(withD));
         assertEquals(Optional.of(withD), a.getConfiguration());
     }

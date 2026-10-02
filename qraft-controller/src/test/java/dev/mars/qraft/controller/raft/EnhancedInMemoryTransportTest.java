@@ -31,6 +31,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -234,18 +235,28 @@ class EnhancedInMemoryTransportTest {
     }
 
     /**
-     * Drives the cluster to one leader on a clear network: the member with the highest term either leads, and
-     * its heartbeat brings the others to its term, or stands for the next term, which it wins because every
-     * log is empty.
+     * Drives the cluster to one leader on a clear network. While a member leads, the leader with the highest
+     * term sends a heartbeat: it brings the others to its term, or learns of a higher term and steps down. With
+     * no leader, the member whose log is most up to date stands, since only it is sure to be granted votes:
+     * every leadership leaves a no-op in its log, so the member with the highest term may hold a log that is
+     * behind and could stand for ever without winning. A candidate behind on term learns the term from the
+     * refusals and wins when it stands again.
      */
     private void convergeOnTheHighestTerm() throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!(leaders().size() == 1 && everyoneFollows(leaders().getFirst())) && System.nanoTime() < deadline) {
-            RaftNode highest = nodes.values().stream().max(Comparator.comparingLong(RaftNode::getCurrentTerm))
-                    .orElseThrow();
+            Optional<RaftNode> leader = nodes.values().stream().filter(RaftNode::isLeader)
+                    .max(Comparator.comparingLong(RaftNode::getCurrentTerm));
             try {
-                if (highest.isLeader()) cluster.timers(highest).firePeriodic(ManualRaftCluster.HEARTBEAT_MS);
-                else cluster.timers(highest).fireElectionTimeout();
+                if (leader.isPresent()) {
+                    cluster.timers(leader.get()).firePeriodic(ManualRaftCluster.HEARTBEAT_MS);
+                } else {
+                    cluster.timers(nodes.values().stream()
+                            .max(Comparator.comparingLong(RaftNode::getLastLogTerm)
+                                    .thenComparingLong(RaftNode::getLastLogIndex)
+                                    .thenComparingLong(RaftNode::getCurrentTerm))
+                            .orElseThrow()).fireElectionTimeout();
+                }
             } catch (IllegalStateException roleChanged) {
                 continue; // its role changed between the check and the fire
             }

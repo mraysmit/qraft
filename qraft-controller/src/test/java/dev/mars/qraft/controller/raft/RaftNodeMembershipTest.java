@@ -44,7 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Tests how a {@link RaftNode} leader admits a joining server and removes a server:
  * <ul>
  *   <li>a joining server is added as a non-voter, and a server already configured is left as it is;</li>
- *   <li>a server rejoining under a new server ID first has its old entry removed, as Consul's autopilot does;</li>
+ *   <li>a server rejoining under a new server ID needs operator removal of a colliding old entry;</li>
  *   <li>a removal is refused when the voters left, among those the leader has heard from, are not a quorum;</li>
  *   <li>a leader that removes itself steps down once the change commits, and does not campaign again.</li>
  * </ul>
@@ -124,11 +124,13 @@ class RaftNodeMembershipTest {
     }
 
     @Test
-    void aServerRejoiningUnderANewIdReplacesItsOldEntryAndThenJoins() throws Exception {
+    void aServerRejoiningUnderANewIdNeedsOperatorRemovalBeforeJoining() throws Exception {
         leadWithACommit();
         Server wipedC = new Server("new-id-of-c", "c", "c", false);
 
-        assertEquals(JoinResult.REPLACING, await(a.admit(wipedC)), "the old entry is removed first");
+        assertRefused(IllegalArgumentException.class, "operator must remove", () -> await(a.admit(wipedC)));
+        assertEquals(Optional.of(ManualRaftCluster.configurationOf(MEMBERS)), a.getConfiguration());
+        await(a.removeServer(serverIdOf("c")));
         assertEquals(Optional.of(without("c")), a.getConfiguration());
 
         assertEquals(JoinResult.JOINED, await(a.admit(wipedC)), "asking again adds the new server");
@@ -137,12 +139,69 @@ class RaftNodeMembershipTest {
     }
 
     @Test
-    void aServerAtAnotherServersAddressAlsoReplacesIt() throws Exception {
+    void aServerAtAnotherServersAddressCannotReplaceIt() throws Exception {
         leadWithACommit();
 
-        assertEquals(JoinResult.REPLACING, await(a.admit(new Server("new-id", "renamed", "c", false))));
+        assertRefused(IllegalArgumentException.class, "operator must remove",
+                () -> await(a.admit(new Server("new-id", "renamed", "c", false))));
 
-        assertEquals(Optional.of(without("c")), a.getConfiguration());
+        assertEquals(Optional.of(ManualRaftCluster.configurationOf(MEMBERS)), a.getConfiguration());
+    }
+
+    @Test
+    void anIdleLeaderCanJoinAndRemoveWithoutAClientWrite() throws Exception {
+        cluster.elect(a);
+        cluster.heartbeatUntil(a, () -> a.getCommitIndex() >= 2, "leadership no-op commits");
+        assertEquals(2, a.getLastLogIndex());
+        assertEquals(JoinResult.JOINED, await(a.admit(D)));
+        await(a.removeServer(serverIdOf("d")));
+    }
+
+    @Test
+    void anIdleClusterPromotesAJoiningServerWithoutAClientWrite() throws Exception {
+        RaftNode d = cluster.add(cluster.unconfiguredBuilder("d", Set.of("a", "d"),
+                new InMemoryTransportSimulator("d"), new QraftStateStore(), RaftNodeMode.volatileMode())
+                .serverId(serverIdOf("d")));
+        await(d.start());
+        cluster.elect(a);
+        cluster.heartbeatUntil(a, () -> a.getCommitIndex() >= 2, "leadership no-op commits");
+        assertEquals(JoinResult.JOINED, await(a.admit(D)));
+        cluster.heartbeatUntil(a, () -> a.getConfiguration().orElseThrow().isVoter(serverIdOf("d"))
+                && a.getCommitIndex() == a.getLastLogIndex(), "idle cluster promotes d after stabilization");
+    }
+
+    @Test
+    void aFollowerAcceptsAVoteOnlyAfterLeaderContactExpires() throws Exception {
+        leadWithACommit();
+        cluster.heartbeatUntil(a, () -> "a".equals(b.getLeaderId()), "b knows the leader");
+        var request = dev.mars.qraft.controller.raft.grpc.VoteRequest.newBuilder()
+                .setCandidateId("c").setCandidateServerId(serverIdOf("c"))
+                .setTerm(a.getCurrentTerm() + 1).setLastLogTerm(a.getLastLogTerm())
+                .setLastLogIndex(a.getLastLogIndex()).build();
+        cluster.timers(b).advanceTime(ManualRaftCluster.ELECTION_TIMEOUT_MS - 1);
+        assertFalse(await(b.handleVoteRequest(request)).getVoteGranted());
+        cluster.timers(b).advanceTime(1);
+        assertTrue(await(b.handleVoteRequest(request)).getVoteGranted(), "the minimum timeout releases stickiness");
+    }
+
+    @Test
+    void aRemovedServerCannotRaiseTheActiveLeadersOrFollowersTerm() throws Exception {
+        InMemoryTransportSimulator.createPartition(Set.of("a", "b"), Set.of("c"));
+        leadWithACommit();
+        await(a.removeServer(serverIdOf("c")));
+        cluster.heartbeatUntil(a, () -> b.getConfiguration().equals(a.getConfiguration()), "b learns removal");
+        long term = a.getCurrentTerm();
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            var request = dev.mars.qraft.controller.raft.grpc.VoteRequest.newBuilder()
+                    .setCandidateId("c").setCandidateServerId(serverIdOf("c"))
+                    .setTerm(term + attempt).setLastLogTerm(term).setLastLogIndex(100).build();
+            assertFalse(await(a.handleVoteRequest(request)).getVoteGranted());
+            assertFalse(await(b.handleVoteRequest(request)).getVoteGranted());
+            assertEquals(term, a.getCurrentTerm());
+            assertEquals(term, b.getCurrentTerm());
+        }
+        assertTrue(a.isLeader());
+        await(a.submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put("after", "removal"))));
     }
 
     @Test
@@ -209,6 +268,9 @@ class RaftNodeMembershipTest {
         await(a.awaitState(RaftNode.State.FOLLOWER, 10_000));
         assertEquals(Optional.of(without("a")), a.getConfiguration());
         assertTrue(await(a.status()).removed(), "a reports that it has been removed");
+        assertEquals(ClusterBootstrap.Outcome.CONFIGURED, await(new ClusterBootstrap(a,
+                InMemoryTransportSimulator.getAllTransports().get("a")).attempt()),
+                "startup reconciliation must not re-admit an intentionally removed server");
         assertFalse(await(b.status()).removed());
         cluster.elect(b);
         assertFalse(a.isLeader());
@@ -218,6 +280,7 @@ class RaftNodeMembershipTest {
     private void leadWithACommit() throws Exception {
         cluster.elect(a);
         await(a.submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put("k", "v"))));
+        cluster.heartbeatUntil(a, () -> true, "replication replies settle");
     }
 
     private RaftNode node(String name) {

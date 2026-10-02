@@ -45,17 +45,28 @@ import java.util.function.Supplier;
 public final class ManualRaftTimers implements RaftTimerScheduler {
     private final JavaRuntime runtime;
     private final AtomicLong ids = new AtomicLong();
-    private final Map<Long, Consumer<Long>> oneShots = new ConcurrentHashMap<>();
+    private final Map<Long, Scheduled> oneShots = new ConcurrentHashMap<>();
     private final Map<Long, Scheduled> periodics = new ConcurrentHashMap<>();
+    private final AtomicLong clock;
 
     public ManualRaftTimers(JavaRuntime runtime) {
-        this.runtime = runtime;
+        this(runtime, new AtomicLong());
     }
+
+    ManualRaftTimers(JavaRuntime runtime, AtomicLong clock) {
+        this.runtime = runtime;
+        this.clock = clock;
+    }
+
+    @Override public long nanoTime() { return clock.get(); }
+
+    /** Advances time without delivering any callbacks, to exercise a lease boundary. */
+    public void advanceTime(long millis) { clock.addAndGet(TimeUnit.MILLISECONDS.toNanos(millis)); }
 
     @Override
     public long setTimer(long delayMs, Consumer<Long> action) {
         long id = ids.incrementAndGet();
-        oneShots.put(id, action);
+        oneShots.put(id, new Scheduled(delayMs, action));
         return id;
     }
 
@@ -76,7 +87,9 @@ public final class ManualRaftTimers implements RaftTimerScheduler {
         onStateLoop(() -> {
             long id = oneShots.keySet().stream().min(Long::compareTo)
                     .orElseThrow(() -> new IllegalStateException("no election timer is armed"));
-            oneShots.remove(id).accept(id);
+            Scheduled timer = oneShots.remove(id);
+            clock.addAndGet(TimeUnit.MILLISECONDS.toNanos(timer.periodMs()));
+            timer.action().accept(id);
         });
     }
 

@@ -42,7 +42,7 @@ import java.util.concurrent.TimeoutException;
  *   <li>a removal needs the operator token. The server that receives it checks the token before forwarding,
  *       and the leader checks it again, so the Raft port does not bypass it. With no token configured, every
  *       removal is refused. Joining needs no token, as joining gives a server no vote until the leader
- *       promotes it.</li>
+ *       promotes it. A join that collides with another server ID is refused until an operator removes it.</li>
  * </ul>
  * The node's refusals, such as the quorum rule, come back as {@link Status#REFUSED} with the node's reason.
  *
@@ -73,16 +73,16 @@ public final class MembershipService {
     /** Admits {@code request}'s server as a non-voter on the leader, or forwards the request to it. */
     public Future<MembershipResponse> join(JoinRequest request) {
         Objects.requireNonNull(request, "request");
-        if (!node.isLeader()) {
-            return forward(request.getForwarded(), leader -> forwarder.join(leader,
-                    request.toBuilder().setForwarded(true).build()));
-        }
         RaftConfiguration.Server joining;
         try {
             joining = new RaftConfiguration.Server(
                     request.getServerId(), request.getName(), request.getAddress(), false);
         } catch (IllegalArgumentException invalid) {
             return Future.succeededFuture(response(Status.REFUSED, invalid.getMessage()));
+        }
+        if (!node.isLeader()) {
+            return forward(request.getForwarded(), leader -> forwarder.join(leader,
+                    request.toBuilder().setForwarded(true).build()));
         }
         return outcome(node.admit(joining).map(result -> switch (result) {
             case JOINED -> response(Status.JOINED, "Added " + joining.name() + " as a non-voter");
@@ -150,6 +150,7 @@ public final class MembershipService {
     private static Future<MembershipResponse> outcome(Future<MembershipResponse> change) {
         return change.timeout(TIMEOUT_SECONDS, TimeUnit.SECONDS).recover(error -> {
             boolean retry = error instanceof CommandOutcomeUnknownException || error instanceof TimeoutException
+                    || String.valueOf(error.getMessage()).startsWith("A configuration change waits until")
                     || String.valueOf(error.getMessage()).startsWith("Not the leader");
             return Future.succeededFuture(response(retry ? Status.NO_LEADER : Status.REFUSED,
                     String.valueOf(error.getMessage())));

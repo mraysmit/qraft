@@ -178,6 +178,7 @@ class RaftNodeServerIdCountingTest {
         held.vote("y").complete(VoteResponse.newBuilder()
                 .setTerm(1).setVoteGranted(true).setVoterServerId(serverIdOf("y")).build());
         awaitTrue(() -> leader.getState() == RaftNode.State.LEADER, "x leads with y's vote");
+        awaitTrue(() -> leader.getLastLogIndex() == 2, "leadership no-op appended before the tested write");
         long index = leader.getLastLogIndex() + 1;
         Future<?> write = leader.submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put("k", "v")));
         awaitTrue(() -> held.appendCarrying(index, "z") != null && held.appendCarrying(index, "y") != null,
@@ -207,6 +208,7 @@ class RaftNodeServerIdCountingTest {
         held.vote("b").complete(VoteResponse.newBuilder()
                 .setTerm(1).setVoteGranted(true).setVoterServerId(serverIdOf("b")).build());
         awaitTrue(() -> leader.getState() == RaftNode.State.LEADER, "a leads with b's vote");
+        awaitTrue(() -> leader.getLastLogIndex() == 2, "leadership no-op appended");
         for (int i = 0; i < 4; i++) {
             long index = leader.getLastLogIndex() + 1;
             Future<?> write = leader.submitCommand(
@@ -252,6 +254,8 @@ class RaftNodeServerIdCountingTest {
         transport.vote("b").complete(VoteResponse.newBuilder()
                 .setTerm(1).setVoteGranted(true).setVoterServerId(serverIdOf("b")).build());
         awaitTrue(() -> node.getState() == RaftNode.State.LEADER, "a leads with b's vote");
+        barrier();
+        awaitTrue(() -> node.getLastLogIndex() == 2, "leadership no-op appended before client writes");
     }
 
     private static AppendEntriesResponse ack(long term, long matchIndex, String followerServerId) {

@@ -529,6 +529,7 @@ class RaftNodeTest {
         elect(durableNode);
         assertInstanceOf(RaftCommandResult.Success.class,
                 await(durableNode.submitCommand(distributedPut("vote-log-key", "vote-log-value"))));
+        yieldToAnotherLeader(durableNode);
         long higherTerm = durableNode.getCurrentTerm() + 5;
 
         VoteResponse response = await(durableNode.handleVoteRequest(VoteRequest.newBuilder()
@@ -551,6 +552,7 @@ class RaftNodeTest {
         elect(durableNode);
         assertInstanceOf(RaftCommandResult.Success.class,
                 await(durableNode.submitCommand(distributedPut("vote-log-key-2", "vote-log-value-2"))));
+        yieldToAnotherLeader(durableNode);
         long higherTerm = durableNode.getCurrentTerm() + 7;
 
         VoteResponse response = await(durableNode.handleVoteRequest(VoteRequest.newBuilder()
@@ -583,6 +585,7 @@ class RaftNodeTest {
         elect(durableNode);
         assertInstanceOf(RaftCommandResult.Success.class,
                 await(durableNode.submitCommand(distributedPut("stale-check-key", "stale-check-value"))));
+        yieldToAnotherLeader(durableNode);
 
         ExecutionException voteFailure = assertThrows(ExecutionException.class,
                 () -> durableNode.handleVoteRequest(VoteRequest.newBuilder()
@@ -719,6 +722,14 @@ class RaftNodeTest {
 
     private static void startAll(RaftNode... nodes) throws Exception {
         ManualRaftCluster.startAll(nodes);
+    }
+
+    private void yieldToAnotherLeader(RaftNode previousLeader) throws Exception {
+        assertTrue(await(previousLeader.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
+                .setTerm(previousLeader.getCurrentTerm() + 1).setLeaderId("other-leader")
+                .setPrevLogIndex(previousLeader.getLastLogIndex()).setPrevLogTerm(previousLeader.getLastLogTerm())
+                .build())).getSuccess());
+        cluster.timers(previousLeader).advanceTime(ManualRaftCluster.ELECTION_TIMEOUT_MS);
     }
 
     private RaftNode elect(RaftNode candidate) throws Exception {

@@ -37,7 +37,7 @@ coverage configuration, and build-wide engineering rules.
 |---|---|---|
 | `qraft-raft-engine` | Defines reusable Raft command, state-machine, and engine contracts. | Own all implementation-neutral consensus contracts and reusable Raft primitives. It must not depend on service discovery, tenancy, HTTP, or a runtime mode. |
 | `qraft-distributed-state` | Defines replicated key/value commands and codecs and currently contains the service-catalog model, including composite health-check identity, ordered observations, and replicated check state. | Own deterministic replicated-state commands and projections, including key/value behavior and catalog state. It must contain no network server, process lifecycle, or client-agent behavior. |
-| `qraft-core` | Contains shared Java 27 discovery, health, node, and agent domain types, together with some inherited domain code awaiting removal. | Own small, transport-neutral value types shared between server and client. Service definitions and common identity types belong here; Raft implementation and HTTP DTOs do not. |
+| `qraft-core` | Contains shared Java 27 discovery, health, node, and agent domain types. The inherited job-system code was removed on 2026-09-27. | Own small, transport-neutral value types shared between server and client. Service definitions and common identity types belong here; Raft implementation and HTTP DTOs do not. |
 | `qraft-agent` | Implements client identity, node registration, the typed outbound catalog HTTP adapter, controller-seed failover, single-flight service reconciliation, heartbeat scheduling, policy-derived local liveness/readiness HTTP endpoints, bounded graceful shutdown, local execution of configured HTTP, TCP, and TTL checks, and sequenced publication of their observations and renewals. | Keep local health authoritative at the server without participating in Raft. |
 | `qraft-tenant` | Implements the current namespace lifecycle abstraction and its in-memory implementation. | Own tenant and namespace policy, validation, and lifecycle contracts. Replicated persistence is performed through distributed-state commands rather than hidden local mutation. |
 | `qraft-controller` | Contains the server application, Raft node implementation, transports, durable storage adapters, replicated state host, HTTP and gRPC APIs, snapshots, and graceful shutdown. | Operate one server member: participate in quorum, host authoritative replicated state, enforce request identity and policy, expose control-plane APIs and the built-in administrative interface, and own server lifecycle. |
@@ -247,13 +247,15 @@ Server mode currently owns:
     a server, as in Consul.
   - **Rejoining after lost storage.** A server that lost its storage comes
     back under a new server ID. If another server ID holds its name or
-    address, the leader first removes that entry, within the quorum rule
-    below, as Consul's autopilot does. It adds the new server when it asks
-    again.
+    address, admission is refused until an operator removes that entry with
+    the operator token, within the quorum rule below. The new server can
+    then join as a non-voter. A join alone never evicts another server ID.
   - **Moving with its storage.** A server that comes back under its server
     ID and name, but at a new address, has its configured address updated,
     and keeps its vote, as Consul's `AddServer` does. A request under
     another name, or for an address another server holds, is refused.
+    Startup retries joining when the recovered configuration records an old
+    self-address, until replication confirms the advertised address.
   - **Removal.** An operator removes a server by ID or by name (section
     12.5). A removal of a voter is refused unless the voters left, among
     those the leader has heard from within its check-quorum window, are a
@@ -270,10 +272,24 @@ Server mode currently owns:
   - **The Raft port is trusted.** Anyone who can reach it can join a server
     that is later promoted, as they can already send Raft messages. It
     belongs on a private network until transport security exists.
+  - **Leader stickiness.** A leader ignores campaigns while check-quorum
+    allows it to lead. A follower ignores votes, including higher terms,
+    for the minimum election timeout after leader contact, measured by a
+    monotonic clock. After that interval it may vote again. This prevents
+    a removed server with an old configuration from disrupting a live cluster.
+  - **Requests name their target.** An append or a snapshot install names
+    the server ID the configuration records for the peer it is sent to. A
+    server refuses one that names another server ID, before its term, log,
+    or snapshot changes. A server that lost its storage answers at its old
+    address under a new server ID; it therefore cannot install a snapshot
+    meant for the entry it replaced, which would leave it holding a
+    configuration without itself.
+    Every new leader appends a no-op so an idle cluster can commit an entry
+    in that leader's term before changing membership.
   - Steps 5 to 8 of
     [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md)
-    add automatic removal of failed servers, protection from disruptive
-    servers, recovery from lost quorum, and container scenarios.
+    cover automatic removal of failed servers, further disruptive-server
+    validation, recovery from lost quorum, and container scenarios.
 - **Bootstrapping.** A server with no Raft state asks every server in
   `server.raft.nodes` to describe itself over the Raft port. It then decides:
   - **Bootstrap.** Every listed server answers, none holds Raft state, and all
@@ -296,7 +312,8 @@ Server mode currently owns:
   - A data directory from before server IDs gets one at its next start.
   - A file that exists but cannot be read stops the start; it is never
     replaced.
-  - Every Raft request and response names its sender's server ID, and
+  - Every Raft request and response names its sender's server ID, an
+    append or snapshot install also names its target's, and
     `/raft/status` and the startup log report it.
 - Durable Raft storage.
 - The replicated key/value, service-catalog, and health-check state machine.
@@ -1101,7 +1118,8 @@ DELETE /v1/operator/raft/peer?id={serverId} | ?name={name}
   - `404`: no configured server has that ID or name.
   - `409` (`refused`): the change breaks a rule, such as the quorum rule or
     another change in flight; the message gives the node's reason.
-  - `503` (`leader_unavailable`, retryable): no leader could be reached.
+  - `503` (`leader_unavailable`, retryable): no leader could be reached, or
+    the leader has not yet committed an entry in its term.
 
 The same operations from the command line, against any server's HTTP address:
 
@@ -1286,6 +1304,11 @@ The leader commits index N only when a majority of the whole membership,
 when the entry at N is from its current term. An entry from an earlier term
 commits only as part of a later current-term commit (Raft section 5.4.2). A
 cluster of two therefore needs both members, and a cluster of four needs three.
+
+Every new leader appends a no-op entry in its own term as soon as it is elected.
+Committing it commits the entries before it, and gives the leader the
+current-term commit a configuration change needs (section 4.2), without waiting
+for a client write.
 
 Committed entries are applied strictly in index order. If the state machine
 fails to apply one, whether from a local fault or because an older server in a
@@ -1764,8 +1787,8 @@ not expose the administrative routes.
 Current progress, the active tranche's detailed steps, and the backlog are
 tracked in the current dated task list in `docs-design/`
 ([`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md);
-its predecessor, [`task-list-test-suite-remediation-2026-09-27.md`](task-list-test-suite-remediation-2026-09-27.md),
-is complete except the packaged-artifact test and is not yet archived; the
+its predecessor, [`task-list-test-suite-remediation-2026-09-27.md`](../docs/archive/task-list-test-suite-remediation-2026-09-27.md),
+was archived on 2026-10-02 with its packaged-artifact test carried forward; the
 administrative interface list is paused, see [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md)).
 Completed task lists are moved to `docs/archive/`.
 
@@ -1906,7 +1929,7 @@ The first complete service-discovery slice is accepted when:
   server mode without external asset files or an additional process.
 - The full default reactor and tagged container acceptance suite pass.
 
-Evidence as of 2026-09-27:
+Evidence as of 2026-09-27, except where a row gives a later date:
 
 | Criterion | Status | Evidence |
 |---|---|---|

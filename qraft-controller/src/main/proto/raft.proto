@@ -36,7 +36,7 @@ message MembershipResponse {
     UNSPECIFIED = 0;
     JOINED = 1;                        // Added as a non-voter
     ALREADY_MEMBER = 2;                // Already configured under this server ID
-    REPLACING = 3;                     // An old entry with its name or address was removed; ask again
+    REPLACING = 3;                     // Legacy wire value; collisions now return REFUSED
     REMOVED = 4;
     NOT_FOUND = 5;                     // No configured server has that ID or name
     REFUSED = 6;                       // The change breaks a rule, such as the quorum rule; see message
@@ -81,6 +81,7 @@ message AppendEntriesRequest {
   repeated LogEntry entries = 5;
   int64 leader_commit = 6;
   string leader_server_id = 7;      // The leader's durable server ID
+  string target_server_id = 8;      // The server ID the leader means to reach; another server refuses
 }
 
 message AppendEntriesResponse {
@@ -109,6 +110,7 @@ message InstallSnapshotRequest {
   bytes data = 7;                   // Raw snapshot chunk bytes
   bool done = 8;                    // true if this is the last chunk
   string leader_server_id = 9;      // The leader's durable server ID
+  string target_server_id = 10;     // The server ID the leader means to reach; another server refuses
 }
 
 message InstallSnapshotResponse {

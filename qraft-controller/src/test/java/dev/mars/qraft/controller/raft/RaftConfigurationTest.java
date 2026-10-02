@@ -85,9 +85,11 @@ class RaftConfigurationTest {
         assertRefused(List.of(LEARNER), "a configuration needs at least one voter");
         assertRefused(List.of(A, new Server("id-a", "other", "o:9080", true)), "server ID id-a appears twice");
         assertRefused(List.of(A, new Server("id-x", "a", "x:9080", true)), "server name a appears twice");
-        for (Server blank : List.of(new Server(" ", "x", "x:1", true), new Server("id", "", "x:1", true),
-                new Server("id", "x", " ", true))) {
-            assertRefused(List.of(A, blank), "a server needs an ID, a name, and an address");
+        for (String[] blank : List.of(new String[]{" ", "x", "x:1"}, new String[]{"id", "", "x:1"},
+                new String[]{"id", "x", " "}, new String[]{null, "x", "x:1"})) {
+            IllegalArgumentException refused = assertThrows(IllegalArgumentException.class,
+                    () -> new Server(blank[0], blank[1], blank[2], true));
+            assertEquals("a server needs an ID, a name, and an address", refused.getMessage());
         }
     }
 

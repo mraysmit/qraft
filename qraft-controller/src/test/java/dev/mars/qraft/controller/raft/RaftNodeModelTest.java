@@ -250,7 +250,7 @@ class RaftNodeModelTest {
         String vote = request.getTerm() > state.term() ? null : state.vote();
         if (!state.has(request.getPrevLogIndex())
                 || state.termAt(request.getPrevLogIndex()) != request.getPrevLogTerm()) {
-            return new ExpectedResult(state.withTermAndVote(term, vote), false);
+            return new ExpectedResult(state.withTermAndVote(term, vote).withLeaderContact(), false);
         }
 
         List<ModelEntry> log = new ArrayList<>(state.log());
@@ -277,11 +277,13 @@ class RaftNodeModelTest {
             applied.put(entry.key(), entry.value());
         }
         return new ExpectedResult(new ReferenceState(
-                term, vote, List.copyOf(log), commit, commit, Map.copyOf(applied)), true, verified);
+                term, vote, List.copyOf(log), commit, commit, Map.copyOf(applied), true), true, verified);
     }
 
     private static ExpectedResult applyVote(ReferenceState state, VoteOperation operation) {
         VoteRequest request = operation.request();
+        // These generated histories advance no time: a leader's contact is still live.
+        if (state.leaderContact()) return new ExpectedResult(state, false);
         if (request.getTerm() < state.term()) return new ExpectedResult(state, false);
 
         long term = request.getTerm();
@@ -477,9 +479,10 @@ class RaftNodeModelTest {
             List<ModelEntry> log,
             long commitIndex,
             long lastApplied,
-            Map<String, String> applied) {
+            Map<String, String> applied,
+            boolean leaderContact) {
         static ReferenceState initial() {
-            return new ReferenceState(0, null, List.of(ModelEntry.BOOTSTRAP), 1, 1, Map.of());
+            return new ReferenceState(0, null, List.of(ModelEntry.BOOTSTRAP), 1, 1, Map.of(), false);
         }
 
         long lastIndex() {
@@ -499,7 +502,11 @@ class RaftNodeModelTest {
         }
 
         ReferenceState withTermAndVote(long newTerm, String newVote) {
-            return new ReferenceState(newTerm, newVote, log, commitIndex, lastApplied, applied);
+            return new ReferenceState(newTerm, newVote, log, commitIndex, lastApplied, applied, leaderContact);
+        }
+
+        ReferenceState withLeaderContact() {
+            return new ReferenceState(term, vote, log, commitIndex, lastApplied, applied, true);
         }
     }
 

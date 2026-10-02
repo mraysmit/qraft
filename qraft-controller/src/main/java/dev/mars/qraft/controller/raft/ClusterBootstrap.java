@@ -52,7 +52,7 @@ public final class ClusterBootstrap {
     public enum Outcome {
         /** This attempt wrote the initial configuration. */
         BOOTSTRAPPED,
-        /** The node already has a configuration, so there is nothing to do. */
+        /** Configuration is current at the advertised address, or this server was removed. */
         CONFIGURED,
         /** A listed server already belongs to a cluster; this server asked to join, and waits for its leader. */
         JOINING_EXISTING,
@@ -71,8 +71,23 @@ public final class ClusterBootstrap {
     }
 
     public Future<Outcome> attempt() {
-        if (node.getConfiguration().isPresent()) return Future.succeededFuture(Outcome.CONFIGURED);
         return node.describe().compose(self -> {
+            Optional<RaftConfiguration> configured = node.getConfiguration();
+            if (configured.isPresent()) {
+                Optional<RaftConfiguration.Server> known = configured.get().server(self.getServerId());
+                // Removed servers must not re-admit themselves. A moved member, however,
+                // must advertise its address even though it recovered a configuration.
+                if (known.isEmpty() || known.get().address().equals(self.getAddress())) {
+                    return Future.succeededFuture(Outcome.CONFIGURED);
+                }
+                if (node.isLeader()) {
+                    return node.admit(new RaftConfiguration.Server(self.getServerId(), self.getName(),
+                            self.getAddress(), false)).map(ignored -> Outcome.JOINING_EXISTING);
+                }
+                return askToJoin(self, configured.get().servers().stream()
+                        .filter(server -> !server.serverId().equals(self.getServerId()))
+                        .map(RaftConfiguration.Server::name).toList());
+            }
             if (self.getHasState()) return Future.succeededFuture(Outcome.CONFIGURED);
             List<String> peers = self.getListedServersList().stream()
                     .map(listed -> listed.substring(0, listed.indexOf('=')))

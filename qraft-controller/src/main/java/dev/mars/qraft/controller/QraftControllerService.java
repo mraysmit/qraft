@@ -283,12 +283,11 @@ public class QraftControllerService {
      * </ol>
      */
     /**
-     * Until the node has a configuration, attempts to bootstrap a new cluster at once and then every
+     * Until the node has a configuration with its advertised address, attempts to bootstrap or rejoin at once and every
      * {@value #BOOTSTRAP_RETRY_MS} ms, one attempt at a time. It stops once the node is configured, whether this
      * server bootstrapped it or a leader of an existing cluster replicated it.
      */
     private void startClusterBootstrap(RaftNode node) {
-        if (node.getConfiguration().isPresent()) return;
         ClusterBootstrap bootstrap = new ClusterBootstrap(node, transport);
         AtomicBoolean attempting = new AtomicBoolean();
         Consumer<Long> attempt = ignored -> {

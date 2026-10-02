@@ -15,6 +15,10 @@ separate named volume for each controller. Production durability requires
 
 The directory is one consistency unit:
 
+- `server-id` contains the server's durable Raft identity, a UUID generated at
+  its first start. The cluster's configuration records each server by this ID,
+  so a directory without the file is a different server, even under the same
+  name and address.
 - `meta.dat` contains the current term and vote.
 - `raft.log` contains the framed Raft WAL.
 - `snapshot.dat`, when present, contains the latest published application
@@ -81,13 +85,9 @@ required state, and retain quorum.
 1. Remove the fenced node from traffic and stop its controller process.
 2. Move or snapshot its complete storage directory to a read-only evidence
    location. Preserve the original bytes and logs.
-3. Create a new empty directory at the configured storage path with the correct
-   owner and permissions. Do not copy selected files from the corrupt directory.
-4. Start the controller with the same node identity and cluster membership.
-5. Wait for it to rejoin and catch up from the leader. When its log history has
-   been compacted, the leader installs a snapshot and then any WAL suffix.
-6. Require HTTP 200 from `/health/ready`, `"fenced":false` from `/raft/status`,
-   and matching catalog data before returning the node to service.
+3. Replace the server as described in "Replace a server that lost its storage"
+   below. An empty directory gives the server a new server ID, so the cluster
+   does not take it back until its old entry is removed.
 
 Recover only one replica at a time. If no healthy quorum or authoritative peer
 remains, stop and restore a complete offline backup; wiping another node can make
@@ -96,6 +96,72 @@ the cluster unrecoverable.
 An unpublished first `snapshot.dat.tmp` is handled the same way. Preserve it for
 diagnosis and rebuild the replica from healthy peers. Do not rename it to
 `snapshot.dat` manually.
+
+## Replace a server that lost its storage
+
+A server whose storage directory is empty starts with a new server ID. The
+cluster still records the old server ID under its name and address, and that
+entry still counts as a voter. A join from the new server ID is refused while
+the old entry is there: only an operator can remove a member. Until then the
+new server keeps asking, once a second, and takes nothing from the leader.
+
+Use this procedure for a wiped or rebuilt directory, and as the last steps of
+recovering a corrupt replica. The other servers must be healthy and hold a
+quorum without the server being replaced. Every server needs the same
+`server.operator.token` in its configuration; without one, removals are
+refused.
+
+1. Stop the server being replaced, if it is running, and confirm its process
+   has exited.
+2. List the configuration from any healthy server, and note the server ID of
+   the old entry:
+
+   ```text
+   qraft operator raft list-peers --http-addr <host:port>
+   ```
+
+3. Remove the old entry, by ID or by name. Any server forwards the request to
+   the leader:
+
+   ```text
+   qraft operator raft remove-peer --name <name> --http-addr <host:port> --token-file <path>
+   ```
+
+   - Exit code 0 means removed.
+   - A refusal that names the quorum rule means too few of the remaining
+     voters have answered the leader recently. Restore them first; do not
+     retry blindly.
+   - "No leader could be reached", or a leader that has not yet committed an
+     entry in its term, is worth retrying after a moment.
+4. Run `list-peers` again and confirm the old entry is gone.
+5. Make sure the storage path is an empty directory with the correct owner and
+   permissions, then start the server with its usual name, address, and
+   `server.raft.nodes`.
+6. The server asks to join and is added as a non-voter. The leader promotes it
+   to a voter once it has caught up and stayed healthy for the stabilization
+   period (10 seconds by default). When its log history has been compacted,
+   the leader installs a snapshot first.
+7. Before returning it to service, require:
+   - `list-peers` shows it under its new server ID with `voter` true;
+   - HTTP 200 from `/health/ready`, and `"fenced":false` from `/raft/status`;
+   - matching catalog data.
+
+Notes:
+
+- **Remove first, start second.** It is safe to start the empty server before
+  the removal, but it only waits and logs a refused join every second.
+- **A server that reports `removed`.** If `/raft/status` on the replacement
+  shows `removed`, it holds a configuration that leaves it out and has stopped
+  asking to join. Stop it, empty its directory again, and repeat from step 4.
+- **Never copy `server-id`** from the old directory or from another server to
+  skip the removal. The old server ID vouched for entries the empty directory
+  no longer holds; reusing it can lose committed data.
+- **A server that moved with its storage** is a different case. It keeps its
+  server ID, asks to rejoin from its new address at startup, has its recorded
+  address updated, and keeps its vote. No removal is needed.
+- **Two servers lost at once in a cluster of three** leaves no quorum, so the
+  removal cannot commit. There is no supported procedure for that yet; restore
+  a complete offline backup.
 
 ## Directory-lock failures
 
@@ -131,6 +197,11 @@ becomes `true`. No operator action, offline rewrite, or coordinated data migrati
 is required; immutable fixture tests cover both legacy command bytes and snapshot
 documents.
 
+A directory that holds Raft state but no cluster configuration, which is any
+directory written before configurations were recorded in the log (2026-09-29),
+refuses to start. There is no in-place upgrade for it: form a new cluster, or
+replace the server as described above.
+
 For a file-backend upgrade:
 
 1. Stop the node and take a complete offline backup of its directory.
@@ -156,6 +227,11 @@ tests:
   crashes, corruption fencing, lock contention, unknown client outcomes, and
   snapshot catch-up followed by restart.
 - `RaftStorageProcessLockTest`: exclusive ownership across separate JVMs.
+- `RaftNodeMembershipTest`, `MembershipServiceTest`, and
+  `RaftNodeServerIdentityTest`: a colliding join is refused until the old entry
+  is removed, the removal's quorum rule and token, and a server refusing a log
+  or snapshot meant for another server ID. The replacement procedure as a
+  whole has no container test yet.
 - `HttpApiServerTest`: fenced liveness/readiness and corruption evidence.
 - `RaftLogStorageIntegrationTest`: corruption, locking, and legacy WAL/metadata
   compatibility against the real external library.

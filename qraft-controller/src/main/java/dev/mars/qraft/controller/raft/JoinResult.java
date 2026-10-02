@@ -34,8 +34,8 @@ public enum JoinResult {
      */
     ADDRESS_UPDATED,
     /**
-     * Another server ID held the joining server's name or address, as after a server loses its storage, and
-     * that entry was removed. The server is added when it asks again.
+     * Legacy result retained for compatibility. Admission now refuses collisions;
+     * an authenticated operator must remove the existing member first.
      */
     REPLACING
 }

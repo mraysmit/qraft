@@ -26,6 +26,8 @@ import java.util.function.Consumer;
  * @version 1.0
  */
 interface RaftTimerScheduler {
+    /** Monotonic time, shared with the timer source (and deterministic in tests). */
+    default long nanoTime() { return System.nanoTime(); }
     long setTimer(long delayMs, Consumer<Long> action);
     long setPeriodic(long periodMs, Consumer<Long> action);
     boolean cancelTimer(long id);

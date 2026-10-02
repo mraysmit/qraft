@@ -1,7 +1,7 @@
 # Qraft Administrative UI Implementation Plan
 
 **Status:** Agreed 2026-09-27; open questions 2 to 4 are decided when their increments start
-**Last updated:** 2026-09-27
+**Last updated:** 2026-10-02 (section 4 brought up to date with scoped reads and the Raft operator endpoints)
 **Design:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md) (what the interface is) and
 [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections
 12.4, 12.4.1, and 19.6 (how it is packaged and served)
@@ -74,12 +74,14 @@ section 4.1, after reviewing the `peegeeq-management-ui` and
 
 | Endpoint | Provides | Gaps for the UI |
 |---|---|---|
-| `GET /raft/status` | node, role, term, leader, commit, applied, and last log index, snapshot index, fenced flag, read as one consistent view | Describes only the answering node: no peers, match or next index, lag, or quorum |
+| `GET /raft/status` | node, server ID, role, term, leader, commit, applied, and last log index, snapshot index, fenced and removed flags, read as one consistent view | Describes only the answering node: no peers, match or next index, lag, or quorum |
+| `GET /v1/operator/raft/configuration` | each configured server: server ID, name, address, voter, leader, as the answering server holds them | No reachability, match or next index, last contact, or lag |
+| `DELETE /v1/operator/raft/peer` | removal of a server, guarded by the operator token and forwarded to the leader | A mutation: not offered by the interface before UI-5 |
 | `GET /health`, `/health/live`, `/health/ready` | node liveness and readiness | None for the status strip |
 | `GET /api/v1/agents` | nodes with status, registration and heartbeat times, and metadata | No owned-service or failing-check counts; no tenant or namespace filter |
-| `GET /v1/catalog/services` | service names with their tags | No health, instance count, or scope; one request per service to learn more; not scoped by tenant or namespace |
-| `GET /v1/catalog/service/{name}` | instances: identity, address, port, tags, metadata, health, tenant, namespace, datacenter, region, enabled | Not scoped by tenant or namespace; no registration source or last-change index |
-| `GET /v1/health/service/{name}` (`?passing`) | instances with their checks: status, sequence, observed, accepted, deadline, expired, output, deregistration delay | Service-scoped only; no cross-service check listing |
+| `GET /v1/catalog/services` | service names with their tags, in the scope of the `X-Qraft-Tenant` and `X-Qraft-Namespace` headers | No health or instance count; one request per service to learn more; no listing of the scopes that exist |
+| `GET /v1/catalog/service/{name}` | instances in the requested scope: identity, address, port, tags, metadata, health, tenant, namespace, datacenter, region, enabled | No registration source or last-change index |
+| `GET /v1/health/service/{name}` (`?passing`) | instances in the requested scope with their checks: status, sequence, observed, accepted, deadline, expired, output, deregistration delay | One service at a time; no cross-service check listing |
 | `PUT /v1/agent/service/register`, `/deregister` | replicated service writes, scoped by `X-Qraft-Tenant`, `X-Qraft-Namespace`, and `X-Qraft-Node` headers | Unauthenticated |
 | Response metadata | `X-Qraft-Index` (applied index) on catalog reads; `X-Qraft-Leader-Id` and a structured error envelope (`code`, `message`, `retryable`) on errors | No answering-node header; no consistency mode |
 | gRPC `DistributedStateService` | key/value `Put`, `Get`, `Delete`, `List` | Not reachable from a browser; no HTTP equivalent |
@@ -89,10 +91,10 @@ section 4.1, after reviewing the `peegeeq-management-ui` and
 
 | Capability | Needed by | Owner |
 |---|---|---|
-| Tenant- and namespace-scoped catalog, health, and agent reads | Scope selector; every Discover view | Controller HTTP API |
+| Tenant- and namespace-scoped agent reads, and a listing of the scopes present. Catalog and health reads are scoped as of 2026-09-27 | Scope selector; every Discover view | Controller HTTP API |
 | Services summary: health, instance count, scope, and last change per service | Services landing page | Controller HTTP API |
 | Cross-service health-check listing with filters | Health Checks page | Controller HTTP API |
-| Cluster membership: peers, role, match and next index, last contact, lag, reachability, quorum | Status strip, Cluster Overview, Raft Members, server rows in Nodes | Raft (leader-side view) and HTTP API |
+| Cluster membership detail: role, match and next index, last contact, lag, reachability, quorum. The configured servers are listed as of 2026-09-29 (section 4.1) | Status strip, Cluster Overview, Raft Members, server rows in Nodes | Raft (leader-side view) and HTTP API |
 | Storage and snapshot state: WAL size and health, fenced and lock state, snapshot index, term, age, and last result, retained boundary | Storage & Snapshots, Cluster Overview | Raft persistence and HTTP API |
 | Transition-queue depth and saturation | Cluster Overview | Raft sequencer and HTTP API |
 | Bounded event journal and query | Events page, Events tabs, recent elections and failures | `qraft-events` (event architecture sections 8 to 10), not started |
@@ -184,7 +186,8 @@ UI-0 and UI-1 together are the scope of
 
 Backend first:
 
-- tenant- and namespace-scoped catalog, health, and agent reads;
+- tenant- and namespace-scoped agent reads (catalog and health reads are
+  already scoped);
 - the services summary endpoint;
 - the cross-service health-check listing.
 

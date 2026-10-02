@@ -142,8 +142,8 @@ class RaftNodeShutdownSequencingTest {
         assertEquals(1, storage.closeCount.get(),
                 "one object serving both storage contracts must be closed once");
         assertTrue(storage.closed);
-        assertEquals(List.of(1L, 2L, 3L), storage.appendedIndexes,
-                "the bootstrap configuration at index 1, then both accepted writes");
+        assertEquals(List.of(1L, 2L, 3L, 4L), storage.appendedIndexes,
+                "the bootstrap configuration, leadership no-op, then both accepted writes");
     }
 
     @Test

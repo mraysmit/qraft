@@ -34,6 +34,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -61,6 +62,7 @@ public final class ManualRaftCluster implements AutoCloseable {
     private static final long WAIT_SECONDS = 10;
 
     private final JavaRuntime runtime;
+    private final AtomicLong clock = new AtomicLong();
     private final List<RaftNode> nodes = new ArrayList<>();
     private final Map<RaftNode, ManualRaftTimers> timers = new ConcurrentHashMap<>();
 
@@ -116,7 +118,7 @@ public final class ManualRaftCluster implements AutoCloseable {
 
     /** Builds the node on manual timers and tracks it, so {@link #close()} stops it. */
     public RaftNode add(RaftNode.Builder builder) {
-        ManualRaftTimers nodeTimers = new ManualRaftTimers(runtime);
+        ManualRaftTimers nodeTimers = new ManualRaftTimers(runtime, clock);
         RaftNode node = builder.timerScheduler(nodeTimers).build();
         synchronized (nodes) {
             nodes.add(node);
@@ -139,6 +141,7 @@ public final class ManualRaftCluster implements AutoCloseable {
         // The outer bound outlasts the node's own, so a failed election reports the node's timeout.
         candidate.awaitState(RaftNode.State.LEADER, TimeUnit.SECONDS.toMillis(WAIT_SECONDS))
                 .toCompletionStage().toCompletableFuture().get(WAIT_SECONDS + 5, TimeUnit.SECONDS);
+        settle(System.nanoTime() + TimeUnit.SECONDS.toNanos(WAIT_SECONDS));
         return candidate;
     }
 
@@ -159,6 +162,7 @@ public final class ManualRaftCluster implements AutoCloseable {
             }
             settle(deadline);
         }
+        settle(deadline);
         assertTrue(condition.getAsBoolean(), description);
     }
 

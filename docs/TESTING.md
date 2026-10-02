@@ -20,14 +20,9 @@ You see the progress live, and a log stays behind in `test-logs/`, which git ign
 mvn install 2>&1 | Tee-Object -FilePath test-logs/install.log
 ```
 
-An assistant or script that starts a build for you must do the same: open a visible PowerShell window
-that runs the command through `Tee-Object`, then read the results from the log. It must never run a build
-hidden in the background:
-
-```powershell
-Start-Process pwsh -WorkingDirectory . -ArgumentList '-NoExit', '-Command',
-    'mvn install 2>&1 | Tee-Object -FilePath test-logs/install.log'
-```
+The terminal is the VS Code integrated terminal. An assistant must not open separate PowerShell windows,
+and must never run a build hidden in the background. It gives you the command to run in the VS Code
+terminal, through `Tee-Object` as above, and then reads the results from the log.
 
 ## The three suites
 

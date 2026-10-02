@@ -128,6 +128,9 @@ public class RaftNode {
     private volatile long commitIndex = 0;
     private volatile long lastApplied = 0;
     private volatile String currentLeaderId = null;
+    /** Leader contact remains live for the minimum election timeout. */
+    private boolean leaderContactActive;
+    private long lastLeaderContactNanos;
 
     // ========== SNAPSHOT STATE ==========
     /** The log index of the last entry included in the most recent snapshot.
@@ -970,8 +973,7 @@ public class RaftNode {
      * Admits a server asking to join, as a non-voter; {@link #considerPromotions} promotes it once it has caught
      * up. A server already configured under its server ID is left as it is, or has its address updated (see
      * {@link #readmit}). If another server ID holds its name
-     * or address, as after the server lost its storage, that entry is removed first, as Consul's autopilot does,
-     * and the server is added when it asks again. Each change completes once committed.
+     * or address, admission is refused until an operator removes that entry. Each change completes once committed.
      */
     public Future<JoinResult> admit(RaftConfiguration.Server joining) {
         requireNonNull(joining, "joining");
@@ -991,10 +993,9 @@ public class RaftNode {
                             || server.address().equals(joining.address()))
                     .findFirst();
             if (displaced.isPresent()) {
-                logger.info("Server {} at {} rejoins as {}; removing its old entry {} first",
-                        joining.name(), joining.address(), joining.serverId(), displaced.get().serverId());
-                return proposeConfiguration(without(current, displaced.get().serverId()))
-                        .map(ignored -> JoinResult.REPLACING);
+                return Future.failedFuture(new IllegalArgumentException(
+                        "Name or address belongs to server " + displaced.get().serverId()
+                                + "; an operator must remove the existing member before replacement"));
             }
             List<RaftConfiguration.Server> servers = new ArrayList<>(current.servers());
             servers.add(joining);
@@ -1335,6 +1336,10 @@ public class RaftNode {
         configuration = logConfigurations.isEmpty() ? snapshotConfiguration : logConfigurations.lastEntry().getValue();
         RaftConfiguration current = configuration;
         if (current != null) {
+            if (currentLeaderId != null && current.serverNamed(currentLeaderId)
+                    .filter(RaftConfiguration.Server::voter).isEmpty()) {
+                leaderContactActive = false;
+            }
             Map<String, String> addresses = new HashMap<>();
             for (RaftConfiguration.Server server : current.servers()) {
                 if (!server.serverId().equals(serverId)) addresses.put(server.name(), server.address());
@@ -1568,6 +1573,7 @@ public class RaftNode {
     private void onElectionTimer(long timerId, long timerGeneration) {
         if (timerId != electionTimerId || timerGeneration != electionTimerGeneration) return;
         electionTimerId = -1;
+        leaderContactActive = false;
         if (transitionSequencer.isFenced()) {
             logger.debug("Election timer stopped because the Raft transition sequencer is fenced");
             return;
@@ -1739,18 +1745,16 @@ public class RaftNode {
         for (RaftConfiguration.Server peer : peers()) lastContactRound.put(peer.name(), 0L);
         answeredPeers.clear();
         healthySinceRound.clear();
-        appendLeadershipNoOpIfRecoveredEntriesAwaitCommit();
+        appendLeadershipNoOp();
         startHeartbeats();
         sendHeartbeats(); // Immediate
     }
 
     /**
-     * Establishes an entry in the new leader's term when recovery left a WAL
-     * suffix whose commit status must be re-established by a quorum. Committing
-     * this no-op also safely commits and applies the preceding retained prefix.
+     * Establishes an entry in every new leader's term, including on an idle cluster,
+     * so membership changes can proceed. Committing it also commits the retained prefix.
      */
-    private void appendLeadershipNoOpIfRecoveredEntriesAwaitCommit() {
-        if (commitIndex >= lastLogIndex()) return;
+    private void appendLeadershipNoOp() {
         long leadershipTerm = currentTerm;
         long generation = leadershipGeneration;
         transitionSequencer.submit(
@@ -1994,6 +1998,14 @@ public class RaftNode {
             return Future.succeededFuture(new VoteDecision(currentTerm, votedFor, false, false));
         }
         long requestedTerm = request.getTerm();
+        // A removed server may retain an old configuration and campaign indefinitely.
+        // Ignore campaigns while a leader is live, before adopting even a higher term.
+        // The election timeout releases followers; check-quorum releases leaders.
+        if (state == State.LEADER || (leaderContactActive
+                && timerScheduler.nanoTime() - lastLeaderContactNanos
+                < TimeUnit.MILLISECONDS.toNanos(electionTimeoutMs))) {
+            return Future.succeededFuture(new VoteDecision(currentTerm, votedFor, false, false));
+        }
         logger.debug("Handling vote request: candidateId={}, requestTerm={}, localTerm={}, localVotedFor={}, candidateLastLogTerm={}, candidateLastLogIndex={}",
                 request.getCandidateId(), requestedTerm, currentTerm, votedFor,
                 request.getLastLogTerm(), request.getLastLogIndex());
@@ -2051,6 +2063,7 @@ public class RaftNode {
         votedFor = durableVote;
         state = State.FOLLOWER;
         currentLeaderId = null;
+        leaderContactActive = false;
         MDC.put("raftRole", "FOLLOWER");
         MDC.put("raftTerm", String.valueOf(currentTerm));
         notifyStateChangeListeners(State.FOLLOWER);
@@ -2123,6 +2136,22 @@ public class RaftNode {
         return response.future().map(this::fromThisFollower);
     }
 
+    /**
+     * Whether a leader addressed a request to a server ID that is not this server's. A server that lost its
+     * storage answers at its old address under a new server ID. If it took the log or snapshot meant for the
+     * entry it replaced, it would hold a configuration that leaves it out, and stop asking to join. A request
+     * that names no server is taken as before.
+     */
+    private boolean isMeantForAnotherServer(String targetServerId) {
+        return !targetServerId.isEmpty() && !targetServerId.equals(serverId);
+    }
+
+    /** The server ID the configuration records for the peer named {@code target}, or empty if it has none. */
+    private String serverIdOfPeer(String target) {
+        RaftConfiguration current = configuration;
+        return current == null ? "" : current.serverNamed(target).map(RaftConfiguration.Server::serverId).orElse("");
+    }
+
     private AppendEntriesResponse fromThisFollower(AppendEntriesResponse response) {
         return response.toBuilder().setFollowerServerId(serverId).build();
     }
@@ -2132,6 +2161,11 @@ public class RaftNode {
         if (!running) {
             // Recovery has not rebuilt the durable term and log yet, or the node has stopped.
             logger.debug("Rejecting AppendEntries from {}: node is not running", request.getLeaderId());
+            return Future.succeededFuture(FollowerAppendDecision.stale(request));
+        }
+        if (isMeantForAnotherServer(request.getTargetServerId())) {
+            logger.debug("Rejecting AppendEntries from {}: it is meant for server {}, not this one",
+                    request.getLeaderId(), request.getTargetServerId());
             return Future.succeededFuture(FollowerAppendDecision.stale(request));
         }
         if (request.getTerm() < currentTerm) {
@@ -2254,6 +2288,8 @@ public class RaftNode {
             cancelHeartbeatTimer();
         }
         currentLeaderId = request.getLeaderId();
+        leaderContactActive = true;
+        lastLeaderContactNanos = timerScheduler.nanoTime();
         resetElectionTimer();
 
         if (decision.requestFailure() != null) {
@@ -2410,6 +2446,7 @@ public class RaftNode {
                 .setTerm(originatingTerm)
                 .setLeaderId(nodeId)
                 .setLeaderServerId(serverId)
+                .setTargetServerId(serverIdOfPeer(target))
                 .setPrevLogIndex(prevLogIndex)
                 .setPrevLogTerm(prevLogTerm)
                 .setLeaderCommit(commitIndex);
@@ -3031,6 +3068,7 @@ public class RaftNode {
                 .setTerm(transfer.term())
                 .setLeaderId(nodeId)
                 .setLeaderServerId(serverId)
+                .setTargetServerId(serverIdOfPeer(target))
                 .setLastIncludedIndex(snapshot.lastIncludedIndex())
                 .setLastIncludedTerm(snapshot.lastIncludedTerm())
                 .setChunkIndex(chunkIndex)
@@ -3263,6 +3301,11 @@ public class RaftNode {
             logger.debug("Rejecting InstallSnapshot from {}: node is not running", request.getLeaderId());
             return Future.succeededFuture(InstalledSnapshotPlan.rejectedWithoutStateChange(request));
         }
+        if (isMeantForAnotherServer(request.getTargetServerId())) {
+            logger.debug("Rejecting InstallSnapshot from {}: it is meant for server {}, not this one",
+                    request.getLeaderId(), request.getTargetServerId());
+            return Future.succeededFuture(InstalledSnapshotPlan.rejectedWithoutStateChange(request));
+        }
         if (request.getTerm() < currentTerm) {
             logger.debug("Rejecting InstallSnapshot: stale term {} < {}",
                     request.getTerm(), currentTerm);
@@ -3419,6 +3462,8 @@ public class RaftNode {
         }
         if (plan.clearAssemblers()) pendingInstalls.clear();
         currentLeaderId = request.getLeaderId();
+        leaderContactActive = true;
+        lastLeaderContactNanos = timerScheduler.nanoTime();
         resetElectionTimer();
 
         if (plan.removeAssembler()) pendingInstalls.remove(request.getLeaderId());

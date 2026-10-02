@@ -1,12 +1,12 @@
 # Task List: Raft Membership Changes
 
 **Date:** 2026-09-29
-**Active work:** Step 4, joining, and operator list and remove. Steps 1 to 3 were done
+**Active work:** Step 4, joining, and operator list and remove. It is built,
+and its verification is not yet recorded (Step 4 record). Steps 1 to 3 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
-**Predecessor:** [`task-list-test-suite-remediation-2026-09-27.md`](task-list-test-suite-remediation-2026-09-27.md).
-It is complete except the packaged-artifact test, which waits for the admin
-interface. It is not yet archived.
+**Predecessor:** [`task-list-test-suite-remediation-2026-09-27.md`](../docs/archive/task-list-test-suite-remediation-2026-09-27.md),
+archived 2026-10-02. Its packaged-artifact test waits for the admin interface.
 **Paused:** [`task-list-embedded-admin-interface-2026-09-27.md`](task-list-embedded-admin-interface-2026-09-27.md), after its Step 1
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), principle 8 (section 3), sections 4.2, 14.4, 14.5 and 16
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
@@ -577,9 +577,9 @@ It was "Operator add and remove".
   leader, which adds it as a non-voter; Step 3 promotes it. There is no
   operator add command, as in Consul.
 - A server that rejoins under a new server ID, after losing its storage,
-  replaces its old entry, as Consul's autopilot does: the leader first
-  removes the entry with the same name or address (within the quorum rule
-  below), and adds the new one when the joining server asks again.
+  is refused if its name or address belongs to an existing member. An
+  operator must remove the old entry with the operator token (within the
+  quorum rule below), after which the new server can join as a non-voter.
 - Server API and CLI commands to list the Raft configuration and remove a
   server. Removal needs the operator token (decision 6); any server forwards
   it to the leader (decision 7).
@@ -620,6 +620,137 @@ Written test first; not yet run:
 - A known server at a new address was left at its old one. Its address is
   now updated, and it keeps its vote.
 
+### Step 4 record (2026-10-02)
+
+The code and its tests are in commits `05a2055` (2026-09-29) and `d081c7a`
+(2026-10-01). The step is not closed: see "Not yet" below.
+
+**Built:**
+- **`RaftNode`** admits a joining server as a non-voter, refuses collisions
+  with another server ID until an operator removes the old entry, updates a known server's
+  address, and removes a server within the quorum rule. Only a leader admits
+  or removes. A leader that removes itself steps down once the change commits
+  and reports `removed`.
+- **`MembershipService`** takes a join or a removal on any server, checks the
+  operator token for a removal, and forwards to the leader once. `JoinResult`
+  carries the answer.
+- **Transport.** `raft.proto`, `GrpcRaftServer` and `GrpcRaftTransport` carry
+  the join and removal requests over the Raft port. The transport reaches
+  servers at the addresses in the configuration.
+- **`ClusterBootstrap`** asks each listed member with state, in turn, to add
+  the server.
+- **HTTP.** `HttpApiServer` serves `GET /v1/operator/raft/configuration` and
+  `DELETE /v1/operator/raft/peer` (design section 12.5). `/raft/status` and
+  `/health/ready` report `removed`.
+- **Configuration.** `server.operator.token`, at least 16 characters (design
+  section 16).
+- **CLI.** `RaftOperatorCommand` in `qraft-runtime`: `qraft operator raft
+  list-peers` and `remove-peer`.
+- **Documentation.** Design sections 4.2, 6.1, 12.5, 16 and 18, and
+  `docs/TESTING.md`.
+
+**Tests:**
+- `RaftNodeMembershipTest`, 16 tests after the review remediation: joining
+  as a non-voter, an address update, a colliding join refused until an
+  operator removes the old entry, changes on an idle cluster, leader
+  stickiness, the quorum rule on removal, and a leader removing itself.
+- `MembershipServiceTest`, 14 tests: forwarding, invalid joins refused before
+  forwarding, the token checked on both servers, and each answer.
+- `HttpApiServerOperatorTest`, 7 tests: listing, removal, and each status
+  code.
+- `RaftOperatorCommandTest`, 7 tests: both commands, token handling, and exit
+  codes.
+- Added to existing classes: `ClusterBootstrapTest` (asking each member in
+  turn), `GrpcRaftTransportTest` (an unaddressable server fails the future),
+  `GrpcRaftIntegrationTest`, `AppConfigValidationTest`, and
+  `HttpApiServerReadinessTest` (a removed server is live but not ready).
+
+**Not yet:**
+- Docker and mutation validation for this step remain outstanding. The
+  remediation build and focused regression runs are recorded below.
+- `promotionStabilization` and `promotionMaxTrailingEntries` are still builder
+  options only, not server configuration (Step 3 record).
+- No container test adds or removes a server; that is Step 8.
+
+### Review remediation (2026-10-02)
+
+The review of `1f74a77` through `d081c7a` identified four issues:
+
+- **Idle membership changes (Step 4): fixed.** Every elected leader appends
+  a durable current-term no-op. Membership no longer depends on a client
+  write. While that no-op awaits a quorum, the membership service answers
+  retryable `NO_LEADER` rather than terminal `REFUSED`.
+- **Removed-server disruption (Step 6): fixed with leader stickiness.**
+  A leader rejects campaigns while it leads; check-quorum still releases
+  an isolated leader. Followers reject votes, without adopting higher
+  terms, for the minimum election timeout after leader contact. The lease
+  uses monotonic time, and expires so genuine failover can proceed.
+- **Join-driven eviction and blank IDs (Step 4): fixed.** Server records
+  validate ID, name and address before admission or forwarding. A join
+  cannot remove an existing server ID through a name/address collision;
+  replacement now requires authenticated operator removal. The Raft port
+  remains trusted, including claims to an existing server ID.
+- **Moved stored members (Step 4): fixed.** Startup reconciliation runs
+  even when configuration is recovered. A member with an old self-address
+  retries joining until the advertised address is replicated; a moved
+  leader updates its own address. Removed members do not re-admit themselves.
+
+Regression coverage includes idle admission/removal and automatic promotion,
+repeated higher-term removed-server requests, the exact follower contact
+expiry boundary, malformed joins and collisions, and a moved member
+recovering its identity and configuration from the real WAL. Existing
+durability, snapshot, model and transport tests account for leadership
+no-ops; failover fixtures share a monotonic clock.
+
+**Validation:** `mvn install -Dmaven.test.redirectTestOutputToFile=true`
+passed on JDK 27, with all reactor modules and coverage gates passing. A
+subsequent focused run passed 52 tests, including the additional readiness
+retry regression. After fixing a learner fixture's race with the new no-op,
+the expanded 60-test selection passed three consecutive runs. Docker and
+mutation suites were not run for this remediation.
+Step 4 remains open for the other items listed above; Step 6's container
+scenarios and broader partition testing remain outstanding.
+
+### Requests name their target server (2026-10-02)
+
+Found in the review of the remediation above.
+
+- **Defect.** Until an operator removes a wiped server's old entry, the
+  leader keeps sending to that entry at the wiped server's address. Its
+  appends fail the log check, because the leader ignores the wiped server's
+  replies and never moves back to index 1. A snapshot install has no log
+  check. Once the leader had compacted past the old entry's next index, the
+  wiped server would install the snapshot. It then held a configuration that
+  left it out, reported `removed`, and stopped asking to join, at every
+  restart too.
+- **Fix.** `AppendEntriesRequest` and `InstallSnapshotRequest` carry
+  `target_server_id`, the server ID the configuration records for the peer.
+  A server refuses a request that names another server ID, before its term,
+  log, snapshot, or leader changes. A request that names no server is taken
+  as before. Vote requests are unchanged: a vote from a server ID outside the
+  configuration was already ignored.
+- **Tests,** in `RaftNodeServerIdentityTest`, both red before the fix:
+  - every append and snapshot install the leader sends names its target;
+  - a request meant for another server ID is refused and changes nothing, and
+    the same request under the server's own ID is accepted.
+- **A test I wrote and deleted.** A membership test of a wiped server beside
+  a live leader passed its log assertions without the fix, for the reason
+  given above, so it could not fail for the defect.
+- **Chaos test.** `EnhancedInMemoryTransportTest`'s convergence helper fired
+  the election timeout of the member with the highest term, "which it wins
+  because every log is empty". With a no-op in every leadership, that member
+  can hold a log that is behind and stand for ever. The first `mvn install`
+  failed there. The helper now heartbeats a leader if there is one, and
+  otherwise stands the member with the most up-to-date log.
+- **Validation.** The changed classes passed 5 consecutive runs (28 tests).
+  `mvn install` then passed: 812 tests, every coverage gate met. The Docker
+  and mutation suites were not run.
+- **Runbook.** `docs/RAFT_STORAGE_OPERATIONS.md` has the operator procedure
+  for replacing a server that lost its storage: remove the old entry, then
+  start the empty server. Its corrupt-replica procedure, which still said the
+  server rejoins by itself, now points there. The procedure has no container
+  test; that is Step 8.
+
 ### Step 5. Failed-server cleanup
 
 - The leader marks a voter failed after it has been unreachable past a
@@ -632,6 +763,11 @@ Written test first; not yet run:
   the voter count below a configured minimum.
 
 ### Step 6. Protection from disruptive servers
+
+Leader stickiness was built on 2026-10-02 (see "Review remediation" under
+Step 4), with unit tests for a removed server and for the contact-expiry
+boundary. Still open: the test of a server rejoining after a partition, the
+container scenarios, and mutation evidence.
 
 - Pre-vote, or ignoring vote requests while a current leader is known
   (thesis section 4.2.3). A removed or partitioned server cannot then force

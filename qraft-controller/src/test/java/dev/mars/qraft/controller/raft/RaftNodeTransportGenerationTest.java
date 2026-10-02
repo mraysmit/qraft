@@ -102,19 +102,20 @@ class RaftNodeTransportGenerationTest {
 
         PendingAppend stale = transport.takeAppend();
         long firstLeadershipTerm = stale.request().getTerm();
-        VoteResponse stepDown = await(node.handleVoteRequest(VoteRequest.newBuilder()
+        AppendEntriesResponse stepDown = await(node.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
                 .setTerm(firstLeadershipTerm + 1)
-                .setCandidateId("peer-1")
-                .setCandidateServerId(ManualRaftCluster.serverIdOf("peer-1"))
-                .setLastLogIndex(1)
-                .setLastLogTerm(0)
+                .setLeaderId("peer-1")
+                .setPrevLogIndex(node.getLastLogIndex())
+                .setPrevLogTerm(node.getLastLogTerm())
                 .build()));
-        assertTrue(stepDown.getVoteGranted());
+        assertTrue(stepDown.getSuccess());
+        long expectedNextIndex = node.getLastLogIndex() + 1;
 
         timers.fireElectionTimeout();
         awaitLeaderAtOrAboveTerm(firstLeadershipTerm + 2);
-        // The new leader's log holds only the bootstrap configuration, so it starts peer-1 after index 1.
-        assertEquals(2, node.getNextIndex("peer-1"));
+        awaitStateLoop(runtime);
+        // The new leader starts peer-1 after the retained leadership no-op.
+        assertEquals(expectedNextIndex, node.getNextIndex("peer-1"));
 
         stale.response().complete(AppendEntriesResponse.newBuilder()
                 .setTerm(firstLeadershipTerm)
@@ -124,7 +125,7 @@ class RaftNodeTransportGenerationTest {
                 .build());
         awaitStateLoop(runtime);
 
-        assertEquals(2, node.getNextIndex("peer-1"),
+        assertEquals(expectedNextIndex, node.getNextIndex("peer-1"),
                 "a completion from an earlier leadership must be ignored");
     }
 

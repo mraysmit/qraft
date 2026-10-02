@@ -21,9 +21,12 @@ feature areas the plans require are missing or only partly present:
 - tenancy isolation;
 - security.
 
-Operational status and metrics are incomplete, and remnants of the inherited job
-system remain in `qraft-core`. The Consul plan's own checklist is out of date in
-both directions (section 4).
+Operational status and metrics are incomplete. On the validation date, remnants
+of the inherited job system remained in `qraft-core`, and the Consul plan's own
+checklist was out of date in both directions; both were resolved on 2026-09-27
+(section 4).
+
+Rows changed since the validation date carry the date of the change.
 
 Status key:
 
@@ -41,7 +44,7 @@ Status key:
 | Raft | Election, replication, check-quorum, fencing | Done | `RaftNode*Test`, `RaftNodeCheckQuorumTest` |
 | Raft | Durable WAL, snapshots in every role, installation, recovery | Done | `RaftNodeFollowerLogTest`, `DockerDurableRestartTest`, `DockerAgentRecoveryTest` |
 | Raft | Replica determinism; follower match index limited to verified entries | Done | `ReplicaDeterminismTest`, `RaftNodeFollowerLogTest` |
-| Raft | Adding or removing servers (membership change) | Partial | Updated 2026-10-02. Durable server IDs, the configuration in the replicated log, bootstrapping, and non-voter promotion are done (`RaftNodeServerIdentityTest`, `RaftNodeConfigurationChangeTest`, `RaftNodePromotionTest`). Joining and operator list and remove are in progress; failed-server cleanup, protection from disruptive servers, and lost-quorum recovery are open. See [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md) |
+| Raft | Adding or removing servers (membership change) | Partial | Updated 2026-10-02. Durable server IDs, the configuration in the replicated log, bootstrapping, and non-voter promotion are done (`RaftNodeServerIdentityTest`, `RaftNodeConfigurationChangeTest`, `RaftNodePromotionTest`). Joining, operator list and remove, and leader stickiness against disruptive servers are built and await Docker and mutation validation (`RaftNodeMembershipTest`, `MembershipServiceTest`); failed-server cleanup and lost-quorum recovery are open. See [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md) |
 | Catalog | Register and deregister through Raft; composite identity; idempotence | Done | `HttpApiServerTest`, `AgentEndToEndTest` |
 | Catalog | Catalog and health queries with deterministic ordering | Done | `ServiceCatalog` sorts names and instances |
 | Catalog | Registration and modification indexes on instances (design 7.5) | Missing | `ServiceInstance` has no index fields |
@@ -64,10 +67,10 @@ Status key:
 | API | Structured error envelope with request ID | Done | `code`, `message`, `retryable`, `requestId`; the deprecated `error` field is due for removal after 2026-12-31 |
 | Tenancy | Tenant and namespace identity in catalog commands and keys | Done | Composite `ServiceInstanceId` |
 | Tenancy | Namespace lifecycle, validation, and isolation end to end | Missing | `qraft-tenant` has an in-memory `NamespaceService` that no other module uses |
-| Security | Authentication, ACL tokens, policies, token middleware (Consul plan phase 7) | Missing | Trusted identity headers behind `HeaderRequestContext` only |
+| Security | Authentication, ACL tokens, policies, token middleware (Consul plan phase 7) | Missing | Trusted identity headers behind `HeaderRequestContext` only. One shared operator token (`server.operator.token`) guards Raft server removal, standing in for ACLs (updated 2026-10-02) |
 | Security | Audit events | Missing | — |
 | Operations | Prometheus metrics | Partial | Raft metrics only. The catalog, health-transition, request, and session metrics of design 18 are absent |
-| Operations | Node and cluster status | Partial | `/raft/status` describes only the answering node: no peers, lag, or quorum |
+| Operations | Node and cluster status | Partial | `/raft/status` describes only the answering node. `GET /v1/operator/raft/configuration` lists the configured servers, with voter and leader flags (updated 2026-10-02). Still no reachability, lag, or quorum |
 | Operations | Health aggregation | Done | Derived service health; `?passing` filter |
 | Operations | Backup, corrupt-replica recovery, upgrade procedures | Done | [`RAFT_STORAGE_OPERATIONS.md`](../docs/RAFT_STORAGE_OPERATIONS.md) |
 | Operations | Event journal (design [`QRAFT_EVENT_ARCHITECTURE.md`](../docs/QRAFT_EVENT_ARCHITECTURE.md)) | Missing | No `qraft-events` module |

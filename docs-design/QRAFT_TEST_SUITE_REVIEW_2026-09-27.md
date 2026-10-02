@@ -193,7 +193,7 @@ with a test that failed first.
    and a four-member leader on two copies.
 
    Fixed on 2026-09-27 with `RaftNodeLeaderCommitTest`; see Step 1 of
-   [`task-list-test-suite-remediation-2026-09-27.md`](task-list-test-suite-remediation-2026-09-27.md).
+   [`task-list-test-suite-remediation-2026-09-27.md`](../docs/archive/task-list-test-suite-remediation-2026-09-27.md).
    Every existing multi-node test used three or five members, the odd sizes
    where the median is a majority.
 7. **A replica skipped a committed entry it could not apply.** When the state
@@ -215,7 +215,7 @@ with a test that failed first.
 | `NetworkPartitionTest` split-brain and recovery | Log statements only. The minority check treats an unreachable node as success. Deleted 2026-09-27; replaced by `DockerRunningPartitionTest` |
 | `RaftNodeTest:247` | `assertThrows(Exception.class, …get(5s))` also accepts a timeout. Fixed 2026-09-27 |
 | `EnhancedInMemoryTransportTest:317, 442` | `leaderCount <= 1` holds before any election. Fixed 2026-09-27: the Byzantine test is deleted and the chaos test checks one leader per term |
-| `RaftFailureTest:264-315` | Exercises a local anonymous class, not `RaftNode`. Deleted 2026-09-27; the real behaviour is an open decision (task list Step 2) |
+| `RaftFailureTest:264-315` | Exercises a local anonymous class, not `RaftNode`. Deleted 2026-09-27. The real behaviour was decided the same day: the node fences (section 2.1, item 7), covered by `RaftNodeApplyFailureTest` |
 | `GrpcRaftServerTest` large-entries and short-deadline tests; `GrpcRaftTransportTest:440, 480` | Catch the only failure path. Fixed 2026-09-27 |
 | `RaftNodeModelTest:206, 253` | The reference model encodes the match-index and commit rule the design rejects. Its generator never produces the case that would catch a regression. Fixed 2026-09-27 |
 | `DockerAgentHealthTest` graceful stop | Expiry deregisters within the wait anyway, so skipped deregistration still passes. Fixed 2026-09-27 |

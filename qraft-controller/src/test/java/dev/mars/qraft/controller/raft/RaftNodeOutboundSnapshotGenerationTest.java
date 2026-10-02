@@ -96,8 +96,8 @@ class RaftNodeOutboundSnapshotGenerationTest {
         awaitLeaderAtOrAboveTerm(1);
         await(node.submitCommand(put("before", "snapshot")));
         await(node.takeSnapshot());
-        // The bootstrap configuration is index 1, so the command is index 2.
-        assertEquals(2, node.getSnapshotLastIndex());
+        // Configuration, leadership no-op, then the first client command.
+        assertEquals(3, node.getSnapshotLastIndex());
     }
 
     @AfterEach
@@ -287,13 +287,13 @@ class RaftNodeOutboundSnapshotGenerationTest {
      * @return the peer's next index, which a fresh leadership sets just past its log
      */
     private long stepDownAndReelect(long oldTerm) throws Exception {
-        VoteResponse vote = await(node.handleVoteRequest(VoteRequest.newBuilder()
+        AppendEntriesResponse vote = await(node.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
                 .setTerm(oldTerm + 1)
-                .setCandidateId("peer-1")
-                .setLastLogIndex(node.getLastLogIndex())
-                .setLastLogTerm(node.getLastLogTerm())
+                .setLeaderId("peer-1")
+                .setPrevLogIndex(node.getLastLogIndex())
+                .setPrevLogTerm(node.getLastLogTerm())
                 .build()));
-        assertTrue(vote.getVoteGranted());
+        assertTrue(vote.getSuccess());
         awaitLeaderAtOrAboveTerm(oldTerm + 2);
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (node.getCommitIndex() < node.getLastLogIndex() && System.nanoTime() < deadline) {

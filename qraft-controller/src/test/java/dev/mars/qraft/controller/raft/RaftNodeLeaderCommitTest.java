@@ -75,6 +75,26 @@ class RaftNodeLeaderCommitTest {
     }
 
     @Test
+    void membershipRetriesUntilTheLeadershipNoOpCommits() throws Exception {
+        start(Set.of("node-1", "peer-2", "peer-3"));
+        becomeLeader();
+        MembershipService service = new MembershipService(node, transport, null);
+        var request = dev.mars.qraft.controller.raft.grpc.JoinRequest.newBuilder()
+                .setServerId("id-d").setName("d").setAddress("d:9080").build();
+        assertEquals(dev.mars.qraft.controller.raft.grpc.MembershipResponse.Status.NO_LEADER,
+                ManualRaftCluster.await(service.join(request)).getStatus());
+        assertFalse(node.getConfiguration().orElseThrow().serverNamed("d").isPresent());
+
+        transport.answer("peer-2", append -> append.getEntriesCount() > 0);
+        settle();
+        var admitted = service.join(request).toCompletionStage().toCompletableFuture();
+        settle();
+        transport.answer("peer-2", append -> append.getEntriesCount() > 0);
+        assertEquals(dev.mars.qraft.controller.raft.grpc.MembershipResponse.Status.JOINED,
+                admitted.get(10, TimeUnit.SECONDS).getStatus());
+    }
+
+    @Test
     void anEntryFromAnEarlierTermIsNotCommittedByCountingReplicas() throws Exception {
         start(Set.of("node-1", "peer-2", "peer-3"));
         // peer-2 leads term 1 and replicates an entry after the bootstrap configuration, which it does not commit.
@@ -114,7 +134,7 @@ class RaftNodeLeaderCommitTest {
 
         transport.answer("peer-3", request -> request.getEntriesCount() > 0);
         settle();
-        assertEquals(2, status().commitIndex(), "three copies of four are a majority");
+        assertEquals(3, status().commitIndex(), "three copies of four commit the no-op and the write");
         write.get(10, TimeUnit.SECONDS);
     }
 
@@ -125,17 +145,17 @@ class RaftNodeLeaderCommitTest {
         CompletableFuture<RaftCommandResult<?>> write = submit("two-members");
         settle();
 
-        assertEquals(2, status().lastLogIndex());
+        assertEquals(3, status().lastLogIndex());
         assertEquals(1, status().commitIndex(), "the leader's own copy is one of two, not a majority");
         assertFalse(write.isDone());
 
         transport.answer("peer-2", request -> request.getEntriesCount() > 0);
         settle();
-        assertEquals(2, status().commitIndex());
+        assertEquals(3, status().commitIndex());
         write.get(10, TimeUnit.SECONDS);
     }
 
-    /** Starts node-1 bootstrapped: its configuration is committed at index 1, so its first write takes index 2. */
+    /** Starts node-1 with configuration at index 1; election appends a no-op before client writes. */
     private void start(Set<String> members) throws Exception {
         runtime = JavaRuntime.create();
         timers = new ManualRaftTimers(runtime);

@@ -162,13 +162,28 @@ class MembershipServiceTest {
     }
 
     @Test
-    void aRejoiningServerIsToldTheOldEntryIsBeingReplaced() throws Exception {
+    void aRejoiningServerCannotEvictAnExistingMember() throws Exception {
         leadWithACommit();
 
         MembershipResponse answer = await(services.get("b").join(JoinRequest.newBuilder()
                 .setServerId("new-id-of-c").setName("c").setAddress("c").build()));
 
-        assertEquals(Status.REPLACING, answer.getStatus());
+        assertEquals(Status.REFUSED, answer.getStatus());
+        assertTrue(a.getConfiguration().orElseThrow().server(serverIdOf("c")).isPresent());
+    }
+
+    @Test
+    void invalidJoinsAreRefusedBeforeForwardingOrChangingMembership() throws Exception {
+        leadWithACommit();
+        for (String receiver : List.of("a", "b")) {
+            for (JoinRequest invalid : List.of(
+                    JOIN_D.toBuilder().clearServerId().setName("c").setAddress("c").build(),
+                    JOIN_D.toBuilder().clearName().build(), JOIN_D.toBuilder().clearAddress().build())) {
+                assertEquals(Status.REFUSED, await(services.get(receiver).join(invalid)).getStatus());
+            }
+        }
+        assertTrue(forwardedTo.isEmpty());
+        assertTrue(a.getConfiguration().orElseThrow().server(serverIdOf("c")).isPresent());
     }
 
     @Test
