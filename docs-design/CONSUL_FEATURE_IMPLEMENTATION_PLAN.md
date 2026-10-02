@@ -8,7 +8,8 @@ Qraft will evolve into a Consul-like distributed service with Raft-backed state,
 recorded in
 [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md)
 and in the dated task lists in this directory and in `docs/archive/`. The checklist
-at the end of this plan was last reconciled with the code on 2026-09-27.
+at the end of this plan was last reconciled with the code on 2026-09-27; its
+membership items were updated on 2026-10-02.
 
 ## 2. Target Feature Set
 
@@ -290,9 +291,9 @@ The implementation will be considered aligned with the target design when:
 
 ### Remaining implementation work
 
-- [x] Complete server-mode configuration and bootstrap behavior, with static
-  membership from `server.raft.nodes`. Adding and removing servers is not
-  implemented (feature validation item 10).
+- [x] Complete server-mode configuration and bootstrap behavior. A cluster
+  forms from `server.raft.nodes`; from then on, membership lives in the
+  replicated log.
 - [x] Complete versioned client-mode configuration and the one-controller catalog
   HTTP adapter with typed retryable and rejected outcomes.
 - [x] Complete controller discovery behavior: seed rotation, preferred-endpoint
@@ -331,5 +332,8 @@ The implementation will be considered aligned with the target design when:
 - [ ] Implement the bounded event journal (item 8).
 - [ ] Implement ACL tokens, policies, token validation, and audit events
   (phase 7; item 9).
-- [ ] Decide on and implement server membership change, DNS discovery, and
-  persisted generated node identity (item 10).
+- [ ] Implement server membership change. Decided 2026-09-29, and in progress
+  in [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md):
+  server IDs, the configuration in the log, and non-voter promotion are done.
+- [ ] Decide on and implement DNS discovery and persisted generated node
+  identity (item 10).

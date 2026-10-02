@@ -41,7 +41,7 @@ Status key:
 | Raft | Election, replication, check-quorum, fencing | Done | `RaftNode*Test`, `RaftNodeCheckQuorumTest` |
 | Raft | Durable WAL, snapshots in every role, installation, recovery | Done | `RaftNodeFollowerLogTest`, `DockerDurableRestartTest`, `DockerAgentRecoveryTest` |
 | Raft | Replica determinism; follower match index limited to verified entries | Done | `ReplicaDeterminismTest`, `RaftNodeFollowerLogTest` |
-| Raft | Adding or removing servers (membership change) | Missing | Membership is static, from `server.raft.nodes` |
+| Raft | Adding or removing servers (membership change) | Partial | Updated 2026-10-02. Durable server IDs, the configuration in the replicated log, bootstrapping, and non-voter promotion are done (`RaftNodeServerIdentityTest`, `RaftNodeConfigurationChangeTest`, `RaftNodePromotionTest`). Joining and operator list and remove are in progress; failed-server cleanup, protection from disruptive servers, and lost-quorum recovery are open. See [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md) |
 | Catalog | Register and deregister through Raft; composite identity; idempotence | Done | `HttpApiServerTest`, `AgentEndToEndTest` |
 | Catalog | Catalog and health queries with deterministic ordering | Done | `ServiceCatalog` sorts names and instances |
 | Catalog | Registration and modification indexes on instances (design 7.5) | Missing | `ServiceInstance` has no index fields |
@@ -133,8 +133,10 @@ need:
 8. **Events.** The `qraft-events` bounded journal, phases 1 to 4 of the event
    architecture.
 9. **Security.** Authentication, ACL tokens and policies, and audit events.
-10. **Deferred until decided.** Server membership change, DNS discovery, and
-    persisted generated node identity.
+10. **Deferred until decided.** DNS discovery, and persisted generated node
+    identity. Server membership change was decided on 2026-09-29 and is in
+    progress in
+    [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md).
 
 Items 3 to 5 complete the Consul plan's target feature set. Items 6 to 9 are
 the prerequisites of the interface's increments UI-2 to UI-6.

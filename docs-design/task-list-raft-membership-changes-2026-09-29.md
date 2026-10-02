@@ -1,7 +1,7 @@
 # Task List: Raft Membership Changes
 
 **Date:** 2026-09-29
-**Active work:** Step 4, operator add and remove. Steps 1 to 3 were done
+**Active work:** Step 4, joining, and operator list and remove. Steps 1 to 3 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
 **Predecessor:** [`task-list-test-suite-remediation-2026-09-27.md`](task-list-test-suite-remediation-2026-09-27.md).

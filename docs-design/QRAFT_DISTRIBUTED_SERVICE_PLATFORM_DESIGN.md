@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-09-25
+**Last updated:** 2026-10-02
 
 ## 1. Purpose
 
@@ -1763,7 +1763,10 @@ not expose the administrative routes.
 
 Current progress, the active tranche's detailed steps, and the backlog are
 tracked in the current dated task list in `docs-design/`
-([`task-list-test-suite-remediation-2026-09-27.md`](task-list-test-suite-remediation-2026-09-27.md); the administrative interface list is paused, see [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md)).
+([`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md);
+its predecessor, [`task-list-test-suite-remediation-2026-09-27.md`](task-list-test-suite-remediation-2026-09-27.md),
+is complete except the packaged-artifact test and is not yet archived; the
+administrative interface list is paused, see [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md)).
 Completed task lists are moved to `docs/archive/`.
 
 ### Tranche 0: Align the WAL and snapshot contracts
@@ -1916,7 +1919,7 @@ Evidence as of 2026-09-27:
 | Leadership change keeps committed registrations | Met | `DockerDurableRestartTest.killedLeaderIsReplacedAndRejoinsWithCompleteCatalog`, `DockerAgentHealthTest` |
 | Bounded graceful deregistration; expiry handles crashes | Met | `QraftAgentTest.unreachableControllerCannotExtendShutdownPastDeadlineAndLogsOnce`, `DockerAgentHealthTest`, `CrashedAgentExpiryEndToEndTest` |
 | Embedded administrative interface | Open | Not implemented (sections 12.4 and 19.6) |
-| Full default reactor and container suite pass | Met | 807 default tests and 30 Docker-tagged tests |
+| Full default reactor and container suite pass | Met | 762 default tests and 23 Docker-tagged tests, as last recorded on 2026-09-29 (membership list, Step 3 record). The counts fell from 807 and 30 when the test-suite remediation deleted tests that verified nothing |
 
 ## 22. Open decisions
 
