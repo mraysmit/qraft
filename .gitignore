@@ -42,6 +42,9 @@ downloads/
 logs/
 test-logs/
 
+# Local credentials
+/.env/
+
 # IntelliJ (additional)
 .idea/
 out/

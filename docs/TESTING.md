@@ -5,20 +5,75 @@
 - **JDK 27.** The build refuses older JDKs. Point `JAVA_HOME`, and your IDE's test runtime, at it.
 - **Maven 3.9 or newer.**
 - **Docker**, for the Docker suite only.
+- **PowerShell 7**, for the UTF-8 log-capture commands below.
 - Optional: the **Maven daemon**, `mvnd`. It takes the same arguments as `mvn`, and keeps Maven warm between
   runs, which saves most of the start-up cost of each small run.
 
 In PowerShell, quote every `-D` argument, for example `"-Dtest=RaftNodeTest"`. Otherwise PowerShell splits
 the argument at the dot.
 
+## Jenkins access
+
+- **URL:** <http://192.168.137.32:8080/>
+- **Username:** `mraysmit`
+- **API token:** stored locally in `.env/jenkins-api-token.txt`, relative to the repository root.
+
+For Jenkins API requests, use HTTP Basic authentication with the username and API token as the password.
+Read the token from the local file; keep its value out of documentation and logs.
+Authentication was verified on 2026-10-03: `GET /whoAmI/api/json` returned HTTP 200 with
+`authenticated: true`, `name: mraysmit`, and `anonymous: false`.
+
+### Run every suite on Jenkins
+
+Open the [Qraft job](http://192.168.137.32:8080/job/Qraft/) and select **Build Now**.
+The job loads the root [`Jenkinsfile`](../Jenkinsfile) and checks out its configured branch from
+`https://github.com/mraysmit/qraft.git` on the `linux` node. The Linux fixture permission fix is included
+in the published CI branch:
+
+1. Verify Git, Maven, Docker, and Docker Compose. Download a checksum-verified SapMachine JDK 27
+   into the job's `@tools` directory on its first run.
+2. Run `mvn -B --fail-at-end -Dstyle.color=never clean install`: default tests in all seven modules,
+   coverage gates, and a freshly packaged runtime jar.
+3. Run the runtime tests tagged `e2e`, with `test.excludedGroups` cleared.
+4. Run the controller tests tagged `docker` or `slow`, with `test.excludedGroups` cleared.
+   This includes every currently excluded controller test; the Docker fixtures build their own image.
+
+The suites run sequentially, and concurrent Qraft builds are disabled. An end-to-end failure still
+allows the Docker suite to run, while a failed reactor build stops the dependent suites. Maven's exit
+code is preserved through `tee`, and the build has a one-hour timeout.
+
+Jenkins publishes the JUnit results and archives `logs/`, separate `reports/default`, `reports/e2e`,
+and `reports/docker` directories, and the default suite's JaCoCo HTML/XML reports under `coverage/`.
+It keeps 20 builds and artifacts from the last 10. Dependencies are cached in the job's `@repository`
+directory, outside the source workspace; each build starts with a fresh checkout.
+
+The job uses **Pipeline script from SCM**, **Git**, branch `*/ci/jenkins-all-tests`, and script path
+`Jenkinsfile`; change the branch to `*/main` after merging.
+Builds are started manually; no recurring trigger is configured. See [JENKINS.md](JENKINS.md) for the
+job configuration, Linux fixture requirements, and run results. On 2026-10-03, native write/read
+checks and a full locked 256 MiB `memtester` run confirmed memory corruption in the Jenkins VM.
+The [diagnostic evidence](http://192.168.137.32:8080/job/Qraft-Diagnostics/3/artifact/logs/memtester-locked.log)
+must be investigated on its VMware host before the complete pipeline can be reliably verified.
+
 ## Run builds in a visible terminal, through `Tee-Object`
 
 Run every build and test command in a terminal you can watch, and pipe its output through `Tee-Object`.
-You see the progress live, and a log stays behind in `test-logs/`, which git ignores:
+You see the progress live, and each run leaves a timestamped UTF-8 log in the
+central `logs/` directory, which git ignores. This is the same command convention
+as [PROJECT_STANDARDS.md, section 7](PROJECT_STANDARDS.md#7-standard-maven-verification-command):
 
 ```powershell
-mvn install 2>&1 | Tee-Object -FilePath test-logs/install.log
+New-Item -ItemType Directory -Force .\logs | Out-Null
+mvn -B "-Dstyle.color=never" install 2>&1 | Tee-Object -FilePath ".\logs\qraft-tests-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
+$qraftBuildExitCode = $LASTEXITCODE
+if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
 ```
+
+For every command below, create `logs/` first and check `$LASTEXITCODE` immediately
+after the pipeline using the final two lines above. A successful `Tee-Object`
+does not prove Maven passed. The shared Logback test configuration also writes
+`logs/qraft-maven-tests-<timestamp>.log`; that application log complements the
+captured Maven output.
 
 The terminal is the VS Code integrated terminal. An assistant must not open separate PowerShell windows,
 and must never run a build hidden in the background. It gives you the command to run in the VS Code
@@ -40,9 +95,14 @@ The default build excludes the end-to-end and Docker suites, through `test.exclu
 
 ## While you work: run one test class
 
-```bash
-mvn test -pl qraft-controller -Dtest=RaftNodeMembershipTest
-mvn test -pl qraft-controller "-Dtest=RaftNodeMembershipTest,MembershipServiceTest" -Dsurefire.failIfNoSpecifiedTests=false
+```powershell
+mvn -B "-Dstyle.color=never" test -pl qraft-controller "-Dtest=RaftNodeMembershipTest" 2>&1 | Tee-Object -FilePath ".\logs\qraft-tests-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
+```
+
+For more than one class:
+
+```powershell
+mvn -B "-Dstyle.color=never" test -pl qraft-controller "-Dtest=RaftNodeMembershipTest,MembershipServiceTest" "-Dsurefire.failIfNoSpecifiedTests=false" 2>&1 | Tee-Object -FilePath ".\logs\qraft-tests-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
 ```
 
 `-pl` builds only that module, so the other modules must already be in your local repository: run
@@ -51,8 +111,8 @@ that some of the modules built do not have.
 
 ## Before you call a change done: `mvn install`
 
-```bash
-mvn install
+```powershell
+mvn -B "-Dstyle.color=never" install 2>&1 | Tee-Object -FilePath ".\logs\qraft-tests-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
 ```
 
 This runs the default suite in every module, then the coverage gates: every package must keep at least 60%
@@ -77,14 +137,14 @@ Run them when a change touches server or agent start-up, health checks and their
 configuration files, the poms, or the Dockerfiles. They aren't needed for every change. Run them straight
 after `mvn install`, together:
 
-```bash
-mvn test -pl qraft-controller,qraft-runtime "-Dgroups=docker,e2e" "-Dtest.excludedGroups="
+```powershell
+mvn -B "-Dstyle.color=never" test -pl qraft-controller,qraft-runtime "-Dgroups=docker,e2e" "-Dtest.excludedGroups=" 2>&1 | Tee-Object -FilePath ".\logs\qraft-tests-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
 ```
 
 Or only the end-to-end suite, which needs no Docker:
 
-```bash
-mvn test -pl qraft-runtime -Dgroups=e2e "-Dtest.excludedGroups="
+```powershell
+mvn -B "-Dstyle.color=never" test -pl qraft-runtime "-Dgroups=e2e" "-Dtest.excludedGroups=" 2>&1 | Tee-Object -FilePath ".\logs\qraft-tests-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
 ```
 
 - Docker must be running. The suite builds the `qraft-runtime:test` image once, from

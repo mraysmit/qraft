@@ -28,6 +28,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -240,6 +242,7 @@ public final class SharedDockerCluster {
                     "storage":{"type":"raftlog","path":"/app/data","fsync":true}},
                     "telemetry":{"enabled":false}}}
                     """);
+            makeContainerConfigReadable(config);
             String name = "qraft-lock-contender-" + java.util.UUID.randomUUID();
             List<String> command = List.of(
                     "docker", "run", "--rm", "--name", name, "--volumes-from", containerId(cluster, ownerService),
@@ -303,9 +306,10 @@ public final class SharedDockerCluster {
                 .orElseThrow(() -> new IllegalStateException("the cluster has no controller1"))
                 .getContainerInfo().getNetworkSettings().getNetworks().keySet().iterator().next();
         Path config = Files.createTempFile("qraft-agent-", ".json");
-        Files.writeString(config, clientJson);
         String name = "qraft-agent-" + alias + "-" + java.util.UUID.randomUUID();
         try {
+            Files.writeString(config, clientJson);
+            makeContainerConfigReadable(config);
             runCommand(List.of("docker", "run", "-d", "--name", name, "--network", network,
                     "--network-alias", alias, "--label", "org.testcontainers=true",
                     "--mount", "type=bind,source=" + config.toAbsolutePath() + ",target=/etc/qraft/client.json,readonly",
@@ -315,6 +319,15 @@ public final class SharedDockerCluster {
             throw failed;
         }
         return new DetachedAgent(name, config);
+    }
+
+    /** Makes a non-secret test configuration readable by the image's non-root user on POSIX hosts. */
+    private static void makeContainerConfigReadable(Path config) throws IOException {
+        PosixFileAttributeView permissions = Files.getFileAttributeView(config, PosixFileAttributeView.class);
+        if (permissions != null) {
+            permissions.setPermissions(Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE,
+                    PosixFilePermission.GROUP_READ, PosixFilePermission.OTHERS_READ));
+        }
     }
 
     /**

@@ -72,7 +72,8 @@ Status key:
 | Operations | Prometheus metrics | Partial | Raft metrics only. The catalog, health-transition, request, and session metrics of design 18 are absent |
 | Operations | Node and cluster status | Partial | `/raft/status` describes only the answering node. `GET /v1/operator/raft/configuration` lists the configured servers, with voter and leader flags (updated 2026-10-02). Still no reachability, lag, or quorum |
 | Operations | Health aggregation | Done | Derived service health; `?passing` filter |
-| Operations | Backup, corrupt-replica recovery, upgrade procedures | Done | [`RAFT_STORAGE_OPERATIONS.md`](../docs/RAFT_STORAGE_OPERATIONS.md) |
+| Operations | Offline backup, corrupt-replica replacement, compatible-upgrade guidance | Done | [`RAFT_STORAGE_OPERATIONS.md`](../docs/RAFT_STORAGE_OPERATIONS.md); clarified 2026-10-03: lower-level legacy byte compatibility does not establish whole-node startup compatibility; an older backup cannot rejoin as the same voter |
+| Operations | Lost-quorum recovery and whole-cluster backup restore | Missing | No supported procedure yet. Membership Step 7 must establish and test it; clarified 2026-10-03 |
 | Operations | Event journal (design [`QRAFT_EVENT_ARCHITECTURE.md`](../docs/QRAFT_EVENT_ARCHITECTURE.md)) | Missing | No `qraft-events` module |
 | Operations | DNS discovery (optional) | Missing | — |
 

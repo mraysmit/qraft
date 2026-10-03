@@ -6,6 +6,7 @@ and the full suites passed on 2026-10-02; its mutation evidence is outstanding
 (Step 4 record). Steps 1 to 3 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
+**Last updated:** 2026-10-03 (document review corrections and remaining-step contracts)
 **Predecessor:** [`task-list-test-suite-remediation-2026-09-27.md`](../docs/archive/task-list-test-suite-remediation-2026-09-27.md),
 archived 2026-10-02. Its packaged-artifact test waits for the admin interface.
 **Paused:** [`task-list-embedded-admin-interface-2026-09-27.md`](task-list-embedded-admin-interface-2026-09-27.md), after its Step 1
@@ -833,16 +834,112 @@ The fix for the build defect above.
   - The packaged jar starts and configures Logback from its own
     `logback.xml`.
 
+### Step 4 close-out gate
+
+Before proceeding to Step 5, record mutation evidence for joining/removal,
+forwarding and token checks, collision protection, the removal quorum guard,
+idle-cluster changes, moved stored members, and target server IDs. Include the
+leader-stickiness guards shared with Step 6. Re-run any changed concurrency
+tests five consecutive times, then the default, end-to-end, and fresh-image
+Docker suites if production or test code changes. If only mutations are run
+in the isolated copy, retain the mutation commands/results and identify the
+unchanged final source/dependency state covered by the existing full-suite
+evidence. Passing ordinary suites alone does not close the outstanding gate.
+
 ### Step 5. Failed-server cleanup
 
-- The leader marks a voter failed after it has been unreachable past a
-  threshold, using the contact tracking that check-quorum already keeps
-  (decision 3).
-- Failed servers are removed automatically (decision 4):
-  - when a replacement is promoted;
-  - otherwise periodically.
-- Cleanup never removes more than `(voters − 1) / 2` voters, and never takes
-  the voter count below a configured minimum.
+**Status: Planned; not implemented.** The contract below was specified during
+the document review on 2026-10-03. Current server JSON rejects these new settings;
+the promotion settings still exist only on `RaftNode.Builder`.
+
+#### Configuration contract
+
+Add the following settings under `server.raft.membership`, validated before any
+runtime resource opens. Existing files without this object retain the current
+promotion defaults and receive the cleanup defaults when Step 5 is implemented.
+
+| Setting | Planned default | Validation and meaning |
+|---|---|---|
+| `promotionStabilizationMs` | 10000 | Integer, nonnegative; maps to the existing builder option |
+| `promotionMaxTrailingEntries` | 250 | Integer, nonnegative; maps to the existing builder option |
+| `cleanup.enabled` | true | Boolean; disabling cleanup does not disable authenticated operator removal |
+| `cleanup.failureTimeoutMs` | `max(60000, electionTimeoutMs)` | Positive integer, at least `server.raft.electionTimeoutMs`; continuous absence of contact before a voter is eligible |
+| `cleanup.intervalMs` | `max(10000, heartbeatIntervalMs)` | Positive integer, at least `server.raft.heartbeatIntervalMs`; periodic cleanup cadence |
+| `cleanup.minVoters` | 3 | Positive integer; automatic cleanup must not leave fewer voters; a smaller existing cluster remains valid and is not expanded automatically |
+
+Unknown fields, wrong JSON types, and values whose conversion to heartbeat
+rounds would overflow are refused. Durations use ceiling division by the
+heartbeat interval and are measured in applied heartbeat rounds, as promotion
+and check-quorum already are. A delayed loop must not turn elapsed wall-clock
+time into fictitious missed rounds. Expose parsed values through `AppConfig`
+and wire them through `QraftControllerService` to the node; do not read JVM or
+environment overrides. Record the effective settings without secrets.
+
+#### Failure detection and replacement sequence
+
+- Only a leader evaluates cleanup. A new leadership starts a fresh failure
+  grace period for every configured voter, including one that has never
+  answered. Any valid reply in the current leadership resets that voter's
+  continuous absence. Stale-generation replies and another server ID do not.
+- A promotion that has committed requests an expedited cleanup pass. Otherwise
+  the leader evaluates cleanup at the configured interval. Neither trigger
+  bypasses the failure grace period, minimum, quorum checks, or change guard.
+- Promotion-triggered replacement uses a new server ID with a **distinct name
+  and address**: join as a non-voter, stabilize, commit promotion, then evaluate
+  failed voters for removal. Cleanup does not infer which old member a join
+  intended to replace.
+- A wiped server reusing a name or address remains refused under Step 4 until
+  the old member's removal commits. The supported operator procedure remains
+  authenticated remove first, then join and promote. Periodic cleanup may free
+  the name/address first only when all its own safety checks allow removal.
+  With the default minimum of three, a three-voter cluster cannot automatically
+  remove one before its replacement joins; use the operator procedure or a
+  replacement with a distinct name/address. A join never triggers eviction or
+  relaxes a cleanup limit.
+
+#### Removal limits and sequencing
+
+- At the start of a pass, freeze the **committed** configuration, its voter
+  count `N`, and eligible failed server IDs. Its budget is
+  `floor((N - 1) / 2)` voter removals. The denominator is not recomputed after
+  each removal in that pass. The budget is per pass, not a lifetime limit;
+  later passes remain subject to the minimum and quorum checks.
+- Consider eligible IDs in deterministic order. Do not remove the leader or
+  automatically remove non-voters in this step.
+- Before every proposal, recheck failure eligibility, a recently contacted
+  quorum of the current configuration, a recently contacted quorum of the
+  proposed configuration, and the configured minimum. A recovered peer is
+  skipped. Missing quorum defers cleanup rather than forcing a change.
+- Use the same current-term commit and single-change guard as operator removal.
+  Await each removal's commit before considering the next; only committed
+  removals consume the budget. A pending promotion, join, or operator change
+  defers cleanup. An unrelated configuration change, failed proposal, or lost
+  leadership abandons the pass; a later pass starts from fresh committed state.
+- Never persist a speculative cleanup decision or continue a pass from a prior
+  leadership. Report eligibility, deferral reason, and committed removals in
+  operational logs; failed detection alone does not alter voting membership.
+
+**Exit gate.**
+
+- Real configuration-parser tests reject invalid, unknown, and overflowing
+  settings, and a controller lifecycle test proves wiring of non-default
+  promotion and cleanup values. An absent object preserves documented defaults,
+  including when existing election or heartbeat intervals exceed the usual
+  cleanup defaults.
+- Manual-timer node tests prove the exact failure and interval boundaries,
+  contact reset, new-leader grace, never-answered peers, disabling cleanup,
+  promotion-triggered evaluation, and stale or wrong-ID replies.
+- Tests prove the frozen budget, minimum, current and proposed quorum checks,
+  recovered-peer skip, deterministic ordering, one committed change at a time,
+  and cancellation on leadership or unrelated membership change.
+- Replacement tests cover both sequences above, including a colliding join
+  that cannot evict a member and a three-voter cluster held at the default
+  minimum. Real-WAL reopen confirms the committed configuration, not a local
+  failure marker, determines voters after restart.
+- New behavior is red before green; safety guards have recorded mutation
+  evidence. Changed concurrency tests pass five consecutive focused runs;
+  `mvn install` and the fresh-image Docker suite pass. The real replacement
+  and cleanup scenarios remain mandatory in Step 8 before the list closes.
 
 ### Step 6. Protection from disruptive servers
 
@@ -851,31 +948,101 @@ Step 4), with unit tests for a removed server and for the contact-expiry
 boundary. Still open: the test of a server rejoining after a partition, the
 container scenarios, and mutation evidence.
 
-- Pre-vote, or ignoring vote requests while a current leader is known
-  (thesis section 4.2.3). A removed or partitioned server cannot then force
-  the cluster into a new term.
-- Tests:
-  - a removed server whose election timeout keeps firing;
-  - a server rejoining after a partition.
+Leader stickiness is the selected protection (thesis section 4.2.3). Do not add
+a second election protocol merely to close this validation step.
+
+**Exit gate.** Manual-timer tests repeatedly campaign a removed server and
+heal a partition containing a higher-term, stale-log server. They prove a
+working leader and its followers keep their term during the contact lease,
+the exact expiry boundary permits voting, an isolated leader steps down via
+check-quorum, and genuine failover and catch-up still complete. Record mutations
+of both the leader and follower guards, lease expiry, and check-quorum behavior.
+Run changed concurrency tests five consecutive times and pass `mvn install`.
+Step 8 must repeat disruption and partition healing over real transport in
+containers before the list closes.
 
 ### Step 7. Recovery from lost quorum
 
-- A documented procedure, like Consul's `peers.json`, that rebuilds the
-  configuration from the surviving servers. The design document and an
-  operator guide both warn that data may be lost.
-- A container test: lose a majority, recover from the survivors, and check the
-  recovered state.
+**Status: Planned; no supported recovery procedure exists today.** An older
+backup must not be restarted under its former voter ID in an existing cluster.
+Offline backup consistency does not prove that later votes and acknowledged
+entries can be rolled back safely.
+
+Before changing recovery code, specify the versioned offline recovery input,
+its selection/discovery, the authoritative history and retained boundary, how
+term/vote and committed/uncommitted entries are handled, survivor identities
+and addresses, and atomic publication/one-time consumption. Define interrupted
+recovery and repeat-invocation behavior, including recovery from backups rather
+than current survivor directories. No recovery setting is accepted in ordinary
+server JSON until that contract is implemented.
+
+The operator procedure must stop all surviving processes, quarantine excluded
+servers so the old cluster cannot return, preserve complete directories and
+backups, and identify the selected survivors before rewriting membership. It
+must state which data can be lost and how the operator checks recovered state.
+Restarting intact current directories is different from rolling them back to
+older backups; whole-cluster backup restore stays unsupported unless this step
+explicitly implements and tests it.
+
+**Exit gate.**
+
+- Real-storage/process tests reject malformed or duplicate identities,
+  incompatible data, conflicting recovery inputs, and ordinary startup that
+  would silently recover without the explicit offline action.
+- Crash/interruption tests cover each durable publication boundary, exclusive
+  locking, and safe repeat invocation; no partial rewrite is accepted as a
+  successful recovery.
+- A container scenario loses the majority, fences the excluded servers,
+  recovers selected survivors, elects one leader, and verifies the documented
+  retained catalog state and subsequent writes. Excluded servers return only
+  through the documented replacement/join path.
+- If whole-cluster backup restore is delivered, its own scenario uses backups
+  that predate later participation and proves the recovered history and voter
+  isolation. Otherwise both the design and runbook keep that feature open.
+- Safety guards have mutation evidence, focused concurrency tests pass five
+  consecutive runs, and the full default, end-to-end, and fresh-image Docker
+  suites pass. Publish executable operator commands and their observed results
+  in the runbook only after the procedure passes these gates.
 
 ### Step 8. Container scenarios
 
-- Form a three-server cluster from empty storage with an expected count of
-  three.
-- Replace a server whose storage was wiped. It must not bootstrap a second
-  cluster.
-- Grow from 3 to 5 servers, and shrink from 5 to 3, while an agent publishes.
-- A failed server is cleaned up once its replacement is promoted.
-- The leader removes itself.
-- Recovery from lost quorum.
+| Scenario | Required observations |
+|---|---|
+| Form three servers from empty storage | Identical bootstrap configuration and server IDs on all three; one leader; replicated writes |
+| Wipe and replace a server at the same name/address | New server ID; collision refused before authenticated removal; no second bootstrap or old-target snapshot accepted; new non-voter catches up, promotes, and retains state/identity after restart |
+| Grow 3 to 5 and shrink 5 to 3 while an agent publishes | Every committed registration survives; membership changes commit one at a time; new servers replicate before voting; all retained nodes converge |
+| Automatic cleanup after promotion | Replacement has distinct name/address; failed member remains until grace and promotion commit; cleanup observes budget/minimum/quorum and persists across restart |
+| Periodic cleanup and blocked cleanup | Removal without a join when limits permit; no removal below minimum or without reachable quorum; a returning peer resets failure eligibility |
+| Leader removes itself | Authenticated removal commits; former leader reports removed and unready; retained voters elect one leader and preserve registrations |
+| Removed-server campaigns and partition healing | Repeated campaigns cannot disrupt the live cluster; healing converges; genuine leader loss still permits failover |
+| Lost-quorum recovery | Step 7's offline procedure and retained-state checks; excluded voters cannot reappear as the old cluster |
+
+**Exit gate.** Every scenario above passes three consecutive runs against a
+fresh image from the final runtime JAR. Each safety assertion is shown able to
+fail against a recorded targeted mutation in the isolated copy. Default,
+end-to-end, and Docker suites pass on the same final source/dependency state;
+retain timestamped logs using `docs/TESTING.md`. Complete the prohibited-framework,
+environment-configuration, timeout-API, source-header, and `git diff --check`
+audits. Update the design, feature validation, and runbook with actual evidence
+and remaining limitations before recording completion of this list.
+
+### Document review corrections (2026-10-03)
+
+The six review findings are addressed in the documents, without claiming new
+runtime behavior or new suite results:
+
+- The storage runbook restricts same-identity restore to the last durable state;
+  older backups and lost quorum have explicit support boundaries.
+- Legacy WAL/catalog byte compatibility is separated from whole-node upgrade
+  compatibility, and storage examples use the versioned JSON contract.
+- Step 5 defines distinct-name/address automatic replacement and authenticated
+  same-name/address replacement without join-driven eviction.
+- Steps 5 to 8 now have configuration, sequencing, mutation, real-storage, and
+  container exit gates. Step 4 remains open for its recorded mutation evidence.
+- `OPEN_SOURCE_USAGE.md` inventories the current direct dependencies and their
+  version sources, removing the obsolete prohibited-framework entry.
+- `docs/TESTING.md` and `docs/PROJECT_STANDARDS.md` use the same visible-terminal,
+  timestamped `logs/` command convention.
 
 ## 7. Out of scope
 

@@ -54,53 +54,65 @@ All Java source files must include the following license header:
 
 ## Third-Party Dependencies
 
-### Runtime Dependencies
+**Reconciled 2026-10-03.** This is the inventory of active, directly declared
+external library dependencies in the reactor POMs, including inherited
+dependencies. Qraft's own modules, Maven plugins, imported BOMs, commented-out
+dependencies, and transitive libraries are not additional rows. The POMs are
+the version authority; this table is a dated documentation snapshot.
 
-#### Database & Connection Management
-- **PostgreSQL JDBC Driver** (42.6.0) - BSD 2-Clause License
-- **HikariCP** (5.0.1) - Apache License 2.0
-- **SCRAM Authentication** (2.1) - BSD 2-Clause License
+License names below report upstream artifact POM metadata (including inherited
+parent metadata), with SLF4J's terms documented by its
+[upstream license](https://www.slf4j.org/license.html). They do not replace the
+license and notice files distributed with each artifact or constitute a
+complete license inventory of the shaded runtime.
 
-#### JSON Processing
-- **Jackson Databind** (2.15.2) - Apache License 2.0
+### Production dependencies
 
-#### Reactive & Async Processing
+| Maven coordinates | Version | Declared license metadata |
+|---|---|---|
+| `io.github.mraysmit:raftlog-core` | 1.4.1 | Apache License 2.0 |
+| `com.fasterxml.jackson.core:jackson-databind` | 2.19.4 | Apache License 2.0 |
+| `com.fasterxml.jackson.datatype:jackson-datatype-jsr310` | 2.19.4 | Apache License 2.0 |
+| `io.grpc:grpc-protobuf`, `io.grpc:grpc-stub`, `io.grpc:grpc-netty` | 1.68.1 | Apache License 2.0 |
+| `com.google.protobuf:protobuf-java`, `com.google.protobuf:protobuf-java-util` | 3.25.5 | BSD 3-Clause |
+| `com.google.guava:guava` | 33.5.0-jre | Apache License 2.0 |
+| `io.opentelemetry:opentelemetry-sdk`, `io.opentelemetry:opentelemetry-exporter-otlp` | 1.59.0 | Apache License 2.0 |
+| `io.opentelemetry:opentelemetry-exporter-prometheus` | 1.59.0-alpha | Apache License 2.0 |
+| `io.opentelemetry.instrumentation:opentelemetry-logback-appender-1.0` | 2.14.0-alpha | Apache License 2.0 |
+| `org.slf4j:slf4j-api`, `org.slf4j:jul-to-slf4j` | 2.0.17 | MIT |
+| `ch.qos.logback:logback-classic` | 1.5.32 | EPL 2.0 or LGPL 2.1 |
+| `net.logstash.logback:logstash-logback-encoder` | 8.1 | Apache License 2.0 and MIT entries |
+| `javax.annotation:javax.annotation-api` | 1.3.2 | CDDL + GPLv2 with Classpath Exception |
 
-#### Logging
-- **SLF4J API** (2.0.9) - MIT License
-- **Logback Classic** (1.4.11) - EPL 1.0 / LGPL 2.1
+Logback is also inherited in test scope throughout the reactor. Production
+modules declare the scope they need, including the runtime's explicit runtime
+dependency so the executable JAR contains its logging backend.
 
-#### Metrics & Monitoring
-- **Micrometer Core** (1.12.0) - Apache License 2.0
-- **Micrometer Prometheus Registry** (1.12.0) - Apache License 2.0
+### Test dependencies
 
-#### Resilience & Circuit Breaking
-- **Resilience4j Circuit Breaker** (2.1.0) - Apache License 2.0
-- **Resilience4j Rate Limiter** (2.1.0) - Apache License 2.0
-- **Resilience4j Micrometer** (2.1.0) - Apache License 2.0
+| Maven coordinates | Version | Declared license metadata |
+|---|---|---|
+| `org.junit.jupiter:junit-jupiter` | 5.14.3 | EPL 2.0 |
+| `org.awaitility:awaitility` | 4.3.0 | Apache License 2.0 |
+| `org.testcontainers:testcontainers`, `org.testcontainers:testcontainers-junit-jupiter` | 2.0.3 | MIT |
 
-### Test Dependencies
+### Version sources and release inventory
 
-#### Testing Frameworks
-- **JUnit Jupiter** (5.10.1) - Eclipse Public License 2.0
-- **JUnit Platform Suite** (1.10.1) - Eclipse Public License 2.0
-- **Mockito Core** (5.7.0) - MIT License
-- **Awaitility** (4.2.0) - Apache License 2.0
-
-#### Integration Testing
-- **TestContainers** (1.18.3) - MIT License
-- **TestContainers JUnit Jupiter** (1.18.3) - MIT License
-- **TestContainers PostgreSQL** (1.18.3) - MIT License
-
-## License Compatibility Matrix
-
-| License | Compatible with Apache 2.0 | Notes |
-|---------|----------------------------|-------|
-| Apache 2.0 | Yes | Same license |
-| MIT | Yes | Permissive, compatible |
-| BSD 2-Clause | Yes | Permissive, compatible |
-| EPL 2.0 | Yes | Compatible with Apache 2.0 |
-| LGPL 2.1 | Conditional | Dynamic linking only |
+- [pom.xml](pom.xml) manages RaftLog, SLF4J, Logback, the JSON logging encoder,
+  JUnit, and the Testcontainers version property. It imports OpenTelemetry BOM
+  1.59.0 and instrumentation BOM 2.14.0-alpha, and pins the Prometheus exporter
+  at 1.59.0-alpha across modules.
+- Module POMs declare Jackson, gRPC, protobuf, Guava, the JUL bridge, annotations,
+  and Awaitility versions. The controller explicitly declares the SDK and
+  exporter versions; the instrumentation BOM supplies the Logback appender
+  version.
+- Before distribution, resolve the production dependency tree for
+  `qraft-runtime`, compare it with the shaded JAR, and retain the licenses and
+  notices for its actual transitive contents. Test libraries and build plugins
+  are separate from that production inventory.
+- Follow [PROJECT_STANDARDS.md](docs/PROJECT_STANDARDS.md#42-test-doubles) for
+  permitted test doubles. The dependency inventory must not introduce a
+  prohibited mocking library or a substitute framework.
 
 ## Compliance Requirements
 
@@ -142,7 +154,7 @@ When using Qraft in your project, include:
 
 ### In Documentation
 ```
-This product includes Qraft (https://github.com/your-org/qraft)
+This product includes Qraft (https://github.com/mraysmit/qraft)
 Copyright 2025 Mark Andrew Ray-Smith Cityline Ltd
 Licensed under the Apache License 2.0
 ```
@@ -154,17 +166,13 @@ Licensed under the Apache License 2.0
 
 ## Automated Compliance
 
-### Header Management Script
+### Source header audit
 
-Use the provided script to ensure all files have proper headers:
-
-```powershell
-# Check current status
-.\update-java-headers.ps1 -DryRun
-
-# Update headers with license information
-.\update-java-headers.ps1
-```
+The required header and attributed type Javadoc are defined in
+[PROJECT_STANDARDS.md, section 10.1](docs/PROJECT_STANDARDS.md#101-source-file-headers).
+Audit all current production and test Java sources against that contract; do
+not infer completion from a historical source-file count. The previously named
+`update-java-headers.ps1` is not present in this repository.
 
 ### Maven License Plugin
 
@@ -203,19 +211,18 @@ Consider adding the Maven License Plugin to your build:
 
 ## Implementation Status
 
-**Complete Implementation:**
-- Apache License 2.0 headers added to all 88 Java files
-- LICENSE file created with full Apache License 2.0 text
-- NOTICE file created with third-party attribution
-- POM.xml updated with license metadata
-- Automated scripts provided for maintenance
+The repository contains [LICENSE](LICENSE), [NOTICE](NOTICE), and the source
+header contract. `NOTICE` identifies Qraft and directs readers to upstream
+dependency terms; it is not a generated list of every bundled component.
+The direct dependency tables above were reconciled on 2026-10-03. A complete
+release inventory and source-header audit must be performed on the artifact and
+sources being distributed; no blanket completion claim is made here.
 
 ## Contact
 
 For license questions or trademark permissions:
 - **Copyright Holder:** Mark Andrew Ray-Smith Cityline Ltd
-- **Project Repository:** [Your Repository URL]
-- **License Questions:** [Your Contact Email]
+- **Project Repository:** [mraysmit/qraft](https://github.com/mraysmit/qraft)
 
 ## Resources
 

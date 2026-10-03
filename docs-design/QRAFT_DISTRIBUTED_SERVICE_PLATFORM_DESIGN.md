@@ -290,6 +290,10 @@ Server mode currently owns:
     [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md)
     cover automatic removal of failed servers, further disruptive-server
     validation, recovery from lost quorum, and container scenarios.
+    Step 5's configuration and removal limits are a planned contract, not
+    accepted server settings today. A promotion can trigger cleanup after a
+    replacement joins with a distinct name and address; a replacement reusing
+    either still needs the old member removed first. Joins never evict a member.
 - **Bootstrapping.** A server with no Raft state asks every server in
   `server.raft.nodes` to describe itself over the Raft port. It then decides:
   - **Bootstrap.** Every listed server answers, none holds Raft state, and all
@@ -1406,6 +1410,14 @@ After prefix compaction, the first replayed entry may have an index greater than
 one. Recovery validates continuity relative to the snapshot boundary rather than
 assuming that every WAL begins at index one.
 
+Restart recovery assumes the server's last durable state. An offline copy that
+predates later participation cannot replace that state under the same voter ID:
+it may erase persisted votes or acknowledged entries. The supported same-identity
+restore restriction and healthy-quorum replacement procedure are in
+[`RAFT_STORAGE_OPERATIONS.md`](../docs/RAFT_STORAGE_OPERATIONS.md#restoring-storage-without-rolling-back-a-voter).
+Lost-quorum recovery and whole-cluster backup restore remain unsupported until
+membership Step 7 establishes and tests their offline recovery contract.
+
 ### 14.6 Concurrency and ownership
 
 Each node has one open WAL instance and one exclusive data-directory lock. RaftLog
@@ -1442,7 +1454,9 @@ Compatibility rules:
 - Legacy catalog entries that omit scoped identity load with tenant and namespace
   `default`, empty datacenter and region, and `enabled=true`; no operator action
   or offline rewrite is required.
-- Snapshot readers accept older documents that omit newer sections.
+- Application snapshot payload readers accept older documents that omit newer
+  catalog sections. Whole-node recovery still requires the Raft configuration
+  envelope; legacy payload readability does not imply startup compatibility.
 - Mixed legacy and current WAL entries remain readable during the supported
   migration window.
 - Corrupt or incomplete payloads fail recovery clearly rather than being silently

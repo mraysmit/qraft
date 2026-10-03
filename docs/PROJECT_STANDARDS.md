@@ -164,27 +164,38 @@ logs/
 - Test-log retention must preserve enough runs for regression comparison without growing indefinitely.
 - Failed CI run logs should be retained longer than routine successful-run logs where supported.
 
-## 7. Standard Maven test command
+## 7. Standard Maven verification command
 
-Run the Maven reactor tests from the repository root with PowerShell:
+Run builds and tests in the visible VS Code integrated terminal, with combined
+output captured by `Tee-Object` under the central `logs/` directory. An assistant
+provides the command for that terminal and reads the retained log; it must not
+open another PowerShell window or launch a hidden background build.
+
+For change completion, run the default reactor and coverage gates from the
+repository root with PowerShell:
 
 ```powershell
-mvn -B "-Dstyle.color=never" test 2>&1 | Tee-Object ".\logs\qraft-tests-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss').log"
+New-Item -ItemType Directory -Force .\logs | Out-Null
+mvn -B "-Dstyle.color=never" install 2>&1 | Tee-Object -FilePath ".\logs\qraft-tests-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
+$qraftBuildExitCode = $LASTEXITCODE
+if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
 ```
 
 This command:
 
-- Runs the Maven reactor test lifecycle.
+- Runs the default Maven reactor tests, packaging, and coverage gates through
+  `install`. The gates run in `verify`; `mvn test` alone is not completion evidence.
 - Disables Maven color output so the captured file does not contain ANSI color sequences.
 - Displays output in the console.
 - Captures standard output and standard error in the same test log.
 - Creates a timestamped log that can be compared with earlier runs.
 
-The `logs` directory must exist before running the command. If it does not exist, create it once with:
-
-```powershell
-New-Item -ItemType Directory -Force .\logs
-```
+The first line creates the log directory if needed. Check Maven's
+`$LASTEXITCODE`, not just the success of `Tee-Object`, after every pipeline.
+Use the same batch, colour, capture, and timestamp options for focused tests and
+tagged suites; their selectors are documented in [TESTING.md](TESTING.md).
+PowerShell 7 writes the captured file in UTF-8. For Windows PowerShell 5.1,
+use PowerShell 7 for these commands rather than producing UTF-16 test logs.
 
 ## 8. Test-log comparison
 

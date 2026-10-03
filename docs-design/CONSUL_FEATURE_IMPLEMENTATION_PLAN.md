@@ -313,9 +313,13 @@ The implementation will be considered aligned with the target design when:
   TCP, and TTL checks, leader-owned expiry, and automatic deregistration.
 - [ ] Implement namespaces and tenancy isolation end to end: replicated tenants
   and namespaces, and scoped reads (feature validation item 6).
-- [x] Add snapshot, restore, upgrade, and operational recovery workflows:
-  snapshots in every role, installation, recovery, and the backup, recovery, and
-  upgrade procedures in `RAFT_STORAGE_OPERATIONS.md`.
+- [x] Add snapshots in every role, installation, restart recovery, offline
+  backups, replica replacement, and guidance for explicitly compatible upgrades
+  in `RAFT_STORAGE_OPERATIONS.md`. Byte-compatible legacy payloads do not imply
+  whole-node upgrade compatibility.
+- [ ] Add lost-quorum recovery and a tested whole-cluster restore contract.
+  Rejoining an existing cluster from an older backup under the same voter ID
+  is unsupported (membership Step 7).
 - [x] Add multi-node integration and failure-injection coverage, including
   container crash, partition, and whole-cluster restart tests.
 - [x] Run the complete reactor test suite and review the resulting log.

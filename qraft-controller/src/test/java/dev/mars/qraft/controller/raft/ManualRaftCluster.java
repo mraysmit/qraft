@@ -167,6 +167,14 @@ public final class ManualRaftCluster implements AutoCloseable {
     }
 
     /**
+     * Waits until the simulated network and the shared state loop are quiescent.
+     * Tests that drive several nodes directly use this between deterministic timer steps.
+     */
+    void settle() throws InterruptedException {
+        settle(System.nanoTime() + TimeUnit.SECONDS.toNanos(WAIT_SECONDS));
+    }
+
+    /**
      * Waits until no simulated message is in flight and the state loop has run everything queued, on
      * {@value #QUIET_PASSES} passes in a row, since a node's handling can send more. It only saves time: a
      * round that settles too early costs one more heartbeat in {@link #heartbeatUntil}, never a wrong answer.

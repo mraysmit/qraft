@@ -36,7 +36,6 @@ import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
-import java.util.function.BooleanSupplier;
 
 import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
 import static dev.mars.qraft.controller.raft.ManualRaftCluster.startAll;
@@ -191,7 +190,7 @@ class EnhancedInMemoryTransportTest {
                     // mid-transition (becoming leader, or between elections): it cannot stand this round
                 }
             }
-            pollUntil(() -> standing.stream().noneMatch(node -> node.getState() == RaftNode.State.CANDIDATE), 200);
+            cluster.settle();
         }
         for (InMemoryTransportSimulator transport : transports.values()) {
             transport.setChaosConfig(5, 15, 0.0);
@@ -244,7 +243,8 @@ class EnhancedInMemoryTransportTest {
      */
     private void convergeOnTheHighestTerm() throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (!(leaders().size() == 1 && everyoneFollows(leaders().getFirst())) && System.nanoTime() < deadline) {
+        cluster.settle();
+        while (convergedLeader().isEmpty() && System.nanoTime() < deadline) {
             Optional<RaftNode> leader = nodes.values().stream().filter(RaftNode::isLeader)
                     .max(Comparator.comparingLong(RaftNode::getCurrentTerm));
             try {
@@ -258,18 +258,23 @@ class EnhancedInMemoryTransportTest {
                             .orElseThrow()).fireElectionTimeout();
                 }
             } catch (IllegalStateException roleChanged) {
+                cluster.settle();
                 continue; // its role changed between the check and the fire
             }
-            pollUntil(() -> leaders().size() == 1 && everyoneFollows(leaders().getFirst()), 200);
+            cluster.settle();
         }
+        cluster.settle();
         List<String> leaders = leaders();
         assertEquals(1, leaders.size(), "one leader once the chaos clears: " + leaders);
         assertTrue(everyoneFollows(leaders.getFirst()), "every member follows " + leaders.getFirst());
     }
 
-    private static void pollUntil(BooleanSupplier condition, long millis) throws InterruptedException {
-        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(millis);
-        while (!condition.getAsBoolean() && System.nanoTime() < deadline) Thread.sleep(5);
+    /** The sole leader, only when every member currently follows it. */
+    private Optional<String> convergedLeader() {
+        List<String> leaders = leaders();
+        if (leaders.size() != 1) return Optional.empty();
+        String leader = leaders.getFirst();
+        return everyoneFollows(leader) ? Optional.of(leader) : Optional.empty();
     }
 
     private static DistributedStateRaftCommand put(String key, String value) {
