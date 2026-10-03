@@ -82,6 +82,14 @@
                 <version>${raftlog.version}</version>
             </dependency>
 
+            <!-- The instrumentation BOM below manages this exporter at an older alpha. Pin the one that matches
+                 the OpenTelemetry BOM, so every module, and the executable jar, resolves the same version. -->
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-exporter-prometheus</artifactId>
+                <version>1.59.0-alpha</version>
+            </dependency>
+
             <!-- OpenTelemetry BOM -->
             <dependency>
                 <groupId>io.opentelemetry</groupId>

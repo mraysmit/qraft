@@ -787,8 +787,8 @@ list.
   the previous shaded jar, whose copy of a dependency wins over the new one.
   Qraft's own classes were current, so earlier Docker results stand for Qraft
   code. `docs/TESTING.md` now says to run `mvn clean install` after a
-  dependency change. The cause is not fixed: the controller still replaces
-  its jar with a shaded one that `qraft-runtime` shades again.
+  dependency change. The cause was fixed the next day; see "One executable
+  jar" below.
 - **Validation,** after `mvn clean install`:
   - 812 tests, every coverage gate met, including the contract tests of
     design section 14.7: `RaftLogStorageIntegrationTest`,
@@ -798,6 +798,40 @@ list.
   - The runtime JAR reports `raftlog-core` 1.4.1.
   - The Docker suite on that JAR: 23 of 23.
   - The end-to-end suite was not rerun.
+
+### One executable jar (2026-10-03)
+
+The fix for the build defect above.
+
+- **`qraft-controller` no longer shades.** Its jar holds only its own
+  classes. Nothing used its executable jar: the design makes
+  `qraft-runtime` the one deployment artifact.
+- **`qraft-runtime`'s shade step** now merges `META-INF/services` files and
+  drops jar signatures, which the controller's step had done for it. Its own
+  jar is rebuilt on every build (`forceCreation`), so the shade step never
+  starts from its previous output.
+- **Two faults the controller's fat jar had hidden,** both fixed:
+  - **Logback was missing.** The root POM gives every module Logback in test
+    scope, which kept it out of the runtime's own dependencies. The runtime
+    now declares it in runtime scope.
+  - **Mixed Prometheus exporter versions.** The runtime resolved
+    `opentelemetry-exporter-prometheus` 1.48.0-alpha and Prometheus 1.3.6
+    through the instrumentation BOM, while the controller compiled and
+    tested against 1.59.0-alpha and 1.3.10. The old executable jar held
+    classes of both. The root POM now pins 1.59.0-alpha for every module.
+- **Proof.** With the new poms and no `clean`: a build on RaftLog 1.4.0
+  packaged 1.4.0, and a rebuild after changing the version to 1.4.1
+  packaged 1.4.1.
+- **The new jar against the old one.** It adds nothing. It drops only the
+  second Prometheus copy (the 1.3.6 protobuf exposition format and its
+  bundled protobuf, 794 classes) and seven annotation classes. The gRPC and
+  SLF4J service files are identical, and the jar is 23.5 MB, down from
+  25.6 MB.
+- **Validation,** on a build without `clean`:
+  - `mvn install`: 812 tests, every coverage gate met.
+  - The Docker suite: 23 of 23. The end-to-end suite: 7 of 7.
+  - The packaged jar starts and configures Logback from its own
+    `logback.xml`.
 
 ### Step 5. Failed-server cleanup
 

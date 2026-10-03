@@ -39,6 +39,13 @@
             <artifactId>qraft-agent</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- The root POM gives every module Logback in test scope, which would keep it out of the
+             executable jar. Server and client both log through it at run time. -->
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <scope>runtime</scope>
+        </dependency>
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
@@ -56,6 +63,19 @@
                     <excludedGroups>${test.excludedGroups}</excludedGroups>
                 </configuration>
             </plugin>
+            <!-- Rebuild this module's own jar on every build. The shade step below replaces it with the
+                 executable jar; if the jar step then kept that file as up to date, the next build would
+                 shade the previous executable jar and keep its old copies of every dependency. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.2</version>
+                <configuration>
+                    <forceCreation>true</forceCreation>
+                </configuration>
+            </plugin>
+            <!-- The one executable jar. No other module shades: a module that shaded its own jar would hand
+                 this step a second, possibly stale, copy of each dependency. -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
@@ -70,7 +90,20 @@
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>dev.mars.qraft.runtime.QraftRuntimeApplication</mainClass>
                                 </transformer>
+                                <!-- gRPC and others find their providers through META-INF/services files that
+                                     several jars define; they must be merged, not first-one-wins. -->
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                             </transformers>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
                         </configuration>
                     </execution>
                 </executions>
