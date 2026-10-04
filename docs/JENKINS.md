@@ -5,20 +5,19 @@ to run the pipeline; it has no recurring trigger.
 
 ## Job configuration
 
-The job loads its pipeline and the Linux fixture permission fix from the published CI branch using
-the following SCM configuration. The initial verification builds used an inline pipeline; build 2
-retains that run's fixture patch as `ci-fixture.patch` in its artifacts.
+The job loads its pipeline from the repository's default branch using the following SCM configuration.
 
 - Type: Pipeline.
 - Definition: Pipeline script from SCM.
 - SCM: Git, repository `https://github.com/mraysmit/qraft.git`.
-- Branch: `*/ci/jenkins-all-tests` while the CI changes are under review; change to `*/main` after merging.
+- Branch: `*/main`.
 - Script path: `Jenkinsfile`.
 - Lightweight checkout: enabled.
 
 The pipeline checks out the same SCM revision that supplied its Jenkinsfile. It needs an online Linux
 x64 node labelled `linux`, Bash, Git, curl, Maven 3.9 or newer, and access to a running Docker engine
-with Docker Compose. The current server provides these tools. No Jenkins plugin installation is needed.
+with Docker Compose. The Jenkins controller's built-in node carries both its existing `peegeeq-linux`
+label and the `linux` label used by Qraft. No Jenkins plugin installation is needed.
 
 The first build downloads SapMachine JDK 27 from its official GitHub release and verifies its pinned
 SHA-256 checksum. The JDK is cached in `<workspace>@tools/sapmachine-jdk-27`; Maven dependencies are
@@ -108,3 +107,22 @@ Further diagnosis needs access to the machine hosting this VM: review its VMware
 error logs and test the host's memory. Recheck memory integrity after resolving the host/VM fault,
 then rerun Qraft's full pipeline to verify the Linux fixture fix and all suites. The published
 pipeline remains available, but successful execution of every suite is still outstanding.
+
+## Current server setup, 2026-10-04
+
+The `Qraft` job was recreated on the current Jenkins server as a Pipeline from SCM using `main` and
+the root `Jenkinsfile`. The built-in node retains its `peegeeq-linux` label and also has the `linux`
+label required by this pipeline. The job is manually triggered, prevents concurrent runs, and retains
+20 builds plus artifacts from the latest 10 builds.
+
+[Build 1](http://192.168.137.32:8080/job/Qraft/1/) verified checkout, JDK 27 provisioning, Maven,
+Docker, report publication, and artifact archival. Its 803 default tests and 7 end-to-end tests passed.
+The first Docker class exceeded its 15-second cluster startup deadline while Testcontainers downloaded
+the `alpine/socat` helper image; the remaining Docker classes passed.
+
+[Build 2](http://192.168.137.32:8080/job/Qraft/2/) confirmed the cached-startup case: both
+`DockerRunningPartitionTest` tests passed. It published 833 JUnit results and 682 artifacts. One Docker
+recovery case remained red:
+`DockerAgentRecoveryTest.aKilledFollowerInstallsTheLeadersSnapshotAndThenHoldsTheLeadersHealthState`
+timed out after 90 seconds while waiting for the restarted follower to install and expose the leader's
+snapshot state. This is a test/product integration result rather than a Jenkins configuration failure.

@@ -1,0 +1,195 @@
+/*
+ * Copyright 2025 Mark Andrew Ray-Smith Cityline Ltd
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package dev.mars.qraft.testing.fault;
+
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.classic.spi.LoggingEvent;
+import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.util.List;
+
+import static dev.mars.qraft.testing.fault.IntentionalError.SELF_TEST_INJECTED_FAILURE;
+import static dev.mars.qraft.testing.fault.IntentionalError.SELF_TEST_INTENTIONAL_ERROR;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * Tests the labelling and checks of intentional errors themselves: an unlabelled error or logged exception is a
+ * problem; an injected failure is labelled wherever it appears in the exception chain; an intentional error is
+ * labelled only when declared and matched exactly; a declared count that is not met is a problem; and a root
+ * logger without a started check is refused. Each case runs in its own window, opened inside this test's window,
+ * and records events directly, so none of them is written to the log.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-10-04
+ * @version 1.0
+ */
+class IntentionalErrorsTest {
+
+    private static final Logger SELF_TEST = (Logger) LoggerFactory.getLogger("dev.mars.qraft.testing.fault.selftest");
+    private static final Logger OTHER = (Logger) LoggerFactory.getLogger("dev.mars.qraft.testing.fault.other");
+
+    @Test
+    void anUnlabelledErrorIsAProblem() {
+        List<String> problems = inWindow("SelfTest#a", () ->
+                IntentionalErrors.record(event(SELF_TEST, Level.ERROR, "a real failure", null)));
+
+        assertEquals(List.of("unlabelled ERROR [main] dev.mars.qraft.testing.fault.selftest - a real failure"),
+                problems.stream().map(problem -> problem.replaceFirst("\\[[^\\]]*\\]", "[main]")).toList());
+    }
+
+    @Test
+    void anUnlabelledExceptionIsAProblemAtAnyLevel() {
+        List<String> problems = inWindow("SelfTest#b", () -> {
+            IntentionalErrors.record(event(SELF_TEST, Level.DEBUG, "a debug line", new IllegalStateException("boom")));
+            IntentionalErrors.record(event(SELF_TEST, Level.WARN, "a warning", new IllegalStateException("boom")));
+        });
+
+        assertEquals(2, problems.size(), problems.toString());
+    }
+
+    @Test
+    void aWarningWithoutAnExceptionIsNotAProblem() {
+        assertEquals(List.of(), inWindow("SelfTest#c", () ->
+                IntentionalErrors.record(event(SELF_TEST, Level.WARN, "a warning", null))));
+    }
+
+    @Test
+    void anInjectedFailureIsLabelledWithItsEntryAndTest() {
+        InjectedFault fault = new InjectedFault(SELF_TEST_INJECTED_FAILURE, "Simulated sync failure");
+        ILoggingEvent direct = event(OTHER, Level.ERROR, "Failed to persist command: Simulated sync failure", fault);
+        ILoggingEvent wrapped = event(OTHER, Level.WARN, "Sync failed",
+                new IllegalStateException("outer", new IOException("disk", fault)));
+        RuntimeException suppressing = new RuntimeException("outer");
+        suppressing.addSuppressed(fault);
+        ILoggingEvent suppressed = event(OTHER, Level.ERROR, "Shutdown failed", suppressing);
+
+        List<String> problems = inWindow("SelfTest#d", () -> {
+            for (ILoggingEvent event : List.of(direct, wrapped, suppressed)) {
+                assertEquals("*** INJECTED FAILURE: SELF_TEST_INJECTED_FAILURE, injected by SelfTest#d *** ",
+                        new IntentionalErrorLabel().convert(event));
+                IntentionalErrors.record(event);
+            }
+        });
+
+        assertEquals(List.of(), problems);
+    }
+
+    @Test
+    void anInjectedFailureCountsAgainstADeclaredNumber() {
+        InjectedFault fault = new InjectedFault(SELF_TEST_INJECTED_FAILURE, "Simulated");
+        List<String> problems = inWindow("SelfTest#e", () -> {
+            IntentionalErrors.expect(SELF_TEST_INJECTED_FAILURE, 1);
+            IntentionalErrors.record(event(OTHER, Level.ERROR, "first", fault));
+            IntentionalErrors.record(event(OTHER, Level.ERROR, "second", fault));
+        });
+
+        assertEquals(List.of("INJECTED FAILURE SELF_TEST_INJECTED_FAILURE was declared exactly 1 time(s)"
+                + " but occurred 2 time(s)"), problems);
+    }
+
+    @Test
+    void anIntentionalErrorIsLabelledOnlyOnceDeclared() {
+        ILoggingEvent error = event(SELF_TEST, Level.ERROR, "Self-test intentional error 7", null);
+
+        List<String> problems = inWindow("SelfTest#f", () -> {
+            assertEquals("", new IntentionalErrorLabel().convert(error));
+            IntentionalErrors.expect(SELF_TEST_INTENTIONAL_ERROR);
+            assertEquals("*** INTENTIONAL ERROR: SELF_TEST_INTENTIONAL_ERROR, caused by SelfTest#f *** ",
+                    new IntentionalErrorLabel().convert(error));
+            IntentionalErrors.record(error);
+        });
+
+        assertEquals(List.of(), problems);
+    }
+
+    @Test
+    void anIntentionalErrorMatchesOnlyItsLoggerLevelAndWholeMessage() {
+        List<String> problems = inWindow("SelfTest#g", () -> {
+            IntentionalErrors.expect(SELF_TEST_INTENTIONAL_ERROR, 1);
+            IntentionalErrors.record(event(SELF_TEST, Level.ERROR, "Self-test intentional error 7", null));
+            IntentionalErrors.record(event(SELF_TEST, Level.ERROR, "Self-test intentional error 7 and more", null));
+            IntentionalErrors.record(event(OTHER, Level.ERROR, "Self-test intentional error 7", null));
+            IntentionalErrors.record(event(SELF_TEST, Level.WARN, "Self-test intentional error 7",
+                    new IllegalStateException("boom")));
+        });
+
+        assertEquals(3, problems.size(), problems.toString());
+        problems.forEach(problem -> assertTrue(problem.startsWith("unlabelled "), problem));
+    }
+
+    @Test
+    void aDeclaredErrorThatNeverOccursIsAProblem() {
+        List<String> problems = inWindow("SelfTest#h", () -> IntentionalErrors.expect(SELF_TEST_INTENTIONAL_ERROR));
+
+        assertEquals(List.of("INTENTIONAL ERROR SELF_TEST_INTENTIONAL_ERROR was declared at least 1 time(s)"
+                + " but occurred 0 time(s)"), problems);
+    }
+
+    @Test
+    void aWindowClosedOutOfOrderIsAProblem() {
+        IntentionalErrors.begin("SelfTest#outer");
+        IntentionalErrors.begin("SelfTest#inner");
+
+        assertEquals(List.of("intentional-error window mismatch: closing SelfTest#outer but the open window is"
+                + " SelfTest#inner"), IntentionalErrors.end("SelfTest#outer"));
+        assertEquals(List.of(), IntentionalErrors.end("SelfTest#inner"));
+        assertEquals(List.of(), IntentionalErrors.end("SelfTest#outer"));
+    }
+
+    @Test
+    void aRootWithoutAStartedCheckIsRefused() {
+        LoggerContext context = new LoggerContext();
+        Logger root = context.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
+        assertThrows(AssertionError.class, () -> IntentionalErrorCheck.requireAttachedTo(root));
+
+        IntentionalErrorCheck check = new IntentionalErrorCheck();
+        check.setContext(context);
+        root.addAppender(check);
+        assertThrows(AssertionError.class, () -> IntentionalErrorCheck.requireAttachedTo(root));
+
+        check.start();
+        IntentionalErrorCheck.requireAttachedTo(root);
+    }
+
+    @Test
+    void onlyAnInjectedFailureEntryCanBeInjected() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new InjectedFault(SELF_TEST_INTENTIONAL_ERROR, "not injectable"));
+    }
+
+    private static List<String> inWindow(String owner, Runnable body) {
+        IntentionalErrors.begin(owner);
+        try {
+            body.run();
+        } catch (RuntimeException | Error failure) {
+            IntentionalErrors.end(owner);
+            throw failure;
+        }
+        return IntentionalErrors.end(owner);
+    }
+
+    private static ILoggingEvent event(Logger logger, Level level, String message, Throwable failure) {
+        return new LoggingEvent(Logger.class.getName(), logger, level, message, failure, null);
+    }
+}

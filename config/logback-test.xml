@@ -1,13 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
     <statusListener class="ch.qos.logback.core.status.OnConsoleStatusListener"/>
+    <!-- %intentional writes "*** INJECTED FAILURE: ... ***" or "*** INTENTIONAL ERROR: ... ***" after the level
+         of an error a test caused on purpose, and nothing otherwise. See dev.mars.qraft.testing.fault.
+         Nothing in this file may filter or drop an event: IntentionalErrorConfigurationTest checks it. -->
+    <conversionRule conversionWord="intentional" class="dev.mars.qraft.testing.fault.IntentionalErrorLabel"/>
     <timestamp key="testRunTimestamp" datePattern="yyyy-MM-dd_HH-mm-ss"/>
     <property name="TEST_LOG_DIR" value="${qraft.test.log.dir:-${user.dir}/logs}"/>
+
+    <!-- Writes nothing; fails a test that logs an error, or an exception at any level, it did not cause on purpose. -->
+    <appender name="INTENTIONAL_ERROR_CHECK" class="dev.mars.qraft.testing.fault.IntentionalErrorCheck"/>
 
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
             <charset>UTF-8</charset>
-            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{48}%replace( [%X{remediationId}]){' \[\]', ''}%replace( [%X{nodeId}]){' \[\]', ''}%replace( [%X{agentId}]){' \[\]', ''}%replace( [%X{raftRole}/%X{raftTerm}]){' \[/\]', ''}%replace( [%X{requestId}]){' \[\]', ''}%replace( [%X{rpcType}]){' \[\]', ''} - %msg%n</pattern>
+            <pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %intentional%logger{48}%replace( [%X{remediationId}]){' \[\]', ''}%replace( [%X{nodeId}]){' \[\]', ''}%replace( [%X{agentId}]){' \[\]', ''}%replace( [%X{raftRole}/%X{raftTerm}]){' \[/\]', ''}%replace( [%X{requestId}]){' \[\]', ''}%replace( [%X{rpcType}]){' \[\]', ''} - %msg%n</pattern>
         </encoder>
     </appender>
 
@@ -17,7 +24,7 @@
         <prudent>true</prudent>
         <encoder>
             <charset>UTF-8</charset>
-            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{48}%replace( [%X{remediationId}]){' \[\]', ''}%replace( [%X{nodeId}]){' \[\]', ''}%replace( [%X{agentId}]){' \[\]', ''}%replace( [%X{raftRole}/%X{raftTerm}]){' \[/\]', ''}%replace( [%X{requestId}]){' \[\]', ''}%replace( [%X{rpcType}]){' \[\]', ''} - %msg%n</pattern>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %intentional%logger{48}%replace( [%X{remediationId}]){' \[\]', ''}%replace( [%X{nodeId}]){' \[\]', ''}%replace( [%X{agentId}]){' \[\]', ''}%replace( [%X{raftRole}/%X{raftTerm}]){' \[/\]', ''}%replace( [%X{requestId}]){' \[\]', ''}%replace( [%X{rpcType}]){' \[\]', ''} - %msg%n</pattern>
         </encoder>
     </appender>
 
@@ -27,6 +34,7 @@
     <logger name="io.grpc" level="WARN"/>
 
     <root level="INFO">
+        <appender-ref ref="INTENTIONAL_ERROR_CHECK"/>
         <appender-ref ref="CONSOLE"/>
         <appender-ref ref="FILE"/>
     </root>

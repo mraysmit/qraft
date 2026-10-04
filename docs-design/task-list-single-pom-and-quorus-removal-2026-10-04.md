@@ -3,7 +3,7 @@
 **Date:** 2026-10-04
 **Status:** Proposed. Starts after the membership list's Step 4 close-out gate; membership Step 5 resumes on the new layout.
 **Followed by:** [`task-list-consul-style-client-2026-10-04.md`](task-list-consul-style-client-2026-10-04.md)
-**Active work:** Phase 2. Phase 1 was done 2026-10-04. The list started at the user's request before the membership Step 4 close-out, whose mutation evidence will be recorded against the refactored source.
+**Active work:** Phase 2A, intentional-error labelling, added 2026-10-04 at the user's direction before Phase 3. Phases 1 and 2 were done 2026-10-04. The list started at the user's request before the membership Step 4 close-out, whose mutation evidence will be recorded against the refactored source.
 **Related:** [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md) (active), [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md), section 2.4: inherited components must not remain without a clear role
 
@@ -39,6 +39,10 @@ runtime layer, or its unused tooling.
   safety guards.
 - Each phase ends with `mvn install`; phases touching the runtime, Docker, or
   async code also run the end-to-end suite and the Docker suite on a fresh image.
+- Until Phase 2A is complete, a log review is a comparison with the previous
+  phase's logs by kind of ERROR/WARN line and exception. It is heuristic: it
+  cannot tell an intended error from a regression of the same kind, and it must
+  be reported as such. After Phase 2A, the build decides.
 - The user runs builds in the VS Code terminal and commits; one commit per phase.
 
 ## 4. Tasks
@@ -176,11 +180,137 @@ copy of the repository and then in the working tree, with identical results.
     and Testcontainers' newer copy won.
   - **Fix.** `pom.xml` now pins 13.0 in `dependencyManagement`, so the jar
     bundles what it did before.
-  - **Not yet verified.** A `mvn clean install` with the pin is still needed to
-    confirm that the jar's third-party list matches the baseline exactly.
+  - **Verified with the pin.** `mvn clean install`
+    (`logs/qraft-tests-2026-10-04_18-36-39-619.log`) ran 803 tests with every
+    coverage gate met.
+    - All 73 bundled third-party artifacts and their versions match the
+      baseline.
+    - The jar differs from the baseline only by Phase 1's deletions and the
+      Maven metadata.
+    - Maven's warnings are unchanged, except that `logback.xml` is no longer
+      an overlapping resource.
+- **Log review.** The logs were compared with the baseline by kind of
+  ERROR/WARN line and exception (`logs/refactor-baseline-2026-10-04/tools/log_kinds.py`).
+  - **Clean.** No Maven `[ERROR]` lines and no ANSI characters.
+  - **No new kinds.** Every ERROR line in the default suite belongs to a kind
+    the baseline also logged: fault injection, fencing, WAL corruption,
+    unreachable peers, and shutdown-hook failures. Counts differ only where
+    timing or chaos decides them.
+  - **One kind gone:** the deleted `GenericStateStore` test's warning.
+  - **One DEBUG exception not in this baseline:** the in-memory transport's
+    "Interrupted awaiting the target node". A delivery still in flight is
+    interrupted when a test stops its nodes. It is a test fixture's teardown
+    path, already logged on 2026-09-28 and 2026-10-02.
+  - **End-to-end and Docker run.** Its ERROR lines are the peers that a killed
+    leader leaves unreachable, as in the 2026-10-03 run. Its WARN lines are the
+    unauthenticated administrative-interface startup warning.
+- **Exit gate met.** Phase 2 was committed as `04dddeb`.
 - **Found for Phase 3.** The jar has always shipped the controller's
   `logback.xml`, so client mode writes `qraft-controller-server.log`. Phase 3
   names the log files by mode.
+
+### Phase 2A. Every intentional error is labelled as intentional in the log
+
+**Problem (found 2026-10-04).** A reader of a test log cannot tell an
+intentional ERROR from a real one.
+- Production code logs the ERROR, and nothing on the line says that a test
+  caused it.
+- Injected faults are generic JDK exceptions created in 43 test files.
+- Docker containers' logs are never checked.
+
+**Rules.**
+- **One package.** Every intentional error is an entry of the enum
+  `IntentionalError` in the test package `dev.mars.qraft.testing.fault`. This
+  is a hard requirement. There are two kinds.
+  - An **injected failure** is thrown by a test as an `InjectedFault` naming its
+    entry. `InjectedFault` is the only exception type tests use to inject a
+    failure. Where production code reacts to a specific type, such as
+    `IOException`, the test keeps that type and attaches an `InjectedFault` as
+    its cause. An event is that failure when the `InjectedFault` is anywhere in
+    its exception's cause or suppressed chain. Production code must therefore
+    log the exception itself, not only its message (PROJECT_STANDARDS 6.3).
+  - An **intentional error** is an ERROR that production code logs because a
+    test arranged the situation, with no injected exception: a refused
+    bootstrap, a corrupted WAL, a partitioned peer. Its entry names the exact
+    logger, level, and a pattern for the whole message. It labels an event only
+    during a test that declares it with `IntentionalErrors.expect(entry)` or
+    `expect(entry, times)`.
+  - Declarations are per test, not an MDC scope, because MDC does not follow
+    work onto the Raft state loop, transport threads, or virtual threads.
+    Tests run one at a time, so an event belongs to the running test whatever
+    thread logs it.
+- **Nothing is filtered, moved, or suppressed.** Every event stays in the one
+  log, in order, at its original level. `logback-test.xml` only adds a label
+  directly after the level. Production `logback.xml` is not changed. Both
+  configurations are checked for any setting that could drop an ERROR: a
+  filter or turbo filter, an include, `neverBlock`, level `OFF`,
+  `additivity="false"`, or a root without an appender.
+- **The label says what happened and who did it.**
+  - An injected failure:
+    `ERROR *** INJECTED FAILURE: WAL_SYNC_FAILURE, injected by RaftNodeLogSequencingTest#... *** dev.mars.qraft.controller.raft.RaftNode - Failed to persist command to WAL: ...`
+  - An intentional error:
+    `ERROR *** INTENTIONAL ERROR: PEER_PARTITIONED, caused by RaftFailureTest#... *** dev.mars.qraft.controller.raft.RaftNode - Raft peer c became unreachable ...`
+- **Labels are exact and checked.** Each test runs in a window that opens
+  before its `@BeforeEach` methods and closes after its `@AfterEach` methods.
+  The test fails on:
+  - an ERROR, or an event carrying an exception at any level, that is neither
+    an injected failure nor a declared intentional error;
+  - a declared entry that occurs too few or too many times.
+
+  Events logged between test classes fail the next class to close. Every test
+  also fails if the check is not attached to the root logger. In a green build,
+  every ERROR line in the log carries one of the two labels.
+
+**Tasks.**
+
+- [x] Create `dev.mars.qraft.testing.fault` (2026-10-04):
+  - `IntentionalError` and `InjectedFault`;
+  - `IntentionalErrors`: the windows, `expect`, the label, and the check;
+  - `IntentionalErrorLabel`, the `%intentional` Logback converter;
+  - `IntentionalErrorCheck`, an appender that writes nothing and shows each
+    event to the check;
+  - `IntentionalErrorExtension`, registered for every test through
+    `META-INF/services` and `junit.jupiter.extensions.autodetection.enabled`;
+  - `LogbackConfigurationAudit`.
+
+  `config/logback-test.xml` writes `%intentional` right after `%-5level` in
+  both appenders and attaches the check to the root logger first.
+- [x] Tests of the mechanism (2026-10-04):
+  - `IntentionalErrorsTest`: labels and checks;
+  - `LogbackConfigurationAuditTest`;
+  - `IntentionalErrorConfigurationTest`: the test configuration passes the
+    audit, every writing appender has the label, the check is attached, each
+    test has its window, and both labels are read back from the log file;
+  - `LoggingConfigurationTest#productionConfigurationCannotDropAnError`.
+
+  Evidence so far: on JDK 27 with Logback 1.5.32 from `target/qraft.jar` and a
+  stub JUnit runner, outside Maven, 22 tests pass and 19 mutants are killed.
+  The mutants removed or broke: the cause chain, the suppressed chain, the
+  whole-message, logger, and level matches, the check of exceptions below
+  ERROR, the declared counts, the label itself, the label in the file pattern,
+  the check appender, the window name, the attachment guard (two), and the
+  audit's filter, `OFF`, include, `neverBlock`, additivity, and single-root
+  findings. Pending: the same tests under Maven with real JUnit.
+- [ ] Inventory run: `mvn test`. Expected to fail widely; each failure lists
+  the test's unlabelled errors. Record the list here.
+- [ ] Convert every injected fault to `InjectedFault`, and declare every
+  intentional error with `expect`. Fix the cause of any ERROR that is neither,
+  and any production code that logs a failure without its exception. Replace
+  `logExpectedFailure` and `@RemediationTest`.
+- [ ] Docker suite:
+  - collect each container's log under `logs/docker/<class>/`;
+  - every ERROR in it must match an `IntentionalError` the class declares, and
+    the test log reprints each one with its label;
+  - any other ERROR fails the class.
+- [ ] After each suite, check its log file: every ERROR line carries a label.
+  This also covers anything logged after the last test class closed, which no
+  window sees.
+- [ ] Document the rules and how to read a test log in `PROJECT_STANDARDS.md`
+  section 4.3 and `docs/TESTING.md`.
+
+**Exit:** Default, end-to-end, and Docker suites green. Every ERROR line in
+their logs carries an `INJECTED FAILURE` or `INTENTIONAL ERROR` label naming
+its entry and test.
 
 ### Phase 3. Package layout follows the modes
 

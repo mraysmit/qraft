@@ -47,8 +47,7 @@ and `reports/docker` directories, and the default suite's JaCoCo HTML/XML report
 It keeps 20 builds and artifacts from the last 10. Dependencies are cached in the job's `@repository`
 directory, outside the source workspace; each build starts with a fresh checkout.
 
-The job uses **Pipeline script from SCM**, **Git**, branch `*/ci/jenkins-all-tests`, and script path
-`Jenkinsfile`; change the branch to `*/main` after merging.
+The job uses **Pipeline script from SCM**, **Git**, branch `*/main`, and script path `Jenkinsfile`.
 Builds are started manually; no recurring trigger is configured. See [JENKINS.md](JENKINS.md) for the
 job configuration, Linux fixture requirements, and run results. On 2026-10-03, native write/read
 checks and a full locked 256 MiB `memtester` run confirmed memory corruption in the Jenkins VM.

@@ -16,20 +16,21 @@
 
 package dev.mars.qraft.controller;
 
+import dev.mars.qraft.testing.fault.LogbackConfigurationAudit;
 import org.junit.jupiter.api.Test;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
-import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.InputStream;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
- * Tests that the packaged logback.xml references available classes, encodes UTF-8, and defines the
- * log directory, JSON, and OTEL appenders.
+ * Tests that the packaged logback.xml references available classes, encodes UTF-8, defines the
+ * log directory, JSON, and OTEL appenders, and has no setting that could drop an ERROR event.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-10
@@ -59,12 +60,15 @@ class LoggingConfigurationTest {
         assertNotNull(findAppender(configuration, "OTEL"));
     }
 
+    @Test
+    void productionConfigurationCannotDropAnError() throws Exception {
+        assertEquals(List.of(), LogbackConfigurationAudit.settingsThatCanDropErrors(loadConfiguration()));
+    }
+
     private static Document loadConfiguration() throws Exception {
         try (InputStream input = LoggingConfigurationTest.class.getClassLoader().getResourceAsStream("logback.xml")) {
             assertNotNull(input, "production logback.xml must be packaged");
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-            return factory.newDocumentBuilder().parse(input);
+            return LogbackConfigurationAudit.parse(input);
         }
     }
 
