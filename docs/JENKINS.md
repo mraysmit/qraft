@@ -29,8 +29,8 @@ sets its own Java environment without changing other jobs' Java installations.
 
 1. **Default tests and coverage gates:** `mvn -B --fail-at-end -Dstyle.color=never clean install`
    across the complete reactor. This also builds the executable runtime jar needed by Docker tests.
-2. **End-to-end tests:** `mvn -B -Dstyle.color=never test -pl qraft-runtime -Dgroups=e2e -Dtest.excludedGroups=`.
-3. **Docker cluster tests:** `mvn -B -Dstyle.color=never test -pl qraft-controller '-Dgroups=docker|slow' -Dtest.excludedGroups=`.
+2. **End-to-end tests:** `mvn -B -Dstyle.color=never test -Dgroups=e2e -Dtest.excludedGroups=`.
+3. **Docker cluster tests:** `mvn -B -Dstyle.color=never test '-Dgroups=docker|slow' -Dtest.excludedGroups=`.
    Including `slow` also covers that controller group if tests are tagged with it later.
 
 Every Maven command uses the job's Maven repository cache, streams combined output to the Jenkins

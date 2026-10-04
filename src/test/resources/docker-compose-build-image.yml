@@ -1,0 +1,11 @@
+# Build-only compose file — creates the qraft-runtime:test image.
+# Used by SharedDockerCluster to build the image once before all tests.
+# The image: tag ensures the built image is tagged with a stable name
+# that the prebuilt compose files can reference.
+
+services:
+  controller:
+    build:
+      context: ../../..
+      dockerfile: docker/Dockerfile
+    image: qraft-runtime:test

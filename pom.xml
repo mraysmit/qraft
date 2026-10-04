@@ -7,19 +7,10 @@
     <groupId>dev.mars</groupId>
     <artifactId>qraft</artifactId>
     <version>1.0-SNAPSHOT</version>
-    <packaging>pom</packaging>
+    <packaging>jar</packaging>
 
-    <name>Qraft Framework</name>
-    <description>Raft consensus framework with distributed state and service discovery primitives</description>
-
-    <modules>
-        <module>qraft-raft-engine</module>
-        <module>qraft-distributed-state</module>
-        <module>qraft-core</module>
-        <module>qraft-agent</module>
-        <module>qraft-controller</module>
-        <module>qraft-runtime</module>
-    </modules>
+    <name>Qraft</name>
+    <description>Raft-based service discovery and coordination platform: one executable with server and client modes</description>
 
     <properties>
         <maven.compiler.release>27</maven.compiler.release>
@@ -33,60 +24,34 @@
         <slf4j.version>2.0.17</slf4j.version>
         <logback.version>1.5.32</logback.version>
         <logstash.logback.encoder.version>8.1</logstash.logback.encoder.version>
+        <jackson.version>2.19.4</jackson.version>
+        <grpc.version>1.68.1</grpc.version>
+        <protobuf.version>3.25.5</protobuf.version>
         <required.java.version>[27,)</required.java.version>
-        <test.log.directory>${maven.multiModuleProjectDirectory}/logs</test.log.directory>
-        <test.log.configuration>${maven.multiModuleProjectDirectory}/config/logback-test.xml</test.log.configuration>
+        <test.log.directory>${project.basedir}/logs</test.log.directory>
+        <test.log.configuration>${project.basedir}/config/logback-test.xml</test.log.configuration>
+        <!-- The default build skips the suites that need Docker or wait out real TTLs and elections
+             (docs/TESTING.md). Select them with -Dgroups=docker,e2e and clear this with -Dtest.excludedGroups= -->
+        <test.excludedGroups>docker,slow,e2e</test.excludedGroups>
     </properties>
-
-    <dependencies>
-        <!-- Make the shared reactor Logback test configuration effective in every module. -->
-        <dependency>
-            <groupId>ch.qos.logback</groupId>
-            <artifactId>logback-classic</artifactId>
-            <version>${logback.version}</version>
-            <scope>test</scope>
-        </dependency>
-    </dependencies>
 
     <dependencyManagement>
         <dependencies>
-            <!-- Testing dependencies -->
-            <dependency>
-                <groupId>org.junit.jupiter</groupId>
-                <artifactId>junit-jupiter</artifactId>
-                <version>${junit.version}</version>
-                <scope>test</scope>
-            </dependency>
-
-            <dependency>
-                <groupId>org.slf4j</groupId>
-                <artifactId>slf4j-api</artifactId>
-                <version>${slf4j.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>ch.qos.logback</groupId>
-                <artifactId>logback-classic</artifactId>
-                <version>${logback.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>net.logstash.logback</groupId>
-                <artifactId>logstash-logback-encoder</artifactId>
-                <version>${logstash.logback.encoder.version}</version>
-            </dependency>
-            
-            <!-- RaftLog WAL - default storage implementation -->
-            <dependency>
-                <groupId>io.github.mraysmit</groupId>
-                <artifactId>raftlog-core</artifactId>
-                <version>${raftlog.version}</version>
-            </dependency>
-
             <!-- The instrumentation BOM below manages this exporter at an older alpha. Pin the one that matches
-                 the OpenTelemetry BOM, so every module, and the executable jar, resolves the same version. -->
+                 the OpenTelemetry BOM, so the build and the executable jar resolve the same version. -->
             <dependency>
                 <groupId>io.opentelemetry</groupId>
                 <artifactId>opentelemetry-exporter-prometheus</artifactId>
                 <version>1.59.0-alpha</version>
+            </dependency>
+
+            <!-- One build means test dependencies take part in version mediation. Testcontainers would
+                 otherwise raise this annotations jar, which the executable jar bundles through
+                 OpenTelemetry's OkHttp and Kotlin dependencies, from 13.0 to 17.0.0. -->
+            <dependency>
+                <groupId>org.jetbrains</groupId>
+                <artifactId>annotations</artifactId>
+                <version>13.0</version>
             </dependency>
 
             <!-- OpenTelemetry BOM -->
@@ -98,7 +63,7 @@
                 <scope>import</scope>
             </dependency>
 
-            <!-- OpenTelemetry Instrumentation BOM (for logback appender, etc.) -->
+            <!-- OpenTelemetry Instrumentation BOM (for the Logback appender) -->
             <dependency>
                 <groupId>io.opentelemetry.instrumentation</groupId>
                 <artifactId>opentelemetry-instrumentation-bom-alpha</artifactId>
@@ -109,52 +74,143 @@
         </dependencies>
     </dependencyManagement>
 
+    <dependencies>
+        <!-- RaftLog WAL - the Raft storage implementation -->
+        <dependency>
+            <groupId>io.github.mraysmit</groupId>
+            <artifactId>raftlog-core</artifactId>
+            <version>${raftlog.version}</version>
+        </dependency>
+
+        <!-- OpenTelemetry -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk</artifactId>
+            <version>1.59.0</version>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+            <version>1.59.0</version>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-prometheus</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry.instrumentation</groupId>
+            <artifactId>opentelemetry-logback-appender-1.0</artifactId>
+        </dependency>
+
+        <!-- JSON -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
+
+        <!-- gRPC and protobuf: the Raft transport and the external API services -->
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-protobuf</artifactId>
+            <version>${grpc.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-stub</artifactId>
+            <version>${grpc.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.grpc</groupId>
+            <artifactId>grpc-netty</artifactId>
+            <version>${grpc.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>33.5.0-jre</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+            <version>${protobuf.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java-util</artifactId>
+            <version>${protobuf.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>javax.annotation</groupId>
+            <artifactId>javax.annotation-api</artifactId>
+            <version>1.3.2</version>
+        </dependency>
+
+        <!-- Logging: SLF4J in code, Logback at run time (PROJECT_STANDARDS.md, section 6.1) -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>jul-to-slf4j</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+        <!-- Compile scope: TelemetryConfig installs the OpenTelemetry appender, a Logback appender type -->
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>${logback.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>${logstash.logback.encoder.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- Testing -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.awaitility</groupId>
+            <artifactId>awaitility</artifactId>
+            <version>4.3.0</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers-junit-jupiter</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
     <build>
-        <pluginManagement>
-            <plugins>
-                <plugin>
-                    <groupId>org.apache.maven.plugins</groupId>
-                    <artifactId>maven-surefire-plugin</artifactId>
-                    <version>3.2.2</version>
-                    <configuration>
-                        <systemPropertyVariables>
-                            <qraft.test.log.dir>${test.log.directory}</qraft.test.log.dir>
-                            <logback.configurationFile>${test.log.configuration}</logback.configurationFile>
-                        </systemPropertyVariables>
-                    </configuration>
-                </plugin>
-                <plugin>
-                    <groupId>org.codehaus.mojo</groupId>
-                    <artifactId>exec-maven-plugin</artifactId>
-                    <version>3.1.1</version>
-                </plugin>
-                <plugin>
-                    <groupId>org.apache.maven.plugins</groupId>
-                    <artifactId>maven-compiler-plugin</artifactId>
-                    <version>3.13.0</version>
-                    <configuration>
-                        <release>${maven.compiler.release}</release>
-                        <source>${maven.compiler.source}</source>
-                        <target>${maven.compiler.target}</target>
-                    </configuration>
-                </plugin>
-                <plugin>
-                    <groupId>org.apache.maven.plugins</groupId>
-                    <artifactId>maven-enforcer-plugin</artifactId>
-                    <version>3.5.0</version>
-                </plugin>
-                <plugin>
-                    <groupId>org.jacoco</groupId>
-                    <artifactId>jacoco-maven-plugin</artifactId>
-                    <version>${jacoco.version}</version>
-                </plugin>
-            </plugins>
-        </pluginManagement>
+        <!-- The one executable jar: target/qraft.jar -->
+        <finalName>qraft</finalName>
 
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
+                <version>3.5.0</version>
                 <executions>
                     <execution>
                         <id>enforce-java-version</id>
@@ -173,10 +229,90 @@
                     </execution>
                 </executions>
             </plugin>
-            <!-- JaCoCo for code coverage -->
+
+            <!-- Generates the protobuf messages and gRPC stubs from src/main/proto -->
+            <plugin>
+                <groupId>io.github.ascopes</groupId>
+                <artifactId>protobuf-maven-plugin</artifactId>
+                <version>4.1.2</version>
+                <configuration>
+                    <!-- protoc matches the protobuf-java dependency -->
+                    <protocVersion>${protobuf.version}</protocVersion>
+                    <binaryMavenPlugins>
+                        <binaryMavenPlugin>
+                            <groupId>io.grpc</groupId>
+                            <artifactId>protoc-gen-grpc-java</artifactId>
+                            <version>${grpc.version}</version>
+                        </binaryMavenPlugin>
+                    </binaryMavenPlugins>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>generate</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Register the generated sources so IDEs (VS Code JDT LS / Eclipse m2e) resolve them -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <version>3.6.0</version>
+                <executions>
+                    <execution>
+                        <id>add-protobuf-generated-sources</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>${project.build.directory}/generated-sources/protobuf</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <release>${maven.compiler.release}</release>
+                    <source>${maven.compiler.source}</source>
+                    <target>${maven.compiler.target}</target>
+                    <!-- Keep the JDK modules the code and tests use on the module graph during compilation -->
+                    <compilerArgs>
+                        <arg>--add-modules</arg>
+                        <arg>java.net.http,java.logging</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.2</version>
+                <configuration>
+                    <!-- Avoid the JPMS module path for tests -->
+                    <useModulePath>false</useModulePath>
+                    <argLine>@{argLine} --add-modules java.net.http,java.logging --enable-native-access=ALL-UNNAMED</argLine>
+                    <excludedGroups>${test.excludedGroups}</excludedGroups>
+                    <systemPropertyVariables>
+                        <qraft.test.log.dir>${test.log.directory}</qraft.test.log.dir>
+                        <logback.configurationFile>${test.log.configuration}</logback.configurationFile>
+                        <java.util.logging.manager>java.util.logging.LogManager</java.util.logging.manager>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+
+            <!-- JaCoCo: every package keeps at least 60% line coverage -->
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.version}</version>
                 <configuration>
                     <!-- Exclude JDK internal classes that cause instrumentation errors.
                          com/sun/** and org/jcp/** are JDK-shipped classes that JaCoCo's
@@ -225,6 +361,51 @@
                                     </limits>
                                 </rule>
                             </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Rebuild the plain jar on every build. The shade step below replaces it with the executable
+                 jar; if the jar step then kept that file as up to date, the next build would shade the
+                 previous executable jar and keep its old copies of every dependency. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>3.4.2</version>
+                <configuration>
+                    <forceCreation>true</forceCreation>
+                </configuration>
+            </plugin>
+            <!-- The one executable jar, for both server and client mode -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.6.0</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals><goal>shade</goal></goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>dev.mars.qraft.runtime.QraftRuntimeApplication</mainClass>
+                                </transformer>
+                                <!-- gRPC and others find their providers through META-INF/services files that
+                                     several jars define; they must be merged, not first-one-wins. -->
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                            </transformers>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
                         </configuration>
                     </execution>
                 </executions>

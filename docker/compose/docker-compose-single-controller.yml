@@ -7,7 +7,7 @@ services:
     command: ["server", "--config", "/etc/qraft/server.json"]
     build:
       context: ../..
-      dockerfile: qraft-runtime/Dockerfile
+      dockerfile: docker/Dockerfile
     container_name: qraft-controller-dev
     volumes:
       - ../config/single/server.json:/etc/qraft/server.json:ro
@@ -27,7 +27,7 @@ services:
     command: ["client"]
     build:
       context: ../..
-      dockerfile: qraft-runtime/Dockerfile
+      dockerfile: docker/Dockerfile
     container_name: qraft-agent-dev
     volumes:
       - ../config/client.json:/etc/qraft/client.json:ro

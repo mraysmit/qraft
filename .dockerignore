@@ -5,9 +5,9 @@
 
 # Build outputs; the runtime JAR is the sole host-built artifact packaged.
 **/target/
-!qraft-runtime/target/
-qraft-runtime/target/*
-!qraft-runtime/target/qraft-runtime.jar
+!target/
+target/*
+!target/qraft.jar
 
 # Version control
 .git/
@@ -29,8 +29,9 @@ temp/
 docs/
 docs-design/
 
-# Docker compose configs (not needed inside image builds)
+# Docker compose configs (not needed inside image builds); the image needs only its entrypoint
 docker/
+!docker/docker-entrypoint.sh
 
 # Scripts
 scripts/

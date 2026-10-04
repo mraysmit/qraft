@@ -49,7 +49,7 @@ services:
   agent:
     build:
       context: ..
-      dockerfile: qraft-runtime/Dockerfile
+      dockerfile: docker/Dockerfile
     command: ["client", "--config", "/etc/qraft/example-client.json"]
     volumes:
       - ./config/client.json:/etc/qraft/example-client.json:ro
@@ -62,7 +62,7 @@ services:
   agent:
     build:
       context: ..
-      dockerfile: qraft-runtime/Dockerfile
+      dockerfile: docker/Dockerfile
     command: ["client"]
     volumes:
       - ./config/client.json:/etc/qraft/client.json:ro

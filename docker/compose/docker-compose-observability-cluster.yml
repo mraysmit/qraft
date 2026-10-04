@@ -143,7 +143,7 @@ services:
   controller1:
     build:
       context: ../..
-      dockerfile: qraft-runtime/Dockerfile
+      dockerfile: docker/Dockerfile
     container_name: qraft-controller1
     hostname: controller1
     command: ["server", "--config", "/etc/qraft/server.json"]
@@ -171,7 +171,7 @@ services:
   controller2:
     build:
       context: ../..
-      dockerfile: qraft-runtime/Dockerfile
+      dockerfile: docker/Dockerfile
     container_name: qraft-controller2
     hostname: controller2
     command: ["server", "--config", "/etc/qraft/server.json"]
@@ -201,7 +201,7 @@ services:
   controller3:
     build:
       context: ../..
-      dockerfile: qraft-runtime/Dockerfile
+      dockerfile: docker/Dockerfile
     container_name: qraft-controller3
     hostname: controller3
     command: ["server", "--config", "/etc/qraft/server.json"]

@@ -60,16 +60,14 @@ exit "${PIPESTATUS[0]}"
                 always {
                     sh '''#!/usr/bin/env bash
 set -euo pipefail
-for module in qraft-*; do
-    if [[ -d "$module/target/surefire-reports" ]]; then
-        mkdir -p "reports/default/$module"
-        cp -a "$module/target/surefire-reports/." "reports/default/$module/"
-    fi
-    if [[ -d "$module/target/site/jacoco" ]]; then
-        mkdir -p "coverage/$module"
-        cp -a "$module/target/site/jacoco/." "coverage/$module/"
-    fi
-done
+if [[ -d target/surefire-reports ]]; then
+    mkdir -p reports/default
+    cp -a target/surefire-reports/. reports/default/
+fi
+if [[ -d target/site/jacoco ]]; then
+    mkdir -p coverage
+    cp -a target/site/jacoco/. coverage/
+fi
 '''
                 }
             }
@@ -80,9 +78,9 @@ done
                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                     sh '''#!/usr/bin/env bash
 set -uo pipefail
-rm -rf -- qraft-runtime/target/surefire-reports
+rm -rf -- target/surefire-reports
 mvn -B -Dstyle.color=never -Dmaven.repo.local="$WORKSPACE@repository" test \
-    -pl qraft-runtime -Dgroups=e2e -Dtest.excludedGroups= 2>&1 \
+    -Dgroups=e2e -Dtest.excludedGroups= 2>&1 \
     | tee "logs/qraft-e2e-$(date -u +%Y-%m-%d_%H-%M-%S)-$BUILD_NUMBER.log"
 exit "${PIPESTATUS[0]}"
 '''
@@ -92,9 +90,9 @@ exit "${PIPESTATUS[0]}"
                 always {
                     sh '''#!/usr/bin/env bash
 set -euo pipefail
-if [[ -d qraft-runtime/target/surefire-reports ]]; then
-    mkdir -p reports/e2e/qraft-runtime
-    cp -a qraft-runtime/target/surefire-reports/. reports/e2e/qraft-runtime/
+if [[ -d target/surefire-reports ]]; then
+    mkdir -p reports/e2e
+    cp -a target/surefire-reports/. reports/e2e/
 fi
 '''
                 }
@@ -106,9 +104,9 @@ fi
                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                     sh '''#!/usr/bin/env bash
 set -uo pipefail
-rm -rf -- qraft-controller/target/surefire-reports
+rm -rf -- target/surefire-reports
 mvn -B -Dstyle.color=never -Dmaven.repo.local="$WORKSPACE@repository" test \
-    -pl qraft-controller '-Dgroups=docker|slow' -Dtest.excludedGroups= 2>&1 \
+    '-Dgroups=docker|slow' -Dtest.excludedGroups= 2>&1 \
     | tee "logs/qraft-docker-$(date -u +%Y-%m-%d_%H-%M-%S)-$BUILD_NUMBER.log"
 exit "${PIPESTATUS[0]}"
 '''
@@ -118,9 +116,9 @@ exit "${PIPESTATUS[0]}"
                 always {
                     sh '''#!/usr/bin/env bash
 set -euo pipefail
-if [[ -d qraft-controller/target/surefire-reports ]]; then
-    mkdir -p reports/docker/qraft-controller
-    cp -a qraft-controller/target/surefire-reports/. reports/docker/qraft-controller/
+if [[ -d target/surefire-reports ]]; then
+    mkdir -p reports/docker
+    cp -a target/surefire-reports/. reports/docker/
 fi
 '''
                 }

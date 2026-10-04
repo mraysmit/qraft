@@ -92,31 +92,103 @@ on a fresh image.
 
 ### Phase 2. Single POM
 
-- [ ] Make the root `pom.xml` the only POM. Merge dependencies, protobuf
+- [x] Make the root `pom.xml` the only POM. Merge dependencies, protobuf
   generation, compiler, enforcer, surefire, JaCoCo, and shade configuration.
-- [ ] `git mv` all sources, protos, and resources into one `src/` tree. No
+- [x] Move all sources, protos, and resources into one `src/` tree. No
   class names collide; the three identical `junit-platform.properties` become one.
-- [ ] Keep one `logback.xml` for both modes. Today the agent and the
-  controller each ship one, and the jar keeps whichever the shade step sees first.
-- [ ] Build `target/qraft.jar`. Update the Dockerfile location, entrypoint,
+- [x] Keep one `logback.xml` for both modes: the controller's, which is the one
+  the executable jar already shipped.
+- [x] Build `target/qraft.jar`. Update the Dockerfile location, entrypoint,
   `build-runtime.*`, compose `dockerfile:` paths, `.dockerignore`,
   `SharedDockerCluster`, and `DockerDeploymentContractTest`.
-- [ ] Define the test groups once: the default build excludes `e2e`, `docker`,
+- [x] Define the test groups once: the default build excludes `e2e`, `docker`,
   and `slow`.
-- [ ] Simplify the Jenkinsfile: no per-module loops or `-pl`.
-- [ ] Add a package-dependency test: client never imports server, Raft, or
+- [x] Simplify the Jenkinsfile: no per-module loops or `-pl`.
+- [x] Add a package-dependency test: client never imports server, Raft, or
   state; Raft and state never import the HTTP layer; nothing imports the
-  entry point. Decide between ArchUnit and a hand-written import scan.
+  entry point. Decided: a hand-written test on the JDK class-file API, not ArchUnit.
 
 **Exit:** Same tests as Phase 1; all coverage gates; end-to-end and Docker
 suites on a fresh image; jar contents differ from the baseline only as expected.
+
+**Record (2026-10-04).** The change was made by
+`logs/refactor-baseline-2026-10-04/phase2/phase2_restructure.py`, first in a
+copy of the repository and then in the working tree, with identical results.
+- **Layout.** All 138 production and 148 test sources moved unchanged. The
+  module POMs and directories are gone.
+- **Image and files.**
+  - The image's Dockerfile and entrypoint are now in `docker/`.
+  - Deleted as unused: the second, agent-only image (`qraft-agent/Dockerfile`
+    and its entrypoint) and the Quorus-era `qraft-controller/.env`.
+  - The logs that tests had written inside module directories are now under
+    `logs/legacy-module-logs/`.
+- **Tests removed:**
+  - the agent's `LoggingConfigurationTest`, whose `logback.xml` never reached
+    the jar;
+  - `everyTestJarAModuleDependsOnIsPublishedByItsModule`, since there are no
+    module test-jars.
+- **Tests renamed.** `agentContainerUsesTheConventionalMountedConfiguration`
+  is now `runtimeImagePassesTheModeAndConfigurationThroughItsEntrypoint`.
+- **Expected default suite:** 803 tests (801 − 2 + 4).
+- **`PackageDependencyTest`.** It reads every production class's constant
+  pool with the JDK class-file API and encodes the former module edges. Its
+  types are layers: ENGINE, STATE, CORE, CLIENT, SERVER, and RUNTIME. The two
+  packages split across modules are classified type by type until Phase 3.
+- **Mutation evidence.** Run against the 2026-10-04 classes on JDK 27, the
+  test passed. After adding a client class with a field of a server type, and
+  a state class calling a shared agent type, it reported exactly those two
+  dependencies.
+- **POM fix.** The first build failed to compile: `logback-classic` must be in
+  compile scope, because `TelemetryConfig` installs the OpenTelemetry appender,
+  a Logback appender type. The old controller POM had it in compile scope.
+- **Test race exposed.** The second build ran 803 tests and one failed:
+  `RaftNodeTransportGenerationTest.delayedAppendSuccessFromPreviousLeadershipCannotAdvancePeerIndexes`.
+  - **Cause.** The test read `getLastLogIndex()` and `getLastLogTerm()`
+    separately from the test thread while the new leader's no-op was landing
+    on the state loop. It got index 1 with term 1, and the node correctly
+    rejected the append as inconsistent.
+  - **Why now.** The timing of the merged single-JVM run exposed it.
+  - **Production.** Production code has no off-loop callers of these getters;
+    it reads `status()` on the loop.
+  - **Fix.** The new `RaftAwait.logEnd(runtime, node)` reads both on the state
+    loop in one step. It is used here and in
+    `RaftNodeOutboundSnapshotGenerationTest.stepDownAndReelect`, which reads a
+    fresh leader's log the same way.
+  - **Left as they are.** The same getter pair in `RaftNodeTest` and
+    `RaftNodeTimerSequencingTest` is read after an awaited, committed command,
+    when the log is settled.
+- **Results.**
+  - Ten consecutive runs of the two changed test classes: 9 of 9 each time
+    (`logs/qraft-tests-repeat-2026-10-04_18-06-38-962.log`).
+  - `mvn clean install` on JDK 27: 803 tests, every coverage gate met
+    (`logs/qraft-tests-2026-10-04_18-08-12-135.log`).
+  - End-to-end and Docker suites on the fresh image: 30 of 30
+    (`logs/qraft-tests-2026-10-04_18-16-10-026.log`).
+- **Test names.** Against the 842 baseline cases, exactly the deleted, removed,
+  and renamed cases are missing, and only the four `PackageDependencyTest`
+  cases and the renamed case are new: 833 in total.
+- **Jar contents.**
+  - Qraft classes differ only by Phase 1's deletions.
+  - The per-module Maven metadata became one `META-INF/maven/dev.mars/qraft/`.
+  - Of the 73 bundled third-party artifacts, one version changed:
+    `org.jetbrains:annotations` went from 13.0 to 17.0.0.
+  - **Cause.** In one build, test dependencies take part in version mediation,
+    and Testcontainers' newer copy won.
+  - **Fix.** `pom.xml` now pins 13.0 in `dependencyManagement`, so the jar
+    bundles what it did before.
+  - **Not yet verified.** A `mvn clean install` with the pin is still needed to
+    confirm that the jar's third-party list matches the baseline exactly.
+- **Found for Phase 3.** The jar has always shipped the controller's
+  `logback.xml`, so client mode writes `qraft-controller-server.log`. Phase 3
+  names the log files by mode.
 
 ### Phase 3. Package layout follows the modes
 
 - [ ] `dev.mars.qraft.agent` (client code) becomes `dev.mars.qraft.client`.
 - [ ] `dev.mars.qraft.controller` becomes `dev.mars.qraft.server`. Rename
   "controller" in class names, log file names, and the default telemetry
-  service name.
+  service name. Name the log files by mode: client mode currently writes
+  `qraft-controller-server.log`.
 - [ ] The Raft engine (`raft.api` and `controller.raft`) moves to `dev.mars.qraft.raft`.
 - [ ] Replicated state (`distributedstate`, `catalog`, and `controller.state`)
   moves to `dev.mars.qraft.state`.
