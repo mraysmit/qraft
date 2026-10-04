@@ -36,7 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests {@link GenericStateStore} and {@link QraftStateStore} command application, agent and
+ * Tests {@link QraftStateStore} command application, agent and
  * catalog lifecycle, heartbeat epochs, and snapshot restore.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
@@ -44,34 +44,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 class ControllerStateStoreTest {
-
-    @Test
-    void genericStoreAppliesCommandsAndRestoresSnapshots() {
-        GenericStateStore store = new GenericStateStore(Map.of("seed", "value"));
-        assertInstanceOf(RaftCommandResult.NoOp.class, store.apply(null));
-        assertEquals("value", store.getMetadata().get("seed"));
-
-        assertInstanceOf(RaftCommandResult.Success.class, store.apply(command(DistributedStateCommand.put("key", "one"))));
-        assertInstanceOf(RaftCommandResult.Success.class, store.apply(command(DistributedStateCommand.delete("key"))));
-        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(command(DistributedStateCommand.delete("missing"))));
-        assertThrows(IllegalArgumentException.class, () -> store.apply(AgentCommand.deregister("agent")));
-
-        store.apply(command(DistributedStateCommand.put("snap", "saved")));
-        store.setLastAppliedIndex(12);
-        byte[] snapshot = store.takeSnapshot();
-        store.reset();
-        assertEquals(0, store.getLastAppliedIndex());
-        assertTrue(store.getMetadata().isEmpty());
-        store.restoreSnapshot(snapshot);
-        assertEquals("saved", store.getMetadata().get("snap"));
-        assertEquals(12, store.getLastAppliedIndex());
-        RuntimeException corrupt = assertThrows(RuntimeException.class,
-                () -> store.restoreSnapshot(new byte[]{1, 2, 3}));
-        assertEquals("Failed to restore generic state snapshot", corrupt.getMessage());
-        assertInstanceOf(IOException.class, corrupt.getCause(), "the unreadable bytes are the cause");
-        assertEquals("saved", store.getMetadata().get("snap"), "a snapshot that cannot be read changes nothing");
-        assertEquals(12, store.getLastAppliedIndex());
-    }
 
     @Test
     void controllerStoreAppliesAgentAndMetadataLifecycle() {

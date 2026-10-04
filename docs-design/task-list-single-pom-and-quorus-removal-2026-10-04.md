@@ -3,6 +3,7 @@
 **Date:** 2026-10-04
 **Status:** Proposed. Starts after the membership list's Step 4 close-out gate; membership Step 5 resumes on the new layout.
 **Followed by:** [`task-list-consul-style-client-2026-10-04.md`](task-list-consul-style-client-2026-10-04.md)
+**Active work:** Phase 2. Phase 1 was done 2026-10-04. The list started at the user's request before the membership Step 4 close-out, whose mutation evidence will be recorded against the refactored source.
 **Related:** [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md) (active), [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md), section 2.4: inherited components must not remain without a clear role
 
@@ -44,23 +45,50 @@ runtime layer, or its unused tooling.
 
 ### Phase 0. Baseline
 
-- [ ] Record a baseline run: `mvn install`, end-to-end, and Docker suites
+- [x] Record a baseline run: `mvn install`, end-to-end, and Docker suites
   (812 / 7 / 23 on 2026-10-02), with their logs kept for comparison.
-- [ ] Record the runtime jar's class list as the packaging baseline.
+- [x] Record the runtime jar's class list as the packaging baseline.
+
+**Record (2026-10-04).** `logs/refactor-baseline-2026-10-04/` holds the jar's
+14,357 entries and the 842 test cases by module, class, and name. The default
+suite is `logs/qraft-tests-2026-10-03_23-58-53-674.log`: BUILD SUCCESS with 812
+tests, run on sources identical to HEAD `532e562` apart from documentation. The
+23 Docker and 7 end-to-end cases come from the 2026-10-02 reports.
 
 ### Phase 1. Delete dead code and files
 
-- [ ] Delete `qraft-tenant`: no module imports it. Namespaces return as
+- [x] Delete `qraft-tenant`: no module imports it. Namespaces return as
   replicated state with the tenancy list.
-- [ ] Delete `GenericStateStore`; only `ControllerStateStoreTest` uses it.
-- [ ] Delete the per-mode `main` methods in `QraftAgent` and
+- [x] Delete `GenericStateStore`; only `ControllerStateStoreTest` uses it.
+- [x] Delete the per-mode `main` methods in `QraftAgent` and
   `QraftControllerApplication`; the runtime calls their `launch` methods.
-- [ ] Delete the packaged `qraft-controller.json`, which nothing reads.
-- [ ] Remove the untracked strays: root `dev/`,
-  `qraft-core/src/test/resources/ftp-docker`, `test-logs/`, and
-  `.git/index.lock.stale-from-claude`.
+- [x] Delete the Quorus ASCII-art banner, which
+  `QraftControllerApplication` printed with `System.out.println`, against
+  `PROJECT_STANDARDS.md` section 6.1.
+- [x] Remove the qraft-tenant lines from the README and the
+  `PROJECT_STANDARDS.md` module list. The design documents change in Phase 8.
+- [x] Remove the untracked strays: root `dev/`, `test-logs/`, and
+  `.git/index.lock.stale-from-claude`. The `ftp-docker` directory was already gone.
 
-**Exit:** `mvn install` passes; only the deleted tests are missing.
+`qraft-controller.json` moved to Phase 5. It is not unused: it holds the
+classpath defaults for `AppConfig`'s static instance.
+
+**Exit:** `mvn install` passes; only the deleted tests are missing: the 10
+qraft-tenant cases and `genericStoreAppliesCommandsAndRestoresSnapshots`. The
+default suite expectation is 801 tests.
+
+**Record (2026-10-04).** `mvn clean install` on JDK 27
+(`logs/qraft-tests-2026-10-04_17-29-37-924.log`): BUILD SUCCESS, every coverage
+gate met, 801 tests (9 + 21 + 46 + 125 + 564 + 36).
+- **Tests.** Against the baseline, the default suite lost exactly the 11 deleted
+  cases and gained none.
+- **Jar.** The runtime jar lost exactly the 12 entries of `qraft-tenant` and
+  `GenericStateStore`, and gained none.
+- **Warnings.** Maven's warnings are unchanged apart from the jar list in the
+  shade overlap warning.
+
+The end-to-end and Docker suites were not run for this phase; Phase 2 runs them
+on a fresh image.
 
 ### Phase 2. Single POM
 
@@ -126,6 +154,8 @@ full suites.
 
 ### Phase 5. Configuration and version
 
+- [ ] Remove `AppConfig`'s static default instance and its classpath defaults
+  file `qraft-controller.json` (moved from Phase 1).
 - [ ] Replace `AppConfig`'s flattened string map with typed records parsed
   directly from the JSON document. The map holds `qraft.*` keys, with cluster
   nodes re-encoded as `name=host:port,...`. Keep identical validation errors

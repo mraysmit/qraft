@@ -49,7 +49,6 @@ Qraft is a Consul-style service discovery and distributed coordination platform.
 - `qraft-distributed-state` defines replicated-state commands and codecs.
 - `qraft-core` contains shared domain models and framework primitives.
 - `qraft-agent` implements the Java 27 service-discovery agent.
-- `qraft-tenant` implements namespace and tenant management.
 - `qraft-controller` implements distributed control, Raft coordination, HTTP APIs, and gRPC services.
 - `qraft-runtime` is the thin executable composition root that selects `server` or `client` mode and owns no domain logic.
 - Modules must not depend on implementation details from a higher-level module.

@@ -35,7 +35,6 @@ import dev.mars.qraft.agent.service.AgentRegistrationClient;
 import dev.mars.qraft.agent.service.HealthService;
 import dev.mars.qraft.agent.service.HeartbeatService;
 import dev.mars.qraft.agent.service.ReadinessPolicy;
-import dev.mars.qraft.config.ConfigFileResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,7 +47,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -319,25 +317,6 @@ public final class QraftAgent implements AutoCloseable {
                 startupFailure.addSuppressed(cleanupFailure);
             }
             throw startupFailure;
-        }
-    }
-
-    public static void main(String[] args) {
-        Path configPath = ConfigFileResolver.resolve(args, "client");
-        QraftAgent agent = launch(configPath);
-        CountDownLatch shutdownComplete = new CountDownLatch(1);
-        Runtime.getRuntime().addShutdownHook(Thread.ofPlatform().unstarted(() -> {
-            try {
-                agent.close();
-            } finally {
-                shutdownComplete.countDown();
-            }
-        }));
-        try {
-            shutdownComplete.await();
-        } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt();
-            agent.close();
         }
     }
 }

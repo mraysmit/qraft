@@ -38,11 +38,6 @@
             <artifactId>qraft-distributed-state</artifactId>
             <version>${project.version}</version>
         </dependency>
-        <dependency>
-            <groupId>dev.mars</groupId>
-            <artifactId>qraft-tenant</artifactId>
-            <version>${project.version}</version>
-        </dependency>
 
         <!-- gRPC uses the standard grpc-java Netty transport. -->
 

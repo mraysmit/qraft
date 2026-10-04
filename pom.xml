@@ -17,7 +17,6 @@
         <module>qraft-distributed-state</module>
         <module>qraft-core</module>
         <module>qraft-agent</module>
-        <module>qraft-tenant</module>
         <module>qraft-controller</module>
         <module>qraft-runtime</module>
     </modules>

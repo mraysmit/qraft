@@ -30,7 +30,6 @@ Qraft is a good fit for:
 - `qraft-distributed-state`: deterministic replicated-state commands and projections
 - `qraft-core`: shared service-discovery, health, node, and agent domain types
 - `qraft-agent`: client-mode registration, heartbeat, and local health behavior
-- `qraft-tenant`: namespace and tenant management
 - `qraft-controller`: Raft coordination, replicated state, and control-plane APIs
 - `qraft-runtime`: the executable composition root for `server` and `client` modes
 

@@ -17,7 +17,6 @@
 package dev.mars.qraft.controller;
 
 import dev.mars.qraft.controller.config.AppConfig;
-import dev.mars.qraft.config.ConfigFileResolver;
 import dev.mars.qraft.controller.observability.TelemetryConfig;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
 import org.slf4j.Logger;
@@ -28,15 +27,13 @@ import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
- * Main application class for Qraft Controller.
- *
- * Bootstraps the Java 27 runtime and controller services.
+ * Launches and stops the controller for the runtime's server mode, bootstrapping the Java 27 runtime and
+ * controller services.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2025-08-26
@@ -45,44 +42,6 @@ import java.util.function.Supplier;
 public class QraftControllerApplication {
 
     private static final Logger logger = LoggerFactory.getLogger(QraftControllerApplication.class);
-
-    /**
-     * Main entry point for the Qraft Controller application.
-     */
-    private static final String BANNER = """
-            
-              ██████  ██    ██  ██████  ██████  ██    ██ ███████
-             ██    ██ ██    ██ ██    ██ ██   ██ ██    ██ ██
-             ██    ██ ██    ██ ██    ██ ██████  ██    ██ ███████
-             ██ ▄▄ ██ ██    ██ ██    ██ ██   ██ ██    ██      ██
-              ██████   ██████   ██████  ██   ██  ██████  ███████
-                 ▀▀                       Controller
-            """;
-
-    public static void main(String[] args) {
-        Path configPath = ConfigFileResolver.resolve(args, "server");
-        RunningController controller = launch(configPath);
-        CountDownLatch shutdownComplete = new CountDownLatch(1);
-        Runtime.getRuntime().addShutdownHook(Thread.ofPlatform().unstarted(() -> {
-            logger.info("Shutdown signal received, stopping controller...");
-            try {
-                controller.close();
-                logger.info("Controller runtime closed successfully");
-            } catch (Throwable error) {
-                Throwable cause = error.getCause() == null ? error : error.getCause();
-                logger.error("Controller did not shut down safely: {}",
-                        cause.getMessage(), cause);
-            } finally {
-                shutdownComplete.countDown();
-            }
-        }));
-        try {
-            shutdownComplete.await();
-        } catch (InterruptedException error) {
-            Thread.currentThread().interrupt();
-            controller.close();
-        }
-    }
 
     public static RunningController launch(Path configPath) {
         ControllerResources resources = launch(configPath, ControllerResources::open,
@@ -147,7 +106,6 @@ public class QraftControllerApplication {
         static ControllerResources open(AppConfig config) {
             System.setProperty("qraft.log.dir", config.getLoggingDirectory());
             configureJulToSlf4jBridge();
-            System.out.println(BANNER);
             logger.info("Initializing Qraft Controller with OpenTelemetry (Java 27 runtime)...");
             AutoCloseable telemetry = TelemetryConfig.configure();
             JavaRuntime runtime = null;
