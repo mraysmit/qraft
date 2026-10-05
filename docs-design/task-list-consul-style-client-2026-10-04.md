@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-04
 **Status:** Proposed. It needs the `client` package and the new node model and routes of [`task-list-single-pom-and-quorus-removal-2026-10-04.md`](task-list-single-pom-and-quorus-removal-2026-10-04.md). It starts after that list and after the rest of [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md), Steps 5 to 8 (decided 2026-10-05).
-**Last updated:** 2026-10-05 (decision 8's takeover and rename rules, the design rule, and exit lines)
+**Last updated:** 2026-10-05 (decision 8's takeover and rename rules, decision 9 on the Docker scenario, the design rule, and exit lines)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 4.3, 5, 6.2, 7.3, 8, 12.1 and 16
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
@@ -23,7 +23,8 @@ readiness.
 
 ## 2. Decisions
 
-All made 2026-10-04. Decisions 5 to 8 follow the Consul pattern.
+Decisions 1 to 8 were made 2026-10-04, and decision 9 on 2026-10-05.
+Decisions 5 to 8 follow the Consul pattern.
 
 1. **Deployment target:** VMs and bare metal, with one client per host.
 2. **Client-to-server transport:** HTTP. The client keeps its classified
@@ -42,8 +43,10 @@ All made 2026-10-04. Decisions 5 to 8 follow the Consul pattern.
 
    The old paths are removed in the same change; nothing is deployed.
 6. **The local API binds to `127.0.0.1` by default,** like Consul's
-   `client_addr`. It has no authentication until the security list; liveness
-   and readiness share the same listener.
+   `client_addr`. It has no authentication until
+   [`task-list-acl-and-tokens-2026-10-05.md`](task-list-acl-and-tokens-2026-10-05.md),
+   which is proposed to follow this list; liveness and readiness share the
+   same listener.
 7. **Registrations follow Consul's rules.**
    - Services and checks registered through the API are kept in
      `agent.dataDirectory` and restored at startup.
@@ -77,6 +80,23 @@ All made 2026-10-04. Decisions 5 to 8 follow the Consul pattern.
      because their identity contains the node name. A rename to a name held by
      another node ID follows the rule above: refused while that holder is
      healthy, a takeover otherwise.
+9. **The Docker scenario keeps the `127.0.0.1` bind and shares the client's
+   network namespace.** Decided 2026-10-05.
+   - Decision 1 targets VMs and bare metal, so a client container in the test
+     stands for a host. The test must exercise the bind address Qraft ships
+     with (decision 6), not a widened one.
+   - The application's requests are made from inside the client's network
+     namespace: `docker compose exec <client> curl http://127.0.0.1:<port>/...`,
+     using the `curl` the runtime image already has. An application that
+     needs its own container joins the namespace with
+     `network_mode: "service:<client>"`.
+   - The test does not bind the local API to `0.0.0.0` or publish its port.
+     That would no longer show applications using only `localhost`.
+   - A container that does not share the client's namespace cannot reach the
+     local API, and the test proves it.
+   - A real container deployment that does not share a namespace sets the
+     bind address of Phase 3 instead, as Consul's `client_addr` is set for
+     containers. That is documented, not tested here.
 
 ## 3. Rules
 
@@ -201,10 +221,17 @@ restart scenario passes end to end.
 - [ ] End-to-end scenario 4: a host rebuilt under the same name re-registers
   only after its old node becomes unreachable. The old node's services are
   gone from discovery once it does, and the rebuilt host's own are present.
-- [ ] Docker: two client containers whose applications use only `localhost`.
-  The local API binds to `127.0.0.1` (decision 6), so decide first how the
-  application reaches it: in the client's own container, or in a container
-  that shares the client's network namespace.
+- [ ] Docker: two client containers whose applications use only `localhost`
+  (decision 9).
+  - Each application runs in its client's network namespace and reaches the
+    local API at `127.0.0.1`, the default bind.
+  - An application registers through one client and is discovered through
+    the other.
+  - From a container outside a client's namespace, on the same compose
+    network, that client's local API port refuses the connection.
+- [ ] Document in `docker/README.md` that a container outside the client's
+  network namespace needs the bind-address setting, and what that exposes
+  while the local API has no authentication.
 - [ ] Check that the design's sections 4.3, 5, 6.2, 7.3, 8, 12.1 and 16 were
   updated in their phases: applications talk to their local agent, node
   identity, and the path split.
@@ -217,7 +244,10 @@ consecutive runs; audits as in the other lists.
 ## 5. Out of scope
 
 - DNS discovery (decision 4).
-- Authentication and ACLs on the local API (security list).
+- Authentication and ACLs, on the local API and on the server. Until they
+  exist, decision 8 detects a conflicting node identity but cannot stop a
+  caller from claiming one. Proposed in
+  [`task-list-acl-and-tokens-2026-10-05.md`](task-list-acl-and-tokens-2026-10-05.md).
 - Forwarding key/value, sessions, consistency modes, and blocking queries. Each
   is added when the corresponding server feature lands.
 - Response caching in the agent, gossip, and configuration-file reload.

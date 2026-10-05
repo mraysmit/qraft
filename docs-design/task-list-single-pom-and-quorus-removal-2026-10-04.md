@@ -3,6 +3,7 @@
 **Date:** 2026-10-04
 **Status:** In progress. This is the current task list. It started on 2026-10-04 at the user's request, before the membership list's Step 4 close-out gate.
 **Active work:** Phase 2A, intentional-error labelling, added 2026-10-04 at the user's direction before Phase 3. Phases 0 to 2 were done 2026-10-04.
+**Last reviewed:** 2026-10-05, against the code at commit `24beac3`. The status table in section 4 and every item marked "review of 2026-10-05" come from that review. No build was run for it, and `logs/` was not in the working tree, so recorded test counts and jar comparisons were not re-checked.
 **Order of work:**
 - The membership list's Step 4 close-out gate is the first task of Phase 7 here.
 - After this list, the membership list resumes at its Step 5, on the new layout, and runs to its end.
@@ -54,6 +55,24 @@ runtime layer, or its unused tooling.
 - The user runs builds in the VS Code terminal and commits; one commit per phase.
 
 ## 4. Tasks
+
+### Status (2026-10-05)
+
+| Phase | State | Tasks done | Commit |
+|---|---|---|---|
+| 0. Baseline | Done, with one task added since | 2 of 3 | none: its output is in `logs/` |
+| 1. Delete dead code and files | Done; verified against the code | 6 of 6 | `bbf5046` |
+| 2. Single POM | Done; verified against the code | 7 of 7 | `04dddeb` |
+| 2A. Intentional errors labelled | In progress: the mechanism and its tests are built, no test uses them yet | 2 of 9 | `24beac3`, in part |
+| 3. Package layout | Not started; five tasks added by the review | 0 of 10 | |
+| 4. Node model and API | Not started; one task added | 0 of 7 | |
+| 5. Configuration and version | Not started; two tasks added | 0 of 6 | |
+| 6. Docker and observability | Not started; two tasks added | 0 of 10 | |
+| 7. Async layer | Not started; one task added | 0 of 6 | |
+| 8. Documentation and close-out | Started early for Phases 1 and 2 | 0 of 6 | |
+
+The default suite on `main` is expected to fail from `24beac3` until Phase 2A's
+conversion task is done (Phase 2A, "State of `main`").
 
 ### Phase 0. Baseline
 
@@ -107,6 +126,15 @@ gate met, 801 tests (9 + 21 + 46 + 125 + 564 + 36).
 
 The end-to-end and Docker suites were not run for this phase; Phase 2 runs them
 on a fresh image.
+
+**Verified against the code (review of 2026-10-05).** Every task holds.
+- No `qraft-tenant` directory, and no reference to it, to `GenericStateStore`,
+  or to `NamespaceService` outside the documents.
+- One `main` method, in `QraftRuntimeApplication`, which calls the two
+  `launch` methods.
+- No `System.out` or `System.err` in production code, and no "quorus" in any
+  file outside the documents.
+- The strays are gone.
 
 ### Phase 2. Single POM
 
@@ -223,14 +251,43 @@ copy of the repository and then in the working tree, with identical results.
   `logback.xml`, so client mode writes `qraft-controller-server.log`. Phase 3
   names the log files by mode.
 
+**Verified against the code (review of 2026-10-05).** Every task holds.
+- One `pom.xml`, one `src/` tree, one `junit-platform.properties`, and one
+  `logback.xml`. The final name is `qraft`.
+- `docker/Dockerfile` copies `target/qraft.jar`. Every compose file, both
+  `build-runtime` scripts, and `.dockerignore` point at them.
+- The default build excludes `docker`, `slow`, and `e2e`. The Jenkinsfile has
+  no `-pl`.
+- `PackageDependencyTest` has four cases and the six layers. Logback is in
+  compile scope, and `org.jetbrains:annotations` is pinned at 13.0.
+- `RaftAwait.logEnd` is used in the two named classes. `RaftNode` reads its
+  last log index and term only on the state loop.
+- The source holds 138 production files and 158 test files: the 148 of this
+  phase and the ten of Phase 2A. It holds 854 test annotations: the 833 of
+  this phase and the 21 that Phase 2A added.
+
+**Correction (review of 2026-10-05).** The dependency test enforces less than
+the task above says.
+- It enforces "Raft and state never import the HTTP layer" only for
+  `raft.api`, `distributedstate`, and `catalog`.
+- The Raft implementation (`controller.raft`), the state host
+  (`controller.state`), and the HTTP layer (`controller.http`) are all one
+  layer, SERVER, so the test would pass if `RaftNode` imported the HTTP
+  server. It does not import it today: only `http`, `health`, and `api`
+  import `raft` and `state`, never the reverse.
+- Phase 3 separates the layers and makes the rule real.
+
 ### Phase 2A. Every intentional error is labelled as intentional in the log
 
 **Problem (found 2026-10-04).** A reader of a test log cannot tell an
 intentional ERROR from a real one.
 - Production code logs the ERROR, and nothing on the line says that a test
   caused it.
-- Injected faults are generic JDK exceptions created in 43 test files.
-- Docker containers' logs are never checked.
+- Injected faults are generic JDK exceptions created in 43 test files. (The
+  review of 2026-10-05 found 39 files with a search for six common exception
+  types, so the figure is about right; the inventory run gives the real list.)
+- Docker containers' logs are never checked for errors. One class,
+  `DockerDurableRestartTest`, reads them, for particular assertions only.
 
 **Rules.**
 - **One package.** Every intentional error is an entry of the enum
@@ -280,6 +337,11 @@ intentional ERROR from a real one.
   declared. The failure message names the logging thread. Such a failure is a
   teardown defect in the earlier test (`PROJECT_STANDARDS.md` section 4.3), and
   is fixed there, not by declaring the entry in the later test.
+- **Libraries count too** (review of 2026-10-05). The root logger is at INFO,
+  and `io.grpc`, `io.netty`, and `org.apache` at WARN. An event with an
+  exception from gRPC, Netty, or Testcontainers therefore fails a test like
+  any other. Where a test causes one on purpose, its entry names the
+  library's logger.
 
 **State of `main` (noted 2026-10-05, from reading the code; no build was
 run).** Commit `24beac3` holds the first two tasks below. From that commit the
@@ -318,6 +380,17 @@ conversion task is done. This phase is committed in parts, unlike the others.
   the check appender, the window name, the attachment guard (two), and the
   audit's filter, `OFF`, include, `neverBlock`, additivity, and single-root
   findings. Pending: the same tests under Maven with real JUnit.
+
+  Verified against the code (review of 2026-10-05): the seven classes exist,
+  the extension is registered through `META-INF/services` and
+  `junit-platform.properties`, the check is the root logger's first appender,
+  and the four test classes hold 22 tests (11, 4, 5, and 2).
+- [ ] Make tests runnable from an IDE (review of 2026-10-05). Only Surefire
+  passes `logback.configurationFile`, and no `logback-test.xml` is on the
+  test classpath. A test started from an IDE loads the production
+  `logback.xml`, finds no check on the root logger, and fails. Either put the
+  test configuration on the test classpath, or document the JVM argument in
+  `docs/TESTING.md`. Decide which.
 - [ ] Inventory run: `mvn test`. Expected to fail widely; each failure lists
   the test's unlabelled errors. Record the list here.
 - [ ] Convert every injected fault to `InjectedFault`, and declare every
@@ -329,6 +402,17 @@ conversion task is done. This phase is committed in parts, unlike the others.
   - every ERROR in it must match an `IntentionalError` the class declares, and
     the test log reprints each one with its label;
   - any other ERROR fails the class.
+- [ ] Child JVMs, by the same rule as containers (review of 2026-10-05). Five
+  test classes start a Java process whose output goes to a file in a
+  temporary directory, where no window sees it and the test log does not
+  hold it:
+  - `RaftNodeRealStorageRecoveryTest`, `RaftNodeRealSnapshotRecoveryTest`,
+    and `RaftNodeInstalledSnapshotRealRecoveryTest`, which run crash writers;
+  - `RaftStorageProcessLockTest`;
+  - `CrashedAgentExpiryEndToEndTest`, which runs a whole client.
+
+  Read each child's output when it ends. Every ERROR in it must match an entry
+  the test declares, and is reprinted in the test log with its label.
 - [ ] After each suite, check its log file: every ERROR line carries a label.
   This also covers anything logged after the last test class closed, which no
   window sees.
@@ -337,7 +421,8 @@ conversion task is done. This phase is committed in parts, unlike the others.
 
 **Exit:** Default, end-to-end, and Docker suites green. Every ERROR line in
 their logs carries an `INJECTED FAILURE` or `INTENTIONAL ERROR` label naming
-its entry and test.
+its entry and test. That includes the lines reprinted from containers and
+child JVMs. A test class runs from an IDE as it does from Maven.
 
 ### Phase 3. Package layout follows the modes
 
@@ -353,11 +438,68 @@ its entry and test.
   node types) move to `dev.mars.qraft.common`. The `catalog` and `agent`
   packages that today span two modules are gone.
 
+**Added by the review of 2026-10-05.** This phase is not only a rename: as the
+code stands, `raft` and `state` cannot be separate layers. The tasks below
+come first.
+
+- [ ] Break the cycle between Raft and state, and fix the direction between
+  them.
+  - `controller.raft` imports three types from `controller.state`:
+    `RaftCommand`, `RaftCommandResult`, and `ConfigurationCommand` (six
+    imports).
+  - `controller.state` imports from `controller.raft`: `RaftConfiguration`,
+    `RaftConfigurationCodec`, `RaftLogApplicator`, and every generated command
+    message in `controller.raft.grpc`.
+  - Recommended: state may use Raft, and Raft never uses state. Then only the
+    three types above move, into `raft`: the command base type, its result,
+    and the configuration entry, which is Raft's own. Confirm when the phase
+    starts.
+- [ ] Give the async layer a home until Phase 7 removes it.
+  `controller.runtime` is imported by nine files of `controller.raft`, by
+  `ShutdownCoordinator`, and by the two classes of `controller`. As
+  `server.runtime` it would make `raft` depend on `server`. It moves with
+  `raft` or to `common`.
+- [ ] Remove Raft's one dependency on server observability: `controller.raft`
+  imports `RaftMetrics`. Move it into `raft`, or pass it in behind an
+  interface.
+- [ ] Change the generated code's packages without changing the wire. The
+  protos' `java_package` options are `dev.mars.qraft.controller.raft.grpc`
+  and `dev.mars.qraft.controller.api.grpc`, and follow the rename. Their
+  `package` lines, `qraft.raft` and `qraft.api`, are part of the gRPC service
+  names on the wire and stay as they are.
+- [ ] Decide which other "controller" names this phase renames. The second
+  task above lists class names, log file names, and the telemetry service
+  name. Not listed, and found in the code:
+  - the client configuration's `controllers` object, which is a configuration
+    contract, so renaming it changes behaviour;
+  - thread names: `qraft-controller-raft` and `qraft-controller-release`;
+  - client classes: `ControllerEndpoints`, `ControllerRetryPolicy`, and
+    `ControllerContactTracker`;
+  - Docker names: the compose files `docker-compose-single-controller.yml`
+    and `docker-compose-controller-first.yml`, the services `controller1` to
+    `controller5`, and the Grafana dashboard `qraft-controller.json` with its
+    job `qraft-controllers-compose`.
+
+No stored format holds a Java class or package name: production code has no
+Java serialization and no polymorphic JSON type names, so the rename cannot
+break a WAL or a snapshot. The existing catalog fixtures prove it for catalog
+commands when they pass after the rename.
+
 **Exit:** Same tests as Phase 2A, changed only where they name a package, a
-log file, or the telemetry service; the dependency test uses the new packages.
+log file, or the telemetry service. The dependency test uses the new packages
+and has `raft`, `state`, and `server` as separate layers, so that "Raft and
+state never import the HTTP layer" is enforced for the Raft implementation
+and the state host too, with a mutation to show it.
 
 ### Phase 4. Node model and API
 
+- [ ] First, write the legacy fixtures from the code as it stands (review of
+  2026-10-05). Only five catalog fixtures exist, under
+  `src/test/resources/fixtures/catalog/`. There is none for a node command, an
+  `UpdateCapabilities` command, a job-system status, or a snapshot holding
+  nodes. Once the old model is removed, nothing can write the old format, so
+  the fixtures of decision 4 are generated before any other task here, and
+  committed with a manifest like the catalog's.
 - [ ] Replace `AgentInfo`, `AgentCapabilities`, `AgentSystemInfo`, and
   `AgentNetworkInfo` with a Consul-shaped node: name, address, datacenter,
   region, metadata, status, and server-stamped times. The client list
@@ -395,9 +537,19 @@ full suites.
   validation helper where they duplicate it.
 - [ ] Report the version from the build manifest instead of the `2.0-ext`
   default and the `applicationVersion` setting.
+- [ ] Put a version in the manifest, and decide what it is (review of
+  2026-10-05). The executable jar's manifest has none today: the shade step
+  sets only the main class. The POM's version is `1.0-SNAPSHOT`, while the
+  server reports `2.0-ext`. Add the implementation entries to the manifest,
+  and choose the POM version that Qraft reports.
+- [ ] Do the same for the client (review of 2026-10-05). `agent.version` in
+  the client configuration is the same kind of setting as
+  `applicationVersion`, and the Docker example sets it to `1.0.0`. The client
+  reports the manifest's version too, and the setting is removed.
 
-**Exit:** The existing configuration tests pass unchanged, plus tests for the
-version source.
+**Exit:** The existing configuration tests pass unchanged, apart from those
+of the two removed version settings, plus tests for the version source in
+both modes.
 
 ### Phase 6. Docker and observability
 
@@ -406,12 +558,20 @@ version source.
 - [ ] Delete the unreferenced ELK and Fluentd compose files.
 - [ ] Delete the Promtail stack: `docker/logging/`, `docker-compose-loki.yml`,
   and the Promtail labels in the cluster compose files.
+- [ ] Remove the start scripts' use of `docker-compose-loki.yml` in the same
+  change (review of 2026-10-05). `start.ps1`, `start.sh`, `start-quick.ps1`,
+  and `start-quick.sh` all start or stop it, so deleting the file alone
+  breaks them, whatever the nginx decision below.
 - [ ] Delete the four logging demo scripts (`.ps1` and `.sh`): demo-logging,
   log-extraction-demo, setup-logging, and simple-log-demo.
 - [ ] Remove the Grafana panels built on `qraft_agents`, a metric the server
   never emits.
 - [ ] Rework `docker/test-data` to use the Phase 4 node routes, or delete it in
   favour of the end-to-end suite. Delete the unreferenced `test-heartbeat.json`.
+  `start-quick.*`'s `test` action and `docker/README.md` use the other files
+  there.
+- [ ] Delete `docker/test-data/nginx.conf` (review of 2026-10-05). Nothing
+  references it; the load-balancer topology mounts `compose/nginx/nginx.conf`.
 - [ ] Decide whether the nginx load-balancer topology stays, since clients
   rotate through their seeds themselves. Reduce `start.*` and `start-quick.*`
   to the remaining topologies.
@@ -439,6 +599,10 @@ start command work.
   virtual-thread pool. Keep the `CallerContext` MDC and OpenTelemetry propagation.
 - [ ] Replace the `JavaTestContext` and `JavaRuntimeExtension` test helpers
   with plain futures and bounded waits.
+- [ ] Size the test side before starting (review of 2026-10-05). 56 test
+  files import the async types, against 3 that use the two helpers above.
+  They include every hand-written transport and Raft fixture. Decide then
+  whether this phase moves to its own list, as decision 5 allows.
 - [ ] Run the changed concurrency tests five times consecutively.
 
 **Exit:** Full suites on a fresh image; no wrapper future types remain;

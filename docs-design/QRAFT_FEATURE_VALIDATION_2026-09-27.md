@@ -137,6 +137,9 @@ need:
 8. **Events.** The `qraft-events` bounded journal, phases 1 to 4 of the event
    architecture.
 9. **Security.** Authentication, ACL tokens and policies, and audit events.
+   The token and ACL core is proposed, as of 2026-10-05, to come earlier,
+   straight after the client agent:
+   [`task-list-acl-and-tokens-2026-10-05.md`](task-list-acl-and-tokens-2026-10-05.md).
 10. **Deferred until decided.** DNS discovery, and persisted generated node
     identity. Server membership change was decided on 2026-09-29 and is in
     progress in

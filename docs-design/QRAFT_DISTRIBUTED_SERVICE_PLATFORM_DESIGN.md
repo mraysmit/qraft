@@ -1959,8 +1959,25 @@ Evidence as of 2026-09-27, except where a row gives a later date:
 - Whether warning services are returned by default discovery queries.
 - Whether write forwarding is implemented server-side or seed rotation remains the
   primary client behavior.
-- How agent identity is established before ACL and certificate support lands.
+- Whether the server can trust a caller's claim to a node. Proposed 2026-10-05,
+  not yet decided: ACL tokens on Consul's model, in
+  [`task-list-acl-and-tokens-2026-10-05.md`](task-list-acl-and-tokens-2026-10-05.md).
+  Until it is built, any caller can claim any node name and node ID.
 - How long legacy command and snapshot readers remain supported.
+
+Resolved on 2026-10-04, recorded here on 2026-10-05: how a node's identity is
+made and kept, which was half of the open item "how agent identity is
+established". It is decision 8 of
+[`task-list-consul-style-client-2026-10-04.md`](task-list-consul-style-client-2026-10-04.md)
+and is not yet built; section 7.3 changes when it is. It follows Consul: a node
+ID generated at first start and kept in the agent's data directory, a node name
+that defaults to the host name, a catalog keyed by name, and a registration
+under a name held by another node ID refused unless that holder is dead. It
+departs from Consul in two ways. Qraft has no gossip, so a holder is dead when
+its node TTL has lapsed. A takeover removes the old node's services and checks
+in the same replicated step, where Consul leaves them to the new agent's
+anti-entropy, which Qraft's reconciler does not have (D3 below). The other
+half, trusting the claim, is the open item above.
 
 Resolved on 2026-09-22: the public registration schema uses the Qraft field names
 shown in section 12.1 and currently accepts no aliases. Unknown fields are
