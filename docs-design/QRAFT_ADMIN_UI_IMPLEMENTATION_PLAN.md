@@ -1,7 +1,7 @@
 # Qraft Administrative UI Implementation Plan
 
 **Status:** Agreed 2026-09-27; open questions 2 to 4 are decided when their increments start
-**Last updated:** 2026-10-02 (section 4 brought up to date with scoped reads and the Raft operator endpoints)
+**Last updated:** 2026-10-05 (the build location and the tenancy owner, after the move to one Maven project; section 4 was brought up to date with scoped reads and the Raft operator endpoints on 2026-10-02)
 **Design:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md) (what the interface is) and
 [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections
 12.4, 12.4.1, and 19.6 (how it is packaged and served)
@@ -51,7 +51,7 @@ section 4.1, after reviewing the `peegeeq-management-ui` and
 - **Frontend.** React 18, TypeScript in strict mode, Vite 6, and Ant Design 5.
   Data comes through a typed `fetch` client with zod validation, and there is no
   global state library until a view needs one.
-- **Build.** `frontend-maven-plugin` in `qraft-controller`, with pinned Node and
+- **Build.** `frontend-maven-plugin` in the root `pom.xml`, with pinned Node and
   npm versions:
   - `npm ci` against a committed lock file;
   - the build runs in `generate-resources`;
@@ -103,7 +103,7 @@ section 4.1, after reviewing the `peegeeq-management-ui` and
 | Blocking queries (last index plus bounded wait) or watches | Live updates, Watches | Controller HTTP API (platform design section 12.3) |
 | HTTP key/value API with indexes and compare-and-set | Key/Value browser | Controller HTTP API over the existing replicated state |
 | Sessions and locks | Sessions, Locks | Platform design section 11, not started |
-| Replicated tenants and namespaces with an API | Tenants, Namespaces, scope selector options | `qraft-tenant` (in-memory today) |
+| Replicated tenants and namespaces with an API | Tenants, Namespaces, scope selector options | Tenancy work; nothing exists today (`qraft-tenant` was removed on 2026-10-04) |
 | Authentication, authorization, and ACL resources | Any mutation; Tokens, Policies, Roles, Auth Methods; permission-shaped navigation | Security, not started |
 | Durable audit sink and query | Audit page | Events and security |
 | Topology, intentions, routing, gateways, peering, federation | Connect and Multi-cluster sections | No platform contract; reserved (UI/UX design section 2) |

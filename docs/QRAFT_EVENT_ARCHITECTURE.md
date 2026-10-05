@@ -43,14 +43,18 @@ The implementation must obey the following rules:
 - Slow or failing consumers must be isolated from the Raft state loop and from
   other consumers.
 
-## 3. Module structure and ownership
+## 3. Package structure and ownership
+
+Qraft has been one Maven project since 2026-10-04. The owners below are layers
+of packages in that build, named in the platform design's section 1.1; the
+former module names are kept as headings where a layer had one.
 
 ### `qraft-events`
 
-A proposed new dependency-light module containing the shared event contracts.
-It is not yet part of the Maven reactor; it is added when Phase 1 begins.
+A proposed new dependency-light package containing the shared event contracts.
+It does not exist yet; it is added, as its own layer, when Phase 1 begins.
 
-The module contains:
+The package contains:
 
 - `QraftEvent`;
 - `EventEnvelope`;
@@ -63,26 +67,26 @@ The module contains:
 - `EventSink`;
 - explicit history-gap and overflow representations.
 
-This module must not depend on the controller, transport, HTTP server, storage
-implementation, or individual feature modules.
+This package must not depend on the server, transport, HTTP server, storage
+implementation, or individual feature packages.
 
-### `qraft-distributed-state`
+### Replicated state (`qraft-distributed-state`)
 
 Owns commands and domain events for replicated key/value and other generic
 distributed-state operations. Planned event types include key creation, update,
 deletion, compare-and-set outcomes, and lock ownership changes.
 
-### `qraft-core`
+### Shared types (`qraft-core`)
 
 Owns domain events for the service catalog, agents, nodes, health state, and
 other core platform concepts.
 
-### `qraft-tenant`
+### Tenancy (formerly `qraft-tenant`, removed 2026-10-04)
 
-Owns tenant and namespace lifecycle events, policy-assignment events, and quota
-state changes.
+The tenancy work, when it returns as replicated state, owns tenant and namespace
+lifecycle events, policy-assignment events, and quota state changes.
 
-### `qraft-controller`
+### Server (`qraft-controller`)
 
 Owns concrete event production and local delivery:
 
@@ -95,7 +99,7 @@ Owns concrete event production and local delivery:
 
 The controller must publish events only at sequenced application points.
 
-### `qraft-runtime`
+### Entry point (`qraft-runtime`)
 
 Owns optional adapters that export events to external systems. Export failure
 must not alter consensus state or command results.
@@ -518,7 +522,7 @@ source are fully tested. It should not yet instrument every Raft path or expose
 network streaming.
 
 That boundary establishes the semantics needed by the current serialization
-work and by future feature modules without prematurely coupling events to HTTP,
+work and by future feature packages without prematurely coupling events to HTTP,
 an external broker, or permanent storage.
 
 The next tranche should add only a small set of high-value sequenced system

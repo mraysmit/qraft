@@ -66,7 +66,7 @@ Status key:
 | Consistency | Leader forwarding for writes | Partial | Leader hint (`X-Qraft-Leader-Id`) and seed rotation; forwarding is out of scope by decision |
 | API | Structured error envelope with request ID | Done | `code`, `message`, `retryable`, `requestId`; the deprecated `error` field is due for removal after 2026-12-31 |
 | Tenancy | Tenant and namespace identity in catalog commands and keys | Done | Composite `ServiceInstanceId` |
-| Tenancy | Namespace lifecycle, validation, and isolation end to end | Missing | `qraft-tenant` has an in-memory `NamespaceService` that no other module uses |
+| Tenancy | Namespace lifecycle, validation, and isolation end to end | Missing | No namespace model. `qraft-tenant`, whose in-memory `NamespaceService` nothing used, was removed on 2026-10-04 (updated 2026-10-05) |
 | Security | Authentication, ACL tokens, policies, token middleware (Consul plan phase 7) | Missing | Trusted identity headers behind `HeaderRequestContext` only. One shared operator token (`server.operator.token`) guards Raft server removal, standing in for ACLs (updated 2026-10-02) |
 | Security | Audit events | Missing | — |
 | Operations | Prometheus metrics | Partial | Raft metrics only. The catalog, health-transition, request, and session metrics of design 18 are absent |
@@ -74,7 +74,7 @@ Status key:
 | Operations | Health aggregation | Done | Derived service health; `?passing` filter |
 | Operations | Offline backup, corrupt-replica replacement, compatible-upgrade guidance | Done | [`RAFT_STORAGE_OPERATIONS.md`](../docs/RAFT_STORAGE_OPERATIONS.md); clarified 2026-10-03: lower-level legacy byte compatibility does not establish whole-node startup compatibility; an older backup cannot rejoin as the same voter |
 | Operations | Lost-quorum recovery and whole-cluster backup restore | Missing | No supported procedure yet. Membership Step 7 must establish and test it; clarified 2026-10-03 |
-| Operations | Event journal (design [`QRAFT_EVENT_ARCHITECTURE.md`](../docs/QRAFT_EVENT_ARCHITECTURE.md)) | Missing | No `qraft-events` module |
+| Operations | Event journal (design [`QRAFT_EVENT_ARCHITECTURE.md`](../docs/QRAFT_EVENT_ARCHITECTURE.md)) | Missing | No event code. `qraft-events` is to be a package of the one build, not a module (updated 2026-10-05) |
 | Operations | DNS discovery (optional) | Missing | — |
 
 ## 3. Client features

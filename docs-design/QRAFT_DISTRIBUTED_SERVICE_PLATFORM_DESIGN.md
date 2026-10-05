@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-10-02
+**Last updated:** 2026-10-05 (section 1.1 and the module wording elsewhere, after the move to one Maven project)
 
 ## 1. Purpose
 
@@ -14,74 +14,70 @@ This document records the current architecture, the target design, the important
 domain invariants, and the test-first path from the current implementation to the
 target system.
 
-### 1.1 Project module structure
+### 1.1 Project structure
 
-Qraft is a Maven reactor with a root aggregate and seven build modules:
+Qraft is one Maven project. The root `pom.xml` is the only POM. It builds one
+executable jar, `target/qraft.jar`, which runs in either mode, and it owns the
+dependency versions, Java 27 compiler settings, test conventions, and coverage
+configuration.
 
-```text
-qraft
-|-- qraft-raft-engine
-|-- qraft-distributed-state
-|-- qraft-core
-|-- qraft-agent
-|-- qraft-tenant
-|-- qraft-controller
-`-- qraft-runtime
-```
+Until 2026-10-04 the build was a reactor of seven modules. Their boundaries are
+now package boundaries. `PackageDependencyTest` enforces them: it reads the
+Qraft types every compiled production class refers to, and fails on a reference
+against the allowed direction.
 
-The root `qraft` project is not a deployable application. It owns the reactor,
-shared dependency versions, Java 27 compiler settings, test conventions,
-coverage configuration, and build-wide engineering rules.
+The package names below are those of 2026-10-05. Phase 3 of
+[`task-list-single-pom-and-quorus-removal-2026-10-04.md`](task-list-single-pom-and-quorus-removal-2026-10-04.md)
+renames them to follow the modes (`server`, `client`, `raft`, `state`, and
+`common`), and this section changes with it.
 
-| Module | Current purpose | Target responsibility |
-|---|---|---|
-| `qraft-raft-engine` | Defines reusable Raft command, state-machine, and engine contracts. | Own all implementation-neutral consensus contracts and reusable Raft primitives. It must not depend on service discovery, tenancy, HTTP, or a runtime mode. |
-| `qraft-distributed-state` | Defines replicated key/value commands and codecs and currently contains the service-catalog model, including composite health-check identity, ordered observations, and replicated check state. | Own deterministic replicated-state commands and projections, including key/value behavior and catalog state. It must contain no network server, process lifecycle, or client-agent behavior. |
-| `qraft-core` | Contains shared Java 27 discovery, health, node, and agent domain types. The inherited job-system code was removed on 2026-09-27. | Own small, transport-neutral value types shared between server and client. Service definitions and common identity types belong here; Raft implementation and HTTP DTOs do not. |
-| `qraft-agent` | Implements client identity, node registration, the typed outbound catalog HTTP adapter, controller-seed failover, single-flight service reconciliation, heartbeat scheduling, policy-derived local liveness/readiness HTTP endpoints, bounded graceful shutdown, local execution of configured HTTP, TCP, and TTL checks, and sequenced publication of their observations and renewals. | Keep local health authoritative at the server without participating in Raft. |
-| `qraft-tenant` | Implements the current namespace lifecycle abstraction and its in-memory implementation. | Own tenant and namespace policy, validation, and lifecycle contracts. Replicated persistence is performed through distributed-state commands rather than hidden local mutation. |
-| `qraft-controller` | Contains the server application, Raft node implementation, transports, durable storage adapters, replicated state host, HTTP and gRPC APIs, snapshots, and graceful shutdown. | Operate one server member: participate in quorum, host authoritative replicated state, enforce request identity and policy, expose control-plane APIs and the built-in administrative interface, and own server lifecycle. |
-| `qraft-runtime` | Packages controller and agent dependencies behind one executable entry point and one container image. | Remain a thin composition root that validates mode-specific configuration, constructs either server or client mode, installs process shutdown handling, and packages the built-in administrative assets into the same executable artifact without owning domain logic. |
+| Layer | Packages today | Former module | Responsibility |
+|---|---|---|---|
+| Raft contracts | `dev.mars.qraft.raft.api` | `qraft-raft-engine` | Own the implementation-neutral consensus contracts: replicated commands, command codecs, the state machine, and the snapshot store. It must not depend on service discovery, tenancy, HTTP, or a runtime mode. |
+| Replicated state | `dev.mars.qraft.distributedstate`, and `dev.mars.qraft.catalog` apart from `ServiceDefinition` | `qraft-distributed-state` | Own deterministic replicated-state commands and projections: key/value commands and codecs, and the service catalog with its composite health-check identity, ordered observations, and replicated check state. It must contain no network server, process lifecycle, or client-agent behavior. |
+| Shared types | `dev.mars.qraft.concurrent`, `dev.mars.qraft.config`, `ServiceDefinition` in `dev.mars.qraft.catalog`, and the node types in `dev.mars.qraft.agent`: `AgentInfo`, `AgentStatus`, `AgentCapabilities`, `AgentSystemInfo`, and `AgentNetworkInfo` | `qraft-core` | Own small, transport-neutral value types and helpers shared between server and client. Service definitions and common identity types belong here; Raft implementation and HTTP DTOs do not. |
+| Client | The rest of `dev.mars.qraft.agent`, and its subpackages | `qraft-agent` | Implement client mode: client identity, node registration, the typed outbound catalog HTTP adapter, controller-seed failover, single-flight service reconciliation, heartbeat scheduling, policy-derived local liveness and readiness HTTP endpoints, bounded graceful shutdown, local execution of configured HTTP, TCP, and TTL checks, and sequenced publication of their observations and renewals. Keep local health authoritative at the server without participating in Raft. |
+| Server | `dev.mars.qraft.controller` and its subpackages | `qraft-controller` | Operate one server member: the Raft node, transports, durable storage adapters, the replicated state host, HTTP and gRPC APIs, snapshots, and graceful shutdown. Participate in quorum, host authoritative replicated state, enforce request identity and policy, expose control-plane APIs and the built-in administrative interface, and own server lifecycle. |
+| Entry point | `dev.mars.qraft.runtime` | `qraft-runtime` | Remain a thin composition root that validates mode-specific configuration, constructs either server or client mode, and installs process shutdown handling, without owning domain logic. |
 
-The intended high-level dependency direction is:
+Each layer may use only these others:
 
 ```text
-qraft-runtime
-|-- qraft-agent
-|   `-- qraft-core
-`-- qraft-controller
-    |-- qraft-core
-    |-- qraft-tenant
-    |-- qraft-distributed-state
-    |   |-- qraft-core                 (target shared value types)
-    |   `-- qraft-raft-engine
-    `-- qraft-raft-engine
+Entry point       -> every layer; nothing uses the entry point
+Server            -> shared types, Raft contracts, replicated state
+Client            -> shared types
+Replicated state  -> Raft contracts
+Shared types      -> none
+Raft contracts    -> none
 ```
 
-Arrows represent compile-time use from a higher-level composition or adapter
-toward a lower-level contract or domain module. Cycles are prohibited. In
-particular:
+Use runs from a higher-level composition or adapter toward a lower-level
+contract or domain layer. Cycles are prohibited. In particular:
 
-- `qraft-runtime` selects and assembles a mode but does not implement it.
-- `qraft-agent` depends on shared domain contracts, not controller internals or
+- The entry point selects and assembles a mode but does not implement it.
+- The client depends on shared domain contracts, not server internals or
   replicated-state implementations.
-- `qraft-controller` may compose all server-side modules, but those lower-level
-  modules do not call back into the controller.
-- `qraft-distributed-state` depends only on consensus contracts and shared value
-  types needed by replicated commands.
+- The server may compose every server-side layer, but those lower layers do not
+  call back into the server.
+- Replicated state depends only on the consensus contracts.
 - Public HTTP and gRPC request/response DTOs stay at adapter boundaries and are
   mapped explicitly to domain commands.
 
-[`QRAFT_EVENT_ARCHITECTURE.md`](../docs/QRAFT_EVENT_ARCHITECTURE.md) proposes an
-eighth module, `qraft-events`, for dependency-light event contracts. It is not
-yet part of the reactor and will be added to this table when its first tranche
-is implemented.
+The seventh module, `qraft-tenant`, was removed on 2026-10-04: nothing used its
+in-memory namespace service. Namespaces return as replicated state with the
+tenancy work (section 15).
 
-Some current code does not yet fully match these boundaries. Most notably, the
-service instance and catalog classes currently live together in
-`qraft-distributed-state`, while the client needs a shared service-definition
-contract from `qraft-core`. The migration should move or introduce only the
-shared value types; the mutable replicated catalog remains server-side.
+[`QRAFT_EVENT_ARCHITECTURE.md`](../docs/QRAFT_EVENT_ARCHITECTURE.md) proposes
+dependency-light event contracts under the name `qraft-events`. They do not
+exist yet. They will be a package and a layer of this build, added to this
+table when their first tranche is implemented.
+
+Two packages do not yet match these boundaries. `dev.mars.qraft.catalog` holds
+both the shared `ServiceDefinition` and the server-side replicated catalog, and
+`dev.mars.qraft.agent` holds both the shared node types and client code.
+`PackageDependencyTest` classifies those two packages type by type until
+Phase 3 gives each layer its own package. The mutable replicated catalog remains
+server-side.
 
 ## 2. Goals
 
@@ -171,7 +167,7 @@ and acceptance requirements.
 
 ### 4.1 Runtime
 
-The `qraft-runtime` module owns the executable entry point and resolves `server`
+The `dev.mars.qraft.runtime` package owns the executable entry point and resolves `server`
 or `client` from the required command-line subcommand. The container image
 packages the runtime and selects the mode through its command, never through an
 environment variable.
@@ -988,8 +984,8 @@ The interface is part of the main executable artifact. Its static assets are
 embedded at build time and served by the server-mode process; it is not a
 separate module, service, container, installation, or deployment. Client mode
 does not start the administrative listener. Packaging the interface must not add
-domain logic to `qraft-runtime`: the runtime carries the assets, while
-`qraft-controller` owns the HTTP routes, authentication, authorization, cache
+domain logic to the entry point: the executable jar carries the assets, while
+the server code owns the HTTP routes, authentication, authorization, cache
 policy, and lifecycle of the serving endpoint.
 
 #### 12.4.1 Build and executable packaging
@@ -997,14 +993,14 @@ policy, and lifecycle of the serving endpoint.
 The administrative frontend is compiled before the Java packaging phase into a
 static distribution containing `index.html`, hashed JavaScript and CSS bundles,
 fonts, images, and an asset manifest. The frontend source remains part of the
-controller source tree rather than becoming an independently released Maven
+project's one source tree rather than becoming an independently released Maven
 module. Tool versions and frontend dependencies are locked so a clean build is
 reproducible.
 
-Maven stages the completed distribution as generated controller resources under
-`META-INF/qraft/ui/`. The existing `qraft-runtime` shade build then copies those
-resources, together with the controller classes, into the executable runtime
-JAR. A packaged server therefore contains everything required to serve the
+Maven stages the completed distribution as generated resources under
+`META-INF/qraft/ui/`. The build's shade step then packages those resources,
+together with the classes, into the executable JAR, `target/qraft.jar`. A
+packaged server therefore contains everything required to serve the
 interface. The container image continues to contain the same runtime artifact
 and does not copy a separate web distribution into the image.
 
@@ -1015,7 +1011,7 @@ served by the existing JDK HTTP server and share its listener, TLS configuration
 authentication boundary, request limits, and lifecycle:
 
 ```text
-qraft-runtime executable JAR
+qraft.jar, the executable JAR
 |-- Java classes
 `-- META-INF/qraft/ui/
     |-- index.html
@@ -1695,7 +1691,7 @@ and close implicitly.
 A future's callbacks run on the thread that completes it, so blocking work never
 runs inline on a thread the component did not create for that work:
 
-- Bounded waits use `Deadlines` from `qraft-core`, not `CompletableFuture.orTimeout`
+- Bounded waits use `dev.mars.qraft.concurrent.Deadlines`, not `CompletableFuture.orTimeout`
   or `completeOnTimeout`. The JDK completes those on one JVM-wide delay thread,
   where a blocked callback would stall every timeout in the process. `Deadlines`
   delivers each timeout on a new virtual thread and releases the pending expiry
@@ -1788,7 +1784,7 @@ In-memory and real-transport clusters cover:
 
 Tagged tests build one image, start it in both modes, register a service, query it
 through multiple servers, change leadership, and verify graceful and automatic
-deregistration. These tests are separate from the fast default reactor but run in
+deregistration. These tests are separate from the fast default build but run in
 continuous integration with Docker available.
 
 The packaged-artifact acceptance test starts the shaded runtime JAR without a
@@ -1941,7 +1937,7 @@ The first complete service-discovery slice is accepted when:
 - Graceful deregistration is bounded and automatic expiry handles crashes.
 - The shaded runtime artifact serves the embedded administrative interface in
   server mode without external asset files or an additional process.
-- The full default reactor and tagged container acceptance suite pass.
+- The full default suite and tagged container acceptance suite pass.
 
 Evidence as of 2026-09-27, except where a row gives a later date:
 
@@ -1956,7 +1952,7 @@ Evidence as of 2026-09-27, except where a row gives a later date:
 | Leadership change keeps committed registrations | Met | `DockerDurableRestartTest.killedLeaderIsReplacedAndRejoinsWithCompleteCatalog`, `DockerAgentHealthTest` |
 | Bounded graceful deregistration; expiry handles crashes | Met | `QraftAgentTest.unreachableControllerCannotExtendShutdownPastDeadlineAndLogsOnce`, `DockerAgentHealthTest`, `CrashedAgentExpiryEndToEndTest` |
 | Embedded administrative interface | Open | Not implemented (sections 12.4 and 19.6) |
-| Full default reactor and container suite pass | Met | 812 default tests, 23 Docker-tagged tests, and 7 end-to-end tests, run on 2026-10-02 (membership list, full-suite run). The counts fell from 807 and 30 when the test-suite remediation deleted tests that verified nothing |
+| Full default suite and container suite pass | Met | 812 default tests, 23 Docker-tagged tests, and 7 end-to-end tests, run on 2026-10-02 (membership list, full-suite run). The counts fell from 807 and 30 when the test-suite remediation deleted tests that verified nothing |
 
 ## 22. Open decisions
 

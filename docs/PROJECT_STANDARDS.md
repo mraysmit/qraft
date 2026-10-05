@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-This document defines the engineering, architecture, testing, logging, and build standards for Qraft. These standards apply to every module in the Maven reactor unless a module documents a stricter requirement.
+This document defines the engineering, architecture, testing, logging, and build standards for Qraft. These standards apply to all of Qraft's code unless a package documents a stricter requirement.
 
 Qraft is a Consul-style service discovery and distributed coordination platform. Features and implementation choices must support that product direction. Components inherited from the original Quorus project must not remain unless they have a clear role in that feature set.
 
@@ -43,16 +43,20 @@ Qraft is a Consul-style service discovery and distributed coordination platform.
 - Legacy functionality must not be retained merely because it existed in the source project.
 - Before deleting inherited code, confirm that no Consul-style feature or supported public contract depends on it.
 
-## 3. Module boundaries
+## 3. Package boundaries
 
-- `qraft-raft-engine` defines Raft engine contracts and primitives.
-- `qraft-distributed-state` defines replicated-state commands and codecs.
-- `qraft-core` contains shared domain models and framework primitives.
-- `qraft-agent` implements the Java 27 service-discovery agent.
-- `qraft-controller` implements distributed control, Raft coordination, HTTP APIs, and gRPC services.
-- `qraft-runtime` is the thin executable composition root that selects `server` or `client` mode and owns no domain logic.
-- Modules must not depend on implementation details from a higher-level module.
-- Shared abstractions belong in the lowest module that can own them without creating a circular dependency.
+Qraft is one Maven project that builds one executable jar. Its code is divided
+into layers of packages, which were separate Maven modules until 2026-10-04. The
+packages of each layer are listed in the design document, section 1.1.
+
+- Raft contracts define the Raft engine contracts and primitives.
+- Replicated state defines replicated-state commands and codecs.
+- Shared types contain shared domain models and framework primitives.
+- The client implements the Java 27 service-discovery agent.
+- The server implements distributed control, Raft coordination, HTTP APIs, and gRPC services.
+- The entry point is the thin executable composition root that selects `server` or `client` mode and owns no domain logic.
+- A layer must not depend on implementation details from a higher-level layer. `PackageDependencyTest` enforces the allowed direction.
+- Shared abstractions belong in the lowest layer that can own them without creating a circular dependency.
 
 ## 4. Testing
 
@@ -143,6 +147,10 @@ logs/
 `-- archive/
 ```
 
+Until the runtime names its log files by mode, both modes write
+`qraft-controller-server.log` and `.json`: the executable jar ships one
+`logback.xml`. The single-POM task list's Phase 3 corrects this.
+
 ### 6.3 Log format and quality
 
 - Text logs must use UTF-8.
@@ -170,7 +178,7 @@ output captured by `Tee-Object` under the central `logs/` directory. An assistan
 provides the command for that terminal and reads the retained log; it must not
 open another PowerShell window or launch a hidden background build.
 
-For change completion, run the default reactor and coverage gates from the
+For change completion, run the default build and coverage gates from the
 repository root with PowerShell:
 
 ```powershell
@@ -182,7 +190,7 @@ if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildE
 
 This command:
 
-- Runs the default Maven reactor tests, packaging, and coverage gates through
+- Runs the default tests, packaging, and coverage gates through
   `install`. The gates run in `verify`; `mvn test` alone is not completion evidence.
 - Disables Maven color output so the captured file does not contain ANSI color sequences.
 - Displays output in the console.
@@ -210,8 +218,8 @@ Timestamps, UUIDs, temporary paths, random ports, and election timing are nondet
 
 ## 9. Dependency management
 
-- Dependency versions shared by multiple modules must be managed by the parent POM.
-- A module must explicitly declare the dependencies required by its production behavior.
+- The root POM is the only POM. A version shared by several artifacts is declared once, as a property.
+- The POM must explicitly declare the dependencies that production behavior requires.
 - Runtime configuration must not reference appenders, encoders, transports, or providers that are absent from the runtime classpath.
 - Test-only dependencies must use test scope.
 - Optional production integrations must fail clearly or remain disabled when their dependencies are unavailable.

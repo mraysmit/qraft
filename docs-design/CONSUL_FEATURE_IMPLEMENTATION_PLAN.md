@@ -9,7 +9,9 @@ recorded in
 [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md)
 and in the dated task lists in this directory and in `docs/archive/`. The checklist
 at the end of this plan was last reconciled with the code on 2026-09-27; its
-membership items were updated on 2026-10-02.
+membership items were updated on 2026-10-02. Sections 3 and 4 were brought up
+to date on 2026-10-05 with the move to one Maven project and the removal of
+`qraft-tenant`.
 
 ## 2. Target Feature Set
 
@@ -48,7 +50,7 @@ The active Maven build is Java-native. The controller uses Java 27 concurrency p
 4. Replace Vert.x `Future` and `Promise` usage with `CompletableFuture` or direct results.
 5. Migrate health checks and agent heartbeats.
 6. Migrate controller endpoints and middleware.
-7. Remove Vert.x dependencies and configuration from all Maven modules.
+7. Remove Vert.x dependencies and configuration from the Maven build.
 8. Remove obsolete reactive integration tests and examples.
 
 ### Single-binary runtime and startup modes
@@ -74,10 +76,11 @@ qraft client
   environment variables for runtime configuration or file discovery.
 - Both modes share configuration conventions, logging, metrics, signal handling, and graceful shutdown.
 
-The Maven modules remain separated for dependency and ownership boundaries, but
-they become libraries behind a thin executable runtime module. The runtime module
-owns mode selection and lifecycle orchestration; `qraft-controller` and
-`qraft-agent` are not separate production deployment artifacts.
+Qraft is one Maven project that builds one executable jar. Until 2026-10-04 it
+was a reactor of modules; their dependency and ownership boundaries are now
+package boundaries, enforced by a dependency test. A thin entry-point package
+owns mode selection and lifecycle orchestration; the server and client code are
+not separate production deployment artifacts.
 
 The container image must support both modes without rebuilding the application:
 
@@ -92,20 +95,26 @@ orchestration readiness.
 
 ## 4. Architectural Boundaries
 
-### Core modules
+### Core layers
 
-- `qraft-core`: shared domain models, configuration, health, and discovery primitives
-- `qraft-raft-engine`: Raft consensus contracts and replicated command execution
-- `qraft-distributed-state`: replicated key/value and service-catalog state
-- `qraft-tenant`: tenant and namespace policy, validation, and lifecycle
-- `qraft-controller`: cluster coordination, state ownership, and HTTP and gRPC APIs
-- `qraft-agent`: node identity, service registration, heartbeats, and local checks
-- `qraft-runtime`: single executable launcher, `server`/`client` mode selection, shared lifecycle, configuration, logging, metrics, and health wiring
+These were Maven modules until 2026-10-04 and are now layers of packages in one
+build. The former module name is given in brackets.
+
+- Shared types (`qraft-core`): shared domain models, configuration, health, and discovery primitives
+- Raft contracts (`qraft-raft-engine`): Raft consensus contracts and replicated command execution
+- Replicated state (`qraft-distributed-state`): replicated key/value and service-catalog state
+- Server (`qraft-controller`): cluster coordination, state ownership, and HTTP and gRPC APIs
+- Client (`qraft-agent`): node identity, service registration, heartbeats, and local checks
+- Entry point (`qraft-runtime`): single executable launcher, `server`/`client` mode selection, shared lifecycle, configuration, logging, metrics, and health wiring
+
+Tenant and namespace policy, validation, and lifecycle have no code today:
+`qraft-tenant` was removed on 2026-10-04, and they return as replicated state
+with the tenancy work (phase 7).
 
 Public HTTP and gRPC request and response types live at the adapter boundary in
-`qraft-controller`; there is no separate API module. The authoritative module
-responsibilities are defined in `QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`
-section 1.1.
+the server code; there is no separate API layer. The authoritative layer
+responsibilities and their packages are defined in
+`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md` section 1.1.
 
 ### Design principles
 
@@ -124,9 +133,9 @@ section 1.1.
 
 - Standardize naming around `Service`, `Instance`, `HealthCheck`, `Session`, and `KeyValue`.
 - Remove remaining transfer, workflow, assignment, and job concepts from active APIs.
-- Confirm the Maven module structure reflects the intended runtime modules.
+- Confirm the build's structure reflects the intended runtime layers.
 - Define interfaces for replicated state, service catalog, health checks, and sessions.
-- Remove Vert.x from module dependencies and public APIs.
+- Remove Vert.x from the build's dependencies and public APIs.
 - Establish shared Java 27 executors, virtual-thread policies, and shutdown conventions.
 - Add the unified runtime launcher with explicit `server` and `client` startup modes.
 - Define mode-specific configuration validation and common lifecycle ownership.
@@ -269,6 +278,10 @@ The implementation will be considered aligned with the target design when:
 - Operational state is exposed through health and metrics endpoints.
 - No Vert.x dependencies, types, timers, event loops, or framework futures remain.
 ## Implementation Checklist
+
+Items ticked before 2026-10-04 keep the wording of the module build they were
+done in; `qraft-runtime` and "reactor" below refer to it. The modules were
+merged into one Maven project on 2026-10-04.
 
 ### Runtime and deployment foundation
 

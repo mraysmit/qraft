@@ -6,7 +6,12 @@ and the full suites passed on 2026-10-02; its mutation evidence is outstanding
 (Step 4 record). Steps 1 to 3 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
-**Last updated:** 2026-10-03 (document review corrections and remaining-step contracts)
+**Last updated:** 2026-10-05 (document review: section order, the state before this list, and the order of work with the single-POM list)
+**Interrupted by:** [`task-list-single-pom-and-quorus-removal-2026-10-04.md`](task-list-single-pom-and-quorus-removal-2026-10-04.md),
+started 2026-10-04 before the Step 4 close-out gate. The gate's mutation evidence
+is recorded there, as the first task of its Phase 7. Step 5 resumes when that
+list is archived, and this list then runs to its end before the Consul-style
+client list starts (decided 2026-10-05).
 **Predecessor:** [`task-list-test-suite-remediation-2026-09-27.md`](../docs/archive/task-list-test-suite-remediation-2026-09-27.md),
 archived 2026-10-02. Its packaged-artifact test waits for the admin interface.
 **Paused:** [`task-list-embedded-admin-interface-2026-09-27.md`](task-list-embedded-admin-interface-2026-09-27.md), after its Step 1
@@ -32,18 +37,18 @@ complete:
 This concerns server membership only. Agents never join the Raft membership
 (design principle 8), and their registration and expiry are unchanged.
 
-## 2. Current state
+## 2. State before this list
 
-Checked in the code on 2026-09-29.
+Checked in the code on 2026-09-29, before Step 1. Steps 1 to 4 have since
+changed most of it; the step records below say how. The line numbers are those
+of that day's source.
 
 - **Membership is fixed at startup.**
   - Each server parses its `clusterNodes` setting, for example
     `controller1=host1:9080,controller2=host2:9080,controller3=host3:9080`,
     into the member IDs and peer addresses
-    ([`QraftControllerService.java:100-113`](../qraft-controller/src/main/java/dev/mars/qraft/controller/QraftControllerService.java#L100-L113)).
-  - `RaftNode` copies the set once
-    ([`RaftNode.java:349`](../qraft-controller/src/main/java/dev/mars/qraft/controller/raft/RaftNode.java#L349))
-    and never changes it.
+    (`QraftControllerService.java:100-113`).
+  - `RaftNode` copies the set once (`RaftNode.java:349`) and never changes it.
   - A majority is `floor(n/2) + 1` of that set, for elections and commits.
 - **Each server has its own copy.** Nothing makes the copies agree. Changing
   them means editing every server's configuration and restarting each one.
@@ -319,6 +324,36 @@ The work:
 **Not yet:** nothing counts votes or acknowledgements by server ID. That is
 Step 2.
 
+### Step 2. Configuration entries in the log
+
+- Add a configuration entry type holding the voters and non-voters, each with
+  server ID, name, and address. Each server uses the latest configuration in
+  its log, committed or not, for elections, commits, and replication targets.
+- A vote or an acknowledgement counts only when its sender's server ID is a
+  voter in that configuration. This closes the wiped-server danger: a server
+  that lost its storage comes back with a new ID, so it cannot vote or be
+  counted towards a commit until it is added as a new member.
+  - Container test: wipe one server's data directory, restart it, and show
+    that it is not counted towards any election or commit.
+- Snapshots record the configuration they cover, and recovery restores it from
+  the snapshot and the WAL.
+- Truncating an uncommitted configuration entry reverts to the previous
+  configuration.
+- The leader starts a change only after it has committed an entry in its
+  current term, and only one change is in flight at a time.
+- **Bootstrapping** (decision 5). A server with no Raft state contacts the
+  servers in `server.raft.nodes`. It writes the initial configuration only
+  when it has reached the expected count and all the checks in decision 5
+  pass. A server with any Raft state never bootstraps. A server that finds an
+  existing cluster joins it instead.
+- Unit tests on manual timers:
+  - bootstrapping only at the expected count, and never with disagreeing
+    counts, an existing cluster, or local Raft state;
+  - majorities under each configuration;
+  - reverting a truncated change;
+  - recovery from a snapshot and from the WAL;
+  - refusing a second change while one is pending.
+
 ### Step 2 plan (2026-09-29)
 
 Two further decisions, taken on the recommendations:
@@ -467,36 +502,6 @@ Slices, each red before green:
   leader listens to replies from an unconfigured server ID. In that image,
   the leader and the wiped server committed a write together.
 
-### Step 2. Configuration entries in the log
-
-- Add a configuration entry type holding the voters and non-voters, each with
-  server ID, name, and address. Each server uses the latest configuration in
-  its log, committed or not, for elections, commits, and replication targets.
-- A vote or an acknowledgement counts only when its sender's server ID is a
-  voter in that configuration. This closes the wiped-server danger: a server
-  that lost its storage comes back with a new ID, so it cannot vote or be
-  counted towards a commit until it is added as a new member.
-  - Container test: wipe one server's data directory, restart it, and show
-    that it is not counted towards any election or commit.
-- Snapshots record the configuration they cover, and recovery restores it from
-  the snapshot and the WAL.
-- Truncating an uncommitted configuration entry reverts to the previous
-  configuration.
-- The leader starts a change only after it has committed an entry in its
-  current term, and only one change is in flight at a time.
-- **Bootstrapping** (decision 5). A server with no Raft state contacts the
-  servers in `server.raft.nodes`. It writes the initial configuration only
-  when it has reached the expected count and all the checks in decision 5
-  pass. A server with any Raft state never bootstraps. A server that finds an
-  existing cluster joins it instead.
-- Unit tests on manual timers:
-  - bootstrapping only at the expected count, and never with disagreeing
-    counts, an existing cluster, or local Raft state;
-  - majorities under each configuration;
-  - reverting a truncated change;
-  - recovery from a snapshot and from the WAL;
-  - refusing a second change while one is pending.
-
 ### Step 3. Non-voters and promotion
 
 - A non-voter receives replication but is not counted for elections or commits,
@@ -610,7 +615,8 @@ It was "Operator add and remove".
    forwarded request is never forwarded again.
 
 **Review fixes (2026-10-01),** from the code review of commit `05a2055`.
-Written test first; not yet run:
+Written test first. They were not run that day; they passed in the full-suite
+run of 2026-10-02, recorded below:
 - A forward to a leader the transport cannot address failed by throwing,
   which escaped both servers. The transport now fails the future, and
   forwarding answers `NO_LEADER`.
@@ -767,73 +773,6 @@ Still outstanding: mutation evidence for the stickiness, collision, moved
 server, and target server ID tests. No container test yet adds, removes, or
 replaces a server; that is Step 8.
 
-### RaftLog 1.4.1 (2026-10-02)
-
-Not part of the membership work; recorded here because this is the current
-list.
-
-- **Change.** The root POM pins `raftlog.version` 1.4.1, up from 1.4.0. The
-  WAL and metadata formats are unchanged. Design section 14.7 names the new
-  version.
-- **1.4.1 against Qraft's use of it:**
-  - The removed `FileRaftStorage(boolean)` constructors: Qraft already builds
-    the storage from `RaftStorageConfig` everywhere.
-  - `updateMetadata` refuses a null vote: Qraft passes an `Optional`.
-  - Narrower torn-tail repair, `LogEntryData` compared by content, and the
-    inferred compaction boundary: covered by the storage contract tests
-    below, which pass unchanged.
-- **Defect in the build, found by this upgrade.** After `mvn install`, the
-  runtime JAR still held RaftLog 1.4.0 classes. `qraft-controller` shades its
-  dependencies into its own jar; without `clean`, the shade step starts from
-  the previous shaded jar, whose copy of a dependency wins over the new one.
-  Qraft's own classes were current, so earlier Docker results stand for Qraft
-  code. `docs/TESTING.md` now says to run `mvn clean install` after a
-  dependency change. The cause was fixed the next day; see "One executable
-  jar" below.
-- **Validation,** after `mvn clean install`:
-  - 812 tests, every coverage gate met, including the contract tests of
-    design section 14.7: `RaftLogStorageIntegrationTest`,
-    `RaftNodeRealStorageRecoveryTest`, `RaftNodeRealSnapshotRecoveryTest`,
-    `RaftNodeInstalledSnapshotRealRecoveryTest`, `FileSnapshotStoreTest`, and
-    `RaftStorageProcessLockTest`.
-  - The runtime JAR reports `raftlog-core` 1.4.1.
-  - The Docker suite on that JAR: 23 of 23.
-  - The end-to-end suite was not rerun.
-
-### One executable jar (2026-10-03)
-
-The fix for the build defect above.
-
-- **`qraft-controller` no longer shades.** Its jar holds only its own
-  classes. Nothing used its executable jar: the design makes
-  `qraft-runtime` the one deployment artifact.
-- **`qraft-runtime`'s shade step** now merges `META-INF/services` files and
-  drops jar signatures, which the controller's step had done for it. Its own
-  jar is rebuilt on every build (`forceCreation`), so the shade step never
-  starts from its previous output.
-- **Two faults the controller's fat jar had hidden,** both fixed:
-  - **Logback was missing.** The root POM gives every module Logback in test
-    scope, which kept it out of the runtime's own dependencies. The runtime
-    now declares it in runtime scope.
-  - **Mixed Prometheus exporter versions.** The runtime resolved
-    `opentelemetry-exporter-prometheus` 1.48.0-alpha and Prometheus 1.3.6
-    through the instrumentation BOM, while the controller compiled and
-    tested against 1.59.0-alpha and 1.3.10. The old executable jar held
-    classes of both. The root POM now pins 1.59.0-alpha for every module.
-- **Proof.** With the new poms and no `clean`: a build on RaftLog 1.4.0
-  packaged 1.4.0, and a rebuild after changing the version to 1.4.1
-  packaged 1.4.1.
-- **The new jar against the old one.** It adds nothing. It drops only the
-  second Prometheus copy (the 1.3.6 protobuf exposition format and its
-  bundled protobuf, 794 classes) and seven annotation classes. The gRPC and
-  SLF4J service files are identical, and the jar is 23.5 MB, down from
-  25.6 MB.
-- **Validation,** on a build without `clean`:
-  - `mvn install`: 812 tests, every coverage gate met.
-  - The Docker suite: 23 of 23. The end-to-end suite: 7 of 7.
-  - The packaged jar starts and configures Logback from its own
-    `logback.xml`.
-
 ### Step 4 close-out gate
 
 Before proceeding to Step 5, record mutation evidence for joining/removal,
@@ -846,11 +785,21 @@ in the isolated copy, retain the mutation commands/results and identify the
 unchanged final source/dependency state covered by the existing full-suite
 evidence. Passing ordinary suites alone does not close the outstanding gate.
 
+**Scheduled (2026-10-05).** This gate is the first task of Phase 7 in
+[`task-list-single-pom-and-quorus-removal-2026-10-04.md`](task-list-single-pom-and-quorus-removal-2026-10-04.md).
+By then the source has its final packages and its tests declare their
+intentional errors, and Phase 7 has not yet changed `RaftNode`'s async code.
+
 ### Step 5. Failed-server cleanup
 
 **Status: Planned; not implemented.** The contract below was specified during
 the document review on 2026-10-03. Current server JSON rejects these new settings;
 the promotion settings still exist only on `RaftNode.Builder`.
+
+The class names below are those of 2026-10-03. The single-POM list renames
+`QraftControllerService` in its Phase 3 and replaces `AppConfig`'s flattened
+map with typed records in its Phase 5. This step resumes after that list, so
+wire the settings through whatever those classes have become.
 
 #### Configuration contract
 
@@ -1044,7 +993,77 @@ runtime behavior or new suite results:
 - `docs/TESTING.md` and `docs/PROJECT_STANDARDS.md` use the same visible-terminal,
   timestamped `logs/` command convention.
 
-## 7. Out of scope
+## 7. Records outside the membership work
+
+These were recorded in this list because it was the current list at the time.
+They were moved here from between the Step 4 records on 2026-10-05; their
+text is otherwise unchanged.
+
+### RaftLog 1.4.1 (2026-10-02)
+
+- **Change.** The root POM pins `raftlog.version` 1.4.1, up from 1.4.0. The
+  WAL and metadata formats are unchanged. Design section 14.7 names the new
+  version.
+- **1.4.1 against Qraft's use of it:**
+  - The removed `FileRaftStorage(boolean)` constructors: Qraft already builds
+    the storage from `RaftStorageConfig` everywhere.
+  - `updateMetadata` refuses a null vote: Qraft passes an `Optional`.
+  - Narrower torn-tail repair, `LogEntryData` compared by content, and the
+    inferred compaction boundary: covered by the storage contract tests
+    below, which pass unchanged.
+- **Defect in the build, found by this upgrade.** After `mvn install`, the
+  runtime JAR still held RaftLog 1.4.0 classes. `qraft-controller` shades its
+  dependencies into its own jar; without `clean`, the shade step starts from
+  the previous shaded jar, whose copy of a dependency wins over the new one.
+  Qraft's own classes were current, so earlier Docker results stand for Qraft
+  code. `docs/TESTING.md` now says to run `mvn clean install` after a
+  dependency change. The cause was fixed the next day; see "One executable
+  jar" below.
+- **Validation,** after `mvn clean install`:
+  - 812 tests, every coverage gate met, including the contract tests of
+    design section 14.7: `RaftLogStorageIntegrationTest`,
+    `RaftNodeRealStorageRecoveryTest`, `RaftNodeRealSnapshotRecoveryTest`,
+    `RaftNodeInstalledSnapshotRealRecoveryTest`, `FileSnapshotStoreTest`, and
+    `RaftStorageProcessLockTest`.
+  - The runtime JAR reports `raftlog-core` 1.4.1.
+  - The Docker suite on that JAR: 23 of 23.
+  - The end-to-end suite was not rerun.
+
+### One executable jar (2026-10-03)
+
+The fix for the build defect above.
+
+- **`qraft-controller` no longer shades.** Its jar holds only its own
+  classes. Nothing used its executable jar: the design makes
+  `qraft-runtime` the one deployment artifact.
+- **`qraft-runtime`'s shade step** now merges `META-INF/services` files and
+  drops jar signatures, which the controller's step had done for it. Its own
+  jar is rebuilt on every build (`forceCreation`), so the shade step never
+  starts from its previous output.
+- **Two faults the controller's fat jar had hidden,** both fixed:
+  - **Logback was missing.** The root POM gives every module Logback in test
+    scope, which kept it out of the runtime's own dependencies. The runtime
+    now declares it in runtime scope.
+  - **Mixed Prometheus exporter versions.** The runtime resolved
+    `opentelemetry-exporter-prometheus` 1.48.0-alpha and Prometheus 1.3.6
+    through the instrumentation BOM, while the controller compiled and
+    tested against 1.59.0-alpha and 1.3.10. The old executable jar held
+    classes of both. The root POM now pins 1.59.0-alpha for every module.
+- **Proof.** With the new poms and no `clean`: a build on RaftLog 1.4.0
+  packaged 1.4.0, and a rebuild after changing the version to 1.4.1
+  packaged 1.4.1.
+- **The new jar against the old one.** It adds nothing. It drops only the
+  second Prometheus copy (the 1.3.6 protobuf exposition format and its
+  bundled protobuf, 794 classes) and seven annotation classes. The gRPC and
+  SLF4J service files are identical, and the jar is 23.5 MB, down from
+  25.6 MB.
+- **Validation,** on a build without `clean`:
+  - `mvn install`: 812 tests, every coverage gate met.
+  - The Docker suite: 23 of 23. The end-to-end suite: 7 of 7.
+  - The packaged jar starts and configures Logback from its own
+    `logback.xml`.
+
+## 8. Out of scope
 
 - Agent membership, which stays outside Raft (design principle 8).
 - Enterprise-style features: redundancy zones and automated upgrade migrations.

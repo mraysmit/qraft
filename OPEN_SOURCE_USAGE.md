@@ -55,9 +55,9 @@ All Java source files must include the following license header:
 ## Third-Party Dependencies
 
 **Reconciled 2026-10-03.** This is the inventory of active, directly declared
-external library dependencies in the reactor POMs, including inherited
-dependencies. Qraft's own modules, Maven plugins, imported BOMs, commented-out
-dependencies, and transitive libraries are not additional rows. The POMs are
+external library dependencies. Since 2026-10-04 they are all declared in the
+one root POM. Maven plugins, imported BOMs, commented-out
+dependencies, and transitive libraries are not additional rows. The POM is
 the version authority; this table is a dated documentation snapshot.
 
 License names below report upstream artifact POM metadata (including inherited
@@ -84,9 +84,9 @@ complete license inventory of the shaded runtime.
 | `net.logstash.logback:logstash-logback-encoder` | 8.1 | Apache License 2.0 and MIT entries |
 | `javax.annotation:javax.annotation-api` | 1.3.2 | CDDL + GPLv2 with Classpath Exception |
 
-Logback is also inherited in test scope throughout the reactor. Production
-modules declare the scope they need, including the runtime's explicit runtime
-dependency so the executable JAR contains its logging backend.
+Logback is declared in compile scope, because `TelemetryConfig` installs the
+OpenTelemetry appender, a Logback appender type; the executable JAR therefore
+contains its logging backend.
 
 ### Test dependencies
 
@@ -98,16 +98,17 @@ dependency so the executable JAR contains its logging backend.
 
 ### Version sources and release inventory
 
-- [pom.xml](pom.xml) manages RaftLog, SLF4J, Logback, the JSON logging encoder,
-  JUnit, and the Testcontainers version property. It imports OpenTelemetry BOM
-  1.59.0 and instrumentation BOM 2.14.0-alpha, and pins the Prometheus exporter
-  at 1.59.0-alpha across modules.
-- Module POMs declare Jackson, gRPC, protobuf, Guava, the JUL bridge, annotations,
-  and Awaitility versions. The controller explicitly declares the SDK and
-  exporter versions; the instrumentation BOM supplies the Logback appender
-  version.
-- Before distribution, resolve the production dependency tree for
-  `qraft-runtime`, compare it with the shaded JAR, and retain the licenses and
+- [pom.xml](pom.xml) is the only POM and declares every version. Properties
+  hold the RaftLog, SLF4J, Logback, JSON logging encoder, Jackson, gRPC,
+  protobuf, JUnit, and Testcontainers versions. Guava, the annotations API,
+  Awaitility, and the OpenTelemetry SDK and OTLP exporter versions are written
+  on their dependencies.
+- It imports OpenTelemetry BOM 1.59.0 and instrumentation BOM 2.14.0-alpha, and
+  pins the Prometheus exporter at 1.59.0-alpha. The instrumentation BOM supplies
+  the Logback appender version. `org.jetbrains:annotations` is pinned at 13.0,
+  so that test dependencies do not raise the copy the executable JAR bundles.
+- Before distribution, resolve the production dependency tree of the build,
+  compare it with the shaded JAR, `target/qraft.jar`, and retain the licenses and
   notices for its actual transitive contents. Test libraries and build plugins
   are separate from that production inventory.
 - Follow [PROJECT_STANDARDS.md](docs/PROJECT_STANDARDS.md#42-test-doubles) for

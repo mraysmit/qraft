@@ -34,12 +34,13 @@ in the published CI branch:
    into the job's `@tools` directory on its first run.
 2. Run `mvn -B --fail-at-end -Dstyle.color=never clean install`: the default tests,
    coverage gates, and a freshly packaged runtime jar.
-3. Run the runtime tests tagged `e2e`, with `test.excludedGroups` cleared.
-4. Run the controller tests tagged `docker` or `slow`, with `test.excludedGroups` cleared.
-   This includes every currently excluded controller test; the Docker fixtures build their own image.
+3. Run the tests tagged `e2e`, with `test.excludedGroups` cleared.
+4. Run the tests tagged `docker` or `slow`, with `test.excludedGroups` cleared.
+   Together with step 3, this covers every test the default build excludes; the Docker fixtures
+   build their own image.
 
 The suites run sequentially, and concurrent Qraft builds are disabled. An end-to-end failure still
-allows the Docker suite to run, while a failed reactor build stops the dependent suites. Maven's exit
+allows the Docker suite to run, while a failed default build stops the dependent suites. Maven's exit
 code is preserved through `tee`, and the build has a one-hour timeout.
 
 Jenkins publishes the JUnit results and archives `logs/`, separate `reports/default`, `reports/e2e`,
@@ -49,10 +50,10 @@ directory, outside the source workspace; each build starts with a fresh checkout
 
 The job uses **Pipeline script from SCM**, **Git**, branch `*/main`, and script path `Jenkinsfile`.
 Builds are started manually; no recurring trigger is configured. See [JENKINS.md](JENKINS.md) for the
-job configuration, Linux fixture requirements, and run results. On 2026-10-03, native write/read
-checks and a full locked 256 MiB `memtester` run confirmed memory corruption in the Jenkins VM.
-The [diagnostic evidence](http://192.168.137.32:8080/job/Qraft-Diagnostics/3/artifact/logs/memtester-locked.log)
-must be investigated on its VMware host before the complete pipeline can be reliably verified.
+job configuration, Linux fixture requirements, and run results. The memory corruption found in the
+Jenkins VM on 2026-10-03 is resolved: the job was recreated on the current server on
+2026-10-04, and JENKINS.md keeps the investigation as a historical record. One Docker test is still
+red on the current server (JENKINS.md, "Current server setup").
 
 ## Run builds in a visible terminal, through `Tee-Object`
 

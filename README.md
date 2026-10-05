@@ -24,19 +24,26 @@ Qraft is a good fit for:
 
 - Qraft persistence defaults to `raftlog-core` as the production WAL-backed Raft storage implementation.
 
-## Modules
+## Structure
 
-- `qraft-raft-engine`: implementation-neutral Raft contracts and primitives
-- `qraft-distributed-state`: deterministic replicated-state commands and projections
-- `qraft-core`: shared service-discovery, health, node, and agent domain types
-- `qraft-agent`: client-mode registration, heartbeat, and local health behavior
-- `qraft-controller`: Raft coordination, replicated state, and control-plane APIs
-- `qraft-runtime`: the executable composition root for `server` and `client` modes
+Qraft is one Maven project that builds one executable jar, `target/qraft.jar`.
+Its code is divided into layers of packages, which a dependency test keeps
+apart:
+
+- Raft contracts: implementation-neutral Raft contracts and primitives
+- Replicated state: deterministic replicated-state commands and projections
+- Shared types: shared service-discovery, health, node, and agent domain types
+- Client: client-mode registration, heartbeat, and local health behavior
+- Server: Raft coordination, replicated state, and control-plane APIs
+- Entry point: the executable composition root for `server` and `client` modes
+
+The packages of each layer are listed in
+[the design document](docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), section 1.1.
 
 ## Quick Start
 
 ```bash
-# Build and test the complete reactor, with the coverage gates
+# Build and test, with the coverage gates
 mvn clean install
 ```
 

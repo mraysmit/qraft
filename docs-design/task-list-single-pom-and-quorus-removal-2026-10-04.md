@@ -1,10 +1,14 @@
 # Task List: Single POM and Removal of the Quorus Leftovers
 
 **Date:** 2026-10-04
-**Status:** Proposed. Starts after the membership list's Step 4 close-out gate; membership Step 5 resumes on the new layout.
-**Followed by:** [`task-list-consul-style-client-2026-10-04.md`](task-list-consul-style-client-2026-10-04.md)
-**Active work:** Phase 2A, intentional-error labelling, added 2026-10-04 at the user's direction before Phase 3. Phases 1 and 2 were done 2026-10-04. The list started at the user's request before the membership Step 4 close-out, whose mutation evidence will be recorded against the refactored source.
-**Related:** [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md) (active), [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md)
+**Status:** In progress. This is the current task list. It started on 2026-10-04 at the user's request, before the membership list's Step 4 close-out gate.
+**Active work:** Phase 2A, intentional-error labelling, added 2026-10-04 at the user's direction before Phase 3. Phases 0 to 2 were done 2026-10-04.
+**Order of work:**
+- The membership list's Step 4 close-out gate is the first task of Phase 7 here.
+- After this list, the membership list resumes at its Step 5, on the new layout, and runs to its end.
+- [`task-list-consul-style-client-2026-10-04.md`](task-list-consul-style-client-2026-10-04.md) follows the membership list. Decided 2026-10-05.
+
+**Related:** [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md) (interrupted by this list), [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md), section 2.4: inherited components must not remain without a clear role
 
 ## 1. Goal
@@ -13,7 +17,7 @@ Ship Qraft as what it now is: one Maven project, one jar, two runtime modes,
 with nothing left of Quorus's file-transfer fleet model, its Vert.x-shaped
 runtime layer, or its unused tooling.
 
-## 2. Decisions (confirm before Phase 1)
+## 2. Decisions
 
 1. **Client mode stays and becomes a full Consul-style client agent.** Decided
    2026-10-04, for VMs and bare metal. That work is
@@ -33,8 +37,12 @@ runtime layer, or its unused tooling.
 
 ## 3. Rules
 
-- Phases 1 to 3 change no behaviour. Evidence: the same tests, by name and
-  count less deleted tests, pass before and after.
+- Phases 1 to 3 change no behaviour, with one exception: Phase 3 renames the
+  log files and the default telemetry service name. Evidence: the same tests,
+  by name and count less deleted tests, pass before and after.
+- Phase 2A changes the test harness. It changes production code only to fix
+  what its inventory finds: an ERROR no test intends, or a failure logged
+  without its exception. Each such change is made test first.
 - Phases 4 to 7 change behaviour: red before green, with recorded mutations for
   safety guards.
 - Each phase ends with `mvn install`; phases touching the runtime, Docker, or
@@ -58,6 +66,12 @@ runtime layer, or its unused tooling.
 suite is `logs/qraft-tests-2026-10-03_23-58-53-674.log`: BUILD SUCCESS with 812
 tests, run on sources identical to HEAD `532e562` apart from documentation. The
 23 Docker and 7 end-to-end cases come from the 2026-10-02 reports.
+
+- [ ] Keep the evidence in the repository (added 2026-10-05). `logs/` is
+  ignored by git, so the baseline lists, `phase2/phase2_restructure.py`, and
+  `tools/log_kinds.py` exist only in the working tree that produced them. Move
+  the two baseline lists and the two tools to a tracked directory before
+  Phase 3, whose exit compares test names with the baseline.
 
 ### Phase 1. Delete dead code and files
 
@@ -260,6 +274,19 @@ intentional ERROR from a real one.
   Events logged between test classes fail the next class to close. Every test
   also fails if the check is not attached to the root logger. In a green build,
   every ERROR line in the log carries one of the two labels.
+- **A late event lands on the next test** (noted 2026-10-05). A thread that
+  outlives its test logs into whichever window is open then. The later test
+  fails for an error it did not cause, or the event counts towards an entry it
+  declared. The failure message names the logging thread. Such a failure is a
+  teardown defect in the earlier test (`PROJECT_STANDARDS.md` section 4.3), and
+  is fixed there, not by declaring the entry in the later test.
+
+**State of `main` (noted 2026-10-05, from reading the code; no build was
+run).** Commit `24beac3` holds the first two tasks below. From that commit the
+check runs for every test, while `IntentionalError` has only its two self-test
+entries and no test declares or injects through it. The default suite on
+`main` is therefore expected to fail, as the inventory task says, until the
+conversion task is done. This phase is committed in parts, unlike the others.
 
 **Tasks.**
 
@@ -326,7 +353,8 @@ its entry and test.
   node types) move to `dev.mars.qraft.common`. The `catalog` and `agent`
   packages that today span two modules are gone.
 
-**Exit:** Same tests as Phase 2; the dependency test uses the new packages.
+**Exit:** Same tests as Phase 2A, changed only where they name a package, a
+log file, or the telemetry service; the dependency test uses the new packages.
 
 ### Phase 4. Node model and API
 
@@ -344,8 +372,9 @@ its entry and test.
 - [ ] Move node registration, heartbeat, deregistration, and listing from
   `/api/v1/agents*` to Consul-aligned `/v1/` routes with the standard error
   envelope and identity headers (for example `GET /v1/catalog/nodes`). Use the
-  paths of the client list's decision 5, so the client-to-server protocol
-  changes only once. Update `HttpCatalogClient`.
+  paths of the client list's decision 5, so the node routes move only once.
+  The service and check write paths move later, in the client list's Phase 1.
+  Update `HttpCatalogClient`.
 - [ ] Remove `/api/v1/info`, `/status`, and bare `/health`. Compose
   healthchecks and the documentation use `/health/live` or `/health/ready`.
 - [ ] Delete the old agent DTO tests. Add node codec, replica-determinism, and
@@ -386,12 +415,22 @@ version source.
 - [ ] Decide whether the nginx load-balancer topology stays, since clients
   rotate through their seeds themselves. Reduce `start.*` and `start-quick.*`
   to the remaining topologies.
+- [ ] Find the cause of the one Docker failure on Jenkins (added 2026-10-05):
+  `DockerAgentRecoveryTest.aKilledFollowerInstallsTheLeadersSnapshotAndThenHoldsTheLeadersHealthState`
+  timed out after 90 seconds in build 2 of 2026-10-04 (`docs/JENKINS.md`),
+  while the Phase 2 run on the development machine passed 30 of 30. An
+  intermittent or machine-dependent failure is a defect
+  (`PROJECT_STANDARDS.md` section 4.4).
 
 **Exit:** `DockerDeploymentContractTest`, the Docker suite, and each remaining
 start command work.
 
 ### Phase 7. Replace the Vert.x-shaped async layer
 
+- [ ] Before any change in this phase, close the membership list's Step 4
+  gate: record its mutation evidence against the source as Phase 6 left it,
+  under the rules of that list's "Step 4 close-out gate". The tests it
+  validates are then the regression net for the changes to `RaftNode` below.
 - [ ] Replace `controller.runtime.Future`, `Promise`, and `AsyncResult` with
   `CompletableFuture` and `CompletionStage` (11 production files import
   them, plus the runtime package itself).
@@ -407,14 +446,37 @@ start command work.
 
 ### Phase 8. Documentation and close-out
 
-- [ ] Rewrite the design's section 1.1 as a package map, and update:
-  - the README;
-  - `PROJECT_STANDARDS.md` section 3;
-  - `TESTING.md` and `JENKINS.md`;
-  - `docker/README.md`;
-  - the version sources in `OPEN_SOURCE_USAGE.md`.
-- [ ] Make the event architecture's `qraft-events` a package, not a module.
-- [ ] Record the removals in the feature validation and the Consul plan checklist.
+**Done early, 2026-10-05,** at the user's direction, for Phases 1 and 2 only:
+the documents below now describe one Maven project, its layers of packages, and
+the removal of `qraft-tenant`. They use the package names of that day.
+- The design's section 1.1 is a package map, and its other module wording is
+  gone.
+- The README, `PROJECT_STANDARDS.md` sections 1, 3, 6.2, 7, and 9, the Consul
+  plan's sections 3 and 4, the event architecture's section 3, and the version
+  sources in `OPEN_SOURCE_USAGE.md`.
+- The feature validation's `qraft-tenant` and `qraft-events` rows, and the
+  build location, frontend source path, and tenancy owner in the administrative
+  interface's plan and task list.
+- The module wording in `TESTING.md` and `JENKINS.md`, and the jar name in
+  `docker/README.md`.
+
+What remains for this phase:
+
+- [ ] Bring the documents above up to date with Phases 3 to 7:
+  - the package and class names of Phase 3, in the design's section 1.1 table
+    first, then the README, `PROJECT_STANDARDS.md` section 3, `TESTING.md`,
+    `JENKINS.md`, and `docker/README.md`;
+  - the log file names of `PROJECT_STANDARDS.md` section 6.2, and its note
+    that both modes write the controller's log;
+  - the version source, in `OPEN_SOURCE_USAGE.md` if Phase 5 changes it.
+- [ ] Record the removals of Phases 4 to 7 in the feature validation and the
+  Consul plan checklist.
+- [ ] Update the administrative interface's plan and task list for Phase 4:
+  the plan's section 4.1, the list's read APIs, its reserved path segments,
+  and the development proxy lose the routes Phase 4 removes: `/api/v1/agents`,
+  `/status`, and bare `/health`.
+- [ ] Update the membership list for its resumption: the class names in its
+  Step 5 contract, after Phases 3 and 5.
 - [ ] Run the final audits:
   - prohibited frameworks;
   - environment-variable configuration;
@@ -422,7 +484,8 @@ start command work.
   - source headers;
   - `git diff --check`;
   - a search for `quorus`, `job`, `transfer`, `fleet`, and `/api/v1`.
-- [ ] Archive this list and resume membership Step 5.
+- [ ] Archive this list and resume the membership list at its Step 5. The
+  client list follows the membership list.
 
 ## 5. Out of scope
 

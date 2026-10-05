@@ -1,7 +1,8 @@
 # Task List: Consul-Style Client Agent
 
 **Date:** 2026-10-04
-**Status:** Proposed. Starts after [`task-list-single-pom-and-quorus-removal-2026-10-04.md`](task-list-single-pom-and-quorus-removal-2026-10-04.md), which provides the `client` package and the new node model and routes.
+**Status:** Proposed. It needs the `client` package and the new node model and routes of [`task-list-single-pom-and-quorus-removal-2026-10-04.md`](task-list-single-pom-and-quorus-removal-2026-10-04.md). It starts after that list and after the rest of [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md), Steps 5 to 8 (decided 2026-10-05).
+**Last updated:** 2026-10-05 (decision 8's takeover and rename rules, the design rule, and exit lines)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 4.3, 5, 6.2, 7.3, 8, 12.1 and 16
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
@@ -63,7 +64,19 @@ All made 2026-10-04. Decisions 5 to 8 follow the Consul pattern.
      node is healthy, with 409 `node_name_reserved`. Once the old node is
      unreachable or reaped, the new ID takes the name, as Consul lets a new ID
      replace a dead node.
-   - The same node ID under a new name renames the node.
+   - **A takeover removes what the old node registered** (decided 2026-10-05).
+     The catalog is keyed by node name, so the old node's services and checks
+     would otherwise pass to the new ID. The command that gives the name to
+     the new ID deregisters them in the same replicated step. The new node
+     starts with nothing and registers its own.
+   - An old node that comes back after a takeover is another node ID asking
+     for a held name. The rule above applies to it: it is refused with
+     `node_name_reserved` while the new holder is healthy.
+   - The same node ID under a new name renames the node. The rename moves the
+     node's services and checks to the new name in the same replicated step,
+     because their identity contains the node name. A rename to a name held by
+     another node ID follows the rule above: refused while that holder is
+     healthy, a takeover otherwise.
 
 ## 3. Rules
 
@@ -72,8 +85,11 @@ All made 2026-10-04. Decisions 5 to 8 follow the Consul pattern.
 - Client HTTP behaviour is tested against real JDK HTTP servers on both sides.
 - Each phase ends with `mvn install`. Phases that change the runtime also run
   the end-to-end suite and the Docker suite on a fresh image.
-- The design document changes in the same phase as the behaviour.
-  The user runs the builds and commits.
+- The design document changes in the same phase as the behaviour. Phase 8
+  only checks that it did.
+- A phase without its own exit line exits on these rules, with each of its
+  endpoints tested over real HTTP.
+- The user runs the builds and commits.
 
 ## 4. Tasks
 
@@ -101,13 +117,26 @@ and Docker suites.
 - [ ] Server side: store the node ID with the node, using a new optional
   protobuf field; older entries load without one.
   - Refuse a held name with `node_name_reserved`.
-  - Allow the takeover once the holder is unreachable or reaped.
-  - Rename a node when its ID returns under a new name.
+  - Allow the takeover once the holder is unreachable or reaped. The takeover
+    command deregisters the old node's services and checks in the same step.
+  - Refuse the old node ID when it returns after a takeover, while the new
+    holder is healthy.
+  - Rename a node when its ID returns under a new name, moving its services
+    and checks to the new name in the same step. Refuse a rename to a name
+    held by a healthy node.
 - [ ] Add fixtures: node entries and snapshots written without a node ID
   still load.
+- [ ] Add replica-determinism tests for the takeover and rename commands:
+  every replica ends with the same nodes, services, and checks.
+- [ ] Record decision 8 in the design: section 7.3, which today says a host
+  name alone is not a sufficient identity, and section 22, which lists agent
+  identity as open and requires a decision record and fixture-based upgrade
+  tests for a change to durable identity.
 
-**Exit:** Red before green, with mutations of the conflict and takeover
-guards. A wiped-directory restart scenario passes end to end.
+**Exit:** Red before green, with mutations of the conflict, takeover, and
+rename guards, including a takeover that leaves the old node's services in
+place and a rename that leaves them under the old name. A wiped-directory
+restart scenario passes end to end.
 
 ### Phase 3. Local API listener
 
@@ -170,10 +199,15 @@ guards. A wiped-directory restart scenario passes end to end.
 - [ ] End-to-end scenario 3: API registrations survive an agent restart, and
   the local API keeps working across a server leader change.
 - [ ] End-to-end scenario 4: a host rebuilt under the same name re-registers
-  only after its old node becomes unreachable.
+  only after its old node becomes unreachable. The old node's services are
+  gone from discovery once it does, and the rebuilt host's own are present.
 - [ ] Docker: two client containers whose applications use only `localhost`.
-- [ ] Update the design, sections 4.3, 5, 6.2, 7.3, 8, 12.1 and 16:
-  applications talk to their local agent, node identity, and the path split.
+  The local API binds to `127.0.0.1` (decision 6), so decide first how the
+  application reaches it: in the client's own container, or in a container
+  that shares the client's network namespace.
+- [ ] Check that the design's sections 4.3, 5, 6.2, 7.3, 8, 12.1 and 16 were
+  updated in their phases: applications talk to their local agent, node
+  identity, and the path split.
 - [ ] Update the feature validation (persisted generated node identity is now
   delivered), the Consul plan checklist, and the Docker client example.
 

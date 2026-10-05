@@ -7,9 +7,10 @@
 **Predecessor:** [`archive/task-list-multi-node-container-acceptance-2026-09-26.md`](../docs/archive/task-list-multi-node-container-acceptance-2026-09-26.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
-This is the current task list for the project. When the active work is complete,
-add a completion summary, move this file to `docs/archive/`, and start a new dated task
-list for the next backlog item.
+This list is paused; the current task list is
+[`task-list-single-pom-and-quorus-removal-2026-10-04.md`](task-list-single-pom-and-quorus-removal-2026-10-04.md).
+When this list's work is complete, add a completion summary and move this file
+to `docs/archive/`.
 
 ## 1. Goal
 
@@ -85,7 +86,7 @@ and corrects the build and security weaknesses the review found.
      used in three files between them, alongside axios.
    - Vite's development server proxies `/v1`, `/api`, `/raft`, and `/health`
      to a local server, as peegeeq does for its backend.
-2. **Build integration.** `frontend-maven-plugin` in `qraft-controller`, with
+2. **Build integration.** `frontend-maven-plugin` in the root `pom.xml`, with
    pinned Node and npm versions, as in peegeeq, but correcting what it does
    differently:
    - `npm ci`, not `npm install`, so the committed `package-lock.json` is never
@@ -208,11 +209,11 @@ real HTTP, each shown failing first.
 
 ## 7. Step 3: Frontend source and reproducible build
 
-1. Create the frontend source under `qraft-controller/src/main/ui/`, using the
+1. Create the frontend source under `src/main/ui/`, using the
    stack in decision 1, with a committed `package-lock.json` and every Node,
    npm, and plugin version pinned.
 2. Build it in `generate-resources` with `npm ci` and `vite build`, as decision 2
-   sets out. Stage the output as generated controller resources under
+   sets out. Stage the output as generated resources under
    `META-INF/qraft/ui/`. The output contains:
    - `index.html`;
    - Vite's asset manifest;
@@ -220,12 +221,12 @@ real HTTP, each shown failing first.
    - no source maps.
 
    None of it is committed.
-3. The existing `qraft-runtime` shade build carries those resources, adding no
-   domain logic to `qraft-runtime`.
+3. The build's shade step carries those resources into `target/qraft.jar`,
+   adding no domain logic to the entry-point package.
 
 **Exit gate.** A clean `mvn package` on a machine without Node installed
 produces a runtime JAR that contains the manifest and every asset it lists, and
-no source maps. A controller test reads the packaged resources through the
+no source maps. A server test reads the packaged resources through the
 classloader. Vitest runs in `mvn test`.
 
 ## 8. Step 4: First Stage 1 read-only views
@@ -262,7 +263,7 @@ fail.
 
 ## 10. Step 6: Verification and close-out
 
-1. Run the full default reactor, the Docker-tagged suite, the Mockito,
+1. Run the full default suite, the Docker-tagged suite, the Mockito,
    environment-variable, and `orTimeout` scans, the header audit, and
    `git diff --check`.
 2. Mark the embedded administrative interface criterion in design section 21,

@@ -26,15 +26,15 @@ sets its own Java environment without changing other jobs' Java installations.
 
 ## Suites and results
 
-1. **Default tests and coverage gates:** `mvn -B --fail-at-end -Dstyle.color=never clean install`
-   across the complete reactor. This also builds the executable runtime jar needed by Docker tests.
+1. **Default tests and coverage gates:** `mvn -B --fail-at-end -Dstyle.color=never clean install`.
+   This also builds `target/qraft.jar`, the executable jar the Docker tests need.
 2. **End-to-end tests:** `mvn -B -Dstyle.color=never test -Dgroups=e2e -Dtest.excludedGroups=`.
 3. **Docker cluster tests:** `mvn -B -Dstyle.color=never test '-Dgroups=docker|slow' -Dtest.excludedGroups=`.
-   Including `slow` also covers that controller group if tests are tagged with it later.
+   Including `slow` also covers that group if tests are tagged with it later.
 
 Every Maven command uses the job's Maven repository cache, streams combined output to the Jenkins
 console and a timestamped file under `logs/`, and preserves Maven's exit status through `tee`.
-Builds and suites run sequentially. A failed reactor build stops the dependent suites; an end-to-end
+Builds and suites run sequentially. A failed default build stops the dependent suites; an end-to-end
 failure still allows Docker tests to run. The build timeout is one hour.
 
 JUnit results appear under **Test Result**. Build artifacts contain the logs, complete Surefire reports
@@ -50,7 +50,37 @@ them, so a configuration created by the Jenkins user cannot be read by a bind-mo
 test configurations on POSIX filesystems. The image continues to run with its normal user, and the mounts
 remain read-only. The existing Docker topology and storage-lock tests exercise these configurations.
 
-## Initial verification, 2026-10-03
+## Current server setup, 2026-10-04
+
+The memory fault recorded in the historical sections below is resolved, and the `Qraft` job was
+recreated on the current Jenkins server as a Pipeline from SCM using `main` and
+the root `Jenkinsfile`. The built-in node retains its `peegeeq-linux` label and also has the `linux`
+label required by this pipeline. The job is manually triggered, prevents concurrent runs, and retains
+20 builds plus artifacts from the latest 10 builds.
+
+[Build 1](http://192.168.137.32:8080/job/Qraft/1/) verified checkout, JDK 27 provisioning, Maven,
+Docker, report publication, and artifact archival. Its 803 default tests and 7 end-to-end tests passed.
+The first Docker class exceeded its 15-second cluster startup deadline while Testcontainers downloaded
+the `alpine/socat` helper image; the remaining Docker classes passed.
+
+[Build 2](http://192.168.137.32:8080/job/Qraft/2/) confirmed the cached-startup case: both
+`DockerRunningPartitionTest` tests passed. It published 833 JUnit results and 682 artifacts. One Docker
+recovery case remained red:
+`DockerAgentRecoveryTest.aKilledFollowerInstallsTheLeadersSnapshotAndThenHoldsTheLeadersHealthState`
+timed out after 90 seconds while waiting for the restarted follower to install and expose the leader's
+snapshot state. This is a test/product integration result rather than a Jenkins configuration failure.
+Finding its cause is a task in Phase 6 of
+[the single-POM task list](../docs-design/task-list-single-pom-and-quorus-removal-2026-10-04.md).
+Until it is found, the complete pipeline has not passed on this server.
+
+## Historical: the memory fault, 2026-10-03
+
+The two sections below describe the Jenkins server as it was on 2026-10-03, when its memory was
+faulty. They are kept as a record. The `Qraft` job was recreated on 2026-10-04, so the build links in them now
+open the current job's builds of the same number, not the builds described, and the
+`Qraft-Diagnostics` links may no longer resolve.
+
+### Initial verification, 2026-10-03
 
 [Build 1](http://192.168.137.32:8080/job/Qraft/1/) ran 842 tests: 812 default tests and all coverage gates
 passed, all 7 end-to-end tests passed, and the Docker suite ran 23 tests with 11 failures/errors.
@@ -64,7 +94,7 @@ full suite. The host Docker CLI also crashed with `SIGSEGV` during an isolated d
 These observations require server-level diagnosis; neither increasing test timeouts nor rerunning
 unchanged tests establishes compatibility. No recurring build trigger is enabled.
 
-## Memory corruption investigation, 2026-10-03
+### Memory corruption investigation, 2026-10-03
 
 [Build 3](http://192.168.137.32:8080/job/Qraft/3/) verified checkout of the published CI revision
 `50e28d75c634f79d5c23b64d0fb2addfbe9aced2`. It stopped after 314 reported passing tests when the
@@ -103,26 +133,6 @@ into the diagnostic workspace, without installing an OS package. The full locked
 temporary container with read-only mounts of the utility and host C libraries. Its container was
 removed after completion. No global Jenkins, Java, Docker, or VM settings were changed.
 
-Further diagnosis needs access to the machine hosting this VM: review its VMware and hardware
-error logs and test the host's memory. Recheck memory integrity after resolving the host/VM fault,
-then rerun Qraft's full pipeline to verify the Linux fixture fix and all suites. The published
-pipeline remains available, but successful execution of every suite is still outstanding.
-
-## Current server setup, 2026-10-04
-
-The `Qraft` job was recreated on the current Jenkins server as a Pipeline from SCM using `main` and
-the root `Jenkinsfile`. The built-in node retains its `peegeeq-linux` label and also has the `linux`
-label required by this pipeline. The job is manually triggered, prevents concurrent runs, and retains
-20 builds plus artifacts from the latest 10 builds.
-
-[Build 1](http://192.168.137.32:8080/job/Qraft/1/) verified checkout, JDK 27 provisioning, Maven,
-Docker, report publication, and artifact archival. Its 803 default tests and 7 end-to-end tests passed.
-The first Docker class exceeded its 15-second cluster startup deadline while Testcontainers downloaded
-the `alpine/socat` helper image; the remaining Docker classes passed.
-
-[Build 2](http://192.168.137.32:8080/job/Qraft/2/) confirmed the cached-startup case: both
-`DockerRunningPartitionTest` tests passed. It published 833 JUnit results and 682 artifacts. One Docker
-recovery case remained red:
-`DockerAgentRecoveryTest.aKilledFollowerInstallsTheLeadersSnapshotAndThenHoldsTheLeadersHealthState`
-timed out after 90 seconds while waiting for the restarted follower to install and expose the leader's
-snapshot state. This is a test/product integration result rather than a Jenkins configuration failure.
+At the time, further diagnosis needed access to the machine hosting the VM, and the fixture fix
+and the full pipeline were unverified. The fault has since been resolved and the job recreated;
+see "Current server setup" above for the runs on the current server.

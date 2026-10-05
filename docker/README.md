@@ -71,7 +71,7 @@ services:
 Outside the container entrypoint, the JVM locator is the third supported method:
 
 ```text
-java -Dqraft.config=/opt/qraft/client.json -jar qraft-runtime.jar client
+java -Dqraft.config=/opt/qraft/client.json -jar qraft.jar client
 ```
 
 The `--config` argument has highest precedence, followed by the `qraft.config` JVM
