@@ -33,6 +33,8 @@ import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.controller.state.RaftCommand;
 import dev.mars.qraft.controller.state.RaftCommandResult;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
+import dev.mars.qraft.testing.fault.InjectedFault;
+import dev.mars.qraft.testing.fault.IntentionalErrors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -42,6 +44,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
+import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_FENCED_OPERATION;
+import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_STATE_MACHINE_APPLY_FAILURE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -74,6 +78,7 @@ class RaftNodeApplyFailureTest {
 
     @Test
     void aLeaderThatCannotApplyACommittedEntryFencesAndKeepsItsAppliedIndex() throws Exception {
+        IntentionalErrors.expect(RAFT_FENCED_OPERATION, 1);
         start(Set.of("node-1"));
         awaitLeader();
         submit("before").get(10, TimeUnit.SECONDS);
@@ -94,6 +99,7 @@ class RaftNodeApplyFailureTest {
 
     @Test
     void aFollowerStopsApplyingAtTheEntryItCannotApply() throws Exception {
+        IntentionalErrors.expect(RAFT_FENCED_OPERATION, 1);
         start(Set.of("node-1", "leader"));
         AppendEntriesResponse response = node.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
                         .setTerm(1).setLeaderId("leader").setPrevLogIndex(1).setPrevLogTerm(0).setLeaderCommit(4)
@@ -154,7 +160,8 @@ class RaftNodeApplyFailureTest {
     /** Applies commands to a real store, except that a put of {@link #POISON} throws. */
     private static final class PoisonedStateMachine implements RaftLogApplicator {
         static final String POISON = "poison";
-        static final IllegalStateException FAILURE = new IllegalStateException("cannot apply the poison command");
+        static final IllegalStateException FAILURE = new IllegalStateException("cannot apply the poison command",
+                new InjectedFault(RAFT_STATE_MACHINE_APPLY_FAILURE, "cannot apply the poison command"));
 
         final QraftStateStore store = new QraftStateStore();
 

@@ -16,6 +16,8 @@
 
 package dev.mars.qraft.controller.raft;
 
+import dev.mars.qraft.testing.fault.IntentionalErrors;
+
 import com.google.protobuf.ByteString;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
@@ -82,6 +84,7 @@ class InstallSnapshotTest {
 
     @Test
     void aFollowerCutOffDuringCompactionCatchesUpByInstallingTheLeadersSnapshot() throws Exception {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
         Cluster nodes = compactWhileNode3IsCutOff(8);
 
         InMemoryTransportSimulator.healPartitions();
@@ -92,6 +95,7 @@ class InstallSnapshotTest {
 
     @Test
     void aFollowerRestoredFromASnapshotKeepsReplicatingTheEntriesThatFollowIt() throws Exception {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
         Cluster nodes = compactWhileNode3IsCutOff(6);
         InMemoryTransportSimulator.healPartitions();
         cluster.heartbeatUntil(nodes.leader(), () -> nodes.node3().getSnapshotLastIndex() > 0,
@@ -105,6 +109,7 @@ class InstallSnapshotTest {
 
     @Test
     void theLeaderMovesAFollowersNextIndexPastTheSnapshotItInstalled() throws Exception {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
         Cluster nodes = compactWhileNode3IsCutOff(7);
         long leaderSnapshotIndex = nodes.leader().getSnapshotLastIndex();
 

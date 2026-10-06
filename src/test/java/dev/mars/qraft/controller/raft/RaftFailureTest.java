@@ -29,11 +29,11 @@ import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.controller.state.RaftCommand;
 import dev.mars.qraft.controller.state.RaftCommandResult;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
+import dev.mars.qraft.testing.fault.InjectedFault;
+import dev.mars.qraft.testing.fault.IntentionalErrors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.List;
 import java.util.Map;
@@ -46,6 +46,8 @@ import java.util.function.Consumer;
 
 import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
 import static dev.mars.qraft.controller.raft.ManualRaftCluster.startAll;
+import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE;
+import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_TRANSPORT_FAILURE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -65,8 +67,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @since 2025-08-20
  */
 class RaftFailureTest {
-    private static final Logger LOG = LoggerFactory.getLogger(RaftFailureTest.class);
-
     private JavaRuntime runtime;
     private ManualRaftCluster cluster;
     private RaftNode node1;
@@ -113,6 +113,7 @@ class RaftFailureTest {
 
     @Test
     void aSurvivingMemberIsElectedInANewTermAfterTheLeaderStops() throws Exception {
+        IntentionalErrors.expect(RAFT_PEER_UNREACHABLE);
         startAll(node1, node2, node3);
         cluster.elect(node1);
         cluster.heartbeatUntil(node1, () -> followsNode1(node2) && followsNode1(node3), "both follow node1");
@@ -129,6 +130,7 @@ class RaftFailureTest {
 
     @Test
     void aLeaderKeepsLeadingAndCommittingWhileAMajorityRemains() throws Exception {
+        IntentionalErrors.expect(RAFT_PEER_UNREACHABLE);
         startAll(node1, node2, node3);
         cluster.elect(node1);
         cluster.heartbeatUntil(node1, () -> followsNode1(node2) && followsNode1(node3), "both follow node1");
@@ -182,7 +184,7 @@ class RaftFailureTest {
         RaftTransport failingTransport = new RaftTransport() {
             @Override
             public void start(Consumer<RaftMessage> messageHandler) {
-                throw new RuntimeException("Transport failed to start");
+                throw new InjectedFault(RAFT_TRANSPORT_FAILURE, "Transport failed to start");
             }
 
             @Override
@@ -190,17 +192,17 @@ class RaftFailureTest {
 
             @Override
             public Future<VoteResponse> sendVoteRequest(String nodeId, VoteRequest request) {
-                return Future.failedFuture(new RuntimeException("Network error"));
+                return Future.failedFuture(new InjectedFault(RAFT_TRANSPORT_FAILURE, "Network error"));
             }
 
             @Override
             public Future<AppendEntriesResponse> sendAppendEntries(String nodeId, AppendEntriesRequest request) {
-                return Future.failedFuture(new RuntimeException("Network error"));
+                return Future.failedFuture(new InjectedFault(RAFT_TRANSPORT_FAILURE, "Network error"));
             }
 
             @Override
             public Future<InstallSnapshotResponse> sendInstallSnapshot(String nodeId, InstallSnapshotRequest request) {
-                return Future.failedFuture(new RuntimeException("Network error"));
+                return Future.failedFuture(new InjectedFault(RAFT_TRANSPORT_FAILURE, "Network error"));
             }
         };
         RaftNode failingNode = cluster.add(cluster.builder("failing", Set.of("failing"), failingTransport,
@@ -210,8 +212,6 @@ class RaftFailureTest {
 
         assertInstanceOf(RuntimeException.class, exception.getCause());
         assertEquals("Transport failed to start", exception.getCause().getMessage());
-        LOG.info("[EXPECTED-TEST-FAILURE] Scenario=transport start failure message={}",
-                exception.getCause().getMessage());
     }
 
     // ---------------------------------------------------------------------------------------------------

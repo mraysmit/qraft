@@ -23,8 +23,6 @@ import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
-import dev.mars.qraft.controller.testsupport.RemediationTest;
-import dev.mars.qraft.controller.testsupport.RemediationTestExtension;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import dev.mars.qraft.raft.api.SnapshotStore;
 import dev.mars.raftlog.storage.FileRaftStorage;
@@ -59,7 +57,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @since 2026-09-14
  * @version 1.0
  */
-@RemediationTest(phase = "6-real-snapshot", scenarioPrefix = "RAFT-SNAPSHOT-RECOVERY")
 class RaftNodeRealSnapshotRecoveryTest {
     private static final ProtobufRaftCommandCodec CODEC = new ProtobufRaftCommandCodec();
     private static final Set<String> MEMBERS = Set.of("node-1");
@@ -98,8 +95,6 @@ class RaftNodeRealSnapshotRecoveryTest {
         seedWal();
         SnapshotStore.SnapshotData replacement = replacementSnapshot();
         String checkpoint = "AFTER_TEMPORARY_FORCE";
-        RemediationTestExtension.logExpectedFailure(
-                checkpoint, "ProcessHalt", "first snapshot is forced but not published");
         ProcessResult crash = runCrashWriter(checkpoint, replacement);
         assertEquals(SnapshotStoreCrashWriter.HALT_EXIT_CODE, crash.exitCode(), crash.output());
 
@@ -135,8 +130,6 @@ class RaftNodeRealSnapshotRecoveryTest {
             long expectedSnapshotIndex,
             List<Long> expectedWalIndexes) throws Exception {
         SnapshotStore.SnapshotData replacement = seedStorage();
-        RemediationTestExtension.logExpectedFailure(
-                checkpoint, "ProcessHalt", "fixture halts without closing snapshot or WAL storage");
         ProcessResult crash = runCrashWriter(checkpoint, replacement);
         assertEquals(SnapshotStoreCrashWriter.HALT_EXIT_CODE, crash.exitCode(), crash.output());
 

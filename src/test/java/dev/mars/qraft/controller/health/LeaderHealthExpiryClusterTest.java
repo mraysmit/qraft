@@ -16,6 +16,8 @@
 
 package dev.mars.qraft.controller.health;
 
+import dev.mars.qraft.testing.fault.IntentionalErrors;
+
 import dev.mars.qraft.catalog.ServiceKey;
 import dev.mars.qraft.catalog.HealthCheckState;
 import dev.mars.qraft.catalog.HealthObservation;
@@ -117,6 +119,7 @@ class LeaderHealthExpiryClusterTest {
 
     @Test
     void aReplacementLeaderWithASkewedClockGrantsGraceAndConvergesOnOneResult() throws Exception {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
         String oldLeader = startCluster("a", "b", "c");
         Map<String, Duration> skew = new LinkedHashMap<>();
         nodes.keySet().stream().filter(id -> !id.equals(oldLeader)).forEach(id -> skew.put(id, Duration.ofHours(1)));

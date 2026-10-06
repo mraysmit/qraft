@@ -28,11 +28,11 @@ import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.controller.state.RaftCommandResult;
-import dev.mars.qraft.controller.testsupport.RemediationTest;
-import dev.mars.qraft.controller.testsupport.RemediationTestExtension;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import dev.mars.qraft.raft.api.SnapshotStore;
 import dev.mars.raftlog.storage.RaftStorage;
+import dev.mars.qraft.testing.fault.InjectedFault;
+import dev.mars.qraft.testing.fault.IntentionalErrors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,6 +50,9 @@ import java.util.function.Consumer;
 
 import static dev.mars.qraft.controller.raft.RaftAwait.awaitStateLoop;
 import static dev.mars.qraft.controller.raft.RaftAwait.await;
+import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_RESOURCE_SHUTDOWN_FAILURE;
+import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_STARTUP_DRAINING;
+import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_TRANSPORT_FAILURE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -66,7 +69,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @since 2026-09-14
  * @version 1.1
  */
-@RemediationTest(phase = "6-shutdown", scenarioPrefix = "RAFT-SHUTDOWN")
 class RaftNodeShutdownSequencingTest {
     private JavaRuntime runtime;
     private ShutdownStorage storage;
@@ -261,6 +263,7 @@ class RaftNodeShutdownSequencingTest {
 
     @Test
     void stopDuringRecoveryWaitsAndPreventsLateStartup() {
+        IntentionalErrors.expect(RAFT_STARTUP_DRAINING);
         await(node.stop());
         storage = new ShutdownStorage(closeEvents);
         storage.open(null).join();
@@ -295,12 +298,10 @@ class RaftNodeShutdownSequencingTest {
         storage = new ShutdownStorage(closeEvents);
         storage.open(null).join();
         transport = new ShutdownTransport(closeEvents);
-        IllegalStateException startFailure =
-                new IllegalStateException("transport failed after partial start");
+        InjectedFault startFailure = new InjectedFault(
+                RAFT_TRANSPORT_FAILURE, "transport failed after partial start");
         transport.startFailure = startFailure;
         node = buildNode(Set.of("node-1"));
-        RemediationTestExtension.logExpectedFailure(
-                "partial-transport-start", startFailure);
 
         CompletionException failedStart = assertThrows(CompletionException.class,
                 () -> await(node.start()));
@@ -365,14 +366,12 @@ class RaftNodeShutdownSequencingTest {
 
     @Test
     void shutdownAttemptsEveryCloseAndReportsCombinedFailure() {
-        IllegalStateException transportFailure =
-                new IllegalStateException("transport close failed");
-        IllegalStateException storageFailure =
-                new IllegalStateException("storage close failed");
+        InjectedFault transportFailure = new InjectedFault(
+                RAFT_RESOURCE_SHUTDOWN_FAILURE, "transport close failed");
+        InjectedFault storageFailure = new InjectedFault(
+                RAFT_RESOURCE_SHUTDOWN_FAILURE, "storage close failed");
         transport.stopFailure = transportFailure;
         storage.closeFailure = storageFailure;
-        RemediationTestExtension.logExpectedFailure(
-                "transport-and-storage-close", transportFailure);
 
         CompletionException shutdown = assertThrows(CompletionException.class,
                 () -> await(node.stop()));

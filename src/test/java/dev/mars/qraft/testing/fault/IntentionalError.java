@@ -45,6 +45,91 @@ public enum IntentionalError {
     /** Used only by the tests of this package, which test the labelling and checks themselves. */
     SELF_TEST_INJECTED_FAILURE,
 
+    /** A test transport's message handler fails while a delayed request is being delivered. */
+    TRANSPORT_HANDLER_FAILURE,
+
+    /** A shutdown hook throws or completes with a failure supplied by its test. */
+    SHUTDOWN_HOOK_FAILURE,
+
+    /** A test storage implementation refuses a Raft metadata update. */
+    RAFT_METADATA_PERSISTENCE_FAILURE,
+
+    /** A test state machine refuses to apply a committed command. */
+    RAFT_STATE_MACHINE_APPLY_FAILURE,
+
+    /** A test transport fails during start or while serving an RPC. */
+    RAFT_TRANSPORT_FAILURE,
+
+    /** A test makes Raft transport or storage resource shutdown fail. */
+    RAFT_RESOURCE_SHUTDOWN_FAILURE,
+
+    /** A test storage fails a WAL mutation after or during its durable transition. */
+    RAFT_WAL_TRANSITION_FAILURE,
+
+    /** A test snapshot store or state machine fails snapshot publication, restoration, or compaction. */
+    RAFT_SNAPSHOT_OPERATION_FAILURE,
+
+    /** A test storage fails recovery while an installed snapshot is being reconciled with the WAL. */
+    RAFT_RECOVERY_STORAGE_FAILURE,
+
+    /** Bootstrap refuses a peer whose advertised server list disagrees with the local list. */
+    BOOTSTRAP_SERVER_LISTS_DISAGREE("dev.mars.qraft.controller.raft.ClusterBootstrap", Level.ERROR,
+            "Bootstrap refused: \\S+ answers as \\S+ and lists \\[.*], but this server lists \\[.*]"),
+
+    /** A second WAL writer is deliberately opened against a directory whose lock is already held. */
+    WAL_DIRECTORY_ALREADY_LOCKED("dev.mars.raftlog.storage.FileRaftStorage", Level.ERROR,
+            "Cannot acquire exclusive lock at .*[\\\\/]raft\\.lock: lock already held in this JVM"),
+
+    /** A test corrupts a complete, acknowledged WAL record and verifies that replay fences the storage. */
+    WAL_AMBIGUOUS_CORRUPTION("dev.mars.raftlog.storage.FileRaftStorage", Level.ERROR,
+            "WAL contains ambiguous corruption: WAL .*[\\\\/]raft\\.log is corrupt at byte \\d+ of \\d+;"
+                    + " \\d+ entries precede the damage\\. Not repaired: restore this node from its peers\\."
+                    + " Storage instance is now fenced; close it and open a fresh instance"),
+
+    /** A best-effort hook is deliberately left incomplete past its test's shutdown deadline. */
+    BEST_EFFORT_SHUTDOWN_HOOK_TIMEOUT("dev.mars.qraft.controller.lifecycle.ShutdownCoordinator", Level.ERROR,
+            "Best-effort shutdown hook 'slow' timed out after 50 ms"),
+
+    /** A critical hook is deliberately left incomplete, producing its hook and overall-shutdown errors. */
+    CRITICAL_SHUTDOWN_HOOK_TIMEOUT("dev.mars.qraft.controller.lifecycle.ShutdownCoordinator", Level.ERROR,
+            "(?:Critical shutdown hook 'node-stop' timed out after 50 ms"
+                    + "|Shutdown failed before resources could be closed safely: null)"),
+
+    /** Recovery refuses legacy Raft state that has no recorded cluster configuration. */
+    RAFT_STATE_WITHOUT_CONFIGURATION("dev.mars.qraft.controller.raft.RaftNode", Level.ERROR,
+            "Failed to recover Raft state from storage: Node \\S+ holds Raft state but no cluster configuration:"
+                    + " the data predates configurations in the log and is not upgraded; start it on an empty"
+                    + " data directory"),
+
+    /** A follower refuses an append that would overwrite an entry it has already committed. */
+    COMMITTED_ENTRY_REPLACEMENT("dev.mars.qraft.controller.raft.RaftNode", Level.ERROR,
+            "Refusing AppendEntries from leader \\S+: it would replace the committed entry at index \\d+"
+                    + " \\(commit index \\d+\\)"),
+
+    /** A stopped or partitioned Raft peer is deliberately made unreachable. */
+    RAFT_PEER_UNREACHABLE("dev.mars.qraft.controller.raft.RaftNode", Level.ERROR,
+            "(?:Raft peer \\S+ became unreachable during AppendEntries|Failed to retrieve vote from \\S+)"),
+
+    /** A test deliberately fences the transition sequencer and then exercises a rejected operation. */
+    RAFT_FENCED_OPERATION("dev.mars.qraft.controller.raft.RaftNode", Level.ERROR,
+            "(?:Failed to persist command to WAL|AppendEntries failed during durable transition"
+                    + "|Failed to establish leadership no-op for term \\d+):"
+                    + " Raft transition sequencer is fenced"),
+
+    /** A test fills the bounded transition queue and verifies that client admission is rejected. */
+    RAFT_TRANSITION_QUEUE_FULL("dev.mars.qraft.controller.raft.RaftNode", Level.ERROR,
+            "Failed to persist command to WAL: Raft transition queue capacity \\d+ has been reached"),
+
+    /** Startup propagates a deliberately corrupted WAL failure through both recovery log sites. */
+    RAFT_RECOVERY_AMBIGUOUS_CORRUPTION("dev.mars.qraft.controller.raft.RaftNode", Level.ERROR,
+            "(?:Recovery failed|Failed to recover Raft state from storage): WAL .* is corrupt at byte \\d+ of \\d+;"
+                    + " \\d+ entries precede the damage\\. Not repaired: restore this node from its peers\\."),
+
+    /** Stopping during recovery deliberately makes already-scheduled startup work encounter the drain. */
+    RAFT_STARTUP_DRAINING("dev.mars.qraft.controller.raft.RaftNode", Level.ERROR,
+            "Failed to (?:establish leadership no-op for term \\d+|recover Raft state from storage):"
+                    + " Raft transition sequencer is draining"),
+
     /** Used only by the tests of this package, which test the labelling and checks themselves. */
     SELF_TEST_INTENTIONAL_ERROR("dev.mars.qraft.testing.fault.selftest", Level.ERROR,
             "Self-test intentional error \\d+");

@@ -63,7 +63,7 @@ runtime layer, or its unused tooling.
 | 0. Baseline | Done, with one task added since | 2 of 3 | none: its output is in `logs/` |
 | 1. Delete dead code and files | Done; verified against the code | 6 of 6 | `bbf5046` |
 | 2. Single POM | Done; verified against the code | 7 of 7 | `04dddeb` |
-| 2A. Intentional errors labelled | In progress: the mechanism and its tests are built, no test uses them yet | 2 of 9 | `24beac3`, in part |
+| 2A. Intentional errors labelled | In progress: default-suite conversion complete | 5 of 9 | `24beac3`, in part |
 | 3. Package layout | Not started; five tasks added by the review | 0 of 10 | |
 | 4. Node model and API | Not started; one task added | 0 of 7 | |
 | 5. Configuration and version | Not started; two tasks added | 0 of 6 | |
@@ -362,7 +362,7 @@ conversion task is done. This phase is committed in parts, unlike the others.
     `META-INF/services` and `junit.jupiter.extensions.autodetection.enabled`;
   - `LogbackConfigurationAudit`.
 
-  `config/logback-test.xml` writes `%intentional` right after `%-5level` in
+  `src/test/resources/logback-test.xml` writes `%intentional` right after `%-5level` in
   both appenders and attaches the check to the root logger first.
 - [x] Tests of the mechanism (2026-10-04):
   - `IntentionalErrorsTest`: labels and checks;
@@ -385,18 +385,80 @@ conversion task is done. This phase is committed in parts, unlike the others.
   the extension is registered through `META-INF/services` and
   `junit-platform.properties`, the check is the root logger's first appender,
   and the four test classes hold 22 tests (11, 4, 5, and 2).
-- [ ] Make tests runnable from an IDE (review of 2026-10-05). Only Surefire
-  passes `logback.configurationFile`, and no `logback-test.xml` is on the
-  test classpath. A test started from an IDE loads the production
-  `logback.xml`, finds no check on the root logger, and fails. Either put the
-  test configuration on the test classpath, or document the JVM argument in
-  `docs/TESTING.md`. Decide which.
-- [ ] Inventory run: `mvn test`. Expected to fail widely; each failure lists
-  the test's unlabelled errors. Record the list here.
-- [ ] Convert every injected fault to `InjectedFault`, and declare every
+- [x] Make tests runnable from an IDE (2026-10-06). The test configuration is
+  `src/test/resources/logback-test.xml`, so Logback discovers it from the test
+  runtime classpath in Maven and an IDE. Surefire no longer passes
+  `logback.configurationFile`, and there is no second copy of the configuration
+  to drift. TDD evidence: the new classpath-resource test first failed alone
+  (6 tests, 1 failure), then the same class passed (6 tests) after the move.
+- [x] Inventory run: `mvn test` (2026-10-06). It ran all 833 default tests and
+  failed as intended: 65 test methods reported 125 unlabelled throwable events
+  (123 at ERROR, one at WARN, and one at DEBUG). Eight additional class-container
+  failures were secondary: `RemediationTestExtension` logged those test failures
+  at ERROR. The primary events were emitted by `RaftNode` (112),
+  `ShutdownCoordinator` (7), `FileRaftStorage` (4), `ClusterBootstrap` (1), and
+  `InMemoryTransportSimulator` (1).
+
+  | Test class | Failing methods | Events |
+  |---|---:|---:|
+  | `LeaderHealthExpiryClusterTest` | 1 | 4 |
+  | `HttpApiServerOperatorTest` | 1 | 3 |
+  | `HttpApiServerReadinessTest` | 1 | 2 |
+  | `HttpApiServerTest` | 2 | 5 |
+  | `ShutdownCoordinatorTest.HookExecutionTests` | 1 | 1 |
+  | `ShutdownCoordinatorTest.TimeoutHandlingTests` | 4 | 6 |
+  | `ClusterBootstrapTest` | 1 | 1 |
+  | `EnhancedInMemoryTransportTest` | 3 | 15 |
+  | `GrpcRaftIntegrationTest` | 3 | 4 |
+  | `InMemoryTransportSimulatorTest` | 1 | 1 |
+  | `InstallSnapshotTest` | 3 | 6 |
+  | `MembershipServiceTest` | 3 | 4 |
+  | `RaftFailureTest` | 3 | 4 |
+  | `RaftNodeApplyFailureTest` | 2 | 4 |
+  | `RaftNodeConfigurationChangeTest` | 3 | 5 |
+  | `RaftNodeConfigurationTest` | 2 | 2 |
+  | `RaftNodeInstalledSnapshotRealRecoveryTest` | 1 | 2 |
+  | `RaftNodeInstalledSnapshotSequencingTest` | 4 | 7 |
+  | `RaftNodeLogSequencingTest` | 7 | 11 |
+  | `RaftNodeMembershipTest` | 5 | 9 |
+  | `RaftNodeModelTest` | 1 | 8 |
+  | `RaftNodeRealStorageRecoveryTest` | 1 | 3 |
+  | `RaftNodeServerIdentityTest` | 1 | 2 |
+  | `RaftNodeShutdownSequencingTest` | 3 | 3 |
+  | `RaftNodeSnapshotSequencingTest` | 3 | 5 |
+  | `RaftNodeTest` | 3 | 6 |
+  | `RaftLogStorageIntegrationTest` | 2 | 2 |
+
+  One separate failure was not from the check:
+  `RaftNodeOutboundSnapshotGenerationTest#staleSnapshotFailureCannotCancelCurrentLeadershipTransfer`
+  expected next index 3 but observed 4. It passed immediately when run alone. That
+  is an intermittent defect under `PROJECT_STANDARDS.md` section 4.4 and must be
+  made deterministic during the conversion, not hidden as an intentional error.
+- [x] Convert every injected fault to `InjectedFault`, and declare every
   intentional error with `expect`. Fix the cause of any ERROR that is neither,
   and any production code that logs a failure without its exception. Replace
   `logExpectedFailure` and `@RemediationTest`.
+
+  Completed (2026-10-06): all 125 events from the inventory's 65 test methods
+  are converted. Injected transport, shutdown, persistence, snapshot,
+  state-machine, and RPC failures carry `InjectedFault`; tests declare the
+  expected bootstrap, WAL, shutdown, configuration, peer, committed-entry,
+  fencing, queue-saturation, recovery, and startup-draining errors. Required
+  outer exception types are preserved with `InjectedFault` attached as a
+  cause. The legacy `RemediationTest`, `RemediationTestExtension`,
+  `logExpectedFailure`, and `[EXPECTED-TEST-FAILURE]` mechanism is removed.
+
+  TDD checkpoints found and corrected over-declarations and timing variants,
+  including startup draining and asynchronous fencing. The inventory's
+  intermittent
+  `RaftNodeOutboundSnapshotGenerationTest#staleSnapshotFailureCannotCancelCurrentLeadershipTransfer`
+  assertion was made deterministic: acknowledgement must advance `nextIndex`
+  at least past the snapshot boundary, while subsequent replication may move
+  it farther. The focused regression test passed, followed by the complete
+  default suite: 825 tests, no failures or errors. Its log
+  (`qraft-maven-tests-2026-10-06_13-12-03.log`) contains 126 labelled events
+  (the timing-dependent peer count can exceed the inventory run), 124 ERROR
+  lines, and zero unlabelled ERROR lines.
 - [ ] Docker suite:
   - collect each container's log under `logs/docker/<class>/`;
   - every ERROR in it must match an `IntentionalError` the class declares, and

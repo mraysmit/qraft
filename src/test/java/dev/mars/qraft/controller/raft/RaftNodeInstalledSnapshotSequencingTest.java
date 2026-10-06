@@ -16,9 +16,6 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.controller.testsupport.RemediationTest;
-import dev.mars.qraft.controller.testsupport.RemediationTestExtension;
-
 import com.google.protobuf.ByteString;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
@@ -35,6 +32,8 @@ import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import dev.mars.qraft.raft.api.SnapshotStore;
 import dev.mars.qraft.raft.api.SnapshotStore.PublicationOutcome;
 import dev.mars.qraft.raft.api.SnapshotStore.SnapshotPublicationException;
+import dev.mars.qraft.testing.fault.InjectedFault;
+import dev.mars.qraft.testing.fault.IntentionalErrors;
 import dev.mars.raftlog.storage.RaftStorage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -66,7 +65,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @since 2026-09-14
  * @version 1.0
  */
-@RemediationTest(phase = "5", scenarioPrefix = "RAFT-INSTALLED-SNAPSHOT")
 class RaftNodeInstalledSnapshotSequencingTest {
     private static final Set<String> MEMBERS = Set.of("follower-1", "leader-1");
     /** The follower bootstraps its configuration at index 1, so a leader's first command is at index 2. */
@@ -317,10 +315,8 @@ class RaftNodeInstalledSnapshotSequencingTest {
 
     @Test
     void uncertainCompactionFailureFencesLaterWalMutation() {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_FENCED_OPERATION, 1);
         storage.failNextPrefixCompaction();
-        RemediationTestExtension.logExpectedFailure(
-                "installed-snapshot-prefix-compaction", "IllegalStateException",
-                "uncertain installed-snapshot compaction outcome");
 
         InstallSnapshotResponse failed = await(node.handleInstallSnapshot(
                 installRequest(1, 5, 3, 0, 1, snapshotBytes(5, "fenced", "snapshot"), true)));
@@ -339,9 +335,6 @@ class RaftNodeInstalledSnapshotSequencingTest {
     @Test
     void publicationFailureCleansAssemblerAndAllowsRetry() {
         storage.failNextSnapshotPublication();
-        RemediationTestExtension.logExpectedFailure(
-                "installed-snapshot-publication", "IllegalStateException",
-                "installed snapshot publication failed");
         InstallSnapshotRequest request = installRequest(
                 1, 5, 3, 0, 1, snapshotBytes(5, "retried", "yes"), true);
 
@@ -361,6 +354,7 @@ class RaftNodeInstalledSnapshotSequencingTest {
 
     @Test
     void ambiguousPublicationFailureFencesLaterWalMutation() {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_FENCED_OPERATION, 1);
         storage.failNextSnapshotPublicationAmbiguously();
 
         InstallSnapshotResponse failed = await(node.handleInstallSnapshot(
@@ -433,10 +427,8 @@ class RaftNodeInstalledSnapshotSequencingTest {
 
     @Test
     void restorationFailureAfterCompactionFencesLaterWalMutation() {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_FENCED_OPERATION, 1);
         stateMachine.failNextRestore();
-        RemediationTestExtension.logExpectedFailure(
-                "installed-snapshot-state-restoration", "IllegalStateException",
-                "installed snapshot restoration failed");
 
         InstallSnapshotResponse failed = await(node.handleInstallSnapshot(
                 installRequest(1, 5, 3, 0, 1, snapshotBytes(5, "restore", "fails"), true)));
@@ -447,6 +439,11 @@ class RaftNodeInstalledSnapshotSequencingTest {
         assertEquals(0, node.getSnapshotLastIndex());
         assertFalse(await(node.handleAppendEntriesRequest(appendPut(1, 2, "after", "forbidden"))).getSuccess());
         assertEquals(1, storage.appendCount(), "only the bootstrap configuration entry was appended");
+    }
+
+    private static InjectedFault snapshotFault(String message) {
+        return new InjectedFault(
+                dev.mars.qraft.testing.fault.IntentionalError.RAFT_SNAPSHOT_OPERATION_FAILURE, message);
     }
 
     private AppendEntriesRequest heartbeat(long term, long previousIndex, long previousTerm) {
@@ -558,7 +555,8 @@ class RaftNodeInstalledSnapshotSequencingTest {
             restoreContext = JavaRuntime.currentContext();
             if (failNextRestore) {
                 failNextRestore = false;
-                throw new IllegalStateException("installed snapshot restoration failed");
+                throw new IllegalStateException("installed snapshot restoration failed",
+                        snapshotFault("installed snapshot restoration failed"));
             }
             delegate.restoreSnapshot(snapshot);
         }
@@ -635,7 +633,8 @@ class RaftNodeInstalledSnapshotSequencingTest {
             if (!failNextCompaction) return persisted;
             failNextCompaction = false;
             return persisted.thenCompose(ignored -> CompletableFuture.failedFuture(
-                    new IllegalStateException("uncertain installed-snapshot compaction outcome")));
+                    new IllegalStateException("uncertain installed-snapshot compaction outcome",
+                            snapshotFault("uncertain installed-snapshot compaction outcome"))));
         }
         @Override public CompletableFuture<Void> sync() { return delegate.sync(); }
         @Override public CompletableFuture<List<LogEntryData>> replayLog() { return delegate.replayLog(); }
@@ -646,14 +645,16 @@ class RaftNodeInstalledSnapshotSequencingTest {
                 return CompletableFuture.failedFuture(new SnapshotPublicationException(
                         PublicationOutcome.NOT_PUBLISHED,
                         "installed snapshot publication failed before publication",
-                        new IllegalStateException("installed snapshot publication failed")));
+                        new IllegalStateException("installed snapshot publication failed",
+                                snapshotFault("installed snapshot publication failed"))));
             }
             if (failNextPublicationAmbiguously) {
                 failNextPublicationAmbiguously = false;
                 return CompletableFuture.failedFuture(new SnapshotPublicationException(
                         PublicationOutcome.PUBLICATION_MAY_HAVE_OCCURRED,
                         "installed snapshot publication outcome is uncertain",
-                        new IllegalStateException("installed snapshot publication failed")));
+                        new IllegalStateException("installed snapshot publication failed",
+                                snapshotFault("installed snapshot publication outcome is uncertain"))));
             }
             CompletableFuture<Void> gate = publicationGate;
             if (gate == null) return delegate.saveAtomically(snapshot);

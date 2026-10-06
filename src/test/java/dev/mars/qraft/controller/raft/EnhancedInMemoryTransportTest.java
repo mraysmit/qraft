@@ -16,6 +16,8 @@
 
 package dev.mars.qraft.controller.raft;
 
+import dev.mars.qraft.testing.fault.IntentionalErrors;
+
 import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.QraftStateStore;
@@ -83,6 +85,7 @@ class EnhancedInMemoryTransportTest {
 
     @Test
     void aPartitionedLeaderIsReplacedAndFollowsTheNewLeaderOnceThePartitionHeals() throws Exception {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
         build("node1", "node2", "node3");
         startAll(nodes.values().toArray(RaftNode[]::new));
         electAndFollow("node1");
@@ -126,6 +129,7 @@ class EnhancedInMemoryTransportTest {
 
     @Test
     void aCrashedLeaderIsReplacedAndFollowsTheNewLeaderOnceRecovered() throws Exception {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
         build("node1", "node2", "node3");
         startAll(nodes.values().toArray(RaftNode[]::new));
         electAndFollow("node1");
@@ -162,6 +166,7 @@ class EnhancedInMemoryTransportTest {
 
     @Test
     void combinedChaosNeverElectsTwoLeadersInOneTermAndALeaderEmergesOnceItClears() throws Exception {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
         build("node1", "node2", "node3");
         for (InMemoryTransportSimulator transport : transports.values()) {
             transport.setChaosConfig(10, 30, 0.1);

@@ -18,6 +18,7 @@ package dev.mars.qraft.controller.raft;
 
 import dev.mars.qraft.controller.raft.grpc.VoteRequest;
 import dev.mars.qraft.controller.raft.grpc.VoteResponse;
+import dev.mars.qraft.testing.fault.InjectedFault;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -30,6 +31,7 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static dev.mars.qraft.testing.fault.IntentionalError.TRANSPORT_HANDLER_FAILURE;
 
 /**
  * Tests the in-memory network fake the Raft tests rely on. A crashed node receives nothing. Every request
@@ -67,7 +69,7 @@ class InMemoryTransportSimulatorTest {
         InMemoryTransportSimulator sender = start("sender", 1);
         InMemoryTransportSimulator target = new InMemoryTransportSimulator("target", 1);
         transports.add(target);
-        target.start(message -> { throw new IllegalStateException("handler failed"); });
+        target.start(message -> { throw new InjectedFault(TRANSPORT_HANDLER_FAILURE, "handler failed"); });
         sender.setReorderingConfig(true, 1.0, 1);
 
         ExecutionException failure = assertThrows(ExecutionException.class,

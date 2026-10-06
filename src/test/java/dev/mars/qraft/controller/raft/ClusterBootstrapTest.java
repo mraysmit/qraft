@@ -23,6 +23,7 @@ import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.controller.raft.storage.RaftStorageFactory;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
+import dev.mars.qraft.testing.fault.IntentionalErrors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,6 +38,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
+import static dev.mars.qraft.testing.fault.IntentionalError.BOOTSTRAP_SERVER_LISTS_DISAGREE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -117,6 +119,7 @@ class ClusterBootstrapTest {
 
     @Test
     void aListedServerThatListsOtherServersMeansRefusingAndNothingIsWritten() throws Exception {
+        IntentionalErrors.expect(BOOTSTRAP_SERVER_LISTS_DISAGREE, 1);
         RaftNode a = fresh("a", MEMBERS);
         fresh("b", Set.of("a", "b", "d"));
         fresh("c", MEMBERS);

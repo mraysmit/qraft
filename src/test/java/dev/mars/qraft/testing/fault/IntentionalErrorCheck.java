@@ -25,7 +25,7 @@ import org.slf4j.LoggerFactory;
 import java.util.Iterator;
 
 /**
- * An appender of {@code config/logback-test.xml} that writes nothing. It shows every event to
+ * An appender of {@code logback-test.xml} that writes nothing. It shows every event to
  * {@link IntentionalErrors}, which counts intentional errors and records unlabelled errors for the running test.
  * The other appenders still receive every event.
  *
@@ -51,7 +51,7 @@ public final class IntentionalErrorCheck extends AppenderBase<ILoggingEvent> {
             if (appenders.next() instanceof IntentionalErrorCheck check && check.isStarted()) return;
         }
         throw new AssertionError("The intentional-error check is not attached to the root logger, so errors would go"
-                + " unchecked. Run with -Dlogback.configurationFile=config/logback-test.xml (Maven sets it), and do"
-                + " not reset or reconfigure Logback in a test.");
+                + " unchecked. Keep logback-test.xml on the test runtime classpath, and do not reset or reconfigure"
+                + " Logback in a test.");
     }
 }

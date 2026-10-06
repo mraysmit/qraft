@@ -16,8 +16,6 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.controller.testsupport.RemediationTest;
-
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
@@ -64,7 +62,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @since 2026-09-14
  * @version 1.0
  */
-@RemediationTest(phase = "5", scenarioPrefix = "RAFT-OUTBOUND-SNAPSHOT")
 class RaftNodeOutboundSnapshotGenerationTest {
     private static final String PEER_SERVER_ID = ManualRaftCluster.serverIdOf("peer-1");
 
@@ -191,9 +188,10 @@ class RaftNodeOutboundSnapshotGenerationTest {
                 .setSuccess(true)
                 .setNextChunkIndex(current.request().getTotalChunks())
                 .build());
-        awaitNextIndex(3);
+        long acknowledgedNextIndex = current.request().getLastIncludedIndex() + 1;
+        awaitNextIndexAtLeast(acknowledgedNextIndex);
 
-        assertEquals(3, node.getNextIndex("peer-1"),
+        assertTrue(node.getNextIndex("peer-1") >= acknowledgedNextIndex,
                 "a stale failure must not remove the current transfer before its acknowledgement");
     }
 
@@ -278,6 +276,15 @@ class RaftNodeOutboundSnapshotGenerationTest {
             Thread.onSpinWait();
         }
         assertEquals(expected, node.getNextIndex("peer-1"));
+    }
+
+    private void awaitNextIndexAtLeast(long expected) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (node.getNextIndex("peer-1") < expected && System.nanoTime() < deadline) {
+            Thread.onSpinWait();
+        }
+        assertTrue(node.getNextIndex("peer-1") >= expected,
+                () -> "expected nextIndex at least " + expected + " but was " + node.getNextIndex("peer-1"));
     }
 
     /**

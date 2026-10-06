@@ -41,6 +41,8 @@ import dev.mars.qraft.controller.state.RaftCommandResult;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.agent.AgentStatus;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
+import dev.mars.qraft.testing.fault.InjectedFault;
+import dev.mars.qraft.testing.fault.IntentionalErrors;
 import dev.mars.raftlog.storage.RaftStorage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -814,6 +816,8 @@ class HttpApiServerTest {
 
     @Test
     void corruptWalFencesStartupWithoutMutatingTheEvidence() throws Exception {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.WAL_AMBIGUOUS_CORRUPTION, 1);
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_RECOVERY_AMBIGUOUS_CORRUPTION, 2);
         RaftStorageFactory.DurableStorage writer = RaftStorageFactory
                 .createDurable(directory, true).toCompletionStage().toCompletableFuture()
                 .get(10, TimeUnit.SECONDS);
@@ -1240,7 +1244,10 @@ class HttpApiServerTest {
         @Override public CompletableFuture<Void> appendEntries(List<LogEntryData> entries) {
             if (!entries.isEmpty() && entries.getFirst().index() == 1) return delegate.appendEntries(entries);
             return delegate.appendEntries(entries).thenCompose(ignored -> CompletableFuture.failedFuture(
-                    new IllegalStateException("append persisted before completion failed")));
+                    new IllegalStateException("append persisted before completion failed",
+                            new InjectedFault(
+                                    dev.mars.qraft.testing.fault.IntentionalError.RAFT_WAL_TRANSITION_FAILURE,
+                                    "append persisted before completion failed"))));
         }
         @Override public CompletableFuture<Void> truncateSuffix(long fromIndex) {
             return delegate.truncateSuffix(fromIndex);

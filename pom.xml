@@ -29,7 +29,6 @@
         <protobuf.version>3.25.5</protobuf.version>
         <required.java.version>[27,)</required.java.version>
         <test.log.directory>${project.basedir}/logs</test.log.directory>
-        <test.log.configuration>${project.basedir}/config/logback-test.xml</test.log.configuration>
         <!-- The default build skips the suites that need Docker or wait out real TTLs and elections
              (docs/TESTING.md). Select them with -Dgroups=docker,e2e and clear this with -Dtest.excludedGroups= -->
         <test.excludedGroups>docker,slow,e2e</test.excludedGroups>
@@ -302,7 +301,6 @@
                     <excludedGroups>${test.excludedGroups}</excludedGroups>
                     <systemPropertyVariables>
                         <qraft.test.log.dir>${test.log.directory}</qraft.test.log.dir>
-                        <logback.configurationFile>${test.log.configuration}</logback.configurationFile>
                         <java.util.logging.manager>java.util.logging.LogManager</java.util.logging.manager>
                     </systemPropertyVariables>
                 </configuration>

@@ -16,8 +16,6 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.controller.testsupport.RemediationTest;
-
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
@@ -61,7 +59,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @since 2026-09-14
  * @version 1.1
  */
-@RemediationTest(phase = "5", scenarioPrefix = "RAFT-TRANSPORT-GENERATION")
 class RaftNodeTransportGenerationTest {
     private static final Set<String> MEMBERS = Set.of("node-1", "peer-1");
 

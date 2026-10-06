@@ -16,6 +16,8 @@
 
 package dev.mars.qraft.controller.raft;
 
+import dev.mars.qraft.testing.fault.IntentionalErrors;
+
 import dev.mars.qraft.controller.raft.grpc.JoinRequest;
 import dev.mars.qraft.controller.raft.grpc.MembershipResponse;
 import dev.mars.qraft.controller.raft.grpc.RemoveServerRequest;
@@ -126,6 +128,7 @@ class GrpcRaftIntegrationTest {
 
     @Test
     void aMajorityKeepsCommittingAfterAFollowerStops() throws Exception {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
         List<Member> cluster = startCluster("node1", "node2", "node3");
         Member leader = elect(cluster.get(0));
         cluster.get(2).stop();
@@ -141,6 +144,7 @@ class GrpcRaftIntegrationTest {
 
     @Test
     void aNewElectionAfterTheLeaderStopsAdvancesTheTerm() throws Exception {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
         List<Member> cluster = startCluster("node1", "node2", "node3");
         Member first = elect(cluster.get(0));
         submit(first, "before", "failover");
@@ -213,6 +217,7 @@ class GrpcRaftIntegrationTest {
 
     @Test
     void aJoinSentToAFollowerIsForwardedOverGrpcToTheLeader() throws Exception {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
         List<Member> cluster = startCluster("node1", "node2", "node3");
         Member leader = elect(cluster.get(0));
         submit(leader, "k", "v");

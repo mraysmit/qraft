@@ -26,8 +26,8 @@ import dev.mars.qraft.controller.state.ConfigurationCommand;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
-import dev.mars.qraft.controller.testsupport.RemediationTest;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
+import dev.mars.qraft.testing.fault.IntentionalErrors;
 import dev.mars.raftlog.storage.RaftStorage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -57,7 +57,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @since 2026-09-17
  * @version 1.1
  */
-@RemediationTest(phase = "7-node-model", scenarioPrefix = "RAFT-NODE-MODEL")
 class RaftNodeModelTest {
     private static final Set<String> MEMBERS = Set.of("follower", "leader", "candidate-a", "candidate-b");
     private static final long[] REGRESSION_SEEDS = {
@@ -91,6 +90,7 @@ class RaftNodeModelTest {
 
     @Test
     void generatedPrehistoryThenAmbiguousSyncFailureFencesFurtherMutation() {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_FENCED_OPERATION);
         for (long seed : configuredSeeds()) {
             try {
                 verifyFollowerHistory(seed, true);

@@ -37,14 +37,14 @@ import dev.mars.qraft.controller.state.RaftCommand;
 import dev.mars.qraft.controller.state.RaftCommandResult;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import dev.mars.qraft.distributedstate.DistributedStateCommandCodec;
+import dev.mars.qraft.testing.fault.InjectedFault;
+import dev.mars.qraft.testing.fault.IntentionalErrors;
 import dev.mars.raftlog.storage.RaftStorage;
 import dev.mars.raftlog.storage.RaftStorage.LogEntryData;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -56,6 +56,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
+import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_METADATA_PERSISTENCE_FAILURE;
+import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -81,7 +83,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @since 2025-08-20
  */
 class RaftNodeTest {
-    private static final Logger LOG = LoggerFactory.getLogger(RaftNodeTest.class);
 
     @TempDir
     Path tempDir;
@@ -189,6 +190,7 @@ class RaftNodeTest {
 
     @Test
     void majorityCatalogValueWinsWhenAnIsolatedLeaderHasAnUncommittedReplacement() throws Exception {
+        IntentionalErrors.expect(RAFT_PEER_UNREACHABLE);
         startAll(node1, node2, node3);
         elect(node1);
         // The followers must be in node1's term before the partition, so node2's election is for term 2.
@@ -518,7 +520,6 @@ class RaftNodeTest {
                         .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
         assertInstanceOf(RaftTransitionSequencer.FencedException.class, fenced.getCause());
         assertEquals(1, flakyMetadataStorage.updateCalls(), "a fenced node must not execute a later metadata transition");
-        logExpectedFailure("vote metadata persistence fenced node", persistenceFailure.getCause());
     }
 
     @Test
@@ -593,8 +594,7 @@ class RaftNodeTest {
                                 .setLastLogTerm(0).setLastLogIndex(1).build())
                         .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
 
-        assertInstanceOf(IllegalStateException.class, voteFailure.getCause());
-        logExpectedFailure("vote-rejection higher-term metadata persistence", voteFailure.getCause());
+        assertInstanceOf(InjectedFault.class, voteFailure.getCause());
         assertTrue(flakyMetadataStorage.hasFailed(), "the higher-term empty-vote write was the one that failed");
         RaftStorage.PersistentMeta persistedMeta = flakyMetadataStorage.loadMetadata().get(10, TimeUnit.SECONDS);
         assertTrue(persistedMeta.currentTerm() < higherTerm,
@@ -618,8 +618,6 @@ class RaftNodeTest {
         assertFalse(response.getSuccess(), "an append is refused unless the higher term is durably persisted first");
         assertEquals(0, response.getTerm(), "a refusal reports the last durable local term, not the observed one");
         assertEquals(0, flakyMetadataStorage.loadMetadata().get(10, TimeUnit.SECONDS).currentTerm());
-        logExpectedFailure("append-entries higher-term metadata persistence",
-                new IllegalStateException("Injected one-shot metadata failure expected by test"));
     }
 
     @Test
@@ -641,15 +639,9 @@ class RaftNodeTest {
         assertFalse(response.getSuccess(), "an installation is refused unless the higher term is durably persisted first");
         assertEquals(0, response.getTerm(), "a refusal reports the last durable local term, not the observed one");
         assertEquals(0, flakyMetadataStorage.loadMetadata().get(10, TimeUnit.SECONDS).currentTerm());
-        logExpectedFailure("install-snapshot higher-term metadata persistence",
-                new IllegalStateException("Injected one-shot metadata failure expected by test"));
     }
 
     // ---------------------------------------------------------------------------------------------------
-
-    private static void logExpectedFailure(String scenario, Throwable failure) {
-        LOG.info("[EXPECTED-TEST-FAILURE] Scenario={} message={}", scenario, failure.getMessage());
-    }
 
     private static final class MetadataFailureStorage implements RaftStorage {
         private final TestRaftStorage delegate;
@@ -685,7 +677,7 @@ class RaftNodeTest {
                     || (targetedTerm != null && targetedTerm == term && votedFor.isEmpty()));
             if (shouldFail) {
                 failed = true;
-                return CompletableFuture.failedFuture(new IllegalStateException(
+                return CompletableFuture.failedFuture(new InjectedFault(RAFT_METADATA_PERSISTENCE_FAILURE,
                         failFirst ? "Simulated one-shot metadata failure"
                                 : "Simulated targeted metadata failure"));
             }

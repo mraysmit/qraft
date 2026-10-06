@@ -16,6 +16,8 @@
 
 package dev.mars.qraft.controller.http;
 
+import dev.mars.qraft.testing.fault.IntentionalErrors;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.mars.qraft.controller.raft.InMemoryTransportSimulator;
@@ -143,6 +145,7 @@ class HttpApiServerOperatorTest {
 
     @Test
     void eachRefusalHasItsOwnStatusCode() throws Exception {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
         serve(TOKEN);
         Map<String, String> token = Map.of("X-Qraft-Token", TOKEN);
 

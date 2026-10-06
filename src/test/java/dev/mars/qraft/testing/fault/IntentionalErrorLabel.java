@@ -20,7 +20,7 @@ import ch.qos.logback.classic.pattern.ClassicConverter;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 
 /**
- * The {@code %intentional} conversion word of {@code config/logback-test.xml}. It writes the label of an injected
+ * The {@code %intentional} conversion word of {@code logback-test.xml}. It writes the label of an injected
  * failure or intentional error, and nothing for any other event. It never changes or drops an event.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd

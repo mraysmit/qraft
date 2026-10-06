@@ -24,9 +24,8 @@ import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
-import dev.mars.qraft.controller.testsupport.RemediationTest;
-import dev.mars.qraft.controller.testsupport.RemediationTestExtension;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
+import dev.mars.qraft.testing.fault.IntentionalErrors;
 import dev.mars.raftlog.storage.FileRaftStorage;
 import dev.mars.raftlog.storage.RaftStorage;
 import dev.mars.raftlog.storage.RaftStorageConfig;
@@ -57,7 +56,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @since 2026-09-14
  * @version 1.0
  */
-@RemediationTest(phase = "6-real-storage", scenarioPrefix = "RAFT-REAL-RECOVERY")
 class RaftNodeRealStorageRecoveryTest {
     private static final ProtobufRaftCommandCodec CODEC = new ProtobufRaftCommandCodec();
     private static final Set<String> MEMBERS = Set.of("node-1");
@@ -166,14 +164,14 @@ class RaftNodeRealStorageRecoveryTest {
      */
     @Test
     void aCorruptCompleteRecordFailsStartupAndLeavesTheLogUntouched() throws Exception {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.WAL_AMBIGUOUS_CORRUPTION, 1);
+        IntentionalErrors.expect(
+                dev.mars.qraft.testing.fault.IntentionalError.RAFT_RECOVERY_AMBIGUOUS_CORRUPTION, 2);
         seedWal();
         Path log = directory.resolve("raft.log");
         byte[] bytes = Files.readAllBytes(log);
         bytes[bytes.length / 2] ^= 0x01;
         Files.write(log, bytes);
-        RemediationTestExtension.logExpectedFailure(
-                "CORRUPT_INTERIOR_RECORD", "CorruptLogException", "fixture flips a byte inside a complete record");
-
         node = singleNode(new QraftStateStore());
         java.util.concurrent.ExecutionException failure = org.junit.jupiter.api.Assertions.assertThrows(
                 java.util.concurrent.ExecutionException.class,
@@ -244,8 +242,6 @@ class RaftNodeRealStorageRecoveryTest {
             boolean expectReplacement) throws Exception {
         seedWal();
         byte[] replacementPayload = encodePut("replacement", "new");
-        RemediationTestExtension.logExpectedFailure(
-                checkpoint.name(), "ProcessHalt", "fixture halts without closing the WAL");
         ProcessResult crash = runCrashWriter(checkpoint, replacementPayload);
         assertEquals(RealStorageCrashWriter.HALT_EXIT_CODE, crash.exitCode(), crash.output());
 

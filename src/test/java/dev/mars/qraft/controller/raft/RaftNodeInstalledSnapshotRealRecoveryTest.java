@@ -16,6 +16,8 @@
 
 package dev.mars.qraft.controller.raft;
 
+import dev.mars.qraft.testing.fault.InjectedFault;
+
 import com.google.protobuf.ByteString;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
@@ -28,8 +30,6 @@ import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
-import dev.mars.qraft.controller.testsupport.RemediationTest;
-import dev.mars.qraft.controller.testsupport.RemediationTestExtension;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import dev.mars.qraft.raft.api.SnapshotStore;
 import dev.mars.raftlog.storage.FileRaftStorage;
@@ -63,7 +63,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @since 2026-09-14
  * @version 1.0
  */
-@RemediationTest(phase = "6-installed-recovery", scenarioPrefix = "RAFT-INSTALLED-RECOVERY")
 class RaftNodeInstalledSnapshotRealRecoveryTest {
     private static final ProtobufRaftCommandCodec CODEC = new ProtobufRaftCommandCodec();
     /** The follower's cluster, as the crash writer's follower and every restart of it know it. */
@@ -111,9 +110,6 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
     @Test
     void crashAfterPublishingAConflictingSnapshotDropsTheReplacedHistory() throws Exception {
         seedWal();
-        RemediationTestExtension.logExpectedFailure(
-                InstalledSnapshotCrashWriter.AFTER_DIVERGENT_SNAPSHOT_PUBLICATION, "ProcessHalt",
-                "fixture halts after publishing a conflicting installed snapshot");
         ProcessResult crash = runCrashWriter(InstalledSnapshotCrashWriter.AFTER_DIVERGENT_SNAPSHOT_PUBLICATION);
         assertEquals(InstalledSnapshotCrashWriter.HALT_EXIT_CODE, crash.exitCode(), crash.output());
         assertDurableState(4, 99, List.of(1L, 2L, 3L, 4L, 5L));
@@ -187,9 +183,6 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
                 .mode(RaftNodeMode.durable(new FailingSyncStorage(durable.wal()), durable.snapshots()))
                 .snapshotEnabled(false).electionTimeout(60_000).heartbeatInterval(60_000)
                 .build();
-        RemediationTestExtension.logExpectedFailure(
-                "RECOVERY_COMPACTION_SYNC", "IOException", "fixture fails the WAL sync during recovery");
-
         ExecutionException failure = assertThrows(ExecutionException.class,
                 () -> node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
 
@@ -260,8 +253,6 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
     private void verifyRecovery(String checkpoint, List<Long> expectedWalIndexes,
                                 long expectedSnapshotTerm, boolean expectFourthEntry) throws Exception {
         seedWal();
-        RemediationTestExtension.logExpectedFailure(
-                checkpoint, "ProcessHalt", "fixture halts an active installed-snapshot transition");
         ProcessResult crash = runCrashWriter(checkpoint);
         assertEquals(InstalledSnapshotCrashWriter.HALT_EXIT_CODE, crash.exitCode(), crash.output());
 
@@ -339,7 +330,10 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
         }
         @Override public java.util.concurrent.CompletableFuture<Void> sync() {
             return java.util.concurrent.CompletableFuture.failedFuture(
-                    new java.io.IOException("Simulated recovery sync failure"));
+                    new java.io.IOException("Simulated recovery sync failure",
+                            new InjectedFault(
+                                    dev.mars.qraft.testing.fault.IntentionalError.RAFT_RECOVERY_STORAGE_FAILURE,
+                                    "Simulated recovery sync failure")));
         }
         @Override public java.util.concurrent.CompletableFuture<List<LogEntryData>> replayLog() { return delegate.replayLog(); }
         @Override public void close() { delegate.close(); }

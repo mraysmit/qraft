@@ -21,12 +21,12 @@ import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.runtime.Promise;
 import dev.mars.qraft.controller.support.JavaRuntimeExtension;
 import dev.mars.qraft.controller.support.JavaTestContext;
+import dev.mars.qraft.testing.fault.InjectedFault;
+import dev.mars.qraft.testing.fault.IntentionalErrors;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -34,6 +34,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static dev.mars.qraft.testing.fault.IntentionalError.BEST_EFFORT_SHUTDOWN_HOOK_TIMEOUT;
+import static dev.mars.qraft.testing.fault.IntentionalError.CRITICAL_SHUTDOWN_HOOK_TIMEOUT;
+import static dev.mars.qraft.testing.fault.IntentionalError.SHUTDOWN_HOOK_FAILURE;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -51,8 +54,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @ExtendWith(JavaRuntimeExtension.class)
 @DisplayName("ShutdownCoordinator Tests")
 class ShutdownCoordinatorTest {
-    private static final Logger LOG = LoggerFactory.getLogger(ShutdownCoordinatorTest.class);
-
     @Nested
     @DisplayName("State Management")
     class StateManagementTests {
@@ -161,8 +162,7 @@ class ShutdownCoordinatorTest {
             
             coordinator.onDrain("failing", () -> {
                 callCount.incrementAndGet();
-                LOG.info("[EXPECTED-TEST-FAILURE] Scenario=shutdown-hook failure message=Simulated failure");
-                return Future.failedFuture("Simulated failure");
+                return Future.failedFuture(new InjectedFault(SHUTDOWN_HOOK_FAILURE, "Simulated failure"));
             });
             coordinator.onDrain("succeeding", () -> {
                 callCount.incrementAndGet();
@@ -218,6 +218,7 @@ class ShutdownCoordinatorTest {
         @Test
         @DisplayName("Should timeout slow hooks")
         void shouldTimeoutSlowHooks(JavaRuntime runtime, JavaTestContext ctx) {
+            IntentionalErrors.expect(BEST_EFFORT_SHUTDOWN_HOOK_TIMEOUT, 1);
             // Very short timeout
             ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime, 50, 50);
             AtomicInteger completedCount = new AtomicInteger(0);
@@ -246,6 +247,7 @@ class ShutdownCoordinatorTest {
         @Test
         @DisplayName("Timing out a hook must not complete its source operation")
         void timeoutDoesNotMutateSourceHookFuture(JavaRuntime runtime, JavaTestContext ctx) {
+            IntentionalErrors.expect(BEST_EFFORT_SHUTDOWN_HOOK_TIMEOUT, 1);
             ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime, 50, 50);
             Promise<Void> sourceOperation = Promise.promise();
             AtomicInteger laterHooks = new AtomicInteger();
@@ -271,6 +273,7 @@ class ShutdownCoordinatorTest {
         @Test
         @DisplayName("A critical service timeout must fail shutdown without closing later resources")
         void criticalServiceTimeoutStopsShutdownProgression(JavaRuntime runtime, JavaTestContext ctx) {
+            IntentionalErrors.expect(CRITICAL_SHUTDOWN_HOOK_TIMEOUT, 2);
             ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime, 50, 50);
             Promise<Void> nodeStop = Promise.promise();
             AtomicInteger laterServiceStops = new AtomicInteger();
@@ -305,7 +308,8 @@ class ShutdownCoordinatorTest {
         @DisplayName("A synchronously throwing critical hook must become the shared shutdown failure")
         void synchronousCriticalHookFailureIsReportedAsynchronously(JavaRuntime runtime, JavaTestContext ctx) {
             ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime, 50, 50);
-            IllegalStateException failure = new IllegalStateException("node stop failed before returning");
+            InjectedFault failure = new InjectedFault(
+                    SHUTDOWN_HOOK_FAILURE, "node stop failed before returning");
 
             coordinator.onCriticalServiceStop("node-stop", () -> {
                 throw failure;

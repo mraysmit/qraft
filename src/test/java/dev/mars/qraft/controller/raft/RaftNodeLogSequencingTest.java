@@ -16,8 +16,8 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.controller.testsupport.RemediationTest;
-import dev.mars.qraft.controller.testsupport.RemediationTestExtension;
+import dev.mars.qraft.testing.fault.InjectedFault;
+import dev.mars.qraft.testing.fault.IntentionalErrors;
 
 import com.google.protobuf.ByteString;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
@@ -70,7 +70,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @since 2026-09-14
  * @version 1.1
  */
-@RemediationTest(phase = "3", scenarioPrefix = "RAFT-LOG")
 class RaftNodeLogSequencingTest {
     /** Configuration and leadership no-op are durable before leader fault injection. */
     private static final int LEADERSHIP_WRITES = 2;
@@ -183,6 +182,7 @@ class RaftNodeLogSequencingTest {
 
     @Test
     void saturatedClientAdmissionPreservesRoomForHigherTermPeerTraffic() {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_TRANSITION_QUEUE_FULL, 1);
         await(node.stop());
         storage = new GatedRaftStorage();
         storage.open(null).join();
@@ -308,9 +308,8 @@ class RaftNodeLogSequencingTest {
 
     @Test
     void uncertainLeaderSyncFailureFencesLaterAppend() {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_FENCED_OPERATION, 1);
         storage.failNextSync();
-        RemediationTestExtension.logExpectedFailure(
-                "leader-sync", storage.syncFailure);
 
         CompletionException failedSync = assertThrows(CompletionException.class,
                 () -> await(node.submitCommand(put("first", "uncertain"))));
@@ -446,13 +445,11 @@ class RaftNodeLogSequencingTest {
 
     @Test
     void uncertainFollowerTruncateFailureFencesLaterAppend() {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_FENCED_OPERATION, 1);
         restartAsFollower();
         assertTrue(await(node.handleAppendEntriesRequest(appendRequest(
                 1, 1, 0, grpcEntry(1, "seed", "original")))).getSuccess());
         storage.failNextTruncate();
-        RemediationTestExtension.logExpectedFailure(
-                "follower-suffix-truncate", storage.truncateFailure);
-
         AppendEntriesResponse failed = await(node.handleAppendEntriesRequest(appendRequest(
                 1, 1, 0, grpcEntry(2, "seed", "replacement"))));
         assertFalse(failed.getSuccess());
@@ -493,6 +490,7 @@ class RaftNodeLogSequencingTest {
 
     @Test
     void prewriteAppendRejectionAfterSuffixTruncationFencesNode() {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_FENCED_OPERATION, 1);
         restartAsFollower();
         assertTrue(await(node.handleAppendEntriesRequest(appendRequest(
                 1, 1, 0, grpcEntry(1, "seed", "original")))).getSuccess());
@@ -567,15 +565,27 @@ class RaftNodeLogSequencingTest {
         return new DistributedStateRaftCommand(DistributedStateCommand.put(key, value));
     }
 
+    private static InjectedFault walFault(String message) {
+        return new InjectedFault(
+                dev.mars.qraft.testing.fault.IntentionalError.RAFT_WAL_TRANSITION_FAILURE, message);
+    }
+
+    private static FileRaftStorage.WriteRejectedException injectedWriteRejection(String message) {
+        FileRaftStorage.WriteRejectedException failure = new FileRaftStorage.WriteRejectedException(
+                dev.mars.raftlog.storage.WriteRejectionReason.PAYLOAD_TOO_LARGE, message);
+        failure.initCause(walFault(message));
+        return failure;
+    }
+
     private static final class GatedRaftStorage implements RaftStorage, SnapshotStore {
         private final TestRaftStorage delegate = new TestRaftStorage();
         private final AtomicInteger appendCount = new AtomicInteger();
         private final AtomicInteger truncateCount = new AtomicInteger();
         private final AtomicInteger syncCount = new AtomicInteger();
-        private final IllegalStateException syncFailure =
-                new IllegalStateException("uncertain sync outcome");
-        private final IllegalStateException truncateFailure =
-                new IllegalStateException("uncertain truncate outcome");
+        private final IllegalStateException syncFailure = new IllegalStateException(
+                "uncertain sync outcome", walFault("uncertain sync outcome"));
+        private final IllegalStateException truncateFailure = new IllegalStateException(
+                "uncertain truncate outcome", walFault("uncertain truncate outcome"));
         private volatile CompletableFuture<Void> appendCompletionGate;
         private volatile CompletableFuture<Void> blockedAppendGate;
         private volatile CompletableFuture<Void> appendEntered;
@@ -670,10 +680,7 @@ class RaftNodeLogSequencingTest {
         @Override public CompletableFuture<Void> updateMetadata(long term, Optional<String> votedFor) {
             if (rejectNextMetadataWithPrewriteShapedFailure) {
                 rejectNextMetadataWithPrewriteShapedFailure = false;
-                return CompletableFuture.failedFuture(
-                        new FileRaftStorage.WriteRejectedException(
-                                dev.mars.raftlog.storage.WriteRejectionReason.PAYLOAD_TOO_LARGE,
-                                "metadata fixture"));
+                return CompletableFuture.failedFuture(injectedWriteRejection("metadata fixture"));
             }
             CompletableFuture<Void> persisted = delegate.updateMetadata(term, votedFor);
             if (!completeNextMetadataOffLoop) return persisted;
@@ -693,10 +700,7 @@ class RaftNodeLogSequencingTest {
             appendCount.incrementAndGet();
             if (rejectNextAppendBeforeWrite) {
                 rejectNextAppendBeforeWrite = false;
-                return CompletableFuture.failedFuture(
-                        new FileRaftStorage.WriteRejectedException(
-                                dev.mars.raftlog.storage.WriteRejectionReason.PAYLOAD_TOO_LARGE,
-                                "test fixture"));
+                return CompletableFuture.failedFuture(injectedWriteRejection("test fixture"));
             }
             CompletableFuture<Void> persisted = delegate.appendEntries(entries);
             CompletableFuture<Void> gate = appendCompletionGate;

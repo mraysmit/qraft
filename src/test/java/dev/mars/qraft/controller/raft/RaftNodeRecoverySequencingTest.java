@@ -29,7 +29,6 @@ import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.controller.state.RaftCommand;
 import dev.mars.qraft.controller.state.RaftCommandResult;
-import dev.mars.qraft.controller.testsupport.RemediationTest;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import dev.mars.qraft.raft.api.SnapshotStore;
 import dev.mars.raftlog.storage.RaftStorage;
@@ -61,7 +60,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @since 2026-09-14
  * @version 1.0
  */
-@RemediationTest(phase = "6-recovery", scenarioPrefix = "RAFT-RECOVERY")
 class RaftNodeRecoverySequencingTest {
     private final ProtobufRaftCommandCodec codec = new ProtobufRaftCommandCodec();
     private JavaRuntime runtime;

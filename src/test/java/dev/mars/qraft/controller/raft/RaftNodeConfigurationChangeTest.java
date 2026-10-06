@@ -16,6 +16,8 @@
 
 package dev.mars.qraft.controller.raft;
 
+import dev.mars.qraft.testing.fault.IntentionalErrors;
+
 import dev.mars.qraft.controller.raft.RaftConfiguration.Server;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.ConfigurationCommand;
@@ -91,6 +93,7 @@ class RaftNodeConfigurationChangeTest {
 
     @Test
     void aChangeWaitsUntilTheLeaderHasCommittedAnEntryInItsTerm() throws Exception {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
         RaftConfiguration withD = with(new Server(serverIdOf("d"), "d", "d", false));
         cluster.heartbeatUntil(a, () -> a.getCommitIndex() >= 2, "leadership no-op commits without client writes");
         await(a.proposeConfiguration(withD));
@@ -99,6 +102,7 @@ class RaftNodeConfigurationChangeTest {
 
     @Test
     void onlyOneChangeIsInFlightAtATime() throws Exception {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
         commitACommand();
         InMemoryTransportSimulator.createPartition(Set.of("a"), Set.of("b", "c"));
         RaftConfiguration withD = with(new Server(serverIdOf("d"), "d", "d", false));
@@ -154,6 +158,7 @@ class RaftNodeConfigurationChangeTest {
 
     @Test
     void aPromotedServerCountsTowardsTheLeadersQuorum() throws Exception {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
         commitACommand();
         RaftNode d = cluster.add(cluster.unconfiguredBuilder("d", Set.of("a", "b", "c", "d"),
                 new InMemoryTransportSimulator("d"), new QraftStateStore(), RaftNodeMode.volatileMode())

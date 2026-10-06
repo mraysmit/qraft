@@ -18,7 +18,6 @@ package dev.mars.qraft.controller.raft;
 
 import dev.mars.qraft.controller.runtime.Future;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
-import dev.mars.qraft.controller.testsupport.RemediationTest;
 import dev.mars.raftlog.storage.RaftStorage.LogEntryData;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,7 +40,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * @since 2026-09-15
  * @version 1.0
  */
-@RemediationTest(phase = "6-architecture", scenarioPrefix = "RAFT-PERSISTENCE-ARCH")
 class RaftPersistenceArchitectureTest {
     private JavaRuntime runtime;
     private TestRaftStorage storage;

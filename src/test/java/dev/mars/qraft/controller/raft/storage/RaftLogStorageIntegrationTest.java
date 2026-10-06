@@ -19,6 +19,7 @@ package dev.mars.qraft.controller.raft.storage;
 import dev.mars.raftlog.storage.FileRaftStorage;
 import dev.mars.raftlog.storage.RaftStorage;
 import dev.mars.raftlog.storage.RaftStorageConfig;
+import dev.mars.qraft.testing.fault.IntentionalErrors;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -31,6 +32,8 @@ import java.util.concurrent.CompletionException;
 import java.util.zip.CRC32C;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
+import static dev.mars.qraft.testing.fault.IntentionalError.WAL_AMBIGUOUS_CORRUPTION;
+import static dev.mars.qraft.testing.fault.IntentionalError.WAL_DIRECTORY_ALREADY_LOCKED;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -75,6 +78,7 @@ class RaftLogStorageIntegrationTest {
 
     @Test
     void secondWriterCannotOpenTheSameDirectory() {
+        IntentionalErrors.expect(WAL_DIRECTORY_ALREADY_LOCKED, 1);
         try (FileRaftStorage owner = storage(directory); FileRaftStorage contender = storage(directory)) {
             owner.open(directory).join();
             CompletionException failure = assertThrows(CompletionException.class,
@@ -85,6 +89,7 @@ class RaftLogStorageIntegrationTest {
 
     @Test
     void completeRecordCorruptionFailsReplayInsteadOfDiscardingAcknowledgedData() throws Exception {
+        IntentionalErrors.expect(WAL_AMBIGUOUS_CORRUPTION, 1);
         try (FileRaftStorage wal = storage(directory)) {
             wal.open(directory).join();
             wal.appendEntries(List.of(entry(1, 1, "durable"))).join();

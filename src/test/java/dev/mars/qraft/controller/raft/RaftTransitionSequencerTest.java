@@ -19,7 +19,6 @@ package dev.mars.qraft.controller.raft;
 import dev.mars.qraft.controller.runtime.Future;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.runtime.Promise;
-import dev.mars.qraft.controller.testsupport.RemediationTest;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.ContextKey;
 import io.opentelemetry.context.Scope;
@@ -54,7 +53,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @since 2026-09-13
  * @version 1.0
  */
-@RemediationTest(phase = "1", scenarioPrefix = "RAFT-SEQUENCER")
 class RaftTransitionSequencerTest {
     private JavaRuntime runtime;
 

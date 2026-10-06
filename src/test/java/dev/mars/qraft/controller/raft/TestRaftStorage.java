@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.controller.raft;
 
+import dev.mars.qraft.testing.fault.InjectedFault;
 import dev.mars.raftlog.storage.RaftStorage;
 import dev.mars.qraft.raft.api.SnapshotStore;
 
@@ -93,7 +94,9 @@ final class TestRaftStorage implements RaftStorage, SnapshotStore {
     @Override
     public CompletableFuture<Void> sync() {
         if (!isOpen()) return failed(new IllegalStateException("Storage not open"));
-        if (failOnSync) return failed(new IOException("Simulated sync failure"));
+        if (failOnSync) return failed(new IOException("Simulated sync failure",
+                new InjectedFault(dev.mars.qraft.testing.fault.IntentionalError.RAFT_WAL_TRANSITION_FAILURE,
+                        "Simulated sync failure")));
         return CompletableFuture.completedFuture(null);
     }
 

@@ -18,7 +18,6 @@ package dev.mars.qraft.controller.raft;
 
 import dev.mars.qraft.controller.runtime.Future;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
-import dev.mars.qraft.controller.testsupport.RemediationTest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -45,7 +44,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * @since 2026-09-15
  * @version 1.0
  */
-@RemediationTest(phase = "6-model", scenarioPrefix = "RAFT-MODEL-HISTORY")
 class RaftTransitionSequencerModelTest {
     private static final long[] REGRESSION_SEEDS = {
             0x5141_4654L, 0x5EED_0001L, 0x5EED_0002L, 0x5EED_0003L

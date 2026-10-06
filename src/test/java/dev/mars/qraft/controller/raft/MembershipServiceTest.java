@@ -31,6 +31,7 @@ import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
+import dev.mars.qraft.testing.fault.IntentionalErrors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -45,6 +46,7 @@ import java.util.function.Consumer;
 
 import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
 import static dev.mars.qraft.controller.raft.ManualRaftCluster.serverIdOf;
+import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -102,6 +104,7 @@ class MembershipServiceTest {
 
     @Test
     void theLeaderAdmitsAJoiningServer() throws Exception {
+        IntentionalErrors.expect(RAFT_PEER_UNREACHABLE, 1);
         leadWithACommit();
 
         assertEquals(Status.JOINED, await(services.get("a").join(JOIN_D)).getStatus());
@@ -112,6 +115,7 @@ class MembershipServiceTest {
 
     @Test
     void aFollowerForwardsAJoinToTheLeader() throws Exception {
+        IntentionalErrors.expect(RAFT_PEER_UNREACHABLE, 1);
         leadWithACommit();
 
         assertEquals(Status.JOINED, await(services.get("b").join(JOIN_D)).getStatus());
@@ -247,6 +251,7 @@ class MembershipServiceTest {
 
     @Test
     void theNodesRefusalComesBackWithItsReason() throws Exception {
+        IntentionalErrors.expect(RAFT_PEER_UNREACHABLE, 2);
         InMemoryTransportSimulator.createPartition(Set.of("a", "b"), Set.of("c"));
         leadWithACommit();
 

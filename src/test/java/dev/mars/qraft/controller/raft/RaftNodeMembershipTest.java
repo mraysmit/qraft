@@ -16,6 +16,8 @@
 
 package dev.mars.qraft.controller.raft;
 
+import dev.mars.qraft.testing.fault.IntentionalErrors;
+
 import dev.mars.qraft.controller.raft.RaftConfiguration.Server;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
@@ -86,6 +88,7 @@ class RaftNodeMembershipTest {
 
     @Test
     void aJoiningServerIsAddedAsANonVoter() throws Exception {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
         leadWithACommit();
 
         assertEquals(JoinResult.JOINED, await(a.admit(D)));
@@ -150,6 +153,7 @@ class RaftNodeMembershipTest {
 
     @Test
     void anIdleLeaderCanJoinAndRemoveWithoutAClientWrite() throws Exception {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
         cluster.elect(a);
         cluster.heartbeatUntil(a, () -> a.getCommitIndex() >= 2, "leadership no-op commits");
         assertEquals(2, a.getLastLogIndex());
@@ -186,6 +190,7 @@ class RaftNodeMembershipTest {
 
     @Test
     void aRemovedServerCannotRaiseTheActiveLeadersOrFollowersTerm() throws Exception {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
         InMemoryTransportSimulator.createPartition(Set.of("a", "b"), Set.of("c"));
         leadWithACommit();
         await(a.removeServer(serverIdOf("c")));
@@ -214,6 +219,7 @@ class RaftNodeMembershipTest {
 
     @Test
     void aRemovalThatLeavesTooFewReachableVotersIsRefused() throws Exception {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
         // c never answers this leader.
         InMemoryTransportSimulator.createPartition(Set.of("a", "b"), Set.of("c"));
         leadWithACommit();
@@ -228,6 +234,7 @@ class RaftNodeMembershipTest {
 
     @Test
     void aNonVoterCanAlwaysBeRemoved() throws Exception {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
         InMemoryTransportSimulator.createPartition(Set.of("a", "b"), Set.of("c"));
         leadWithACommit();
         await(a.admit(D));

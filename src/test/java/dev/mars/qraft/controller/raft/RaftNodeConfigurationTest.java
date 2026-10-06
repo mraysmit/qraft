@@ -28,6 +28,7 @@ import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.controller.state.RaftCommand;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
+import dev.mars.qraft.testing.fault.IntentionalErrors;
 import dev.mars.qraft.controller.raft.storage.RaftStorageFactory;
 import dev.mars.raftlog.storage.FileRaftStorage;
 import dev.mars.raftlog.storage.RaftStorage.LogEntryData;
@@ -46,6 +47,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
 import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
+import static dev.mars.qraft.testing.fault.IntentionalError.COMMITTED_ENTRY_REPLACEMENT;
+import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_STATE_WITHOUT_CONFIGURATION;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -141,6 +144,7 @@ class RaftNodeConfigurationTest {
 
     @Test
     void stateFromBeforeConfigurationsWereRecordedRefusesToStart() throws Exception {
+        IntentionalErrors.expect(RAFT_STATE_WITHOUT_CONFIGURATION, 1);
         TestRaftStorage storage = openStorage();
         storage.appendEntries(List.of(new LogEntryData(1, 1, CODEC.serialize(put("k"))))).get(10, TimeUnit.SECONDS);
         RaftNode node = cluster.add(cluster.unconfiguredBuilder("f", Set.of("f"), new InMemoryTransportSimulator("f"),
@@ -210,6 +214,7 @@ class RaftNodeConfigurationTest {
 
     @Test
     void anAppendThatWouldReplaceACommittedEntryIsRefusedAndChangesNothing() throws Exception {
+        IntentionalErrors.expect(COMMITTED_ENTRY_REPLACEMENT, 1);
         RaftNode follower = follower(new QraftStateStore(), RaftNodeMode.volatileMode(), FL);
         await(follower.start());
 

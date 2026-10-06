@@ -25,12 +25,12 @@ import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.controller.state.RaftCommand;
 import dev.mars.qraft.controller.state.RaftCommandResult;
-import dev.mars.qraft.controller.testsupport.RemediationTest;
-import dev.mars.qraft.controller.testsupport.RemediationTestExtension;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import dev.mars.qraft.raft.api.SnapshotStore;
 import dev.mars.qraft.raft.api.SnapshotStore.PublicationOutcome;
 import dev.mars.qraft.raft.api.SnapshotStore.SnapshotPublicationException;
+import dev.mars.qraft.testing.fault.InjectedFault;
+import dev.mars.qraft.testing.fault.IntentionalErrors;
 import dev.mars.raftlog.storage.RaftStorage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -63,7 +63,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @since 2026-09-14
  * @version 1.0
  */
-@RemediationTest(phase = "4", scenarioPrefix = "RAFT-SNAPSHOT")
 class RaftNodeSnapshotSequencingTest {
     private JavaRuntime runtime;
     private GatedSnapshotStorage storage;
@@ -251,8 +250,6 @@ class RaftNodeSnapshotSequencingTest {
     @Test
     void publicationFailureLeavesWalAndMemoryUnchangedAndAllowsLaterWork() {
         storage.failNextSnapshotPublication();
-        RemediationTestExtension.logExpectedFailure(
-                "local-snapshot-publication", storage.publicationFailure);
 
         CompletionException failure = assertThrows(CompletionException.class,
                 () -> await(node.takeSnapshot()));
@@ -270,6 +267,7 @@ class RaftNodeSnapshotSequencingTest {
 
     @Test
     void ambiguousPublicationFailureFencesLaterWork() {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_FENCED_OPERATION, 1);
         storage.failNextSnapshotPublicationAmbiguously();
 
         CompletionException failure = assertThrows(CompletionException.class,
@@ -290,9 +288,8 @@ class RaftNodeSnapshotSequencingTest {
 
     @Test
     void uncertainCompactionFailureLeavesMemoryUntrimmedAndFencesLaterWork() {
+        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_FENCED_OPERATION, 1);
         storage.failNextPrefixCompaction();
-        RemediationTestExtension.logExpectedFailure(
-                "local-snapshot-prefix-compaction", storage.compactionFailure);
 
         CompletionException failure = assertThrows(CompletionException.class,
                 () -> await(node.takeSnapshot()));
@@ -309,6 +306,11 @@ class RaftNodeSnapshotSequencingTest {
 
     private static DistributedStateRaftCommand put(String key, String value) {
         return new DistributedStateRaftCommand(DistributedStateCommand.put(key, value));
+    }
+
+    private static InjectedFault snapshotFault(String message) {
+        return new InjectedFault(
+                dev.mars.qraft.testing.fault.IntentionalError.RAFT_SNAPSHOT_OPERATION_FAILURE, message);
     }
 
     private static final class RecordingStateMachine implements RaftLogApplicator {
@@ -334,10 +336,10 @@ class RaftNodeSnapshotSequencingTest {
         private final AtomicInteger metadataUpdateCount = new AtomicInteger();
         private final AtomicInteger saveCount = new AtomicInteger();
         private final AtomicInteger prefixTruncateCount = new AtomicInteger();
-        private final IllegalStateException publicationFailure =
-                new IllegalStateException("snapshot publication failed");
-        private final IllegalStateException compactionFailure =
-                new IllegalStateException("uncertain prefix compaction outcome");
+        private final IllegalStateException publicationFailure = new IllegalStateException(
+                "snapshot publication failed", snapshotFault("snapshot publication failed"));
+        private final IllegalStateException compactionFailure = new IllegalStateException(
+                "uncertain prefix compaction outcome", snapshotFault("uncertain prefix compaction outcome"));
         private volatile CompletableFuture<Void> publicationGate;
         private volatile CompletableFuture<Void> blockedPublicationGate;
         private volatile CompletableFuture<Void> publicationEntered;

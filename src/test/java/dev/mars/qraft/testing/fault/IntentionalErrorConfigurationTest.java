@@ -43,7 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests that the test run is wired as the labelling requires: {@code config/logback-test.xml} cannot drop an error,
+ * Tests that the test run is wired as the labelling requires: {@code logback-test.xml} cannot drop an error,
  * every appender that writes puts the label right after the level, the check is attached to the root logger, the
  * extension opens a window for every test, and an intentional error and an injected failure reach the log file with
  * their labels.
@@ -57,11 +57,15 @@ class IntentionalErrorConfigurationTest {
     private static final String SELF_TEST_LOGGER = "dev.mars.qraft.testing.fault.selftest";
 
     @Test
-    void theTestConfigurationCannotDropAnError() throws Exception {
-        String location = System.getProperty("logback.configurationFile");
-        assertNotNull(location, "logback.configurationFile must name config/logback-test.xml");
+    void theTestConfigurationIsAvailableOnTheTestRuntimeClasspath() {
+        assertNotNull(IntentionalErrorConfigurationTest.class.getResource("/logback-test.xml"),
+                "logback-test.xml must be on the test runtime classpath for IDE test launches");
+    }
 
-        try (InputStream input = Files.newInputStream(Path.of(location))) {
+    @Test
+    void theTestConfigurationCannotDropAnError() throws Exception {
+        try (InputStream input = IntentionalErrorConfigurationTest.class.getResourceAsStream("/logback-test.xml")) {
+            assertNotNull(input, "logback-test.xml must be on the test runtime classpath");
             assertEquals(List.of(), LogbackConfigurationAudit.settingsThatCanDropErrors(
                     LogbackConfigurationAudit.parse(input)));
         }
