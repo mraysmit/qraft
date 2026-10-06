@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.controller.raft;
 
+import dev.mars.qraft.testing.fault.ExpectedDockerErrors;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Tag;
@@ -52,6 +53,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.1
  */
 @Tag("docker")
+@ExpectedDockerErrors({
+        dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE,
+        dev.mars.qraft.testing.fault.IntentionalError.RAFT_SNAPSHOT_TRANSFER_INTERRUPTED,
+        dev.mars.qraft.testing.fault.IntentionalError.WAL_AMBIGUOUS_CORRUPTION,
+        dev.mars.qraft.testing.fault.IntentionalError.RAFT_RECOVERY_AMBIGUOUS_CORRUPTION,
+        dev.mars.qraft.testing.fault.IntentionalError.CONTROLLER_RECOVERY_AMBIGUOUS_CORRUPTION,
+        dev.mars.qraft.testing.fault.IntentionalError.WAL_DIRECTORY_ALREADY_LOCKED,
+        dev.mars.qraft.testing.fault.IntentionalError.CONTROLLER_STORAGE_ALREADY_LOCKED
+})
 // Each test waits only on bounded conditions, up to about 270 s in all; the method budget exceeds that,
 // so a failure reports the condition that was not met rather than the module's default method timeout.
 @Timeout(value = 10, unit = TimeUnit.MINUTES)
@@ -304,7 +314,7 @@ class DockerDurableRestartTest {
                 }
             });
         } finally {
-            cluster.stop();
+            SharedDockerCluster.stopAndCapture(cluster);
         }
     }
 
@@ -345,7 +355,7 @@ class DockerDurableRestartTest {
             String logs = cluster.getContainerByServiceName(corruptService).orElseThrow().getLogs();
             assertTrue(logs.contains("raft.log") && logs.contains("corrupt at byte"), logs);
         } finally {
-            cluster.stop();
+            SharedDockerCluster.stopAndCapture(cluster);
         }
     }
 

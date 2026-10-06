@@ -63,7 +63,7 @@ runtime layer, or its unused tooling.
 | 0. Baseline | Done, with one task added since | 2 of 3 | none: its output is in `logs/` |
 | 1. Delete dead code and files | Done; verified against the code | 6 of 6 | `bbf5046` |
 | 2. Single POM | Done; verified against the code | 7 of 7 | `04dddeb` |
-| 2A. Intentional errors labelled | In progress: default-suite conversion complete | 5 of 9 | `24beac3`, in part |
+| 2A. Intentional errors labelled | In progress: default and Docker-suite conversion complete | 6 of 9 | `24beac3`, in part |
 | 3. Package layout | Not started; five tasks added by the review | 0 of 10 | |
 | 4. Node model and API | Not started; one task added | 0 of 7 | |
 | 5. Configuration and version | Not started; two tasks added | 0 of 6 | |
@@ -459,11 +459,23 @@ conversion task is done. This phase is committed in parts, unlike the others.
   (`qraft-maven-tests-2026-10-06_13-12-03.log`) contains 126 labelled events
   (the timing-dependent peer count can exceed the inventory run), 124 ERROR
   lines, and zero unlabelled ERROR lines.
-- [ ] Docker suite:
+- [x] Docker suite:
   - collect each container's log under `logs/docker/<class>/`;
   - every ERROR in it must match an `IntentionalError` the class declares, and
     the test log reprints each one with its label;
   - any other ERROR fails the class.
+
+  Completed (2026-10-06): the auto-registered Docker extension captures each
+  compose service and detached helper before removal, archives each class's
+  incremental output, rejects unparseable and undeclared ERROR lines, and
+  reprints recognised events through the intentional-error labeller. The first
+  complete Docker run was RED for snapshot-transfer interruption, controller
+  recovery fencing, and cross-process WAL locking; focused contracts were added
+  before their narrow catalogue entries and class declarations. The three
+  formerly failing classes then passed 16 tests. After restarting Docker Desktop
+  once when its daemon returned HTTP 503 and stopped, the complete Docker suite
+  passed 24 tests with no failures or errors. The final default regression suite
+  passed 830 tests with no failures or errors.
 - [ ] Child JVMs, by the same rule as containers (review of 2026-10-05). Five
   test classes start a Java process whose output goes to a file in a
   temporary directory, where no window sees it and the test log does not

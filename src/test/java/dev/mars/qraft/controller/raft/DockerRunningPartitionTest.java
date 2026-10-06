@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.controller.raft;
 
+import dev.mars.qraft.testing.fault.ExpectedDockerErrors;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterAll;
@@ -61,6 +62,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 @Tag("docker")
+@ExpectedDockerErrors(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE)
 @Execution(ExecutionMode.SAME_THREAD)
 @Timeout(value = 10, unit = TimeUnit.MINUTES)
 class DockerRunningPartitionTest {
@@ -78,7 +80,7 @@ class DockerRunningPartitionTest {
 
     @AfterAll
     static void stopCluster() {
-        if (cluster != null) cluster.stop();
+        if (cluster != null) SharedDockerCluster.stopAndCapture(cluster);
     }
 
     @Test

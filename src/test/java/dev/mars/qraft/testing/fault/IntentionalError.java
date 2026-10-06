@@ -48,6 +48,9 @@ public enum IntentionalError {
     /** A test transport's message handler fails while a delayed request is being delivered. */
     TRANSPORT_HANDLER_FAILURE,
 
+    /** Test teardown interrupts a delayed in-memory delivery that is waiting for its target node. */
+    TRANSPORT_DELIVERY_INTERRUPTED,
+
     /** A shutdown hook throws or completes with a failure supplied by its test. */
     SHUTDOWN_HOOK_FAILURE,
 
@@ -78,7 +81,8 @@ public enum IntentionalError {
 
     /** A second WAL writer is deliberately opened against a directory whose lock is already held. */
     WAL_DIRECTORY_ALREADY_LOCKED("dev.mars.raftlog.storage.FileRaftStorage", Level.ERROR,
-            "Cannot acquire exclusive lock at .*[\\\\/]raft\\.lock: lock already held in this JVM"),
+            "Cannot acquire exclusive lock at .*[\\\\/]raft\\.lock:"
+                    + " (?:lock already held in this JVM|another process holds the lock)"),
 
     /** A test corrupts a complete, acknowledged WAL record and verifies that replay fences the storage. */
     WAL_AMBIGUOUS_CORRUPTION("dev.mars.raftlog.storage.FileRaftStorage", Level.ERROR,
@@ -110,6 +114,13 @@ public enum IntentionalError {
     RAFT_PEER_UNREACHABLE("dev.mars.qraft.controller.raft.RaftNode", Level.ERROR,
             "(?:Raft peer \\S+ became unreachable during AppendEntries|Failed to retrieve vote from \\S+)"),
 
+    /** A stopped Docker peer interrupts an in-progress snapshot transfer or its completion callback. */
+    RAFT_SNAPSHOT_TRANSFER_INTERRUPTED("dev.mars.qraft.controller.raft.RaftNode", Level.ERROR,
+            "(?:Failed to send InstallSnapshot chunk \\d+/\\d+ to \\S+: UNAVAILABLE:"
+                    + " (?:io exception|Unable to resolve host \\S+)"
+                    + "|Failed to process InstallSnapshot response from \\S+:"
+                    + " Raft transition sequencer is draining)"),
+
     /** A test deliberately fences the transition sequencer and then exercises a rejected operation. */
     RAFT_FENCED_OPERATION("dev.mars.qraft.controller.raft.RaftNode", Level.ERROR,
             "(?:Failed to persist command to WAL|AppendEntries failed during durable transition"
@@ -124,6 +135,18 @@ public enum IntentionalError {
     RAFT_RECOVERY_AMBIGUOUS_CORRUPTION("dev.mars.qraft.controller.raft.RaftNode", Level.ERROR,
             "(?:Recovery failed|Failed to recover Raft state from storage): WAL .* is corrupt at byte \\d+ of \\d+;"
                     + " \\d+ entries precede the damage\\. Not repaired: restore this node from its peers\\."),
+
+    /** Controller startup reports that deliberately corrupted storage left the node live but fenced. */
+    CONTROLLER_RECOVERY_AMBIGUOUS_CORRUPTION("d.mars.qraft.controller.QraftControllerService", Level.ERROR,
+            "Raft recovery failed; node remains live but unready and will not participate\\."
+                    + " Preserve the node directory for diagnosis, then replace it from a healthy peer and restart:"
+                    + " WAL .* is corrupt at byte \\d+ of \\d+; \\d+ entries precede the damage\\."
+                    + " Not repaired: restore this node from its peers\\."),
+
+    /** Controller startup propagates a deliberate cross-process WAL lock conflict. */
+    CONTROLLER_STORAGE_ALREADY_LOCKED("d.mars.qraft.controller.QraftControllerService", Level.ERROR,
+            "Failed to initialize Raft storage: Cannot acquire exclusive lock on WAL directory: .*\\."
+                    + " Another process may be using this storage\\."),
 
     /** Stopping during recovery deliberately makes already-scheduled startup work encounter the drain. */
     RAFT_STARTUP_DRAINING("dev.mars.qraft.controller.raft.RaftNode", Level.ERROR,
@@ -186,9 +209,14 @@ public enum IntentionalError {
      * pattern matches completely. Always false for an injected failure, which is recognised by its exception.
      */
     boolean matches(ILoggingEvent event) {
+        return matches(event.getLoggerName(), event.getLevel(), event.getFormattedMessage());
+    }
+
+    /** Whether an externally captured log event has this intentional error's exact signature. */
+    boolean matches(String eventLogger, Level eventLevel, String eventMessage) {
         return kind == Kind.INTENTIONAL_ERROR
-                && loggerName.equals(event.getLoggerName())
-                && level.equals(event.getLevel())
-                && message.matcher(event.getFormattedMessage()).matches();
+                && loggerName.equals(eventLogger)
+                && level.equals(eventLevel)
+                && message.matcher(eventMessage).matches();
     }
 }

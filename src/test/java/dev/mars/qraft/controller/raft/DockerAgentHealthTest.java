@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.controller.raft;
 
+import dev.mars.qraft.testing.fault.ExpectedDockerErrors;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -54,6 +55,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 @Tag("docker")
+@ExpectedDockerErrors(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE)
 // Each test starts its own cluster and then waits on bounded conditions; the method budget exceeds their sum,
 // so a failure reports the condition that was not met rather than the module's default method timeout.
 @Timeout(value = 10, unit = TimeUnit.MINUTES)
@@ -91,7 +93,7 @@ class DockerAgentHealthTest {
             });
             assertFalse(sawExpiry.get(), "a graceful stop deregisters the service; it must not be left to expire");
         } finally {
-            cluster.stop();
+            SharedDockerCluster.stopAndCapture(cluster);
         }
     }
 
@@ -112,7 +114,7 @@ class DockerAgentHealthTest {
             });
             assertTrue(sawExpiry.get(), "every server showed the unrenewed checks expired before deregistration");
         } finally {
-            cluster.stop();
+            SharedDockerCluster.stopAndCapture(cluster);
         }
     }
 
@@ -144,7 +146,7 @@ class DockerAgentHealthTest {
                             && "200".equals(agentStatus(cluster, "/health/ready")));
         } finally {
             if (partitioned) SharedDockerCluster.restoreContainerNetwork(cluster, "agent");
-            cluster.stop();
+            SharedDockerCluster.stopAndCapture(cluster);
         }
     }
 

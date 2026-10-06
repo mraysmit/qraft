@@ -28,6 +28,7 @@ import dev.mars.qraft.controller.raft.grpc.VoteRequest;
 import dev.mars.qraft.controller.raft.grpc.VoteResponse;
 import dev.mars.qraft.controller.runtime.Future;
 import dev.mars.qraft.controller.runtime.Promise;
+import dev.mars.qraft.testing.fault.InjectedFault;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -659,7 +660,12 @@ public class InMemoryTransportSimulator implements RaftTransport {
             return response.toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted awaiting the target node", interrupted);
+            IllegalStateException failure = new IllegalStateException(
+                    "Interrupted awaiting the target node", interrupted);
+            failure.addSuppressed(new InjectedFault(
+                    dev.mars.qraft.testing.fault.IntentionalError.TRANSPORT_DELIVERY_INTERRUPTED,
+                    "test teardown interrupted a delayed in-memory delivery"));
+            throw failure;
         } catch (java.util.concurrent.ExecutionException failure) {
             throw failure.getCause() instanceof RuntimeException runtime ? runtime
                     : new IllegalStateException(failure.getCause());

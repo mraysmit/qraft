@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.controller.raft;
 
+import dev.mars.qraft.testing.fault.DockerLogCapture;
 import org.testcontainers.containers.ComposeContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.DockerClientFactory;
@@ -33,6 +34,7 @@ import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
 import java.util.Map;
@@ -68,6 +70,7 @@ public final class SharedDockerCluster {
 
     private static volatile boolean imageBuilt = false;
     private static ComposeContainer threeNodeCluster;
+    private static final Map<ComposeContainer, List<String>> ACTIVE_CLUSTERS = new IdentityHashMap<>();
     private static final Map<String, Map<String, ContainerNetwork>> DISCONNECTED_NETWORKS =
             new ConcurrentHashMap<>();
 
@@ -94,6 +97,7 @@ public final class SharedDockerCluster {
                     .withStartupTimeout(Duration.ofSeconds(90));
 
             threeNodeCluster.start();
+            registerCluster(threeNodeCluster, List.of("controller1", "controller2", "controller3"));
             logger.info("Shared 3-node cluster started successfully");
         }
         return threeNodeCluster;
@@ -109,6 +113,7 @@ public final class SharedDockerCluster {
                 .withExposedService("controller3", 8080, Wait.forHttp("/health").forStatusCode(200))
                 .withStartupTimeout(Duration.ofSeconds(90));
         cluster.start();
+        registerCluster(cluster, List.of("controller1", "controller2", "controller3"));
         return cluster;
     }
 
@@ -138,6 +143,7 @@ public final class SharedDockerCluster {
                 .withExposedService("agent", 8080, Wait.forHttp("/health/live").forStatusCode(200))
                 .withStartupTimeout(Duration.ofSeconds(90));
         cluster.start();
+        registerCluster(cluster, List.of("controller1", "controller2", "controller3", "agent"));
         return cluster;
     }
 
@@ -260,6 +266,7 @@ public final class SharedDockerCluster {
                 process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
             }
             String text = Files.readString(output, java.nio.charset.StandardCharsets.UTF_8);
+            DockerLogCapture.capture("lock-contender-" + name, "lock-contender", text);
             return new DockerCommandResult(exited, exited ? process.exitValue() : -1, text);
         } catch (Exception error) {
             throw new IllegalStateException("Could not run storage-lock contender", error);
@@ -288,6 +295,7 @@ public final class SharedDockerCluster {
         @Override
         public void close() throws Exception {
             try {
+                captureDetachedContainer(name);
                 new ProcessBuilder("docker", "rm", "-f", name).redirectErrorStream(true).start()
                         .waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
             } finally {
@@ -434,6 +442,40 @@ public final class SharedDockerCluster {
         }
     }
 
+    /** Captures every registered container's output without stopping it. */
+    public static synchronized void captureRunningLogs() {
+        ACTIVE_CLUSTERS.forEach(SharedDockerCluster::captureClusterLogs);
+    }
+
+    /** Captures a disposable cluster before Testcontainers removes its containers, then stops it. */
+    public static synchronized void stopAndCapture(ComposeContainer cluster) {
+        captureClusterLogs(cluster, ACTIVE_CLUSTERS.getOrDefault(cluster, List.of()));
+        ACTIVE_CLUSTERS.remove(cluster);
+        cluster.stop();
+    }
+
+    private static void registerCluster(ComposeContainer cluster, List<String> services) {
+        ACTIVE_CLUSTERS.put(cluster, List.copyOf(services));
+    }
+
+    private static void captureClusterLogs(ComposeContainer cluster, List<String> services) {
+        for (String service : services) {
+            cluster.getContainerByServiceName(service).ifPresent(container -> DockerLogCapture.capture(
+                    container.getContainerId(), service + "-" + container.getContainerId().substring(0, 12),
+                    container.getLogs()));
+        }
+    }
+
+    private static void captureDetachedContainer(String name) {
+        try {
+            Process process = new ProcessBuilder("docker", "logs", name).redirectErrorStream(true).start();
+            String output = new String(process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            if (process.waitFor() == 0) DockerLogCapture.capture("detached-" + name, name, output);
+        } catch (Exception error) {
+            throw new IllegalStateException("Could not capture Docker logs for " + name, error);
+        }
+    }
+
     /**
      * Packages the host-built runtime JAR as the qraft-runtime:test Docker image.
      */
@@ -539,7 +581,7 @@ public final class SharedDockerCluster {
     private static void shutdown() {
         logger.info("Shutting down shared Docker clusters...");
         if (threeNodeCluster != null) {
-            try { threeNodeCluster.stop(); } catch (Exception e) { /* ignore */ }
+            try { stopAndCapture(threeNodeCluster); } catch (Exception e) { /* ignore */ }
         }
     }
 }

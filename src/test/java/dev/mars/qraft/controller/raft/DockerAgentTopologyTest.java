@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.controller.raft;
 
+import dev.mars.qraft.testing.fault.ExpectedDockerErrors;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Tag;
@@ -59,6 +60,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
  * @version 1.0
  */
 @Tag("docker")
+@ExpectedDockerErrors({
+        dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE,
+        dev.mars.qraft.testing.fault.IntentionalError.RAFT_SNAPSHOT_TRANSFER_INTERRUPTED
+})
 // Each test starts its own cluster and then waits on bounded conditions; the method budget exceeds their sum.
 @Timeout(value = 10, unit = TimeUnit.MINUTES)
 @Execution(ExecutionMode.SAME_THREAD)
@@ -92,7 +97,7 @@ class DockerAgentTopologyTest {
                         servers.stream().allMatch(DockerHealthApi::passingWithBothChecks));
             }
         } finally {
-            cluster.stop();
+            SharedDockerCluster.stopAndCapture(cluster);
         }
     }
 
@@ -135,7 +140,7 @@ class DockerAgentTopologyTest {
                     && httpSequence(servers.get(leader)) >= majorityAtHeal);
         } finally {
             if (cutOff != null) SharedDockerCluster.restoreContainerNetwork(cluster, cutOff);
-            cluster.stop();
+            SharedDockerCluster.stopAndCapture(cluster);
         }
     }
 
@@ -168,7 +173,7 @@ class DockerAgentTopologyTest {
             assertFalse(sawLoss.get(), "no running server ever showed the service expired or removed");
             servers.forEach(server -> assertEquals(1, instanceCount(server), server));
         } finally {
-            cluster.stop();
+            SharedDockerCluster.stopAndCapture(cluster);
         }
     }
 

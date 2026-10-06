@@ -1,0 +1,152 @@
+/*
+ * Copyright 2025 Mark Andrew Ray-Smith Cityline Ltd
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package dev.mars.qraft.testing.fault;
+
+import ch.qos.logback.classic.Level;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/** Captures, archives, audits, and reprints Docker output while a Docker test class is running. */
+public final class DockerLogCapture {
+    private static final Object LOCK = new Object();
+    private static final Pattern ANSI = Pattern.compile("\\u001B\\[[;\\d]*m");
+    private static final Pattern EVENT = Pattern.compile(
+            "^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{3} \\[[^]]+] "
+                    + "(?<level>TRACE|DEBUG|INFO|WARN|ERROR)\\s+"
+                    + "(?<logger>\\S+?)(?: \\[[^]]*])*(?: \\[[^]]*])? - (?<message>.*)$");
+    private static final Pattern ERROR_TOKEN = Pattern.compile("(?:^|[|\\s-])ERROR(?:[|:\\s-]|$)");
+    private static final Map<String, String> PREVIOUS_OUTPUT = new HashMap<>();
+
+    private static String owner;
+    private static Set<IntentionalError> declared = Set.of();
+    private static final Map<String, StringBuilder> captured = new LinkedHashMap<>();
+
+    private DockerLogCapture() {
+    }
+
+    /** Starts collection for one Docker test class. Previously drained container output remains remembered. */
+    public static void beginClass(String classOwner, Set<IntentionalError> expected) {
+        synchronized (LOCK) {
+            if (owner != null) throw new IllegalStateException("Docker log capture already belongs to " + owner);
+            owner = safeName(classOwner);
+            declared = expected.isEmpty() ? Set.of() : EnumSet.copyOf(expected);
+            for (IntentionalError error : declared) {
+                if (error.kind() != IntentionalError.Kind.INTENTIONAL_ERROR) {
+                    throw new IllegalArgumentException("Docker logs cannot declare injected failure " + error);
+                }
+            }
+            captured.clear();
+        }
+    }
+
+    /** Captures only output not already drained from this container or detached process. */
+    public static void capture(String sourceId, String sourceName, String completeOutput) {
+        synchronized (LOCK) {
+            if (owner == null || completeOutput == null) return;
+            String previous = PREVIOUS_OUTPUT.getOrDefault(sourceId, "");
+            String addition = completeOutput.startsWith(previous)
+                    ? completeOutput.substring(previous.length()) : completeOutput;
+            PREVIOUS_OUTPUT.put(sourceId, completeOutput);
+            StringBuilder destination = captured.computeIfAbsent(
+                    safeName(sourceName), ignored -> new StringBuilder());
+            if (!addition.isEmpty()) {
+                destination.append(addition);
+                if (!addition.endsWith("\n")) destination.append(System.lineSeparator());
+            }
+        }
+    }
+
+    /** Archives and checks everything captured for the current class, returning violations. */
+    public static List<String> finishClass(Path logRoot) {
+        synchronized (LOCK) {
+            if (owner == null) return List.of("Docker log capture ended without a running Docker class");
+            List<String> problems = new ArrayList<>();
+            Set<IntentionalError> observed = EnumSet.noneOf(IntentionalError.class);
+            List<ExternalError> recognised = new ArrayList<>();
+            Path classDirectory = logRoot.resolve(owner);
+            try {
+                Files.createDirectories(classDirectory);
+                for (Map.Entry<String, StringBuilder> entry : captured.entrySet()) {
+                    String output = entry.getValue().toString();
+                    Files.writeString(classDirectory.resolve(entry.getKey() + ".log"), output,
+                            StandardCharsets.UTF_8, StandardOpenOption.CREATE,
+                            StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+                    Audit audit = audit(output, declared);
+                    recognised.addAll(audit.recognised());
+                    problems.addAll(audit.problems().stream()
+                            .map(problem -> entry.getKey() + ": " + problem).toList());
+                    audit.recognised().forEach(event -> observed.add(event.error()));
+                }
+                observed.forEach(IntentionalErrors::expect);
+                recognised.forEach(event -> LoggerFactory.getLogger(event.logger()).error(event.message()));
+            } catch (IOException error) {
+                problems.add("could not archive Docker logs for " + owner + ": " + error.getMessage());
+            } finally {
+                owner = null;
+                declared = Set.of();
+                captured.clear();
+            }
+            return List.copyOf(problems);
+        }
+    }
+
+    /** Parses and checks one block of container output. */
+    static Audit audit(String output, Set<IntentionalError> expected) {
+        List<ExternalError> recognised = new ArrayList<>();
+        List<String> problems = new ArrayList<>();
+        for (String rawLine : output.lines().toList()) {
+            String line = ANSI.matcher(rawLine).replaceAll("").stripTrailing();
+            Matcher event = EVENT.matcher(line);
+            if (event.matches() && "ERROR".equals(event.group("level"))) {
+                String logger = event.group("logger");
+                String message = event.group("message");
+                IntentionalError match = expected.stream()
+                        .filter(error -> error.matches(logger, Level.ERROR, message))
+                        .findFirst().orElse(null);
+                if (match == null) problems.add("undeclared container " + line);
+                else recognised.add(new ExternalError(match, logger, message, line));
+            } else if (ERROR_TOKEN.matcher(line).find()) {
+                problems.add("unparseable container ERROR: " + line);
+            }
+        }
+        return new Audit(List.copyOf(recognised), List.copyOf(problems));
+    }
+
+    private static String safeName(String value) {
+        return value.replaceAll("[^A-Za-z0-9._-]", "_");
+    }
+
+    record ExternalError(IntentionalError error, String logger, String message, String originalLine) {
+    }
+
+    record Audit(List<ExternalError> recognised, List<String> problems) {
+    }
+}

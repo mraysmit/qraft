@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.controller.raft;
 
+import dev.mars.qraft.testing.fault.ExpectedDockerErrors;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -75,6 +76,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * @version 1.0
  */
 @Tag("docker")
+@ExpectedDockerErrors({
+        dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE,
+        dev.mars.qraft.testing.fault.IntentionalError.RAFT_SNAPSHOT_TRANSFER_INTERRUPTED
+})
 // Each test starts its own cluster and then waits on bounded conditions; the method budget exceeds their sum,
 // so a failure reports the condition that was not met rather than the module's default method timeout.
 @Timeout(value = 10, unit = TimeUnit.MINUTES)
@@ -135,7 +140,7 @@ class DockerAgentRecoveryTest {
             assertFalse(sawExpiry.get(), "renewals resumed before any server expired a check");
         } finally {
             if (agentPaused) SharedDockerCluster.unpauseContainer(cluster, "agent");
-            cluster.stop();
+            SharedDockerCluster.stopAndCapture(cluster);
         }
     }
 
@@ -182,7 +187,7 @@ class DockerAgentRecoveryTest {
                     servers.stream().allMatch(DockerHealthApi::passingWithBothChecks));
         } finally {
             if (agentPaused) SharedDockerCluster.unpauseContainer(cluster, "agent");
-            cluster.stop();
+            SharedDockerCluster.stopAndCapture(cluster);
         }
     }
 
@@ -219,7 +224,7 @@ class DockerAgentRecoveryTest {
             assertFalse(sawRemovedOrDuplicated.get(),
                     "a restarted agent keeps its identity, so its one instance is never removed or duplicated");
         } finally {
-            cluster.stop();
+            SharedDockerCluster.stopAndCapture(cluster);
         }
     }
 
@@ -240,7 +245,7 @@ class DockerAgentRecoveryTest {
             await().atMost(Duration.ofSeconds(90)).until(() -> servers.stream().allMatch(server ->
                     passingWithBothChecks(server) && instanceCount(server) == 1));
         } finally {
-            cluster.stop();
+            SharedDockerCluster.stopAndCapture(cluster);
         }
     }
 
