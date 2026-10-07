@@ -47,9 +47,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
-import static dev.mars.qraft.controller.raft.RaftAwait.awaitStateLoop;
-import static dev.mars.qraft.controller.raft.RaftAwait.await;
-import static dev.mars.qraft.controller.raft.RaftAwait.logEnd;
+import static dev.mars.qraft.controller.raft.RaftAwaitHelper.awaitStateLoop;
+import static dev.mars.qraft.controller.raft.RaftAwaitHelper.await;
+import static dev.mars.qraft.controller.raft.RaftAwaitHelper.logEnd;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -63,25 +63,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 class RaftNodeOutboundSnapshotGenerationTest {
-    private static final String PEER_SERVER_ID = ManualRaftCluster.serverIdOf("peer-1");
+    private static final String PEER_SERVER_ID = ManualRaftClusterFixture.serverIdOf("peer-1");
 
     private JavaRuntime runtime;
-    private GatedSnapshotLoadStorage storage;
-    private SnapshotTransport transport;
+    private GatedSnapshotLoadStorageFixture storage;
+    private SnapshotTransportFixture transport;
     private RaftNode node;
 
     @BeforeEach
     void setUp() {
         runtime = JavaRuntime.create();
-        storage = new GatedSnapshotLoadStorage();
+        storage = new GatedSnapshotLoadStorageFixture();
         storage.open(null).join();
-        transport = new SnapshotTransport();
+        transport = new SnapshotTransportFixture();
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
-                .serverId(ManualRaftCluster.serverIdOf("node-1"))
+                .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
                 .clusterNodes(Set.of("node-1", "peer-1"))
-                .initialConfiguration(ManualRaftCluster.configurationOf(Set.of("node-1", "peer-1")))
+                .initialConfiguration(ManualRaftClusterFixture.configurationOf(Set.of("node-1", "peer-1")))
                 .transport(transport)
                 .stateMachine(new QraftStateStore())
                 .commandCodec(new ProtobufRaftCommandCodec())
@@ -295,7 +295,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
      * @return the peer's next index, which a fresh leadership sets just past its log
      */
     private long stepDownAndReelect(long oldTerm) throws Exception {
-        RaftAwait.LogEnd end = logEnd(runtime, node);
+        RaftAwaitHelper.LogEnd end = logEnd(runtime, node);
         AppendEntriesResponse vote = await(node.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
                 .setTerm(oldTerm + 1)
                 .setLeaderId("peer-1")
@@ -340,7 +340,8 @@ class RaftNodeOutboundSnapshotGenerationTest {
     private record PendingSnapshot(
             InstallSnapshotRequest request, Promise<InstallSnapshotResponse> response) {}
 
-    private static final class SnapshotTransport implements RaftTransport {
+    /** Test transport fixture that records and controls snapshot requests for generation assertions. */
+    private static final class SnapshotTransportFixture implements RaftTransport {
         private final BlockingQueue<PendingSnapshot> snapshots = new LinkedBlockingQueue<>();
         private final AtomicBoolean rejectNextAppend = new AtomicBoolean();
         private volatile CompletableFuture<Void> rejectedAppend;
@@ -370,7 +371,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
         @Override
         public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
             return Future.succeededFuture(VoteResponse.newBuilder()
-                    .setTerm(request.getTerm()).setVoterServerId(ManualRaftCluster.serverIdOf(targetId))
+                    .setTerm(request.getTerm()).setVoterServerId(ManualRaftClusterFixture.serverIdOf(targetId))
                     .setVoteGranted(true).build());
         }
 
@@ -380,14 +381,14 @@ class RaftNodeOutboundSnapshotGenerationTest {
             if (rejectNextAppend.compareAndSet(true, false)) {
                 rejectedAppend.complete(null);
                 return Future.succeededFuture(AppendEntriesResponse.newBuilder()
-                        .setTerm(request.getTerm()).setFollowerServerId(ManualRaftCluster.serverIdOf(targetId))
+                        .setTerm(request.getTerm()).setFollowerServerId(ManualRaftClusterFixture.serverIdOf(targetId))
                         .setSuccess(false).build());
             }
             long matchIndex = request.getEntriesCount() == 0
                     ? request.getPrevLogIndex()
                     : request.getEntries(request.getEntriesCount() - 1).getIndex();
             return Future.succeededFuture(AppendEntriesResponse.newBuilder()
-                    .setTerm(request.getTerm()).setFollowerServerId(ManualRaftCluster.serverIdOf(targetId))
+                    .setTerm(request.getTerm()).setFollowerServerId(ManualRaftClusterFixture.serverIdOf(targetId))
                     .setSuccess(true).setMatchIndex(matchIndex).build());
         }
 
@@ -400,8 +401,9 @@ class RaftNodeOutboundSnapshotGenerationTest {
         }
     }
 
-    private static final class GatedSnapshotLoadStorage implements RaftStorage, SnapshotStore {
-        private final TestRaftStorage delegate = new TestRaftStorage();
+    /** Test storage fixture that holds snapshot loading until the test releases it. */
+    private static final class GatedSnapshotLoadStorageFixture implements RaftStorage, SnapshotStore {
+        private final TestRaftStorageFixture delegate = new TestRaftStorageFixture();
         private final AtomicInteger closeCount = new AtomicInteger();
         private volatile CompletableFuture<Void> nextLoadGate;
         private volatile CompletableFuture<Void> blockedLoadGate;

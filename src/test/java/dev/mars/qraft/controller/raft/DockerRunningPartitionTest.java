@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.testing.fault.ExpectedDockerErrors;
+import dev.mars.qraft.testing.fault.ExpectedDockerErrorsHelper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterAll;
@@ -62,7 +62,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 @Tag("docker")
-@ExpectedDockerErrors(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE)
+@ExpectedDockerErrorsHelper(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE)
 @Execution(ExecutionMode.SAME_THREAD)
 @Timeout(value = 10, unit = TimeUnit.MINUTES)
 class DockerRunningPartitionTest {
@@ -74,13 +74,13 @@ class DockerRunningPartitionTest {
 
     @BeforeAll
     static void startCluster() {
-        cluster = SharedDockerCluster.startIsolatedThreeNodeCluster();
-        endpoints = SharedDockerCluster.getNodeEndpoints(cluster, 3);
+        cluster = SharedDockerClusterFixture.startIsolatedThreeNodeCluster();
+        endpoints = SharedDockerClusterFixture.getNodeEndpoints(cluster, 3);
     }
 
     @AfterAll
     static void stopCluster() {
-        if (cluster != null) SharedDockerCluster.stopAndCapture(cluster);
+        if (cluster != null) SharedDockerClusterFixture.stopAndCapture(cluster);
     }
 
     @Test
@@ -92,7 +92,7 @@ class DockerRunningPartitionTest {
         register(endpoints.get(leader), before);
         await().atMost(Duration.ofSeconds(30)).until(() -> everyNodeHas(endpoints, before));
 
-        SharedDockerCluster.partitionContainer(cluster, leaderService);
+        SharedDockerClusterFixture.partitionContainer(cluster, leaderService);
         String during = "during-" + System.nanoTime();
         String refused = "refused-" + System.nanoTime();
         try {
@@ -106,7 +106,7 @@ class DockerRunningPartitionTest {
             register(currentLeader(majority), during);
             await().atMost(Duration.ofSeconds(30)).until(() -> everyNodeHas(majority, during));
         } finally {
-            SharedDockerCluster.restoreContainerNetwork(cluster, leaderService);
+            SharedDockerClusterFixture.restoreContainerNetwork(cluster, leaderService);
         }
 
         await().atMost(Duration.ofSeconds(60)).until(() -> leaders(endpoints) == 1);
@@ -125,7 +125,7 @@ class DockerRunningPartitionTest {
         List<String> majority = without(follower);
         long termBefore = insideStatus(followerService).path("term").asLong();
 
-        SharedDockerCluster.partitionContainer(cluster, followerService);
+        SharedDockerClusterFixture.partitionContainer(cluster, followerService);
         String during = "while-partitioned-" + System.nanoTime();
         List<String> followerStates = new ArrayList<>();
         try {
@@ -141,7 +141,7 @@ class DockerRunningPartitionTest {
             register(currentLeader(majority), during);
             await().atMost(Duration.ofSeconds(30)).until(() -> everyNodeHas(majority, during));
         } finally {
-            SharedDockerCluster.restoreContainerNetwork(cluster, followerService);
+            SharedDockerClusterFixture.restoreContainerNetwork(cluster, followerService);
         }
 
         await().atMost(Duration.ofSeconds(60)).until(() -> leaders(endpoints) == 1);
@@ -228,18 +228,18 @@ class DockerRunningPartitionTest {
     }
 
     private static JsonNode insideStatus(String service) throws Exception {
-        return JSON.readTree(SharedDockerCluster.execInService(cluster, service,
+        return JSON.readTree(SharedDockerClusterFixture.execInService(cluster, service,
                 "curl", "-s", "--max-time", "5", "http://localhost:8080/raft/status"));
     }
 
     private static int insideReadiness(String service) throws Exception {
-        return Integer.parseInt(SharedDockerCluster.execInService(cluster, service,
+        return Integer.parseInt(SharedDockerClusterFixture.execInService(cluster, service,
                 "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "5",
                 "http://localhost:8080/health/ready").trim());
     }
 
     private static int insideRegister(String service, String serviceName) throws Exception {
-        return Integer.parseInt(SharedDockerCluster.execInService(cluster, service,
+        return Integer.parseInt(SharedDockerClusterFixture.execInService(cluster, service,
                 "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "15",
                 "-X", "PUT", "-H", "Content-Type: application/json", "-H", "X-Qraft-Node: partition-test",
                 "--data", registration(serviceName), "http://localhost:8080/v1/agent/service/register").trim());

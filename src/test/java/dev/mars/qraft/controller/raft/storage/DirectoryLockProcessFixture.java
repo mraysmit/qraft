@@ -24,14 +24,23 @@ import java.io.InputStreamReader;
 import java.nio.file.Path;
 
 /**
- * Separate-JVM fixture that owns a real RaftLog directory lock until stdin closes.
+ * Test helper executable launched in separate JVMs by {@link RaftStorageProcessLockTest}
+ * to verify that two processes cannot open the same Raft storage directory.
+ *
+ * <p>Opens the directory supplied in the first argument and prints {@code LOCKED} when
+ * it owns the lock. It holds the lock until stdin receives a line or closes, then closes
+ * the storage. A failed open reports {@code LOCK_FAILED} and exits with code {@code 73}.
+ * The calling test launches an owner and a contender and performs the assertions.
+ *
+ * <p>This class belongs in the test sources because it supplies a subprocess for the
+ * test. It has a {@code main} entry point rather than JUnit test methods.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-22
  * @version 1.0
  */
-public final class DirectoryLockProcess {
-    private DirectoryLockProcess() { }
+public final class DirectoryLockProcessFixture {
+    private DirectoryLockProcessFixture() { }
 
     public static void main(String[] args) {
         Path directory = Path.of(args[0]).toAbsolutePath().normalize();

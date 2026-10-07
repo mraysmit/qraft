@@ -28,7 +28,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Finds the settings in a Logback configuration that could stop an ERROR event from being written: a filter or
+ * Test audit helper used by logging-configuration tests to find settings that could
+ * stop an ERROR event from being written: a filter or
  * turbo filter, an included file this audit cannot see, an asynchronous appender that discards events when its
  * queue is full, a level of {@code OFF}, a logger that does not pass events to the root, or a root without an
  * appender. Used for both the production and the test configuration.
@@ -37,9 +38,9 @@ import java.util.List;
  * @since 2026-10-04
  * @version 1.0
  */
-public final class LogbackConfigurationAudit {
+public final class LogbackConfigurationAuditHelper {
 
-    private LogbackConfigurationAudit() {
+    private LogbackConfigurationAuditHelper() {
     }
 
     /** Parses a Logback configuration document, refusing a DOCTYPE. A malformed document throws; nothing is printed. */

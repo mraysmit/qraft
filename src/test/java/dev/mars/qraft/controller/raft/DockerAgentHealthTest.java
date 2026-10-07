@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.testing.fault.ExpectedDockerErrors;
+import dev.mars.qraft.testing.fault.ExpectedDockerErrorsHelper;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -32,11 +32,11 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static dev.mars.qraft.controller.raft.DockerHealthApi.httpSequence;
-import static dev.mars.qraft.controller.raft.DockerHealthApi.instanceCount;
-import static dev.mars.qraft.controller.raft.DockerHealthApi.leaderIndex;
-import static dev.mars.qraft.controller.raft.DockerHealthApi.passingWithBothChecks;
-import static dev.mars.qraft.controller.raft.DockerHealthApi.webEntry;
+import static dev.mars.qraft.controller.raft.DockerHealthApiHelper.httpSequence;
+import static dev.mars.qraft.controller.raft.DockerHealthApiHelper.instanceCount;
+import static dev.mars.qraft.controller.raft.DockerHealthApiHelper.leaderIndex;
+import static dev.mars.qraft.controller.raft.DockerHealthApiHelper.passingWithBothChecks;
+import static dev.mars.qraft.controller.raft.DockerHealthApiHelper.webEntry;
 import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -55,7 +55,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 @Tag("docker")
-@ExpectedDockerErrors(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE)
+@ExpectedDockerErrorsHelper(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE)
 // Each test starts its own cluster and then waits on bounded conditions; the method budget exceeds their sum,
 // so a failure reports the condition that was not met rather than the module's default method timeout.
 @Timeout(value = 10, unit = TimeUnit.MINUTES)
@@ -65,16 +65,16 @@ class DockerAgentHealthTest {
 
     @Test
     void anAgentContainersChecksReachEveryServerSurviveTheLeaderLossAndDeregisterOnGracefulStop() {
-        ComposeContainer cluster = SharedDockerCluster.startIsolatedThreeNodeClusterWithAgent();
+        ComposeContainer cluster = SharedDockerClusterFixture.startIsolatedThreeNodeClusterWithAgent();
         try {
-            List<String> endpoints = SharedDockerCluster.getNodeEndpoints(cluster, 3);
+            List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(cluster, 3);
             await().atMost(Duration.ofSeconds(60)).until(() -> leaderIndex(endpoints) >= 0);
             await().atMost(Duration.ofSeconds(60)).until(() ->
-                    endpoints.stream().allMatch(DockerHealthApi::passingWithBothChecks));
+                    endpoints.stream().allMatch(DockerHealthApiHelper::passingWithBothChecks));
 
             int leader = leaderIndex(endpoints);
             long sequenceBeforeLoss = httpSequence(endpoints.get(leader));
-            SharedDockerCluster.killContainer(cluster, "controller" + (leader + 1));
+            SharedDockerClusterFixture.killContainer(cluster, "controller" + (leader + 1));
             List<String> survivors = new ArrayList<>(endpoints);
             survivors.remove(leader);
 
@@ -85,7 +85,7 @@ class DockerAgentHealthTest {
             // Expiry would also remove the instance, but only after holding its checks critical for
             // deregisterAfterMs (5 s), far longer than a poll. A graceful stop deregisters directly, so no
             // server may ever show the checks expired.
-            SharedDockerCluster.stopContainer(cluster, "agent");
+            SharedDockerClusterFixture.stopContainer(cluster, "agent");
             AtomicBoolean sawExpiry = new AtomicBoolean();
             await().atMost(Duration.ofSeconds(60)).pollInterval(Duration.ofMillis(100)).until(() -> {
                 if (survivors.stream().anyMatch(DockerAgentHealthTest::anyCheckExpired)) sawExpiry.set(true);
@@ -93,19 +93,19 @@ class DockerAgentHealthTest {
             });
             assertFalse(sawExpiry.get(), "a graceful stop deregisters the service; it must not be left to expire");
         } finally {
-            SharedDockerCluster.stopAndCapture(cluster);
+            SharedDockerClusterFixture.stopAndCapture(cluster);
         }
     }
 
     @Test
     void aKilledAgentContainersChecksExpireAndTheLeaderThenDeregistersItsService() {
-        ComposeContainer cluster = SharedDockerCluster.startIsolatedThreeNodeClusterWithAgent();
+        ComposeContainer cluster = SharedDockerClusterFixture.startIsolatedThreeNodeClusterWithAgent();
         try {
-            List<String> endpoints = SharedDockerCluster.getNodeEndpoints(cluster, 3);
+            List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(cluster, 3);
             await().atMost(Duration.ofSeconds(60)).until(() ->
-                    endpoints.stream().allMatch(DockerHealthApi::passingWithBothChecks));
+                    endpoints.stream().allMatch(DockerHealthApiHelper::passingWithBothChecks));
 
-            SharedDockerCluster.killContainer(cluster, "agent");
+            SharedDockerClusterFixture.killContainer(cluster, "agent");
 
             AtomicBoolean sawExpiry = new AtomicBoolean();
             await().atMost(Duration.ofSeconds(60)).until(() -> {
@@ -114,21 +114,21 @@ class DockerAgentHealthTest {
             });
             assertTrue(sawExpiry.get(), "every server showed the unrenewed checks expired before deregistration");
         } finally {
-            SharedDockerCluster.stopAndCapture(cluster);
+            SharedDockerClusterFixture.stopAndCapture(cluster);
         }
     }
 
     @Test
     void anAgentCutOffFromEveryServerIsExpiredAndDeregisteredThenRejoinsWhenThePartitionHeals() throws Exception {
-        ComposeContainer cluster = SharedDockerCluster.startIsolatedThreeNodeClusterWithAgent();
+        ComposeContainer cluster = SharedDockerClusterFixture.startIsolatedThreeNodeClusterWithAgent();
         boolean partitioned = false;
         try {
-            List<String> servers = SharedDockerCluster.getNodeEndpoints(cluster, 3);
+            List<String> servers = SharedDockerClusterFixture.getNodeEndpoints(cluster, 3);
             await().atMost(Duration.ofSeconds(60)).until(() ->
-                    servers.stream().allMatch(DockerHealthApi::passingWithBothChecks)
+                    servers.stream().allMatch(DockerHealthApiHelper::passingWithBothChecks)
                             && "200".equals(agentStatus(cluster, "/health/ready")));
 
-            SharedDockerCluster.partitionContainer(cluster, "agent");
+            SharedDockerClusterFixture.partitionContainer(cluster, "agent");
             partitioned = true;
 
             AtomicBoolean sawExpiry = new AtomicBoolean();
@@ -139,20 +139,20 @@ class DockerAgentHealthTest {
             });
             assertEquals("200", agentStatus(cluster, "/health/live"), "a partition never affects liveness");
 
-            SharedDockerCluster.restoreContainerNetwork(cluster, "agent");
+            SharedDockerClusterFixture.restoreContainerNetwork(cluster, "agent");
             partitioned = false;
             await().atMost(Duration.ofSeconds(90)).until(() ->
                     servers.stream().allMatch(server -> passingWithBothChecks(server) && instanceCount(server) == 1)
                             && "200".equals(agentStatus(cluster, "/health/ready")));
         } finally {
-            if (partitioned) SharedDockerCluster.restoreContainerNetwork(cluster, "agent");
-            SharedDockerCluster.stopAndCapture(cluster);
+            if (partitioned) SharedDockerClusterFixture.restoreContainerNetwork(cluster, "agent");
+            SharedDockerClusterFixture.stopAndCapture(cluster);
         }
     }
 
     /** The agent's own HTTP status for {@code path}, read inside its container because it may be partitioned. */
     private static String agentStatus(ComposeContainer cluster, String path) throws Exception {
-        return SharedDockerCluster.execInService(cluster, "agent", "curl", "-s", "-o", "/dev/null",
+        return SharedDockerClusterFixture.execInService(cluster, "agent", "curl", "-s", "-o", "/dev/null",
                 "-w", "%{http_code}", "--max-time", "5", "http://127.0.0.1:8080" + path).trim();
     }
 

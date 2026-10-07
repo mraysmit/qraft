@@ -39,7 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Real-HTTP tests for {@link ProbeCheckRunner} running an {@link HttpCheck}, with all timing
- * driven by {@link ManualTime}.
+ * driven by {@link ManualTimeHelper}.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-26
@@ -50,8 +50,8 @@ class HttpCheckRunnerTest {
     private static final Duration INTERVAL = Duration.ofSeconds(10);
     private static final Duration TIMEOUT = Duration.ofSeconds(2);
 
-    private final ManualTime time = new ManualTime(START);
-    private final RecordingListener results = new RecordingListener();
+    private final ManualTimeHelper time = new ManualTimeHelper(START);
+    private final RecordingListenerHelper results = new RecordingListenerHelper();
     private final HttpClient client = HttpClient.newHttpClient();
     private final ConcurrentLinkedQueue<Integer> statuses = new ConcurrentLinkedQueue<>();
     private final AtomicInteger requests = new AtomicInteger();

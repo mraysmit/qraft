@@ -37,8 +37,8 @@ import dev.mars.qraft.controller.state.RaftCommand;
 import dev.mars.qraft.controller.state.RaftCommandResult;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import dev.mars.qraft.distributedstate.DistributedStateCommandCodec;
-import dev.mars.qraft.testing.fault.InjectedFault;
-import dev.mars.qraft.testing.fault.IntentionalErrors;
+import dev.mars.qraft.testing.fault.InjectedFaultFixture;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import dev.mars.raftlog.storage.RaftStorage;
 import dev.mars.raftlog.storage.RaftStorage.LogEntryData;
 import org.junit.jupiter.api.AfterEach;
@@ -56,8 +56,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
-import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_METADATA_PERSISTENCE_FAILURE;
-import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE;
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_METADATA_PERSISTENCE_FAILURE;
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -73,7 +73,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * cannot be persisted, rejected vote requests, and timers cancelled on stop.
  *
  * <p>Elections happen only when a test fires a chosen node's election timeout through
- * {@link ManualRaftTimers}, and heartbeats only when it fires the leader's heartbeat, so who leads and
+ * {@link ManualRaftTimersHelper}, and heartbeats only when it fires the leader's heartbeat, so who leads and
  * when followers learn a commit are decided by the test. Every node a test builds is tracked and
  * stopped afterwards, which also releases its storage, even when an assertion fails. Every wait is
  * bounded.
@@ -88,11 +88,11 @@ class RaftNodeTest {
     Path tempDir;
 
     private JavaRuntime runtime;
-    private ManualRaftCluster cluster;
+    private ManualRaftClusterFixture cluster;
     private RaftNode node1;
     private RaftNode node2;
     private RaftNode node3;
-    private InMemoryTransportSimulator transport1;
+    private InMemoryTransportSimulatorFixture transport1;
     private QraftStateStore stateMachine1;
     private QraftStateStore stateMachine2;
     private QraftStateStore stateMachine3;
@@ -100,17 +100,17 @@ class RaftNodeTest {
     @BeforeEach
     void setUp() {
         runtime = JavaRuntime.create();
-        cluster = new ManualRaftCluster(runtime);
-        InMemoryTransportSimulator.clearAllTransports();
+        cluster = new ManualRaftClusterFixture(runtime);
+        InMemoryTransportSimulatorFixture.clearAllTransports();
         Set<String> clusterNodes = Set.of("node1", "node2", "node3");
-        transport1 = new InMemoryTransportSimulator("node1");
+        transport1 = new InMemoryTransportSimulatorFixture("node1");
         stateMachine1 = new QraftStateStore();
         stateMachine2 = new QraftStateStore();
         stateMachine3 = new QraftStateStore();
         node1 = node("node1", clusterNodes, transport1, stateMachine1, RaftNodeMode.volatileMode());
-        node2 = node("node2", clusterNodes, new InMemoryTransportSimulator("node2"), stateMachine2,
+        node2 = node("node2", clusterNodes, new InMemoryTransportSimulatorFixture("node2"), stateMachine2,
                 RaftNodeMode.volatileMode());
-        node3 = node("node3", clusterNodes, new InMemoryTransportSimulator("node3"), stateMachine3,
+        node3 = node("node3", clusterNodes, new InMemoryTransportSimulatorFixture("node3"), stateMachine3,
                 RaftNodeMode.volatileMode());
     }
 
@@ -120,7 +120,7 @@ class RaftNodeTest {
             cluster.close();
         } finally {
             runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            InMemoryTransportSimulator.clearAllTransports();
+            InMemoryTransportSimulatorFixture.clearAllTransports();
         }
     }
 
@@ -146,7 +146,7 @@ class RaftNodeTest {
 
     @Test
     void aSoleMemberElectsItselfWhenItsElectionTimeoutFires() throws Exception {
-        RaftNode sole = node("sole", Set.of("sole"), new InMemoryTransportSimulator("sole"), new QraftStateStore(),
+        RaftNode sole = node("sole", Set.of("sole"), new InMemoryTransportSimulatorFixture("sole"), new QraftStateStore(),
                 RaftNodeMode.volatileMode());
         await(sole.start());
         assertEquals(RaftNode.State.FOLLOWER, sole.getState(), "a started node follows until its election timeout fires");
@@ -190,12 +190,12 @@ class RaftNodeTest {
 
     @Test
     void majorityCatalogValueWinsWhenAnIsolatedLeaderHasAnUncommittedReplacement() throws Exception {
-        IntentionalErrors.expect(RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(RAFT_PEER_UNREACHABLE);
         startAll(node1, node2, node3);
         elect(node1);
         // The followers must be in node1's term before the partition, so node2's election is for term 2.
         heartbeatUntil(node1, () -> "node1".equals(node2.getLeaderId()) && "node1".equals(node3.getLeaderId()));
-        InMemoryTransportSimulator.createPartition(Set.of("node1"), Set.of("node2", "node3"));
+        InMemoryTransportSimulatorFixture.createPartition(Set.of("node1"), Set.of("node2", "node3"));
         Future<RaftCommandResult<?>> uncertainWrite = node1.submitCommand(
                 CatalogCommand.register(serviceInstance("partitioned-1", 8080)));
 
@@ -203,7 +203,7 @@ class RaftNodeTest {
         assertEquals(2, node2.getCurrentTerm());
         ServiceInstance winningValue = serviceInstance("partitioned-1", 9090);
         assertInstanceOf(RaftCommandResult.Success.class, await(node2.submitCommand(CatalogCommand.register(winningValue))));
-        InMemoryTransportSimulator.healPartitions();
+        InMemoryTransportSimulatorFixture.healPartitions();
 
         // The old leader hears the new term from node2's heartbeat, steps down, and replaces its uncommitted
         // entry with the majority's value.
@@ -253,7 +253,7 @@ class RaftNodeTest {
                 .allMatch(store -> "durable-value".equals(store.getMetadata("restart-key"))));
 
         for (RaftNode original : originals) await(original.stop());
-        InMemoryTransportSimulator.clearAllTransports();
+        InMemoryTransportSimulatorFixture.clearAllTransports();
         List<QraftStateStore> recoveredStores = List.of(new QraftStateStore(), new QraftStateStore(),
                 new QraftStateStore());
         List<RaftNode> recovered = List.of(durableNode("node1", members, recoveredStores.get(0), node1Directory),
@@ -277,7 +277,7 @@ class RaftNodeTest {
             byte[] legacy = new DistributedStateCommandCodec()
                     .serialize(DistributedStateCommand.put("legacy-key", "legacy-value"));
             byte[] protobuf = new ProtobufRaftCommandCodec().serialize(CatalogCommand.register(instance));
-            writerStorage.wal().appendEntries(List.of(ManualRaftCluster.bootstrapEntry(Set.of("catalog-mixed")),
+            writerStorage.wal().appendEntries(List.of(ManualRaftClusterFixture.bootstrapEntry(Set.of("catalog-mixed")),
                             new RaftStorage.LogEntryData(2, 1, legacy), new RaftStorage.LogEntryData(3, 1, protobuf)))
                     .thenCompose(ignored -> writerStorage.wal().sync()).get(10, TimeUnit.SECONDS);
         } finally {
@@ -308,7 +308,7 @@ class RaftNodeTest {
     @Test
     void theInMemoryTransportDeliversAVoteRequest() throws Exception {
         transport1.start(message -> { });
-        InMemoryTransportSimulator transport2 = new InMemoryTransportSimulator("node2-transport-only");
+        InMemoryTransportSimulatorFixture transport2 = new InMemoryTransportSimulatorFixture("node2-transport-only");
         transport2.start(message -> { });
 
         VoteResponse response = await(transport1.sendVoteRequest("node2-transport-only", VoteRequest.newBuilder()
@@ -320,9 +320,9 @@ class RaftNodeTest {
 
     @Test
     void aDurableElectionPersistsTermAndSelfVote() throws Exception {
-        TestRaftStorage storage = new TestRaftStorage();
+        TestRaftStorageFixture storage = new TestRaftStorageFixture();
         storage.open(null).get(10, TimeUnit.SECONDS);
-        RaftNode sole = node("node1", Set.of("node1"), new InMemoryTransportSimulator("node1"),
+        RaftNode sole = node("node1", Set.of("node1"), new InMemoryTransportSimulatorFixture("node1"),
                 new QraftStateStore(), RaftNodeMode.durable(storage, storage));
         await(sole.start());
 
@@ -334,15 +334,15 @@ class RaftNodeTest {
 
     @Test
     void aRecoveredMultiMemberFollowerKeepsButDoesNotApplyAnUncommittedLogTail() throws Exception {
-        TestRaftStorage storage = new TestRaftStorage();
+        TestRaftStorageFixture storage = new TestRaftStorageFixture();
         storage.open(null).get(10, TimeUnit.SECONDS);
         Set<String> members = Set.of("node1", "node2", "node3");
         byte[] payload = new ProtobufRaftCommandCodec().serialize(distributedPut("recovery-key", "tail-value"));
-        storage.appendEntries(List.of(ManualRaftCluster.bootstrapEntry(members), new LogEntryData(2L, 1L, payload)))
+        storage.appendEntries(List.of(ManualRaftClusterFixture.bootstrapEntry(members), new LogEntryData(2L, 1L, payload)))
                 .get(10, TimeUnit.SECONDS);
         storage.updateMetadata(1L, Optional.empty()).get(10, TimeUnit.SECONDS);
         QraftStateStore recoveredState = new QraftStateStore();
-        RaftNode recovered = node("node1", members, new InMemoryTransportSimulator("node1"),
+        RaftNode recovered = node("node1", members, new InMemoryTransportSimulatorFixture("node1"),
                 recoveredState, RaftNodeMode.durable(storage, storage));
 
         await(recovered.start());
@@ -355,14 +355,14 @@ class RaftNodeTest {
 
     @Test
     void aRecoveredSoleMemberAppliesItsWholeLocalLogBeforeStartCompletes() throws Exception {
-        TestRaftStorage storage = new TestRaftStorage();
+        TestRaftStorageFixture storage = new TestRaftStorageFixture();
         storage.open(null).get(10, TimeUnit.SECONDS);
         byte[] payload = new ProtobufRaftCommandCodec().serialize(distributedPut("single-recovery-key", "single-value"));
-        storage.appendEntries(List.of(ManualRaftCluster.bootstrapEntry(Set.of("node1")),
+        storage.appendEntries(List.of(ManualRaftClusterFixture.bootstrapEntry(Set.of("node1")),
                 new LogEntryData(2L, 1L, payload))).get(10, TimeUnit.SECONDS);
         storage.updateMetadata(1L, Optional.of("node1")).get(10, TimeUnit.SECONDS);
         QraftStateStore recoveredState = new QraftStateStore();
-        RaftNode recovered = node("node1", Set.of("node1"), new InMemoryTransportSimulator("node1"),
+        RaftNode recovered = node("node1", Set.of("node1"), new InMemoryTransportSimulatorFixture("node1"),
                 recoveredState, RaftNodeMode.durable(storage, storage));
 
         await(recovered.start());
@@ -383,14 +383,14 @@ class RaftNodeTest {
         snapshottedState.apply(distributedPut("before-snapshot", "preserved"));
         // The snapshot covers the bootstrap configuration at index 1 and the command at index 2.
         snapshots.saveAtomically(new dev.mars.qraft.raft.api.SnapshotStore.SnapshotData(
-                ManualRaftCluster.snapshotOf(Set.of("node1"), snapshottedState.takeSnapshot()), 2L, 1L))
+                ManualRaftClusterFixture.snapshotOf(Set.of("node1"), snapshottedState.takeSnapshot()), 2L, 1L))
                 .get(10, TimeUnit.SECONDS);
         byte[] postSnapshotCommand = new ProtobufRaftCommandCodec().serialize(distributedPut("after-snapshot", "replayed"));
         wal.truncatePrefix(2L).get(10, TimeUnit.SECONDS);
         wal.appendEntries(List.of(new RaftStorage.LogEntryData(3L, 1L, postSnapshotCommand))).get(10, TimeUnit.SECONDS);
         wal.sync().get(10, TimeUnit.SECONDS);
         QraftStateStore recoveredState = new QraftStateStore();
-        RaftNode recovered = node("node1", Set.of("node1"), new InMemoryTransportSimulator("node1"),
+        RaftNode recovered = node("node1", Set.of("node1"), new InMemoryTransportSimulatorFixture("node1"),
                 recoveredState, RaftNodeMode.durable(wal, snapshots));
 
         await(recovered.start());
@@ -402,18 +402,18 @@ class RaftNodeTest {
 
     @Test
     void appendConflictPlanningUsesIndicesRelativeToTheSnapshotBoundary() throws Exception {
-        TestRaftStorage storage = new TestRaftStorage();
+        TestRaftStorageFixture storage = new TestRaftStorageFixture();
         storage.open(tempDir.resolve("compacted-conflict")).get(10, TimeUnit.SECONDS);
         ProtobufRaftCommandCodec codec = new ProtobufRaftCommandCodec();
         Set<String> members = Set.of("node1", "leader");
         storage.saveAtomically(new dev.mars.qraft.raft.api.SnapshotStore.SnapshotData(
-                ManualRaftCluster.snapshotOf(members, new QraftStateStore().takeSnapshot()), 5L, 2L))
+                ManualRaftClusterFixture.snapshotOf(members, new QraftStateStore().takeSnapshot()), 5L, 2L))
                 .get(10, TimeUnit.SECONDS);
         storage.appendEntries(List.of(
                 new LogEntryData(6, 2, codec.serialize(distributedPut("six", "old"))),
                 new LogEntryData(7, 2, codec.serialize(distributedPut("seven", "old"))),
                 new LogEntryData(8, 3, codec.serialize(distributedPut("eight", "old-suffix"))))).get(10, TimeUnit.SECONDS);
-        RaftNode follower = node("node1", members, new InMemoryTransportSimulator("compacted-follower"),
+        RaftNode follower = node("node1", members, new InMemoryTransportSimulatorFixture("compacted-follower"),
                 new QraftStateStore(), RaftNodeMode.durable(storage, storage));
         await(follower.start());
 
@@ -432,7 +432,7 @@ class RaftNodeTest {
 
     @Test
     void aVoteIsRefusedToACandidateWhoseLogIsBehind() throws Exception {
-        RaftNode sole = node("node1", Set.of("node1"), new InMemoryTransportSimulator("node1"), new QraftStateStore(),
+        RaftNode sole = node("node1", Set.of("node1"), new InMemoryTransportSimulatorFixture("node1"), new QraftStateStore(),
                 RaftNodeMode.volatileMode());
         await(sole.start());
         elect(sole);
@@ -449,7 +449,7 @@ class RaftNodeTest {
     @Test
     void stoppingAFollowerCancelsItsElectionTimer() throws Exception {
         await(node1.start());
-        ManualRaftTimers timers = cluster.timers(node1);
+        ManualRaftTimersHelper timers = cluster.timers(node1);
         assertEquals(1, timers.oneShotCount(), "a follower waits on an election timer");
 
         await(node1.stop());
@@ -460,22 +460,22 @@ class RaftNodeTest {
 
     @Test
     void stoppingALeaderCancelsItsHeartbeat() throws Exception {
-        RaftNode sole = node("sole", Set.of("sole"), new InMemoryTransportSimulator("sole"), new QraftStateStore(),
+        RaftNode sole = node("sole", Set.of("sole"), new InMemoryTransportSimulatorFixture("sole"), new QraftStateStore(),
                 RaftNodeMode.volatileMode());
         await(sole.start());
         elect(sole);
-        ManualRaftTimers timers = cluster.timers(sole);
-        assertTrue(timers.hasPeriodic(ManualRaftCluster.HEARTBEAT_MS), "a leader sends heartbeats");
+        ManualRaftTimersHelper timers = cluster.timers(sole);
+        assertTrue(timers.hasPeriodic(ManualRaftClusterFixture.HEARTBEAT_MS), "a leader sends heartbeats");
 
         await(sole.stop());
 
         assertFalse(sole.isRunning());
-        assertFalse(timers.hasPeriodic(ManualRaftCluster.HEARTBEAT_MS), "no heartbeat is left scheduled");
+        assertFalse(timers.hasPeriodic(ManualRaftClusterFixture.HEARTBEAT_MS), "no heartbeat is left scheduled");
     }
 
     @Test
     void aVoteRequestNamingNoCandidateIsRejectedWithoutSpendingTheVote() throws Exception {
-        RaftNode sole = node("node1", Set.of("node1"), new InMemoryTransportSimulator("node1"), new QraftStateStore(),
+        RaftNode sole = node("node1", Set.of("node1"), new InMemoryTransportSimulatorFixture("node1"), new QraftStateStore(),
                 RaftNodeMode.volatileMode());
         await(sole.start());
 
@@ -495,10 +495,10 @@ class RaftNodeTest {
 
     @Test
     void aFailedVotePersistenceFencesTheNodeAgainstAnyFurtherMetadataWrite() throws Exception {
-        TestRaftStorage delegate = new TestRaftStorage();
-        MetadataFailureStorage flakyMetadataStorage = MetadataFailureStorage.failFirstUpdate(delegate);
+        TestRaftStorageFixture delegate = new TestRaftStorageFixture();
+        MetadataFailureStorageFixture flakyMetadataStorage = MetadataFailureStorageFixture.failFirstUpdate(delegate);
         flakyMetadataStorage.open(null).get(10, TimeUnit.SECONDS);
-        RaftNode durableNode = node("node1", Set.of("node1"), new InMemoryTransportSimulator("node1"),
+        RaftNode durableNode = node("node1", Set.of("node1"), new InMemoryTransportSimulatorFixture("node1"),
                 new QraftStateStore(), RaftNodeMode.durable(flakyMetadataStorage, delegate));
         await(durableNode.start());
         VoteRequest voteRequest = VoteRequest.newBuilder()
@@ -576,11 +576,11 @@ class RaftNodeTest {
 
     @Test
     void aHigherTermCandidateWithAStaleLogGetsAFailureAndNoDurableTermOrVoteWhenTheTermWriteFails() throws Exception {
-        TestRaftStorage delegate = new TestRaftStorage();
+        TestRaftStorageFixture delegate = new TestRaftStorageFixture();
         final long higherTerm = 5;
-        MetadataFailureStorage flakyMetadataStorage = MetadataFailureStorage.failTermWithEmptyVote(delegate, higherTerm);
+        MetadataFailureStorageFixture flakyMetadataStorage = MetadataFailureStorageFixture.failTermWithEmptyVote(delegate, higherTerm);
         flakyMetadataStorage.open(null).get(10, TimeUnit.SECONDS);
-        RaftNode durableNode = node("node1", Set.of("node1"), new InMemoryTransportSimulator("node1"),
+        RaftNode durableNode = node("node1", Set.of("node1"), new InMemoryTransportSimulatorFixture("node1"),
                 new QraftStateStore(), RaftNodeMode.durable(flakyMetadataStorage, delegate));
         await(durableNode.start());
         elect(durableNode);
@@ -594,7 +594,7 @@ class RaftNodeTest {
                                 .setLastLogTerm(0).setLastLogIndex(1).build())
                         .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
 
-        assertInstanceOf(InjectedFault.class, voteFailure.getCause());
+        assertInstanceOf(InjectedFaultFixture.class, voteFailure.getCause());
         assertTrue(flakyMetadataStorage.hasFailed(), "the higher-term empty-vote write was the one that failed");
         RaftStorage.PersistentMeta persistedMeta = flakyMetadataStorage.loadMetadata().get(10, TimeUnit.SECONDS);
         assertTrue(persistedMeta.currentTerm() < higherTerm,
@@ -605,10 +605,10 @@ class RaftNodeTest {
 
     @Test
     void anAppendIsRefusedWithTheDurableTermWhenItsHigherTermCannotBePersisted() throws Exception {
-        TestRaftStorage delegate = new TestRaftStorage();
-        MetadataFailureStorage flakyMetadataStorage = MetadataFailureStorage.failFirstUpdate(delegate);
+        TestRaftStorageFixture delegate = new TestRaftStorageFixture();
+        MetadataFailureStorageFixture flakyMetadataStorage = MetadataFailureStorageFixture.failFirstUpdate(delegate);
         flakyMetadataStorage.open(null).get(10, TimeUnit.SECONDS);
-        RaftNode durableNode = node("node1", Set.of("node1"), new InMemoryTransportSimulator("node1"),
+        RaftNode durableNode = node("node1", Set.of("node1"), new InMemoryTransportSimulatorFixture("node1"),
                 new QraftStateStore(), RaftNodeMode.durable(flakyMetadataStorage, delegate));
         await(durableNode.start());
 
@@ -622,10 +622,10 @@ class RaftNodeTest {
 
     @Test
     void aSnapshotInstallIsRefusedWithTheDurableTermWhenItsHigherTermCannotBePersisted() throws Exception {
-        TestRaftStorage delegate = new TestRaftStorage();
-        MetadataFailureStorage flakyMetadataStorage = MetadataFailureStorage.failFirstUpdate(delegate);
+        TestRaftStorageFixture delegate = new TestRaftStorageFixture();
+        MetadataFailureStorageFixture flakyMetadataStorage = MetadataFailureStorageFixture.failFirstUpdate(delegate);
         flakyMetadataStorage.open(null).get(10, TimeUnit.SECONDS);
-        RaftNode durableNode = node("node1", Set.of("node1"), new InMemoryTransportSimulator("node1"),
+        RaftNode durableNode = node("node1", Set.of("node1"), new InMemoryTransportSimulatorFixture("node1"),
                 new QraftStateStore(), RaftNodeMode.durable(flakyMetadataStorage, delegate));
         await(durableNode.start());
 
@@ -633,7 +633,7 @@ class RaftNodeTest {
                 .setTerm(11).setLeaderId("leader-y").setLastIncludedIndex(2).setLastIncludedTerm(1)
                 .setChunkIndex(0).setTotalChunks(1)
                 .setData(com.google.protobuf.ByteString.copyFrom(
-                        ManualRaftCluster.snapshotOf(Set.of("node1", "leader-y"), new byte[]{1})))
+                        ManualRaftClusterFixture.snapshotOf(Set.of("node1", "leader-y"), new byte[]{1})))
                 .setDone(false).build()));
 
         assertFalse(response.getSuccess(), "an installation is refused unless the higher term is durably persisted first");
@@ -643,25 +643,26 @@ class RaftNodeTest {
 
     // ---------------------------------------------------------------------------------------------------
 
-    private static final class MetadataFailureStorage implements RaftStorage {
-        private final TestRaftStorage delegate;
+    /** Test storage fixture that injects metadata persistence failure to exercise node failure handling. */
+    private static final class MetadataFailureStorageFixture implements RaftStorage {
+        private final TestRaftStorageFixture delegate;
         private final Long targetedTerm;
         private final boolean failFirst;
         private int calls;
         private boolean failed;
 
-        private MetadataFailureStorage(TestRaftStorage delegate, Long targetedTerm, boolean failFirst) {
+        private MetadataFailureStorageFixture(TestRaftStorageFixture delegate, Long targetedTerm, boolean failFirst) {
             this.delegate = delegate;
             this.targetedTerm = targetedTerm;
             this.failFirst = failFirst;
         }
 
-        static MetadataFailureStorage failFirstUpdate(TestRaftStorage delegate) {
-            return new MetadataFailureStorage(delegate, null, true);
+        static MetadataFailureStorageFixture failFirstUpdate(TestRaftStorageFixture delegate) {
+            return new MetadataFailureStorageFixture(delegate, null, true);
         }
 
-        static MetadataFailureStorage failTermWithEmptyVote(TestRaftStorage delegate, long term) {
-            return new MetadataFailureStorage(delegate, term, false);
+        static MetadataFailureStorageFixture failTermWithEmptyVote(TestRaftStorageFixture delegate, long term) {
+            return new MetadataFailureStorageFixture(delegate, term, false);
         }
 
         boolean hasFailed() { return failed; }
@@ -677,7 +678,7 @@ class RaftNodeTest {
                     || (targetedTerm != null && targetedTerm == term && votedFor.isEmpty()));
             if (shouldFail) {
                 failed = true;
-                return CompletableFuture.failedFuture(new InjectedFault(RAFT_METADATA_PERSISTENCE_FAILURE,
+                return CompletableFuture.failedFuture(new InjectedFaultFixture(RAFT_METADATA_PERSISTENCE_FAILURE,
                         failFirst ? "Simulated one-shot metadata failure"
                                 : "Simulated targeted metadata failure"));
             }
@@ -701,19 +702,19 @@ class RaftNodeTest {
     }
 
     private RaftNode durableSingleNode(String nodeId, QraftStateStore store, RaftStorageFactory.DurableStorage storage) {
-        return node(nodeId, Set.of(nodeId), new InMemoryTransportSimulator(nodeId), store,
+        return node(nodeId, Set.of(nodeId), new InMemoryTransportSimulatorFixture(nodeId), store,
                 RaftNodeMode.durable(storage.wal(), storage.snapshots()));
     }
 
     private RaftNode durableNode(String nodeId, Set<String> members, QraftStateStore store, Path storageDirectory)
             throws Exception {
         RaftStorageFactory.DurableStorage storage = awaitPersistence(storageDirectory);
-        return cluster.add(cluster.builder(nodeId, members, new InMemoryTransportSimulator(nodeId), store,
+        return cluster.add(cluster.builder(nodeId, members, new InMemoryTransportSimulatorFixture(nodeId), store,
                 RaftNodeMode.durable(storage.wal(), storage.snapshots())).snapshotEnabled(false));
     }
 
     private static void startAll(RaftNode... nodes) throws Exception {
-        ManualRaftCluster.startAll(nodes);
+        ManualRaftClusterFixture.startAll(nodes);
     }
 
     private void yieldToAnotherLeader(RaftNode previousLeader) throws Exception {
@@ -721,7 +722,7 @@ class RaftNodeTest {
                 .setTerm(previousLeader.getCurrentTerm() + 1).setLeaderId("other-leader")
                 .setPrevLogIndex(previousLeader.getLastLogIndex()).setPrevLogTerm(previousLeader.getLastLogTerm())
                 .build())).getSuccess());
-        cluster.timers(previousLeader).advanceTime(ManualRaftCluster.ELECTION_TIMEOUT_MS);
+        cluster.timers(previousLeader).advanceTime(ManualRaftClusterFixture.ELECTION_TIMEOUT_MS);
     }
 
     private RaftNode elect(RaftNode candidate) throws Exception {
@@ -733,7 +734,7 @@ class RaftNodeTest {
     }
 
     private static <T> T await(Future<T> future) throws Exception {
-        return ManualRaftCluster.await(future);
+        return ManualRaftClusterFixture.await(future);
     }
 
     private static RaftStorageFactory.DurableStorage awaitPersistence(Path directory) throws Exception {

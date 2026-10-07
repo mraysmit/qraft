@@ -43,7 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class ManualRaftTimersTest {
     private final JavaRuntime runtime = JavaRuntime.create();
-    private final ManualRaftTimers timers = new ManualRaftTimers(runtime);
+    private final ManualRaftTimersHelper timers = new ManualRaftTimersHelper(runtime);
     private final List<String> fired = new CopyOnWriteArrayList<>();
 
     @AfterEach

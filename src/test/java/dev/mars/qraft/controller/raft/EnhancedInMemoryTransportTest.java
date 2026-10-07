@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.testing.fault.IntentionalErrors;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 
 import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
@@ -39,8 +39,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
-import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
-import static dev.mars.qraft.controller.raft.ManualRaftCluster.startAll;
+import static dev.mars.qraft.controller.raft.ManualRaftClusterFixture.await;
+import static dev.mars.qraft.controller.raft.ManualRaftClusterFixture.startAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -51,7 +51,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * slow and flaky nodes. Each fault leaves the cluster with one leader that every member follows, and
  * combined chaos never elects two leaders in one term.
  *
- * <p>Elections and heartbeats fire only when a test fires them through {@link ManualRaftCluster}, so each
+ * <p>Elections and heartbeats fire only when a test fires them through {@link ManualRaftClusterFixture}, so each
  * scenario decides who stands for election; the network's faults are seeded, so a run repeats.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
@@ -60,41 +60,41 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class EnhancedInMemoryTransportTest {
     private JavaRuntime runtime;
-    private ManualRaftCluster cluster;
+    private ManualRaftClusterFixture cluster;
     private final Map<String, RaftNode> nodes = new LinkedHashMap<>();
-    private final Map<String, InMemoryTransportSimulator> transports = new LinkedHashMap<>();
+    private final Map<String, InMemoryTransportSimulatorFixture> transports = new LinkedHashMap<>();
     private final Map<String, QraftStateStore> stores = new LinkedHashMap<>();
 
     @BeforeEach
     void setUp() {
         runtime = JavaRuntime.create();
-        cluster = new ManualRaftCluster(runtime);
-        InMemoryTransportSimulator.clearAllTransports();
+        cluster = new ManualRaftClusterFixture(runtime);
+        InMemoryTransportSimulatorFixture.clearAllTransports();
     }
 
     @AfterEach
     void tearDown() throws Exception {
-        InMemoryTransportSimulator.healPartitions();
+        InMemoryTransportSimulatorFixture.healPartitions();
         try {
             cluster.close();
         } finally {
             runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            InMemoryTransportSimulator.clearAllTransports();
+            InMemoryTransportSimulatorFixture.clearAllTransports();
         }
     }
 
     @Test
     void aPartitionedLeaderIsReplacedAndFollowsTheNewLeaderOnceThePartitionHeals() throws Exception {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
         build("node1", "node2", "node3");
         startAll(nodes.values().toArray(RaftNode[]::new));
         electAndFollow("node1");
 
-        InMemoryTransportSimulator.createPartition(Set.of("node1"), Set.of("node2", "node3"));
+        InMemoryTransportSimulatorFixture.createPartition(Set.of("node1"), Set.of("node2", "node3"));
         cluster.elect(node("node2"));
         assertEquals(2, node("node2").getCurrentTerm());
 
-        InMemoryTransportSimulator.healPartitions();
+        InMemoryTransportSimulatorFixture.healPartitions();
         cluster.heartbeatUntil(node("node2"), () -> everyoneFollows("node2"), "node1 follows node2 once healed");
         assertEquals(List.of("node2"), leaders());
     }
@@ -102,7 +102,7 @@ class EnhancedInMemoryTransportTest {
     @Test
     void reorderedMessagesStillElectOneLeaderAndReplicateInOrder() throws Exception {
         build("leader", "follower");
-        for (InMemoryTransportSimulator transport : transports.values()) transport.setReorderingConfig(true, 0.3, 50);
+        for (InMemoryTransportSimulatorFixture transport : transports.values()) transport.setReorderingConfig(true, 0.3, 50);
         startAll(nodes.values().toArray(RaftNode[]::new));
 
         electAndFollow("leader");
@@ -119,7 +119,7 @@ class EnhancedInMemoryTransportTest {
     @Test
     void aThrottledNetworkStillElectsOneLeader() throws Exception {
         build("node1", "node2");
-        for (InMemoryTransportSimulator transport : transports.values()) transport.setThrottlingConfig(true, 1000);
+        for (InMemoryTransportSimulatorFixture transport : transports.values()) transport.setThrottlingConfig(true, 1000);
         startAll(nodes.values().toArray(RaftNode[]::new));
 
         electAndFollow("node1");
@@ -129,12 +129,12 @@ class EnhancedInMemoryTransportTest {
 
     @Test
     void aCrashedLeaderIsReplacedAndFollowsTheNewLeaderOnceRecovered() throws Exception {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
         build("node1", "node2", "node3");
         startAll(nodes.values().toArray(RaftNode[]::new));
         electAndFollow("node1");
 
-        transports.get("node1").setFailureMode(InMemoryTransportSimulator.FailureMode.CRASH);
+        transports.get("node1").setFailureMode(InMemoryTransportSimulatorFixture.FailureMode.CRASH);
         cluster.elect(node("node2"));
 
         transports.get("node1").recoverFromCrash();
@@ -145,7 +145,7 @@ class EnhancedInMemoryTransportTest {
     @Test
     void aSlowNodeIsStillElected() throws Exception {
         build("node1", "node2");
-        transports.get("node1").setFailureMode(InMemoryTransportSimulator.FailureMode.SLOW);
+        transports.get("node1").setFailureMode(InMemoryTransportSimulatorFixture.FailureMode.SLOW);
         startAll(nodes.values().toArray(RaftNode[]::new));
 
         electAndFollow("node1");
@@ -156,7 +156,7 @@ class EnhancedInMemoryTransportTest {
     @Test
     void aFlakyFollowerStillFollowsTheLeader() throws Exception {
         build("node1", "node2", "node3");
-        transports.get("node2").setFailureMode(InMemoryTransportSimulator.FailureMode.FLAKY);
+        transports.get("node2").setFailureMode(InMemoryTransportSimulatorFixture.FailureMode.FLAKY);
         startAll(nodes.values().toArray(RaftNode[]::new));
 
         electAndFollow("node1");
@@ -166,9 +166,9 @@ class EnhancedInMemoryTransportTest {
 
     @Test
     void combinedChaosNeverElectsTwoLeadersInOneTermAndALeaderEmergesOnceItClears() throws Exception {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
         build("node1", "node2", "node3");
-        for (InMemoryTransportSimulator transport : transports.values()) {
+        for (InMemoryTransportSimulatorFixture transport : transports.values()) {
             transport.setChaosConfig(10, 30, 0.1);
             transport.setReorderingConfig(true, 0.2, 40);
         }
@@ -197,7 +197,7 @@ class EnhancedInMemoryTransportTest {
             }
             cluster.settle();
         }
-        for (InMemoryTransportSimulator transport : transports.values()) {
+        for (InMemoryTransportSimulatorFixture transport : transports.values()) {
             transport.setChaosConfig(5, 15, 0.0);
             transport.setReorderingConfig(false, 0.0, 0);
         }
@@ -213,7 +213,7 @@ class EnhancedInMemoryTransportTest {
     private void build(String... ids) {
         Set<String> members = Set.of(ids);
         for (String id : ids) {
-            InMemoryTransportSimulator transport = new InMemoryTransportSimulator(id);
+            InMemoryTransportSimulatorFixture transport = new InMemoryTransportSimulatorFixture(id);
             QraftStateStore store = new QraftStateStore();
             transports.put(id, transport);
             stores.put(id, store);
@@ -254,7 +254,7 @@ class EnhancedInMemoryTransportTest {
                     .max(Comparator.comparingLong(RaftNode::getCurrentTerm));
             try {
                 if (leader.isPresent()) {
-                    cluster.timers(leader.get()).firePeriodic(ManualRaftCluster.HEARTBEAT_MS);
+                    cluster.timers(leader.get()).firePeriodic(ManualRaftClusterFixture.HEARTBEAT_MS);
                 } else {
                     cluster.timers(nodes.values().stream()
                             .max(Comparator.comparingLong(RaftNode::getLastLogTerm)

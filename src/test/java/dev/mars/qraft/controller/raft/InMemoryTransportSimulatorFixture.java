@@ -28,7 +28,7 @@ import dev.mars.qraft.controller.raft.grpc.VoteRequest;
 import dev.mars.qraft.controller.raft.grpc.VoteResponse;
 import dev.mars.qraft.controller.runtime.Future;
 import dev.mars.qraft.controller.runtime.Promise;
-import dev.mars.qraft.testing.fault.InjectedFault;
+import dev.mars.qraft.testing.fault.InjectedFaultFixture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -67,18 +67,18 @@ import java.util.function.Consumer;
  * @since 2026-01-05
  */
 
-public class InMemoryTransportSimulator implements RaftTransport {
+public class InMemoryTransportSimulatorFixture implements RaftTransport {
 
-    private static final Logger logger = LoggerFactory.getLogger(InMemoryTransportSimulator.class);
+    private static final Logger logger = LoggerFactory.getLogger(InMemoryTransportSimulatorFixture.class);
 
     // Global registry of all transport instances
-    private static final Map<String, InMemoryTransportSimulator> transports = new ConcurrentHashMap<>();
+    private static final Map<String, InMemoryTransportSimulatorFixture> transports = new ConcurrentHashMap<>();
     /**
      * Sends and deliveries not yet finished, across every transport: queued or running on a pool, or held for
      * their latency. A test waits for it to reach zero rather than for a fixed time.
      */
     private static final AtomicInteger IN_FLIGHT = new AtomicInteger();
-    
+
     // Network partition state (set of isolated node groups)
     private static final Set<Set<String>> networkPartitions = ConcurrentHashMap.newKeySet();
 
@@ -91,30 +91,30 @@ public class InMemoryTransportSimulator implements RaftTransport {
     private RaftNode raftNode;
     /** Serves joins and removals forwarded to this node, as its Raft port would; null serves none. */
     private volatile MembershipService membership;
-    
+
     // Chaos Configuration
     private final Random random;
     private volatile int minLatencyMs = 5;
     private volatile int maxLatencyMs = 15;
     private volatile double dropRate = 0.0; // 0.0 to 1.0
-    
+
     // Message Reordering Configuration
     private volatile boolean reorderingEnabled = false;
     private volatile double reorderProbability = 0.0; // 0.0 to 1.0
     private volatile int maxReorderDelayMs = 100;
-    private final PriorityBlockingQueue<DelayedMessage> messageQueue = new PriorityBlockingQueue<>();
+    private final PriorityBlockingQueue<DelayedMessageHelper> messageQueue = new PriorityBlockingQueue<>();
     private volatile ScheduledExecutorService reorderExecutor;
-    
+
     // Bandwidth Throttling Configuration
     private volatile boolean throttlingEnabled = false;
     private volatile long maxBytesPerSecond = Long.MAX_VALUE;
     private final AtomicLong bytesSentThisSecond = new AtomicLong(0);
     private volatile long lastResetTime = System.currentTimeMillis();
-    
+
     // Failure Mode Configuration
     private volatile FailureMode failureMode = FailureMode.NONE;
     private volatile boolean crashed = false;
-    
+
     /**
      * Failure modes for sophisticated chaos testing.
      */
@@ -129,11 +129,11 @@ public class InMemoryTransportSimulator implements RaftTransport {
      * A transport whose chaos is seeded from {@code qraft.transport.seed} when set, and otherwise from the
      * node ID, so a run is repeatable; the seed is logged.
      */
-    public InMemoryTransportSimulator(String nodeId) {
+    public InMemoryTransportSimulatorFixture(String nodeId) {
         this(nodeId, Long.getLong("qraft.transport.seed", nodeId.hashCode()));
     }
 
-    public InMemoryTransportSimulator(String nodeId, long seed) {
+    public InMemoryTransportSimulatorFixture(String nodeId, long seed) {
         this.nodeId = nodeId;
         this.random = new Random(seed);
         this.executor = Executors.newFixedThreadPool(10,
@@ -171,7 +171,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
         this.maxLatencyMs = maxLatencyMs;
         this.dropRate = dropRate;
     }
-    
+
     /**
      * Enable message reordering with specified probability.
      * @param enabled whether reordering is enabled
@@ -183,7 +183,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
         this.reorderProbability = reorderProbability;
         this.maxReorderDelayMs = maxReorderDelayMs;
     }
-    
+
     /**
      * Enable bandwidth throttling.
      * @param enabled whether throttling is enabled
@@ -193,7 +193,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
         this.throttlingEnabled = enabled;
         this.maxBytesPerSecond = maxBytesPerSecond;
     }
-    
+
     /**
      * Set the failure mode for this transport.
      * @param mode the failure mode to use
@@ -206,7 +206,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
             this.crashed = false;
         }
     }
-    
+
     /**
      * Recover from a crash failure mode.
      */
@@ -216,7 +216,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
             this.failureMode = FailureMode.NONE;
         }
     }
-    
+
     /**
      * Create a network partition. Nodes in different partitions cannot communicate.
      * @param partition1 first partition of node IDs
@@ -227,7 +227,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
         networkPartitions.add(new HashSet<>(partition2));
         logger.info("Created network partition: {} | {}", partition1, partition2);
     }
-    
+
     /**
      * Heal all network partitions.
      */
@@ -235,7 +235,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
         networkPartitions.clear();
         logger.info("Healed all network partitions");
     }
-    
+
     /**
      * Check if two nodes can communicate (not partitioned).
      */
@@ -243,12 +243,12 @@ public class InMemoryTransportSimulator implements RaftTransport {
         if (networkPartitions.isEmpty()) {
             return true;
         }
-        
+
         // Find which partitions the nodes belong to
         for (Set<String> partition : networkPartitions) {
             boolean sourceInPartition = partition.contains(sourceId);
             boolean targetInPartition = partition.contains(targetId);
-            
+
             // If source is in partition and target is not, or vice versa, they cannot communicate
             if (sourceInPartition && !targetInPartition) {
                 return false;
@@ -257,10 +257,10 @@ public class InMemoryTransportSimulator implements RaftTransport {
                 return false;
             }
         }
-        
+
         return true;
     }
-    
+
     /**
      * Starts the thread that hands held deliveries to the pool when they fall due. It starts with the transport,
      * or with the first held delivery, so a transport that is never used holds no thread.
@@ -272,18 +272,18 @@ public class InMemoryTransportSimulator implements RaftTransport {
         if (reorderExecutor == null || reorderExecutor.isShutdown()) {
             reorderExecutor = Executors.newSingleThreadScheduledExecutor(
                     Thread.ofPlatform().daemon().name(threadPrefix() + "delivery").factory());
-            reorderExecutor.scheduleAtFixedRate(this::processReorderedMessages, 
+            reorderExecutor.scheduleAtFixedRate(this::processReorderedMessages,
                 10, 10, TimeUnit.MILLISECONDS);
         }
     }
-    
+
     /**
      * Process messages in the reorder queue.
      */
     private void processReorderedMessages() {
         long now = System.currentTimeMillis();
-        DelayedMessage message;
-        
+        DelayedMessageHelper message;
+
         while ((message = messageQueue.peek()) != null && message.deliveryTime <= now) {
             message = messageQueue.poll();
             if (message != null) {
@@ -292,7 +292,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
             }
         }
     }
-    
+
     /**
      * The extra delay bandwidth throttling imposes on a message of {@code messageSize} bytes: none while the
      * current one-second window has room, otherwise until the window ends, when a new one begins.
@@ -319,7 +319,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
     private void dispatch(Runnable send, Consumer<Throwable> failure) {
         IN_FLIGHT.incrementAndGet();
         try {
-            executor.execute(new Task(send, failure));
+            executor.execute(new TaskHelper(send, failure));
         } catch (RejectedExecutionException stopped) {
             IN_FLIGHT.decrementAndGet();
             failure.accept(new IllegalStateException("Transport stopped: " + nodeId, stopped));
@@ -330,7 +330,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
     private void deliverAfter(long delayMs, Runnable delivery, Consumer<Throwable> failure) {
         IN_FLIGHT.incrementAndGet();
         startReorderProcessor();
-        messageQueue.offer(new DelayedMessage(System.currentTimeMillis() + delayMs, delivery, failure));
+        messageQueue.offer(new DelayedMessageHelper(System.currentTimeMillis() + delayMs, delivery, failure));
     }
 
     /**
@@ -358,7 +358,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
         }
         transports.remove(nodeId);
         for (Runnable neverStarted : executor.shutdownNow()) {
-            if (neverStarted instanceof Task task) {
+            if (neverStarted instanceof TaskHelper task) {
                 IN_FLIGHT.decrementAndGet();
                 task.failure().accept(new IllegalStateException("Transport stopped before sending: " + nodeId));
             }
@@ -374,7 +374,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
             delivery.shutdownNow();
         }
         awaitTermination(delivery, "reorder");
-        DelayedMessage held;
+        DelayedMessageHelper held;
         while ((held = messageQueue.poll()) != null) {
             IN_FLIGHT.decrementAndGet();
             held.failure.accept(new IllegalStateException("Transport stopped before delivery: " + nodeId));
@@ -415,7 +415,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
         if (crashed || !canCommunicate(nodeId, targetNodeId)) {
             return Future.failedFuture(new RuntimeException("Cannot reach " + targetNodeId));
         }
-        InMemoryTransportSimulator targetTransport = transports.get(targetNodeId);
+        InMemoryTransportSimulatorFixture targetTransport = transports.get(targetNodeId);
         if (targetTransport == null || !targetTransport.running || targetTransport.crashed
                 || targetTransport.membership == null) {
             return Future.failedFuture(new RuntimeException("Target node not available: " + targetNodeId));
@@ -428,7 +428,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
         if (crashed || !canCommunicate(nodeId, targetNodeId)) {
             return Future.failedFuture(new RuntimeException("Cannot reach " + targetNodeId));
         }
-        InMemoryTransportSimulator targetTransport = transports.get(targetNodeId);
+        InMemoryTransportSimulatorFixture targetTransport = transports.get(targetNodeId);
         if (targetTransport == null || !targetTransport.running || targetTransport.crashed
                 || targetTransport.raftNode == null) {
             return Future.failedFuture(new RuntimeException("Target node not available: " + targetNodeId));
@@ -446,14 +446,14 @@ public class InMemoryTransportSimulator implements RaftTransport {
                     promise.fail(new RuntimeException("Node crashed"));
                     return;
                 }
-                
+
                 // Check for network partition
                 if (!canCommunicate(nodeId, targetNodeId)) {
                     logger.debug("Network partition prevents communication from {} to {}", nodeId, targetNodeId);
                     promise.fail(new RuntimeException("Network partition"));
                     return;
                 }
-                
+
                 // Simulate Packet Drop
                 if (dropRate > 0 && random.nextDouble() < dropRate) {
                     logger.debug("Dropped VoteRequest from {} to {}", nodeId, targetNodeId);
@@ -461,7 +461,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
                     return;
                 }
 
-                InMemoryTransportSimulator targetTransport = transports.get(targetNodeId);
+                InMemoryTransportSimulatorFixture targetTransport = transports.get(targetNodeId);
                 if (targetTransport == null || !targetTransport.running) {
                     promise.fail(new RuntimeException("Target node not available: " + targetNodeId));
                     return;
@@ -486,7 +486,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
     }
 
     @Override
-    public Future<AppendEntriesResponse> sendAppendEntries(String targetNodeId, 
+    public Future<AppendEntriesResponse> sendAppendEntries(String targetNodeId,
                                                                      AppendEntriesRequest request) {
         Promise<AppendEntriesResponse> promise = Promise.promise();
         dispatch(() -> {
@@ -496,14 +496,14 @@ public class InMemoryTransportSimulator implements RaftTransport {
                     promise.fail(new RuntimeException("Node crashed"));
                     return;
                 }
-                
+
                 // Check for network partition
                 if (!canCommunicate(nodeId, targetNodeId)) {
                     logger.debug("Network partition prevents communication from {} to {}", nodeId, targetNodeId);
                     promise.fail(new RuntimeException("Network partition"));
                     return;
                 }
-                
+
                 // Simulate Packet Drop
                 if (dropRate > 0 && random.nextDouble() < dropRate) {
                     logger.debug("Dropped AppendEntries from {} to {}", nodeId, targetNodeId);
@@ -511,7 +511,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
                     return;
                 }
 
-                InMemoryTransportSimulator targetTransport = transports.get(targetNodeId);
+                InMemoryTransportSimulatorFixture targetTransport = transports.get(targetNodeId);
                 if (targetTransport == null || !targetTransport.running) {
                     promise.fail(new RuntimeException("Target node not available: " + targetNodeId));
                     return;
@@ -542,7 +542,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
         }
         return 0;
     }
-    
+
     /**
      * Calculate delay based on current failure mode.
      */
@@ -558,18 +558,18 @@ public class InMemoryTransportSimulator implements RaftTransport {
             return minLatencyMs + random.nextInt(Math.max(1, maxLatencyMs - minLatencyMs + 1));
         }
     }
-    
+
 
 
     private VoteResponse handleVoteRequest(VoteRequest request) {
         if (raftNode != null) {
             return answer(raftNode.handleVoteRequest(request));
         }
-        
+
         if (messageHandler != null) {
             messageHandler.accept(new RaftMessage.Vote(request));
         }
-        
+
         logger.warn("RaftNode not set for transport {}, returning failure", nodeId);
         return VoteResponse.newBuilder()
                 .setTerm(request.getTerm())
@@ -585,7 +585,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
         if (messageHandler != null) {
             messageHandler.accept(new RaftMessage.AppendEntries(request));
         }
-        
+
         logger.warn("RaftNode not set for transport {}, returning failure", nodeId);
         return AppendEntriesResponse.newBuilder()
                 .setTerm(request.getTerm())
@@ -632,7 +632,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
                     return;
                 }
 
-                InMemoryTransportSimulator targetTransport = transports.get(targetNodeId);
+                InMemoryTransportSimulatorFixture targetTransport = transports.get(targetNodeId);
                 if (targetTransport == null || !targetTransport.running) {
                     promise.fail(new RuntimeException("Target node not available: " + targetNodeId));
                     return;
@@ -662,8 +662,8 @@ public class InMemoryTransportSimulator implements RaftTransport {
             Thread.currentThread().interrupt();
             IllegalStateException failure = new IllegalStateException(
                     "Interrupted awaiting the target node", interrupted);
-            failure.addSuppressed(new InjectedFault(
-                    dev.mars.qraft.testing.fault.IntentionalError.TRANSPORT_DELIVERY_INTERRUPTED,
+            failure.addSuppressed(new InjectedFaultFixture(
+                    dev.mars.qraft.testing.fault.IntentionalErrorFixture.TRANSPORT_DELIVERY_INTERRUPTED,
                     "test teardown interrupted a delayed in-memory delivery"));
             throw failure;
         } catch (java.util.concurrent.ExecutionException failure) {
@@ -674,7 +674,7 @@ public class InMemoryTransportSimulator implements RaftTransport {
         }
     }
 
-    public static Map<String, InMemoryTransportSimulator> getAllTransports() {
+    public static Map<String, InMemoryTransportSimulatorFixture> getAllTransports() {
         return new ConcurrentHashMap<>(transports);
     }
 
@@ -687,9 +687,13 @@ public class InMemoryTransportSimulator implements RaftTransport {
         // A count left by an earlier test must not make every later round wait out its deadline.
         IN_FLIGHT.set(0);
     }
-    
-    /** A send or delivery on the pool, with the failure that ends its request if it never runs. */
-    private record Task(Runnable body, Consumer<Throwable> failure) implements Runnable {
+
+    /**
+     * Internal test scheduling helper that tracks work for the enclosing scheduler or transport.
+     *
+     * <p>A send or delivery on the pool, with the failure that ends its request if it never runs.
+     */
+    private record TaskHelper(Runnable body, Consumer<Throwable> failure) implements Runnable {
         @Override
         public void run() {
             try {
@@ -701,14 +705,16 @@ public class InMemoryTransportSimulator implements RaftTransport {
     }
 
     /**
+     * Internal test transport helper that tracks queued message delivery.
+     *
      * A delivery held until its time, by latency, throttling or reordering.
      */
-    private static class DelayedMessage implements Comparable<DelayedMessage> {
+    private static class DelayedMessageHelper implements Comparable<DelayedMessageHelper> {
         final long deliveryTime;
         final Runnable action;
         final Consumer<Throwable> failure;
 
-        DelayedMessage(long deliveryTime, Runnable action, Consumer<Throwable> failure) {
+        DelayedMessageHelper(long deliveryTime, Runnable action, Consumer<Throwable> failure) {
             this.deliveryTime = deliveryTime;
             this.action = action;
             this.failure = failure;
@@ -723,9 +729,9 @@ public class InMemoryTransportSimulator implements RaftTransport {
                 failure.accept(e);
             }
         }
-        
+
         @Override
-        public int compareTo(DelayedMessage other) {
+        public int compareTo(DelayedMessageHelper other) {
             return Long.compare(this.deliveryTime, other.deliveryTime);
         }
     }

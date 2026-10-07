@@ -31,7 +31,7 @@ import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
-import dev.mars.qraft.testing.fault.IntentionalErrors;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,9 +44,9 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
-import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
-import static dev.mars.qraft.controller.raft.ManualRaftCluster.serverIdOf;
-import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE;
+import static dev.mars.qraft.controller.raft.ManualRaftClusterFixture.await;
+import static dev.mars.qraft.controller.raft.ManualRaftClusterFixture.serverIdOf;
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -72,7 +72,7 @@ class MembershipServiceTest {
             .setServerId(serverIdOf("d")).setName("d").setAddress("d").build();
 
     private JavaRuntime runtime;
-    private ManualRaftCluster cluster;
+    private ManualRaftClusterFixture cluster;
     private RaftNode a;
     private RaftNode b;
     private final Map<String, MembershipService> services = new ConcurrentHashMap<>();
@@ -82,14 +82,14 @@ class MembershipServiceTest {
     @BeforeEach
     void setUp() throws Exception {
         runtime = JavaRuntime.create();
-        cluster = new ManualRaftCluster(runtime);
-        InMemoryTransportSimulator.clearAllTransports();
+        cluster = new ManualRaftClusterFixture(runtime);
+        InMemoryTransportSimulatorFixture.clearAllTransports();
         a = node("a");
         b = node("b");
         RaftNode c = node("c");
-        ManualRaftCluster.startAll(a, b, c);
-        services.put("a", new MembershipService(a, new Forwarder(), TOKEN));
-        services.put("b", new MembershipService(b, new Forwarder(), TOKEN));
+        ManualRaftClusterFixture.startAll(a, b, c);
+        services.put("a", new MembershipService(a, new ForwarderFixture(), TOKEN));
+        services.put("b", new MembershipService(b, new ForwarderFixture(), TOKEN));
     }
 
     @AfterEach
@@ -98,13 +98,13 @@ class MembershipServiceTest {
             cluster.close();
         } finally {
             runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            InMemoryTransportSimulator.clearAllTransports();
+            InMemoryTransportSimulatorFixture.clearAllTransports();
         }
     }
 
     @Test
     void theLeaderAdmitsAJoiningServer() throws Exception {
-        IntentionalErrors.expect(RAFT_PEER_UNREACHABLE, 1);
+        IntentionalErrorsHelper.expect(RAFT_PEER_UNREACHABLE, 1);
         leadWithACommit();
 
         assertEquals(Status.JOINED, await(services.get("a").join(JOIN_D)).getStatus());
@@ -115,7 +115,7 @@ class MembershipServiceTest {
 
     @Test
     void aFollowerForwardsAJoinToTheLeader() throws Exception {
-        IntentionalErrors.expect(RAFT_PEER_UNREACHABLE, 1);
+        IntentionalErrorsHelper.expect(RAFT_PEER_UNREACHABLE, 1);
         leadWithACommit();
 
         assertEquals(Status.JOINED, await(services.get("b").join(JOIN_D)).getStatus());
@@ -144,7 +144,7 @@ class MembershipServiceTest {
     @Test
     void aForwarderThatThrowsIsAnsweredAsNoLeaderReachable() throws Exception {
         leadWithACommit();
-        MembershipService follower = new MembershipService(b, new ThrowingForwarder(), TOKEN);
+        MembershipService follower = new MembershipService(b, new ThrowingForwarderFixture(), TOKEN);
 
         MembershipResponse join = await(follower.join(JOIN_D));
         MembershipResponse removal = await(follower.remove(removal().setName("c").setToken(TOKEN).build()));
@@ -218,7 +218,7 @@ class MembershipServiceTest {
     @Test
     void theLeaderChecksAForwardedTokenItself() throws Exception {
         leadWithACommit();
-        services.put("a", new MembershipService(a, new Forwarder(), "the-leaders-token"));
+        services.put("a", new MembershipService(a, new ForwarderFixture(), "the-leaders-token"));
 
         MembershipResponse answer = await(services.get("b").remove(removal().setName("c").setToken(TOKEN).build()));
 
@@ -229,7 +229,7 @@ class MembershipServiceTest {
     @Test
     void withNoTokenConfiguredEveryRemovalIsRefused() throws Exception {
         leadWithACommit();
-        MembershipService unconfigured = new MembershipService(a, new Forwarder(), null);
+        MembershipService unconfigured = new MembershipService(a, new ForwarderFixture(), null);
 
         MembershipResponse answer = await(unconfigured.remove(removal().setName("c").setToken("").build()));
 
@@ -251,8 +251,8 @@ class MembershipServiceTest {
 
     @Test
     void theNodesRefusalComesBackWithItsReason() throws Exception {
-        IntentionalErrors.expect(RAFT_PEER_UNREACHABLE, 2);
-        InMemoryTransportSimulator.createPartition(Set.of("a", "b"), Set.of("c"));
+        IntentionalErrorsHelper.expect(RAFT_PEER_UNREACHABLE, 2);
+        InMemoryTransportSimulatorFixture.createPartition(Set.of("a", "b"), Set.of("c"));
         leadWithACommit();
 
         MembershipResponse answer = await(services.get("a").remove(removal().setName("b").setToken(TOKEN).build()));
@@ -272,12 +272,16 @@ class MembershipServiceTest {
     }
 
     private RaftNode node(String name) {
-        return cluster.add(cluster.builder(name, MEMBERS, new InMemoryTransportSimulator(name),
+        return cluster.add(cluster.builder(name, MEMBERS, new InMemoryTransportSimulatorFixture(name),
                 new QraftStateStore(), RaftNodeMode.volatileMode()));
     }
 
-    /** Throws as it is asked to forward, as a transport given a leader it cannot address once did. */
-    private static final class ThrowingForwarder implements RaftTransport {
+    /**
+     * Test transport fixture that throws during membership forwarding to exercise forwarding failures.
+     *
+     * <p>Throws as it is asked to forward, as a transport given a leader it cannot address once did.
+     */
+    private static final class ThrowingForwarderFixture implements RaftTransport {
         @Override
         public Future<MembershipResponse> join(String targetId, JoinRequest request) {
             throw new IllegalArgumentException("Unknown node: " + targetId);
@@ -307,8 +311,12 @@ class MembershipServiceTest {
         }
     }
 
-    /** Carries a forwarded request to the target's service, as the Raft port would. */
-    private final class Forwarder implements RaftTransport {
+    /**
+     * Test transport fixture that records membership forwarding and delivers requests to the target service.
+     *
+     * <p>Carries a forwarded request to the target's service, as the Raft port would.
+     */
+    private final class ForwarderFixture implements RaftTransport {
         @Override
         public Future<MembershipResponse> join(String targetId, JoinRequest request) {
             forwardedTo.add(targetId);

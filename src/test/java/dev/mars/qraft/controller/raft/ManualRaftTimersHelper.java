@@ -29,7 +29,8 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
- * A {@link RaftTimerScheduler} whose timers fire only when a test asks, on the node's state loop. A node's
+ * Test helper implementing {@link RaftTimerScheduler} so Raft tests control when timers fire.
+ * Timers fire only when a test asks, on the node's state loop. A node's
  * only one-shot timer is its election timeout; its periodic timers are the heartbeat and snapshot checks,
  * told apart by period. Elections therefore happen exactly when, and on exactly the node, a test decides.
  *
@@ -42,18 +43,18 @@ import java.util.function.Supplier;
  * @since 2026-09-28
  * @version 1.2
  */
-public final class ManualRaftTimers implements RaftTimerScheduler {
+public final class ManualRaftTimersHelper implements RaftTimerScheduler {
     private final JavaRuntime runtime;
     private final AtomicLong ids = new AtomicLong();
     private final Map<Long, Scheduled> oneShots = new ConcurrentHashMap<>();
     private final Map<Long, Scheduled> periodics = new ConcurrentHashMap<>();
     private final AtomicLong clock;
 
-    public ManualRaftTimers(JavaRuntime runtime) {
+    public ManualRaftTimersHelper(JavaRuntime runtime) {
         this(runtime, new AtomicLong());
     }
 
-    ManualRaftTimers(JavaRuntime runtime, AtomicLong clock) {
+    ManualRaftTimersHelper(JavaRuntime runtime, AtomicLong clock) {
         this.runtime = runtime;
         this.clock = clock;
     }

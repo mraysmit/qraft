@@ -32,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests for {@link SharedDockerCluster} runtime JAR freshness checks against sources and POMs, and
+ * Tests for {@link SharedDockerClusterFixture} runtime JAR freshness checks against sources and POMs, and
  * lifecycle commands that do not remove volumes.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
@@ -51,7 +51,7 @@ class SharedDockerClusterFreshnessTest {
         Files.writeString(source, "class Runtime {}");
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
-                () -> SharedDockerCluster.assertRuntimeJarIsCurrent(
+                () -> SharedDockerClusterFixture.assertRuntimeJarIsCurrent(
                         repositoryRoot, repositoryRoot.resolve("target/qraft.jar")));
 
         assertTrue(error.getMessage().contains("Host-built runtime JAR not found"));
@@ -69,7 +69,7 @@ class SharedDockerClusterFreshnessTest {
         Files.setLastModifiedTime(source, FileTime.from(Instant.parse("2026-01-02T00:00:00Z")));
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
-                () -> SharedDockerCluster.assertRuntimeJarIsCurrent(repositoryRoot, jar));
+                () -> SharedDockerClusterFixture.assertRuntimeJarIsCurrent(repositoryRoot, jar));
 
         assertTrue(error.getMessage().contains("older than build input"));
         assertTrue(error.getMessage().contains("Controller.java"));
@@ -90,18 +90,18 @@ class SharedDockerClusterFreshnessTest {
         Files.setLastModifiedTime(pom, inputTime);
         Files.setLastModifiedTime(jar, FileTime.from(Instant.parse("2026-01-02T00:00:00Z")));
 
-        assertDoesNotThrow(() -> SharedDockerCluster.assertRuntimeJarIsCurrent(repositoryRoot, jar));
+        assertDoesNotThrow(() -> SharedDockerClusterFixture.assertRuntimeJarIsCurrent(repositoryRoot, jar));
     }
 
     @Test
     void lifecycleCommandsUseDockerWithoutRemovingVolumes() {
         List<List<String>> commands = new ArrayList<>();
 
-        SharedDockerCluster.runDockerLifecycleCommand(
+        SharedDockerClusterFixture.runDockerLifecycleCommand(
                 "stop", "container-id", command -> commands.add(List.copyOf(command)));
-        SharedDockerCluster.runDockerLifecycleCommand(
+        SharedDockerClusterFixture.runDockerLifecycleCommand(
                 "kill", "container-id", command -> commands.add(List.copyOf(command)));
-        SharedDockerCluster.runDockerLifecycleCommand(
+        SharedDockerClusterFixture.runDockerLifecycleCommand(
                 "start", "container-id", command -> commands.add(List.copyOf(command)));
 
         assertEquals(List.of(
@@ -114,15 +114,15 @@ class SharedDockerClusterFreshnessTest {
     void pauseAndUnpauseFreezeAContainerWithoutRestartingOrRemovingIt() {
         List<List<String>> commands = new ArrayList<>();
 
-        SharedDockerCluster.runDockerLifecycleCommand(
+        SharedDockerClusterFixture.runDockerLifecycleCommand(
                 "pause", "container-id", command -> commands.add(List.copyOf(command)));
-        SharedDockerCluster.runDockerLifecycleCommand(
+        SharedDockerClusterFixture.runDockerLifecycleCommand(
                 "unpause", "container-id", command -> commands.add(List.copyOf(command)));
 
         assertEquals(List.of(
                 List.of("docker", "pause", "container-id"),
                 List.of("docker", "unpause", "container-id")), commands);
-        assertThrows(IllegalArgumentException.class, () -> SharedDockerCluster.runDockerLifecycleCommand(
+        assertThrows(IllegalArgumentException.class, () -> SharedDockerClusterFixture.runDockerLifecycleCommand(
                 "rm", "container-id", command -> commands.add(List.copyOf(command))),
                 "lifecycle commands never remove a container or its volumes");
     }

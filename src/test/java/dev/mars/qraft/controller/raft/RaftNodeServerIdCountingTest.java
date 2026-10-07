@@ -35,8 +35,8 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
-import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
-import static dev.mars.qraft.controller.raft.ManualRaftCluster.serverIdOf;
+import static dev.mars.qraft.controller.raft.ManualRaftClusterFixture.await;
+import static dev.mars.qraft.controller.raft.ManualRaftClusterFixture.serverIdOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -60,15 +60,15 @@ class RaftNodeServerIdCountingTest {
     private static final String WIPED = "00000000-0000-0000-0000-00000000dead";
 
     private JavaRuntime runtime;
-    private ManualRaftCluster cluster;
-    private HeldRaftTransport transport;
+    private ManualRaftClusterFixture cluster;
+    private HeldRaftTransportFixture transport;
     private RaftNode node;
 
     @BeforeEach
     void setUp() throws Exception {
         runtime = JavaRuntime.create();
-        cluster = new ManualRaftCluster(runtime);
-        transport = new HeldRaftTransport();
+        cluster = new ManualRaftClusterFixture(runtime);
+        transport = new HeldRaftTransportFixture();
         node = cluster.add(cluster.builder("a", MEMBERS, transport, new QraftStateStore(), RaftNodeMode.volatileMode()));
         await(node.start());
     }
@@ -164,7 +164,7 @@ class RaftNodeServerIdCountingTest {
 
     @Test
     void aNonVotersAcknowledgementIsNotCountedTowardsACommit() throws Exception {
-        HeldRaftTransport held = new HeldRaftTransport();
+        HeldRaftTransportFixture held = new HeldRaftTransportFixture();
         RaftConfiguration withLearner = new RaftConfiguration(List.of(
                 new RaftConfiguration.Server(serverIdOf("x"), "x", "x", true),
                 new RaftConfiguration.Server(serverIdOf("y"), "y", "y", true),
@@ -196,8 +196,8 @@ class RaftNodeServerIdCountingTest {
 
     @Test
     void aSnapshotInstallAnswerFromAnotherServerIdIsIgnored() throws Exception {
-        HeldRaftTransport held = new HeldRaftTransport();
-        TestRaftStorage storage = new TestRaftStorage();
+        HeldRaftTransportFixture held = new HeldRaftTransportFixture();
+        TestRaftStorageFixture storage = new TestRaftStorageFixture();
         storage.open(null).get(10, TimeUnit.SECONDS);
         RaftNode leader = cluster.add(cluster.builder("a", MEMBERS, held, new QraftStateStore(),
                         RaftNodeMode.durable(storage, storage))
@@ -220,7 +220,7 @@ class RaftNodeServerIdCountingTest {
         cluster.timers(leader).firePeriodic(300);
         awaitTrue(() -> leader.getSnapshotLastIndex() >= 3, "the leader compacts its log");
         // c never answered, so its next index is behind the snapshot and a heartbeat sends it the snapshot.
-        cluster.timers(leader).firePeriodic(ManualRaftCluster.HEARTBEAT_MS);
+        cluster.timers(leader).firePeriodic(ManualRaftClusterFixture.HEARTBEAT_MS);
         awaitTrue(() -> !held.snapshots.isEmpty(), "the leader sends c its snapshot");
 
         held.snapshots.getFirst().response().complete(InstallSnapshotResponse.newBuilder()
@@ -234,7 +234,7 @@ class RaftNodeServerIdCountingTest {
 
     @Test
     void aServerThatIsNotAVoterInAnyConfigurationNeverCampaigns() throws Exception {
-        HeldRaftTransport unconfiguredTransport = new HeldRaftTransport();
+        HeldRaftTransportFixture unconfiguredTransport = new HeldRaftTransportFixture();
         RaftNode unconfigured = cluster.add(cluster.unconfiguredBuilder("d", Set.of("d", "e", "f"),
                 unconfiguredTransport, new QraftStateStore(), RaftNodeMode.volatileMode()));
         await(unconfigured.start());

@@ -29,8 +29,8 @@ import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.controller.state.RaftCommand;
 import dev.mars.qraft.controller.state.RaftCommandResult;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
-import dev.mars.qraft.testing.fault.InjectedFault;
-import dev.mars.qraft.testing.fault.IntentionalErrors;
+import dev.mars.qraft.testing.fault.InjectedFaultFixture;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -44,10 +44,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
-import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
-import static dev.mars.qraft.controller.raft.ManualRaftCluster.startAll;
-import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE;
-import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_TRANSPORT_FAILURE;
+import static dev.mars.qraft.controller.raft.ManualRaftClusterFixture.await;
+import static dev.mars.qraft.controller.raft.ManualRaftClusterFixture.startAll;
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE;
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_TRANSPORT_FAILURE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -59,7 +59,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * keeping its leader when one member stops, simultaneous candidacies, a transport that cannot start, and a
  * node built with no members.
  *
- * <p>Elections and heartbeats happen only when a test fires them through {@link ManualRaftCluster}, so each
+ * <p>Elections and heartbeats happen only when a test fires them through {@link ManualRaftClusterFixture}, so each
  * scenario runs the same way every time. Every node is stopped after the test.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
@@ -68,22 +68,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class RaftFailureTest {
     private JavaRuntime runtime;
-    private ManualRaftCluster cluster;
+    private ManualRaftClusterFixture cluster;
     private RaftNode node1;
     private RaftNode node2;
     private RaftNode node3;
-    private InMemoryTransportSimulator transport1;
+    private InMemoryTransportSimulatorFixture transport1;
 
     @BeforeEach
     void setUp() {
         runtime = JavaRuntime.create();
-        cluster = new ManualRaftCluster(runtime);
-        InMemoryTransportSimulator.clearAllTransports();
+        cluster = new ManualRaftClusterFixture(runtime);
+        InMemoryTransportSimulatorFixture.clearAllTransports();
         Set<String> members = Set.of("node1", "node2", "node3");
-        transport1 = new InMemoryTransportSimulator("node1");
+        transport1 = new InMemoryTransportSimulatorFixture("node1");
         node1 = node("node1", members, transport1);
-        node2 = node("node2", members, new InMemoryTransportSimulator("node2"));
-        node3 = node("node3", members, new InMemoryTransportSimulator("node3"));
+        node2 = node("node2", members, new InMemoryTransportSimulatorFixture("node2"));
+        node3 = node("node3", members, new InMemoryTransportSimulatorFixture("node3"));
     }
 
     @AfterEach
@@ -92,7 +92,7 @@ class RaftFailureTest {
             cluster.close();
         } finally {
             runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            InMemoryTransportSimulator.clearAllTransports();
+            InMemoryTransportSimulatorFixture.clearAllTransports();
         }
     }
 
@@ -113,7 +113,7 @@ class RaftFailureTest {
 
     @Test
     void aSurvivingMemberIsElectedInANewTermAfterTheLeaderStops() throws Exception {
-        IntentionalErrors.expect(RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(RAFT_PEER_UNREACHABLE);
         startAll(node1, node2, node3);
         cluster.elect(node1);
         cluster.heartbeatUntil(node1, () -> followsNode1(node2) && followsNode1(node3), "both follow node1");
@@ -130,7 +130,7 @@ class RaftFailureTest {
 
     @Test
     void aLeaderKeepsLeadingAndCommittingWhileAMajorityRemains() throws Exception {
-        IntentionalErrors.expect(RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(RAFT_PEER_UNREACHABLE);
         startAll(node1, node2, node3);
         cluster.elect(node1);
         cluster.heartbeatUntil(node1, () -> followsNode1(node2) && followsNode1(node3), "both follow node1");
@@ -140,7 +140,7 @@ class RaftFailureTest {
         // More heartbeat rounds than the check-quorum window: node2's replies keep the leader in office. Each
         // commit needs node2's reply, so every round's contact is recorded before the next round starts.
         for (int round = 0; round < 60; round++) {
-            cluster.timers(node1).firePeriodic(ManualRaftCluster.HEARTBEAT_MS);
+            cluster.timers(node1).firePeriodic(ManualRaftClusterFixture.HEARTBEAT_MS);
             assertInstanceOf(RaftCommandResult.Success.class,
                     await(node1.submitCommand(distributedPut("round", Integer.toString(round)))));
         }
@@ -184,7 +184,7 @@ class RaftFailureTest {
         RaftTransport failingTransport = new RaftTransport() {
             @Override
             public void start(Consumer<RaftMessage> messageHandler) {
-                throw new InjectedFault(RAFT_TRANSPORT_FAILURE, "Transport failed to start");
+                throw new InjectedFaultFixture(RAFT_TRANSPORT_FAILURE, "Transport failed to start");
             }
 
             @Override
@@ -192,17 +192,17 @@ class RaftFailureTest {
 
             @Override
             public Future<VoteResponse> sendVoteRequest(String nodeId, VoteRequest request) {
-                return Future.failedFuture(new InjectedFault(RAFT_TRANSPORT_FAILURE, "Network error"));
+                return Future.failedFuture(new InjectedFaultFixture(RAFT_TRANSPORT_FAILURE, "Network error"));
             }
 
             @Override
             public Future<AppendEntriesResponse> sendAppendEntries(String nodeId, AppendEntriesRequest request) {
-                return Future.failedFuture(new InjectedFault(RAFT_TRANSPORT_FAILURE, "Network error"));
+                return Future.failedFuture(new InjectedFaultFixture(RAFT_TRANSPORT_FAILURE, "Network error"));
             }
 
             @Override
             public Future<InstallSnapshotResponse> sendInstallSnapshot(String nodeId, InstallSnapshotRequest request) {
-                return Future.failedFuture(new InjectedFault(RAFT_TRANSPORT_FAILURE, "Network error"));
+                return Future.failedFuture(new InjectedFaultFixture(RAFT_TRANSPORT_FAILURE, "Network error"));
             }
         };
         RaftNode failingNode = cluster.add(cluster.builder("failing", Set.of("failing"), failingTransport,

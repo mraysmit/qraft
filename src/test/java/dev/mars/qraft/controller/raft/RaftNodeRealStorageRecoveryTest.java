@@ -25,7 +25,7 @@ import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
-import dev.mars.qraft.testing.fault.IntentionalErrors;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import dev.mars.raftlog.storage.FileRaftStorage;
 import dev.mars.raftlog.storage.RaftStorage;
 import dev.mars.raftlog.storage.RaftStorageConfig;
@@ -42,7 +42,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-import static dev.mars.qraft.controller.raft.RaftAwait.await;
+import static dev.mars.qraft.controller.raft.RaftAwaitHelper.await;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -78,19 +78,19 @@ class RaftNodeRealStorageRecoveryTest {
 
     @Test
     void restartAfterSuffixTruncationRecoversTheRetainedPrefix() throws Exception {
-        verifyRecovery(RealStorageCrashWriter.Checkpoint.AFTER_TRUNCATE,
+        verifyRecovery(RealStorageCrashWriterFixture.Checkpoint.AFTER_TRUNCATE,
                 List.of(1L, 2L, 3L), List.of(0L, 1L, 1L), 3, false);
     }
 
     @Test
     void restartAfterReplacementAppendRecoversTheWrittenReplacement() throws Exception {
-        verifyRecovery(RealStorageCrashWriter.Checkpoint.AFTER_APPEND,
+        verifyRecovery(RealStorageCrashWriterFixture.Checkpoint.AFTER_APPEND,
                 List.of(1L, 2L, 3L, 4L), List.of(0L, 1L, 1L, 2L), 4, true);
     }
 
     @Test
     void restartAfterStorageSyncRecoversTheDurableReplacement() throws Exception {
-        verifyRecovery(RealStorageCrashWriter.Checkpoint.AFTER_SYNC,
+        verifyRecovery(RealStorageCrashWriterFixture.Checkpoint.AFTER_SYNC,
                 List.of(1L, 2L, 3L, 4L), List.of(0L, 1L, 1L, 2L), 4, true);
     }
 
@@ -103,10 +103,10 @@ class RaftNodeRealStorageRecoveryTest {
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
-                .serverId(ManualRaftCluster.serverIdOf("node-1"))
-                .initialConfiguration(ManualRaftCluster.configurationOf(Set.of("node-1", "leader-1")))
+                .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
+                .initialConfiguration(ManualRaftClusterFixture.configurationOf(Set.of("node-1", "leader-1")))
                 .clusterNodes(Set.of("node-1", "leader-1"))
-                .transport(new PeerlessTransport())
+                .transport(new PeerlessTransportFixture())
                 .stateMachine(new QraftStateStore())
                 .commandCodec(CODEC)
                 .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
@@ -164,9 +164,9 @@ class RaftNodeRealStorageRecoveryTest {
      */
     @Test
     void aCorruptCompleteRecordFailsStartupAndLeavesTheLogUntouched() throws Exception {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.WAL_AMBIGUOUS_CORRUPTION, 1);
-        IntentionalErrors.expect(
-                dev.mars.qraft.testing.fault.IntentionalError.RAFT_RECOVERY_AMBIGUOUS_CORRUPTION, 2);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.WAL_AMBIGUOUS_CORRUPTION, 1);
+        IntentionalErrorsHelper.expect(
+                dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_RECOVERY_AMBIGUOUS_CORRUPTION, 2);
         seedWal();
         Path log = directory.resolve("raft.log");
         byte[] bytes = Files.readAllBytes(log);
@@ -194,9 +194,9 @@ class RaftNodeRealStorageRecoveryTest {
         return RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
-                .serverId(ManualRaftCluster.serverIdOf("node-1"))
+                .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
                 .clusterNodes(MEMBERS)
-                .transport(new PeerlessTransport())
+                .transport(new PeerlessTransportFixture())
                 .stateMachine(state)
                 .commandCodec(CODEC)
                 .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
@@ -215,7 +215,7 @@ class RaftNodeRealStorageRecoveryTest {
                 .runtime(runtime)
                 .nodeId("node-1")
                 .clusterNodes(Set.of("node-1"))
-                .transport(new PeerlessTransport())
+                .transport(new PeerlessTransportFixture())
                 .stateMachine(new QraftStateStore())
                 .commandCodec(CODEC)
                 .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
@@ -235,7 +235,7 @@ class RaftNodeRealStorageRecoveryTest {
     }
 
     private void verifyRecovery(
-            RealStorageCrashWriter.Checkpoint checkpoint,
+            RealStorageCrashWriterFixture.Checkpoint checkpoint,
             List<Long> expectedIndexes,
             List<Long> expectedTerms,
             long expectedLastApplied,
@@ -243,7 +243,7 @@ class RaftNodeRealStorageRecoveryTest {
         seedWal();
         byte[] replacementPayload = encodePut("replacement", "new");
         ProcessResult crash = runCrashWriter(checkpoint, replacementPayload);
-        assertEquals(RealStorageCrashWriter.HALT_EXIT_CODE, crash.exitCode(), crash.output());
+        assertEquals(RealStorageCrashWriterFixture.HALT_EXIT_CODE, crash.exitCode(), crash.output());
 
         try (FileRaftStorage reopened = storage()) {
             reopened.open(directory).get(10, TimeUnit.SECONDS);
@@ -261,9 +261,9 @@ class RaftNodeRealStorageRecoveryTest {
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
-                .serverId(ManualRaftCluster.serverIdOf("node-1"))
+                .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
                 .clusterNodes(MEMBERS)
-                .transport(new PeerlessTransport())
+                .transport(new PeerlessTransportFixture())
                 .stateMachine(state)
                 .commandCodec(CODEC)
                 .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
@@ -290,7 +290,7 @@ class RaftNodeRealStorageRecoveryTest {
             wal.open(directory).get(10, TimeUnit.SECONDS);
             wal.updateMetadata(2, Optional.of("node-1")).get(10, TimeUnit.SECONDS);
             wal.appendEntries(List.of(
-                    ManualRaftCluster.bootstrapEntry(MEMBERS),
+                    ManualRaftClusterFixture.bootstrapEntry(MEMBERS),
                     entry(2, 1, "retained-1", "one"),
                     entry(3, 1, "retained-2", "two"),
                     entry(REPLACEMENT_INDEX, 1, "obsolete", "old"))).get(10, TimeUnit.SECONDS);
@@ -299,7 +299,7 @@ class RaftNodeRealStorageRecoveryTest {
     }
 
     private ProcessResult runCrashWriter(
-            RealStorageCrashWriter.Checkpoint checkpoint,
+            RealStorageCrashWriterFixture.Checkpoint checkpoint,
             byte[] replacementPayload) throws Exception {
         String executable = System.getProperty("os.name", "").startsWith("Windows")
                 ? "java.exe" : "java";
@@ -310,7 +310,7 @@ class RaftNodeRealStorageRecoveryTest {
         Process process = new ProcessBuilder(
                 java.toString(),
                 "-cp", classPath,
-                RealStorageCrashWriter.class.getName(),
+                RealStorageCrashWriterFixture.class.getName(),
                 directory.toString(),
                 checkpoint.name(),
                 Base64.getEncoder().encodeToString(replacementPayload),

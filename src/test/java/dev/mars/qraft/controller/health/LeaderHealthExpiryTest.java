@@ -53,7 +53,7 @@ class LeaderHealthExpiryTest {
     private static final ServiceCheckId CHECK = new ServiceCheckId(
             new ServiceInstanceId("default", "default", "node-1", "web"), "ttl");
 
-    private final ManualExpiryTime time = new ManualExpiryTime(START);
+    private final ManualExpiryTimeHelper time = new ManualExpiryTimeHelper(START);
     private final AtomicReference<List<HealthCheckState>> checks = new AtomicReference<>(List.of());
     private final List<RaftCommand> proposed = new CopyOnWriteArrayList<>();
     private final List<CompletableFuture<RaftCommandResult<?>>> replies = new CopyOnWriteArrayList<>();

@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.testing.fault.IntentionalErrors;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 
 import dev.mars.qraft.controller.raft.RaftConfiguration.Server;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
@@ -37,8 +37,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
-import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
-import static dev.mars.qraft.controller.raft.ManualRaftCluster.serverIdOf;
+import static dev.mars.qraft.controller.raft.ManualRaftClusterFixture.await;
+import static dev.mars.qraft.controller.raft.ManualRaftClusterFixture.serverIdOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -64,7 +64,7 @@ class RaftNodeConfigurationChangeTest {
     private static final Set<String> MEMBERS = Set.of("a", "b", "c");
 
     private JavaRuntime runtime;
-    private ManualRaftCluster cluster;
+    private ManualRaftClusterFixture cluster;
     private RaftNode a;
     private RaftNode b;
     private RaftNode c;
@@ -72,12 +72,12 @@ class RaftNodeConfigurationChangeTest {
     @BeforeEach
     void setUp() throws Exception {
         runtime = JavaRuntime.create();
-        cluster = new ManualRaftCluster(runtime);
-        InMemoryTransportSimulator.clearAllTransports();
+        cluster = new ManualRaftClusterFixture(runtime);
+        InMemoryTransportSimulatorFixture.clearAllTransports();
         a = node("a");
         b = node("b");
         c = node("c");
-        ManualRaftCluster.startAll(a, b, c);
+        ManualRaftClusterFixture.startAll(a, b, c);
         cluster.elect(a);
     }
 
@@ -87,13 +87,13 @@ class RaftNodeConfigurationChangeTest {
             cluster.close();
         } finally {
             runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            InMemoryTransportSimulator.clearAllTransports();
+            InMemoryTransportSimulatorFixture.clearAllTransports();
         }
     }
 
     @Test
     void aChangeWaitsUntilTheLeaderHasCommittedAnEntryInItsTerm() throws Exception {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
         RaftConfiguration withD = with(new Server(serverIdOf("d"), "d", "d", false));
         cluster.heartbeatUntil(a, () -> a.getCommitIndex() >= 2, "leadership no-op commits without client writes");
         await(a.proposeConfiguration(withD));
@@ -102,17 +102,17 @@ class RaftNodeConfigurationChangeTest {
 
     @Test
     void onlyOneChangeIsInFlightAtATime() throws Exception {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
         commitACommand();
-        InMemoryTransportSimulator.createPartition(Set.of("a"), Set.of("b", "c"));
+        InMemoryTransportSimulatorFixture.createPartition(Set.of("a"), Set.of("b", "c"));
         RaftConfiguration withD = with(new Server(serverIdOf("d"), "d", "d", false));
         a.proposeConfiguration(withD);
         awaitTrue(() -> a.getConfiguration().equals(Optional.of(withD)), "the change is in force once appended");
 
         assertRefused(IllegalStateException.class, "already in progress",
-                () -> await(a.proposeConfiguration(ManualRaftCluster.configurationOf(Set.of("a", "b")))));
+                () -> await(a.proposeConfiguration(ManualRaftClusterFixture.configurationOf(Set.of("a", "b")))));
 
-        InMemoryTransportSimulator.healPartitions();
+        InMemoryTransportSimulatorFixture.healPartitions();
         cluster.heartbeatUntil(a, () -> a.getCommitIndex() >= a.getLastLogIndex(), "the first change commits");
         await(a.proposeConfiguration(without(withD, "d")));
     }
@@ -125,8 +125,8 @@ class RaftNodeConfigurationChangeTest {
                 () -> await(a.proposeConfiguration(with(new Server(serverIdOf("d"), "d", "d", true),
                         new Server(serverIdOf("e"), "e", "e", true)))));
         assertRefused(IllegalArgumentException.class, "unchanged",
-                () -> await(a.proposeConfiguration(ManualRaftCluster.configurationOf(MEMBERS))));
-        assertEquals(Optional.of(ManualRaftCluster.configurationOf(MEMBERS)), a.getConfiguration());
+                () -> await(a.proposeConfiguration(ManualRaftClusterFixture.configurationOf(MEMBERS))));
+        assertEquals(Optional.of(ManualRaftClusterFixture.configurationOf(MEMBERS)), a.getConfiguration());
     }
 
     @Test
@@ -142,7 +142,7 @@ class RaftNodeConfigurationChangeTest {
     void anAddedServerIsReplicatedToUntilItHoldsTheConfiguration() throws Exception {
         commitACommand();
         RaftNode d = cluster.add(cluster.unconfiguredBuilder("d", Set.of("a", "b", "c", "d"),
-                new InMemoryTransportSimulator("d"), new QraftStateStore(), RaftNodeMode.volatileMode())
+                new InMemoryTransportSimulatorFixture("d"), new QraftStateStore(), RaftNodeMode.volatileMode())
                 .serverId(serverIdOf("d")));
         await(d.start());
         RaftConfiguration withD = with(new Server(serverIdOf("d"), "d", "d", false));
@@ -158,10 +158,10 @@ class RaftNodeConfigurationChangeTest {
 
     @Test
     void aPromotedServerCountsTowardsTheLeadersQuorum() throws Exception {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
         commitACommand();
         RaftNode d = cluster.add(cluster.unconfiguredBuilder("d", Set.of("a", "b", "c", "d"),
-                new InMemoryTransportSimulator("d"), new QraftStateStore(), RaftNodeMode.volatileMode())
+                new InMemoryTransportSimulatorFixture("d"), new QraftStateStore(), RaftNodeMode.volatileMode())
                 .serverId(serverIdOf("d")));
         await(d.start());
         await(a.proposeConfiguration(with(new Server(serverIdOf("d"), "d", "d", false))));
@@ -171,9 +171,9 @@ class RaftNodeConfigurationChangeTest {
                 "d joins, catches up, and is promoted");
 
         // Four voters need three; with c cut off, only d's answers keep a in office.
-        InMemoryTransportSimulator.createPartition(Set.of("a", "b", "d"), Set.of("c"));
+        InMemoryTransportSimulatorFixture.createPartition(Set.of("a", "b", "d"), Set.of("c"));
         for (int round = 0; round < 60; round++) {
-            cluster.timers(a).firePeriodic(ManualRaftCluster.HEARTBEAT_MS);
+            cluster.timers(a).firePeriodic(ManualRaftClusterFixture.HEARTBEAT_MS);
             // Each commit needs d's acknowledgement, so d's contact is recorded every round.
             await(a.submitCommand(new DistributedStateRaftCommand(
                     DistributedStateCommand.put("round", Integer.toString(round)))));
@@ -186,14 +186,14 @@ class RaftNodeConfigurationChangeTest {
     void aRemovedServerIsNoLongerTrackedSoItsReplacementStartsAfresh() throws Exception {
         commitACommand();
         cluster.heartbeatUntil(a, () -> a.getNextIndex("c") == a.getLastLogIndex() + 1, "c is up to date");
-        RaftConfiguration withoutC = without(ManualRaftCluster.configurationOf(MEMBERS), "c");
+        RaftConfiguration withoutC = without(ManualRaftClusterFixture.configurationOf(MEMBERS), "c");
 
         await(a.proposeConfiguration(withoutC));
 
         assertEquals(-1, a.getNextIndex("c"), "a removed server is not tracked");
         await(c.stop());
         RaftNode replacement = cluster.add(cluster.unconfiguredBuilder("c", Set.of("a", "b", "c"),
-                new InMemoryTransportSimulator("c"), new QraftStateStore(), RaftNodeMode.volatileMode())
+                new InMemoryTransportSimulatorFixture("c"), new QraftStateStore(), RaftNodeMode.volatileMode())
                 .serverId("replacement-of-c"));
         await(replacement.start());
         List<Server> servers = new ArrayList<>(withoutC.servers());
@@ -216,9 +216,9 @@ class RaftNodeConfigurationChangeTest {
 
     /** A member that promotes a healthy non-voter after one heartbeat round, rather than Consul's 10 seconds. */
     private RaftNode node(String name) {
-        return cluster.add(cluster.builder(name, MEMBERS, new InMemoryTransportSimulator(name),
+        return cluster.add(cluster.builder(name, MEMBERS, new InMemoryTransportSimulatorFixture(name),
                 new QraftStateStore(), RaftNodeMode.volatileMode())
-                .promotionStabilization(ManualRaftCluster.HEARTBEAT_MS));
+                .promotionStabilization(ManualRaftClusterFixture.HEARTBEAT_MS));
     }
 
     private void commitACommand() throws Exception {
@@ -226,7 +226,7 @@ class RaftNodeConfigurationChangeTest {
     }
 
     private static RaftConfiguration with(Server... added) {
-        List<Server> servers = new ArrayList<>(ManualRaftCluster.configurationOf(MEMBERS).servers());
+        List<Server> servers = new ArrayList<>(ManualRaftClusterFixture.configurationOf(MEMBERS).servers());
         servers.addAll(List.of(added));
         return new RaftConfiguration(servers);
     }

@@ -32,7 +32,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * A {@link ScheduledExecutorService} whose time moves only when a test calls {@link #advance}. Due tasks
+ * Test helper implementing {@link ScheduledExecutorService} for agent tests that control scheduled work.
+ * Time moves only when a test calls {@link #advance}. Due tasks
  * run on the advancing thread in due-time order; fixed-rate tasks are rescheduled after each run. The
  * pending task count proves exactly that nothing is scheduled, without waiting to observe nothing.
  *
@@ -40,8 +41,8 @@ import java.util.concurrent.TimeoutException;
  * @since 2026-09-27
  * @version 1.0
  */
-final class ManualScheduledExecutor extends AbstractExecutorService implements ScheduledExecutorService {
-    private final List<Task<?>> tasks = new ArrayList<>();
+final class ManualScheduledExecutorHelper extends AbstractExecutorService implements ScheduledExecutorService {
+    private final List<TaskHelper<?>> tasks = new ArrayList<>();
     private long nowNanos;
     private long sequence;
     private boolean shutdown;
@@ -53,10 +54,10 @@ final class ManualScheduledExecutor extends AbstractExecutorService implements S
             target = nowNanos + duration.toNanos();
         }
         while (true) {
-            Task<?> next;
+            TaskHelper<?> next;
             synchronized (this) {
                 next = tasks.stream().filter(task -> task.dueNanos <= target)
-                        .min(Comparator.comparingLong((Task<?> task) -> task.dueNanos)
+                        .min(Comparator.comparingLong((TaskHelper<?> task) -> task.dueNanos)
                                 .thenComparingLong(task -> task.sequence))
                         .orElse(null);
                 if (next == null) {
@@ -143,32 +144,33 @@ final class ManualScheduledExecutor extends AbstractExecutorService implements S
         return shutdown;
     }
 
-    private synchronized <V> Task<V> enqueue(Callable<V> action, long delay, long period, TimeUnit unit) {
+    private synchronized <V> TaskHelper<V> enqueue(Callable<V> action, long delay, long period, TimeUnit unit) {
         if (shutdown) throw new RejectedExecutionException("executor is shut down");
-        Task<V> task = new Task<>(action, nowNanos + unit.toNanos(Math.max(0, delay)),
+        TaskHelper<V> task = new TaskHelper<>(action, nowNanos + unit.toNanos(Math.max(0, delay)),
                 unit.toNanos(period), sequence++);
         tasks.add(task);
         return task;
     }
 
-    private synchronized void reschedule(Task<?> task) {
+    private synchronized void reschedule(TaskHelper<?> task) {
         if (shutdown || task.isCancelled()) return;
         task.dueNanos += task.periodNanos;
         tasks.add(task);
     }
 
-    private synchronized void cancel(Task<?> task) {
+    private synchronized void cancel(TaskHelper<?> task) {
         tasks.remove(task);
     }
 
-    private final class Task<V> implements ScheduledFuture<V>, Runnable {
+    /** Internal test scheduling helper that tracks work for the enclosing scheduler or transport. */
+    private final class TaskHelper<V> implements ScheduledFuture<V>, Runnable {
         private final Callable<V> action;
         private final long periodNanos;
         private final long sequence;
         private final CompletableFuture<V> result = new CompletableFuture<>();
         private long dueNanos;
 
-        private Task(Callable<V> action, long dueNanos, long periodNanos, long sequence) {
+        private TaskHelper(Callable<V> action, long dueNanos, long periodNanos, long sequence) {
             this.action = action;
             this.dueNanos = dueNanos;
             this.periodNanos = periodNanos;
@@ -188,7 +190,7 @@ final class ManualScheduledExecutor extends AbstractExecutorService implements S
 
         @Override
         public long getDelay(TimeUnit unit) {
-            synchronized (ManualScheduledExecutor.this) {
+            synchronized (ManualScheduledExecutorHelper.this) {
                 return unit.convert(dueNanos - nowNanos, TimeUnit.NANOSECONDS);
             }
         }
@@ -200,7 +202,7 @@ final class ManualScheduledExecutor extends AbstractExecutorService implements S
 
         @Override
         public boolean cancel(boolean mayInterruptIfRunning) {
-            ManualScheduledExecutor.this.cancel(this);
+            ManualScheduledExecutorHelper.this.cancel(this);
             return result.cancel(mayInterruptIfRunning);
         }
 

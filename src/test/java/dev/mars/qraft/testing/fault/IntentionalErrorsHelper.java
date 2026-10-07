@@ -31,8 +31,9 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Labels and checks the errors that tests cause on purpose. Tests call {@link #expect}; the rest is used by
- * {@link IntentionalErrorExtension}, {@link IntentionalErrorLabel}, and {@link IntentionalErrorCheck}.
+ * Test logging helper that labels and checks the errors tests cause on purpose.
+ * Tests call {@link #expect}; the rest is used by
+ * {@link IntentionalErrorExtensionHelper}, {@link IntentionalErrorLabelHelper}, and {@link IntentionalErrorCheckHelper}.
  *
  * <p>Each test runs in a window that the extension opens before it and closes after it, and each test class in an
  * enclosing window. Tests run one at a time, so an event belongs to the innermost open window whatever thread
@@ -48,30 +49,30 @@ import java.util.Optional;
  * @since 2026-10-04
  * @version 1.0
  */
-public final class IntentionalErrors {
+public final class IntentionalErrorsHelper {
 
     private static final Object LOCK = new Object();
-    private static final Deque<Window> WINDOWS = new ArrayDeque<>();
+    private static final Deque<WindowHelper> WINDOWS = new ArrayDeque<>();
     private static final List<String> OUTSIDE_ANY_TEST = new ArrayList<>();
 
-    private IntentionalErrors() {
+    private IntentionalErrorsHelper() {
     }
 
     /** Declares that the running test causes {@code error} at least once. */
-    public static void expect(IntentionalError error) {
+    public static void expect(IntentionalErrorFixture error) {
         declare(error, 1, Integer.MAX_VALUE);
     }
 
     /** Declares that the running test causes {@code error} exactly {@code times} times. */
-    public static void expect(IntentionalError error, int times) {
+    public static void expect(IntentionalErrorFixture error, int times) {
         if (times < 1) throw new IllegalArgumentException("times must be at least 1");
         declare(error, times, times);
     }
 
-    private static void declare(IntentionalError error, int minimum, int maximum) {
+    private static void declare(IntentionalErrorFixture error, int minimum, int maximum) {
         Objects.requireNonNull(error, "error");
         synchronized (LOCK) {
-            Window window = WINDOWS.peek();
+            WindowHelper window = WINDOWS.peek();
             if (window == null) throw new IllegalStateException("expect(" + error + ") was called outside a test");
             window.expected.put(error, new int[] {minimum, maximum});
         }
@@ -80,14 +81,14 @@ public final class IntentionalErrors {
     /** Opens the window of a test or test class, named in labels as {@code owner}. */
     static void begin(String owner) {
         synchronized (LOCK) {
-            WINDOWS.push(new Window(Objects.requireNonNull(owner, "owner")));
+            WINDOWS.push(new WindowHelper(Objects.requireNonNull(owner, "owner")));
         }
     }
 
     /** Closes the innermost window, which must be {@code owner}'s, and returns its problems; empty when it passes. */
     static List<String> end(String owner) {
         synchronized (LOCK) {
-            Window window = WINDOWS.peek();
+            WindowHelper window = WINDOWS.peek();
             if (window == null || !window.owner.equals(owner)) {
                 return List.of("intentional-error window mismatch: closing " + owner + " but the open window is "
                         + (window == null ? "none" : window.owner));
@@ -128,7 +129,7 @@ public final class IntentionalErrors {
      */
     static String label(ILoggingEvent event) {
         synchronized (LOCK) {
-            Window window = WINDOWS.peek();
+            WindowHelper window = WINDOWS.peek();
             return classify(event, window)
                     .map(error -> "*** " + error.kind().title() + ": " + error + ", " + error.kind().attribution()
                             + " " + (window == null ? "no running test" : window.owner) + " *** ")
@@ -139,8 +140,8 @@ public final class IntentionalErrors {
     /** Counts {@code event} against the innermost window, or records it as a problem when it is not intentional. */
     static void record(ILoggingEvent event) {
         synchronized (LOCK) {
-            Window window = WINDOWS.peek();
-            Optional<IntentionalError> intentional = classify(event, window);
+            WindowHelper window = WINDOWS.peek();
+            Optional<IntentionalErrorFixture> intentional = classify(event, window);
             if (intentional.isPresent()) {
                 if (window != null) window.seen.merge(intentional.get(), 1, Integer::sum);
                 return;
@@ -153,14 +154,14 @@ public final class IntentionalErrors {
         }
     }
 
-    private static Optional<IntentionalError> classify(ILoggingEvent event, Window window) {
+    private static Optional<IntentionalErrorFixture> classify(ILoggingEvent event, WindowHelper window) {
         IThrowableProxy proxy = event.getThrowableProxy();
         if (proxy instanceof ThrowableProxy throwableProxy) {
-            Optional<InjectedFault> fault = InjectedFault.in(throwableProxy.getThrowable());
+            Optional<InjectedFaultFixture> fault = InjectedFaultFixture.in(throwableProxy.getThrowable());
             if (fault.isPresent()) return Optional.of(fault.get().error());
         }
         if (window != null) {
-            for (IntentionalError declared : window.expected.keySet()) {
+            for (IntentionalErrorFixture declared : window.expected.keySet()) {
                 if (declared.matches(event)) return Optional.of(declared);
             }
         }
@@ -176,13 +177,14 @@ public final class IntentionalErrors {
         return text.toString();
     }
 
-    private static final class Window {
+    /** Internal test logging helper that tracks expected and unexpected errors for a test scope. */
+    private static final class WindowHelper {
         private final String owner;
-        private final Map<IntentionalError, int[]> expected = new EnumMap<>(IntentionalError.class);
-        private final Map<IntentionalError, Integer> seen = new EnumMap<>(IntentionalError.class);
+        private final Map<IntentionalErrorFixture, int[]> expected = new EnumMap<>(IntentionalErrorFixture.class);
+        private final Map<IntentionalErrorFixture, Integer> seen = new EnumMap<>(IntentionalErrorFixture.class);
         private final List<String> problems = new ArrayList<>();
 
-        private Window(String owner) {
+        private WindowHelper(String owner) {
             this.owner = owner;
         }
     }

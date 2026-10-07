@@ -31,8 +31,8 @@ import dev.mars.qraft.controller.state.RaftCommandResult;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import dev.mars.qraft.raft.api.SnapshotStore;
 import dev.mars.raftlog.storage.RaftStorage;
-import dev.mars.qraft.testing.fault.InjectedFault;
-import dev.mars.qraft.testing.fault.IntentionalErrors;
+import dev.mars.qraft.testing.fault.InjectedFaultFixture;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,11 +48,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
-import static dev.mars.qraft.controller.raft.RaftAwait.awaitStateLoop;
-import static dev.mars.qraft.controller.raft.RaftAwait.await;
-import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_RESOURCE_SHUTDOWN_FAILURE;
-import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_STARTUP_DRAINING;
-import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_TRANSPORT_FAILURE;
+import static dev.mars.qraft.controller.raft.RaftAwaitHelper.awaitStateLoop;
+import static dev.mars.qraft.controller.raft.RaftAwaitHelper.await;
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_RESOURCE_SHUTDOWN_FAILURE;
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_STARTUP_DRAINING;
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_TRANSPORT_FAILURE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -71,8 +71,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class RaftNodeShutdownSequencingTest {
     private JavaRuntime runtime;
-    private ShutdownStorage storage;
-    private ShutdownTransport transport;
+    private ShutdownStorageFixture storage;
+    private ShutdownTransportFixture transport;
     private RaftNode node;
     private List<String> closeEvents;
 
@@ -80,9 +80,9 @@ class RaftNodeShutdownSequencingTest {
     void setUp() {
         runtime = JavaRuntime.create();
         closeEvents = new CopyOnWriteArrayList<>();
-        storage = new ShutdownStorage(closeEvents);
+        storage = new ShutdownStorageFixture(closeEvents);
         storage.open(null).join();
-        transport = new ShutdownTransport(closeEvents);
+        transport = new ShutdownTransportFixture(closeEvents);
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
@@ -150,14 +150,14 @@ class RaftNodeShutdownSequencingTest {
 
     @Test
     void writesThatCanNoLongerCommitWhenTheDrainEndsFailInsteadOfHangingForever() {
-        ShutdownStorage clusterStorage = new ShutdownStorage(closeEvents);
+        ShutdownStorageFixture clusterStorage = new ShutdownStorageFixture(closeEvents);
         clusterStorage.open(null).join();
-        ShutdownTransport silentPeers = new ShutdownTransport(closeEvents);
+        ShutdownTransportFixture silentPeers = new ShutdownTransportFixture(closeEvents);
         silentPeers.holdAppendResponses();
         Set<String> members = Set.of("leader", "peer-2", "peer-3");
         RaftNode leader = RaftNode.builder().runtime(runtime).nodeId("leader")
-                .serverId(ManualRaftCluster.serverIdOf("leader"))
-                .initialConfiguration(ManualRaftCluster.configurationOf(members))
+                .serverId(ManualRaftClusterFixture.serverIdOf("leader"))
+                .initialConfiguration(ManualRaftClusterFixture.configurationOf(members))
                 .clusterNodes(members).transport(silentPeers)
                 .stateMachine(new QraftStateStore()).commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.durable(clusterStorage, clusterStorage)).snapshotEnabled(false)
@@ -263,12 +263,12 @@ class RaftNodeShutdownSequencingTest {
 
     @Test
     void stopDuringRecoveryWaitsAndPreventsLateStartup() {
-        IntentionalErrors.expect(RAFT_STARTUP_DRAINING);
+        IntentionalErrorsHelper.expect(RAFT_STARTUP_DRAINING);
         await(node.stop());
-        storage = new ShutdownStorage(closeEvents);
+        storage = new ShutdownStorageFixture(closeEvents);
         storage.open(null).join();
         storage.blockNextMetadataLoad();
-        transport = new ShutdownTransport(closeEvents);
+        transport = new ShutdownTransportFixture(closeEvents);
         node = buildNode(Set.of("node-1"));
 
         Future<Void> start = node.start();
@@ -295,10 +295,10 @@ class RaftNodeShutdownSequencingTest {
     @Test
     void partialTransportStartFailureRollsBackAllNodeResources() {
         await(node.stop());
-        storage = new ShutdownStorage(closeEvents);
+        storage = new ShutdownStorageFixture(closeEvents);
         storage.open(null).join();
-        transport = new ShutdownTransport(closeEvents);
-        InjectedFault startFailure = new InjectedFault(
+        transport = new ShutdownTransportFixture(closeEvents);
+        InjectedFaultFixture startFailure = new InjectedFaultFixture(
                 RAFT_TRANSPORT_FAILURE, "transport failed after partial start");
         transport.startFailure = startFailure;
         node = buildNode(Set.of("node-1"));
@@ -319,9 +319,9 @@ class RaftNodeShutdownSequencingTest {
     @Test
     void lateReplicationResponseCannotMutateStoppedNode() {
         await(node.stop());
-        storage = new ShutdownStorage(closeEvents);
+        storage = new ShutdownStorageFixture(closeEvents);
         storage.open(null).join();
-        transport = new ShutdownTransport(closeEvents);
+        transport = new ShutdownTransportFixture(closeEvents);
         transport.holdAppendResponses();
         node = buildNode(Set.of("node-1", "peer-1", "peer-2"));
         await(node.start());
@@ -349,9 +349,9 @@ class RaftNodeShutdownSequencingTest {
     @Test
     void stopBeforeStartClosesResourcesAndMakesNodeTerminal() {
         await(node.stop());
-        storage = new ShutdownStorage(closeEvents);
+        storage = new ShutdownStorageFixture(closeEvents);
         storage.open(null).join();
-        transport = new ShutdownTransport(closeEvents);
+        transport = new ShutdownTransportFixture(closeEvents);
         node = buildNode(Set.of("node-1"));
 
         await(node.stop());
@@ -366,9 +366,9 @@ class RaftNodeShutdownSequencingTest {
 
     @Test
     void shutdownAttemptsEveryCloseAndReportsCombinedFailure() {
-        InjectedFault transportFailure = new InjectedFault(
+        InjectedFaultFixture transportFailure = new InjectedFaultFixture(
                 RAFT_RESOURCE_SHUTDOWN_FAILURE, "transport close failed");
-        InjectedFault storageFailure = new InjectedFault(
+        InjectedFaultFixture storageFailure = new InjectedFaultFixture(
                 RAFT_RESOURCE_SHUTDOWN_FAILURE, "storage close failed");
         transport.stopFailure = transportFailure;
         storage.closeFailure = storageFailure;
@@ -389,8 +389,8 @@ class RaftNodeShutdownSequencingTest {
         return RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
-                .serverId(ManualRaftCluster.serverIdOf("node-1"))
-                .initialConfiguration(ManualRaftCluster.configurationOf(members))
+                .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
+                .initialConfiguration(ManualRaftClusterFixture.configurationOf(members))
                 .clusterNodes(members)
                 .transport(transport)
                 .stateMachine(new QraftStateStore())
@@ -412,7 +412,8 @@ class RaftNodeShutdownSequencingTest {
         if (!node.isLeader()) throw new AssertionError("single node did not become leader");
     }
 
-    private static final class ShutdownTransport implements RaftTransport {
+    /** Test transport fixture that controls peer communication during shutdown-sequencing tests. */
+    private static final class ShutdownTransportFixture implements RaftTransport {
         private final List<String> closeEvents;
         private final AtomicInteger startCount = new AtomicInteger();
         private final AtomicInteger stopCount = new AtomicInteger();
@@ -424,7 +425,7 @@ class RaftNodeShutdownSequencingTest {
         private volatile RuntimeException startFailure;
         private volatile JavaRuntime closeContext;
 
-        private ShutdownTransport(List<String> closeEvents) {
+        private ShutdownTransportFixture(List<String> closeEvents) {
             this.closeEvents = closeEvents;
         }
 
@@ -460,7 +461,7 @@ class RaftNodeShutdownSequencingTest {
         @Override public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
             return Future.succeededFuture(VoteResponse.newBuilder()
                     .setTerm(request.getTerm()).setVoteGranted(true)
-                    .setVoterServerId(ManualRaftCluster.serverIdOf(targetId)).build());
+                    .setVoterServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
         }
         @Override public Future<AppendEntriesResponse> sendAppendEntries(
                 String targetId, AppendEntriesRequest request) {
@@ -470,23 +471,24 @@ class RaftNodeShutdownSequencingTest {
                 heldAppends.add(heldAppend);
                 appendHeld.complete(null);
                 return heldAppend.future().map(response -> response.toBuilder()
-                        .setFollowerServerId(ManualRaftCluster.serverIdOf(targetId)).build());
+                        .setFollowerServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
             }
             return Future.succeededFuture(AppendEntriesResponse.newBuilder()
                     .setTerm(request.getTerm()).setSuccess(true)
-                    .setFollowerServerId(ManualRaftCluster.serverIdOf(targetId)).build());
+                    .setFollowerServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
         }
         @Override public Future<InstallSnapshotResponse> sendInstallSnapshot(
                 String targetId, InstallSnapshotRequest request) {
             return Future.succeededFuture(InstallSnapshotResponse.newBuilder()
                     .setTerm(request.getTerm()).setSuccess(true)
-                    .setFollowerServerId(ManualRaftCluster.serverIdOf(targetId)).build());
+                    .setFollowerServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
         }
     }
 
-    private static final class ShutdownStorage implements RaftStorage, SnapshotStore {
+    /** Test storage fixture that controls persistence during shutdown-sequencing tests. */
+    private static final class ShutdownStorageFixture implements RaftStorage, SnapshotStore {
         private final List<String> closeEvents;
-        private final TestRaftStorage delegate = new TestRaftStorage();
+        private final TestRaftStorageFixture delegate = new TestRaftStorageFixture();
         private final AtomicInteger closeCount = new AtomicInteger();
         private final AtomicInteger prefixTruncateCount = new AtomicInteger();
         private final List<Long> appendedIndexes = new CopyOnWriteArrayList<>();
@@ -506,7 +508,7 @@ class RaftNodeShutdownSequencingTest {
         private volatile RuntimeException closeFailure;
         private volatile JavaRuntime closeContext;
 
-        private ShutdownStorage(List<String> closeEvents) {
+        private ShutdownStorageFixture(List<String> closeEvents) {
             this.closeEvents = closeEvents;
         }
 

@@ -38,7 +38,7 @@ class LogbackConfigurationAuditTest {
 
     @Test
     void aConfigurationThatWritesEverythingHasNoFinding() throws Exception {
-        assertEquals(List.of(), LogbackConfigurationAudit.settingsThatCanDropErrors(parse("""
+        assertEquals(List.of(), LogbackConfigurationAuditHelper.settingsThatCanDropErrors(parse("""
                 <configuration>
                   <appender name="A" class="ch.qos.logback.core.ConsoleAppender"/>
                   <logger name="noisy" level="WARN"/>
@@ -58,7 +58,7 @@ class LogbackConfigurationAuditTest {
                         "detached has additivity=\"false\"",
                         "root has level OFF",
                         "the configuration needs exactly one root with at least one appender"),
-                LogbackConfigurationAudit.settingsThatCanDropErrors(parse("""
+                LogbackConfigurationAuditHelper.settingsThatCanDropErrors(parse("""
                         <configuration>
                           <turboFilter class="ch.qos.logback.classic.turbo.MarkerFilter"/>
                           <include file="more.xml"/>
@@ -76,7 +76,7 @@ class LogbackConfigurationAuditTest {
     @Test
     void aSecondRootIsFound() throws Exception {
         assertEquals(List.of("the configuration needs exactly one root with at least one appender"),
-                LogbackConfigurationAudit.settingsThatCanDropErrors(parse("""
+                LogbackConfigurationAuditHelper.settingsThatCanDropErrors(parse("""
                         <configuration>
                           <root><appender-ref ref="A"/></root>
                           <root><appender-ref ref="A"/></root>
@@ -90,7 +90,7 @@ class LogbackConfigurationAuditTest {
     }
 
     private static Document parse(String configuration) throws Exception {
-        return LogbackConfigurationAudit.parse(
+        return LogbackConfigurationAuditHelper.parse(
                 new ByteArrayInputStream(configuration.getBytes(StandardCharsets.UTF_8)));
     }
 }

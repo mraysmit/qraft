@@ -19,7 +19,7 @@ package dev.mars.qraft.runtime;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
-import dev.mars.qraft.controller.raft.PeerlessTransport;
+import dev.mars.qraft.controller.raft.PeerlessTransportFixture;
 import dev.mars.qraft.agent.AgentStatus;
 import dev.mars.qraft.agent.QraftAgent;
 import dev.mars.qraft.agent.catalog.CatalogOutcome;
@@ -71,7 +71,7 @@ class AgentControllerContractTest {
 
     @AfterEach
     void closeResources() throws Exception {
-        new Cleanup()
+        new CleanupHelper()
                 .run(() -> { if (agent != null) agent.shutdown().get(10, TimeUnit.SECONDS); })
                 .run(() -> { if (catalogClient != null) catalogClient.close(); })
                 .run(() -> { if (retryableServer != null) retryableServer.stop(0); })
@@ -161,7 +161,7 @@ class AgentControllerContractTest {
                 .runtime(runtime)
                 .nodeId("contract-node")
                 .clusterNodes(Set.of("contract-node"))
-                .transport(new PeerlessTransport())
+                .transport(new PeerlessTransportFixture())
                 .stateMachine(store)
                 .commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.volatileMode())

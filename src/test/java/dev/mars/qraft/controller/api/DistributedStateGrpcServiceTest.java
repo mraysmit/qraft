@@ -24,7 +24,7 @@ import dev.mars.qraft.controller.api.grpc.ListRequest;
 import dev.mars.qraft.controller.api.grpc.ListResponse;
 import dev.mars.qraft.controller.api.grpc.PutRequest;
 import dev.mars.qraft.controller.api.grpc.PutResponse;
-import dev.mars.qraft.controller.raft.InMemoryTransportSimulator;
+import dev.mars.qraft.controller.raft.InMemoryTransportSimulatorFixture;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.raft.RaftNodeMode;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
@@ -60,8 +60,8 @@ class DistributedStateGrpcServiceTest {
     @BeforeEach
     void setUp() throws Exception {
         runtime = JavaRuntime.create();
-        InMemoryTransportSimulator.clearAllTransports();
-        InMemoryTransportSimulator transport = new InMemoryTransportSimulator("single");
+        InMemoryTransportSimulatorFixture.clearAllTransports();
+        InMemoryTransportSimulatorFixture transport = new InMemoryTransportSimulatorFixture("single");
         store = new QraftStateStore();
         node = RaftNode.builder()
                 .runtime(runtime)
@@ -85,36 +85,37 @@ class DistributedStateGrpcServiceTest {
     void tearDown() throws Exception {
         if (node != null) node.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         if (runtime != null) runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-        InMemoryTransportSimulator.clearAllTransports();
+        InMemoryTransportSimulatorFixture.clearAllTransports();
     }
 
     @Test
     void putGetListAndDeleteRoundTrip() throws Exception {
-        RecordingObserver<PutResponse> put = new RecordingObserver<>();
+        RecordingObserverHelper<PutResponse> put = new RecordingObserverHelper<>();
         service.put(PutRequest.newBuilder().setKey("service/api").setValue("healthy").build(), put);
         assertTrue(put.await().getAccepted());
 
-        RecordingObserver<GetResponse> get = new RecordingObserver<>();
+        RecordingObserverHelper<GetResponse> get = new RecordingObserverHelper<>();
         service.get(GetRequest.newBuilder().setKey("service/api").build(), get);
         assertTrue(get.await().getFound());
         assertEquals("healthy", get.value.getValue());
 
-        RecordingObserver<ListResponse> list = new RecordingObserver<>();
+        RecordingObserverHelper<ListResponse> list = new RecordingObserverHelper<>();
         service.list(ListRequest.getDefaultInstance(), list);
         ListResponse listed = list.await();
         assertTrue(listed.getEntriesList().stream()
                 .anyMatch(entry -> entry.getKey().equals("service/api") && entry.getValue().equals("healthy")));
 
-        RecordingObserver<DeleteResponse> delete = new RecordingObserver<>();
+        RecordingObserverHelper<DeleteResponse> delete = new RecordingObserverHelper<>();
         service.delete(DeleteRequest.newBuilder().setKey("service/api").build(), delete);
         assertTrue(delete.await().getDeleted());
 
-        RecordingObserver<GetResponse> missing = new RecordingObserver<>();
+        RecordingObserverHelper<GetResponse> missing = new RecordingObserverHelper<>();
         service.get(GetRequest.newBuilder().setKey("service/api").build(), missing);
         assertFalse(missing.await().getFound());
     }
 
-    private static final class RecordingObserver<T> implements StreamObserver<T> {
+    /** Test observer helper that records gRPC responses and completion for assertions. */
+    private static final class RecordingObserverHelper<T> implements StreamObserver<T> {
         private final CompletableFuture<T> completion = new CompletableFuture<>();
         private T value;
 

@@ -46,8 +46,8 @@ class TcpCheckRunnerTest {
     private static final Duration INTERVAL = Duration.ofSeconds(5);
     private static final Duration TIMEOUT = Duration.ofSeconds(1);
 
-    private final ManualTime time = new ManualTime(START);
-    private final RecordingListener results = new RecordingListener();
+    private final ManualTimeHelper time = new ManualTimeHelper(START);
+    private final RecordingListenerHelper results = new RecordingListenerHelper();
     private HealthCheckRunner runner;
 
     @AfterEach
@@ -77,7 +77,7 @@ class TcpCheckRunnerTest {
 
     @Test
     void failureRecoversOnTheNextSuccessfulConnection() throws Exception {
-        ScriptedConnector connector = new ScriptedConnector();
+        ScriptedConnectorFixture connector = new ScriptedConnectorFixture();
         runner = start(check(7000), connector);
 
         time.runDue();
@@ -95,7 +95,7 @@ class TcpCheckRunnerTest {
 
     @Test
     void timeoutCancelsTheConnectionAttemptAndTheCheckNeverOverlapsItself() throws Exception {
-        ScriptedConnector connector = new ScriptedConnector();
+        ScriptedConnectorFixture connector = new ScriptedConnectorFixture();
         runner = start(check(7000), connector);
 
         time.runDue();
@@ -118,7 +118,7 @@ class TcpCheckRunnerTest {
 
     @Test
     void stoppingCancelsTheAttemptAndPendingScheduleWithoutLateResults() throws Exception {
-        ScriptedConnector connector = new ScriptedConnector();
+        ScriptedConnectorFixture connector = new ScriptedConnectorFixture();
         runner = start(check(7000), connector);
         time.runDue();
 
@@ -134,7 +134,7 @@ class TcpCheckRunnerTest {
 
     @Test
     void aConnectionThatTakesAtLeastTheWarningThresholdIsAWarning() throws Exception {
-        ScriptedConnector connector = new ScriptedConnector();
+        ScriptedConnectorFixture connector = new ScriptedConnectorFixture();
         runner = start(check(7000, Duration.ofMillis(300)), connector);
 
         time.runDue();
@@ -159,7 +159,7 @@ class TcpCheckRunnerTest {
 
     @Test
     void withoutAWarningThresholdASlowConnectionStillPasses() throws Exception {
-        ScriptedConnector connector = new ScriptedConnector();
+        ScriptedConnectorFixture connector = new ScriptedConnectorFixture();
         runner = start(check(7000), connector);
 
         time.runDue();
@@ -206,7 +206,8 @@ class TcpCheckRunnerTest {
                 Duration.ZERO, warnAfter);
     }
 
-    private static final class ScriptedConnector implements TcpConnector {
+    /** Test TCP connector fixture that supplies scripted connection outcomes for probe assertions. */
+    private static final class ScriptedConnectorFixture implements TcpConnector {
         final List<CompletableFuture<Void>> attempts = new CopyOnWriteArrayList<>();
         final List<Duration> timeouts = new CopyOnWriteArrayList<>();
 

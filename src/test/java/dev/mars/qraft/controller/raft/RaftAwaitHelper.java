@@ -24,17 +24,18 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Bounded waits shared by the Raft tests. The bounds only diagnose a hang: a future that fails ends the wait
+ * Test helper providing bounded waits for asynchronous operations in Raft tests.
+ * The bounds only diagnose a hang: a future that fails ends the wait
  * at once with a {@link java.util.concurrent.CompletionException} carrying its cause, as {@code join} does.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-28
  * @version 1.0
  */
-public final class RaftAwait {
+public final class RaftAwaitHelper {
     private static final Duration DEFAULT = Duration.ofSeconds(10);
 
-    private RaftAwait() {
+    private RaftAwaitHelper() {
     }
 
     /** Waits up to 10 seconds for {@code future}. */

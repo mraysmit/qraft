@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package dev.mars.qraft.controller.health;
+package dev.mars.qraft.agent.health;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -26,27 +26,28 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * Deterministic clock and expiry scheduler: tasks run on the caller's thread only when time is advanced.
+ * Test helper providing a controllable clock and scheduler for agent health-check tests.
+ * Tasks run on the caller's thread only when the test advances time.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-26
  * @version 1.0
  */
-final class ManualExpiryTime extends Clock implements ExpiryScheduler {
-    private final List<Task> tasks = new ArrayList<>();
+final class ManualTimeHelper extends Clock implements CheckScheduler {
+    private final List<TaskHelper> tasks = new ArrayList<>();
     private Instant now;
     private long nextOrder;
 
-    ManualExpiryTime(Instant start) {
+    ManualTimeHelper(Instant start) {
         now = start;
     }
 
     @Override
     public synchronized Cancellable schedule(Runnable action, Duration delay) {
-        Task task = new Task(now.plus(delay), nextOrder++, action);
+        TaskHelper task = new TaskHelper(now.plus(delay), nextOrder++, action);
         tasks.add(task);
         return () -> {
-            synchronized (ManualExpiryTime.this) {
+            synchronized (ManualTimeHelper.this) {
                 tasks.remove(task);
             }
         };
@@ -59,11 +60,11 @@ final class ManualExpiryTime extends Clock implements ExpiryScheduler {
             target = now.plus(duration);
         }
         while (true) {
-            Task due;
+            TaskHelper due;
             synchronized (this) {
                 due = tasks.stream()
                         .filter(task -> !task.deadline.isAfter(target))
-                        .min(Comparator.comparing((Task task) -> task.deadline).thenComparingLong(task -> task.order))
+                        .min(Comparator.comparing((TaskHelper task) -> task.deadline).thenComparingLong(task -> task.order))
                         .orElse(null);
                 if (due == null) {
                     now = target;
@@ -76,6 +77,12 @@ final class ManualExpiryTime extends Clock implements ExpiryScheduler {
         }
     }
 
+    /** Steps the clock back, as a wall clock corrected by time synchronization can; no task runs. */
+    synchronized void rewind(Duration duration) {
+        now = now.minus(duration);
+    }
+
+    /** Runs tasks that are already due without moving time. */
     void runDue() {
         advance(Duration.ZERO);
     }
@@ -84,14 +91,11 @@ final class ManualExpiryTime extends Clock implements ExpiryScheduler {
         return tasks.size();
     }
 
-    synchronized Instant nextTaskAt() {
-        return tasks.stream().map(Task::deadline).min(Comparator.naturalOrder()).orElse(null);
-    }
-
     @Override public synchronized Instant instant() { return now; }
     @Override public ZoneId getZone() { return ZoneOffset.UTC; }
     @Override public Clock withZone(ZoneId zone) { return this; }
 
-    private record Task(Instant deadline, long order, Runnable action) {
+    /** Internal test scheduling helper that tracks work for the enclosing scheduler or transport. */
+    private record TaskHelper(Instant deadline, long order, Runnable action) {
     }
 }

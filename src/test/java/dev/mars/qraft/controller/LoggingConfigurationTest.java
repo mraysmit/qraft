@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.controller;
 
-import dev.mars.qraft.testing.fault.LogbackConfigurationAudit;
+import dev.mars.qraft.testing.fault.LogbackConfigurationAuditHelper;
 import org.junit.jupiter.api.Test;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
@@ -62,13 +62,13 @@ class LoggingConfigurationTest {
 
     @Test
     void productionConfigurationCannotDropAnError() throws Exception {
-        assertEquals(List.of(), LogbackConfigurationAudit.settingsThatCanDropErrors(loadConfiguration()));
+        assertEquals(List.of(), LogbackConfigurationAuditHelper.settingsThatCanDropErrors(loadConfiguration()));
     }
 
     private static Document loadConfiguration() throws Exception {
         try (InputStream input = LoggingConfigurationTest.class.getClassLoader().getResourceAsStream("logback.xml")) {
             assertNotNull(input, "production logback.xml must be packaged");
-            return LogbackConfigurationAudit.parse(input);
+            return LogbackConfigurationAuditHelper.parse(input);
         }
     }
 

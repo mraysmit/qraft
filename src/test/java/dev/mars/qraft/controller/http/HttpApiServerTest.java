@@ -25,7 +25,7 @@ import dev.mars.qraft.catalog.HealthCheckState;
 import dev.mars.qraft.catalog.ServiceCheckId;
 import dev.mars.qraft.catalog.ServiceHealth;
 import dev.mars.qraft.catalog.ServiceInstanceId;
-import dev.mars.qraft.controller.raft.InMemoryTransportSimulator;
+import dev.mars.qraft.controller.raft.InMemoryTransportSimulatorFixture;
 import dev.mars.qraft.controller.raft.RaftLogApplicator;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.raft.RaftNodeMode;
@@ -41,8 +41,8 @@ import dev.mars.qraft.controller.state.RaftCommandResult;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.agent.AgentStatus;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
-import dev.mars.qraft.testing.fault.InjectedFault;
-import dev.mars.qraft.testing.fault.IntentionalErrors;
+import dev.mars.qraft.testing.fault.InjectedFaultFixture;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import dev.mars.raftlog.storage.RaftStorage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -98,7 +98,7 @@ class HttpApiServerTest {
         }
         if (node != null) node.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         if (runtime != null) runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-        InMemoryTransportSimulator.clearAllTransports();
+        InMemoryTransportSimulatorFixture.clearAllTransports();
     }
 
     @Test
@@ -222,7 +222,7 @@ class HttpApiServerTest {
     @Test
     void registrationTheStateMachineDoesNotAcceptAnswersWithTheErrorEnvelope() throws Exception {
         QraftStateStore store = new QraftStateStore();
-        startSingleNode(new RejectingRegistrations(store));
+        startSingleNode(new RejectingRegistrationsFixture(store));
         server = new HttpApiServer(0, node, store);
         server.start().join();
 
@@ -636,7 +636,7 @@ class HttpApiServerTest {
     @Test
     void returnsServiceUnavailableWhenCatalogWriteReachesFollower() throws Exception {
         runtime = JavaRuntime.create();
-        InMemoryTransportSimulator transport = new InMemoryTransportSimulator("follower");
+        InMemoryTransportSimulatorFixture transport = new InMemoryTransportSimulatorFixture("follower");
         QraftStateStore store = new QraftStateStore();
         node = RaftNode.builder()
                 .runtime(runtime).nodeId("follower").clusterNodes(Set.of("follower", "peer"))
@@ -674,7 +674,7 @@ class HttpApiServerTest {
     void reportsUnknownOutcomeWhenHttpWriteTimesOut() throws Exception {
         // The append is held until the test releases it, so only the write timeout can answer the request;
         // a short timeout keeps the test from waiting out the production default.
-        GatedAppendStorage gatedWal = startGatedHttpNode(Duration.ofMillis(200));
+        GatedAppendStorageFixture gatedWal = startGatedHttpNode(Duration.ofMillis(200));
 
         CompletableFuture<HttpResponse<String>> request = HttpClient.newHttpClient().sendAsync(
                 serviceRegistrationRequest("pending-service"), HttpResponse.BodyHandlers.ofString());
@@ -704,7 +704,7 @@ class HttpApiServerTest {
 
     @Test
     void retriedRegistrationConvergesToOneCompositeInstanceThroughSequencer() throws Exception {
-        GatedAppendStorage gatedWal = startGatedHttpNode();
+        GatedAppendStorageFixture gatedWal = startGatedHttpNode();
         HttpClient client = HttpClient.newHttpClient();
         CompletableFuture<HttpResponse<String>> first = client.sendAsync(
                 serviceRegistrationRequest("retry-web", "node-a"), HttpResponse.BodyHandlers.ofString());
@@ -727,7 +727,7 @@ class HttpApiServerTest {
 
     @Test
     void twoNodesRegisteringOneServiceIdBothCommitBehindABlockedAppend() throws Exception {
-        GatedAppendStorage gatedWal = startGatedHttpNode();
+        GatedAppendStorageFixture gatedWal = startGatedHttpNode();
         HttpClient client = HttpClient.newHttpClient();
         CompletableFuture<HttpResponse<String>> nodeA = client.sendAsync(
                 serviceRegistrationRequest("web", "node-a"), HttpResponse.BodyHandlers.ofString());
@@ -781,10 +781,10 @@ class HttpApiServerTest {
         RaftStorageFactory.DurableStorage durable = RaftStorageFactory
                 .createDurable(directory, true).toCompletionStage().toCompletableFuture()
                 .get(10, TimeUnit.SECONDS);
-        RaftStorage ambiguousStorage = new AmbiguousAppendStorage(durable.wal());
+        RaftStorage ambiguousStorage = new AmbiguousAppendStorageFixture(durable.wal());
         node = RaftNode.builder()
                 .runtime(runtime).nodeId("fenced-node").clusterNodes(Set.of("fenced-node"))
-                .transport(new InMemoryTransportSimulator("fenced-node"))
+                .transport(new InMemoryTransportSimulatorFixture("fenced-node"))
                 .stateMachine(store).commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.durable(ambiguousStorage, durable.snapshots()))
                 .snapshotEnabled(false).electionTimeout(25).heartbeatInterval(10_000)
@@ -816,8 +816,8 @@ class HttpApiServerTest {
 
     @Test
     void corruptWalFencesStartupWithoutMutatingTheEvidence() throws Exception {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.WAL_AMBIGUOUS_CORRUPTION, 1);
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_RECOVERY_AMBIGUOUS_CORRUPTION, 2);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.WAL_AMBIGUOUS_CORRUPTION, 1);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_RECOVERY_AMBIGUOUS_CORRUPTION, 2);
         RaftStorageFactory.DurableStorage writer = RaftStorageFactory
                 .createDurable(directory, true).toCompletionStage().toCompletableFuture()
                 .get(10, TimeUnit.SECONDS);
@@ -838,7 +838,7 @@ class HttpApiServerTest {
                 .get(10, TimeUnit.SECONDS);
         node = RaftNode.builder()
                 .runtime(runtime).nodeId("corrupt-node").clusterNodes(Set.of("corrupt-node"))
-                .transport(new InMemoryTransportSimulator("corrupt-node"))
+                .transport(new InMemoryTransportSimulatorFixture("corrupt-node"))
                 .stateMachine(store).commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.durable(reopened.wal(), reopened.snapshots()))
                 .snapshotEnabled(false).electionTimeout(25).build();
@@ -864,7 +864,7 @@ class HttpApiServerTest {
 
     @Test
     void healthObservationIsCommittedWithAServerReceiptDeadline() throws Exception {
-        MutableClock clock = new MutableClock(Instant.parse("2026-09-26T10:00:00.123456Z"));
+        MutableClockHelper clock = new MutableClockHelper(Instant.parse("2026-09-26T10:00:00.123456Z"));
         QraftStateStore store = startHealthApi(clock);
         HttpClient client = HttpClient.newHttpClient();
         registerService(client, "web", "frontend", "node-a", "acme", "payments");
@@ -905,7 +905,7 @@ class HttpApiServerTest {
 
     @Test
     void replayingAnAcceptedObservationSucceedsWithoutMovingItsDeadline() throws Exception {
-        MutableClock clock = new MutableClock(Instant.parse("2026-09-26T10:00:00Z"));
+        MutableClockHelper clock = new MutableClockHelper(Instant.parse("2026-09-26T10:00:00Z"));
         QraftStateStore store = startHealthApi(clock);
         HttpClient client = HttpClient.newHttpClient();
         registerService(client, "web", "frontend", "node-a");
@@ -930,7 +930,7 @@ class HttpApiServerTest {
 
     @Test
     void staleObservationsAreRejectedWithoutChangingAcceptedState() throws Exception {
-        QraftStateStore store = startHealthApi(new MutableClock(Instant.parse("2026-09-26T10:00:00Z")));
+        QraftStateStore store = startHealthApi(new MutableClockHelper(Instant.parse("2026-09-26T10:00:00Z")));
         HttpClient client = HttpClient.newHttpClient();
         registerService(client, "web", "frontend", "node-a");
         Map<String, String> identity = Map.of("X-Qraft-Node", "node-a");
@@ -955,7 +955,7 @@ class HttpApiServerTest {
 
     @Test
     void observationsForUnregisteredCompositeInstancesAreNotFound() throws Exception {
-        QraftStateStore store = startHealthApi(new MutableClock(Instant.parse("2026-09-26T10:00:00Z")));
+        QraftStateStore store = startHealthApi(new MutableClockHelper(Instant.parse("2026-09-26T10:00:00Z")));
         HttpClient client = HttpClient.newHttpClient();
         registerService(client, "web", "frontend", "node-a");
 
@@ -974,7 +974,7 @@ class HttpApiServerTest {
 
     @Test
     void invalidObservationsUseTheStructuredEnvelope() throws Exception {
-        QraftStateStore store = startHealthApi(new MutableClock(Instant.parse("2026-09-26T10:00:00Z")));
+        QraftStateStore store = startHealthApi(new MutableClockHelper(Instant.parse("2026-09-26T10:00:00Z")));
         HttpClient client = HttpClient.newHttpClient();
         registerService(client, "web", "frontend", "node-a");
         Map<String, String> identity = Map.of("X-Qraft-Node", "node-a");
@@ -1025,7 +1025,7 @@ class HttpApiServerTest {
 
     @Test
     void healthDiscoveryReportsChecksAndFiltersPassingWithoutMutatingState() throws Exception {
-        QraftStateStore store = startHealthApi(new MutableClock(Instant.parse("2026-09-26T10:00:00Z")));
+        QraftStateStore store = startHealthApi(new MutableClockHelper(Instant.parse("2026-09-26T10:00:00Z")));
         HttpClient client = HttpClient.newHttpClient();
         registerService(client, "web-1", "frontend", "node-a");
         registerService(client, "web-2", "frontend", "node-b");
@@ -1087,7 +1087,7 @@ class HttpApiServerTest {
 
     @Test
     void observationCarriesTheDeregistrationDelayIntoReplicatedStateAndDiscovery() throws Exception {
-        QraftStateStore store = startHealthApi(new MutableClock(Instant.parse("2026-09-26T10:00:00Z")));
+        QraftStateStore store = startHealthApi(new MutableClockHelper(Instant.parse("2026-09-26T10:00:00Z")));
         HttpClient client = HttpClient.newHttpClient();
         registerService(client, "web", "frontend", "node-a");
         Map<String, String> identity = Map.of("X-Qraft-Node", "node-a");
@@ -1113,7 +1113,7 @@ class HttpApiServerTest {
 
     @Test
     void registrationDeclaringChecksPrunesOthersAndRejectsLaterUndeclaredObservations() throws Exception {
-        QraftStateStore store = startHealthApi(new MutableClock(Instant.parse("2026-09-26T10:00:00Z")));
+        QraftStateStore store = startHealthApi(new MutableClockHelper(Instant.parse("2026-09-26T10:00:00Z")));
         HttpClient client = HttpClient.newHttpClient();
         Map<String, String> identity = Map.of("X-Qraft-Node", "node-a");
         registerService(client, "web", "frontend", "node-a");
@@ -1150,7 +1150,7 @@ class HttpApiServerTest {
 
     @Test
     void membershipTimesAreStampedWithTheServerClockNotTheAgentClock() throws Exception {
-        MutableClock clock = new MutableClock(Instant.parse("2026-09-26T10:00:00Z"));
+        MutableClockHelper clock = new MutableClockHelper(Instant.parse("2026-09-26T10:00:00Z"));
         QraftStateStore store = startHealthApi(clock);
         HttpClient client = HttpClient.newHttpClient();
 
@@ -1209,10 +1209,11 @@ class HttpApiServerTest {
         return states;
     }
 
-    private static final class MutableClock extends Clock {
+    /** Test clock helper that lets the enclosing tests advance time explicitly. */
+    private static final class MutableClockHelper extends Clock {
         private final AtomicReference<Instant> now;
 
-        MutableClock(Instant start) {
+        MutableClockHelper(Instant start) {
             now = new AtomicReference<>(start);
         }
 
@@ -1225,10 +1226,11 @@ class HttpApiServerTest {
         @Override public Instant instant() { return now.get(); }
     }
 
-    private static final class AmbiguousAppendStorage implements RaftStorage {
+    /** Test storage fixture that persists an append but reports failure to exercise uncertain command outcomes. */
+    private static final class AmbiguousAppendStorageFixture implements RaftStorage {
         private final RaftStorage delegate;
 
-        private AmbiguousAppendStorage(RaftStorage delegate) {
+        private AmbiguousAppendStorageFixture(RaftStorage delegate) {
             this.delegate = delegate;
         }
 
@@ -1245,8 +1247,8 @@ class HttpApiServerTest {
             if (!entries.isEmpty() && entries.getFirst().index() == 1) return delegate.appendEntries(entries);
             return delegate.appendEntries(entries).thenCompose(ignored -> CompletableFuture.failedFuture(
                     new IllegalStateException("append persisted before completion failed",
-                            new InjectedFault(
-                                    dev.mars.qraft.testing.fault.IntentionalError.RAFT_WAL_TRANSITION_FAILURE,
+                            new InjectedFaultFixture(
+                                    dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_WAL_TRANSITION_FAILURE,
                                     "append persisted before completion failed"))));
         }
         @Override public CompletableFuture<Void> truncateSuffix(long fromIndex) {
@@ -1261,13 +1263,14 @@ class HttpApiServerTest {
         @Override public void close() { closeAsync(); }
     }
 
-    private static final class GatedAppendStorage implements RaftStorage {
+    /** Test storage fixture that holds append completion until the test releases it. */
+    private static final class GatedAppendStorageFixture implements RaftStorage {
         private final RaftStorage delegate;
         private final AtomicReference<CompletableFuture<Void>> nextGate = new AtomicReference<>();
         private final AtomicReference<CompletableFuture<Void>> blockedGate = new AtomicReference<>();
         private final CountDownLatch appendBlocked = new CountDownLatch(1);
 
-        private GatedAppendStorage(RaftStorage delegate) {
+        private GatedAppendStorageFixture(RaftStorage delegate) {
             this.delegate = delegate;
         }
 
@@ -1318,8 +1321,8 @@ class HttpApiServerTest {
 
     private void startSingleNode(RaftLogApplicator store) throws Exception {
         runtime = JavaRuntime.create();
-        InMemoryTransportSimulator.clearAllTransports();
-        InMemoryTransportSimulator transport = new InMemoryTransportSimulator("catalog-node");
+        InMemoryTransportSimulatorFixture.clearAllTransports();
+        InMemoryTransportSimulatorFixture transport = new InMemoryTransportSimulatorFixture("catalog-node");
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("catalog-node")
@@ -1337,8 +1340,12 @@ class HttpApiServerTest {
         assertTrue(node.isLeader());
     }
 
-    /** Applies every command to the store except service registrations, which it declines. */
-    private record RejectingRegistrations(QraftStateStore store) implements RaftLogApplicator {
+    /**
+     * Test state-machine fixture that declines service registrations while applying other commands.
+     *
+     * <p>Applies every command to the store except service registrations, which it declines.
+     */
+    private record RejectingRegistrationsFixture(QraftStateStore store) implements RaftLogApplicator {
         @Override public RaftCommandResult<?> apply(RaftCommand command) {
             return command instanceof CatalogCommand.Register
                     ? new RaftCommandResult.NoOp<>() : store.apply(command);
@@ -1350,20 +1357,20 @@ class HttpApiServerTest {
         @Override public void reset() { store.reset(); }
     }
 
-    private GatedAppendStorage startGatedHttpNode() throws Exception {
+    private GatedAppendStorageFixture startGatedHttpNode() throws Exception {
         return startGatedHttpNode(HttpApiServer.DEFAULT_RAFT_TIMEOUT);
     }
 
-    private GatedAppendStorage startGatedHttpNode(Duration raftTimeout) throws Exception {
+    private GatedAppendStorageFixture startGatedHttpNode(Duration raftTimeout) throws Exception {
         runtime = JavaRuntime.create();
         QraftStateStore store = new QraftStateStore();
         RaftStorageFactory.DurableStorage durable = RaftStorageFactory
                 .createDurable(directory, true).toCompletionStage().toCompletableFuture()
                 .get(10, TimeUnit.SECONDS);
-        GatedAppendStorage gatedWal = new GatedAppendStorage(durable.wal());
+        GatedAppendStorageFixture gatedWal = new GatedAppendStorageFixture(durable.wal());
         node = RaftNode.builder()
                 .runtime(runtime).nodeId("pending-http-node").clusterNodes(Set.of("pending-http-node"))
-                .transport(new InMemoryTransportSimulator("pending-http-node"))
+                .transport(new InMemoryTransportSimulatorFixture("pending-http-node"))
                 .stateMachine(store).commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.durable(gatedWal, durable.snapshots()))
                 .snapshotEnabled(false).electionTimeout(25).heartbeatInterval(10_000)

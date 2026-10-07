@@ -16,8 +16,8 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.testing.fault.InjectedFault;
-import dev.mars.qraft.testing.fault.IntentionalErrors;
+import dev.mars.qraft.testing.fault.InjectedFaultFixture;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 
 import com.google.protobuf.ByteString;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
@@ -48,8 +48,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static dev.mars.qraft.controller.raft.RaftAwait.awaitStateLoop;
-import static dev.mars.qraft.controller.raft.RaftAwait.await;
+import static dev.mars.qraft.controller.raft.RaftAwaitHelper.awaitStateLoop;
+import static dev.mars.qraft.controller.raft.RaftAwaitHelper.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -76,19 +76,19 @@ class RaftNodeLogSequencingTest {
     private static final int BOOTSTRAP_WRITES = 1;
 
     private JavaRuntime runtime;
-    private GatedRaftStorage storage;
+    private GatedRaftStorageFixture storage;
     private RaftNode node;
 
     @BeforeEach
     void setUp() {
         runtime = JavaRuntime.create();
-        storage = new GatedRaftStorage();
+        storage = new GatedRaftStorageFixture();
         storage.open(null).join();
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("leader-1")
                 .clusterNodes(Set.of("leader-1"))
-                .transport(new InMemoryTransportSimulator("leader-1"))
+                .transport(new InMemoryTransportSimulatorFixture("leader-1"))
                 .stateMachine(new QraftStateStore())
                 .commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.durable(storage, storage))
@@ -108,7 +108,7 @@ class RaftNodeLogSequencingTest {
         if (runtime != null) {
             runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
-        InMemoryTransportSimulator.clearAllTransports();
+        InMemoryTransportSimulatorFixture.clearAllTransports();
     }
 
     @Test
@@ -138,7 +138,7 @@ class RaftNodeLogSequencingTest {
     @Test
     void commandEncodingFailureDoesNotFenceOrReachTheWal() {
         await(node.stop());
-        storage = new GatedRaftStorage();
+        storage = new GatedRaftStorageFixture();
         storage.open(null).join();
         // Encoding is rejected only once the node leads: its bootstrap configuration must encode.
         AtomicBoolean rejectEncoding = new AtomicBoolean(false);
@@ -154,7 +154,7 @@ class RaftNodeLogSequencingTest {
                 .runtime(runtime)
                 .nodeId("leader-1")
                 .clusterNodes(Set.of("leader-1"))
-                .transport(new InMemoryTransportSimulator("leader-1"))
+                .transport(new InMemoryTransportSimulatorFixture("leader-1"))
                 .stateMachine(new QraftStateStore())
                 .commandCodec(codec)
                 .mode(RaftNodeMode.durable(storage, storage))
@@ -182,15 +182,15 @@ class RaftNodeLogSequencingTest {
 
     @Test
     void saturatedClientAdmissionPreservesRoomForHigherTermPeerTraffic() {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_TRANSITION_QUEUE_FULL, 1);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_TRANSITION_QUEUE_FULL, 1);
         await(node.stop());
-        storage = new GatedRaftStorage();
+        storage = new GatedRaftStorageFixture();
         storage.open(null).join();
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("leader-1")
                 .clusterNodes(Set.of("leader-1"))
-                .transport(new InMemoryTransportSimulator("leader-1"))
+                .transport(new InMemoryTransportSimulatorFixture("leader-1"))
                 .stateMachine(new QraftStateStore())
                 .commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.durable(storage, storage))
@@ -308,7 +308,7 @@ class RaftNodeLogSequencingTest {
 
     @Test
     void uncertainLeaderSyncFailureFencesLaterAppend() {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_FENCED_OPERATION, 1);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_FENCED_OPERATION, 1);
         storage.failNextSync();
 
         CompletionException failedSync = assertThrows(CompletionException.class,
@@ -445,7 +445,7 @@ class RaftNodeLogSequencingTest {
 
     @Test
     void uncertainFollowerTruncateFailureFencesLaterAppend() {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_FENCED_OPERATION, 1);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_FENCED_OPERATION, 1);
         restartAsFollower();
         assertTrue(await(node.handleAppendEntriesRequest(appendRequest(
                 1, 1, 0, grpcEntry(1, "seed", "original")))).getSuccess());
@@ -490,7 +490,7 @@ class RaftNodeLogSequencingTest {
 
     @Test
     void prewriteAppendRejectionAfterSuffixTruncationFencesNode() {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_FENCED_OPERATION, 1);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_FENCED_OPERATION, 1);
         restartAsFollower();
         assertTrue(await(node.handleAppendEntriesRequest(appendRequest(
                 1, 1, 0, grpcEntry(1, "seed", "original")))).getSuccess());
@@ -515,15 +515,15 @@ class RaftNodeLogSequencingTest {
     /** Restarts as a bootstrapped follower: its log holds the committed configuration at index 1. */
     private void restartAsFollower() {
         await(node.stop());
-        storage = new GatedRaftStorage();
+        storage = new GatedRaftStorageFixture();
         storage.open(null).join();
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("follower-1")
-                .serverId(ManualRaftCluster.serverIdOf("follower-1"))
-                .initialConfiguration(ManualRaftCluster.configurationOf(Set.of("follower-1", "leader-1")))
+                .serverId(ManualRaftClusterFixture.serverIdOf("follower-1"))
+                .initialConfiguration(ManualRaftClusterFixture.configurationOf(Set.of("follower-1", "leader-1")))
                 .clusterNodes(Set.of("follower-1", "leader-1"))
-                .transport(new InMemoryTransportSimulator("follower-1"))
+                .transport(new InMemoryTransportSimulatorFixture("follower-1"))
                 .stateMachine(new QraftStateStore())
                 .commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.durable(storage, storage))
@@ -565,9 +565,9 @@ class RaftNodeLogSequencingTest {
         return new DistributedStateRaftCommand(DistributedStateCommand.put(key, value));
     }
 
-    private static InjectedFault walFault(String message) {
-        return new InjectedFault(
-                dev.mars.qraft.testing.fault.IntentionalError.RAFT_WAL_TRANSITION_FAILURE, message);
+    private static InjectedFaultFixture walFault(String message) {
+        return new InjectedFaultFixture(
+                dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_WAL_TRANSITION_FAILURE, message);
     }
 
     private static FileRaftStorage.WriteRejectedException injectedWriteRejection(String message) {
@@ -577,8 +577,9 @@ class RaftNodeLogSequencingTest {
         return failure;
     }
 
-    private static final class GatedRaftStorage implements RaftStorage, SnapshotStore {
-        private final TestRaftStorage delegate = new TestRaftStorage();
+    /** Test storage fixture with controlled persistence completion for log-sequencing assertions. */
+    private static final class GatedRaftStorageFixture implements RaftStorage, SnapshotStore {
+        private final TestRaftStorageFixture delegate = new TestRaftStorageFixture();
         private final AtomicInteger appendCount = new AtomicInteger();
         private final AtomicInteger truncateCount = new AtomicInteger();
         private final AtomicInteger syncCount = new AtomicInteger();

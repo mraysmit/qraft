@@ -65,8 +65,8 @@ class RaftNodeLeaderCommitTest {
 
     private JavaRuntime runtime;
     private RaftNode node;
-    private ManualRaftTimers timers;
-    private final HeldTransport transport = new HeldTransport();
+    private ManualRaftTimersHelper timers;
+    private final HeldTransportFixture transport = new HeldTransportFixture();
 
     @AfterEach
     void tearDown() throws Exception {
@@ -82,7 +82,7 @@ class RaftNodeLeaderCommitTest {
         var request = dev.mars.qraft.controller.raft.grpc.JoinRequest.newBuilder()
                 .setServerId("id-d").setName("d").setAddress("d:9080").build();
         assertEquals(dev.mars.qraft.controller.raft.grpc.MembershipResponse.Status.NO_LEADER,
-                ManualRaftCluster.await(service.join(request)).getStatus());
+                ManualRaftClusterFixture.await(service.join(request)).getStatus());
         assertFalse(node.getConfiguration().orElseThrow().serverNamed("d").isPresent());
 
         transport.answer("peer-2", append -> append.getEntriesCount() > 0);
@@ -158,11 +158,11 @@ class RaftNodeLeaderCommitTest {
     /** Starts node-1 with configuration at index 1; election appends a no-op before client writes. */
     private void start(Set<String> members) throws Exception {
         runtime = JavaRuntime.create();
-        timers = new ManualRaftTimers(runtime);
+        timers = new ManualRaftTimersHelper(runtime);
         node = RaftNode.builder()
                 .runtime(runtime).nodeId("node-1").clusterNodes(members).transport(transport)
-                .serverId(ManualRaftCluster.serverIdOf("node-1"))
-                .initialConfiguration(ManualRaftCluster.configurationOf(members))
+                .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
+                .initialConfiguration(ManualRaftClusterFixture.configurationOf(members))
                 .stateMachine(new QraftStateStore()).commandCodec(CODEC)
                 .mode(RaftNodeMode.volatileMode()).snapshotEnabled(false)
                 .electionTimeout(ELECTION_TIMEOUT_MS).heartbeatInterval(HEARTBEAT_MS)
@@ -201,10 +201,12 @@ class RaftNodeLeaderCommitTest {
     }
 
     /**
+     * Test transport fixture that holds append responses until the test chooses to complete them.
+     *
      * Grants every vote at once and holds every AppendEntries until the test answers it. An answer is a
      * follower's success: its match index is the prefix the request verified.
      */
-    private static final class HeldTransport implements RaftTransport {
+    private static final class HeldTransportFixture implements RaftTransport {
         private record Held(String target, AppendEntriesRequest request, Promise<AppendEntriesResponse> response) { }
 
         private final List<Held> held = new CopyOnWriteArrayList<>();
@@ -220,7 +222,7 @@ class RaftNodeLeaderCommitTest {
                 entry.response().complete(AppendEntriesResponse.newBuilder()
                         .setTerm(request.getTerm()).setSuccess(true)
                         .setMatchIndex(request.getPrevLogIndex() + request.getEntriesCount())
-                        .setFollowerServerId(ManualRaftCluster.serverIdOf(target)).build());
+                        .setFollowerServerId(ManualRaftClusterFixture.serverIdOf(target)).build());
             }
         }
 
@@ -231,7 +233,7 @@ class RaftNodeLeaderCommitTest {
         public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
             return Future.succeededFuture(VoteResponse.newBuilder()
                     .setTerm(request.getTerm()).setVoteGranted(true)
-                    .setVoterServerId(ManualRaftCluster.serverIdOf(targetId)).build());
+                    .setVoterServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
         }
 
         @Override

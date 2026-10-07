@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.testing.fault.IntentionalErrors;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 
 import com.google.protobuf.ByteString;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
@@ -36,8 +36,8 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
-import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
-import static dev.mars.qraft.controller.raft.ManualRaftCluster.startAll;
+import static dev.mars.qraft.controller.raft.ManualRaftClusterFixture.await;
+import static dev.mars.qraft.controller.raft.ManualRaftClusterFixture.startAll;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -51,7 +51,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * installed snapshot is persisted. The chunk assembler reassembles split data.
  *
  * <p>Elections, heartbeats and the leader's snapshot check fire only when a test fires them through
- * {@link ManualRaftCluster}; the snapshot is still taken by the node's own threshold check, not called
+ * {@link ManualRaftClusterFixture}; the snapshot is still taken by the node's own threshold check, not called
  * directly. Every node is stopped after the test.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
@@ -63,13 +63,13 @@ class InstallSnapshotTest {
     private static final long SNAPSHOT_THRESHOLD = 5;
 
     private JavaRuntime runtime;
-    private ManualRaftCluster cluster;
+    private ManualRaftClusterFixture cluster;
 
     @BeforeEach
     void setUp() {
         runtime = JavaRuntime.create();
-        cluster = new ManualRaftCluster(runtime);
-        InMemoryTransportSimulator.clearAllTransports();
+        cluster = new ManualRaftClusterFixture(runtime);
+        InMemoryTransportSimulatorFixture.clearAllTransports();
     }
 
     @AfterEach
@@ -78,16 +78,16 @@ class InstallSnapshotTest {
             cluster.close();
         } finally {
             runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            InMemoryTransportSimulator.clearAllTransports();
+            InMemoryTransportSimulatorFixture.clearAllTransports();
         }
     }
 
     @Test
     void aFollowerCutOffDuringCompactionCatchesUpByInstallingTheLeadersSnapshot() throws Exception {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
         Cluster nodes = compactWhileNode3IsCutOff(8);
 
-        InMemoryTransportSimulator.healPartitions();
+        InMemoryTransportSimulatorFixture.healPartitions();
 
         cluster.heartbeatUntil(nodes.leader(), () -> nodes.node3().getSnapshotLastIndex() > 0
                 && hasKeys(nodes.store3(), 0, 8), "node3 installs the leader's snapshot");
@@ -95,9 +95,9 @@ class InstallSnapshotTest {
 
     @Test
     void aFollowerRestoredFromASnapshotKeepsReplicatingTheEntriesThatFollowIt() throws Exception {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
         Cluster nodes = compactWhileNode3IsCutOff(6);
-        InMemoryTransportSimulator.healPartitions();
+        InMemoryTransportSimulatorFixture.healPartitions();
         cluster.heartbeatUntil(nodes.leader(), () -> nodes.node3().getSnapshotLastIndex() > 0,
                 "node3 installs the leader's snapshot");
 
@@ -109,11 +109,11 @@ class InstallSnapshotTest {
 
     @Test
     void theLeaderMovesAFollowersNextIndexPastTheSnapshotItInstalled() throws Exception {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
         Cluster nodes = compactWhileNode3IsCutOff(7);
         long leaderSnapshotIndex = nodes.leader().getSnapshotLastIndex();
 
-        InMemoryTransportSimulator.healPartitions();
+        InMemoryTransportSimulatorFixture.healPartitions();
 
         cluster.heartbeatUntil(nodes.leader(), () -> nodes.node3().getSnapshotLastIndex() > 0
                         && nodes.leader().getNextIndex("node3") > leaderSnapshotIndex,
@@ -122,11 +122,11 @@ class InstallSnapshotTest {
 
     @Test
     void aFollowerRefusesASnapshotFromAStaleTerm() throws Exception {
-        TestRaftStorage storage = openStorage();
+        TestRaftStorageFixture storage = openStorage();
         QraftStateStore store = new QraftStateStore();
         Set<String> members = Set.of("node1", "leader");
         RaftNode follower = cluster.add(cluster.builder("node1", members,
-                new InMemoryTransportSimulator("node1"), store, RaftNodeMode.durable(storage, storage))
+                new InMemoryTransportSimulatorFixture("node1"), store, RaftNodeMode.durable(storage, storage))
                 .snapshotEnabled(false));
         await(follower.start());
         assertTrue(await(follower.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
@@ -180,10 +180,10 @@ class InstallSnapshotTest {
 
     @Test
     void anInstalledSnapshotIsPersistedAndRestoresTheStateMachine() throws Exception {
-        TestRaftStorage storage = openStorage();
+        TestRaftStorageFixture storage = openStorage();
         QraftStateStore store = new QraftStateStore();
         RaftNode node = cluster.add(cluster.builder("follower-persist", Set.of("follower-persist"),
-                new InMemoryTransportSimulator("follower-persist"), store, RaftNodeMode.durable(storage, storage))
+                new InMemoryTransportSimulatorFixture("follower-persist"), store, RaftNodeMode.durable(storage, storage))
                 .snapshotEnabled(false));
         await(node.start());
 
@@ -217,7 +217,7 @@ class InstallSnapshotTest {
         return InstallSnapshotRequest.newBuilder()
                 .setTerm(term).setLeaderId(leaderId).setLastIncludedIndex(10).setLastIncludedTerm(1)
                 .setChunkIndex(0).setTotalChunks(1)
-                .setData(ByteString.copyFrom(ManualRaftCluster.snapshotOf(members, leaderState.takeSnapshot())))
+                .setData(ByteString.copyFrom(ManualRaftClusterFixture.snapshotOf(members, leaderState.takeSnapshot())))
                 .setDone(true).build();
     }
 
@@ -231,7 +231,7 @@ class InstallSnapshotTest {
         RaftNode node1 = snapshottingNode("node1", members, new QraftStateStore());
         RaftNode node2 = snapshottingNode("node2", members, new QraftStateStore());
         RaftNode node3 = snapshottingNode("node3", members, store3);
-        InMemoryTransportSimulator.createPartition(Set.of("node1", "node2"), Set.of("node3"));
+        InMemoryTransportSimulatorFixture.createPartition(Set.of("node1", "node2"), Set.of("node3"));
         startAll(node1, node2, node3);
         cluster.elect(node1);
 
@@ -245,15 +245,15 @@ class InstallSnapshotTest {
     }
 
     private RaftNode snapshottingNode(String nodeId, Set<String> members, QraftStateStore store) throws Exception {
-        TestRaftStorage storage = openStorage();
-        return cluster.add(cluster.builder(nodeId, members, new InMemoryTransportSimulator(nodeId), store,
+        TestRaftStorageFixture storage = openStorage();
+        return cluster.add(cluster.builder(nodeId, members, new InMemoryTransportSimulatorFixture(nodeId), store,
                         RaftNodeMode.durable(storage, storage))
                 .snapshotEnabled(true).snapshotThreshold(SNAPSHOT_THRESHOLD).snapshotCheckInterval(SNAPSHOT_CHECK_MS));
     }
 
     /** In-memory storage: the directory is ignored. */
-    private static TestRaftStorage openStorage() throws Exception {
-        TestRaftStorage storage = new TestRaftStorage();
+    private static TestRaftStorageFixture openStorage() throws Exception {
+        TestRaftStorageFixture storage = new TestRaftStorageFixture();
         storage.open(null).get(10, TimeUnit.SECONDS);
         return storage;
     }

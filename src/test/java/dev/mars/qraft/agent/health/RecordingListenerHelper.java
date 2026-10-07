@@ -24,13 +24,14 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
- * Collects delivered check results; probes complete on protocol threads, so reads wait for delivery.
+ * Test helper that records health-check results for assertions in probe and TTL tests.
+ * Probes complete on protocol threads, so reads wait for delivery.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-26
  * @version 1.0
  */
-final class RecordingListener implements CheckResultListener {
+final class RecordingListenerHelper implements CheckResultListener {
     private final BlockingQueue<Delivery> deliveries = new LinkedBlockingQueue<>();
 
     @Override

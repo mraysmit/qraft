@@ -42,9 +42,9 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
-import static dev.mars.qraft.controller.raft.RaftAwait.awaitStateLoop;
-import static dev.mars.qraft.controller.raft.RaftAwait.await;
-import static dev.mars.qraft.controller.raft.RaftAwait.logEnd;
+import static dev.mars.qraft.controller.raft.RaftAwaitHelper.awaitStateLoop;
+import static dev.mars.qraft.controller.raft.RaftAwaitHelper.await;
+import static dev.mars.qraft.controller.raft.RaftAwaitHelper.logEnd;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -64,7 +64,7 @@ class RaftNodeTransportGenerationTest {
 
     private JavaRuntime runtime;
     private RaftNode node;
-    private ManualRaftTimers timers;
+    private ManualRaftTimersHelper timers;
 
     @AfterEach
     void tearDown() throws Exception {
@@ -77,13 +77,13 @@ class RaftNodeTransportGenerationTest {
     @Test
     void delayedAppendSuccessFromPreviousLeadershipCannotAdvancePeerIndexes() throws Exception {
         runtime = JavaRuntime.create();
-        timers = new ManualRaftTimers(runtime);
-        ControlledTransport transport = new ControlledTransport();
+        timers = new ManualRaftTimersHelper(runtime);
+        ControlledTransportFixture transport = new ControlledTransportFixture();
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
-                .serverId(ManualRaftCluster.serverIdOf("node-1"))
-                .initialConfiguration(ManualRaftCluster.configurationOf(MEMBERS))
+                .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
+                .initialConfiguration(ManualRaftClusterFixture.configurationOf(MEMBERS))
                 .clusterNodes(MEMBERS)
                 .transport(transport)
                 .stateMachine(new QraftStateStore())
@@ -101,7 +101,7 @@ class RaftNodeTransportGenerationTest {
         PendingAppend stale = transport.takeAppend();
         long firstLeadershipTerm = stale.request().getTerm();
         // The leadership no-op may still be landing on the state loop: read the log's end there, in one step.
-        RaftAwait.LogEnd end = logEnd(runtime, node);
+        RaftAwaitHelper.LogEnd end = logEnd(runtime, node);
         AppendEntriesResponse stepDown = await(node.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
                 .setTerm(firstLeadershipTerm + 1)
                 .setLeaderId("peer-1")
@@ -121,7 +121,7 @@ class RaftNodeTransportGenerationTest {
                 .setTerm(firstLeadershipTerm)
                 .setSuccess(true)
                 .setMatchIndex(100)
-                .setFollowerServerId(ManualRaftCluster.serverIdOf("peer-1"))
+                .setFollowerServerId(ManualRaftClusterFixture.serverIdOf("peer-1"))
                 .build());
         awaitStateLoop(runtime);
 
@@ -132,15 +132,15 @@ class RaftNodeTransportGenerationTest {
     @Test
     void grantedVoteCannotOvertakeBlockedHigherTermTransition() throws Exception {
         runtime = JavaRuntime.create();
-        timers = new ManualRaftTimers(runtime);
-        GatedMetadataStorage storage = new GatedMetadataStorage();
+        timers = new ManualRaftTimersHelper(runtime);
+        GatedMetadataStorageFixture storage = new GatedMetadataStorageFixture();
         storage.open(null).join();
-        ControlledTransport transport = new ControlledTransport(true);
+        ControlledTransportFixture transport = new ControlledTransportFixture(true);
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
-                .serverId(ManualRaftCluster.serverIdOf("node-1"))
-                .initialConfiguration(ManualRaftCluster.configurationOf(MEMBERS))
+                .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
+                .initialConfiguration(ManualRaftClusterFixture.configurationOf(MEMBERS))
                 .clusterNodes(MEMBERS)
                 .transport(transport)
                 .stateMachine(new QraftStateStore())
@@ -160,7 +160,7 @@ class RaftNodeTransportGenerationTest {
         Future<VoteResponse> higherTermVote = node.handleVoteRequest(VoteRequest.newBuilder()
                 .setTerm(oldTerm + 1)
                 .setCandidateId("peer-1")
-                .setCandidateServerId(ManualRaftCluster.serverIdOf("peer-1"))
+                .setCandidateServerId(ManualRaftClusterFixture.serverIdOf("peer-1"))
                 .setLastLogIndex(1)
                 .setLastLogTerm(0)
                 .build());
@@ -169,7 +169,7 @@ class RaftNodeTransportGenerationTest {
         oldElection.response().complete(VoteResponse.newBuilder()
                 .setTerm(oldTerm)
                 .setVoteGranted(true)
-                .setVoterServerId(ManualRaftCluster.serverIdOf("peer-1"))
+                .setVoterServerId(ManualRaftClusterFixture.serverIdOf("peer-1"))
                 .build());
         awaitStateLoop(runtime);
 
@@ -197,16 +197,17 @@ class RaftNodeTransportGenerationTest {
     private record PendingAppend(AppendEntriesRequest request, Promise<AppendEntriesResponse> response) {}
     private record PendingVote(VoteRequest request, Promise<VoteResponse> response) {}
 
-    private static final class ControlledTransport implements RaftTransport {
+    /** Test transport fixture that lets tests complete pending requests across transport replacement. */
+    private static final class ControlledTransportFixture implements RaftTransport {
         private final BlockingQueue<PendingAppend> appends = new LinkedBlockingQueue<>();
         private final BlockingQueue<PendingVote> votes = new LinkedBlockingQueue<>();
         private final boolean holdVotes;
 
-        private ControlledTransport() {
+        private ControlledTransportFixture() {
             this(false);
         }
 
-        private ControlledTransport(boolean holdVotes) {
+        private ControlledTransportFixture(boolean holdVotes) {
             this.holdVotes = holdVotes;
         }
 
@@ -232,7 +233,7 @@ class RaftNodeTransportGenerationTest {
             }
             return Future.succeededFuture(VoteResponse.newBuilder()
                     .setTerm(request.getTerm()).setVoteGranted(true)
-                    .setVoterServerId(ManualRaftCluster.serverIdOf(targetId)).build());
+                    .setVoterServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
         }
         @Override public Future<AppendEntriesResponse> sendAppendEntries(
                 String targetId, AppendEntriesRequest request) {
@@ -245,12 +246,13 @@ class RaftNodeTransportGenerationTest {
             return Future.succeededFuture(InstallSnapshotResponse.newBuilder()
                     .setTerm(request.getTerm()).setSuccess(true)
                     .setNextChunkIndex(request.getTotalChunks())
-                    .setFollowerServerId(ManualRaftCluster.serverIdOf(targetId)).build());
+                    .setFollowerServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
         }
     }
 
-    private static final class GatedMetadataStorage implements RaftStorage, SnapshotStore {
-        private final TestRaftStorage delegate = new TestRaftStorage();
+    /** Test storage fixture with controlled metadata persistence for sequencing assertions. */
+    private static final class GatedMetadataStorageFixture implements RaftStorage, SnapshotStore {
+        private final TestRaftStorageFixture delegate = new TestRaftStorageFixture();
         private volatile CompletableFuture<Void> nextMetadataGate;
         private volatile CompletableFuture<Void> blockedMetadataGate;
         private volatile CompletableFuture<Void> metadataUpdateEntered;

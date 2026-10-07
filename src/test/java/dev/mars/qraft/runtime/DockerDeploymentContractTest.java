@@ -174,7 +174,7 @@ class DockerDeploymentContractTest {
     void dockerIntegrationTestsRequireTheHostBuiltRuntimeJar() throws IOException {
         Path root = Path.of("").toAbsolutePath();
         String sharedCluster = Files.readString(root.resolve(
-                "src/test/java/dev/mars/qraft/controller/raft/SharedDockerCluster.java"));
+                "src/test/java/dev/mars/qraft/controller/raft/SharedDockerClusterFixture.java"));
         assertTrue(sharedCluster.contains("target/qraft.jar"));
         assertTrue(sharedCluster.contains("assertRuntimeJarIsCurrent"));
         assertFalse(sharedCluster.contains("isImageCached"));

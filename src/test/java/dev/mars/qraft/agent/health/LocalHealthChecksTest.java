@@ -46,8 +46,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class LocalHealthChecksTest {
     private static final Instant START = Instant.parse("2026-09-26T12:00:00Z");
 
-    private final ManualTime time = new ManualTime(START);
-    private final RecordingListener results = new RecordingListener();
+    private final ManualTimeHelper time = new ManualTimeHelper(START);
+    private final RecordingListenerHelper results = new RecordingListenerHelper();
     private final HttpClient client = HttpClient.newHttpClient();
     private final CountDownLatch releaseHttp = new CountDownLatch(1);
     private final CountDownLatch httpEntered = new CountDownLatch(1);
@@ -90,11 +90,11 @@ class LocalHealthChecksTest {
         checks.start();
         time.runDue();
         assertTrue(httpEntered.await(10, TimeUnit.SECONDS));
-        RecordingListener.Delivery first = results.nextDelivery();
+        RecordingListenerHelper.Delivery first = results.nextDelivery();
         assertEquals(tcp, first.check());
         for (int interval = 1; interval <= 3; interval++) {
             time.advance(Duration.ofSeconds(5));
-            RecordingListener.Delivery next = results.nextDelivery();
+            RecordingListenerHelper.Delivery next = results.nextDelivery();
             assertEquals(tcp, next.check());
             assertEquals(START.plusSeconds(5L * interval), next.result().observedAt());
         }
@@ -117,7 +117,7 @@ class LocalHealthChecksTest {
 
         checks.start();
         assertTrue(reporter.report(CheckStatus.WARNING, "degraded"));
-        RecordingListener.Delivery delivery = results.nextDelivery();
+        RecordingListenerHelper.Delivery delivery = results.nextDelivery();
         assertEquals(app, delivery.check());
         assertEquals(CheckStatus.WARNING, delivery.result().status());
         assertEquals("degraded", delivery.result().output());

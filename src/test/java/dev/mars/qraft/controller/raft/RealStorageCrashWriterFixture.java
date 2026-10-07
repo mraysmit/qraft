@@ -25,17 +25,24 @@ import java.util.Base64;
 import java.util.List;
 
 /**
- * Child-process fixture that halts at an observable real-WAL call boundary: it truncates the WAL from the
- * replacement index, appends the replacement there in term 2, and syncs.
+ * Test helper executable launched in a separate JVM by {@link RaftNodeRealStorageRecoveryTest}
+ * to prepare real write-ahead log (WAL) crash scenarios.
+ *
+ * <p>Truncates the WAL from the replacement index, appends the replacement there in term 2,
+ * and syncs, halting the JVM at the checkpoint selected by the calling test. Halting skips
+ * normal cleanup so the test can reopen the storage and assert recovery after a crash.
+ *
+ * <p>This class belongs in the test sources because it supplies a subprocess for the
+ * test. Its {@code main} method prepares the crash; the calling test checks recovery.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-14
  * @version 1.1
  */
-public final class RealStorageCrashWriter {
+public final class RealStorageCrashWriterFixture {
     static final int HALT_EXIT_CODE = 91;
 
-    private RealStorageCrashWriter() {
+    private RealStorageCrashWriterFixture() {
     }
 
     public static void main(String[] args) {

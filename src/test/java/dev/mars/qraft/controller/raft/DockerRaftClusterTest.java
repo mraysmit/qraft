@@ -64,14 +64,14 @@ public class DockerRaftClusterTest {
     private static final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
-    private static final ComposeContainer environment = SharedDockerCluster.getThreeNodeCluster();
+    private static final ComposeContainer environment = SharedDockerClusterFixture.getThreeNodeCluster();
 
     private List<String> nodeEndpoints;
 
     @BeforeEach
     void setUp(TestInfo testInfo) {
         logger.info("Starting test: " + testInfo.getDisplayName());
-        nodeEndpoints = SharedDockerCluster.getNodeEndpoints(environment, 3);
+        nodeEndpoints = SharedDockerClusterFixture.getNodeEndpoints(environment, 3);
         // Testcontainers already verified /health returns 200 for all nodes
         logger.info("All nodes are healthy and ready for testing");
     }

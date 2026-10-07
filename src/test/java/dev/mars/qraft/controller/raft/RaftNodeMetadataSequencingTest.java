@@ -39,8 +39,8 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static dev.mars.qraft.controller.raft.RaftAwait.awaitStateLoop;
-import static dev.mars.qraft.controller.raft.RaftAwait.await;
+import static dev.mars.qraft.controller.raft.RaftAwaitHelper.awaitStateLoop;
+import static dev.mars.qraft.controller.raft.RaftAwaitHelper.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -59,19 +59,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class RaftNodeMetadataSequencingTest {
     private JavaRuntime runtime;
-    private GatedMetadataStorage storage;
+    private GatedMetadataStorageFixture storage;
     private RaftNode node;
 
     @BeforeEach
     void setUp() {
         runtime = JavaRuntime.create();
-        storage = new GatedMetadataStorage();
+        storage = new GatedMetadataStorageFixture();
         storage.open(null).join();
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
                 .clusterNodes(Set.of("node-1", "node-2", "node-3"))
-                .transport(new InMemoryTransportSimulator("node-1"))
+                .transport(new InMemoryTransportSimulatorFixture("node-1"))
                 .stateMachine(new QraftStateStore())
                 .commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.durable(storage, storage))
@@ -87,7 +87,7 @@ class RaftNodeMetadataSequencingTest {
         if (runtime != null) {
             runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
-        InMemoryTransportSimulator.clearAllTransports();
+        InMemoryTransportSimulatorFixture.clearAllTransports();
     }
 
     @Test
@@ -198,14 +198,14 @@ class RaftNodeMetadataSequencingTest {
     @Test
     void selfVoteIsAppliedOnlyAfterElectionMetadataIsDurable() {
         await(node.stop());
-        GatedMetadataStorage electionStorage = new GatedMetadataStorage();
+        GatedMetadataStorageFixture electionStorage = new GatedMetadataStorageFixture();
         electionStorage.open(null).join();
         electionStorage.blockNextUpdate();
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("single")
                 .clusterNodes(Set.of("single"))
-                .transport(new InMemoryTransportSimulator("single"))
+                .transport(new InMemoryTransportSimulatorFixture("single"))
                 .stateMachine(new QraftStateStore())
                 .commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.durable(electionStorage, electionStorage))
@@ -238,8 +238,9 @@ class RaftNodeMetadataSequencingTest {
                 .build();
     }
 
-    private static final class GatedMetadataStorage implements RaftStorage, SnapshotStore {
-        private final TestRaftStorage delegate = new TestRaftStorage();
+    /** Test storage fixture with controlled metadata persistence for sequencing assertions. */
+    private static final class GatedMetadataStorageFixture implements RaftStorage, SnapshotStore {
+        private final TestRaftStorageFixture delegate = new TestRaftStorageFixture();
         private final AtomicInteger updateCount = new AtomicInteger();
         private final CompletableFuture<Void> updateEntered = new CompletableFuture<>();
         private final IllegalStateException failure = new IllegalStateException("uncertain metadata write");

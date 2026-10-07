@@ -23,7 +23,7 @@ import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.controller.raft.storage.RaftStorageFactory;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
-import dev.mars.qraft.testing.fault.IntentionalErrors;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,8 +37,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
-import static dev.mars.qraft.testing.fault.IntentionalError.BOOTSTRAP_SERVER_LISTS_DISAGREE;
+import static dev.mars.qraft.controller.raft.ManualRaftClusterFixture.await;
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.BOOTSTRAP_SERVER_LISTS_DISAGREE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -63,14 +63,14 @@ class ClusterBootstrapTest {
     private static final Map<String, String> ADDRESSES = Map.of("a", "a:9080", "b", "b:9080", "c", "c:9080");
 
     private JavaRuntime runtime;
-    private ManualRaftCluster cluster;
+    private ManualRaftClusterFixture cluster;
     @TempDir Path storageDirectory;
 
     @BeforeEach
     void setUp() {
         runtime = JavaRuntime.create();
-        cluster = new ManualRaftCluster(runtime);
-        InMemoryTransportSimulator.clearAllTransports();
+        cluster = new ManualRaftClusterFixture(runtime);
+        InMemoryTransportSimulatorFixture.clearAllTransports();
     }
 
     @AfterEach
@@ -79,7 +79,7 @@ class ClusterBootstrapTest {
             cluster.close();
         } finally {
             runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            InMemoryTransportSimulator.clearAllTransports();
+            InMemoryTransportSimulatorFixture.clearAllTransports();
         }
     }
 
@@ -119,7 +119,7 @@ class ClusterBootstrapTest {
 
     @Test
     void aListedServerThatListsOtherServersMeansRefusingAndNothingIsWritten() throws Exception {
-        IntentionalErrors.expect(BOOTSTRAP_SERVER_LISTS_DISAGREE, 1);
+        IntentionalErrorsHelper.expect(BOOTSTRAP_SERVER_LISTS_DISAGREE, 1);
         RaftNode a = fresh("a", MEMBERS);
         fresh("b", Set.of("a", "b", "d"));
         fresh("c", MEMBERS);
@@ -170,13 +170,13 @@ class ClusterBootstrapTest {
         RaftNode a = configured("a", true);
         configured("b", true);
         var originalStorage = await(RaftStorageFactory.createDurable(storageDirectory, true));
-        RaftNode original = cluster.add(cluster.builder("c", MEMBERS, new InMemoryTransportSimulator("c"),
+        RaftNode original = cluster.add(cluster.builder("c", MEMBERS, new InMemoryTransportSimulatorFixture("c"),
                 new QraftStateStore(), RaftNodeMode.durable(originalStorage.wal(), originalStorage.snapshots())));
         await(original.start());
         await(original.stop());
         var recoveredStorage = await(RaftStorageFactory.createDurable(storageDirectory, true));
         // Recover the same server ID and configuration from the real WAL at a changed address.
-        InMemoryTransportSimulator movedTransport = new InMemoryTransportSimulator("c");
+        InMemoryTransportSimulatorFixture movedTransport = new InMemoryTransportSimulatorFixture("c");
         RaftNode moved = cluster.add(cluster.unconfiguredBuilder("c", MEMBERS, movedTransport,
                 new QraftStateStore(), RaftNodeMode.durable(recoveredStorage.wal(), recoveredStorage.snapshots()))
                 .serverId(original.getServerId())
@@ -195,7 +195,7 @@ class ClusterBootstrapTest {
 
     @Test
     void aMovedLeaderUpdatesItsOwnAddressWithoutAnotherMember() throws Exception {
-        RaftNode moved = cluster.add(cluster.builder("a", Set.of("a"), new InMemoryTransportSimulator("a"),
+        RaftNode moved = cluster.add(cluster.builder("a", Set.of("a"), new InMemoryTransportSimulatorFixture("a"),
                 new QraftStateStore(), RaftNodeMode.volatileMode()).addresses(Map.of("a", "a-moved")));
         await(moved.start());
         cluster.elect(moved);
@@ -207,7 +207,7 @@ class ClusterBootstrapTest {
 
     @Test
     void aNodeThatHasAConfigurationHasNothingToDo() throws Exception {
-        RaftNode configured = cluster.add(cluster.builder("a", MEMBERS, new InMemoryTransportSimulator("a"),
+        RaftNode configured = cluster.add(cluster.builder("a", MEMBERS, new InMemoryTransportSimulatorFixture("a"),
                 new QraftStateStore(), RaftNodeMode.volatileMode()));
         await(configured.start());
 
@@ -217,7 +217,7 @@ class ClusterBootstrapTest {
 
     /** A member of a cluster of a, b and c that serves joins, with its promotions left to their default. */
     private RaftNode configured(String name, boolean servesJoins) throws Exception {
-        InMemoryTransportSimulator transport = new InMemoryTransportSimulator(name);
+        InMemoryTransportSimulatorFixture transport = new InMemoryTransportSimulatorFixture(name);
         RaftNode node = cluster.add(cluster.builder(name, MEMBERS, transport,
                 new QraftStateStore(), RaftNodeMode.volatileMode()));
         if (servesJoins) transport.serveMembership(new MembershipService(node, transport, null));
@@ -228,13 +228,13 @@ class ClusterBootstrapTest {
     private RaftNode fresh(String name, Set<String> members) throws Exception {
         Map<String, String> addresses = new HashMap<>();
         for (String member : members) addresses.put(member, ADDRESSES.getOrDefault(member, member + ":9080"));
-        RaftNode node = cluster.add(cluster.unconfiguredBuilder(name, members, new InMemoryTransportSimulator(name),
+        RaftNode node = cluster.add(cluster.unconfiguredBuilder(name, members, new InMemoryTransportSimulatorFixture(name),
                 new QraftStateStore(), RaftNodeMode.volatileMode()).addresses(addresses));
         await(node.start());
         return node;
     }
 
     private static ClusterBootstrap bootstrapOf(RaftNode node) {
-        return new ClusterBootstrap(node, InMemoryTransportSimulator.getAllTransports().get(node.getNodeId()));
+        return new ClusterBootstrap(node, InMemoryTransportSimulatorFixture.getAllTransports().get(node.getNodeId()));
     }
 }

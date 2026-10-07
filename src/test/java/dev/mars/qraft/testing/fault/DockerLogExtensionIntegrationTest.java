@@ -21,12 +21,12 @@ import org.junit.jupiter.api.Test;
 
 /** Proves the two auto-detected extensions compose correctly without needing a Docker daemon. */
 @Tag("docker")
-@ExpectedDockerErrors(IntentionalError.RAFT_PEER_UNREACHABLE)
+@ExpectedDockerErrorsHelper(IntentionalErrorFixture.RAFT_PEER_UNREACHABLE)
 class DockerLogExtensionIntegrationTest {
 
     @Test
     void declaredExternalErrorIsCheckedInTheClassWindow() {
-        DockerLogCapture.capture("extension-fixture", "fixture", """
+        DockerLogCaptureHelper.capture("extension-fixture", "fixture", """
                 2026-10-06 14:00:00.000 [main] ERROR dev.mars.qraft.controller.raft.RaftNode - Raft peer n2 became unreachable during AppendEntries
                 """);
     }

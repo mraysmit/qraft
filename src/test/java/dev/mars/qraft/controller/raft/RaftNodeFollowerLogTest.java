@@ -52,7 +52,7 @@ class RaftNodeFollowerLogTest {
 
     private final QraftStateStore store = new QraftStateStore();
     private JavaRuntime runtime;
-    private ManualRaftTimers timers;
+    private ManualRaftTimersHelper timers;
     private RaftNode follower;
 
     @AfterEach
@@ -117,15 +117,15 @@ class RaftNodeFollowerLogTest {
      */
     private void startFollower() throws Exception {
         runtime = JavaRuntime.create();
-        timers = new ManualRaftTimers(runtime);
-        TestRaftStorage storage = new TestRaftStorage();
+        timers = new ManualRaftTimersHelper(runtime);
+        TestRaftStorageFixture storage = new TestRaftStorageFixture();
         storage.open(null).join();
         Set<String> members = Set.of("follower", "leader", "other");
         follower = RaftNode.builder().runtime(runtime).nodeId("follower")
-                .serverId(ManualRaftCluster.serverIdOf("follower"))
-                .initialConfiguration(ManualRaftCluster.configurationOf(members))
+                .serverId(ManualRaftClusterFixture.serverIdOf("follower"))
+                .initialConfiguration(ManualRaftClusterFixture.configurationOf(members))
                 .clusterNodes(members)
-                .transport(new InMemoryTransportSimulator("follower"))
+                .transport(new InMemoryTransportSimulatorFixture("follower"))
                 .stateMachine(store).commandCodec(CODEC)
                 .mode(RaftNodeMode.durable(storage, storage))
                 .snapshotEnabled(true).snapshotThreshold(1).snapshotCheckInterval(SNAPSHOT_INTERVAL_MS)

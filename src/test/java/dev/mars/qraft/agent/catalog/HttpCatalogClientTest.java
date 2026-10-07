@@ -239,7 +239,7 @@ class HttpCatalogClientTest {
 
     @Test
     void closesOwnedHttpClientExactlyOnceAndRejectsLaterCalls() {
-        CloseTrackingHttpClient transport = new CloseTrackingHttpClient(HttpClient.newHttpClient());
+        CloseTrackingHttpClientFixture transport = new CloseTrackingHttpClientFixture(HttpClient.newHttpClient());
         HttpCatalogClient client = new HttpCatalogClient(transport, JSON, "node-a", "tenant-a", "prod",
                 "dc-1", "eu-west", Duration.ofSeconds(10));
         clients.add(client);
@@ -504,11 +504,12 @@ class HttpCatalogClientTest {
         String header(String name) { return headers.getFirst(name); }
     }
 
-    private static final class CloseTrackingHttpClient extends HttpClient {
+    /** Test HTTP client fixture that delegates requests and records closes for ownership assertions. */
+    private static final class CloseTrackingHttpClientFixture extends HttpClient {
         private final HttpClient delegate;
         private final AtomicInteger closeCount = new AtomicInteger();
 
-        private CloseTrackingHttpClient(HttpClient delegate) { this.delegate = delegate; }
+        private CloseTrackingHttpClientFixture(HttpClient delegate) { this.delegate = delegate; }
         @Override public Optional<CookieHandler> cookieHandler() { return delegate.cookieHandler(); }
         @Override public Optional<Duration> connectTimeout() { return delegate.connectTimeout(); }
         @Override public Redirect followRedirects() { return delegate.followRedirects(); }

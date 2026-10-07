@@ -18,7 +18,7 @@ package dev.mars.qraft.controller.raft;
 
 import dev.mars.qraft.controller.raft.grpc.VoteRequest;
 import dev.mars.qraft.controller.raft.grpc.VoteResponse;
-import dev.mars.qraft.testing.fault.InjectedFault;
+import dev.mars.qraft.testing.fault.InjectedFaultFixture;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -31,7 +31,7 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static dev.mars.qraft.testing.fault.IntentionalError.TRANSPORT_HANDLER_FAILURE;
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.TRANSPORT_HANDLER_FAILURE;
 
 /**
  * Tests the in-memory network fake the Raft tests rely on. A crashed node receives nothing. Every request
@@ -44,19 +44,19 @@ import static dev.mars.qraft.testing.fault.IntentionalError.TRANSPORT_HANDLER_FA
  * @version 1.0
  */
 class InMemoryTransportSimulatorTest {
-    private final List<InMemoryTransportSimulator> transports = new ArrayList<>();
+    private final List<InMemoryTransportSimulatorFixture> transports = new ArrayList<>();
 
     @AfterEach
     void tearDown() {
-        transports.forEach(InMemoryTransportSimulator::stop);
-        InMemoryTransportSimulator.clearAllTransports();
+        transports.forEach(InMemoryTransportSimulatorFixture::stop);
+        InMemoryTransportSimulatorFixture.clearAllTransports();
     }
 
     @Test
     void aCrashedNodeReceivesNothing() {
-        InMemoryTransportSimulator sender = start("sender", 1);
-        InMemoryTransportSimulator crashed = start("crashed", 1);
-        crashed.setFailureMode(InMemoryTransportSimulator.FailureMode.CRASH);
+        InMemoryTransportSimulatorFixture sender = start("sender", 1);
+        InMemoryTransportSimulatorFixture crashed = start("crashed", 1);
+        crashed.setFailureMode(InMemoryTransportSimulatorFixture.FailureMode.CRASH);
 
         ExecutionException failure = assertThrows(ExecutionException.class,
                 () -> vote(sender, "crashed").get(10, TimeUnit.SECONDS));
@@ -66,10 +66,10 @@ class InMemoryTransportSimulatorTest {
 
     @Test
     void aDelayedDeliveryThatThrowsFailsItsRequest() throws Exception {
-        InMemoryTransportSimulator sender = start("sender", 1);
-        InMemoryTransportSimulator target = new InMemoryTransportSimulator("target", 1);
+        InMemoryTransportSimulatorFixture sender = start("sender", 1);
+        InMemoryTransportSimulatorFixture target = new InMemoryTransportSimulatorFixture("target", 1);
         transports.add(target);
-        target.start(message -> { throw new InjectedFault(TRANSPORT_HANDLER_FAILURE, "handler failed"); });
+        target.start(message -> { throw new InjectedFaultFixture(TRANSPORT_HANDLER_FAILURE, "handler failed"); });
         sender.setReorderingConfig(true, 1.0, 1);
 
         ExecutionException failure = assertThrows(ExecutionException.class,
@@ -80,7 +80,7 @@ class InMemoryTransportSimulatorTest {
 
     @Test
     void stoppingATransportFailsTheRequestsItStillHolds() throws Exception {
-        InMemoryTransportSimulator sender = start("sender", 1);
+        InMemoryTransportSimulatorFixture sender = start("sender", 1);
         start("target", 1);
         sender.setReorderingConfig(true, 1.0, 600_000);
         CompletableFuture<VoteResponse> held = vote(sender, "target");
@@ -93,7 +93,7 @@ class InMemoryTransportSimulatorTest {
 
     @Test
     void simulatedLatencyHoldsTheRequestInsteadOfOccupyingAThread() {
-        InMemoryTransportSimulator sender = start("sender", 1);
+        InMemoryTransportSimulatorFixture sender = start("sender", 1);
         start("target", 1);
         sender.setChaosConfig(60_000, 60_000, 0);
 
@@ -106,7 +106,7 @@ class InMemoryTransportSimulatorTest {
 
     @Test
     void aThrottledRequestIsHeldAndThenDelivered() throws Exception {
-        InMemoryTransportSimulator sender = start("sender", 1);
+        InMemoryTransportSimulatorFixture sender = start("sender", 1);
         start("target", 1);
         sender.setThrottlingConfig(true, 1);
 
@@ -118,7 +118,7 @@ class InMemoryTransportSimulatorTest {
 
     @Test
     void everyRequestInTransitWhenATransportStopsFails() throws Exception {
-        InMemoryTransportSimulator sender = start("sender", 1);
+        InMemoryTransportSimulatorFixture sender = start("sender", 1);
         start("target", 1);
         sender.setChaosConfig(60_000, 60_000, 0);
         List<CompletableFuture<VoteResponse>> inTransit = new ArrayList<>();
@@ -135,7 +135,7 @@ class InMemoryTransportSimulatorTest {
 
     @Test
     void aTransportThatIsNeverStartedHoldsNoThread() {
-        InMemoryTransportSimulator unstarted = new InMemoryTransportSimulator("never-started", 1);
+        InMemoryTransportSimulatorFixture unstarted = new InMemoryTransportSimulatorFixture("never-started", 1);
 
         assertEquals(List.of(), threadsOf(unstarted), "a transport a node never starts must not leak a thread");
     }
@@ -148,8 +148,8 @@ class InMemoryTransportSimulatorTest {
     }
 
     private List<Boolean> dropPattern(long seed) throws Exception {
-        InMemoryTransportSimulator.clearAllTransports();
-        InMemoryTransportSimulator sender = start("sender-" + seed, seed);
+        InMemoryTransportSimulatorFixture.clearAllTransports();
+        InMemoryTransportSimulatorFixture sender = start("sender-" + seed, seed);
         start("target", seed);
         sender.setChaosConfig(0, 0, 0.5);
         List<Boolean> dropped = new ArrayList<>();
@@ -166,32 +166,32 @@ class InMemoryTransportSimulatorTest {
         return dropped;
     }
 
-    private InMemoryTransportSimulator start(String nodeId, long seed) {
-        InMemoryTransportSimulator transport = new InMemoryTransportSimulator(nodeId, seed);
+    private InMemoryTransportSimulatorFixture start(String nodeId, long seed) {
+        InMemoryTransportSimulatorFixture transport = new InMemoryTransportSimulatorFixture(nodeId, seed);
         transport.start(message -> { });
         transports.add(transport);
         return transport;
     }
 
-    private static CompletableFuture<VoteResponse> vote(InMemoryTransportSimulator sender, String target) {
+    private static CompletableFuture<VoteResponse> vote(InMemoryTransportSimulatorFixture sender, String target) {
         return sender.sendVoteRequest(target, VoteRequest.newBuilder()
                         .setTerm(1).setCandidateId("sender").setLastLogIndex(0).setLastLogTerm(0).build())
                 .toCompletionStage().toCompletableFuture();
     }
 
     /** A stopped transport's threads exit; the bound only diagnoses one that never does. */
-    private static void awaitNoThreads(InMemoryTransportSimulator transport) throws InterruptedException {
+    private static void awaitNoThreads(InMemoryTransportSimulatorFixture transport) throws InterruptedException {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!threadsOf(transport).isEmpty() && System.nanoTime() < deadline) Thread.sleep(5);
         assertEquals(List.of(), threadsOf(transport), "a stopped transport leaves no thread behind");
     }
 
-    private static List<String> threadsOf(InMemoryTransportSimulator transport) {
+    private static List<String> threadsOf(InMemoryTransportSimulatorFixture transport) {
         return Thread.getAllStackTraces().keySet().stream().map(Thread::getName)
                 .filter(name -> name.startsWith(transport.threadPrefix())).toList();
     }
 
-    private static void awaitQueued(InMemoryTransportSimulator transport) {
+    private static void awaitQueued(InMemoryTransportSimulatorFixture transport) {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (transport.queuedMessages() == 0 && System.nanoTime() < deadline) Thread.onSpinWait();
         assertEquals(1, transport.queuedMessages(), "the request is held for delayed delivery");

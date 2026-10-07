@@ -26,7 +26,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Fails a test that logs an error it did not cause on purpose. Registered for every test through
+ * JUnit test support helper that fails a test logging an error it did not cause on purpose.
+ * Registered for every test through
  * {@code META-INF/services} and {@code junit.jupiter.extensions.autodetection.enabled}.
  *
  * <p>It opens a window for each test class and each test. The test's window closes after the test's own
@@ -39,29 +40,29 @@ import java.util.List;
  * @since 2026-10-04
  * @version 1.0
  */
-public final class IntentionalErrorExtension
+public final class IntentionalErrorExtensionHelper
         implements BeforeAllCallback, AfterAllCallback, BeforeEachCallback, AfterEachCallback {
 
     @Override
     public void beforeAll(ExtensionContext context) {
-        IntentionalErrors.begin(classOwner(context));
+        IntentionalErrorsHelper.begin(classOwner(context));
     }
 
     @Override
     public void beforeEach(ExtensionContext context) {
-        IntentionalErrors.begin(testOwner(context));
-        IntentionalErrorCheck.requireAttachedTo(IntentionalErrorCheck.root());
+        IntentionalErrorsHelper.begin(testOwner(context));
+        IntentionalErrorCheckHelper.requireAttachedTo(IntentionalErrorCheckHelper.root());
     }
 
     @Override
     public void afterEach(ExtensionContext context) {
-        failIfAny(testOwner(context), IntentionalErrors.end(testOwner(context)));
+        failIfAny(testOwner(context), IntentionalErrorsHelper.end(testOwner(context)));
     }
 
     @Override
     public void afterAll(ExtensionContext context) {
-        List<String> problems = new ArrayList<>(IntentionalErrors.end(classOwner(context)));
-        IntentionalErrors.drainOutsideAnyTest().forEach(problem -> problems.add(problem + " (logged outside any test)"));
+        List<String> problems = new ArrayList<>(IntentionalErrorsHelper.end(classOwner(context)));
+        IntentionalErrorsHelper.drainOutsideAnyTest().forEach(problem -> problems.add(problem + " (logged outside any test)"));
         failIfAny(classOwner(context), problems);
     }
 

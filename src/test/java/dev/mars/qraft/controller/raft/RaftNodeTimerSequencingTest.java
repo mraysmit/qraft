@@ -47,7 +47,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
-import static dev.mars.qraft.controller.raft.RaftAwait.awaitStateLoop;
+import static dev.mars.qraft.controller.raft.RaftAwaitHelper.awaitStateLoop;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -64,7 +64,7 @@ class RaftNodeTimerSequencingTest {
     private static final Set<String> MEMBERS = Set.of("node-1", "peer-1");
 
     private JavaRuntime runtime;
-    private ManualTimerScheduler timers;
+    private ManualTimerSchedulerHelper timers;
     private RaftNode node;
 
     @AfterEach
@@ -78,18 +78,18 @@ class RaftNodeTimerSequencingTest {
     @Test
     void expiredElectionTimerCannotStartNewTermAfterVoteResetsIt() throws Exception {
         runtime = JavaRuntime.create();
-        timers = new ManualTimerScheduler(runtime);
-        GatedTimerStorage storage = new GatedTimerStorage();
+        timers = new ManualTimerSchedulerHelper(runtime);
+        GatedTimerStorageFixture storage = new GatedTimerStorageFixture();
         storage.open(null).join();
         storage.blockNextMetadataUpdate();
-        node = newNode(storage, new AutoTransport(false),
+        node = newNode(storage, new AutoTransportFixture(false),
                 MEMBERS, 200, 10_000, false, 60_000);
         await(node.start());
 
         Future<VoteResponse> vote = node.handleVoteRequest(VoteRequest.newBuilder()
                 .setTerm(1)
                 .setCandidateId("peer-1")
-                .setCandidateServerId(ManualRaftCluster.serverIdOf("peer-1"))
+                .setCandidateServerId(ManualRaftClusterFixture.serverIdOf("peer-1"))
                 .setLastLogIndex(1)
                 .setLastLogTerm(0)
                 .build());
@@ -109,10 +109,10 @@ class RaftNodeTimerSequencingTest {
     @Test
     void heartbeatTimerCannotSendWhileWalTransitionIsBlocked() throws Exception {
         runtime = JavaRuntime.create();
-        timers = new ManualTimerScheduler(runtime);
-        GatedTimerStorage storage = new GatedTimerStorage();
+        timers = new ManualTimerSchedulerHelper(runtime);
+        GatedTimerStorageFixture storage = new GatedTimerStorageFixture();
         storage.open(null).join();
-        AutoTransport transport = new AutoTransport(true);
+        AutoTransportFixture transport = new AutoTransportFixture(true);
         node = newNode(storage, transport,
                 MEMBERS, 25, 200, false, 60_000);
         await(node.start());
@@ -137,10 +137,10 @@ class RaftNodeTimerSequencingTest {
     @Test
     void aScheduledSnapshotQueuedBehindAStepDownWaitsForItAndCompactsOnlyAppliedEntries() throws Exception {
         runtime = JavaRuntime.create();
-        timers = new ManualTimerScheduler(runtime);
-        GatedTimerStorage storage = new GatedTimerStorage();
+        timers = new ManualTimerSchedulerHelper(runtime);
+        GatedTimerStorageFixture storage = new GatedTimerStorageFixture();
         storage.open(null).join();
-        node = newNode(storage, new AutoTransport(true),
+        node = newNode(storage, new AutoTransportFixture(true),
                 Set.of("node-1"), 1_000, 10_000, true, 200);
         await(node.start());
         electLeader();
@@ -181,20 +181,20 @@ class RaftNodeTimerSequencingTest {
     @Test
     void aVoteAppliedWhileStoppingDoesNotReArmTheElectionTimer() throws Exception {
         runtime = JavaRuntime.create();
-        timers = new ManualTimerScheduler(runtime);
-        GatedTimerStorage storage = new GatedTimerStorage();
+        timers = new ManualTimerSchedulerHelper(runtime);
+        GatedTimerStorageFixture storage = new GatedTimerStorageFixture();
         storage.open(null).join();
         node = RaftNode.builder().runtime(runtime).nodeId("node-1").clusterNodes(MEMBERS)
-                .serverId(ManualRaftCluster.serverIdOf("node-1"))
-                .initialConfiguration(ManualRaftCluster.configurationOf(MEMBERS))
-                .transport(new AutoTransport(false)).stateMachine(new QraftStateStore())
+                .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
+                .initialConfiguration(ManualRaftClusterFixture.configurationOf(MEMBERS))
+                .transport(new AutoTransportFixture(false)).stateMachine(new QraftStateStore())
                 .commandCodec(new ProtobufRaftCommandCodec()).mode(RaftNodeMode.durable(storage, storage))
                 .snapshotEnabled(false).electionTimeout(10_000).heartbeatInterval(10_000)
                 .timerScheduler(timers).build();
         await(node.start());
         storage.blockNextMetadataUpdate();
         Future<VoteResponse> vote = node.handleVoteRequest(VoteRequest.newBuilder()
-                .setTerm(1).setCandidateId("peer-1").setCandidateServerId(ManualRaftCluster.serverIdOf("peer-1"))
+                .setTerm(1).setCandidateId("peer-1").setCandidateServerId(ManualRaftClusterFixture.serverIdOf("peer-1"))
                 .setLastLogIndex(1).setLastLogTerm(0).build());
         storage.awaitBlockedMetadataUpdate();
 
@@ -211,17 +211,17 @@ class RaftNodeTimerSequencingTest {
     @Test
     void queueRejectedElectionRearmsTheElectionTimer() throws Exception {
         runtime = JavaRuntime.create();
-        timers = new ManualTimerScheduler(runtime);
-        GatedTimerStorage storage = new GatedTimerStorage();
+        timers = new ManualTimerSchedulerHelper(runtime);
+        GatedTimerStorageFixture storage = new GatedTimerStorageFixture();
         storage.open(null).join();
         storage.blockNextMetadataUpdate();
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
-                .serverId(ManualRaftCluster.serverIdOf("node-1"))
-                .initialConfiguration(ManualRaftCluster.configurationOf(MEMBERS))
+                .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
+                .initialConfiguration(ManualRaftClusterFixture.configurationOf(MEMBERS))
                 .clusterNodes(MEMBERS)
-                .transport(new AutoTransport(false))
+                .transport(new AutoTransportFixture(false))
                 .stateMachine(new QraftStateStore())
                 .commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.durable(storage, storage))
@@ -234,7 +234,7 @@ class RaftNodeTimerSequencingTest {
         await(node.start());
 
         Future<VoteResponse> vote = node.handleVoteRequest(VoteRequest.newBuilder()
-                .setTerm(1).setCandidateId("peer-1").setCandidateServerId(ManualRaftCluster.serverIdOf("peer-1"))
+                .setTerm(1).setCandidateId("peer-1").setCandidateServerId(ManualRaftClusterFixture.serverIdOf("peer-1"))
                 .setLastLogIndex(1).setLastLogTerm(0).build());
         storage.awaitBlockedMetadataUpdate();
 
@@ -251,14 +251,14 @@ class RaftNodeTimerSequencingTest {
     }
 
     private RaftNode newNode(
-            GatedTimerStorage storage, RaftTransport transport, Set<String> members,
+            GatedTimerStorageFixture storage, RaftTransport transport, Set<String> members,
             long electionTimeout, long heartbeatInterval,
             boolean snapshotEnabled, long snapshotInterval) {
         return RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
-                .serverId(ManualRaftCluster.serverIdOf("node-1"))
-                .initialConfiguration(ManualRaftCluster.configurationOf(members))
+                .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
+                .initialConfiguration(ManualRaftClusterFixture.configurationOf(members))
                 .clusterNodes(members)
                 .transport(transport)
                 .stateMachine(new QraftStateStore())
@@ -279,14 +279,15 @@ class RaftNodeTimerSequencingTest {
     }
 
     private static <T> T await(Future<T> future) {
-        return RaftAwait.await(future, Duration.ofSeconds(15));
+        return RaftAwaitHelper.await(future, Duration.ofSeconds(15));
     }
 
-    private static final class AutoTransport implements RaftTransport {
+    /** Test transport fixture that answers peer requests and counts appends for timer-sequencing assertions. */
+    private static final class AutoTransportFixture implements RaftTransport {
         private final boolean grantVotes;
         private final AtomicInteger appendCount = new AtomicInteger();
 
-        private AutoTransport(boolean grantVotes) {
+        private AutoTransportFixture(boolean grantVotes) {
             this.grantVotes = grantVotes;
         }
 
@@ -301,7 +302,7 @@ class RaftNodeTimerSequencingTest {
             if (!grantVotes) return Promise.<VoteResponse>promise().future();
             return Future.succeededFuture(VoteResponse.newBuilder()
                     .setTerm(request.getTerm()).setVoteGranted(true)
-                    .setVoterServerId(ManualRaftCluster.serverIdOf(targetId)).build());
+                    .setVoterServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
         }
 
         @Override
@@ -313,7 +314,7 @@ class RaftNodeTimerSequencingTest {
                     : request.getEntries(request.getEntriesCount() - 1).getIndex();
             return Future.succeededFuture(AppendEntriesResponse.newBuilder()
                     .setTerm(request.getTerm()).setSuccess(true).setMatchIndex(matchIndex)
-                    .setFollowerServerId(ManualRaftCluster.serverIdOf(targetId)).build());
+                    .setFollowerServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
         }
 
         @Override
@@ -322,17 +323,18 @@ class RaftNodeTimerSequencingTest {
             return Future.succeededFuture(InstallSnapshotResponse.newBuilder()
                     .setTerm(request.getTerm()).setSuccess(true)
                     .setNextChunkIndex(request.getTotalChunks())
-                    .setFollowerServerId(ManualRaftCluster.serverIdOf(targetId)).build());
+                    .setFollowerServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
         }
     }
 
-    private static final class ManualTimerScheduler implements RaftTimerScheduler {
+    /** Test timer helper that records timers and lets the test choose when callbacks run. */
+    private static final class ManualTimerSchedulerHelper implements RaftTimerScheduler {
         private final JavaRuntime runtime;
         private final AtomicLong ids = new AtomicLong();
         private final Map<Long, ScheduledAction> oneShots = new ConcurrentHashMap<>();
         private final Map<Long, ScheduledAction> periodics = new ConcurrentHashMap<>();
 
-        private ManualTimerScheduler(JavaRuntime runtime) { this.runtime = runtime; }
+        private ManualTimerSchedulerHelper(JavaRuntime runtime) { this.runtime = runtime; }
 
         @Override
         public long setTimer(long delayMs, Consumer<Long> action) {
@@ -371,8 +373,9 @@ class RaftNodeTimerSequencingTest {
         private record ScheduledAction(long delayMs, Consumer<Long> action) { }
     }
 
-    private static final class GatedTimerStorage implements RaftStorage, SnapshotStore {
-        private final TestRaftStorage delegate = new TestRaftStorage();
+    /** Test storage fixture that holds persistence to exercise ordering between timer callbacks and state transitions. */
+    private static final class GatedTimerStorageFixture implements RaftStorage, SnapshotStore {
+        private final TestRaftStorageFixture delegate = new TestRaftStorageFixture();
         private final AtomicInteger snapshotSaveCount = new AtomicInteger();
         private volatile CompletableFuture<Void> nextMetadataGate;
         private volatile CompletableFuture<Void> blockedMetadataGate;

@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.controller.raft.HeldRaftTransport.Held;
+import dev.mars.qraft.controller.raft.HeldRaftTransportFixture.Held;
 import dev.mars.qraft.controller.raft.RaftConfiguration.Server;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesResponse;
@@ -37,8 +37,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
-import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
-import static dev.mars.qraft.controller.raft.ManualRaftCluster.serverIdOf;
+import static dev.mars.qraft.controller.raft.ManualRaftClusterFixture.await;
+import static dev.mars.qraft.controller.raft.ManualRaftClusterFixture.serverIdOf;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -69,15 +69,15 @@ class RaftNodePromotionTest {
     private static final long FULL = -1;
 
     private JavaRuntime runtime;
-    private ManualRaftCluster cluster;
-    private HeldRaftTransport transport;
+    private ManualRaftClusterFixture cluster;
+    private HeldRaftTransportFixture transport;
     private RaftNode leader;
 
     @BeforeEach
     void setUp() {
         runtime = JavaRuntime.create();
-        cluster = new ManualRaftCluster(runtime);
-        transport = new HeldRaftTransport();
+        cluster = new ManualRaftClusterFixture(runtime);
+        transport = new HeldRaftTransportFixture();
     }
 
     @AfterEach
@@ -178,7 +178,7 @@ class RaftNodePromotionTest {
         leader = cluster.add(cluster.unconfiguredBuilder("a", Set.of("a", "b", "d"), transport,
                         new QraftStateStore(), RaftNodeMode.volatileMode())
                 .serverId(serverIdOf("a")).initialConfiguration(configuration)
-                .promotionStabilization(stabilizationRounds * ManualRaftCluster.HEARTBEAT_MS)
+                .promotionStabilization(stabilizationRounds * ManualRaftClusterFixture.HEARTBEAT_MS)
                 .promotionMaxTrailingEntries(maxTrailingEntries));
         await(leader.start());
         cluster.timers(leader).fireElectionTimeout();
@@ -206,7 +206,7 @@ class RaftNodePromotionTest {
      * answer (null).
      */
     private void round(Long dMatch) throws Exception {
-        cluster.timers(leader).firePeriodic(ManualRaftCluster.HEARTBEAT_MS);
+        cluster.timers(leader).firePeriodic(ManualRaftClusterFixture.HEARTBEAT_MS);
         barrier();
         for (Held<AppendEntriesRequest, AppendEntriesResponse> held : transport.unansweredAppends("b")) {
             held.response().complete(ack(held.request(), FULL, "b"));

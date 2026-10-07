@@ -21,9 +21,13 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
-/** Declares the intentional ERROR signatures a Docker test class may cause in container output. */
+/**
+ * Test annotation helper that declares the intentional ERROR signatures a Docker
+ * test class may cause in container output. {@link DockerLogExtensionHelper} reads
+ * it when configuring the class's container-log audit.
+ */
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.TYPE)
-public @interface ExpectedDockerErrors {
-    IntentionalError[] value();
+public @interface ExpectedDockerErrorsHelper {
+    IntentionalErrorFixture[] value();
 }

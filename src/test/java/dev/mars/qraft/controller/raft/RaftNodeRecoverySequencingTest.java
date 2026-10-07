@@ -45,7 +45,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-import static dev.mars.qraft.controller.raft.RaftAwait.await;
+import static dev.mars.qraft.controller.raft.RaftAwaitHelper.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -64,7 +64,7 @@ class RaftNodeRecoverySequencingTest {
     private final ProtobufRaftCommandCodec codec = new ProtobufRaftCommandCodec();
     private JavaRuntime runtime;
     private RaftNode node;
-    private AsyncRecoveryStorage storage;
+    private AsyncRecoveryStorageFixture storage;
 
     @AfterEach
     void tearDown() throws Exception {
@@ -79,12 +79,12 @@ class RaftNodeRecoverySequencingTest {
     void fullLogRecoveryReentersStateLoopAfterEveryStorageCompletion() throws Exception {
         runtime = JavaRuntime.create();
         DistributedStateRaftCommand command = put("recovered", "from-log");
-        storage = new AsyncRecoveryStorage(
+        storage = new AsyncRecoveryStorageFixture(
                 new RaftStorage.PersistentMeta(7, Optional.of("node-1")),
                 Optional.empty(),
-                List.of(ManualRaftCluster.bootstrapEntry(Set.of("node-1")),
+                List.of(ManualRaftClusterFixture.bootstrapEntry(Set.of("node-1")),
                         new RaftStorage.LogEntryData(2, 7, codec.serialize(command))));
-        RecordingStateMachine stateMachine = new RecordingStateMachine();
+        RecordingStateMachineFixture stateMachine = new RecordingStateMachineFixture();
         node = buildNode(storage, stateMachine);
 
         Future<Void> start = node.start();
@@ -113,13 +113,13 @@ class RaftNodeRecoverySequencingTest {
         snapshotSource.apply(put("snapshot", "restored"));
         snapshotSource.setLastAppliedIndex(5);
         SnapshotStore.SnapshotData snapshot = new SnapshotStore.SnapshotData(
-                ManualRaftCluster.snapshotOf(Set.of("node-1"), snapshotSource.takeSnapshot()), 5, 3, 1);
+                ManualRaftClusterFixture.snapshotOf(Set.of("node-1"), snapshotSource.takeSnapshot()), 5, 3, 1);
         DistributedStateRaftCommand suffix = put("suffix", "replayed");
-        storage = new AsyncRecoveryStorage(
+        storage = new AsyncRecoveryStorageFixture(
                 new RaftStorage.PersistentMeta(4, Optional.empty()),
                 Optional.of(snapshot),
                 List.of(new RaftStorage.LogEntryData(6, 4, codec.serialize(suffix))));
-        RecordingStateMachine stateMachine = new RecordingStateMachine();
+        RecordingStateMachineFixture stateMachine = new RecordingStateMachineFixture();
         node = buildNode(storage, stateMachine);
 
         Future<Void> start = node.start();
@@ -144,9 +144,9 @@ class RaftNodeRecoverySequencingTest {
     @Test
     void raftRequestsArrivingDuringRecoveryAreRejectedWithoutTouchingDurableState() throws Exception {
         runtime = JavaRuntime.create();
-        storage = new AsyncRecoveryStorage(new RaftStorage.PersistentMeta(5, Optional.of("node-2")),
+        storage = new AsyncRecoveryStorageFixture(new RaftStorage.PersistentMeta(5, Optional.of("node-2")),
                 Optional.empty(), List.of());
-        node = buildNode(storage, new RecordingStateMachine(), Set.of("node-1", "node-2", "node-3"));
+        node = buildNode(storage, new RecordingStateMachineFixture(), Set.of("node-1", "node-2", "node-3"));
 
         Future<Void> start = node.start();
         storage.awaitMetadataRequest();
@@ -178,17 +178,17 @@ class RaftNodeRecoverySequencingTest {
         assertEquals(List.of(), storage.metadataWrites);
     }
 
-    private RaftNode buildNode(AsyncRecoveryStorage storage, RecordingStateMachine stateMachine) {
+    private RaftNode buildNode(AsyncRecoveryStorageFixture storage, RecordingStateMachineFixture stateMachine) {
         return buildNode(storage, stateMachine, Set.of("node-1"));
     }
 
-    private RaftNode buildNode(AsyncRecoveryStorage storage, RecordingStateMachine stateMachine, Set<String> members) {
+    private RaftNode buildNode(AsyncRecoveryStorageFixture storage, RecordingStateMachineFixture stateMachine, Set<String> members) {
         return RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("node-1")
-                .serverId(ManualRaftCluster.serverIdOf("node-1"))
+                .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
                 .clusterNodes(members)
-                .transport(new RecoveryTransport())
+                .transport(new RecoveryTransportFixture())
                 .stateMachine(stateMachine)
                 .commandCodec(codec)
                 .mode(RaftNodeMode.durable(storage, storage))
@@ -212,7 +212,8 @@ class RaftNodeRecoverySequencingTest {
         assertNull(context.get(), "storage completion fixture must run outside the state loop");
     }
 
-    private static final class RecordingStateMachine implements RaftLogApplicator {
+    /** Test state-machine fixture that records application and snapshot operations for sequencing assertions. */
+    private static final class RecordingStateMachineFixture implements RaftLogApplicator {
         private final QraftStateStore delegate = new QraftStateStore();
         private final List<JavaRuntime> resetContexts = new ArrayList<>();
         private final List<JavaRuntime> restoreContexts = new ArrayList<>();
@@ -248,7 +249,8 @@ class RaftNodeRecoverySequencingTest {
         }
     }
 
-    private static final class AsyncRecoveryStorage implements RaftStorage, SnapshotStore {
+    /** Test storage fixture that lets tests control asynchronous recovery operations. */
+    private static final class AsyncRecoveryStorageFixture implements RaftStorage, SnapshotStore {
         private final PersistentMeta metadataValue;
         private final Optional<SnapshotData> snapshotValue;
         private final List<LogEntryData> replayValue;
@@ -260,7 +262,7 @@ class RaftNodeRecoverySequencingTest {
         private final CompletableFuture<JavaRuntime> replayRequested = new CompletableFuture<>();
         private final List<String> metadataWrites = new java.util.concurrent.CopyOnWriteArrayList<>();
 
-        private AsyncRecoveryStorage(PersistentMeta metadataValue,
+        private AsyncRecoveryStorageFixture(PersistentMeta metadataValue,
                                      Optional<SnapshotData> snapshotValue,
                                      List<LogEntryData> replayValue) {
             this.metadataValue = metadataValue;
@@ -304,7 +306,8 @@ class RaftNodeRecoverySequencingTest {
         @Override public CompletableFuture<Void> closeAsync() { return SnapshotStore.super.closeAsync(); }
     }
 
-    private static final class RecoveryTransport implements RaftTransport {
+    /** Test transport fixture that records peer communication during recovery for sequencing assertions. */
+    private static final class RecoveryTransportFixture implements RaftTransport {
         @Override public void start(Consumer<RaftMessage> messageHandler) {}
         @Override public void stop() {}
         @Override public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {

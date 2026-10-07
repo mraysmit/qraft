@@ -17,14 +17,15 @@
 package dev.mars.qraft.runtime;
 
 /**
- * Runs every teardown step even when an earlier one fails, so one resource that will not stop cannot
+ * Test teardown helper for runtime tests. Runs every cleanup step even when an earlier one fails,
+ * so one resource that will not stop cannot
  * leave the others open for the next test. The first failure is rethrown with the later ones suppressed.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-27
  * @version 1.0
  */
-final class Cleanup {
+final class CleanupHelper {
     @FunctionalInterface
     interface Step {
         void run() throws Exception;
@@ -32,7 +33,7 @@ final class Cleanup {
 
     private Exception failure;
 
-    Cleanup run(Step step) {
+    CleanupHelper run(Step step) {
         try {
             step.run();
         } catch (Exception error) {

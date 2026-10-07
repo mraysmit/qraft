@@ -18,7 +18,7 @@ package dev.mars.qraft.runtime;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
-import dev.mars.qraft.controller.raft.PeerlessTransport;
+import dev.mars.qraft.controller.raft.PeerlessTransportFixture;
 import dev.mars.qraft.catalog.ServiceKey;
 import dev.mars.qraft.agent.QraftAgent;
 import dev.mars.qraft.agent.config.AgentConfiguration;
@@ -84,7 +84,7 @@ class AgentHealthPublicationTest {
 
     @AfterEach
     void closeResources() throws Exception {
-        new Cleanup()
+        new CleanupHelper()
                 .run(() -> { if (agent != null) agent.shutdown().get(10, TimeUnit.SECONDS); })
                 .run(() -> { if (proxy != null) proxy.stop(0); })
                 .run(() -> { if (workload != null) workload.stop(0); })
@@ -258,7 +258,7 @@ class AgentHealthPublicationTest {
             JavaRuntime runtime = JavaRuntime.create();
             QraftStateStore store = new QraftStateStore();
             RaftNode node = RaftNode.builder().runtime(runtime).nodeId("health-controller")
-                    .clusterNodes(Set.of("health-controller")).transport(new PeerlessTransport())
+                    .clusterNodes(Set.of("health-controller")).transport(new PeerlessTransportFixture())
                     .stateMachine(store).commandCodec(new ProtobufRaftCommandCodec())
                     .mode(RaftNodeMode.volatileMode()).electionTimeout(25).heartbeatInterval(10_000).build();
             node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);

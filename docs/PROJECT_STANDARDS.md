@@ -71,6 +71,9 @@ packages of each layer are listed in the design document, section 1.1.
 
 ### 4.2 Test doubles
 
+- Name test helper classes with a `Helper` suffix and test fixture classes with a `Fixture` suffix.
+- Apply these names to nested test helpers and doubles as well as standalone source files. Test support annotations and fault definitions must also identify their helper or fixture role.
+- Their class Javadoc must identify their test support role and explain how tests use them. Subprocess fixtures must name the tests that launch them and state where the assertions live.
 - Mockito is prohibited.
 - Do not add Mockito dependencies, imports, extensions, agents, configuration, examples, or generated test code.
 - Do not substitute another mocking framework to evade this rule.

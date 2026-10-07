@@ -40,11 +40,11 @@ class DockerLogCaptureTest {
                 \tat example.Trace.call(Trace.java:1)
                 """;
 
-        DockerLogCapture.Audit audit = DockerLogCapture.audit(
-                log, Set.of(IntentionalError.RAFT_PEER_UNREACHABLE));
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(
+                log, Set.of(IntentionalErrorFixture.RAFT_PEER_UNREACHABLE));
 
         assertEquals(1, audit.recognised().size());
-        assertEquals(IntentionalError.RAFT_PEER_UNREACHABLE, audit.recognised().getFirst().error());
+        assertEquals(IntentionalErrorFixture.RAFT_PEER_UNREACHABLE, audit.recognised().getFirst().error());
         assertTrue(audit.problems().isEmpty());
     }
 
@@ -52,7 +52,7 @@ class DockerLogCaptureTest {
     void undeclaredContainerErrorIsReportedWithItsOriginalLine() {
         String line = "2026-10-06 14:00:00.000 [main] ERROR example.Container - unexpected failure";
 
-        DockerLogCapture.Audit audit = DockerLogCapture.audit(line, Set.of());
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(line, Set.of());
 
         assertTrue(audit.recognised().isEmpty());
         assertEquals(java.util.List.of("undeclared container " + line), audit.problems());
@@ -60,7 +60,7 @@ class DockerLogCaptureTest {
 
     @Test
     void anErrorShapedLineThatCannotBeParsedIsNeverSilentlyIgnored() {
-        DockerLogCapture.Audit audit = DockerLogCapture.audit(
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(
                 "12:00:00 | ERROR | runtime failed before Logback started", Set.of());
 
         assertEquals(1, audit.problems().size());
@@ -77,11 +77,11 @@ class DockerLogCaptureTest {
                 2026-10-06 14:00:04.000 [main] ERROR d.mars.qraft.controller.QraftControllerService - Failed to initialize Raft storage: Cannot acquire exclusive lock on WAL directory: /app/data. Another process may be using this storage.
                 """;
 
-        DockerLogCapture.Audit audit = DockerLogCapture.audit(log, Set.of(
-                IntentionalError.RAFT_SNAPSHOT_TRANSFER_INTERRUPTED,
-                IntentionalError.CONTROLLER_RECOVERY_AMBIGUOUS_CORRUPTION,
-                IntentionalError.WAL_DIRECTORY_ALREADY_LOCKED,
-                IntentionalError.CONTROLLER_STORAGE_ALREADY_LOCKED));
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(log, Set.of(
+                IntentionalErrorFixture.RAFT_SNAPSHOT_TRANSFER_INTERRUPTED,
+                IntentionalErrorFixture.CONTROLLER_RECOVERY_AMBIGUOUS_CORRUPTION,
+                IntentionalErrorFixture.WAL_DIRECTORY_ALREADY_LOCKED,
+                IntentionalErrorFixture.CONTROLLER_STORAGE_ALREADY_LOCKED));
 
         assertEquals(5, audit.recognised().size());
         assertTrue(audit.problems().isEmpty());
@@ -91,19 +91,19 @@ class DockerLogCaptureTest {
     void classCaptureArchivesOnlyTheUndrainedSuffixAndReprintsItsDeclaredError() throws Exception {
         String first = "2026-10-06 14:00:00.000 [main] INFO  example.Container - started\n";
         String error = "2026-10-06 14:00:01.000 [main] ERROR dev.mars.qraft.controller.raft.RaftNode - Raft peer n2 became unreachable during AppendEntries\n";
-        DockerLogCapture.beginClass("FirstDockerClass", Set.of());
-        DockerLogCapture.capture("container-1", "controller1", first);
-        assertTrue(DockerLogCapture.finishClass(directory).isEmpty());
+        DockerLogCaptureHelper.beginClass("FirstDockerClass", Set.of());
+        DockerLogCaptureHelper.capture("container-1", "controller1", first);
+        assertTrue(DockerLogCaptureHelper.finishClass(directory).isEmpty());
 
-        DockerLogCapture.beginClass("SecondDockerClass", Set.of(IntentionalError.RAFT_PEER_UNREACHABLE));
-        DockerLogCapture.capture("container-1", "controller1", first + error);
-        assertTrue(DockerLogCapture.finishClass(directory).isEmpty());
+        DockerLogCaptureHelper.beginClass("SecondDockerClass", Set.of(IntentionalErrorFixture.RAFT_PEER_UNREACHABLE));
+        DockerLogCaptureHelper.capture("container-1", "controller1", first + error);
+        assertTrue(DockerLogCaptureHelper.finishClass(directory).isEmpty());
 
         assertEquals(error, Files.readString(directory.resolve("SecondDockerClass/controller1.log")));
 
-        DockerLogCapture.beginClass("QuietDockerClass", Set.of());
-        DockerLogCapture.capture("container-1", "controller1", first + error);
-        assertTrue(DockerLogCapture.finishClass(directory).isEmpty());
+        DockerLogCaptureHelper.beginClass("QuietDockerClass", Set.of());
+        DockerLogCaptureHelper.capture("container-1", "controller1", first + error);
+        assertTrue(DockerLogCaptureHelper.finishClass(directory).isEmpty());
         assertEquals("", Files.readString(directory.resolve("QuietDockerClass/controller1.log")));
     }
 }

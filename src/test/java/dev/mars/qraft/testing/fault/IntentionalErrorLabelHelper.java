@@ -20,17 +20,18 @@ import ch.qos.logback.classic.pattern.ClassicConverter;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 
 /**
- * The {@code %intentional} conversion word of {@code logback-test.xml}. It writes the label of an injected
+ * Test logging helper implementing the {@code %intentional} conversion word in
+ * {@code logback-test.xml}. It writes the label of an injected
  * failure or intentional error, and nothing for any other event. It never changes or drops an event.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-10-04
  * @version 1.0
  */
-public final class IntentionalErrorLabel extends ClassicConverter {
+public final class IntentionalErrorLabelHelper extends ClassicConverter {
 
     @Override
     public String convert(ILoggingEvent event) {
-        return IntentionalErrors.label(event);
+        return IntentionalErrorsHelper.label(event);
     }
 }

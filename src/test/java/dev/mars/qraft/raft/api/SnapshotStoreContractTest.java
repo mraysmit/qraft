@@ -46,7 +46,7 @@ class SnapshotStoreContractTest {
 
     @Test
     void closeAsyncClosesTheStoreOnceAndCompletes() {
-        ClosingStore store = new ClosingStore(null);
+        ClosingStoreFixture store = new ClosingStoreFixture(null);
 
         CompletableFuture<Void> closed = store.closeAsync();
 
@@ -58,7 +58,7 @@ class SnapshotStoreContractTest {
     @Test
     void aFailedCloseFailsTheReturnedFutureInsteadOfThrowing() {
         IllegalStateException failure = new IllegalStateException("disk gone");
-        ClosingStore store = new ClosingStore(failure);
+        ClosingStoreFixture store = new ClosingStoreFixture(failure);
 
         CompletableFuture<Void> closed = store.closeAsync();
 
@@ -70,7 +70,7 @@ class SnapshotStoreContractTest {
     @Test
     void anErrorFromCloseAlsoFailsTheReturnedFuture() {
         AssertionError failure = new AssertionError("fatal");
-        ClosingStore store = new ClosingStore(failure);
+        ClosingStoreFixture store = new ClosingStoreFixture(failure);
 
         CompletionException error = assertThrows(CompletionException.class, () -> store.closeAsync().join());
 
@@ -98,12 +98,16 @@ class SnapshotStoreContractTest {
         assertEquals("outcome", missing.getMessage());
     }
 
-    /** A store whose only behaviour is counting closes, optionally throwing {@code failure} from each. */
-    private static final class ClosingStore implements SnapshotStore {
+    /**
+     * Test snapshot-store fixture that records cleanup for close-contract assertions.
+     *
+     * <p>A store whose only behaviour is counting closes, optionally throwing {@code failure} from each.
+     */
+    private static final class ClosingStoreFixture implements SnapshotStore {
         private final Throwable failure;
         private final AtomicInteger closes = new AtomicInteger();
 
-        private ClosingStore(Throwable failure) {
+        private ClosingStoreFixture(Throwable failure) {
             this.failure = failure;
         }
 

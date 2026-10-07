@@ -75,8 +75,8 @@ class QraftControllerLifecycleTest {
         assertThrows(IllegalStateException.class, () -> QraftControllerApplication.launch(configuration,
                 ignored -> {
                     opened.incrementAndGet();
-                    return new TestControllerResource();
-                }, TestControllerResource::start, TestControllerResource::shutdown));
+                    return new TestControllerResourceFixture();
+                }, TestControllerResourceFixture::start, TestControllerResourceFixture::shutdown));
 
         assertEquals(0, opened.get());
     }
@@ -85,12 +85,12 @@ class QraftControllerLifecycleTest {
     void failedStartupClosesAcquiredControllerResources() throws Exception {
         Path configuration = validConfiguration();
         RuntimeException expected = new RuntimeException("raft failed");
-        TestControllerResource resource = new TestControllerResource();
+        TestControllerResourceFixture resource = new TestControllerResourceFixture();
         resource.startup = CompletableFuture.failedFuture(expected);
 
         CompletionException actual = assertThrows(CompletionException.class,
                 () -> QraftControllerApplication.launch(configuration, ignored -> resource,
-                        TestControllerResource::start, TestControllerResource::shutdown));
+                        TestControllerResourceFixture::start, TestControllerResourceFixture::shutdown));
 
         assertSame(expected, actual.getCause());
         assertEquals(1, resource.shutdowns.get());
@@ -203,7 +203,8 @@ class QraftControllerLifecycleTest {
         return configuration;
     }
 
-    private static final class TestControllerResource {
+    /** Test fixture that supplies controllable controller lifecycle operations for startup and shutdown assertions. */
+    private static final class TestControllerResourceFixture {
         private CompletableFuture<Void> startup = CompletableFuture.completedFuture(null);
         private final AtomicInteger shutdowns = new AtomicInteger();
 

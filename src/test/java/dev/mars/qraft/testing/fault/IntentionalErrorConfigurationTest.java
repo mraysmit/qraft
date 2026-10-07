@@ -36,8 +36,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 
-import static dev.mars.qraft.testing.fault.IntentionalError.SELF_TEST_INJECTED_FAILURE;
-import static dev.mars.qraft.testing.fault.IntentionalError.SELF_TEST_INTENTIONAL_ERROR;
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.SELF_TEST_INJECTED_FAILURE;
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.SELF_TEST_INTENTIONAL_ERROR;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -66,8 +66,8 @@ class IntentionalErrorConfigurationTest {
     void theTestConfigurationCannotDropAnError() throws Exception {
         try (InputStream input = IntentionalErrorConfigurationTest.class.getResourceAsStream("/logback-test.xml")) {
             assertNotNull(input, "logback-test.xml must be on the test runtime classpath");
-            assertEquals(List.of(), LogbackConfigurationAudit.settingsThatCanDropErrors(
-                    LogbackConfigurationAudit.parse(input)));
+            assertEquals(List.of(), LogbackConfigurationAuditHelper.settingsThatCanDropErrors(
+                    LogbackConfigurationAuditHelper.parse(input)));
         }
     }
 
@@ -84,18 +84,18 @@ class IntentionalErrorConfigurationTest {
         }
 
         assertEquals(List.of("CONSOLE", "FILE"), writers);
-        IntentionalErrorCheck.requireAttachedTo(root());
+        IntentionalErrorCheckHelper.requireAttachedTo(root());
     }
 
     @Test
     void theExtensionOpensAWindowForEveryTest() {
         assertEquals(Optional.of("IntentionalErrorConfigurationTest#theExtensionOpensAWindowForEveryTest"),
-                IntentionalErrors.openWindow());
+                IntentionalErrorsHelper.openWindow());
     }
 
     @Test
     void anIntentionalErrorIsWrittenToTheLogWithItsLabel() throws IOException {
-        IntentionalErrors.expect(SELF_TEST_INTENTIONAL_ERROR, 1);
+        IntentionalErrorsHelper.expect(SELF_TEST_INTENTIONAL_ERROR, 1);
         String message = "Self-test intentional error " + System.nanoTime();
 
         String line = logAndReadBack(message, null);
@@ -107,10 +107,10 @@ class IntentionalErrorConfigurationTest {
 
     @Test
     void anInjectedFailureIsWrittenToTheLogWithItsLabel() throws IOException {
-        IntentionalErrors.expect(SELF_TEST_INJECTED_FAILURE, 1);
+        IntentionalErrorsHelper.expect(SELF_TEST_INJECTED_FAILURE, 1);
         String message = "Self-test injected failure " + System.nanoTime();
 
-        String line = logAndReadBack(message, new InjectedFault(SELF_TEST_INJECTED_FAILURE, "simulated"));
+        String line = logAndReadBack(message, new InjectedFaultFixture(SELF_TEST_INJECTED_FAILURE, "simulated"));
 
         assertTrue(line.contains("ERROR *** INJECTED FAILURE: SELF_TEST_INJECTED_FAILURE, injected by"
                 + " IntentionalErrorConfigurationTest#anInjectedFailureIsWrittenToTheLogWithItsLabel *** "

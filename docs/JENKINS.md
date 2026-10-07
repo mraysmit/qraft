@@ -46,7 +46,7 @@ can overwrite them. Jenkins retains 20 builds and artifacts from the latest 10 b
 
 Qraft containers run as UID 1001. Java temporary files on Linux initially allow only their owner to read
 them, so a configuration created by the Jenkins user cannot be read by a bind-mounted container.
-`SharedDockerCluster` grants read permission to the image's user for its non-secret agent and storage-lock
+`SharedDockerClusterFixture` grants read permission to the image's user for its non-secret agent and storage-lock
 test configurations on POSIX filesystems. The image continues to run with its normal user, and the mounts
 remain read-only. The existing Docker topology and storage-lock tests exercise these configurations.
 

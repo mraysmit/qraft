@@ -40,7 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ReadinessPolicyTest {
     @Test
     void requiresRunningRegisteredConvergedAndFreshContact() {
-        MutableClock clock = new MutableClock(Instant.parse("2026-09-24T12:00:00Z"));
+        MutableClockHelper clock = new MutableClockHelper(Instant.parse("2026-09-24T12:00:00Z"));
         ControllerContactTracker contact = new ControllerContactTracker(clock);
         AtomicBoolean running = new AtomicBoolean(true);
         AtomicBoolean registered = new AtomicBoolean(false);
@@ -66,7 +66,7 @@ class ReadinessPolicyTest {
 
     @Test
     void noServiceAgentIsReadyAfterNodeRegistrationAndFreshContact() {
-        MutableClock clock = new MutableClock(Instant.parse("2026-09-24T12:00:00Z"));
+        MutableClockHelper clock = new MutableClockHelper(Instant.parse("2026-09-24T12:00:00Z"));
         ControllerContactTracker contact = new ControllerContactTracker(clock);
         AtomicBoolean registered = new AtomicBoolean(true);
         contact.recordSuccessfulContact();
@@ -78,7 +78,7 @@ class ReadinessPolicyTest {
 
     @Test
     void failingRequiredChecksWithdrawReadinessUntilTheyRecover() {
-        MutableClock clock = new MutableClock(Instant.parse("2026-09-26T12:00:00Z"));
+        MutableClockHelper clock = new MutableClockHelper(Instant.parse("2026-09-26T12:00:00Z"));
         ControllerContactTracker contact = new ControllerContactTracker(clock);
         contact.recordSuccessfulContact();
         AtomicBoolean checksSatisfied = new AtomicBoolean(false);
@@ -90,10 +90,11 @@ class ReadinessPolicyTest {
         assertTrue(policy.isReady());
     }
 
-    private static final class MutableClock extends Clock {
+    /** Test clock helper that lets the enclosing tests advance time explicitly. */
+    private static final class MutableClockHelper extends Clock {
         private Instant instant;
 
-        private MutableClock(Instant instant) { this.instant = instant; }
+        private MutableClockHelper(Instant instant) { this.instant = instant; }
         void advance(Duration duration) { instant = instant.plus(duration); }
         @Override public ZoneId getZone() { return ZoneOffset.UTC; }
         @Override public Clock withZone(ZoneId zone) { return this; }

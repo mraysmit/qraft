@@ -28,7 +28,7 @@ import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
-import dev.mars.qraft.testing.fault.IntentionalErrors;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,9 +43,9 @@ import java.util.function.BiFunction;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
-import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
-import static dev.mars.qraft.controller.raft.ManualRaftCluster.startAll;
-import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE;
+import static dev.mars.qraft.controller.raft.ManualRaftClusterFixture.await;
+import static dev.mars.qraft.controller.raft.ManualRaftClusterFixture.startAll;
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -64,22 +64,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 class RaftNodeServerIdentityTest {
-    private static final String LEADER_ID = ManualRaftCluster.serverIdOf("node1");
+    private static final String LEADER_ID = ManualRaftClusterFixture.serverIdOf("node1");
     private static final Map<String, String> SERVER_IDS = Map.of(
             "node1", LEADER_ID,
-            "node2", ManualRaftCluster.serverIdOf("node2"),
-            "node3", ManualRaftCluster.serverIdOf("node3"));
+            "node2", ManualRaftClusterFixture.serverIdOf("node2"),
+            "node3", ManualRaftClusterFixture.serverIdOf("node3"));
     private static final long SNAPSHOT_THRESHOLD = 5;
     private static final long SNAPSHOT_CHECK_MS = 300;
 
     private JavaRuntime runtime;
-    private ManualRaftCluster cluster;
+    private ManualRaftClusterFixture cluster;
 
     @BeforeEach
     void setUp() {
         runtime = JavaRuntime.create();
-        cluster = new ManualRaftCluster(runtime);
-        InMemoryTransportSimulator.clearAllTransports();
+        cluster = new ManualRaftClusterFixture(runtime);
+        InMemoryTransportSimulatorFixture.clearAllTransports();
     }
 
     @AfterEach
@@ -88,14 +88,14 @@ class RaftNodeServerIdentityTest {
             cluster.close();
         } finally {
             runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            InMemoryTransportSimulator.clearAllTransports();
+            InMemoryTransportSimulatorFixture.clearAllTransports();
         }
     }
 
     @Test
     void aNodeReportsTheServerIdItWasBuiltWith() throws Exception {
         RaftNode node = cluster.add(cluster.unconfiguredBuilder("node1", Set.of("node1"),
-                new InMemoryTransportSimulator("node1"), new QraftStateStore(), RaftNodeMode.volatileMode())
+                new InMemoryTransportSimulatorFixture("node1"), new QraftStateStore(), RaftNodeMode.volatileMode())
                 .serverId(LEADER_ID));
         await(node.start());
 
@@ -106,9 +106,9 @@ class RaftNodeServerIdentityTest {
     @Test
     void aNodeBuiltWithoutAServerIdGetsItsOwnUuid() {
         RaftNode first = cluster.add(cluster.unconfiguredBuilder("node1", Set.of("node1"),
-                new InMemoryTransportSimulator("node1"), new QraftStateStore(), RaftNodeMode.volatileMode()));
+                new InMemoryTransportSimulatorFixture("node1"), new QraftStateStore(), RaftNodeMode.volatileMode()));
         RaftNode second = cluster.add(cluster.unconfiguredBuilder("node2", Set.of("node2"),
-                new InMemoryTransportSimulator("node2"), new QraftStateStore(), RaftNodeMode.volatileMode()));
+                new InMemoryTransportSimulatorFixture("node2"), new QraftStateStore(), RaftNodeMode.volatileMode()));
 
         assertEquals(first.getServerId(), UUID.fromString(first.getServerId()).toString());
         assertNotEquals(first.getServerId(), second.getServerId());
@@ -116,14 +116,14 @@ class RaftNodeServerIdentityTest {
 
     @Test
     void everyRequestAndResponseNamesItsSendersServerId() throws Exception {
-        IntentionalErrors.expect(RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(RAFT_PEER_UNREACHABLE);
         Set<String> members = Set.of("node1", "node2", "node3");
-        RecordingTransport leaderTransport = new RecordingTransport(new InMemoryTransportSimulator("node1"));
+        RecordingTransportFixture leaderTransport = new RecordingTransportFixture(new InMemoryTransportSimulatorFixture("node1"));
         RaftNode leader = snapshottingNode("node1", members, leaderTransport);
-        RaftNode node2 = snapshottingNode("node2", members, new InMemoryTransportSimulator("node2"));
-        RaftNode node3 = snapshottingNode("node3", members, new InMemoryTransportSimulator("node3"));
+        RaftNode node2 = snapshottingNode("node2", members, new InMemoryTransportSimulatorFixture("node2"));
+        RaftNode node3 = snapshottingNode("node3", members, new InMemoryTransportSimulatorFixture("node3"));
         // node3 misses the entries the leader compacts, so it can only catch up by installing the snapshot.
-        InMemoryTransportSimulator.createPartition(Set.of("node1", "node2"), Set.of("node3"));
+        InMemoryTransportSimulatorFixture.createPartition(Set.of("node1", "node2"), Set.of("node3"));
         startAll(leader, node2, node3);
         cluster.elect(leader);
         for (int i = 0; i < 8; i++) {
@@ -131,7 +131,7 @@ class RaftNodeServerIdentityTest {
         }
         cluster.timers(leader).firePeriodic(SNAPSHOT_CHECK_MS);
         awaitTrue(() -> leader.getSnapshotLastIndex() >= SNAPSHOT_THRESHOLD, "the leader compacts its log");
-        InMemoryTransportSimulator.healPartitions();
+        InMemoryTransportSimulatorFixture.healPartitions();
         cluster.heartbeatUntil(leader, () -> node3.getSnapshotLastIndex() > 0, "node3 installs the snapshot");
 
         // node3 answers after installing, so its reply may reach the leader just after the condition above held.
@@ -164,7 +164,7 @@ class RaftNodeServerIdentityTest {
     @Test
     void aRequestMeantForAnotherServerIdIsRefusedWithoutChangingAnything() throws Exception {
         RaftNode follower = cluster.add(cluster.builder("node2", Set.of("node1", "node2"),
-                new InMemoryTransportSimulator("node2"), new QraftStateStore(), RaftNodeMode.volatileMode()));
+                new InMemoryTransportSimulatorFixture("node2"), new QraftStateStore(), RaftNodeMode.volatileMode()));
         await(follower.start());
         long term = follower.getCurrentTerm();
         long lastIndex = follower.getLastLogIndex();
@@ -175,7 +175,7 @@ class RaftNodeServerIdentityTest {
                 .setTerm(term + 3).setLeaderId("node1").setLeaderServerId(LEADER_ID)
                 .setTargetServerId("another-server").setLastIncludedIndex(3).setLastIncludedTerm(1)
                 .setChunkIndex(0).setTotalChunks(1)
-                .setData(ByteString.copyFrom(ManualRaftCluster.snapshotOf(Set.of("node1", "node2"), new byte[0])))
+                .setData(ByteString.copyFrom(ManualRaftClusterFixture.snapshotOf(Set.of("node1", "node2"), new byte[0])))
                 .setDone(true).build()));
 
         assertFalse(append.getSuccess());
@@ -194,7 +194,7 @@ class RaftNodeServerIdentityTest {
     void refusalsAlsoNameTheRespondersServerId() throws Exception {
         String followerId = SERVER_IDS.get("node2");
         RaftNode follower = cluster.add(cluster.builder("node2", Set.of("node1", "node2"),
-                new InMemoryTransportSimulator("node2"), new QraftStateStore(), RaftNodeMode.volatileMode()));
+                new InMemoryTransportSimulatorFixture("node2"), new QraftStateStore(), RaftNodeMode.volatileMode()));
         await(follower.start());
         assertTrue(await(follower.handleAppendEntriesRequest(append(2, 0))).getSuccess(), "node2 follows in term 2");
 
@@ -222,7 +222,7 @@ class RaftNodeServerIdentityTest {
     }
 
     private RaftNode snapshottingNode(String nodeId, Set<String> members, RaftTransport transport) throws Exception {
-        TestRaftStorage storage = new TestRaftStorage();
+        TestRaftStorageFixture storage = new TestRaftStorageFixture();
         storage.open(null).get(10, TimeUnit.SECONDS);
         return cluster.add(cluster.builder(nodeId, members, transport, new QraftStateStore(),
                         RaftNodeMode.durable(storage, storage))
@@ -251,13 +251,17 @@ class RaftNodeServerIdentityTest {
     /** A message the recorded node sent to {@code peer}, or received from it. */
     private record Exchange(String peer, Object message) { }
 
-    /** Delegates to another transport, recording each request as it is sent and each response as it arrives. */
-    private static final class RecordingTransport implements RaftTransport {
+    /**
+     * Test transport fixture that records peer exchanges for server-identity assertions.
+     *
+     * <p>Delegates to another transport, recording each request as it is sent and each response as it arrives.
+     */
+    private static final class RecordingTransportFixture implements RaftTransport {
         private final RaftTransport delegate;
         private final List<Exchange> sent = new CopyOnWriteArrayList<>();
         private final List<Exchange> answered = new CopyOnWriteArrayList<>();
 
-        private RecordingTransport(RaftTransport delegate) {
+        private RecordingTransportFixture(RaftTransport delegate) {
             this.delegate = delegate;
         }
 

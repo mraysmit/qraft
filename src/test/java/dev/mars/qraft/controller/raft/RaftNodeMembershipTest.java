@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.testing.fault.IntentionalErrors;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 
 import dev.mars.qraft.controller.raft.RaftConfiguration.Server;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
@@ -34,8 +34,8 @@ import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
-import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
-import static dev.mars.qraft.controller.raft.ManualRaftCluster.serverIdOf;
+import static dev.mars.qraft.controller.raft.ManualRaftClusterFixture.await;
+import static dev.mars.qraft.controller.raft.ManualRaftClusterFixture.serverIdOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -60,7 +60,7 @@ class RaftNodeMembershipTest {
     private static final Server D = new Server(serverIdOf("d"), "d", "d", false);
 
     private JavaRuntime runtime;
-    private ManualRaftCluster cluster;
+    private ManualRaftClusterFixture cluster;
     private RaftNode a;
     private RaftNode b;
     private RaftNode c;
@@ -68,12 +68,12 @@ class RaftNodeMembershipTest {
     @BeforeEach
     void setUp() throws Exception {
         runtime = JavaRuntime.create();
-        cluster = new ManualRaftCluster(runtime);
-        InMemoryTransportSimulator.clearAllTransports();
+        cluster = new ManualRaftClusterFixture(runtime);
+        InMemoryTransportSimulatorFixture.clearAllTransports();
         a = node("a");
         b = node("b");
         c = node("c");
-        ManualRaftCluster.startAll(a, b, c);
+        ManualRaftClusterFixture.startAll(a, b, c);
     }
 
     @AfterEach
@@ -82,13 +82,13 @@ class RaftNodeMembershipTest {
             cluster.close();
         } finally {
             runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            InMemoryTransportSimulator.clearAllTransports();
+            InMemoryTransportSimulatorFixture.clearAllTransports();
         }
     }
 
     @Test
     void aJoiningServerIsAddedAsANonVoter() throws Exception {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
         leadWithACommit();
 
         assertEquals(JoinResult.JOINED, await(a.admit(D)));
@@ -102,7 +102,7 @@ class RaftNodeMembershipTest {
 
         assertEquals(JoinResult.ALREADY_MEMBER, await(a.admit(new Server(serverIdOf("b"), "b", "b", false))));
 
-        assertEquals(Optional.of(ManualRaftCluster.configurationOf(MEMBERS)), a.getConfiguration());
+        assertEquals(Optional.of(ManualRaftClusterFixture.configurationOf(MEMBERS)), a.getConfiguration());
     }
 
     @Test
@@ -123,7 +123,7 @@ class RaftNodeMembershipTest {
                 () -> await(a.admit(new Server(serverIdOf("c"), "c", "b", false))));
         assertRefused(IllegalArgumentException.class, "configured as c",
                 () -> await(a.admit(new Server(serverIdOf("c"), "renamed", "c", false))));
-        assertEquals(Optional.of(ManualRaftCluster.configurationOf(MEMBERS)), a.getConfiguration());
+        assertEquals(Optional.of(ManualRaftClusterFixture.configurationOf(MEMBERS)), a.getConfiguration());
     }
 
     @Test
@@ -132,7 +132,7 @@ class RaftNodeMembershipTest {
         Server wipedC = new Server("new-id-of-c", "c", "c", false);
 
         assertRefused(IllegalArgumentException.class, "operator must remove", () -> await(a.admit(wipedC)));
-        assertEquals(Optional.of(ManualRaftCluster.configurationOf(MEMBERS)), a.getConfiguration());
+        assertEquals(Optional.of(ManualRaftClusterFixture.configurationOf(MEMBERS)), a.getConfiguration());
         await(a.removeServer(serverIdOf("c")));
         assertEquals(Optional.of(without("c")), a.getConfiguration());
 
@@ -148,12 +148,12 @@ class RaftNodeMembershipTest {
         assertRefused(IllegalArgumentException.class, "operator must remove",
                 () -> await(a.admit(new Server("new-id", "renamed", "c", false))));
 
-        assertEquals(Optional.of(ManualRaftCluster.configurationOf(MEMBERS)), a.getConfiguration());
+        assertEquals(Optional.of(ManualRaftClusterFixture.configurationOf(MEMBERS)), a.getConfiguration());
     }
 
     @Test
     void anIdleLeaderCanJoinAndRemoveWithoutAClientWrite() throws Exception {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
         cluster.elect(a);
         cluster.heartbeatUntil(a, () -> a.getCommitIndex() >= 2, "leadership no-op commits");
         assertEquals(2, a.getLastLogIndex());
@@ -164,7 +164,7 @@ class RaftNodeMembershipTest {
     @Test
     void anIdleClusterPromotesAJoiningServerWithoutAClientWrite() throws Exception {
         RaftNode d = cluster.add(cluster.unconfiguredBuilder("d", Set.of("a", "d"),
-                new InMemoryTransportSimulator("d"), new QraftStateStore(), RaftNodeMode.volatileMode())
+                new InMemoryTransportSimulatorFixture("d"), new QraftStateStore(), RaftNodeMode.volatileMode())
                 .serverId(serverIdOf("d")));
         await(d.start());
         cluster.elect(a);
@@ -182,7 +182,7 @@ class RaftNodeMembershipTest {
                 .setCandidateId("c").setCandidateServerId(serverIdOf("c"))
                 .setTerm(a.getCurrentTerm() + 1).setLastLogTerm(a.getLastLogTerm())
                 .setLastLogIndex(a.getLastLogIndex()).build();
-        cluster.timers(b).advanceTime(ManualRaftCluster.ELECTION_TIMEOUT_MS - 1);
+        cluster.timers(b).advanceTime(ManualRaftClusterFixture.ELECTION_TIMEOUT_MS - 1);
         assertFalse(await(b.handleVoteRequest(request)).getVoteGranted());
         cluster.timers(b).advanceTime(1);
         assertTrue(await(b.handleVoteRequest(request)).getVoteGranted(), "the minimum timeout releases stickiness");
@@ -190,8 +190,8 @@ class RaftNodeMembershipTest {
 
     @Test
     void aRemovedServerCannotRaiseTheActiveLeadersOrFollowersTerm() throws Exception {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
-        InMemoryTransportSimulator.createPartition(Set.of("a", "b"), Set.of("c"));
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
+        InMemoryTransportSimulatorFixture.createPartition(Set.of("a", "b"), Set.of("c"));
         leadWithACommit();
         await(a.removeServer(serverIdOf("c")));
         cluster.heartbeatUntil(a, () -> b.getConfiguration().equals(a.getConfiguration()), "b learns removal");
@@ -219,14 +219,14 @@ class RaftNodeMembershipTest {
 
     @Test
     void aRemovalThatLeavesTooFewReachableVotersIsRefused() throws Exception {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
         // c never answers this leader.
-        InMemoryTransportSimulator.createPartition(Set.of("a", "b"), Set.of("c"));
+        InMemoryTransportSimulatorFixture.createPartition(Set.of("a", "b"), Set.of("c"));
         leadWithACommit();
 
         assertRefused(IllegalStateException.class, "quorum",
                 () -> await(a.removeServer(serverIdOf("b"))));
-        assertEquals(Optional.of(ManualRaftCluster.configurationOf(MEMBERS)), a.getConfiguration());
+        assertEquals(Optional.of(ManualRaftClusterFixture.configurationOf(MEMBERS)), a.getConfiguration());
 
         await(a.removeServer(serverIdOf("c")));
         assertEquals(Optional.of(without("c")), a.getConfiguration(), "a and b are both of the voters left");
@@ -234,15 +234,15 @@ class RaftNodeMembershipTest {
 
     @Test
     void aNonVoterCanAlwaysBeRemoved() throws Exception {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
-        InMemoryTransportSimulator.createPartition(Set.of("a", "b"), Set.of("c"));
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
+        InMemoryTransportSimulatorFixture.createPartition(Set.of("a", "b"), Set.of("c"));
         leadWithACommit();
         await(a.admit(D));
         cluster.heartbeatUntil(a, () -> a.getCommitIndex() == a.getLastLogIndex(), "d's addition commits");
 
         await(a.removeServer(serverIdOf("d")));
 
-        assertEquals(Optional.of(ManualRaftCluster.configurationOf(MEMBERS)), a.getConfiguration());
+        assertEquals(Optional.of(ManualRaftClusterFixture.configurationOf(MEMBERS)), a.getConfiguration());
     }
 
     @Test
@@ -276,7 +276,7 @@ class RaftNodeMembershipTest {
         assertEquals(Optional.of(without("a")), a.getConfiguration());
         assertTrue(await(a.status()).removed(), "a reports that it has been removed");
         assertEquals(ClusterBootstrap.Outcome.CONFIGURED, await(new ClusterBootstrap(a,
-                InMemoryTransportSimulator.getAllTransports().get("a")).attempt()),
+                InMemoryTransportSimulatorFixture.getAllTransports().get("a")).attempt()),
                 "startup reconciliation must not re-admit an intentionally removed server");
         assertFalse(await(b.status()).removed());
         cluster.elect(b);
@@ -291,7 +291,7 @@ class RaftNodeMembershipTest {
     }
 
     private RaftNode node(String name) {
-        return cluster.add(cluster.builder(name, MEMBERS, new InMemoryTransportSimulator(name),
+        return cluster.add(cluster.builder(name, MEMBERS, new InMemoryTransportSimulatorFixture(name),
                 new QraftStateStore(), RaftNodeMode.volatileMode()));
     }
 
@@ -304,7 +304,7 @@ class RaftNodeMembershipTest {
     }
 
     private static RaftConfiguration without(String name) {
-        return new RaftConfiguration(ManualRaftCluster.configurationOf(MEMBERS).servers().stream()
+        return new RaftConfiguration(ManualRaftClusterFixture.configurationOf(MEMBERS).servers().stream()
                 .filter(server -> !server.name().equals(name)).toList());
     }
 

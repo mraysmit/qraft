@@ -64,8 +64,8 @@ class QraftAgentApplicationTest {
         assertThrows(IllegalArgumentException.class, () -> QraftAgent.launch(configuration,
                 ignored -> {
                     opened.incrementAndGet();
-                    return new TestAgentResource();
-                }, TestAgentResource::start, TestAgentResource::shutdown));
+                    return new TestAgentResourceFixture();
+                }, TestAgentResourceFixture::start, TestAgentResourceFixture::shutdown));
 
         assertEquals(0, opened.get());
     }
@@ -74,12 +74,12 @@ class QraftAgentApplicationTest {
     void failedStartupClosesAcquiredAgentResources() throws Exception {
         Path configuration = validConfiguration();
         RuntimeException expected = new RuntimeException("registration failed");
-        TestAgentResource resource = new TestAgentResource();
+        TestAgentResourceFixture resource = new TestAgentResourceFixture();
         resource.startup = CompletableFuture.failedFuture(expected);
 
         CompletionException actual = assertThrows(CompletionException.class,
                 () -> QraftAgent.launch(configuration, ignored -> resource,
-                        TestAgentResource::start, TestAgentResource::shutdown));
+                        TestAgentResourceFixture::start, TestAgentResourceFixture::shutdown));
 
         assertSame(expected, actual.getCause());
         assertEquals(1, resource.shutdowns.get());
@@ -94,7 +94,8 @@ class QraftAgentApplicationTest {
         return configuration;
     }
 
-    private static final class TestAgentResource {
+    /** Test fixture that supplies controllable agent startup and records shutdown calls for lifecycle assertions. */
+    private static final class TestAgentResourceFixture {
         private CompletableFuture<Boolean> startup = CompletableFuture.completedFuture(true);
         private final AtomicInteger shutdowns = new AtomicInteger();
 

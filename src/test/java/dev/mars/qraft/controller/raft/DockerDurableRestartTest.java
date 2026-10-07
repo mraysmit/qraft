@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.testing.fault.ExpectedDockerErrors;
+import dev.mars.qraft.testing.fault.ExpectedDockerErrorsHelper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Tag;
@@ -53,14 +53,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.1
  */
 @Tag("docker")
-@ExpectedDockerErrors({
-        dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE,
-        dev.mars.qraft.testing.fault.IntentionalError.RAFT_SNAPSHOT_TRANSFER_INTERRUPTED,
-        dev.mars.qraft.testing.fault.IntentionalError.WAL_AMBIGUOUS_CORRUPTION,
-        dev.mars.qraft.testing.fault.IntentionalError.RAFT_RECOVERY_AMBIGUOUS_CORRUPTION,
-        dev.mars.qraft.testing.fault.IntentionalError.CONTROLLER_RECOVERY_AMBIGUOUS_CORRUPTION,
-        dev.mars.qraft.testing.fault.IntentionalError.WAL_DIRECTORY_ALREADY_LOCKED,
-        dev.mars.qraft.testing.fault.IntentionalError.CONTROLLER_STORAGE_ALREADY_LOCKED
+@ExpectedDockerErrorsHelper({
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE,
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_SNAPSHOT_TRANSFER_INTERRUPTED,
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.WAL_AMBIGUOUS_CORRUPTION,
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_RECOVERY_AMBIGUOUS_CORRUPTION,
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.CONTROLLER_RECOVERY_AMBIGUOUS_CORRUPTION,
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.WAL_DIRECTORY_ALREADY_LOCKED,
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.CONTROLLER_STORAGE_ALREADY_LOCKED
 })
 // Each test waits only on bounded conditions, up to about 270 s in all; the method budget exceeds that,
 // so a failure reports the condition that was not met rather than the module's default method timeout.
@@ -83,11 +83,11 @@ class DockerDurableRestartTest {
     private static final HttpClient HTTP = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .build();
-    private static final ComposeContainer CLUSTER = SharedDockerCluster.getThreeNodeCluster();
+    private static final ComposeContainer CLUSTER = SharedDockerClusterFixture.getThreeNodeCluster();
 
     @Test
     void committedCatalogAndTermSurviveWholeClusterRestart() throws Exception {
-        List<String> endpoints = SharedDockerCluster.getNodeEndpoints(CLUSTER, 3);
+        List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(CLUSTER, 3);
         String serviceName = "restart-" + System.nanoTime();
         List<String> serviceIds = List.of(serviceName + "-1", serviceName + "-2", serviceName + "-3");
 
@@ -101,7 +101,7 @@ class DockerDurableRestartTest {
         List<String> serverIdsBeforeRestart = serverIds(endpoints);
         assertEquals(3, Set.copyOf(serverIdsBeforeRestart).size(), "each server has its own ID: " + serverIdsBeforeRestart);
 
-        SharedDockerCluster.restartCluster(CLUSTER, 3);
+        SharedDockerClusterFixture.restartCluster(CLUSTER, 3);
 
         await().atMost(Duration.ofSeconds(90)).until(() -> allNodesReady(endpoints));
         await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
@@ -125,7 +125,7 @@ class DockerDurableRestartTest {
 
     @Test
     void snapshotAndPostSnapshotWalSuffixSurviveWholeClusterRestart() throws Exception {
-        List<String> endpoints = SharedDockerCluster.getNodeEndpoints(CLUSTER, 3);
+        List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(CLUSTER, 3);
         String serviceName = "snapshot-restart-" + System.nanoTime();
         List<String> snapshottedIds = List.of(
                 serviceName + "-1", serviceName + "-2", serviceName + "-3",
@@ -147,7 +147,7 @@ class DockerDurableRestartTest {
         await().atMost(Duration.ofSeconds(30))
                 .until(() -> everyNodeContains(endpoints, serviceName, allIds));
 
-        SharedDockerCluster.restartCluster(CLUSTER, 3);
+        SharedDockerClusterFixture.restartCluster(CLUSTER, 3);
 
         await().atMost(Duration.ofSeconds(90)).until(() -> allNodesReady(endpoints));
         await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
@@ -159,7 +159,7 @@ class DockerDurableRestartTest {
 
     @Test
     void killedFollowerReplaysMissedCommitAfterRestart() throws Exception {
-        List<String> endpoints = SharedDockerCluster.getNodeEndpoints(CLUSTER, 3);
+        List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(CLUSTER, 3);
         await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
         int leaderIndex = leaderIndex(endpoints);
         int followerIndex = (leaderIndex + 1) % endpoints.size();
@@ -167,7 +167,7 @@ class DockerDurableRestartTest {
         String serviceName = "follower-rejoin-" + System.nanoTime();
         String serviceId = serviceName + "-1";
 
-        SharedDockerCluster.killContainer(CLUSTER, followerService);
+        SharedDockerClusterFixture.killContainer(CLUSTER, followerService);
         try {
             registerOnLeader(endpoints, serviceId, serviceName, 8301);
             List<String> liveEndpoints = endpoints.stream()
@@ -176,7 +176,7 @@ class DockerDurableRestartTest {
             await().atMost(Duration.ofSeconds(30))
                     .until(() -> everyNodeContains(liveEndpoints, serviceName, List.of(serviceId)));
         } finally {
-            SharedDockerCluster.startContainer(CLUSTER, followerService);
+            SharedDockerClusterFixture.startContainer(CLUSTER, followerService);
         }
 
         await().atMost(Duration.ofSeconds(60))
@@ -188,20 +188,20 @@ class DockerDurableRestartTest {
 
     @Test
     void killedLeaderIsReplacedAndRejoinsWithCompleteCatalog() throws Exception {
-        List<String> endpoints = SharedDockerCluster.getNodeEndpoints(CLUSTER, 3);
+        List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(CLUSTER, 3);
         await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
         int oldLeaderIndex = leaderIndex(endpoints);
         String oldLeaderService = "controller" + (oldLeaderIndex + 1);
         String serviceName = "leader-rejoin-" + System.nanoTime();
         String serviceId = serviceName + "-1";
 
-        SharedDockerCluster.killContainer(CLUSTER, oldLeaderService);
+        SharedDockerClusterFixture.killContainer(CLUSTER, oldLeaderService);
         try {
             await().atMost(Duration.ofSeconds(60))
                     .until(() -> oneLeaderAmongTwoReachable(endpoints));
             registerOnLeader(endpoints, serviceId, serviceName, 8401);
         } finally {
-            SharedDockerCluster.startContainer(CLUSTER, oldLeaderService);
+            SharedDockerClusterFixture.startContainer(CLUSTER, oldLeaderService);
         }
 
         await().atMost(Duration.ofSeconds(60))
@@ -215,7 +215,7 @@ class DockerDurableRestartTest {
 
     @Test
     void retryAfterLeaderCrashConvergesToOneCatalogInstance() throws Exception {
-        List<String> endpoints = SharedDockerCluster.getNodeEndpoints(CLUSTER, 3);
+        List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(CLUSTER, 3);
         await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
         int oldLeaderIndex = leaderIndex(endpoints);
         String oldLeaderService = "controller" + (oldLeaderIndex + 1);
@@ -234,7 +234,7 @@ class DockerDurableRestartTest {
 
         CompletableFuture<HttpResponse<String>> firstAttempt =
                 HTTP.sendAsync(request, HttpResponse.BodyHandlers.ofString());
-        SharedDockerCluster.killContainer(CLUSTER, oldLeaderService);
+        SharedDockerClusterFixture.killContainer(CLUSTER, oldLeaderService);
         try {
             try {
                 firstAttempt.get(6, TimeUnit.SECONDS);
@@ -245,7 +245,7 @@ class DockerDurableRestartTest {
                     .until(() -> oneLeaderAmongTwoReachable(endpoints));
             registerOnLeader(endpoints, serviceId, serviceName, 8501);
         } finally {
-            SharedDockerCluster.startContainer(CLUSTER, oldLeaderService);
+            SharedDockerClusterFixture.startContainer(CLUSTER, oldLeaderService);
         }
 
         await().atMost(Duration.ofSeconds(60)).until(() -> allNodesReady(endpoints));
@@ -263,9 +263,9 @@ class DockerDurableRestartTest {
      */
     @Test
     void aWipedFollowerRejoinsAsANewServerAndIsNotCountedTowardsACommit() throws Exception {
-        ComposeContainer cluster = SharedDockerCluster.startIsolatedThreeNodeCluster();
+        ComposeContainer cluster = SharedDockerClusterFixture.startIsolatedThreeNodeCluster();
         try {
-            List<String> endpoints = SharedDockerCluster.getNodeEndpoints(cluster, 3);
+            List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(cluster, 3);
             await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
             int leaderIndex = leaderIndex(endpoints);
             int wipedIndex = (leaderIndex + 1) % endpoints.size();
@@ -279,9 +279,9 @@ class DockerDurableRestartTest {
             await().atMost(Duration.ofSeconds(30))
                     .until(() -> everyNodeContains(endpoints, serviceName, List.of(serviceName + "-before")));
 
-            SharedDockerCluster.stopContainer(cluster, wipedService);
-            SharedDockerCluster.wipeDataDirectory(cluster, wipedService);
-            SharedDockerCluster.startContainer(cluster, wipedService);
+            SharedDockerClusterFixture.stopContainer(cluster, wipedService);
+            SharedDockerClusterFixture.wipeDataDirectory(cluster, wipedService);
+            SharedDockerClusterFixture.startContainer(cluster, wipedService);
             await().atMost(Duration.ofSeconds(60)).until(() -> {
                 try {
                     String id = status(endpoints.get(wipedIndex)).path("serverId").asText("");
@@ -291,7 +291,7 @@ class DockerDurableRestartTest {
                 }
             });
 
-            SharedDockerCluster.stopContainer(cluster, otherService);
+            SharedDockerClusterFixture.stopContainer(cluster, otherService);
             long commitBefore = status(leader).path("commitIndex").asLong();
             HttpResponse<String> write;
             try {
@@ -304,7 +304,7 @@ class DockerDurableRestartTest {
                     "the leader and a wiped server are not a majority: " + (write == null ? "timed out" : write.body()));
             assertEquals(commitBefore, status(leader).path("commitIndex").asLong(), "nothing was committed");
 
-            SharedDockerCluster.startContainer(cluster, otherService);
+            SharedDockerClusterFixture.startContainer(cluster, otherService);
             await().atMost(Duration.ofSeconds(60)).until(() -> {
                 try {
                     registerOnLeader(endpoints, serviceName + "-after", serviceName, 8703);
@@ -314,15 +314,15 @@ class DockerDurableRestartTest {
                 }
             });
         } finally {
-            SharedDockerCluster.stopAndCapture(cluster);
+            SharedDockerClusterFixture.stopAndCapture(cluster);
         }
     }
 
     @Test
     void corruptFollowerStaysLiveButUnreadyWhileHealthyQuorumServes() throws Exception {
-        ComposeContainer cluster = SharedDockerCluster.startIsolatedThreeNodeCluster();
+        ComposeContainer cluster = SharedDockerClusterFixture.startIsolatedThreeNodeCluster();
         try {
-            List<String> endpoints = SharedDockerCluster.getNodeEndpoints(cluster, 3);
+            List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(cluster, 3);
             await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
             int leaderIndex = leaderIndex(endpoints);
             int corruptIndex = (leaderIndex + 1) % endpoints.size();
@@ -333,10 +333,10 @@ class DockerDurableRestartTest {
             await().atMost(Duration.ofSeconds(30))
                     .until(() -> everyNodeContains(endpoints, serviceName, List.of(serviceId)));
 
-            SharedDockerCluster.stopContainer(cluster, corruptService);
-            SharedDockerCluster.overwriteVolumeFileByte(
+            SharedDockerClusterFixture.stopContainer(cluster, corruptService);
+            SharedDockerClusterFixture.overwriteVolumeFileByte(
                     cluster, corruptService, "/app/data/raft.log", 0);
-            SharedDockerCluster.startContainer(cluster, corruptService);
+            SharedDockerClusterFixture.startContainer(cluster, corruptService);
 
             List<String> healthyEndpoints = endpoints.stream()
                     .filter(endpoint -> !endpoint.equals(endpoints.get(corruptIndex)))
@@ -355,13 +355,13 @@ class DockerDurableRestartTest {
             String logs = cluster.getContainerByServiceName(corruptService).orElseThrow().getLogs();
             assertTrue(logs.contains("raft.log") && logs.contains("corrupt at byte"), logs);
         } finally {
-            SharedDockerCluster.stopAndCapture(cluster);
+            SharedDockerClusterFixture.stopAndCapture(cluster);
         }
     }
 
     @Test
     void secondContainerCannotOwnAnActiveNodeVolume() throws Exception {
-        List<String> endpoints = SharedDockerCluster.getNodeEndpoints(CLUSTER, 3);
+        List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(CLUSTER, 3);
         await().atMost(Duration.ofSeconds(60)).until(() -> allNodesReady(endpoints));
         await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
         String serviceName = "lock-owner-" + System.nanoTime();
@@ -370,8 +370,8 @@ class DockerDurableRestartTest {
         await().atMost(Duration.ofSeconds(30))
                 .until(() -> everyNodeContains(endpoints, serviceName, List.of(serviceId)));
 
-        SharedDockerCluster.DockerCommandResult contender =
-                SharedDockerCluster.runStorageLockContender(CLUSTER, "controller1");
+        SharedDockerClusterFixture.DockerCommandResult contender =
+                SharedDockerClusterFixture.runStorageLockContender(CLUSTER, "controller1");
 
         assertTrue(contender.exited(), "the contender must stop on its own, not serve the volume: "
                 + contender.output());
@@ -385,7 +385,7 @@ class DockerDurableRestartTest {
 
     @Test
     void partitionedFollowerCatchesUpBySnapshotAndSurvivesRestart() throws Exception {
-        List<String> endpoints = SharedDockerCluster.getNodeEndpoints(CLUSTER, 3);
+        List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(CLUSTER, 3);
         await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
         int leaderIndex = leaderIndex(endpoints);
         int followerIndex = (leaderIndex + 1) % endpoints.size();
@@ -398,7 +398,7 @@ class DockerDurableRestartTest {
         String serviceName = "partition-snapshot-" + System.nanoTime();
         List<String> serviceIds = new ArrayList<>();
 
-        SharedDockerCluster.isolateContainerNetwork(CLUSTER, followerService);
+        SharedDockerClusterFixture.isolateContainerNetwork(CLUSTER, followerService);
         try {
             for (int i = 0; i < 6; i++) {
                 String serviceId = serviceName + "-" + i;
@@ -410,7 +410,7 @@ class DockerDurableRestartTest {
             await().atMost(Duration.ofSeconds(30))
                     .until(() -> maximumSnapshotIndex(majorityEndpoints) > snapshotBefore);
         } finally {
-            SharedDockerCluster.restoreContainerNetwork(CLUSTER, followerService);
+            SharedDockerClusterFixture.restoreContainerNetwork(CLUSTER, followerService);
         }
 
         await().atMost(Duration.ofSeconds(90)).until(() -> allNodesReady(endpoints));
@@ -427,8 +427,8 @@ class DockerDurableRestartTest {
             assertTrue(followerLogs.contains("Snapshot installed: snapshotLastIndex="), diagnostic);
         });
 
-        SharedDockerCluster.stopContainer(CLUSTER, followerService);
-        SharedDockerCluster.startContainer(CLUSTER, followerService);
+        SharedDockerClusterFixture.stopContainer(CLUSTER, followerService);
+        SharedDockerClusterFixture.startContainer(CLUSTER, followerService);
         await().atMost(Duration.ofSeconds(60))
                 .until(() -> nodeReady(endpoints.get(followerIndex)));
         await().atMost(Duration.ofSeconds(30))

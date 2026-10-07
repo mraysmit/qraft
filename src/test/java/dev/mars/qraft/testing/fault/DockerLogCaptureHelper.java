@@ -34,8 +34,12 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Captures, archives, audits, and reprints Docker output while a Docker test class is running. */
-public final class DockerLogCapture {
+/**
+ * Test logging helper used by {@link DockerLogExtensionHelper} to capture, archive,
+ * audit, and reprint container output while a Docker test class is running.
+ * Reports unexpected errors so the extension can fail the calling test class.
+ */
+public final class DockerLogCaptureHelper {
     private static final Object LOCK = new Object();
     private static final Pattern ANSI = Pattern.compile("\\u001B\\[[;\\d]*m");
     private static final Pattern EVENT = Pattern.compile(
@@ -46,20 +50,20 @@ public final class DockerLogCapture {
     private static final Map<String, String> PREVIOUS_OUTPUT = new HashMap<>();
 
     private static String owner;
-    private static Set<IntentionalError> declared = Set.of();
+    private static Set<IntentionalErrorFixture> declared = Set.of();
     private static final Map<String, StringBuilder> captured = new LinkedHashMap<>();
 
-    private DockerLogCapture() {
+    private DockerLogCaptureHelper() {
     }
 
     /** Starts collection for one Docker test class. Previously drained container output remains remembered. */
-    public static void beginClass(String classOwner, Set<IntentionalError> expected) {
+    public static void beginClass(String classOwner, Set<IntentionalErrorFixture> expected) {
         synchronized (LOCK) {
             if (owner != null) throw new IllegalStateException("Docker log capture already belongs to " + owner);
             owner = safeName(classOwner);
             declared = expected.isEmpty() ? Set.of() : EnumSet.copyOf(expected);
-            for (IntentionalError error : declared) {
-                if (error.kind() != IntentionalError.Kind.INTENTIONAL_ERROR) {
+            for (IntentionalErrorFixture error : declared) {
+                if (error.kind() != IntentionalErrorFixture.Kind.INTENTIONAL_ERROR) {
                     throw new IllegalArgumentException("Docker logs cannot declare injected failure " + error);
                 }
             }
@@ -89,7 +93,7 @@ public final class DockerLogCapture {
         synchronized (LOCK) {
             if (owner == null) return List.of("Docker log capture ended without a running Docker class");
             List<String> problems = new ArrayList<>();
-            Set<IntentionalError> observed = EnumSet.noneOf(IntentionalError.class);
+            Set<IntentionalErrorFixture> observed = EnumSet.noneOf(IntentionalErrorFixture.class);
             List<ExternalError> recognised = new ArrayList<>();
             Path classDirectory = logRoot.resolve(owner);
             try {
@@ -105,7 +109,7 @@ public final class DockerLogCapture {
                             .map(problem -> entry.getKey() + ": " + problem).toList());
                     audit.recognised().forEach(event -> observed.add(event.error()));
                 }
-                observed.forEach(IntentionalErrors::expect);
+                observed.forEach(IntentionalErrorsHelper::expect);
                 recognised.forEach(event -> LoggerFactory.getLogger(event.logger()).error(event.message()));
             } catch (IOException error) {
                 problems.add("could not archive Docker logs for " + owner + ": " + error.getMessage());
@@ -119,7 +123,7 @@ public final class DockerLogCapture {
     }
 
     /** Parses and checks one block of container output. */
-    static Audit audit(String output, Set<IntentionalError> expected) {
+    static Audit audit(String output, Set<IntentionalErrorFixture> expected) {
         List<ExternalError> recognised = new ArrayList<>();
         List<String> problems = new ArrayList<>();
         for (String rawLine : output.lines().toList()) {
@@ -128,7 +132,7 @@ public final class DockerLogCapture {
             if (event.matches() && "ERROR".equals(event.group("level"))) {
                 String logger = event.group("logger");
                 String message = event.group("message");
-                IntentionalError match = expected.stream()
+                IntentionalErrorFixture match = expected.stream()
                         .filter(error -> error.matches(logger, Level.ERROR, message))
                         .findFirst().orElse(null);
                 if (match == null) problems.add("undeclared container " + line);
@@ -144,7 +148,7 @@ public final class DockerLogCapture {
         return value.replaceAll("[^A-Za-z0-9._-]", "_");
     }
 
-    record ExternalError(IntentionalError error, String logger, String message, String originalLine) {
+    record ExternalError(IntentionalErrorFixture error, String logger, String message, String originalLine) {
     }
 
     record Audit(List<ExternalError> recognised, List<String> problems) {

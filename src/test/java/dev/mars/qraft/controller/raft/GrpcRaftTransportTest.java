@@ -82,7 +82,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class GrpcRaftTransportTest {
 
     private JavaRuntime runtime;
-    private ManualRaftCluster cluster;
+    private ManualRaftClusterFixture cluster;
     private GrpcRaftServer targetServer;
     private RaftNode targetNode;
     private int targetPort;
@@ -92,7 +92,7 @@ class GrpcRaftTransportTest {
     @BeforeEach
     void setUp() throws Exception {
         runtime = JavaRuntime.create();
-        cluster = new ManualRaftCluster(runtime);
+        cluster = new ManualRaftClusterFixture(runtime);
         // On manual timers the target never elects itself, so it stays a follower in term 0 with no vote until a
         // request changes that, and every decision it returns is the same on every run.
         targetNode = node("target");
@@ -128,9 +128,9 @@ class GrpcRaftTransportTest {
 
     /** A started sole-member node on manual timers, stopped after the test. */
     private RaftNode node(String nodeId) throws Exception {
-        RaftNode node = cluster.add(cluster.builder(nodeId, Set.of(nodeId), new InMemoryTransportSimulator(nodeId),
+        RaftNode node = cluster.add(cluster.builder(nodeId, Set.of(nodeId), new InMemoryTransportSimulatorFixture(nodeId),
                 new QraftStateStore(), RaftNodeMode.volatileMode()));
-        ManualRaftCluster.await(node.start());
+        ManualRaftClusterFixture.await(node.start());
         return node;
     }
 

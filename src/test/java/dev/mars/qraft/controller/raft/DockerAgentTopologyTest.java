@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.testing.fault.ExpectedDockerErrors;
+import dev.mars.qraft.testing.fault.ExpectedDockerErrorsHelper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Tag;
@@ -35,11 +35,11 @@ import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static dev.mars.qraft.controller.raft.DockerHealthApi.get;
-import static dev.mars.qraft.controller.raft.DockerHealthApi.httpSequence;
-import static dev.mars.qraft.controller.raft.DockerHealthApi.instanceCount;
-import static dev.mars.qraft.controller.raft.DockerHealthApi.leaderIndex;
-import static dev.mars.qraft.controller.raft.DockerHealthApi.passingWithBothChecks;
+import static dev.mars.qraft.controller.raft.DockerHealthApiHelper.get;
+import static dev.mars.qraft.controller.raft.DockerHealthApiHelper.httpSequence;
+import static dev.mars.qraft.controller.raft.DockerHealthApiHelper.instanceCount;
+import static dev.mars.qraft.controller.raft.DockerHealthApiHelper.leaderIndex;
+import static dev.mars.qraft.controller.raft.DockerHealthApiHelper.passingWithBothChecks;
 import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -60,9 +60,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
  * @version 1.0
  */
 @Tag("docker")
-@ExpectedDockerErrors({
-        dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE,
-        dev.mars.qraft.testing.fault.IntentionalError.RAFT_SNAPSHOT_TRANSFER_INTERRUPTED
+@ExpectedDockerErrorsHelper({
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE,
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_SNAPSHOT_TRANSFER_INTERRUPTED
 })
 // Each test starts its own cluster and then waits on bounded conditions; the method budget exceeds their sum.
 @Timeout(value = 10, unit = TimeUnit.MINUTES)
@@ -74,17 +74,17 @@ class DockerAgentTopologyTest {
 
     @Test
     void aSecondAgentWithTheSameServiceIdRegistersItsOwnInstanceThroughAnOfflineThenFollowerSeed() throws Exception {
-        ComposeContainer cluster = SharedDockerCluster.startIsolatedThreeNodeClusterWithAgent();
+        ComposeContainer cluster = SharedDockerClusterFixture.startIsolatedThreeNodeClusterWithAgent();
         try {
-            List<String> servers = SharedDockerCluster.getNodeEndpoints(cluster, 3);
+            List<String> servers = SharedDockerClusterFixture.getNodeEndpoints(cluster, 3);
             await().atMost(Duration.ofSeconds(60)).until(() -> leaderIndex(servers) >= 0
-                    && servers.stream().allMatch(DockerHealthApi::passingWithBothChecks));
+                    && servers.stream().allMatch(DockerHealthApiHelper::passingWithBothChecks));
             int leader = leaderIndex(servers);
             int follower = (leader + 1) % 3;
             List<String> seeds = List.of("http://offline-seed:8080", "http://controller" + (follower + 1) + ":8080",
                     "http://controller" + (leader + 1) + ":8080");
 
-            try (SharedDockerCluster.DetachedAgent second = SharedDockerCluster.startDetachedAgent(
+            try (SharedDockerClusterFixture.DetachedAgent second = SharedDockerClusterFixture.startDetachedAgent(
                     cluster, "agent2", clientJson(SECOND_AGENT, "agent2", seeds))) {
                 await().atMost(Duration.ofSeconds(60)).until(() -> servers.stream()
                         .allMatch(server -> Set.of(FIRST_AGENT, SECOND_AGENT).equals(webNodes(server))));
@@ -94,21 +94,21 @@ class DockerAgentTopologyTest {
                 await().atMost(Duration.ofSeconds(60)).until(() -> servers.stream()
                         .allMatch(server -> Set.of(FIRST_AGENT).equals(webNodes(server))));
                 await().atMost(Duration.ofSeconds(30)).until(() ->
-                        servers.stream().allMatch(DockerHealthApi::passingWithBothChecks));
+                        servers.stream().allMatch(DockerHealthApiHelper::passingWithBothChecks));
             }
         } finally {
-            SharedDockerCluster.stopAndCapture(cluster);
+            SharedDockerClusterFixture.stopAndCapture(cluster);
         }
     }
 
     @Test
     void anAgentKeepsPublishingWhileTheRunningLeaderIsCutOff() {
-        ComposeContainer cluster = SharedDockerCluster.startIsolatedThreeNodeClusterWithAgent();
+        ComposeContainer cluster = SharedDockerClusterFixture.startIsolatedThreeNodeClusterWithAgent();
         String cutOff = null;
         try {
-            List<String> servers = SharedDockerCluster.getNodeEndpoints(cluster, 3);
+            List<String> servers = SharedDockerClusterFixture.getNodeEndpoints(cluster, 3);
             await().atMost(Duration.ofSeconds(60)).until(() -> leaderIndex(servers) >= 0
-                    && servers.stream().allMatch(DockerHealthApi::passingWithBothChecks));
+                    && servers.stream().allMatch(DockerHealthApiHelper::passingWithBothChecks));
             int leader = leaderIndex(servers);
             long sequenceBefore = httpSequence(servers.get(leader));
             List<String> majority = new ArrayList<>(servers);
@@ -116,7 +116,7 @@ class DockerAgentTopologyTest {
 
             // The old leader keeps running: it is disconnected, not stopped or restarted.
             cutOff = "controller" + (leader + 1);
-            SharedDockerCluster.partitionContainer(cluster, cutOff);
+            SharedDockerClusterFixture.partitionContainer(cluster, cutOff);
 
             // Sequence numbers are seeded from the agent's clock in milliseconds, so a sequence three seconds
             // past the one before the partition shows publications continuing through it.
@@ -125,7 +125,7 @@ class DockerAgentTopologyTest {
             String isolated = cutOff;
             AtomicBoolean sawExpiry = new AtomicBoolean();
             await().atMost(Duration.ofSeconds(90)).pollInterval(Duration.ofMillis(200)).until(() -> {
-                if (majority.stream().anyMatch(DockerHealthApi::anyCheckExpired)) sawExpiry.set(true);
+                if (majority.stream().anyMatch(DockerHealthApiHelper::anyCheckExpired)) sawExpiry.set(true);
                 return !"LEADER".equals(ownState(cluster, isolated)) && leaderIndex(majority) >= 0
                         && majority.stream().allMatch(server ->
                                 passingWithBothChecks(server) && httpSequence(server) > sequenceBefore + 3_000);
@@ -133,24 +133,24 @@ class DockerAgentTopologyTest {
             assertFalse(sawExpiry.get(), "the agent's publications reach the majority throughout the partition");
 
             long majorityAtHeal = httpSequence(majority.getFirst());
-            SharedDockerCluster.restoreContainerNetwork(cluster, cutOff);
+            SharedDockerClusterFixture.restoreContainerNetwork(cluster, cutOff);
             cutOff = null;
             await().atMost(Duration.ofSeconds(90)).until(() -> leaderIndex(servers) >= 0
                     && servers.stream().allMatch(server -> passingWithBothChecks(server) && instanceCount(server) == 1)
                     && httpSequence(servers.get(leader)) >= majorityAtHeal);
         } finally {
-            if (cutOff != null) SharedDockerCluster.restoreContainerNetwork(cluster, cutOff);
-            SharedDockerCluster.stopAndCapture(cluster);
+            if (cutOff != null) SharedDockerClusterFixture.restoreContainerNetwork(cluster, cutOff);
+            SharedDockerClusterFixture.stopAndCapture(cluster);
         }
     }
 
     @Test
     void restartingEveryServerInTurnNeverExpiresOrRemovesTheAgentsService() {
-        ComposeContainer cluster = SharedDockerCluster.startIsolatedThreeNodeClusterWithAgent();
+        ComposeContainer cluster = SharedDockerClusterFixture.startIsolatedThreeNodeClusterWithAgent();
         try {
-            List<String> servers = SharedDockerCluster.getNodeEndpoints(cluster, 3);
+            List<String> servers = SharedDockerClusterFixture.getNodeEndpoints(cluster, 3);
             await().atMost(Duration.ofSeconds(60)).until(() -> leaderIndex(servers) >= 0
-                    && servers.stream().allMatch(DockerHealthApi::passingWithBothChecks));
+                    && servers.stream().allMatch(DockerHealthApiHelper::passingWithBothChecks));
             AtomicBoolean sawLoss = new AtomicBoolean();
 
             for (int restarted = 0; restarted < servers.size(); restarted++) {
@@ -158,29 +158,29 @@ class DockerAgentTopologyTest {
                 List<String> running = new ArrayList<>(servers);
                 running.remove(restarted);
 
-                SharedDockerCluster.stopContainer(cluster, service);
+                SharedDockerClusterFixture.stopContainer(cluster, service);
                 await().atMost(Duration.ofSeconds(60)).pollInterval(Duration.ofMillis(200)).until(() -> {
                     watchForLoss(running, sawLoss);
-                    return leaderIndex(running) >= 0 && running.stream().allMatch(DockerHealthApi::passingWithBothChecks);
+                    return leaderIndex(running) >= 0 && running.stream().allMatch(DockerHealthApiHelper::passingWithBothChecks);
                 });
-                SharedDockerCluster.startContainer(cluster, service);
+                SharedDockerClusterFixture.startContainer(cluster, service);
                 await().atMost(Duration.ofSeconds(90)).pollInterval(Duration.ofMillis(200)).until(() -> {
                     watchForLoss(running, sawLoss);
-                    return leaderIndex(servers) >= 0 && servers.stream().allMatch(DockerHealthApi::passingWithBothChecks);
+                    return leaderIndex(servers) >= 0 && servers.stream().allMatch(DockerHealthApiHelper::passingWithBothChecks);
                 });
             }
 
             assertFalse(sawLoss.get(), "no running server ever showed the service expired or removed");
             servers.forEach(server -> assertEquals(1, instanceCount(server), server));
         } finally {
-            SharedDockerCluster.stopAndCapture(cluster);
+            SharedDockerClusterFixture.stopAndCapture(cluster);
         }
     }
 
     /** A server's own Raft state, read inside its container because its published port may be cut off. */
     private static String ownState(ComposeContainer cluster, String service) {
         try {
-            String status = SharedDockerCluster.execInService(cluster, service, "curl", "-s", "--max-time", "2",
+            String status = SharedDockerClusterFixture.execInService(cluster, service, "curl", "-s", "--max-time", "2",
                     "http://127.0.0.1:8080/raft/status");
             return new ObjectMapper().readTree(status).path("state").asText();
         } catch (Exception unanswered) {
@@ -191,7 +191,7 @@ class DockerAgentTopologyTest {
     /** Records whether any running server shows the agent's checks expired or its instance gone. */
     private static void watchForLoss(List<String> running, AtomicBoolean sawLoss) {
         for (String server : running) {
-            if (DockerHealthApi.anyCheckExpired(server) || instanceCount(server) == 0) sawLoss.set(true);
+            if (DockerHealthApiHelper.anyCheckExpired(server) || instanceCount(server) == 0) sawLoss.set(true);
         }
     }
 

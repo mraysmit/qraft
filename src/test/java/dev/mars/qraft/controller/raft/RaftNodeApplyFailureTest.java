@@ -33,8 +33,8 @@ import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.controller.state.RaftCommand;
 import dev.mars.qraft.controller.state.RaftCommandResult;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
-import dev.mars.qraft.testing.fault.InjectedFault;
-import dev.mars.qraft.testing.fault.IntentionalErrors;
+import dev.mars.qraft.testing.fault.InjectedFaultFixture;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -44,8 +44,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
-import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_FENCED_OPERATION;
-import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_STATE_MACHINE_APPLY_FAILURE;
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_FENCED_OPERATION;
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_STATE_MACHINE_APPLY_FAILURE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -68,7 +68,7 @@ class RaftNodeApplyFailureTest {
 
     private JavaRuntime runtime;
     private RaftNode node;
-    private PoisonedStateMachine state;
+    private PoisonedStateMachineFixture state;
 
     @AfterEach
     void tearDown() throws Exception {
@@ -78,16 +78,16 @@ class RaftNodeApplyFailureTest {
 
     @Test
     void aLeaderThatCannotApplyACommittedEntryFencesAndKeepsItsAppliedIndex() throws Exception {
-        IntentionalErrors.expect(RAFT_FENCED_OPERATION, 1);
+        IntentionalErrorsHelper.expect(RAFT_FENCED_OPERATION, 1);
         start(Set.of("node-1"));
         awaitLeader();
         submit("before").get(10, TimeUnit.SECONDS);
         long appliedBefore = status().lastApplied();
 
         ExecutionException failed = assertThrows(ExecutionException.class,
-                () -> submit(PoisonedStateMachine.POISON).get(10, TimeUnit.SECONDS));
+                () -> submit(PoisonedStateMachineFixture.POISON).get(10, TimeUnit.SECONDS));
 
-        assertSame(PoisonedStateMachine.FAILURE, failed.getCause(), "the client learns why the entry failed");
+        assertSame(PoisonedStateMachineFixture.FAILURE, failed.getCause(), "the client learns why the entry failed");
         RaftStatus status = status();
         assertTrue(status.fenced(), "a node that cannot apply a committed entry must not keep serving");
         assertEquals(appliedBefore, status.lastApplied(), "the entry that failed is not counted as applied");
@@ -99,12 +99,12 @@ class RaftNodeApplyFailureTest {
 
     @Test
     void aFollowerStopsApplyingAtTheEntryItCannotApply() throws Exception {
-        IntentionalErrors.expect(RAFT_FENCED_OPERATION, 1);
+        IntentionalErrorsHelper.expect(RAFT_FENCED_OPERATION, 1);
         start(Set.of("node-1", "leader"));
         AppendEntriesResponse response = node.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
                         .setTerm(1).setLeaderId("leader").setPrevLogIndex(1).setPrevLogTerm(0).setLeaderCommit(4)
                         .addEntries(entry(2, "first"))
-                        .addEntries(entry(3, PoisonedStateMachine.POISON))
+                        .addEntries(entry(3, PoisonedStateMachineFixture.POISON))
                         .addEntries(entry(4, "third"))
                         .build())
                 .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
@@ -126,11 +126,11 @@ class RaftNodeApplyFailureTest {
 
     private void start(Set<String> members) throws Exception {
         runtime = JavaRuntime.create();
-        state = new PoisonedStateMachine();
+        state = new PoisonedStateMachineFixture();
         node = RaftNode.builder()
-                .runtime(runtime).nodeId("node-1").serverId(ManualRaftCluster.serverIdOf("node-1"))
-                .initialConfiguration(ManualRaftCluster.configurationOf(members))
-                .clusterNodes(members).transport(new SilentTransport())
+                .runtime(runtime).nodeId("node-1").serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
+                .initialConfiguration(ManualRaftClusterFixture.configurationOf(members))
+                .clusterNodes(members).transport(new SilentTransportFixture())
                 .stateMachine(state).commandCodec(CODEC)
                 .mode(RaftNodeMode.volatileMode()).snapshotEnabled(false)
                 .electionTimeout(members.size() == 1 ? 30 : 60_000).heartbeatInterval(60_000)
@@ -157,11 +157,15 @@ class RaftNodeApplyFailureTest {
         return LogEntry.newBuilder().setIndex(index).setTerm(1).setData(ByteString.copyFrom(data)).build();
     }
 
-    /** Applies commands to a real store, except that a put of {@link #POISON} throws. */
-    private static final class PoisonedStateMachine implements RaftLogApplicator {
+    /**
+     * Test state-machine fixture that injects application failures to exercise node failure handling.
+     *
+     * <p>Applies commands to a real store, except that a put of {@link #POISON} throws.
+     */
+    private static final class PoisonedStateMachineFixture implements RaftLogApplicator {
         static final String POISON = "poison";
         static final IllegalStateException FAILURE = new IllegalStateException("cannot apply the poison command",
-                new InjectedFault(RAFT_STATE_MACHINE_APPLY_FAILURE, "cannot apply the poison command"));
+                new InjectedFaultFixture(RAFT_STATE_MACHINE_APPLY_FAILURE, "cannot apply the poison command"));
 
         final QraftStateStore store = new QraftStateStore();
 
@@ -181,8 +185,12 @@ class RaftNodeApplyFailureTest {
         @Override public void reset() { store.reset(); }
     }
 
-    /** Never answers; the tests drive the node directly. */
-    private static final class SilentTransport implements RaftTransport {
+    /**
+     * Test transport fixture for application-failure tests that do not require peer communication.
+     *
+     * <p>Never answers; the tests drive the node directly.
+     */
+    private static final class SilentTransportFixture implements RaftTransport {
         @Override public void start(Consumer<RaftMessage> messageHandler) { }
         @Override public void stop() { }
         @Override public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {

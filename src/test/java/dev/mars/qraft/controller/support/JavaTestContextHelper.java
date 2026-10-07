@@ -22,14 +22,15 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
- * Completion latch for asynchronous tests: records the first failure and provides succeeding and
+ * Test helper providing a completion latch for asynchronous controller tests.
+ * Records the first failure and provides succeeding and
  * failing result handlers.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-09
  * @version 1.0
  */
-public final class JavaTestContext {
+public final class JavaTestContextHelper {
     private final CountDownLatch completion = new CountDownLatch(1);
     private volatile Throwable failure;
 

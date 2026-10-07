@@ -46,7 +46,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * its followers reach by decoding the replicated bytes; and that entries are compared by their
  * replicated bytes, so a retransmitted entry whose re-encoding differs does not fence a follower.
  *
- * <p>The cluster runs on manual timers ({@link ManualRaftCluster}): node a is elected by the test, and
+ * <p>The cluster runs on manual timers ({@link ManualRaftClusterFixture}): node a is elected by the test, and
  * followers learn the commit when the test fires a's heartbeat.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
@@ -57,7 +57,7 @@ class RaftNodeAppliesWhatItLogsTest {
     private final Map<String, RaftNode> nodes = new LinkedHashMap<>();
     private final Map<String, QraftStateStore> stores = new LinkedHashMap<>();
     private final JavaRuntime runtime = JavaRuntime.create();
-    private final ManualRaftCluster cluster = new ManualRaftCluster(runtime);
+    private final ManualRaftClusterFixture cluster = new ManualRaftClusterFixture(runtime);
 
     @AfterEach
     void stopCluster() throws Exception {
@@ -65,7 +65,7 @@ class RaftNodeAppliesWhatItLogsTest {
             cluster.close();
         } finally {
             runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            InMemoryTransportSimulator.clearAllTransports();
+            InMemoryTransportSimulatorFixture.clearAllTransports();
         }
     }
 
@@ -88,7 +88,7 @@ class RaftNodeAppliesWhatItLogsTest {
     void aRetransmittedEntryIsComparedByItsReplicatedBytesAndDoesNotFenceTheFollower() throws Exception {
         QraftStateStore store = new QraftStateStore();
         RaftNode follower = cluster.add(cluster.builder("follower", Set.of("follower", "leader"),
-                new InMemoryTransportSimulator("follower"), store, RaftNodeMode.volatileMode()));
+                new InMemoryTransportSimulatorFixture("follower"), store, RaftNodeMode.volatileMode()));
         follower.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         byte[] entry = registrationWhoseEncodingIsNotReproducedByReEncoding();
         AppendEntriesRequest request = AppendEntriesRequest.newBuilder().setTerm(1).setLeaderId("leader")
@@ -134,21 +134,25 @@ class RaftNodeAppliesWhatItLogsTest {
 
     /** Starts the members with the normalizing codec and elects the first. */
     private String startCluster(String... nodeIds) throws Exception {
-        InMemoryTransportSimulator.clearAllTransports();
+        InMemoryTransportSimulatorFixture.clearAllTransports();
         Set<String> members = new LinkedHashSet<>(List.of(nodeIds));
         for (String nodeId : nodeIds) {
             QraftStateStore store = new QraftStateStore();
-            nodes.put(nodeId, cluster.add(cluster.builder(nodeId, members, new InMemoryTransportSimulator(nodeId),
-                    store, RaftNodeMode.volatileMode()).commandCodec(new NormalizingCodec())));
+            nodes.put(nodeId, cluster.add(cluster.builder(nodeId, members, new InMemoryTransportSimulatorFixture(nodeId),
+                    store, RaftNodeMode.volatileMode()).commandCodec(new NormalizingCodecFixture())));
             stores.put(nodeId, store);
         }
-        ManualRaftCluster.startAll(nodes.values().toArray(RaftNode[]::new));
+        ManualRaftClusterFixture.startAll(nodes.values().toArray(RaftNode[]::new));
         cluster.elect(nodes.get(nodeIds[0]));
         return nodeIds[0];
     }
 
-    /** A codec whose decoding normalizes a value, standing in for any lossy or canonicalizing field. */
-    private static final class NormalizingCodec implements CommandCodec<RaftCommand> {
+    /**
+     * Test command codec fixture that normalizes commands to check that a node applies what it logs.
+     *
+     * <p>A codec whose decoding normalizes a value, standing in for any lossy or canonicalizing field.
+     */
+    private static final class NormalizingCodecFixture implements CommandCodec<RaftCommand> {
         private final ProtobufRaftCommandCodec delegate = new ProtobufRaftCommandCodec();
 
         @Override

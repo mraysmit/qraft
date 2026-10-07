@@ -31,7 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests for {@link HealthPublisher} sequencing, renewal, coalescing, retry identity, stale recovery, and
- * stop ordering, driven by {@link ManualTime} and a scripted {@link ObservationClient}.
+ * stop ordering, driven by {@link ManualTimeHelper} and a scripted {@link ObservationClient}.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-26
@@ -44,8 +44,8 @@ class HealthPublisherTest {
     private static final TtlCheck TTL = new TtlCheck("web", "app", Duration.ofSeconds(20), false,
             Duration.ofSeconds(90));
 
-    private final ManualTime time = new ManualTime(START);
-    private final ScriptedClient client = new ScriptedClient();
+    private final ManualTimeHelper time = new ManualTimeHelper(START);
+    private final ScriptedClientFixture client = new ScriptedClientFixture();
     private final HealthPublisher publisher = new HealthPublisher(client, time, time, attempt -> 1_000L << attempt);
 
     @Test
@@ -117,7 +117,7 @@ class HealthPublisherTest {
     @Test
     void aClientThatThrowsFailsOrAnswersNothingIsRetriedWithTheSameObservation() {
         for (String failure : List.of("throws", "fails", "answers null")) {
-            ManualTime clock = new ManualTime(START);
+            ManualTimeHelper clock = new ManualTimeHelper(START);
             List<CheckObservation> attempts = new CopyOnWriteArrayList<>();
             ObservationClient failingOnce = observation -> {
                 attempts.add(observation);
@@ -249,8 +249,12 @@ class HealthPublisherTest {
         return new CheckResult(status, output, time.instant());
     }
 
-    /** Records observations and lets the test decide each outcome. */
-    private static final class ScriptedClient implements ObservationClient {
+    /**
+     * Test observation client fixture that supplies scripted responses for health-publication assertions.
+     *
+     * <p>Records observations and lets the test decide each outcome.
+     */
+    private static final class ScriptedClientFixture implements ObservationClient {
         private final List<CheckObservation> sent = new CopyOnWriteArrayList<>();
         private final List<CompletableFuture<ObservationOutcome>> replies = new CopyOnWriteArrayList<>();
 

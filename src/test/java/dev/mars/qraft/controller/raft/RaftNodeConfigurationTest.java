@@ -28,7 +28,7 @@ import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.controller.state.RaftCommand;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
-import dev.mars.qraft.testing.fault.IntentionalErrors;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import dev.mars.qraft.controller.raft.storage.RaftStorageFactory;
 import dev.mars.raftlog.storage.FileRaftStorage;
 import dev.mars.raftlog.storage.RaftStorage.LogEntryData;
@@ -46,9 +46,9 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
-import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
-import static dev.mars.qraft.testing.fault.IntentionalError.COMMITTED_ENTRY_REPLACEMENT;
-import static dev.mars.qraft.testing.fault.IntentionalError.RAFT_STATE_WITHOUT_CONFIGURATION;
+import static dev.mars.qraft.controller.raft.ManualRaftClusterFixture.await;
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.COMMITTED_ENTRY_REPLACEMENT;
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_STATE_WITHOUT_CONFIGURATION;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -85,13 +85,13 @@ class RaftNodeConfigurationTest {
     Path directory;
 
     private JavaRuntime runtime;
-    private ManualRaftCluster cluster;
+    private ManualRaftClusterFixture cluster;
 
     @BeforeEach
     void setUp() {
         runtime = JavaRuntime.create();
-        cluster = new ManualRaftCluster(runtime);
-        InMemoryTransportSimulator.clearAllTransports();
+        cluster = new ManualRaftClusterFixture(runtime);
+        InMemoryTransportSimulatorFixture.clearAllTransports();
     }
 
     @AfterEach
@@ -100,7 +100,7 @@ class RaftNodeConfigurationTest {
             cluster.close();
         } finally {
             runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            InMemoryTransportSimulator.clearAllTransports();
+            InMemoryTransportSimulatorFixture.clearAllTransports();
         }
     }
 
@@ -122,7 +122,7 @@ class RaftNodeConfigurationTest {
 
     @Test
     void aSoleMemberBootstrapsItself() throws Exception {
-        RaftNode sole = cluster.add(cluster.unconfiguredBuilder("f", Set.of("f"), new InMemoryTransportSimulator("f"),
+        RaftNode sole = cluster.add(cluster.unconfiguredBuilder("f", Set.of("f"), new InMemoryTransportSimulatorFixture("f"),
                 new QraftStateStore(), RaftNodeMode.volatileMode()).serverId("id-f"));
 
         await(sole.start());
@@ -133,7 +133,7 @@ class RaftNodeConfigurationTest {
 
     @Test
     void aNodeWithManyMembersAndNoInitialConfigurationHasNone() throws Exception {
-        RaftNode node = cluster.add(cluster.unconfiguredBuilder("f", Set.of("f", "l"), new InMemoryTransportSimulator("f"),
+        RaftNode node = cluster.add(cluster.unconfiguredBuilder("f", Set.of("f", "l"), new InMemoryTransportSimulatorFixture("f"),
                 new QraftStateStore(), RaftNodeMode.volatileMode()).serverId("id-f"));
 
         await(node.start());
@@ -144,10 +144,10 @@ class RaftNodeConfigurationTest {
 
     @Test
     void stateFromBeforeConfigurationsWereRecordedRefusesToStart() throws Exception {
-        IntentionalErrors.expect(RAFT_STATE_WITHOUT_CONFIGURATION, 1);
-        TestRaftStorage storage = openStorage();
+        IntentionalErrorsHelper.expect(RAFT_STATE_WITHOUT_CONFIGURATION, 1);
+        TestRaftStorageFixture storage = openStorage();
         storage.appendEntries(List.of(new LogEntryData(1, 1, CODEC.serialize(put("k"))))).get(10, TimeUnit.SECONDS);
-        RaftNode node = cluster.add(cluster.unconfiguredBuilder("f", Set.of("f"), new InMemoryTransportSimulator("f"),
+        RaftNode node = cluster.add(cluster.unconfiguredBuilder("f", Set.of("f"), new InMemoryTransportSimulatorFixture("f"),
                 new QraftStateStore(), RaftNodeMode.durable(storage, storage)).serverId("id-f"));
 
         ExecutionException refused = assertThrows(ExecutionException.class, () -> await(node.start()));
@@ -173,7 +173,7 @@ class RaftNodeConfigurationTest {
     @Test
     void aRunningNodeIsBootstrappedOnlyWhileItHoldsNoStateAndOnlyWithItself() throws Exception {
         RaftNode fresh = cluster.add(cluster.unconfiguredBuilder("f", Set.of("f", "l"),
-                new InMemoryTransportSimulator("f"), new QraftStateStore(), RaftNodeMode.volatileMode()).serverId("id-f"));
+                new InMemoryTransportSimulatorFixture("f"), new QraftStateStore(), RaftNodeMode.volatileMode()).serverId("id-f"));
         await(fresh.start());
 
         ExecutionException withoutItself = assertThrows(ExecutionException.class,
@@ -195,7 +195,7 @@ class RaftNodeConfigurationTest {
     @Test
     void indexOneMustHoldABootstrapConfiguration() throws Exception {
         RaftNode joining = cluster.add(cluster.unconfiguredBuilder("f", Set.of("f", "l"),
-                new InMemoryTransportSimulator("f"), new QraftStateStore(), RaftNodeMode.volatileMode()).serverId("id-f"));
+                new InMemoryTransportSimulatorFixture("f"), new QraftStateStore(), RaftNodeMode.volatileMode()).serverId("id-f"));
         await(joining.start());
 
         for (LogEntry notABootstrap : List.of(entry(1, 1, put("k")), entry(1, 1, new ConfigurationCommand(FL)))) {
@@ -214,7 +214,7 @@ class RaftNodeConfigurationTest {
 
     @Test
     void anAppendThatWouldReplaceACommittedEntryIsRefusedAndChangesNothing() throws Exception {
-        IntentionalErrors.expect(COMMITTED_ENTRY_REPLACEMENT, 1);
+        IntentionalErrorsHelper.expect(COMMITTED_ENTRY_REPLACEMENT, 1);
         RaftNode follower = follower(new QraftStateStore(), RaftNodeMode.volatileMode(), FL);
         await(follower.start());
 
@@ -244,7 +244,7 @@ class RaftNodeConfigurationTest {
         await(first.start());
         await(first.stop());
 
-        RaftNode restarted = cluster.add(cluster.unconfiguredBuilder("f", Set.of("f", "l"), new InMemoryTransportSimulator("f"),
+        RaftNode restarted = cluster.add(cluster.unconfiguredBuilder("f", Set.of("f", "l"), new InMemoryTransportSimulatorFixture("f"),
                 new QraftStateStore(), durable()).serverId("id-f"));
         await(restarted.start());
 
@@ -255,7 +255,7 @@ class RaftNodeConfigurationTest {
     @Test
     void recoveryRestoresTheConfigurationFromTheSnapshotOnceTheWalEntryIsCompacted() throws Exception {
         RaftConfiguration sole = new RaftConfiguration(List.of(F));
-        RaftNode first = cluster.add(cluster.unconfiguredBuilder("f", Set.of("f"), new InMemoryTransportSimulator("f"),
+        RaftNode first = cluster.add(cluster.unconfiguredBuilder("f", Set.of("f"), new InMemoryTransportSimulatorFixture("f"),
                         new QraftStateStore(), durable())
                 .serverId("id-f").initialConfiguration(sole)
                 .snapshotEnabled(true).snapshotThreshold(3).snapshotCheckInterval(300));
@@ -272,7 +272,7 @@ class RaftNodeConfigurationTest {
                     "the configuration entry is gone from the WAL");
         }
 
-        RaftNode restarted = cluster.add(cluster.unconfiguredBuilder("f", Set.of("f"), new InMemoryTransportSimulator("f"),
+        RaftNode restarted = cluster.add(cluster.unconfiguredBuilder("f", Set.of("f"), new InMemoryTransportSimulatorFixture("f"),
                 new QraftStateStore(), durable()).serverId("id-f"));
         await(restarted.start());
 
@@ -281,7 +281,7 @@ class RaftNodeConfigurationTest {
 
     @Test
     void anInstalledSnapshotBringsItsConfiguration() throws Exception {
-        RaftNode follower = cluster.add(cluster.unconfiguredBuilder("f", Set.of("f", "l"), new InMemoryTransportSimulator("f"),
+        RaftNode follower = cluster.add(cluster.unconfiguredBuilder("f", Set.of("f", "l"), new InMemoryTransportSimulatorFixture("f"),
                 new QraftStateStore(), RaftNodeMode.volatileMode()).serverId("id-f"));
         await(follower.start());
         byte[] data = SnapshotEnvelope.wrap(FLM, new QraftStateStore().takeSnapshot());
@@ -295,7 +295,7 @@ class RaftNodeConfigurationTest {
     }
 
     private RaftNode follower(QraftStateStore store, RaftNodeMode mode, RaftConfiguration configuration) {
-        return cluster.add(cluster.unconfiguredBuilder("f", Set.of("f", "l"), new InMemoryTransportSimulator("f"), store, mode)
+        return cluster.add(cluster.unconfiguredBuilder("f", Set.of("f", "l"), new InMemoryTransportSimulatorFixture("f"), store, mode)
                 .serverId("id-f").initialConfiguration(configuration));
     }
 
@@ -319,8 +319,8 @@ class RaftNodeConfigurationTest {
         return RaftNodeMode.durable(storage.wal(), storage.snapshots());
     }
 
-    private static TestRaftStorage openStorage() throws Exception {
-        TestRaftStorage storage = new TestRaftStorage();
+    private static TestRaftStorageFixture openStorage() throws Exception {
+        TestRaftStorageFixture storage = new TestRaftStorageFixture();
         storage.open(null).get(10, TimeUnit.SECONDS);
         return storage;
     }

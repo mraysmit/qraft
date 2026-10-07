@@ -32,8 +32,8 @@ import dev.mars.qraft.distributedstate.DistributedStateCommand;
 import dev.mars.qraft.raft.api.SnapshotStore;
 import dev.mars.qraft.raft.api.SnapshotStore.PublicationOutcome;
 import dev.mars.qraft.raft.api.SnapshotStore.SnapshotPublicationException;
-import dev.mars.qraft.testing.fault.InjectedFault;
-import dev.mars.qraft.testing.fault.IntentionalErrors;
+import dev.mars.qraft.testing.fault.InjectedFaultFixture;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import dev.mars.raftlog.storage.RaftStorage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,8 +47,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static dev.mars.qraft.controller.raft.RaftAwait.awaitStateLoop;
-import static dev.mars.qraft.controller.raft.RaftAwait.await;
+import static dev.mars.qraft.controller.raft.RaftAwaitHelper.awaitStateLoop;
+import static dev.mars.qraft.controller.raft.RaftAwaitHelper.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -71,25 +71,25 @@ class RaftNodeInstalledSnapshotSequencingTest {
     private static final long FIRST_COMMAND_INDEX = 2;
 
     private JavaRuntime runtime;
-    private GatedStorage storage;
-    private RecordingStateMachine stateMachine;
+    private GatedStorageFixture storage;
+    private RecordingStateMachineFixture stateMachine;
     private ProtobufRaftCommandCodec codec;
     private RaftNode node;
 
     @BeforeEach
     void setUp() {
         runtime = JavaRuntime.create();
-        storage = new GatedStorage();
+        storage = new GatedStorageFixture();
         storage.open(null).join();
-        stateMachine = new RecordingStateMachine();
+        stateMachine = new RecordingStateMachineFixture();
         codec = new ProtobufRaftCommandCodec();
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("follower-1")
-                .serverId(ManualRaftCluster.serverIdOf("follower-1"))
+                .serverId(ManualRaftClusterFixture.serverIdOf("follower-1"))
                 .clusterNodes(MEMBERS)
-                .initialConfiguration(ManualRaftCluster.configurationOf(MEMBERS))
-                .transport(new InMemoryTransportSimulator("follower-1"))
+                .initialConfiguration(ManualRaftClusterFixture.configurationOf(MEMBERS))
+                .transport(new InMemoryTransportSimulatorFixture("follower-1"))
                 .stateMachine(stateMachine)
                 .commandCodec(codec)
                 .mode(RaftNodeMode.durable(storage, storage))
@@ -106,7 +106,7 @@ class RaftNodeInstalledSnapshotSequencingTest {
         if (runtime != null) {
             runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
-        InMemoryTransportSimulator.clearAllTransports();
+        InMemoryTransportSimulatorFixture.clearAllTransports();
     }
 
     @Test
@@ -315,7 +315,7 @@ class RaftNodeInstalledSnapshotSequencingTest {
 
     @Test
     void uncertainCompactionFailureFencesLaterWalMutation() {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_FENCED_OPERATION, 1);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_FENCED_OPERATION, 1);
         storage.failNextPrefixCompaction();
 
         InstallSnapshotResponse failed = await(node.handleInstallSnapshot(
@@ -354,7 +354,7 @@ class RaftNodeInstalledSnapshotSequencingTest {
 
     @Test
     void ambiguousPublicationFailureFencesLaterWalMutation() {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_FENCED_OPERATION, 1);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_FENCED_OPERATION, 1);
         storage.failNextSnapshotPublicationAmbiguously();
 
         InstallSnapshotResponse failed = await(node.handleInstallSnapshot(
@@ -427,7 +427,7 @@ class RaftNodeInstalledSnapshotSequencingTest {
 
     @Test
     void restorationFailureAfterCompactionFencesLaterWalMutation() {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_FENCED_OPERATION, 1);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_FENCED_OPERATION, 1);
         stateMachine.failNextRestore();
 
         InstallSnapshotResponse failed = await(node.handleInstallSnapshot(
@@ -441,9 +441,9 @@ class RaftNodeInstalledSnapshotSequencingTest {
         assertEquals(1, storage.appendCount(), "only the bootstrap configuration entry was appended");
     }
 
-    private static InjectedFault snapshotFault(String message) {
-        return new InjectedFault(
-                dev.mars.qraft.testing.fault.IntentionalError.RAFT_SNAPSHOT_OPERATION_FAILURE, message);
+    private static InjectedFaultFixture snapshotFault(String message) {
+        return new InjectedFaultFixture(
+                dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_SNAPSHOT_OPERATION_FAILURE, message);
     }
 
     private AppendEntriesRequest heartbeat(long term, long previousIndex, long previousTerm) {
@@ -523,7 +523,7 @@ class RaftNodeInstalledSnapshotSequencingTest {
         QraftStateStore state = new QraftStateStore();
         state.apply(put(key, value));
         state.setLastAppliedIndex(index);
-        return ManualRaftCluster.snapshotOf(MEMBERS, state.takeSnapshot());
+        return ManualRaftClusterFixture.snapshotOf(MEMBERS, state.takeSnapshot());
     }
 
     private static byte[][] thirds(byte[] bytes) {
@@ -540,7 +540,8 @@ class RaftNodeInstalledSnapshotSequencingTest {
         return new DistributedStateRaftCommand(DistributedStateCommand.put(key, value));
     }
 
-    private static final class RecordingStateMachine implements RaftLogApplicator {
+    /** Test state-machine fixture that records application and snapshot operations for sequencing assertions. */
+    private static final class RecordingStateMachineFixture implements RaftLogApplicator {
         private final QraftStateStore delegate = new QraftStateStore();
         private volatile JavaRuntime restoreContext;
         private volatile boolean failNextRestore;
@@ -565,8 +566,9 @@ class RaftNodeInstalledSnapshotSequencingTest {
         @Override public void reset() { delegate.reset(); }
     }
 
-    private static final class GatedStorage implements RaftStorage, SnapshotStore {
-        private final TestRaftStorage delegate = new TestRaftStorage();
+    /** Test storage and snapshot fixture with controlled operation completion for installation-sequencing assertions. */
+    private static final class GatedStorageFixture implements RaftStorage, SnapshotStore {
+        private final TestRaftStorageFixture delegate = new TestRaftStorageFixture();
         private final AtomicInteger appendCount = new AtomicInteger();
         private final AtomicInteger saveCount = new AtomicInteger();
         private final AtomicInteger prefixTruncateCount = new AtomicInteger();

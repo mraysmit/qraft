@@ -62,7 +62,7 @@ class RaftNodeCheckQuorumTest {
     private static final long HEARTBEAT_MS = 100;
 
     private JavaRuntime runtime;
-    private ManualRaftTimers timers;
+    private ManualRaftTimersHelper timers;
     private RaftNode node;
 
     @AfterEach
@@ -73,7 +73,7 @@ class RaftNodeCheckQuorumTest {
 
     @Test
     void aLeaderThatLosesItsMajorityStepsDownAfterOneElectionTimeoutOfRounds() throws Exception {
-        PeerTransport transport = new PeerTransport();
+        PeerTransportFixture transport = new PeerTransportFixture();
         List<RaftNode.State> transitions = new CopyOnWriteArrayList<>();
         startLeader(Set.of("node-1", "peer-2", "peer-3"), transport);
         long term = node.getCurrentTerm();
@@ -94,7 +94,7 @@ class RaftNodeCheckQuorumTest {
 
     @Test
     void oneResponsivePeerIsAMajorityOfThree() throws Exception {
-        PeerTransport transport = new PeerTransport();
+        PeerTransportFixture transport = new PeerTransportFixture();
         startLeader(Set.of("node-1", "peer-2", "peer-3"), transport);
 
         transport.silence("peer-3");
@@ -105,7 +105,7 @@ class RaftNodeCheckQuorumTest {
 
     @Test
     void rejectedAppendsInTheCurrentTermCountAsContact() throws Exception {
-        PeerTransport transport = new PeerTransport();
+        PeerTransportFixture transport = new PeerTransportFixture();
         startLeader(Set.of("node-1", "peer-2", "peer-3"), transport);
 
         transport.reject("peer-2", "peer-3");
@@ -116,7 +116,7 @@ class RaftNodeCheckQuorumTest {
 
     @Test
     void aSingleNodeClusterIsAlwaysItsOwnMajority() throws Exception {
-        startLeader(Set.of("node-1"), new PeerTransport());
+        startLeader(Set.of("node-1"), new PeerTransportFixture());
 
         heartbeats(20);
 
@@ -125,7 +125,7 @@ class RaftNodeCheckQuorumTest {
 
     @Test
     void steppingDownFailsWritesThatCanNoLongerCommit() throws Exception {
-        PeerTransport transport = new PeerTransport();
+        PeerTransportFixture transport = new PeerTransportFixture();
         startLeader(Set.of("node-1", "peer-2", "peer-3"), transport);
         transport.silence("peer-2", "peer-3");
 
@@ -142,7 +142,7 @@ class RaftNodeCheckQuorumTest {
 
     @Test
     void aFollowerThatSteppedDownCanBeElectedAgainWhenPeersReturn() throws Exception {
-        PeerTransport transport = new PeerTransport();
+        PeerTransportFixture transport = new PeerTransportFixture();
         startLeader(Set.of("node-1", "peer-2", "peer-3"), transport);
         transport.silence("peer-2", "peer-3");
         heartbeats(4);
@@ -159,7 +159,7 @@ class RaftNodeCheckQuorumTest {
 
     @Test
     void awaitingAStateNeverConsumesTheNodesRaftTimers() throws Exception {
-        startLeader(Set.of("node-1", "peer-2", "peer-3"), new PeerTransport());
+        startLeader(Set.of("node-1", "peer-2", "peer-3"), new PeerTransportFixture());
         int armed = timers.oneShotCount();
 
         CompletableFuture<RaftNode.State> leader = node.awaitState(RaftNode.State.LEADER, 60_000)
@@ -171,13 +171,13 @@ class RaftNodeCheckQuorumTest {
                 "an observer's timeout must not be scheduled on the node's election and heartbeat timers");
     }
 
-    private void startLeader(Set<String> members, PeerTransport transport) throws Exception {
+    private void startLeader(Set<String> members, PeerTransportFixture transport) throws Exception {
         runtime = JavaRuntime.create();
-        timers = new ManualRaftTimers(runtime);
+        timers = new ManualRaftTimersHelper(runtime);
         node = RaftNode.builder()
                 .runtime(runtime).nodeId("node-1").clusterNodes(members).transport(transport)
-                .serverId(ManualRaftCluster.serverIdOf("node-1"))
-                .initialConfiguration(ManualRaftCluster.configurationOf(members))
+                .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
+                .initialConfiguration(ManualRaftClusterFixture.configurationOf(members))
                 .stateMachine(new QraftStateStore()).commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.volatileMode()).snapshotEnabled(false)
                 .electionTimeout(ELECTION_TIMEOUT_MS).heartbeatInterval(HEARTBEAT_MS)
@@ -207,10 +207,12 @@ class RaftNodeCheckQuorumTest {
     }
 
     /**
+     * Test transport fixture with selectable peer response modes for quorum assertions.
+     *
      * Grants every vote and answers AppendEntries per peer: success, rejection, or silence. Every answer comes
      * from the server configured under the peer's name.
      */
-    private static final class PeerTransport implements RaftTransport {
+    private static final class PeerTransportFixture implements RaftTransport {
         private enum Mode { RESPOND, REJECT, SILENT }
 
         private final Map<String, Mode> modes = new ConcurrentHashMap<>();
@@ -226,7 +228,7 @@ class RaftNodeCheckQuorumTest {
         public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
             return Future.succeededFuture(VoteResponse.newBuilder()
                     .setTerm(request.getTerm()).setVoteGranted(true)
-                    .setVoterServerId(ManualRaftCluster.serverIdOf(targetId)).build());
+                    .setVoterServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
         }
 
         @Override
@@ -238,7 +240,7 @@ class RaftNodeCheckQuorumTest {
                     : request.getEntries(request.getEntriesCount() - 1).getIndex();
             return Future.succeededFuture(AppendEntriesResponse.newBuilder().setTerm(request.getTerm())
                     .setSuccess(mode == Mode.RESPOND).setMatchIndex(mode == Mode.RESPOND ? matchIndex : 0)
-                    .setFollowerServerId(ManualRaftCluster.serverIdOf(targetId)).build());
+                    .setFollowerServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
         }
 
         @Override

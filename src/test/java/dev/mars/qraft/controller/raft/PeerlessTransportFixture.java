@@ -27,14 +27,15 @@ import dev.mars.qraft.controller.runtime.Future;
 import java.util.function.Consumer;
 
 /**
- * The transport of a node with no peers, such as a sole cluster member: it starts and stops, and every request
- * it is asked to send fails, naming the request and its target, because there is no one to send it to.
+ * Test transport helper for Raft tests that run a node without communicating with peers.
+ * It starts and stops, and every request it is asked to send fails, naming the request
+ * and its target, because this helper has no peer connections.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-28
  * @version 1.0
  */
-public final class PeerlessTransport implements RaftTransport {
+public final class PeerlessTransportFixture implements RaftTransport {
     @Override
     public void start(Consumer<RaftMessage> messageHandler) {
     }

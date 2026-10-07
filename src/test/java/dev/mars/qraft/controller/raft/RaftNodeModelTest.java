@@ -27,7 +27,7 @@ import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.controller.state.QraftStateStore;
 import dev.mars.qraft.distributedstate.DistributedStateCommand;
-import dev.mars.qraft.testing.fault.IntentionalErrors;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import dev.mars.raftlog.storage.RaftStorage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -41,7 +41,7 @@ import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-import static dev.mars.qraft.controller.raft.RaftAwait.await;
+import static dev.mars.qraft.controller.raft.RaftAwaitHelper.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -72,7 +72,7 @@ class RaftNodeModelTest {
         if (runtime != null) {
             runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
-        InMemoryTransportSimulator.clearAllTransports();
+        InMemoryTransportSimulatorFixture.clearAllTransports();
     }
 
     @Test
@@ -90,7 +90,7 @@ class RaftNodeModelTest {
 
     @Test
     void generatedPrehistoryThenAmbiguousSyncFailureFencesFurtherMutation() {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_FENCED_OPERATION);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_FENCED_OPERATION);
         for (long seed : configuredSeeds()) {
             try {
                 verifyFollowerHistory(seed, true);
@@ -104,7 +104,7 @@ class RaftNodeModelTest {
 
     private void verifyFollowerHistory(long seed, boolean injectFailure) {
         Fixture fixture = startFollower();
-        TestRaftStorage storage = fixture.storage();
+        TestRaftStorageFixture storage = fixture.storage();
         QraftStateStore stateStore = fixture.stateStore();
         Random random = new Random(seed);
         ReferenceState expected = ReferenceState.initial();
@@ -143,16 +143,16 @@ class RaftNodeModelTest {
 
     private Fixture startFollower() {
         runtime = JavaRuntime.create();
-        TestRaftStorage storage = new TestRaftStorage();
+        TestRaftStorageFixture storage = new TestRaftStorageFixture();
         storage.open(null).join();
         QraftStateStore stateStore = new QraftStateStore();
         node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("follower")
-                .serverId(ManualRaftCluster.serverIdOf("follower"))
-                .initialConfiguration(ManualRaftCluster.configurationOf(MEMBERS))
+                .serverId(ManualRaftClusterFixture.serverIdOf("follower"))
+                .initialConfiguration(ManualRaftClusterFixture.configurationOf(MEMBERS))
                 .clusterNodes(MEMBERS)
-                .transport(new InMemoryTransportSimulator("follower"))
+                .transport(new InMemoryTransportSimulatorFixture("follower"))
                 .stateMachine(stateStore)
                 .commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.durable(storage, storage))
@@ -172,7 +172,7 @@ class RaftNodeModelTest {
             await(runtime.shutdown());
             runtime = null;
         }
-        InMemoryTransportSimulator.clearAllTransports();
+        InMemoryTransportSimulatorFixture.clearAllTransports();
     }
 
     private static List<Operation> generatedOperations(Random random, int count) {
@@ -298,7 +298,7 @@ class RaftNodeModelTest {
 
     private void assertNodeState(
             ReferenceState expected,
-            TestRaftStorage storage,
+            TestRaftStorageFixture storage,
             QraftStateStore stateStore,
             long seed,
             int index) {
@@ -307,7 +307,7 @@ class RaftNodeModelTest {
 
     private void assertNodeState(
             ReferenceState expected,
-            TestRaftStorage storage,
+            TestRaftStorageFixture storage,
             QraftStateStore stateStore,
             long seed,
             int index,
@@ -349,7 +349,7 @@ class RaftNodeModelTest {
         ProtobufRaftCommandCodec codec = new ProtobufRaftCommandCodec();
         for (ModelEntry entry : entries) {
             byte[] bytes = entry == ModelEntry.BOOTSTRAP
-                    ? codec.serialize(new ConfigurationCommand(ManualRaftCluster.configurationOf(MEMBERS)))
+                    ? codec.serialize(new ConfigurationCommand(ManualRaftClusterFixture.configurationOf(MEMBERS)))
                     : codec.serialize(new DistributedStateRaftCommand(
                             DistributedStateCommand.put(entry.key(), entry.value())));
             request.addEntries(dev.mars.qraft.controller.raft.grpc.LogEntry.newBuilder()
@@ -510,5 +510,5 @@ class RaftNodeModelTest {
         }
     }
 
-    private record Fixture(TestRaftStorage storage, QraftStateStore stateStore) { }
+    private record Fixture(TestRaftStorageFixture storage, QraftStateStore stateStore) { }
 }

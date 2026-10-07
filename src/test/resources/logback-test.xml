@@ -4,12 +4,12 @@
     <!-- %intentional writes "*** INJECTED FAILURE: ... ***" or "*** INTENTIONAL ERROR: ... ***" after the level
          of an error a test caused on purpose, and nothing otherwise. See dev.mars.qraft.testing.fault.
          Nothing in this file may filter or drop an event: IntentionalErrorConfigurationTest checks it. -->
-    <conversionRule conversionWord="intentional" class="dev.mars.qraft.testing.fault.IntentionalErrorLabel"/>
+    <conversionRule conversionWord="intentional" class="dev.mars.qraft.testing.fault.IntentionalErrorLabelHelper"/>
     <timestamp key="testRunTimestamp" datePattern="yyyy-MM-dd_HH-mm-ss"/>
     <property name="TEST_LOG_DIR" value="${qraft.test.log.dir:-${user.dir}/logs}"/>
 
     <!-- Writes nothing; fails a test that logs an error, or an exception at any level, it did not cause on purpose. -->
-    <appender name="INTENTIONAL_ERROR_CHECK" class="dev.mars.qraft.testing.fault.IntentionalErrorCheck"/>
+    <appender name="INTENTIONAL_ERROR_CHECK" class="dev.mars.qraft.testing.fault.IntentionalErrorCheckHelper"/>
 
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>

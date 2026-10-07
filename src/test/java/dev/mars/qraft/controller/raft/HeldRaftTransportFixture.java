@@ -30,14 +30,15 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
 /**
- * A transport that holds every request a node sends, for the test to answer by hand, in any order. A test that
+ * Test transport helper that holds every request a Raft node sends for the test to answer by hand,
+ * in any order. A test that
  * answers each request itself decides exactly what the node hears and when.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-29
  * @version 1.0
  */
-final class HeldRaftTransport implements RaftTransport {
+final class HeldRaftTransportFixture implements RaftTransport {
 
     /** A request sent to {@code target}, and the promise the test completes to answer it. */
     record Held<Q, R>(String target, Q request, Promise<R> response) {

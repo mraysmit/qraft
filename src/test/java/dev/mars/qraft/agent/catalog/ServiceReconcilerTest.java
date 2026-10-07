@@ -53,7 +53,7 @@ class ServiceReconcilerTest {
 
     @Test
     void registersEveryEnabledDefinitionAndSkipsDisabledDefinitions() {
-        FakeCatalogClient client = new FakeCatalogClient();
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
         AtomicReference<List<ServiceDefinition>> definitions = new AtomicReference<>(List.of(
                 service("web", "web", 8080, true), service("admin", "admin", 8081, false)));
         ServiceReconciler reconciler = new ServiceReconciler(client, definitions::get, CLOCK);
@@ -68,7 +68,7 @@ class ServiceReconcilerTest {
 
     @Test
     void retainsPartialSuccessAndRetriesOnlyTheMissingDefinition() {
-        FakeCatalogClient client = new FakeCatalogClient();
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
         client.registrationOutcomes.put("api", new CatalogOutcome.Retryable("offline", "later", null));
         List<ServiceDefinition> definitions = List.of(
                 service("web", "web", 8080, true), service("api", "api", 8081, true));
@@ -86,7 +86,7 @@ class ServiceReconcilerTest {
 
     @Test
     void unchangedDefinitionIsReadButNotSentAgainAndChangedDefinitionIsReregisteredAlone() {
-        FakeCatalogClient client = new FakeCatalogClient();
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
         AtomicReference<List<ServiceDefinition>> definitions = new AtomicReference<>(List.of(
                 service("web", "web", 8080, true), service("api", "api", 8081, true)));
         ServiceReconciler reconciler = new ServiceReconciler(client, definitions::get, CLOCK);
@@ -104,7 +104,7 @@ class ServiceReconcilerTest {
 
     @Test
     void aChangedCheckSetIsReRegisteredSoTheControllerCanPruneRemovedChecks() {
-        FakeCatalogClient client = new FakeCatalogClient();
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
         ServiceDefinition web = service("web", "web", 8080, true).withCheckIds(List.of("http", "tcp"));
         AtomicReference<List<ServiceDefinition>> definitions = new AtomicReference<>(List.of(web));
         ServiceReconciler reconciler = new ServiceReconciler(client, definitions::get, CLOCK);
@@ -136,7 +136,7 @@ class ServiceReconcilerTest {
 
     @Test
     void movingAValueFromTagsToMetadataIsReRegistered() {
-        FakeCatalogClient client = new FakeCatalogClient();
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
         ServiceDefinition tagged = new ServiceDefinition("web", "web", "127.0.0.1", 8080,
                 List.of("env", "prod"), Map.of(), true);
         AtomicReference<List<ServiceDefinition>> definitions = new AtomicReference<>(List.of(tagged));
@@ -184,7 +184,7 @@ class ServiceReconcilerTest {
 
     @Test
     void registersAgainWhenControllerReportsTheInstanceAbsent() {
-        FakeCatalogClient client = new FakeCatalogClient();
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
         ServiceDefinition web = service("web", "web", 8080, true);
         ServiceReconciler reconciler = new ServiceReconciler(client, () -> List.of(web), CLOCK);
         reconciler.trigger().join();
@@ -197,7 +197,7 @@ class ServiceReconcilerTest {
 
     @Test
     void overlappingTriggersShareOnePass() {
-        FakeCatalogClient client = new FakeCatalogClient();
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
         CompletableFuture<CatalogOutcome> pending = new CompletableFuture<>();
         client.pendingRegistration = pending;
         ServiceReconciler reconciler = new ServiceReconciler(client,
@@ -215,7 +215,7 @@ class ServiceReconcilerTest {
 
     @Test
     void rejectedDefinitionIsReportedAndSuppressedUntilItsContentChanges() {
-        FakeCatalogClient client = new FakeCatalogClient();
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
         client.registrationOutcomes.put("web",
                 new CatalogOutcome.Rejected("invalid_registration", "bad address", null));
         AtomicReference<List<ServiceDefinition>> definitions = new AtomicReference<>(
@@ -247,7 +247,7 @@ class ServiceReconcilerTest {
 
     @Test
     void shutdownWaitsForAnActivePassThenDeregistersItsCommittedService() {
-        FakeCatalogClient client = new FakeCatalogClient();
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
         CompletableFuture<CatalogOutcome> pending = new CompletableFuture<>();
         client.pendingRegistration = pending;
         ServiceReconciler reconciler = new ServiceReconciler(client,
@@ -266,7 +266,7 @@ class ServiceReconcilerTest {
 
     @Test
     void shutdownReportsRejectedAndRetryableDeregistrations() {
-        FakeCatalogClient client = new FakeCatalogClient();
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
         ServiceReconciler reconciler = new ServiceReconciler(client, () -> List.of(
                 service("web", "web", 8080, true), service("api", "api", 8081, true)), CLOCK);
         reconciler.trigger().join();
@@ -285,7 +285,7 @@ class ServiceReconcilerTest {
 
     @Test
     void lookupRetryableAndRejectedOutcomesLeaveCommittedStateUnchanged() {
-        FakeCatalogClient client = new FakeCatalogClient();
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
         ServiceDefinition web = service("web", "web", 8080, true);
         ServiceReconciler reconciler = new ServiceReconciler(client, () -> List.of(web), CLOCK);
         reconciler.trigger().join();
@@ -303,7 +303,7 @@ class ServiceReconcilerTest {
 
     @Test
     void removedDefinitionIsDeregisteredOnTheNextPass() {
-        FakeCatalogClient client = new FakeCatalogClient();
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
         AtomicReference<List<ServiceDefinition>> definitions = new AtomicReference<>(
                 List.of(service("web", "web", 8080, true)));
         ServiceReconciler reconciler = new ServiceReconciler(client, definitions::get, CLOCK);
@@ -318,7 +318,7 @@ class ServiceReconcilerTest {
 
     @Test
     void shutdownStopsNewPassesAndDeregistersEveryKnownService() {
-        FakeCatalogClient client = new FakeCatalogClient();
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
         List<ServiceDefinition> definitions = List.of(
                 service("web", "web", 8080, true), service("api", "api", 8081, true));
         ServiceReconciler reconciler = new ServiceReconciler(client, () -> definitions, CLOCK);
@@ -340,7 +340,8 @@ class ServiceReconcilerTest {
                 List.of("blue"), Map.of("team", "platform"), enabled);
     }
 
-    private static final class FakeCatalogClient implements CatalogClient {
+    /** Test catalog client fixture whose responses and recorded calls support reconciliation assertions. */
+    private static final class FakeCatalogClientFixture implements CatalogClient {
         private final List<String> registrations = new ArrayList<>();
         private final List<String> deregistrations = new ArrayList<>();
         private final List<String> lookupIds = new ArrayList<>();

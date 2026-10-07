@@ -41,7 +41,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Builds in-memory Raft nodes on {@link ManualRaftTimers} for tests, and stops every one of them on
+ * Test cluster helper that builds in-memory Raft nodes on {@link ManualRaftTimersHelper}
+ * so tests can control elections and heartbeats. It stops every node on
  * {@link #close()}, which also releases their storage, even when the test failed.
  *
  * <p>A node elects itself only when {@link #elect} fires its election timeout, and a leader heartbeats only
@@ -54,7 +55,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @since 2026-09-28
  * @version 1.1
  */
-public final class ManualRaftCluster implements AutoCloseable {
+public final class ManualRaftClusterFixture implements AutoCloseable {
     public static final long HEARTBEAT_MS = 200;
     public static final long ELECTION_TIMEOUT_MS = 10_000;
     /** Passes over an idle network and state loop before a heartbeat round counts as settled. */
@@ -64,9 +65,9 @@ public final class ManualRaftCluster implements AutoCloseable {
     private final JavaRuntime runtime;
     private final AtomicLong clock = new AtomicLong();
     private final List<RaftNode> nodes = new ArrayList<>();
-    private final Map<RaftNode, ManualRaftTimers> timers = new ConcurrentHashMap<>();
+    private final Map<RaftNode, ManualRaftTimersHelper> timers = new ConcurrentHashMap<>();
 
-    public ManualRaftCluster(JavaRuntime runtime) {
+    public ManualRaftClusterFixture(JavaRuntime runtime) {
         this.runtime = runtime;
     }
 
@@ -118,7 +119,7 @@ public final class ManualRaftCluster implements AutoCloseable {
 
     /** Builds the node on manual timers and tracks it, so {@link #close()} stops it. */
     public RaftNode add(RaftNode.Builder builder) {
-        ManualRaftTimers nodeTimers = new ManualRaftTimers(runtime, clock);
+        ManualRaftTimersHelper nodeTimers = new ManualRaftTimersHelper(runtime, clock);
         RaftNode node = builder.timerScheduler(nodeTimers).build();
         synchronized (nodes) {
             nodes.add(node);
@@ -127,7 +128,7 @@ public final class ManualRaftCluster implements AutoCloseable {
         return node;
     }
 
-    public ManualRaftTimers timers(RaftNode node) {
+    public ManualRaftTimersHelper timers(RaftNode node) {
         return timers.get(node);
     }
 
@@ -182,13 +183,13 @@ public final class ManualRaftCluster implements AutoCloseable {
     private void settle(long deadline) throws InterruptedException {
         int quiet = 0;
         while (quiet < QUIET_PASSES && System.nanoTime() < deadline) {
-            if (InMemoryTransportSimulator.hasMessagesInFlight()) {
+            if (InMemoryTransportSimulatorFixture.hasMessagesInFlight()) {
                 quiet = 0;
                 Thread.sleep(1);
                 continue;
             }
             drainStateLoop();
-            quiet = InMemoryTransportSimulator.hasMessagesInFlight() ? 0 : quiet + 1;
+            quiet = InMemoryTransportSimulatorFixture.hasMessagesInFlight() ? 0 : quiet + 1;
         }
     }
 

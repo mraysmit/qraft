@@ -24,21 +24,29 @@ import java.nio.file.Path;
 import java.util.Base64;
 
 /**
- * Child-process fixture that halts at an observable snapshot/WAL boundary. It publishes the snapshot bytes it is
- * given as they are, so a caller passes them as a node stores them, configuration envelope included, and then,
- * for {@link #AFTER_PREFIX_COMPACTION}, compacts the WAL up to the snapshot's last included index.
+ * Test helper executable launched in a separate JVM by
+ * {@link dev.mars.qraft.controller.raft.RaftNodeRealSnapshotRecoveryTest}
+ * to prepare crashes during snapshot persistence and write-ahead log (WAL) compaction.
+ *
+ * <p>Publishes the supplied snapshot bytes unchanged, including their configuration
+ * envelope, and halts the JVM at the selected persistence checkpoint. For
+ * {@link #AFTER_PREFIX_COMPACTION}, it first compacts the WAL up to the snapshot's last
+ * included index. Halting skips normal cleanup so the test can assert crash recovery.
+ *
+ * <p>This class belongs in the test sources because it supplies a subprocess for the
+ * test. Its {@code main} method prepares the crash; the calling test checks recovery.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-14
  * @version 1.1
  */
-public final class SnapshotStoreCrashWriter {
+public final class SnapshotStoreCrashWriterFixture {
     public static final int HALT_EXIT_CODE = 92;
     public static final String AFTER_PUBLICATION_BEFORE_COMPACTION =
             "AFTER_PUBLICATION_BEFORE_COMPACTION";
     public static final String AFTER_PREFIX_COMPACTION = "AFTER_PREFIX_COMPACTION";
 
-    private SnapshotStoreCrashWriter() {
+    private SnapshotStoreCrashWriterFixture() {
     }
 
     public static void main(String[] args) {

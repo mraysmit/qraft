@@ -54,7 +54,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Tests {@link QraftAgent} registration, retry, readiness, service reconciliation, and ordered
  * shutdown against a stub controller. Retry delays and periodic heartbeats run on a
- * {@link ManualScheduledExecutor}, so a test decides when they fire and proves exactly that none is
+ * {@link ManualScheduledExecutorHelper}, so a test decides when they fire and proves exactly that none is
  * scheduled.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
@@ -63,7 +63,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class QraftAgentTest {
     private HttpServer server;
-    private final ManualScheduledExecutor scheduler = new ManualScheduledExecutor();
+    private final ManualScheduledExecutorHelper scheduler = new ManualScheduledExecutorHelper();
 
     @AfterEach
     void stopServer() {
@@ -514,7 +514,7 @@ class QraftAgentTest {
                 .agentPort(0).controllerUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000).contactFreshnessMs(1_000)
                 .build();
-        MutableClock clock = new MutableClock(Instant.parse("2026-09-24T10:00:00Z"));
+        MutableClockHelper clock = new MutableClockHelper(Instant.parse("2026-09-24T10:00:00Z"));
         QraftAgent agent = new QraftAgent(config,
                 new ControllerRetryPolicy(10, 100, () -> 0.0), clock);
 
@@ -677,11 +677,11 @@ class QraftAgentTest {
         assertTrue(condition.getAsBoolean(), description);
     }
 
-
-    private static final class MutableClock extends Clock {
+    /** Test clock helper that lets the enclosing tests advance time explicitly. */
+    private static final class MutableClockHelper extends Clock {
         private Instant instant;
 
-        private MutableClock(Instant instant) { this.instant = instant; }
+        private MutableClockHelper(Instant instant) { this.instant = instant; }
         private void advance(Duration duration) { instant = instant.plus(duration); }
         @Override public ZoneId getZone() { return ZoneId.of("UTC"); }
         @Override public Clock withZone(ZoneId zone) { return this; }

@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.testing.fault;
 
-import dev.mars.qraft.controller.raft.SharedDockerCluster;
+import dev.mars.qraft.controller.raft.SharedDockerClusterFixture;
 import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
@@ -24,22 +24,26 @@ import org.junit.jupiter.api.extension.ExtensionContext;
 import java.nio.file.Path;
 import java.util.Set;
 
-/** Audits container output around every class tagged {@code docker}. */
-public final class DockerLogExtension implements BeforeAllCallback, AfterAllCallback {
+/**
+ * JUnit test support helper that audits container output around every class tagged
+ * {@code docker}. Registered through {@code META-INF/services}; delegates capture
+ * to {@link DockerLogCaptureHelper} and fails the test class on unexpected errors.
+ */
+public final class DockerLogExtensionHelper implements BeforeAllCallback, AfterAllCallback {
     @Override
     public void beforeAll(ExtensionContext context) {
         if (!context.getTags().contains("docker")) return;
-        ExpectedDockerErrors annotation = context.getRequiredTestClass().getAnnotation(ExpectedDockerErrors.class);
-        DockerLogCapture.beginClass(context.getRequiredTestClass().getSimpleName(),
+        ExpectedDockerErrorsHelper annotation = context.getRequiredTestClass().getAnnotation(ExpectedDockerErrorsHelper.class);
+        DockerLogCaptureHelper.beginClass(context.getRequiredTestClass().getSimpleName(),
                 annotation == null ? Set.of() : Set.of(annotation.value()));
     }
 
     @Override
     public void afterAll(ExtensionContext context) {
         if (!context.getTags().contains("docker")) return;
-        SharedDockerCluster.captureRunningLogs();
+        SharedDockerClusterFixture.captureRunningLogs();
         String configured = System.getProperty("qraft.test.log.dir", Path.of("logs").toString());
-        var problems = DockerLogCapture.finishClass(Path.of(configured).resolve("docker"));
+        var problems = DockerLogCaptureHelper.finishClass(Path.of(configured).resolve("docker"));
         if (!problems.isEmpty()) {
             throw new AssertionError(context.getRequiredTestClass().getSimpleName()
                     + " found " + problems.size() + " unrecognised Docker log error(s):\n  "

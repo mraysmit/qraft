@@ -23,24 +23,25 @@ import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
- * The complete list of errors the test suite causes on purpose. Every error a test causes deliberately has an
+ * Test fault-definition fixture listing the errors the test suite causes on purpose.
+ * Every error a test causes deliberately has an
  * entry here, and nowhere else.
  *
  * <ul>
  * <li>An {@link Kind#INJECTED_FAILURE} is a failure a test injects into production code by throwing an
- * {@link InjectedFault} that names the entry. A logged event is that failure when its exception, or any exception
- * in its cause or suppressed chain, is that {@link InjectedFault}.</li>
+ * {@link InjectedFaultFixture} that names the entry. A logged event is that failure when its exception, or any exception
+ * in its cause or suppressed chain, is that {@link InjectedFaultFixture}.</li>
  * <li>An {@link Kind#INTENTIONAL_ERROR} is an error that production code logs because a test arranged the
  * situation, with no injected exception: a partitioned peer, a corrupted file, a refused configuration. It names
  * the exact logger, level, and complete message pattern, and labels an event only during a test that declares it
- * with {@link IntentionalErrors#expect(IntentionalError)}.</li>
+ * with {@link IntentionalErrorsHelper#expect(IntentionalErrorFixture)}.</li>
  * </ul>
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-10-04
  * @version 1.0
  */
-public enum IntentionalError {
+public enum IntentionalErrorFixture {
 
     /** Used only by the tests of this package, which test the labelling and checks themselves. */
     SELF_TEST_INJECTED_FAILURE,
@@ -186,14 +187,14 @@ public enum IntentionalError {
     private final Level level;
     private final Pattern message;
 
-    IntentionalError() {
+    IntentionalErrorFixture() {
         this.kind = Kind.INJECTED_FAILURE;
         this.loggerName = null;
         this.level = null;
         this.message = null;
     }
 
-    IntentionalError(String loggerName, Level level, String messagePattern) {
+    IntentionalErrorFixture(String loggerName, Level level, String messagePattern) {
         this.kind = Kind.INTENTIONAL_ERROR;
         this.loggerName = Objects.requireNonNull(loggerName, "loggerName");
         this.level = Objects.requireNonNull(level, "level");

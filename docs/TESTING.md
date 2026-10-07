@@ -160,7 +160,7 @@ There are two ways onto Docker, and they build differently.
 
 **1. The Docker tests deploy themselves.** You never deploy by hand before running them. After `mvn install`:
 
-1. `SharedDockerCluster` checks that `target/qraft.jar` exists and is newer than the
+1. `SharedDockerClusterFixture` checks that `target/qraft.jar` exists and is newer than the
    sources.
 2. It builds the `qraft-runtime:test` image once per run, with
    `docker compose -f src/test/resources/docker-compose-build-image.yml build`.
@@ -211,10 +211,10 @@ equivalents.
 
 ## Rules for tests
 
-- **No Mockito.** Use real objects, or small hand-written fakes such as `HeldRaftTransport`.
+- **No Mockito.** Use real objects, or small hand-written fakes such as `HeldRaftTransportFixture`.
 - **No flaky tests.** A test that fails only sometimes is a defect. Find the race, check whether production
   code has it too, and make the test deterministic.
-- **Raft timing uses manual timers** (`ManualRaftCluster`, `ManualRaftTimers`). A test fires an election or
+- **Raft timing uses manual timers** (`ManualRaftClusterFixture`, `ManualRaftTimersHelper`). A test fires an election or
   heartbeat itself, and doesn't wait for one on the clock.
 - **Real-time waits are rare and bounded.** They belong only to the runtime end-to-end tests and the
   Docker suite, which wait out real TTLs and elections. Everywhere else, a wait's bound exists only to

@@ -17,8 +17,8 @@
 package dev.mars.qraft.controller.raft.storage.snapshot;
 
 import com.google.protobuf.ByteString;
-import dev.mars.qraft.controller.raft.ManualRaftCluster;
-import dev.mars.qraft.controller.raft.PeerlessTransport;
+import dev.mars.qraft.controller.raft.ManualRaftClusterFixture;
+import dev.mars.qraft.controller.raft.PeerlessTransportFixture;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.raft.RaftNodeMode;
 import dev.mars.qraft.controller.raft.SnapshotEnvelope;
@@ -41,16 +41,25 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
-import static dev.mars.qraft.controller.raft.RaftAwait.await;
+import static dev.mars.qraft.controller.raft.RaftAwaitHelper.await;
 
 /**
- * Child-process fixture for real installed-snapshot and shutdown-drain recovery.
+ * Test helper executable launched in a separate JVM by
+ * {@link dev.mars.qraft.controller.raft.RaftNodeInstalledSnapshotRealRecoveryTest}
+ * to prepare crashes during snapshot installation or while shutdown waits for installation.
+ *
+ * <p>Starts a Raft node backed by real storage, installs a snapshot, and halts the JVM
+ * at the checkpoint selected by the calling test. Halting skips normal cleanup so the
+ * test can reopen the storage and assert recovery from the persisted snapshot and WAL.
+ *
+ * <p>This class belongs in the test sources because it supplies a subprocess for the
+ * test. Its {@code main} method prepares the crash; the calling test checks recovery.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-15
  * @version 1.0
  */
-public final class InstalledSnapshotCrashWriter {
+public final class InstalledSnapshotCrashWriterFixture {
     public static final int HALT_EXIT_CODE = 93;
     public static final String AFTER_INSTALLED_SNAPSHOT_PUBLICATION =
             "AFTER_INSTALLED_SNAPSHOT_PUBLICATION";
@@ -66,7 +75,7 @@ public final class InstalledSnapshotCrashWriter {
     /** The installed snapshot's boundary: the seeded WAL holds key-3 there, in term 2. */
     private static final long SNAPSHOT_INDEX = 4;
 
-    private InstalledSnapshotCrashWriter() {
+    private InstalledSnapshotCrashWriterFixture() {
     }
 
     public static void main(String[] args) throws Exception {
@@ -82,8 +91,8 @@ public final class InstalledSnapshotCrashWriter {
                 .build());
         realWal.open(directory).get(10, TimeUnit.SECONDS);
 
-        CompactionGateStorage gatedWal = DURING_SHUTDOWN_AFTER_PREFIX_COMPACTION.equals(checkpoint)
-                ? new CompactionGateStorage(realWal)
+        CompactionGateStorageFixture gatedWal = DURING_SHUTDOWN_AFTER_PREFIX_COMPACTION.equals(checkpoint)
+                ? new CompactionGateStorageFixture(realWal)
                 : null;
         RaftStorage wal = gatedWal == null ? realWal : gatedWal;
         FileSnapshotStore snapshots = new FileSnapshotStore(reached -> {
@@ -99,9 +108,9 @@ public final class InstalledSnapshotCrashWriter {
         RaftNode node = RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("follower-1")
-                .serverId(ManualRaftCluster.serverIdOf("follower-1"))
+                .serverId(ManualRaftClusterFixture.serverIdOf("follower-1"))
                 .clusterNodes(MEMBERS)
-                .transport(new PeerlessTransport())
+                .transport(new PeerlessTransportFixture())
                 .stateMachine(new QraftStateStore())
                 .commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.durable(wal, snapshots))
@@ -157,19 +166,20 @@ public final class InstalledSnapshotCrashWriter {
         state.apply(put("key-2", "two"));
         state.apply(put("key-3", "three"));
         state.setLastAppliedIndex(SNAPSHOT_INDEX);
-        return SnapshotEnvelope.wrap(ManualRaftCluster.configurationOf(MEMBERS), state.takeSnapshot());
+        return SnapshotEnvelope.wrap(ManualRaftClusterFixture.configurationOf(MEMBERS), state.takeSnapshot());
     }
 
     private static DistributedStateRaftCommand put(String key, String value) {
         return new DistributedStateRaftCommand(DistributedStateCommand.put(key, value));
     }
 
-    private static final class CompactionGateStorage implements RaftStorage {
+    /** Test storage fixture that holds prefix-compaction completion so the crash subprocess can halt during shutdown. */
+    private static final class CompactionGateStorageFixture implements RaftStorage {
         private final FileRaftStorage delegate;
         private final CompletableFuture<Void> compactionReached = new CompletableFuture<>();
         private final CompletableFuture<Void> neverRelease = new CompletableFuture<>();
 
-        private CompactionGateStorage(FileRaftStorage delegate) {
+        private CompactionGateStorageFixture(FileRaftStorage delegate) {
             this.delegate = delegate;
         }
 

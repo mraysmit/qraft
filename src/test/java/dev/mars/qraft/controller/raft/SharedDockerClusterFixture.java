@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.testing.fault.DockerLogCapture;
+import dev.mars.qraft.testing.fault.DockerLogCaptureHelper;
 import org.testcontainers.containers.ComposeContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.DockerClientFactory;
@@ -43,7 +43,7 @@ import java.util.logging.Logger;
 import java.util.stream.Stream;
 
 /**
- * Shared Docker cluster containers for integration tests.
+ * Test fixture that manages shared Docker cluster containers for integration tests.
  *
  * <p>Uses the singleton pattern to build the Docker image once and share
  * running 3-node and 5-node clusters across all test classes. This avoids
@@ -62,11 +62,11 @@ import java.util.stream.Stream;
  * @version 1.0
  * @since 2025-08-20
  */
-public final class SharedDockerCluster {
+public final class SharedDockerClusterFixture {
 
     private static final Set<String> LIFECYCLE_ACTIONS = Set.of("stop", "kill", "start", "pause", "unpause");
 
-    private static final Logger logger = Logger.getLogger(SharedDockerCluster.class.getName());
+    private static final Logger logger = Logger.getLogger(SharedDockerClusterFixture.class.getName());
 
     private static volatile boolean imageBuilt = false;
     private static ComposeContainer threeNodeCluster;
@@ -76,10 +76,10 @@ public final class SharedDockerCluster {
 
     static {
         Runtime.getRuntime().addShutdownHook(
-                new Thread(SharedDockerCluster::shutdown, "SharedDockerCluster-shutdown"));
+                new Thread(SharedDockerClusterFixture::shutdown, "SharedDockerClusterFixture-shutdown"));
     }
 
-    private SharedDockerCluster() {}
+    private SharedDockerClusterFixture() {}
 
     /**
      * Returns the shared 3-node cluster, building the image and starting containers on first call.
@@ -166,30 +166,30 @@ public final class SharedDockerCluster {
 
     /** Freezes every process in one compose service without stopping, restarting, or removing it. */
     public static synchronized void pauseContainer(ComposeContainer cluster, String serviceName) {
-        runDockerLifecycleCommand("pause", containerId(cluster, serviceName), SharedDockerCluster::runCommand);
+        runDockerLifecycleCommand("pause", containerId(cluster, serviceName), SharedDockerClusterFixture::runCommand);
     }
 
     /** Resumes a service frozen by {@link #pauseContainer}. */
     public static synchronized void unpauseContainer(ComposeContainer cluster, String serviceName) {
-        runDockerLifecycleCommand("unpause", containerId(cluster, serviceName), SharedDockerCluster::runCommand);
+        runDockerLifecycleCommand("unpause", containerId(cluster, serviceName), SharedDockerClusterFixture::runCommand);
     }
 
     /** Stops one compose service without removing its container or volume. */
     public static synchronized void stopContainer(ComposeContainer cluster, String serviceName) {
         runDockerLifecycleCommand("stop", containerId(cluster, serviceName),
-                SharedDockerCluster::runCommand);
+                SharedDockerClusterFixture::runCommand);
     }
 
     /** Abruptly kills one compose service without removing its container or volume. */
     public static synchronized void killContainer(ComposeContainer cluster, String serviceName) {
         runDockerLifecycleCommand("kill", containerId(cluster, serviceName),
-                SharedDockerCluster::runCommand);
+                SharedDockerClusterFixture::runCommand);
     }
 
     /** Starts a previously stopped or killed compose service. */
     public static synchronized void startContainer(ComposeContainer cluster, String serviceName) {
         runDockerLifecycleCommand("start", containerId(cluster, serviceName),
-                SharedDockerCluster::runCommand);
+                SharedDockerClusterFixture::runCommand);
     }
 
     /** Stops every node and starts the same containers again, retaining named volumes. */
@@ -199,10 +199,10 @@ public final class SharedDockerCluster {
             containerIds.add(containerId(cluster, "controller" + i));
         }
         for (String containerId : containerIds) {
-            runDockerLifecycleCommand("stop", containerId, SharedDockerCluster::runCommand);
+            runDockerLifecycleCommand("stop", containerId, SharedDockerClusterFixture::runCommand);
         }
         for (String containerId : containerIds) {
-            runDockerLifecycleCommand("start", containerId, SharedDockerCluster::runCommand);
+            runDockerLifecycleCommand("start", containerId, SharedDockerClusterFixture::runCommand);
         }
     }
 
@@ -266,7 +266,7 @@ public final class SharedDockerCluster {
                 process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
             }
             String text = Files.readString(output, java.nio.charset.StandardCharsets.UTF_8);
-            DockerLogCapture.capture("lock-contender-" + name, "lock-contender", text);
+            DockerLogCaptureHelper.capture("lock-contender-" + name, "lock-contender", text);
             return new DockerCommandResult(exited, exited ? process.exitValue() : -1, text);
         } catch (Exception error) {
             throw new IllegalStateException("Could not run storage-lock contender", error);
@@ -444,7 +444,7 @@ public final class SharedDockerCluster {
 
     /** Captures every registered container's output without stopping it. */
     public static synchronized void captureRunningLogs() {
-        ACTIVE_CLUSTERS.forEach(SharedDockerCluster::captureClusterLogs);
+        ACTIVE_CLUSTERS.forEach(SharedDockerClusterFixture::captureClusterLogs);
     }
 
     /** Captures a disposable cluster before Testcontainers removes its containers, then stops it. */
@@ -460,7 +460,7 @@ public final class SharedDockerCluster {
 
     private static void captureClusterLogs(ComposeContainer cluster, List<String> services) {
         for (String service : services) {
-            cluster.getContainerByServiceName(service).ifPresent(container -> DockerLogCapture.capture(
+            cluster.getContainerByServiceName(service).ifPresent(container -> DockerLogCaptureHelper.capture(
                     container.getContainerId(), service + "-" + container.getContainerId().substring(0, 12),
                     container.getLogs()));
         }
@@ -470,7 +470,7 @@ public final class SharedDockerCluster {
         try {
             Process process = new ProcessBuilder("docker", "logs", name).redirectErrorStream(true).start();
             String output = new String(process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-            if (process.waitFor() == 0) DockerLogCapture.capture("detached-" + name, name, output);
+            if (process.waitFor() == 0) DockerLogCaptureHelper.capture("detached-" + name, name, output);
         } catch (Exception error) {
             throw new IllegalStateException("Could not capture Docker logs for " + name, error);
         }

@@ -108,7 +108,7 @@ class HealthPropagationEndToEndTest {
 
     @AfterEach
     void closeResources() throws Exception {
-        Cleanup cleanup = new Cleanup()
+        CleanupHelper cleanup = new CleanupHelper()
                 .run(this::stopReporting)
                 .run(() -> { if (agent != null) agent.shutdown().get(10, TimeUnit.SECONDS); })
                 .run(() -> holdObservations.set(false));

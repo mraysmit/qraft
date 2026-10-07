@@ -27,8 +27,8 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.List;
 
-import static dev.mars.qraft.testing.fault.IntentionalError.SELF_TEST_INJECTED_FAILURE;
-import static dev.mars.qraft.testing.fault.IntentionalError.SELF_TEST_INTENTIONAL_ERROR;
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.SELF_TEST_INJECTED_FAILURE;
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.SELF_TEST_INTENTIONAL_ERROR;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -52,7 +52,7 @@ class IntentionalErrorsTest {
     @Test
     void anUnlabelledErrorIsAProblem() {
         List<String> problems = inWindow("SelfTest#a", () ->
-                IntentionalErrors.record(event(SELF_TEST, Level.ERROR, "a real failure", null)));
+                IntentionalErrorsHelper.record(event(SELF_TEST, Level.ERROR, "a real failure", null)));
 
         assertEquals(List.of("unlabelled ERROR [main] dev.mars.qraft.testing.fault.selftest - a real failure"),
                 problems.stream().map(problem -> problem.replaceFirst("\\[[^\\]]*\\]", "[main]")).toList());
@@ -61,8 +61,8 @@ class IntentionalErrorsTest {
     @Test
     void anUnlabelledExceptionIsAProblemAtAnyLevel() {
         List<String> problems = inWindow("SelfTest#b", () -> {
-            IntentionalErrors.record(event(SELF_TEST, Level.DEBUG, "a debug line", new IllegalStateException("boom")));
-            IntentionalErrors.record(event(SELF_TEST, Level.WARN, "a warning", new IllegalStateException("boom")));
+            IntentionalErrorsHelper.record(event(SELF_TEST, Level.DEBUG, "a debug line", new IllegalStateException("boom")));
+            IntentionalErrorsHelper.record(event(SELF_TEST, Level.WARN, "a warning", new IllegalStateException("boom")));
         });
 
         assertEquals(2, problems.size(), problems.toString());
@@ -71,12 +71,12 @@ class IntentionalErrorsTest {
     @Test
     void aWarningWithoutAnExceptionIsNotAProblem() {
         assertEquals(List.of(), inWindow("SelfTest#c", () ->
-                IntentionalErrors.record(event(SELF_TEST, Level.WARN, "a warning", null))));
+                IntentionalErrorsHelper.record(event(SELF_TEST, Level.WARN, "a warning", null))));
     }
 
     @Test
     void anInjectedFailureIsLabelledWithItsEntryAndTest() {
-        InjectedFault fault = new InjectedFault(SELF_TEST_INJECTED_FAILURE, "Simulated sync failure");
+        InjectedFaultFixture fault = new InjectedFaultFixture(SELF_TEST_INJECTED_FAILURE, "Simulated sync failure");
         ILoggingEvent direct = event(OTHER, Level.ERROR, "Failed to persist command: Simulated sync failure", fault);
         ILoggingEvent wrapped = event(OTHER, Level.WARN, "Sync failed",
                 new IllegalStateException("outer", new IOException("disk", fault)));
@@ -87,8 +87,8 @@ class IntentionalErrorsTest {
         List<String> problems = inWindow("SelfTest#d", () -> {
             for (ILoggingEvent event : List.of(direct, wrapped, suppressed)) {
                 assertEquals("*** INJECTED FAILURE: SELF_TEST_INJECTED_FAILURE, injected by SelfTest#d *** ",
-                        new IntentionalErrorLabel().convert(event));
-                IntentionalErrors.record(event);
+                        new IntentionalErrorLabelHelper().convert(event));
+                IntentionalErrorsHelper.record(event);
             }
         });
 
@@ -97,11 +97,11 @@ class IntentionalErrorsTest {
 
     @Test
     void anInjectedFailureCountsAgainstADeclaredNumber() {
-        InjectedFault fault = new InjectedFault(SELF_TEST_INJECTED_FAILURE, "Simulated");
+        InjectedFaultFixture fault = new InjectedFaultFixture(SELF_TEST_INJECTED_FAILURE, "Simulated");
         List<String> problems = inWindow("SelfTest#e", () -> {
-            IntentionalErrors.expect(SELF_TEST_INJECTED_FAILURE, 1);
-            IntentionalErrors.record(event(OTHER, Level.ERROR, "first", fault));
-            IntentionalErrors.record(event(OTHER, Level.ERROR, "second", fault));
+            IntentionalErrorsHelper.expect(SELF_TEST_INJECTED_FAILURE, 1);
+            IntentionalErrorsHelper.record(event(OTHER, Level.ERROR, "first", fault));
+            IntentionalErrorsHelper.record(event(OTHER, Level.ERROR, "second", fault));
         });
 
         assertEquals(List.of("INJECTED FAILURE SELF_TEST_INJECTED_FAILURE was declared exactly 1 time(s)"
@@ -113,11 +113,11 @@ class IntentionalErrorsTest {
         ILoggingEvent error = event(SELF_TEST, Level.ERROR, "Self-test intentional error 7", null);
 
         List<String> problems = inWindow("SelfTest#f", () -> {
-            assertEquals("", new IntentionalErrorLabel().convert(error));
-            IntentionalErrors.expect(SELF_TEST_INTENTIONAL_ERROR);
+            assertEquals("", new IntentionalErrorLabelHelper().convert(error));
+            IntentionalErrorsHelper.expect(SELF_TEST_INTENTIONAL_ERROR);
             assertEquals("*** INTENTIONAL ERROR: SELF_TEST_INTENTIONAL_ERROR, caused by SelfTest#f *** ",
-                    new IntentionalErrorLabel().convert(error));
-            IntentionalErrors.record(error);
+                    new IntentionalErrorLabelHelper().convert(error));
+            IntentionalErrorsHelper.record(error);
         });
 
         assertEquals(List.of(), problems);
@@ -126,11 +126,11 @@ class IntentionalErrorsTest {
     @Test
     void anIntentionalErrorMatchesOnlyItsLoggerLevelAndWholeMessage() {
         List<String> problems = inWindow("SelfTest#g", () -> {
-            IntentionalErrors.expect(SELF_TEST_INTENTIONAL_ERROR, 1);
-            IntentionalErrors.record(event(SELF_TEST, Level.ERROR, "Self-test intentional error 7", null));
-            IntentionalErrors.record(event(SELF_TEST, Level.ERROR, "Self-test intentional error 7 and more", null));
-            IntentionalErrors.record(event(OTHER, Level.ERROR, "Self-test intentional error 7", null));
-            IntentionalErrors.record(event(SELF_TEST, Level.WARN, "Self-test intentional error 7",
+            IntentionalErrorsHelper.expect(SELF_TEST_INTENTIONAL_ERROR, 1);
+            IntentionalErrorsHelper.record(event(SELF_TEST, Level.ERROR, "Self-test intentional error 7", null));
+            IntentionalErrorsHelper.record(event(SELF_TEST, Level.ERROR, "Self-test intentional error 7 and more", null));
+            IntentionalErrorsHelper.record(event(OTHER, Level.ERROR, "Self-test intentional error 7", null));
+            IntentionalErrorsHelper.record(event(SELF_TEST, Level.WARN, "Self-test intentional error 7",
                     new IllegalStateException("boom")));
         });
 
@@ -140,7 +140,7 @@ class IntentionalErrorsTest {
 
     @Test
     void aDeclaredErrorThatNeverOccursIsAProblem() {
-        List<String> problems = inWindow("SelfTest#h", () -> IntentionalErrors.expect(SELF_TEST_INTENTIONAL_ERROR));
+        List<String> problems = inWindow("SelfTest#h", () -> IntentionalErrorsHelper.expect(SELF_TEST_INTENTIONAL_ERROR));
 
         assertEquals(List.of("INTENTIONAL ERROR SELF_TEST_INTENTIONAL_ERROR was declared at least 1 time(s)"
                 + " but occurred 0 time(s)"), problems);
@@ -148,45 +148,45 @@ class IntentionalErrorsTest {
 
     @Test
     void aWindowClosedOutOfOrderIsAProblem() {
-        IntentionalErrors.begin("SelfTest#outer");
-        IntentionalErrors.begin("SelfTest#inner");
+        IntentionalErrorsHelper.begin("SelfTest#outer");
+        IntentionalErrorsHelper.begin("SelfTest#inner");
 
         assertEquals(List.of("intentional-error window mismatch: closing SelfTest#outer but the open window is"
-                + " SelfTest#inner"), IntentionalErrors.end("SelfTest#outer"));
-        assertEquals(List.of(), IntentionalErrors.end("SelfTest#inner"));
-        assertEquals(List.of(), IntentionalErrors.end("SelfTest#outer"));
+                + " SelfTest#inner"), IntentionalErrorsHelper.end("SelfTest#outer"));
+        assertEquals(List.of(), IntentionalErrorsHelper.end("SelfTest#inner"));
+        assertEquals(List.of(), IntentionalErrorsHelper.end("SelfTest#outer"));
     }
 
     @Test
     void aRootWithoutAStartedCheckIsRefused() {
         LoggerContext context = new LoggerContext();
         Logger root = context.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
-        assertThrows(AssertionError.class, () -> IntentionalErrorCheck.requireAttachedTo(root));
+        assertThrows(AssertionError.class, () -> IntentionalErrorCheckHelper.requireAttachedTo(root));
 
-        IntentionalErrorCheck check = new IntentionalErrorCheck();
+        IntentionalErrorCheckHelper check = new IntentionalErrorCheckHelper();
         check.setContext(context);
         root.addAppender(check);
-        assertThrows(AssertionError.class, () -> IntentionalErrorCheck.requireAttachedTo(root));
+        assertThrows(AssertionError.class, () -> IntentionalErrorCheckHelper.requireAttachedTo(root));
 
         check.start();
-        IntentionalErrorCheck.requireAttachedTo(root);
+        IntentionalErrorCheckHelper.requireAttachedTo(root);
     }
 
     @Test
     void onlyAnInjectedFailureEntryCanBeInjected() {
         assertThrows(IllegalArgumentException.class,
-                () -> new InjectedFault(SELF_TEST_INTENTIONAL_ERROR, "not injectable"));
+                () -> new InjectedFaultFixture(SELF_TEST_INTENTIONAL_ERROR, "not injectable"));
     }
 
     private static List<String> inWindow(String owner, Runnable body) {
-        IntentionalErrors.begin(owner);
+        IntentionalErrorsHelper.begin(owner);
         try {
             body.run();
         } catch (RuntimeException | Error failure) {
-            IntentionalErrors.end(owner);
+            IntentionalErrorsHelper.end(owner);
             throw failure;
         }
-        return IntentionalErrors.end(owner);
+        return IntentionalErrorsHelper.end(owner);
     }
 
     private static ILoggingEvent event(Logger logger, Level level, String message, Throwable failure) {

@@ -28,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests for {@link TtlCheckRunner} reporting, local expiry, renewal, and stop, driven by
- * {@link ManualTime}.
+ * {@link ManualTimeHelper}.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-26
@@ -38,8 +38,8 @@ class TtlCheckRunnerTest {
     private static final Instant START = Instant.parse("2026-09-26T12:00:00Z");
     private static final Duration TTL = Duration.ofSeconds(15);
 
-    private final ManualTime time = new ManualTime(START);
-    private final RecordingListener results = new RecordingListener();
+    private final ManualTimeHelper time = new ManualTimeHelper(START);
+    private final RecordingListenerHelper results = new RecordingListenerHelper();
     private final TtlCheckRunner runner = new TtlCheckRunner(
             new TtlCheck("web", "app", TTL, true), time, time, results);
 

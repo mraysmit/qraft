@@ -97,7 +97,7 @@ class JavaRuntimeTest {
 
     @Test
     void aTimerThatFiresBeforeItsRegistrationIsRecordedLeavesNoRegistrationBehind() throws Exception {
-        JavaRuntime racing = new JavaRuntime(new FiresBeforeScheduleReturns());
+        JavaRuntime racing = new JavaRuntime(new FiresBeforeScheduleReturnsFixture());
         try {
             java.util.concurrent.atomic.AtomicInteger fired = new java.util.concurrent.atomic.AtomicInteger();
 
@@ -167,9 +167,13 @@ class JavaRuntimeTest {
         assertEquals("request-1", operation.toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
     }
 
-    /** Runs each scheduled task to completion before {@code schedule} returns, the widest timer race. */
-    private static final class FiresBeforeScheduleReturns extends java.util.concurrent.ScheduledThreadPoolExecutor {
-        FiresBeforeScheduleReturns() {
+    /**
+     * Test executor fixture that runs a scheduled task before returning its handle to exercise the scheduling race.
+     *
+     * <p>Runs each scheduled task to completion before {@code schedule} returns, the widest timer race.
+     */
+    private static final class FiresBeforeScheduleReturnsFixture extends java.util.concurrent.ScheduledThreadPoolExecutor {
+        FiresBeforeScheduleReturnsFixture() {
             super(1);
         }
 

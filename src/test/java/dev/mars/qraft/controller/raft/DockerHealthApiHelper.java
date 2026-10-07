@@ -27,21 +27,21 @@ import java.time.Duration;
 import java.util.List;
 
 /**
- * Reads Raft, node, and health state from containers through their public HTTP APIs for the Docker
- * agent tests. Every read tolerates an unreachable container by returning {@code null} or {@code -1}, so
+ * Test helper that reads Raft, node, and health state through container HTTP APIs for Docker agent tests.
+ * Every read tolerates an unreachable container by returning {@code null} or {@code -1}, so
  * callers can poll across crashes and restarts.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-27
  * @version 1.0
  */
-final class DockerHealthApi {
+final class DockerHealthApiHelper {
     static final String AGENT_ID = "docker-agent";
 
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
-    private DockerHealthApi() {
+    private DockerHealthApiHelper() {
     }
 
     /** The agent's {@code web} instance is discoverable as passing, with both of its checks passing. */

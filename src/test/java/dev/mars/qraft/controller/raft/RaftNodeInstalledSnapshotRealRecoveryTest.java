@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.testing.fault.InjectedFault;
+import dev.mars.qraft.testing.fault.InjectedFaultFixture;
 
 import com.google.protobuf.ByteString;
 import dev.mars.qraft.controller.raft.grpc.AppendEntriesRequest;
@@ -25,7 +25,7 @@ import dev.mars.qraft.controller.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.controller.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.controller.raft.storage.RaftStorageFactory;
 import dev.mars.qraft.controller.raft.storage.snapshot.FileSnapshotStore;
-import dev.mars.qraft.controller.raft.storage.snapshot.InstalledSnapshotCrashWriter;
+import dev.mars.qraft.controller.raft.storage.snapshot.InstalledSnapshotCrashWriterFixture;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
 import dev.mars.qraft.controller.state.DistributedStateRaftCommand;
 import dev.mars.qraft.controller.state.ProtobufRaftCommandCodec;
@@ -48,7 +48,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
-import static dev.mars.qraft.controller.raft.RaftAwait.await;
+import static dev.mars.qraft.controller.raft.RaftAwaitHelper.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -66,7 +66,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RaftNodeInstalledSnapshotRealRecoveryTest {
     private static final ProtobufRaftCommandCodec CODEC = new ProtobufRaftCommandCodec();
     /** The follower's cluster, as the crash writer's follower and every restart of it know it. */
-    private static final Set<String> MEMBERS = InstalledSnapshotCrashWriter.MEMBERS;
+    private static final Set<String> MEMBERS = InstalledSnapshotCrashWriterFixture.MEMBERS;
 
     @TempDir
     Path directory;
@@ -84,19 +84,19 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
 
     @Test
     void restartDuringInstalledSnapshotPublicationUsesSnapshotAndUntrimmedWal() throws Exception {
-        verifyRecovery(InstalledSnapshotCrashWriter.AFTER_INSTALLED_SNAPSHOT_PUBLICATION,
+        verifyRecovery(InstalledSnapshotCrashWriterFixture.AFTER_INSTALLED_SNAPSHOT_PUBLICATION,
                 List.of(1L, 2L, 3L, 4L, 5L), 2, true);
     }
 
     @Test
     void restartWhileShutdownDrainsCompactedInstallationUsesExactSuffix() throws Exception {
-        verifyRecovery(InstalledSnapshotCrashWriter.DURING_SHUTDOWN_AFTER_PREFIX_COMPACTION,
+        verifyRecovery(InstalledSnapshotCrashWriterFixture.DURING_SHUTDOWN_AFTER_PREFIX_COMPACTION,
                 List.of(5L), 2, true);
     }
 
     @Test
     void divergentSuffixIsAbsentFromWalAndRecoveryAfterInstallation() throws Exception {
-        verifyRecovery(InstalledSnapshotCrashWriter.AFTER_DIVERGENT_SUFFIX_INSTALL,
+        verifyRecovery(InstalledSnapshotCrashWriterFixture.AFTER_DIVERGENT_SUFFIX_INSTALL,
                 List.of(), 99, false);
     }
 
@@ -110,8 +110,8 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
     @Test
     void crashAfterPublishingAConflictingSnapshotDropsTheReplacedHistory() throws Exception {
         seedWal();
-        ProcessResult crash = runCrashWriter(InstalledSnapshotCrashWriter.AFTER_DIVERGENT_SNAPSHOT_PUBLICATION);
-        assertEquals(InstalledSnapshotCrashWriter.HALT_EXIT_CODE, crash.exitCode(), crash.output());
+        ProcessResult crash = runCrashWriter(InstalledSnapshotCrashWriterFixture.AFTER_DIVERGENT_SNAPSHOT_PUBLICATION);
+        assertEquals(InstalledSnapshotCrashWriterFixture.HALT_EXIT_CODE, crash.exitCode(), crash.output());
         assertDurableState(4, 99, List.of(1L, 2L, 3L, 4L, 5L));
 
         QraftStateStore state = new QraftStateStore();
@@ -146,7 +146,7 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
             wal.open(directory).get(10, TimeUnit.SECONDS);
             wal.updateMetadata(3, Optional.of("follower-1")).get(10, TimeUnit.SECONDS);
             wal.appendEntries(List.of(
-                    ManualRaftCluster.bootstrapEntry(MEMBERS),
+                    ManualRaftClusterFixture.bootstrapEntry(MEMBERS),
                     entry(2, 1, "key-1", "one"),
                     entry(3, 1, "key-2", "two"),
                     entry(4, 2, "key-3", "three"))).get(10, TimeUnit.SECONDS);
@@ -177,10 +177,10 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
                 RaftStorageFactory.createDurable(directory, true));
         runtime = JavaRuntime.create();
         node = RaftNode.builder()
-                .runtime(runtime).nodeId("follower-1").serverId(ManualRaftCluster.serverIdOf("follower-1"))
+                .runtime(runtime).nodeId("follower-1").serverId(ManualRaftClusterFixture.serverIdOf("follower-1"))
                 .clusterNodes(MEMBERS)
-                .transport(new PeerlessTransport()).stateMachine(new QraftStateStore()).commandCodec(CODEC)
-                .mode(RaftNodeMode.durable(new FailingSyncStorage(durable.wal()), durable.snapshots()))
+                .transport(new PeerlessTransportFixture()).stateMachine(new QraftStateStore()).commandCodec(CODEC)
+                .mode(RaftNodeMode.durable(new FailingSyncStorageFixture(durable.wal()), durable.snapshots()))
                 .snapshotEnabled(false).electionTimeout(60_000).heartbeatInterval(60_000)
                 .build();
         ExecutionException failure = assertThrows(ExecutionException.class,
@@ -216,9 +216,9 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
         QraftStateStore state = new QraftStateStore();
         Set<String> members = Set.of("leader", "empty-follower", "peer");
         node = RaftNode.builder()
-                .runtime(runtime).nodeId("empty-follower").serverId(ManualRaftCluster.serverIdOf("empty-follower"))
+                .runtime(runtime).nodeId("empty-follower").serverId(ManualRaftClusterFixture.serverIdOf("empty-follower"))
                 .clusterNodes(members)
-                .transport(new PeerlessTransport()).stateMachine(state).commandCodec(CODEC)
+                .transport(new PeerlessTransportFixture()).stateMachine(state).commandCodec(CODEC)
                 .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
                 .snapshotEnabled(false).electionTimeout(60_000).heartbeatInterval(60_000)
                 .build();
@@ -233,13 +233,13 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
                         .setTerm(1).setLeaderId("leader")
                         .setLastIncludedIndex(6).setLastIncludedTerm(1)
                         .setChunkIndex(0).setTotalChunks(1).setDone(true)
-                        .setData(ByteString.copyFrom(ManualRaftCluster.snapshotOf(members, source.takeSnapshot())))
+                        .setData(ByteString.copyFrom(ManualRaftClusterFixture.snapshotOf(members, source.takeSnapshot())))
                         .build()));
 
         assertTrue(response.getSuccess(), response.toString());
         assertEquals(6, node.getSnapshotLastIndex());
         assertEquals("snapshot", state.getMetadata("installed"));
-        assertEquals(Optional.of(ManualRaftCluster.configurationOf(members)), node.getConfiguration(),
+        assertEquals(Optional.of(ManualRaftClusterFixture.configurationOf(members)), node.getConfiguration(),
                 "the installed snapshot brings the cluster configuration with it");
     }
 
@@ -254,7 +254,7 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
                                 long expectedSnapshotTerm, boolean expectFourthEntry) throws Exception {
         seedWal();
         ProcessResult crash = runCrashWriter(checkpoint);
-        assertEquals(InstalledSnapshotCrashWriter.HALT_EXIT_CODE, crash.exitCode(), crash.output());
+        assertEquals(InstalledSnapshotCrashWriterFixture.HALT_EXIT_CODE, crash.exitCode(), crash.output());
 
         try (FileSnapshotStore snapshots = new FileSnapshotStore()) {
             snapshots.open(directory).get(10, TimeUnit.SECONDS);
@@ -301,7 +301,7 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
         try (FileSnapshotStore snapshots = new FileSnapshotStore()) {
             snapshots.open(directory).get(10, TimeUnit.SECONDS);
             snapshots.saveAtomically(new SnapshotStore.SnapshotData(
-                            ManualRaftCluster.snapshotOf(MEMBERS, installed.takeSnapshot()), 4, 99))
+                            ManualRaftClusterFixture.snapshotOf(MEMBERS, installed.takeSnapshot()), 4, 99))
                     .get(10, TimeUnit.SECONDS);
         }
     }
@@ -312,8 +312,12 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
         return String.valueOf(root.getMessage());
     }
 
-    /** Delegates to the real WAL except that {@code sync} fails. */
-    private record FailingSyncStorage(RaftStorage delegate) implements RaftStorage {
+    /**
+     * Test storage fixture that injects sync failure to exercise installed-snapshot recovery.
+     *
+     * <p>Delegates to the real WAL except that {@code sync} fails.
+     */
+    private record FailingSyncStorageFixture(RaftStorage delegate) implements RaftStorage {
         @Override public java.util.concurrent.CompletableFuture<Void> open(Path dataDir) { return delegate.open(dataDir); }
         @Override public java.util.concurrent.CompletableFuture<Void> updateMetadata(long term, Optional<String> votedFor) {
             return delegate.updateMetadata(term, votedFor);
@@ -331,8 +335,8 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
         @Override public java.util.concurrent.CompletableFuture<Void> sync() {
             return java.util.concurrent.CompletableFuture.failedFuture(
                     new java.io.IOException("Simulated recovery sync failure",
-                            new InjectedFault(
-                                    dev.mars.qraft.testing.fault.IntentionalError.RAFT_RECOVERY_STORAGE_FAILURE,
+                            new InjectedFaultFixture(
+                                    dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_RECOVERY_STORAGE_FAILURE,
                                     "Simulated recovery sync failure")));
         }
         @Override public java.util.concurrent.CompletableFuture<List<LogEntryData>> replayLog() { return delegate.replayLog(); }
@@ -348,9 +352,9 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
         return RaftNode.builder()
                 .runtime(runtime)
                 .nodeId("follower-1")
-                .serverId(ManualRaftCluster.serverIdOf("follower-1"))
+                .serverId(ManualRaftClusterFixture.serverIdOf("follower-1"))
                 .clusterNodes(MEMBERS)
-                .transport(new PeerlessTransport())
+                .transport(new PeerlessTransportFixture())
                 .stateMachine(state)
                 .commandCodec(CODEC)
                 .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
@@ -409,7 +413,7 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
             wal.open(directory).get(10, TimeUnit.SECONDS);
             wal.updateMetadata(3, Optional.of("follower-1")).get(10, TimeUnit.SECONDS);
             wal.appendEntries(List.of(
-                    ManualRaftCluster.bootstrapEntry(MEMBERS),
+                    ManualRaftClusterFixture.bootstrapEntry(MEMBERS),
                     entry(2, 1, "key-1", "one"),
                     entry(3, 1, "key-2", "two"),
                     entry(4, 2, "key-3", "three"),
@@ -427,7 +431,7 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
         Path outputFile = directory.resolve("installed-snapshot-crash-writer.log");
         Process process = new ProcessBuilder(
                 java.toString(), "-cp", classPath,
-                InstalledSnapshotCrashWriter.class.getName(),
+                InstalledSnapshotCrashWriterFixture.class.getName(),
                 directory.toString(), checkpoint)
                 .redirectErrorStream(true)
                 .redirectOutput(outputFile.toFile())

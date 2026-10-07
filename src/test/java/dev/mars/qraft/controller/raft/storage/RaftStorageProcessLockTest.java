@@ -33,7 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests that a second JVM cannot open a Raft storage directory locked by a live {@link
- * DirectoryLockProcess}, and that its failure leaves the owner unaffected.
+ * DirectoryLockProcessFixture}, and that its failure leaves the owner unaffected.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-22
@@ -94,6 +94,6 @@ class RaftStorageProcessLockTest {
         String classPath = System.getProperty(
                 "surefire.test.class.path", System.getProperty("java.class.path"));
         return new ProcessBuilder(java, "-cp", classPath,
-                DirectoryLockProcess.class.getName(), directory.toString());
+                DirectoryLockProcessFixture.class.getName(), directory.toString());
     }
 }

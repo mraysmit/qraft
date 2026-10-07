@@ -28,7 +28,7 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
-import static dev.mars.qraft.controller.raft.RaftAwait.await;
+import static dev.mars.qraft.controller.raft.RaftAwaitHelper.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -42,13 +42,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  */
 class RaftPersistenceArchitectureTest {
     private JavaRuntime runtime;
-    private TestRaftStorage storage;
+    private TestRaftStorageFixture storage;
     private RaftPersistence persistence;
 
     @BeforeEach
     void setUp() {
         runtime = JavaRuntime.create();
-        storage = new TestRaftStorage();
+        storage = new TestRaftStorageFixture();
         storage.open(null).join();
         persistence = new RaftPersistence(Optional.of(storage), Optional.of(storage));
     }

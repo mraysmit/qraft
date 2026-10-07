@@ -16,12 +16,12 @@
 
 package dev.mars.qraft.controller.http;
 
-import dev.mars.qraft.testing.fault.IntentionalErrors;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.mars.qraft.controller.raft.InMemoryTransportSimulator;
-import dev.mars.qraft.controller.raft.ManualRaftCluster;
+import dev.mars.qraft.controller.raft.InMemoryTransportSimulatorFixture;
+import dev.mars.qraft.controller.raft.ManualRaftClusterFixture;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.raft.RaftNodeMode;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
@@ -52,7 +52,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * fenced or draining, and knows a current leader. A 503 names every failed condition; liveness is never
  * affected. A server cut off from the majority becomes unready and is ready again once the partition heals.
  *
- * <p>Elections and heartbeats fire only when a test fires them through {@link ManualRaftCluster}, so the
+ * <p>Elections and heartbeats fire only when a test fires them through {@link ManualRaftClusterFixture}, so the
  * leader a test observes stays the leader until the test changes it.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
@@ -66,7 +66,7 @@ class HttpApiServerReadinessTest {
     private final Map<String, RaftNode> nodes = new LinkedHashMap<>();
     private final List<HttpApiServer> servers = new ArrayList<>();
     private JavaRuntime runtime;
-    private ManualRaftCluster cluster;
+    private ManualRaftClusterFixture cluster;
 
     @AfterEach
     void stop() throws Exception {
@@ -75,7 +75,7 @@ class HttpApiServerReadinessTest {
             if (cluster != null) cluster.close();
         } finally {
             if (runtime != null) runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            InMemoryTransportSimulator.clearAllTransports();
+            InMemoryTransportSimulatorFixture.clearAllTransports();
             http.close();
         }
     }
@@ -117,10 +117,10 @@ class HttpApiServerReadinessTest {
         startCluster(Set.of("a", "b", "c"), Set.of("a", "b", "c"));
         electAndFollow("a");
         RaftNode a = nodes.get("a");
-        ManualRaftCluster.await(a.submitCommand(new DistributedStateRaftCommand(
+        ManualRaftClusterFixture.await(a.submitCommand(new DistributedStateRaftCommand(
                 DistributedStateCommand.put("k", "v"))));
-        ManualRaftCluster.await(a.removeServer(a.getServerId()));
-        ManualRaftCluster.await(a.awaitState(RaftNode.State.FOLLOWER, 10_000));
+        ManualRaftClusterFixture.await(a.removeServer(a.getServerId()));
+        ManualRaftClusterFixture.await(a.awaitState(RaftNode.State.FOLLOWER, 10_000));
         HttpApiServer server = serve(a);
 
         HttpResponse<String> ready = get(server, "/health/ready");
@@ -152,7 +152,7 @@ class HttpApiServerReadinessTest {
     @Test
     void aNodeThatHasNotFinishedRecoveryIsNotReady() throws Exception {
         runtime = JavaRuntime.create();
-        cluster = new ManualRaftCluster(runtime);
+        cluster = new ManualRaftClusterFixture(runtime);
         QraftStateStore store = new QraftStateStore();
         RaftNode unstarted = node("a", Set.of("a"), store);
         HttpApiServer server = new HttpApiServer(0, unstarted, store);
@@ -180,14 +180,14 @@ class HttpApiServerReadinessTest {
 
     @Test
     void aServerCutOffFromTheMajorityBecomesUnreadyAndIsReadyAgainWhenThePartitionHeals() throws Exception {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
         startCluster(Set.of("a", "b", "c"), Set.of("a", "b", "c"));
         electAndFollow("a");
         String isolated = "b";
         HttpApiServer server = serve(nodes.get(isolated));
         await(() -> get(server, "/health/ready").statusCode() == 200);
 
-        InMemoryTransportSimulator.createPartition(Set.of(isolated), Set.of("a", "c"));
+        InMemoryTransportSimulatorFixture.createPartition(Set.of(isolated), Set.of("a", "c"));
         // Hearing from no leader for a whole timeout, it stands for election and knows no leader.
         cluster.timers(nodes.get(isolated)).fireElectionTimeout();
         await(() -> {
@@ -195,26 +195,26 @@ class HttpApiServerReadinessTest {
             return ready.statusCode() == 503 && conditions(ready).contains("no_leader");
         });
 
-        InMemoryTransportSimulator.healPartitions();
+        InMemoryTransportSimulatorFixture.healPartitions();
         // Its higher term would unseat a, and every log is equally empty, so its next candidacy wins.
         cluster.elect(nodes.get(isolated));
         await(() -> get(server, "/health/ready").statusCode() == 200);
     }
 
     private Map<String, RaftNode> startCluster(Set<String> members, Set<String> started) throws Exception {
-        InMemoryTransportSimulator.clearAllTransports();
+        InMemoryTransportSimulatorFixture.clearAllTransports();
         runtime = JavaRuntime.create();
-        cluster = new ManualRaftCluster(runtime);
+        cluster = new ManualRaftClusterFixture(runtime);
         for (String id : members.stream().sorted().toList()) {
             if (!started.contains(id)) continue;
             nodes.put(id, node(id, members, new QraftStateStore()));
         }
-        ManualRaftCluster.startAll(nodes.values().toArray(RaftNode[]::new));
+        ManualRaftClusterFixture.startAll(nodes.values().toArray(RaftNode[]::new));
         return nodes;
     }
 
     private RaftNode node(String id, Set<String> members, QraftStateStore store) {
-        return cluster.add(cluster.builder(id, members, new InMemoryTransportSimulator(id), store,
+        return cluster.add(cluster.builder(id, members, new InMemoryTransportSimulatorFixture(id), store,
                 RaftNodeMode.volatileMode()));
     }
 

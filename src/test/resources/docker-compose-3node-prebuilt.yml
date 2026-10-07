@@ -1,5 +1,5 @@
 # 3-node Raft cluster using pre-built image (no Docker build step).
-# Requires qraft-runtime:test image — built by SharedDockerCluster.
+# Requires qraft-runtime:test image — built by SharedDockerClusterFixture.
 
 services:
   controller1:

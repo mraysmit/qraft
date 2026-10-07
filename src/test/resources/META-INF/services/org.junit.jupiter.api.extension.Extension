@@ -1,2 +1,2 @@
-dev.mars.qraft.testing.fault.IntentionalErrorExtension
-dev.mars.qraft.testing.fault.DockerLogExtension
+dev.mars.qraft.testing.fault.IntentionalErrorExtensionHelper
+dev.mars.qraft.testing.fault.DockerLogExtensionHelper

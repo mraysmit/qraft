@@ -55,17 +55,17 @@ class RaftNodeCandidateTest {
 
     private JavaRuntime runtime;
     private RaftNode node;
-    private ManualRaftTimers timers;
+    private ManualRaftTimersHelper timers;
 
     @BeforeEach
     void becomeCandidateInTermTwo() throws Exception {
         runtime = JavaRuntime.create();
-        timers = new ManualRaftTimers(runtime);
+        timers = new ManualRaftTimersHelper(runtime);
         node = RaftNode.builder()
                 .runtime(runtime).nodeId("node-1").clusterNodes(MEMBERS)
-                .serverId(ManualRaftCluster.serverIdOf("node-1"))
-                .initialConfiguration(ManualRaftCluster.configurationOf(MEMBERS))
-                .transport(new RefusingTransport())
+                .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
+                .initialConfiguration(ManualRaftClusterFixture.configurationOf(MEMBERS))
+                .transport(new RefusingTransportFixture())
                 .stateMachine(new QraftStateStore()).commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.volatileMode()).snapshotEnabled(false)
                 .electionTimeout(300).heartbeatInterval(100)
@@ -143,10 +143,12 @@ class RaftNodeCandidateTest {
     }
 
     /**
+     * Test transport fixture that refuses peer requests to exercise candidate behavior.
+     *
      * Refuses every vote as the server configured under the peer's name, so the node stays a candidate, and
      * never answers anything else.
      */
-    private static final class RefusingTransport implements RaftTransport {
+    private static final class RefusingTransportFixture implements RaftTransport {
         @Override public void start(Consumer<RaftMessage> messageHandler) { }
         @Override public void stop() { }
 
@@ -154,7 +156,7 @@ class RaftNodeCandidateTest {
         public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
             return Future.succeededFuture(VoteResponse.newBuilder()
                     .setTerm(request.getTerm()).setVoteGranted(false)
-                    .setVoterServerId(ManualRaftCluster.serverIdOf(targetId)).build());
+                    .setVoterServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
         }
 
         @Override

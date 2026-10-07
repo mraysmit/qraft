@@ -16,12 +16,12 @@
 
 package dev.mars.qraft.controller.http;
 
-import dev.mars.qraft.testing.fault.IntentionalErrors;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.mars.qraft.controller.raft.InMemoryTransportSimulator;
-import dev.mars.qraft.controller.raft.ManualRaftCluster;
+import dev.mars.qraft.controller.raft.InMemoryTransportSimulatorFixture;
+import dev.mars.qraft.controller.raft.ManualRaftClusterFixture;
 import dev.mars.qraft.controller.raft.MembershipService;
 import dev.mars.qraft.controller.raft.RaftConfiguration;
 import dev.mars.qraft.controller.raft.RaftNode;
@@ -45,8 +45,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-import static dev.mars.qraft.controller.raft.ManualRaftCluster.await;
-import static dev.mars.qraft.controller.raft.ManualRaftCluster.serverIdOf;
+import static dev.mars.qraft.controller.raft.ManualRaftClusterFixture.await;
+import static dev.mars.qraft.controller.raft.ManualRaftClusterFixture.serverIdOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -69,7 +69,7 @@ class HttpApiServerOperatorTest {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private JavaRuntime runtime;
-    private ManualRaftCluster cluster;
+    private ManualRaftClusterFixture cluster;
     private final Map<String, RaftNode> nodes = new HashMap<>();
     private RaftNode leader;
     private HttpApiServer server;
@@ -78,13 +78,13 @@ class HttpApiServerOperatorTest {
     @BeforeEach
     void setUp() throws Exception {
         runtime = JavaRuntime.create();
-        cluster = new ManualRaftCluster(runtime);
-        InMemoryTransportSimulator.clearAllTransports();
+        cluster = new ManualRaftClusterFixture(runtime);
+        InMemoryTransportSimulatorFixture.clearAllTransports();
         for (String name : MEMBERS) {
-            nodes.put(name, cluster.add(cluster.builder(name, MEMBERS, new InMemoryTransportSimulator(name),
+            nodes.put(name, cluster.add(cluster.builder(name, MEMBERS, new InMemoryTransportSimulatorFixture(name),
                     new QraftStateStore(), RaftNodeMode.volatileMode())));
         }
-        ManualRaftCluster.startAll(nodes.values().toArray(RaftNode[]::new));
+        ManualRaftClusterFixture.startAll(nodes.values().toArray(RaftNode[]::new));
         leader = cluster.elect(nodes.get("a"));
         await(leader.submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put("k", "v"))));
     }
@@ -96,7 +96,7 @@ class HttpApiServerOperatorTest {
             cluster.close();
         } finally {
             runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            InMemoryTransportSimulator.clearAllTransports();
+            InMemoryTransportSimulatorFixture.clearAllTransports();
         }
     }
 
@@ -145,7 +145,7 @@ class HttpApiServerOperatorTest {
 
     @Test
     void eachRefusalHasItsOwnStatusCode() throws Exception {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
         serve(TOKEN);
         Map<String, String> token = Map.of("X-Qraft-Token", TOKEN);
 
@@ -155,7 +155,7 @@ class HttpApiServerOperatorTest {
         assertEquals(405, send("DELETE", "/v1/operator/raft/configuration", token).statusCode());
 
         // Cut off from b and c, a cannot commit d's addition, so the removal after it is refused.
-        InMemoryTransportSimulator.createPartition(Set.of("a"), Set.of("b", "c"));
+        InMemoryTransportSimulatorFixture.createPartition(Set.of("a"), Set.of("b", "c"));
         leader.admit(new RaftConfiguration.Server(serverIdOf("d"), "d", "d", false));
         cluster.heartbeatUntil(leader, () -> leader.getConfiguration().orElseThrow().serverNamed("d").isPresent(),
                 "d's addition is appended");
@@ -170,7 +170,7 @@ class HttpApiServerOperatorTest {
         // The leader serves no membership changes over its transport, so forwarding fails.
         server = new HttpApiServer(0, follower, new QraftStateStore(), Clock.systemUTC(), AdminUiConfig.disabled(),
                 null, HttpApiServer.DEFAULT_RAFT_TIMEOUT, new MembershipService(follower,
-                InMemoryTransportSimulator.getAllTransports().get(follower.getNodeId()), TOKEN));
+                InMemoryTransportSimulatorFixture.getAllTransports().get(follower.getNodeId()), TOKEN));
         server.start().join();
 
         HttpResponse<String> response = send("DELETE", "/v1/operator/raft/peer?name=c",
@@ -205,7 +205,7 @@ class HttpApiServerOperatorTest {
     private void serve(String operatorToken) throws Exception {
         server = new HttpApiServer(0, leader, new QraftStateStore(), Clock.systemUTC(), AdminUiConfig.disabled(),
                 null, HttpApiServer.DEFAULT_RAFT_TIMEOUT,
-                new MembershipService(leader, InMemoryTransportSimulator.getAllTransports().get("a"), operatorToken));
+                new MembershipService(leader, InMemoryTransportSimulatorFixture.getAllTransports().get("a"), operatorToken));
         server.start().join();
     }
 

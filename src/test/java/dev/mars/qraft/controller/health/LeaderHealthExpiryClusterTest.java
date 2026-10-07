@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.controller.health;
 
-import dev.mars.qraft.testing.fault.IntentionalErrors;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 
 import dev.mars.qraft.catalog.ServiceKey;
 import dev.mars.qraft.catalog.HealthCheckState;
@@ -24,8 +24,8 @@ import dev.mars.qraft.catalog.HealthObservation;
 import dev.mars.qraft.catalog.ServiceCheckId;
 import dev.mars.qraft.catalog.ServiceHealth;
 import dev.mars.qraft.catalog.ServiceInstance;
-import dev.mars.qraft.controller.raft.InMemoryTransportSimulator;
-import dev.mars.qraft.controller.raft.ManualRaftCluster;
+import dev.mars.qraft.controller.raft.InMemoryTransportSimulatorFixture;
+import dev.mars.qraft.controller.raft.ManualRaftClusterFixture;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.raft.RaftNodeMode;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
@@ -58,12 +58,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Multi-node tests with real Raft nodes and replicated state machines, in which expiry time is driven
- * by {@link ManualExpiryTime}: followers never expire state locally, an isolated former leader steps
+ * by {@link ManualExpiryTimeHelper}: followers never expire state locally, an isolated former leader steps
  * down for lost quorum without proposing, a replacement leader with a skewed clock grants a full TTL before expiring, a
  * renewal racing an expiry converges to the renewal on every replica, and automatic deregistration is
  * replicated.
  *
- * <p>Elections and heartbeats fire only when a test fires them through {@link ManualRaftCluster}: node a is
+ * <p>Elections and heartbeats fire only when a test fires them through {@link ManualRaftClusterFixture}: node a is
  * elected first, and no other election happens unless a test causes one, so the proposal counts are exact.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
@@ -77,23 +77,23 @@ class LeaderHealthExpiryClusterTest {
             List.of(), Map.of(), ServiceHealth.UNKNOWN, "default", "default", "", "", true);
     private static final ServiceCheckId CHECK = new ServiceCheckId(WEB.identity(), "ttl");
 
-    private final ManualExpiryTime time = new ManualExpiryTime(START);
+    private final ManualExpiryTimeHelper time = new ManualExpiryTimeHelper(START);
     private final Map<String, RaftNode> nodes = new LinkedHashMap<>();
     private final Map<String, QraftStateStore> stores = new LinkedHashMap<>();
     private final Map<String, AtomicInteger> proposals = new LinkedHashMap<>();
     private final List<LeaderHealthExpiry> expiries = new ArrayList<>();
     private JavaRuntime runtime;
-    private ManualRaftCluster cluster;
+    private ManualRaftClusterFixture cluster;
 
     @AfterEach
     void stopCluster() throws Exception {
         expiries.forEach(LeaderHealthExpiry::close);
-        InMemoryTransportSimulator.healPartitions();
+        InMemoryTransportSimulatorFixture.healPartitions();
         try {
             if (cluster != null) cluster.close();
         } finally {
             if (runtime != null) runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            InMemoryTransportSimulator.clearAllTransports();
+            InMemoryTransportSimulatorFixture.clearAllTransports();
         }
     }
 
@@ -119,7 +119,7 @@ class LeaderHealthExpiryClusterTest {
 
     @Test
     void aReplacementLeaderWithASkewedClockGrantsGraceAndConvergesOnOneResult() throws Exception {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
         String oldLeader = startCluster("a", "b", "c");
         Map<String, Duration> skew = new LinkedHashMap<>();
         nodes.keySet().stream().filter(id -> !id.equals(oldLeader)).forEach(id -> skew.put(id, Duration.ofHours(1)));
@@ -131,7 +131,7 @@ class LeaderHealthExpiryClusterTest {
 
         Set<String> majority = new LinkedHashSet<>(nodes.keySet());
         majority.remove(oldLeader);
-        InMemoryTransportSimulator.createPartition(Set.of(oldLeader), majority);
+        InMemoryTransportSimulatorFixture.createPartition(Set.of(oldLeader), majority);
         String newLeader = majority.iterator().next();
         cluster.elect(nodes.get(newLeader));
         assertNotEquals(oldLeader, newLeader);
@@ -150,7 +150,7 @@ class LeaderHealthExpiryClusterTest {
         assertEquals(1, proposals.get(newLeader).get(), "the new leader proposes the expiry once its grace ends");
         replicateUntil(newLeader, () -> majority.stream().allMatch(id -> check(id).orElseThrow().expired()));
 
-        InMemoryTransportSimulator.healPartitions();
+        InMemoryTransportSimulatorFixture.healPartitions();
         replicateUntil(newLeader, () -> check(oldLeader).map(HealthCheckState::expired).orElse(false));
         assertFalse(nodes.get(oldLeader).isLeader());
         assertEquals(1, nodes.values().stream().filter(RaftNode::isLeader).count());
@@ -183,18 +183,18 @@ class LeaderHealthExpiryClusterTest {
 
     /** Starts the members on manual timers and elects the first; every member follows it on return. */
     private String startCluster(String... nodeIds) throws Exception {
-        InMemoryTransportSimulator.clearAllTransports();
+        InMemoryTransportSimulatorFixture.clearAllTransports();
         runtime = JavaRuntime.create();
-        cluster = new ManualRaftCluster(runtime);
+        cluster = new ManualRaftClusterFixture(runtime);
         Set<String> members = new LinkedHashSet<>(List.of(nodeIds));
         for (String nodeId : nodeIds) {
             QraftStateStore store = new QraftStateStore();
-            nodes.put(nodeId, cluster.add(cluster.builder(nodeId, members, new InMemoryTransportSimulator(nodeId),
+            nodes.put(nodeId, cluster.add(cluster.builder(nodeId, members, new InMemoryTransportSimulatorFixture(nodeId),
                     store, RaftNodeMode.volatileMode())));
             stores.put(nodeId, store);
             proposals.put(nodeId, new AtomicInteger());
         }
-        ManualRaftCluster.startAll(nodes.values().toArray(RaftNode[]::new));
+        ManualRaftClusterFixture.startAll(nodes.values().toArray(RaftNode[]::new));
         String leader = nodeIds[0];
         cluster.elect(nodes.get(leader));
         replicateUntil(leader, () -> nodes.values().stream().allMatch(node -> leader.equals(node.getLeaderId())));

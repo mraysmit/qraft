@@ -26,49 +26,50 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * The only exception type a test uses to inject a failure into production code. It names its
- * {@link IntentionalError}, so the log can label every event the failure causes as an injected failure.
+ * Test exception fixture used to inject a named failure into production code.
+ * It names its
+ * {@link IntentionalErrorFixture}, so the log can label every event the failure causes as an injected failure.
  *
  * <p>Where production code reacts to a specific exception type, the test keeps that type and attaches the fault as
- * its cause, for example {@code new IOException("disk full", new InjectedFault(DISK_FULL, "disk full"))}. The
+ * its cause, for example {@code new IOException("disk full", new InjectedFaultFixture(DISK_FULL, "disk full"))}. The
  * production path under test is unchanged, and the event is still recognised.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-10-04
  * @version 1.0
  */
-public final class InjectedFault extends RuntimeException {
+public final class InjectedFaultFixture extends RuntimeException {
 
     @Serial
     private static final long serialVersionUID = 1L;
 
-    private final IntentionalError error;
+    private final IntentionalErrorFixture error;
 
     /**
-     * @param error   an entry of kind {@link IntentionalError.Kind#INJECTED_FAILURE}
+     * @param error   an entry of kind {@link IntentionalErrorFixture.Kind#INJECTED_FAILURE}
      * @param message the failure's message, as production code will see and log it
      */
-    public InjectedFault(IntentionalError error, String message) {
+    public InjectedFaultFixture(IntentionalErrorFixture error, String message) {
         super(message);
         this.error = Objects.requireNonNull(error, "error");
-        if (error.kind() != IntentionalError.Kind.INJECTED_FAILURE) {
+        if (error.kind() != IntentionalErrorFixture.Kind.INJECTED_FAILURE) {
             throw new IllegalArgumentException(error + " is not an injected failure");
         }
     }
 
-    public IntentionalError error() {
+    public IntentionalErrorFixture error() {
         return error;
     }
 
     /** The injected fault in {@code failure}, its causes, or their suppressed exceptions, if there is one. */
-    public static Optional<InjectedFault> in(Throwable failure) {
+    public static Optional<InjectedFaultFixture> in(Throwable failure) {
         Set<Throwable> visited = Collections.newSetFromMap(new IdentityHashMap<>());
         Deque<Throwable> pending = new ArrayDeque<>();
         if (failure != null) pending.push(failure);
         while (!pending.isEmpty()) {
             Throwable next = pending.pop();
             if (!visited.add(next)) continue;
-            if (next instanceof InjectedFault fault) return Optional.of(fault);
+            if (next instanceof InjectedFaultFixture fault) return Optional.of(fault);
             if (next.getCause() != null) pending.push(next.getCause());
             for (Throwable suppressed : next.getSuppressed()) pending.push(suppressed);
         }

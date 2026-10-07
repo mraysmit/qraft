@@ -16,14 +16,14 @@
 
 package dev.mars.qraft.runtime;
 
-import dev.mars.qraft.controller.raft.PeerlessTransport;
+import dev.mars.qraft.controller.raft.PeerlessTransportFixture;
 import dev.mars.qraft.catalog.ServiceKey;
 import dev.mars.qraft.agent.QraftAgent;
 import dev.mars.qraft.agent.config.AgentConfiguration;
 import dev.mars.qraft.catalog.ServiceDefinition;
 import dev.mars.qraft.controller.http.HttpApiServer;
-import dev.mars.qraft.controller.raft.InMemoryTransportSimulator;
-import dev.mars.qraft.controller.raft.ManualRaftCluster;
+import dev.mars.qraft.controller.raft.InMemoryTransportSimulatorFixture;
+import dev.mars.qraft.controller.raft.ManualRaftClusterFixture;
 import dev.mars.qraft.controller.raft.RaftNode;
 import dev.mars.qraft.controller.raft.RaftNodeMode;
 import dev.mars.qraft.controller.runtime.JavaRuntime;
@@ -48,7 +48,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * End-to-end tests of {@link QraftAgent} against in-process controllers: reconciliation after
  * restart, shared local service IDs, and follower seeds.
  *
- * <p>The controllers' Raft timers are manual ({@link ManualRaftCluster}): the first node is elected by the
+ * <p>The controllers' Raft timers are manual ({@link ManualRaftClusterFixture}): the first node is elected by the
  * test, and a cluster's followers learn commits when a wait fires the leader's heartbeat.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
@@ -57,22 +57,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class AgentEndToEndTest {
     private final List<QraftAgent> agents = new ArrayList<>();
-    private ControllerGroup controllers;
+    private ControllerGroupFixture controllers;
 
     @AfterEach
     void closeResources() throws Exception {
-        Cleanup cleanup = new Cleanup();
+        CleanupHelper cleanup = new CleanupHelper();
         for (QraftAgent agent : agents.reversed()) {
             cleanup.run(() -> agent.shutdown().get(10, TimeUnit.SECONDS));
         }
         cleanup.run(() -> { if (controllers != null) controllers.close(); })
-                .run(InMemoryTransportSimulator::clearAllTransports)
+                .run(InMemoryTransportSimulatorFixture::clearAllTransports)
                 .rethrow();
     }
 
     @Test
     void agentReconcilesTwoServicesAfterControllerRestartAndDeregistersBoth() throws Exception {
-        controllers = ControllerGroup.single(0);
+        controllers = ControllerGroupFixture.single(0);
         int controllerPort = controllers.port(0);
         QraftAgent agent = agent("agent-a", controllers.endpoints(), List.of(
                 service("web", "web", 8080), service("api", "api", 8081)), 1_000);
@@ -86,7 +86,7 @@ class AgentEndToEndTest {
         waitUntil(() -> !agent.healthService().isReady());
 
         // The agent knows the controller by URL, so the restarted controller must bind the same port.
-        controllers = ControllerGroup.single(controllerPort);
+        controllers = ControllerGroupFixture.single(controllerPort);
         waitUntil(() -> agent.healthService().isReady()
                 && controllers.store(0).getServiceCatalog().instances().size() == 2);
 
@@ -97,7 +97,7 @@ class AgentEndToEndTest {
 
     @Test
     void twoAgentsCanRegisterTheSameLocalServiceId() throws Exception {
-        controllers = ControllerGroup.single(0);
+        controllers = ControllerGroupFixture.single(0);
         ServiceDefinition web = service("web", "web", 8080);
         QraftAgent first = agent("agent-a", controllers.endpoints(), List.of(web), 2_000);
         QraftAgent second = agent("agent-b", controllers.endpoints(), List.of(web), 2_000);
@@ -120,7 +120,7 @@ class AgentEndToEndTest {
 
     @Test
     void threeNodeClusterAcceptsAgentWhenFirstSeedIsAFollower() throws Exception {
-        controllers = ControllerGroup.cluster("node-a", "node-b", "node-c");
+        controllers = ControllerGroupFixture.cluster("node-a", "node-b", "node-c");
         int leader = controllers.leaderIndex();
         int follower = leader == 0 ? 1 : 0;
         List<URI> seeds = new ArrayList<>();
@@ -168,16 +168,16 @@ class AgentEndToEndTest {
         assertTrue(condition.getAsBoolean(), "condition was not met before the deadline");
     }
 
-
-    private static final class ControllerGroup implements AutoCloseable {
+    /** Test cluster fixture that owns controllers and their resources for agent end-to-end tests. */
+    private static final class ControllerGroupFixture implements AutoCloseable {
         private final JavaRuntime runtime;
-        private final ManualRaftCluster raft;
+        private final ManualRaftClusterFixture raft;
         private final List<RaftNode> nodes;
         private final List<QraftStateStore> stores;
         private final List<HttpApiServer> servers;
         private boolean closed;
 
-        private ControllerGroup(JavaRuntime runtime, ManualRaftCluster raft, List<RaftNode> nodes,
+        private ControllerGroupFixture(JavaRuntime runtime, ManualRaftClusterFixture raft, List<RaftNode> nodes,
                                 List<QraftStateStore> stores, List<HttpApiServer> servers) {
             this.runtime = runtime;
             this.raft = raft;
@@ -186,34 +186,34 @@ class AgentEndToEndTest {
             this.servers = servers;
         }
 
-        static ControllerGroup single(int port) throws Exception {
+        static ControllerGroupFixture single(int port) throws Exception {
             JavaRuntime runtime = JavaRuntime.create();
-            ManualRaftCluster raft = new ManualRaftCluster(runtime);
+            ManualRaftClusterFixture raft = new ManualRaftClusterFixture(runtime);
             QraftStateStore store = new QraftStateStore();
-            RaftNode node = raft.add(raft.builder("single", Set.of("single"), new PeerlessTransport(), store,
+            RaftNode node = raft.add(raft.builder("single", Set.of("single"), new PeerlessTransportFixture(), store,
                     RaftNodeMode.volatileMode()));
-            ManualRaftCluster.startAll(node);
+            ManualRaftClusterFixture.startAll(node);
             raft.elect(node);
             HttpApiServer server = new HttpApiServer(port, node, store);
             server.start().get(10, TimeUnit.SECONDS);
-            return new ControllerGroup(runtime, raft, List.of(node), List.of(store), List.of(server));
+            return new ControllerGroupFixture(runtime, raft, List.of(node), List.of(store), List.of(server));
         }
 
         /** Starts the members, elects the first, and returns once every member follows it. */
-        static ControllerGroup cluster(String... nodeIds) throws Exception {
-            InMemoryTransportSimulator.clearAllTransports();
+        static ControllerGroupFixture cluster(String... nodeIds) throws Exception {
+            InMemoryTransportSimulatorFixture.clearAllTransports();
             JavaRuntime runtime = JavaRuntime.create();
-            ManualRaftCluster raft = new ManualRaftCluster(runtime);
+            ManualRaftClusterFixture raft = new ManualRaftClusterFixture(runtime);
             Set<String> members = new LinkedHashSet<>(List.of(nodeIds));
             List<RaftNode> nodes = new ArrayList<>();
             List<QraftStateStore> stores = new ArrayList<>();
             for (String nodeId : nodeIds) {
                 QraftStateStore store = new QraftStateStore();
                 stores.add(store);
-                nodes.add(raft.add(raft.builder(nodeId, members, new InMemoryTransportSimulator(nodeId), store,
+                nodes.add(raft.add(raft.builder(nodeId, members, new InMemoryTransportSimulatorFixture(nodeId), store,
                         RaftNodeMode.volatileMode())));
             }
-            ManualRaftCluster.startAll(nodes.toArray(RaftNode[]::new));
+            ManualRaftClusterFixture.startAll(nodes.toArray(RaftNode[]::new));
             RaftNode leader = raft.elect(nodes.getFirst());
             raft.heartbeatUntil(leader, () -> nodes.stream().allMatch(node -> leader.getNodeId().equals(node.getLeaderId())),
                     "every member follows " + leader.getNodeId());
@@ -223,7 +223,7 @@ class AgentEndToEndTest {
                 server.start().get(10, TimeUnit.SECONDS);
                 servers.add(server);
             }
-            return new ControllerGroup(runtime, raft, List.copyOf(nodes), List.copyOf(stores), List.copyOf(servers));
+            return new ControllerGroupFixture(runtime, raft, List.copyOf(nodes), List.copyOf(stores), List.copyOf(servers));
         }
 
         /** Fires the leader's heartbeat, which carries its commits to the followers, until the condition holds. */
@@ -246,7 +246,7 @@ class AgentEndToEndTest {
         public void close() throws Exception {
             if (closed) return;
             closed = true;
-            Cleanup cleanup = new Cleanup();
+            CleanupHelper cleanup = new CleanupHelper();
             for (HttpApiServer server : servers.reversed()) cleanup.run(server::close);
             cleanup.run(raft::close)
                     .run(() -> runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS))

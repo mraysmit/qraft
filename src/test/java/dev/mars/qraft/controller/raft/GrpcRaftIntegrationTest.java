@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.controller.raft;
 
-import dev.mars.qraft.testing.fault.IntentionalErrors;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 
 import dev.mars.qraft.controller.raft.grpc.JoinRequest;
 import dev.mars.qraft.controller.raft.grpc.MembershipResponse;
@@ -51,7 +51,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  *
  * <p>Every server listens on port 0 and peers learn the port it bound before any node starts, so no test
  * races another process for a port. Elections happen only when a test fires a chosen node's timeout
- * through {@link ManualRaftTimers}, so who leads, and in which term, is decided by the test.
+ * through {@link ManualRaftTimersHelper}, so who leads, and in which term, is decided by the test.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @version 2.0
@@ -69,7 +69,7 @@ class GrpcRaftIntegrationTest {
     /** The configuration the members bootstrap with, at the addresses their servers bound. */
     private RaftConfiguration configuration;
 
-    private record Member(String id, RaftNode node, GrpcRaftServer server, ManualRaftTimers timers,
+    private record Member(String id, RaftNode node, GrpcRaftServer server, ManualRaftTimersHelper timers,
                           QraftStateStore state, GrpcRaftTransport transport) {
         void stop() throws Exception {
             server.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
@@ -128,7 +128,7 @@ class GrpcRaftIntegrationTest {
 
     @Test
     void aMajorityKeepsCommittingAfterAFollowerStops() throws Exception {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
         List<Member> cluster = startCluster("node1", "node2", "node3");
         Member leader = elect(cluster.get(0));
         cluster.get(2).stop();
@@ -144,7 +144,7 @@ class GrpcRaftIntegrationTest {
 
     @Test
     void aNewElectionAfterTheLeaderStopsAdvancesTheTerm() throws Exception {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
         List<Member> cluster = startCluster("node1", "node2", "node3");
         Member first = elect(cluster.get(0));
         submit(first, "before", "failover");
@@ -217,7 +217,7 @@ class GrpcRaftIntegrationTest {
 
     @Test
     void aJoinSentToAFollowerIsForwardedOverGrpcToTheLeader() throws Exception {
-        IntentionalErrors.expect(dev.mars.qraft.testing.fault.IntentionalError.RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
         List<Member> cluster = startCluster("node1", "node2", "node3");
         Member leader = elect(cluster.get(0));
         submit(leader, "k", "v");
@@ -278,10 +278,10 @@ class GrpcRaftIntegrationTest {
         List<Member> cluster = new ArrayList<>();
         for (String id : ids) {
             GrpcRaftTransport transport = new GrpcRaftTransport(runtime, id, addresses);
-            ManualRaftTimers timers = new ManualRaftTimers(runtime, clock);
+            ManualRaftTimersHelper timers = new ManualRaftTimersHelper(runtime, clock);
             QraftStateStore state = new QraftStateStore();
             RaftNode node = RaftNode.builder().runtime(runtime).nodeId(id).clusterNodes(memberIds)
-                    .serverId(ManualRaftCluster.serverIdOf(id))
+                    .serverId(ManualRaftClusterFixture.serverIdOf(id))
                     .transport(transport).stateMachine(state).commandCodec(new ProtobufRaftCommandCodec())
                     .mode(RaftNodeMode.volatileMode()).snapshotEnabled(false)
                     .electionTimeout(1_000).heartbeatInterval(HEARTBEAT_MS).timerScheduler(timers)
@@ -295,7 +295,7 @@ class GrpcRaftIntegrationTest {
             members.add(member);
         }
         configuration = new RaftConfiguration(cluster.stream().map(member -> new RaftConfiguration.Server(
-                ManualRaftCluster.serverIdOf(member.id()), member.id(), addresses.get(member.id()), true)).toList());
+                ManualRaftClusterFixture.serverIdOf(member.id()), member.id(), addresses.get(member.id()), true)).toList());
         return cluster;
     }
 

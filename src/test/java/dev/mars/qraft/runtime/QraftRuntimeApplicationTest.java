@@ -86,8 +86,8 @@ class QraftRuntimeApplicationTest {
 
     @Test
     void invokesOnlySuppliedServerLauncherWithResolvedPath() {
-        RecordingLauncher server = new RecordingLauncher();
-        RecordingLauncher client = new RecordingLauncher();
+        RecordingLauncherFixture server = new RecordingLauncherFixture();
+        RecordingLauncherFixture client = new RecordingLauncherFixture();
 
         RuntimeLifecycle lifecycle = QraftRuntimeApplication.run(new String[]{"server", "--config", "server.json"},
                 server, client);
@@ -99,8 +99,8 @@ class QraftRuntimeApplicationTest {
 
     @Test
     void invokesOnlySuppliedClientLauncherWithResolvedPath() {
-        RecordingLauncher server = new RecordingLauncher();
-        RecordingLauncher client = new RecordingLauncher();
+        RecordingLauncherFixture server = new RecordingLauncherFixture();
+        RecordingLauncherFixture client = new RecordingLauncherFixture();
 
         RuntimeLifecycle lifecycle = QraftRuntimeApplication.run(new String[]{"client", "--config", "client.json"},
                 server, client);
@@ -112,8 +112,8 @@ class QraftRuntimeApplicationTest {
 
     @Test
     void invalidModeFailsBeforeEitherLauncherIsInvoked() {
-        RecordingLauncher server = new RecordingLauncher();
-        RecordingLauncher client = new RecordingLauncher();
+        RecordingLauncherFixture server = new RecordingLauncherFixture();
+        RecordingLauncherFixture client = new RecordingLauncherFixture();
 
         assertThrows(IllegalArgumentException.class,
                 () -> QraftRuntimeApplication.run(new String[]{"worker"}, server, client));
@@ -128,7 +128,7 @@ class QraftRuntimeApplicationTest {
     void launcherFailureIsPropagatedWithoutStartingOtherMode() {
         RuntimeException expected = new RuntimeException("server did not start");
         QraftRuntimeApplication.ModeLauncher failingServer = path -> { throw expected; };
-        RecordingLauncher client = new RecordingLauncher();
+        RecordingLauncherFixture client = new RecordingLauncherFixture();
 
         RuntimeException actual = assertThrows(RuntimeException.class,
                 () -> QraftRuntimeApplication.run(
@@ -178,7 +178,8 @@ class QraftRuntimeApplicationTest {
         assertSame(lifecycle.closeAsync(), lifecycle.completion());
     }
 
-    private static final class RecordingLauncher implements QraftRuntimeApplication.ModeLauncher {
+    /** Test launcher fixture that records the selected runtime mode for application-launch assertions. */
+    private static final class RecordingLauncherFixture implements QraftRuntimeApplication.ModeLauncher {
         private final List<Path> paths = new ArrayList<>();
         private final RuntimeLifecycle lifecycle = new ManagedRuntimeLifecycle(
                 () -> CompletableFuture.completedFuture(null));
