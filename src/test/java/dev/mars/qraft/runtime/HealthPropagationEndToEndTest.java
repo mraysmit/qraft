@@ -23,6 +23,7 @@ import com.sun.net.httpserver.HttpServer;
 import dev.mars.qraft.agent.QraftAgent;
 import dev.mars.qraft.agent.health.CheckStatus;
 import dev.mars.qraft.agent.health.LocalStatusReporter;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -57,6 +58,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -291,10 +293,11 @@ class HealthPropagationEndToEndTest {
         return false;
     }
 
-    /** Shuts the leader down and returns the servers that remain. */
+    /** Deliberately stops the leader, declares only that peer's RPC failures, and returns the survivors. */
     private Map<String, URI> replaceLeader(Cluster cluster) throws Exception {
         String formerLeader = leader(cluster.controllers().values());
         assertNotNull(formerLeader);
+        IntentionalErrorsHelper.expect(RAFT_PEER_UNREACHABLE, formerLeader);
         cluster.servers().get(formerLeader).closeAsync().get(10, TimeUnit.SECONDS);
         Map<String, URI> survivors = new LinkedHashMap<>(cluster.controllers());
         survivors.remove(formerLeader);

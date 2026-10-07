@@ -18,10 +18,13 @@ package dev.mars.qraft.controller.raft.storage;
 
 import dev.mars.raftlog.storage.FileRaftStorage;
 import dev.mars.raftlog.storage.RaftStorageConfig;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.file.Path;
+
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.WAL_DIRECTORY_ALREADY_LOCKED;
 
 /**
  * Test helper executable launched in separate JVMs by {@link RaftStorageProcessLockTest}
@@ -29,7 +32,9 @@ import java.nio.file.Path;
  *
  * <p>Opens the directory supplied in the first argument and prints {@code LOCKED} when
  * it owns the lock. It holds the lock until stdin receives a line or closes, then closes
- * the storage. A failed open reports {@code LOCK_FAILED} and exits with code {@code 73}.
+ * the storage. The second argument is {@code owner} or {@code contender}; the third names
+ * the calling test. Only the contender declares the intentional lock error. A failed open
+ * reports {@code LOCK_FAILED} and exits with code {@code 73} after its log audit passes.
  * The calling test launches an owner and a contender and performs the assertions.
  *
  * <p>This class belongs in the test sources because it supplies a subprocess for the
@@ -44,17 +49,30 @@ public final class DirectoryLockProcessFixture {
 
     public static void main(String[] args) {
         Path directory = Path.of(args[0]).toAbsolutePath().normalize();
+        String role = args[1];
+        if (!role.equals("owner") && !role.equals("contender")) {
+            throw new IllegalArgumentException("expected owner or contender role, got " + role);
+        }
+        int exitCode = IntentionalErrorsHelper.inSubprocess(args[2] + "/" + role, () -> {
+            if (role.equals("contender")) IntentionalErrorsHelper.expect(WAL_DIRECTORY_ALREADY_LOCKED, 1);
+            return runProcess(directory);
+        });
+        System.exit(exitCode);
+    }
+
+    private static int runProcess(Path directory) {
         try (FileRaftStorage storage = new FileRaftStorage(RaftStorageConfig.builder()
                 .dataDir(directory).syncEnabled(true).build())) {
             storage.open(directory).join();
             System.out.println("LOCKED " + directory);
             System.out.flush();
             new BufferedReader(new InputStreamReader(System.in)).readLine();
+            return 0;
         } catch (Throwable error) {
             Throwable cause = error.getCause() == null ? error : error.getCause();
             System.err.println("LOCK_FAILED directory=" + directory
                     + "; another process may hold the storage lock: " + cause.getMessage());
-            System.exit(73);
+            return 73;
         }
     }
 }

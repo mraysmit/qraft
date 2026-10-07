@@ -211,6 +211,13 @@ equivalents.
 
 ## Rules for tests
 
+- **Every error must be explicitly flagged intentional.** The logging audit fails on an undeclared ERROR
+  or an event carrying an undeclared exception, even when the test assertions pass. Declare expected
+  errors with `IntentionalErrorsHelper.expect` before causing them; leader-loss tests must name the stopped
+  peer. Helper subprocesses must use `IntentionalErrorsHelper.inSubprocess` and return through its audit
+  before exiting. Docker tests declare their expected errors with `@ExpectedDockerErrorsHelper`; matching
+  entries are flagged in both the main test log and `logs/docker/` archives. Messages and stack traces are
+  retained. Every other error requires remediation; a successful Maven exit code alone is insufficient.
 - **No Mockito.** Use real objects, or small hand-written fakes such as `HeldRaftTransportFixture`.
 - **No flaky tests.** A test that fails only sometimes is a defect. Find the race, check whether production
   code has it too, and make the test deterministic.

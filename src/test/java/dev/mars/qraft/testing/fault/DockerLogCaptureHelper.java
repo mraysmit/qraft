@@ -36,7 +36,7 @@ import java.util.regex.Pattern;
 
 /**
  * Test logging helper used by {@link DockerLogExtensionHelper} to capture, archive,
- * audit, and reprint container output while a Docker test class is running.
+ * audit, label, and reprint container output while a Docker test class is running.
  * Reports unexpected errors so the extension can fail the calling test class.
  */
 public final class DockerLogCaptureHelper {
@@ -100,10 +100,10 @@ public final class DockerLogCaptureHelper {
                 Files.createDirectories(classDirectory);
                 for (Map.Entry<String, StringBuilder> entry : captured.entrySet()) {
                     String output = entry.getValue().toString();
-                    Files.writeString(classDirectory.resolve(entry.getKey() + ".log"), output,
+                    Audit audit = audit(output, declared, owner);
+                    Files.writeString(classDirectory.resolve(entry.getKey() + ".log"), audit.archivedOutput(),
                             StandardCharsets.UTF_8, StandardOpenOption.CREATE,
                             StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
-                    Audit audit = audit(output, declared);
                     recognised.addAll(audit.recognised());
                     problems.addAll(audit.problems().stream()
                             .map(problem -> entry.getKey() + ": " + problem).toList());
@@ -124,9 +124,15 @@ public final class DockerLogCaptureHelper {
 
     /** Parses and checks one block of container output. */
     static Audit audit(String output, Set<IntentionalErrorFixture> expected) {
+        return audit(output, expected, null);
+    }
+
+    /** Labels only declared error headers in the archive; other lines and stack traces are preserved. */
+    static Audit audit(String output, Set<IntentionalErrorFixture> expected, String classOwner) {
         List<ExternalError> recognised = new ArrayList<>();
         List<String> problems = new ArrayList<>();
-        for (String rawLine : output.lines().toList()) {
+        StringBuilder archived = new StringBuilder();
+        for (String rawLine : output.split("(?<=\\n)", -1)) {
             String line = ANSI.matcher(rawLine).replaceAll("").stripTrailing();
             Matcher event = EVENT.matcher(line);
             if (event.matches() && "ERROR".equals(event.group("level"))) {
@@ -136,12 +142,25 @@ public final class DockerLogCaptureHelper {
                         .filter(error -> error.matches(logger, Level.ERROR, message))
                         .findFirst().orElse(null);
                 if (match == null) problems.add("undeclared container " + line);
-                else recognised.add(new ExternalError(match, logger, message, line));
+                else {
+                    recognised.add(new ExternalError(match, logger, message, line));
+                    if (classOwner != null) {
+                        String label = "*** " + match.kind().title() + ": " + match + ", "
+                                + match.kind().attribution() + " " + classOwner + " *** ";
+                        int loggerStart = event.start("logger");
+                        Matcher escapes = ANSI.matcher(rawLine);
+                        while (escapes.find() && escapes.start() <= loggerStart) {
+                            loggerStart += escapes.end() - escapes.start();
+                        }
+                        rawLine = rawLine.substring(0, loggerStart) + label + rawLine.substring(loggerStart);
+                    }
+                }
             } else if (ERROR_TOKEN.matcher(line).find()) {
                 problems.add("unparseable container ERROR: " + line);
             }
+            archived.append(rawLine);
         }
-        return new Audit(List.copyOf(recognised), List.copyOf(problems));
+        return new Audit(List.copyOf(recognised), List.copyOf(problems), archived.toString());
     }
 
     private static String safeName(String value) {
@@ -151,6 +170,6 @@ public final class DockerLogCaptureHelper {
     record ExternalError(IntentionalErrorFixture error, String logger, String message, String originalLine) {
     }
 
-    record Audit(List<ExternalError> recognised, List<String> problems) {
+    record Audit(List<ExternalError> recognised, List<String> problems, String archivedOutput) {
     }
 }

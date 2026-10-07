@@ -17,6 +17,7 @@
 package dev.mars.qraft.controller.raft.storage;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInfo;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.BufferedReader;
@@ -28,7 +29,6 @@ import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -44,8 +44,9 @@ class RaftStorageProcessLockTest {
     Path directory;
 
     @Test
-    void secondJvmCannotOpenDirectoryWhileOwnerRemainsHealthy() throws Exception {
-        Process owner = startProcess();
+    void secondJvmCannotOpenDirectoryWhileOwnerRemainsHealthy(TestInfo testInfo) throws Exception {
+        String testOwner = getClass().getSimpleName() + "#" + testInfo.getTestMethod().orElseThrow().getName();
+        Process owner = processBuilder("owner", testOwner).redirectErrorStream(true).start();
         try {
             BufferedReader ownerOutput = new BufferedReader(new InputStreamReader(
                     owner.getInputStream(), StandardCharsets.UTF_8));
@@ -63,11 +64,22 @@ class RaftStorageProcessLockTest {
             assertTrue(ownerReady.contains("LOCKED " + directory.toAbsolutePath().normalize()), ownerReady);
 
             Path contenderLog = directory.resolveSibling(directory.getFileName() + "-contender.log");
-            Process contender = startProcess(contenderLog);
-            assertTrue(contender.waitFor(Duration.ofSeconds(10).toMillis(), TimeUnit.MILLISECONDS),
-                    "second JVM did not fail promptly");
+            Process contender = processBuilder("contender", testOwner)
+                    .redirectErrorStream(true).redirectOutput(contenderLog.toFile()).start();
+            try {
+                assertTrue(contender.waitFor(Duration.ofSeconds(10).toMillis(), TimeUnit.MILLISECONDS),
+                        "second JVM did not fail promptly");
+            } finally {
+                if (contender.isAlive()) contender.destroyForcibly();
+            }
             String failure = Files.readString(contenderLog, StandardCharsets.UTF_8);
-            assertFalse(contender.exitValue() == 0, failure);
+            assertEquals(73, contender.exitValue(), failure);
+            String intentional = "*** INTENTIONAL ERROR: WAL_DIRECTORY_ALREADY_LOCKED, caused by "
+                    + testOwner + "/contender *** ";
+            assertTrue(failure.contains(intentional), failure);
+            assertEquals(1, failure.lines().filter(log -> log.contains(" ERROR ")).count(), failure);
+            assertTrue(failure.lines().filter(log -> log.contains(" ERROR "))
+                    .allMatch(log -> log.contains(intentional)), failure);
             assertTrue(failure.contains(directory.toAbsolutePath().normalize().toString()), failure);
             assertTrue(failure.contains("another process may hold the storage lock"), failure);
             assertTrue(owner.isAlive(), "lock contender must not disturb the owning process");
@@ -81,19 +93,11 @@ class RaftStorageProcessLockTest {
         }
     }
 
-    private Process startProcess() throws Exception {
-        return processBuilder().redirectErrorStream(true).start();
-    }
-
-    private Process startProcess(Path output) throws Exception {
-        return processBuilder().redirectErrorStream(true).redirectOutput(output.toFile()).start();
-    }
-
-    private ProcessBuilder processBuilder() {
+    private ProcessBuilder processBuilder(String role, String testOwner) {
         String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
         String classPath = System.getProperty(
                 "surefire.test.class.path", System.getProperty("java.class.path"));
         return new ProcessBuilder(java, "-cp", classPath,
-                DirectoryLockProcessFixture.class.getName(), directory.toString());
+                DirectoryLockProcessFixture.class.getName(), directory.toString(), role, testOwner);
     }
 }

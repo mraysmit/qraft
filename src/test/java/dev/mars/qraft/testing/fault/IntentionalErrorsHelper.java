@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * Test logging helper that labels and checks the errors tests cause on purpose.
@@ -69,12 +70,54 @@ public final class IntentionalErrorsHelper {
         declare(error, times, times);
     }
 
+    /** Declares peer-unreachable errors caused only by stopping the named Raft peer. */
+    public static void expect(IntentionalErrorFixture error, String stoppedPeer) {
+        if (error != IntentionalErrorFixture.RAFT_PEER_UNREACHABLE) {
+            throw new IllegalArgumentException("a stopped peer applies only to RAFT_PEER_UNREACHABLE");
+        }
+        if (stoppedPeer == null || !stoppedPeer.matches("\\S+")) {
+            throw new IllegalArgumentException("stoppedPeer must be a nonblank peer ID without whitespace");
+        }
+        synchronized (LOCK) {
+            declare(error, 1, Integer.MAX_VALUE);
+            WINDOWS.peek().stoppedPeers.put(error, stoppedPeer);
+        }
+    }
+
+    /**
+     * Runs a helper subprocess's body with the same labels and strict error audit as a JUnit test.
+     * The body must return before the process exits so missing expectations and unexpected errors are checked.
+     */
+    public static <T> T inSubprocess(String owner, Supplier<T> body) {
+        Objects.requireNonNull(body, "body");
+        boolean standalone = openWindow().isEmpty();
+        begin(owner);
+        Throwable failure = null;
+        try {
+            IntentionalErrorCheckHelper.requireAttachedTo(IntentionalErrorCheckHelper.root());
+            return body.get();
+        } catch (RuntimeException | Error error) {
+            failure = error;
+            throw error;
+        } finally {
+            List<String> problems = new ArrayList<>(end(owner));
+            if (standalone) problems.addAll(drainOutsideAnyTest());
+            if (!problems.isEmpty()) {
+                AssertionError audit = new AssertionError(owner + " failed its intentional-error audit:\n"
+                        + String.join("\n", problems));
+                if (failure == null) throw audit;
+                failure.addSuppressed(audit);
+            }
+        }
+    }
+
     private static void declare(IntentionalErrorFixture error, int minimum, int maximum) {
         Objects.requireNonNull(error, "error");
         synchronized (LOCK) {
             WindowHelper window = WINDOWS.peek();
             if (window == null) throw new IllegalStateException("expect(" + error + ") was called outside a test");
             window.expected.put(error, new int[] {minimum, maximum});
+            window.stoppedPeers.remove(error);
         }
     }
 
@@ -162,7 +205,13 @@ public final class IntentionalErrorsHelper {
         }
         if (window != null) {
             for (IntentionalErrorFixture declared : window.expected.keySet()) {
-                if (declared.matches(event)) return Optional.of(declared);
+                String stoppedPeer = window.stoppedPeers.get(declared);
+                String message = event.getFormattedMessage();
+                if (declared.matches(event) && (stoppedPeer == null
+                        || message.equals("Failed to retrieve vote from " + stoppedPeer)
+                        || message.equals("Raft peer " + stoppedPeer + " became unreachable during AppendEntries"))) {
+                    return Optional.of(declared);
+                }
             }
         }
         return Optional.empty();
@@ -182,6 +231,7 @@ public final class IntentionalErrorsHelper {
         private final String owner;
         private final Map<IntentionalErrorFixture, int[]> expected = new EnumMap<>(IntentionalErrorFixture.class);
         private final Map<IntentionalErrorFixture, Integer> seen = new EnumMap<>(IntentionalErrorFixture.class);
+        private final Map<IntentionalErrorFixture, String> stoppedPeers = new EnumMap<>(IntentionalErrorFixture.class);
         private final List<String> problems = new ArrayList<>();
 
         private WindowHelper(String owner) {

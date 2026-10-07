@@ -27,6 +27,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.List;
 
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE;
 import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.SELF_TEST_INJECTED_FAILURE;
 import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.SELF_TEST_INTENTIONAL_ERROR;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -144,6 +145,90 @@ class IntentionalErrorsTest {
 
         assertEquals(List.of("INTENTIONAL ERROR SELF_TEST_INTENTIONAL_ERROR was declared at least 1 time(s)"
                 + " but occurred 0 time(s)"), problems);
+    }
+
+    @Test
+    void aStoppedPeerDeclarationLabelsBothRpcFailuresOnlyForThatPeer() {
+        Logger raft = (Logger) LoggerFactory.getLogger("dev.mars.qraft.controller.raft.RaftNode");
+        List<String> problems = inWindow("SelfTest#stoppedPeer", () -> {
+            IntentionalErrorsHelper.expect(RAFT_PEER_UNREACHABLE, "node.b");
+            for (String message : List.of("Failed to retrieve vote from node.b",
+                    "Raft peer node.b became unreachable during AppendEntries")) {
+                ILoggingEvent failure = event(raft, Level.ERROR, message, null);
+                assertEquals("*** INTENTIONAL ERROR: RAFT_PEER_UNREACHABLE, caused by SelfTest#stoppedPeer *** ",
+                        IntentionalErrorsHelper.label(failure));
+                IntentionalErrorsHelper.record(failure);
+            }
+            for (String message : List.of("Failed to retrieve vote from node-b",
+                    "Raft peer node-c became unreachable during AppendEntries",
+                    "Failed to retrieve vote from node.b and more")) {
+                ILoggingEvent failure = event(raft, Level.ERROR, message, null);
+                assertEquals("", IntentionalErrorsHelper.label(failure));
+                IntentionalErrorsHelper.record(failure);
+            }
+            IntentionalErrorsHelper.record(event(OTHER, Level.ERROR, "Failed to retrieve vote from node.b", null));
+            IntentionalErrorsHelper.record(event(raft, Level.WARN, "Failed to retrieve vote from node.b",
+                    new IOException("unexpected warning")));
+        });
+
+        assertEquals(5, problems.size(), problems.toString());
+        problems.forEach(problem -> assertTrue(problem.startsWith("unlabelled "), problem));
+    }
+
+    @Test
+    void aStoppedPeerDeclarationMustOccurAndRejectsInvalidArguments() {
+        assertEquals(List.of("INTENTIONAL ERROR RAFT_PEER_UNREACHABLE was declared at least 1 time(s)"
+                + " but occurred 0 time(s)"), inWindow("SelfTest#missingPeer", () ->
+                IntentionalErrorsHelper.expect(RAFT_PEER_UNREACHABLE, "node-b")));
+        assertThrows(IllegalArgumentException.class,
+                () -> IntentionalErrorsHelper.expect(SELF_TEST_INTENTIONAL_ERROR, "node-b"));
+        assertThrows(IllegalArgumentException.class,
+                () -> IntentionalErrorsHelper.expect(RAFT_PEER_UNREACHABLE, " "));
+    }
+
+    @Test
+    void aSubprocessScopeLabelsAndChecksItsDeclaredErrorsBeforeReturning() {
+        int exitCode = IntentionalErrorsHelper.inSubprocess("SelfTest#contender", () -> {
+            IntentionalErrorsHelper.expect(SELF_TEST_INTENTIONAL_ERROR, 1);
+            ILoggingEvent failure = event(SELF_TEST, Level.ERROR, "Self-test intentional error 7", null);
+            assertEquals("*** INTENTIONAL ERROR: SELF_TEST_INTENTIONAL_ERROR, caused by SelfTest#contender *** ",
+                    IntentionalErrorsHelper.label(failure));
+            IntentionalErrorsHelper.record(failure);
+            return 73;
+        });
+        assertEquals(73, exitCode);
+    }
+
+    @Test
+    void aSubprocessScopeRejectsUnlabelledErrorsAndMissingExpectedErrors() {
+        String enclosing = IntentionalErrorsHelper.openWindow().orElseThrow();
+        AssertionError unlabelled = assertThrows(AssertionError.class, () ->
+                IntentionalErrorsHelper.inSubprocess("SelfTest#unexpectedChild", () -> {
+                    IntentionalErrorsHelper.record(event(OTHER, Level.ERROR, "unexpected child failure", null));
+                    return 73;
+                }));
+        assertTrue(unlabelled.getMessage().contains("unlabelled ERROR"), unlabelled.getMessage());
+        AssertionError missing = assertThrows(AssertionError.class, () ->
+                IntentionalErrorsHelper.inSubprocess("SelfTest#missingChildError", () -> {
+                    IntentionalErrorsHelper.expect(SELF_TEST_INTENTIONAL_ERROR, 1);
+                    return 73;
+                }));
+        assertTrue(missing.getMessage().contains("occurred 0 time(s)"), missing.getMessage());
+        assertEquals(enclosing, IntentionalErrorsHelper.openWindow().orElseThrow());
+    }
+
+    @Test
+    void aSubprocessScopePreservesTheBodyFailureAndItsAuditFailure() {
+        String enclosing = IntentionalErrorsHelper.openWindow().orElseThrow();
+        IllegalStateException original = new IllegalStateException("child body failed");
+        assertEquals(original, assertThrows(IllegalStateException.class, () ->
+                IntentionalErrorsHelper.inSubprocess("SelfTest#failedChild", () -> {
+                    IntentionalErrorsHelper.record(event(OTHER, Level.ERROR, "unexpected child failure", null));
+                    throw original;
+                })));
+        assertEquals(1, original.getSuppressed().length);
+        assertTrue(original.getSuppressed()[0].getMessage().contains("unlabelled ERROR"));
+        assertEquals(enclosing, IntentionalErrorsHelper.openWindow().orElseThrow());
     }
 
     @Test

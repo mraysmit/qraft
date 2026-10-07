@@ -49,6 +49,51 @@ class DockerLogCaptureTest {
     }
 
     @Test
+    void archivesFlagDeclaredErrorsAndPreserveOtherLinesAndStackTraces() {
+        String prefix = "2026-10-06 14:00:00.000 [qraft-state-loop] ERROR "
+                + "dev.mars.qraft.controller.raft.RaftNode [n1] [LEADER] [term=2] - ";
+        String message = "Raft peer n2 became unreachable during AppendEntries";
+        String continuation = "\r\njava.net.ConnectException: connection refused\r\n"
+                + "\tat example.Trace.call(Trace.java:1)\r\n";
+        String unexpected = "2026-10-06 14:00:01.000 [main] ERROR example.Container - unexpected failure\n";
+        String info = "2026-10-06 14:00:02.000 [main] INFO  example.Container - stopping\n";
+        String unparseable = "12:00:00 | ERROR | runtime failed before Logback started";
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(
+                prefix + message + continuation + unexpected + info + unparseable,
+                Set.of(IntentionalErrorFixture.RAFT_PEER_UNREACHABLE), "DockerClass");
+
+        assertEquals(prefix.replace("ERROR ", "ERROR *** INTENTIONAL ERROR: RAFT_PEER_UNREACHABLE, "
+                        + "caused by DockerClass *** ")
+                + message + continuation + unexpected + info + unparseable, audit.archivedOutput());
+        assertEquals(1, audit.recognised().size());
+        assertEquals(2, audit.problems().size());
+        assertTrue(audit.problems().getFirst().startsWith("undeclared container "));
+        assertTrue(audit.problems().getLast().startsWith("unparseable container ERROR: "));
+    }
+
+    @Test
+    void archiveLabellingPreservesAnsiSequencesWithoutLosingTheIntentionalFlag() {
+        String line = "2026-10-06 14:00:00.000 [main] \u001B[31mERROR\u001B[0m "
+                + "dev.mars.qraft.controller.raft.RaftNode - "
+                + "Raft peer n2 became unreachable during AppendEntries\n";
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(line,
+                Set.of(IntentionalErrorFixture.RAFT_PEER_UNREACHABLE), "DockerClass");
+        assertTrue(audit.problems().isEmpty());
+        assertEquals(line.replace("\u001B[0m ", "\u001B[0m *** INTENTIONAL ERROR: RAFT_PEER_UNREACHABLE, "
+                + "caused by DockerClass *** "), audit.archivedOutput());
+    }
+
+    @Test
+    void anUndeclaredErrorIsArchivedUnflaggedAndFailsTheClassAudit() throws Exception {
+        String error = "2026-10-06 14:00:00.000 [main] ERROR example.Container - unexpected failure\n";
+        DockerLogCaptureHelper.beginClass("UnexpectedDockerClass", Set.of());
+        DockerLogCaptureHelper.capture("unexpected-container", "controller1", error);
+        assertEquals(java.util.List.of("controller1: undeclared container " + error.stripTrailing()),
+                DockerLogCaptureHelper.finishClass(directory));
+        assertEquals(error, Files.readString(directory.resolve("UnexpectedDockerClass/controller1.log")));
+    }
+
+    @Test
     void undeclaredContainerErrorIsReportedWithItsOriginalLine() {
         String line = "2026-10-06 14:00:00.000 [main] ERROR example.Container - unexpected failure";
 
@@ -99,7 +144,9 @@ class DockerLogCaptureTest {
         DockerLogCaptureHelper.capture("container-1", "controller1", first + error);
         assertTrue(DockerLogCaptureHelper.finishClass(directory).isEmpty());
 
-        assertEquals(error, Files.readString(directory.resolve("SecondDockerClass/controller1.log")));
+        assertEquals(error.replace("ERROR ", "ERROR *** INTENTIONAL ERROR: RAFT_PEER_UNREACHABLE, "
+                        + "caused by SecondDockerClass *** "),
+                Files.readString(directory.resolve("SecondDockerClass/controller1.log")));
 
         DockerLogCaptureHelper.beginClass("QuietDockerClass", Set.of());
         DockerLogCaptureHelper.capture("container-1", "controller1", first + error);
