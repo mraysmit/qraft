@@ -53,7 +53,7 @@ Updated 2026-09-27.
 ## 3. Rules
 
 - The interface is a client of the public HTTP API. It must not read or mutate
-  controller implementation objects, or introduce another consistency or
+  server implementation objects, or introduce another consistency or
   persistence path.
 - Production serves assets from classpath resources under `META-INF/qraft/ui/`
   only. Server code must not convert resource URLs to `Path` or use `Files`.
@@ -231,7 +231,7 @@ classloader. Vitest runs in `mvn test`.
 
 ## 8. Step 4: First Stage 1 read-only views
 
-This step builds the scope agreed in open decision 5:
+This step builds the scope agreed in decision 5:
 
 - the application shell and cluster status strip;
 - Services;
@@ -265,7 +265,10 @@ fail.
 
 1. Run the full default suite, the Docker-tagged suite, the Mockito,
    environment-variable, and `orTimeout` scans, the header audit, and
-   `git diff --check`.
+   `git diff --check`. Read every retained log of those runs for unflagged
+   errors, as `AGENTS.md` and `docs/TESTING.md` require (added 2026-10-08:
+   this list predates the logging policy, which applies to every step's exit
+   gate).
 2. Mark the embedded administrative interface criterion in design section 21,
    and record the tranche status.
 

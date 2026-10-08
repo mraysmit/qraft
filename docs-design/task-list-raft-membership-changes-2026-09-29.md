@@ -6,7 +6,7 @@ and the full suites passed on 2026-10-02; its mutation evidence is outstanding
 (Step 4 record). Steps 1 to 3 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
-**Last updated:** 2026-10-05 (document review: section order, the state before this list, and the order of work with the single-POM list)
+**Last updated:** 2026-10-08 (review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
 **Interrupted by:** [`task-list-single-pom-and-quorus-removal-2026-10-04.md`](task-list-single-pom-and-quorus-removal-2026-10-04.md),
 started 2026-10-04 before the Step 4 close-out gate. The gate's mutation evidence
 is recorded there, as the first task of its Phase 7. Step 5 resumes when that
@@ -188,6 +188,12 @@ Sources:
 - The design document is updated in the same step as the behaviour it
   describes.
 - Every new Java file carries the licence header and attributed type Javadoc.
+- A run is accepted only after its retained Maven, application, subprocess,
+  and Docker logs have been read and hold no unflagged error (`AGENTS.md`, and
+  `docs/TESTING.md`, "Intentional error flags and log auditing"). A test that
+  causes an error on purpose declares it. Added 2026-10-08: the rules above
+  and the exit gates below predate the logging policy, and it applies to each
+  of them.
 - No commits; the user commits.
 
 ## 5. Decisions
@@ -239,6 +245,10 @@ Decisions 1, 2, 4, and 5 follow from this. Decision 3 was made the same day.
    Servers exchange these facts with their seeds over the existing server
    port (decision 3). The "none already has a cluster" check also stops a
    wiped server from bootstrapping a second cluster.
+6. **Protecting changes. Decided 2026-09-29** for Step 4, and recorded
+   there: a removal needs the operator token, and listing stays open.
+7. **Forwarding. Decided 2026-09-29** for Step 4, and recorded there: any
+   server forwards a join or a removal to the leader, once.
 
 ## 6. Steps
 
@@ -790,16 +800,27 @@ evidence. Passing ordinary suites alone does not close the outstanding gate.
 By then the source has its final packages and its tests declare their
 intentional errors, and Phase 7 has not yet changed `RaftNode`'s async code.
 
+**Changed by that list's Phase 3 (review of 2026-10-08).** Phase 3 changed
+`RaftNode.becomeLeader`, which two of the guards above depend on:
+- the leadership no-op is appended, and the replication state initialized,
+  before leadership is published. Idle-cluster changes rely on that no-op;
+- leadership is declined once a stop has been requested.
+
+Add a mutation of each to this gate's evidence. The full-suite run of
+2026-10-02 no longer describes the source. The run that stands behind the
+mutations is the one that closes the single-POM list's Phase 6.
+
 ### Step 5. Failed-server cleanup
 
 **Status: Planned; not implemented.** The contract below was specified during
 the document review on 2026-10-03. Current server JSON rejects these new settings;
 the promotion settings still exist only on `RaftNode.Builder`.
 
-The class names below are those of 2026-10-03. The single-POM list renames
-`QraftControllerService` in its Phase 3 and replaces `AppConfig`'s flattened
-map with typed records in its Phase 5. This step resumes after that list, so
-wire the settings through whatever those classes have become.
+The single-POM list's Phase 3 renamed `QraftControllerService` to
+`QraftServerService` on 2026-10-08, and the text below uses the new name. Its
+Phase 5 replaces `AppConfig`'s flattened map with typed records. This step
+resumes after that list, so wire the settings through whatever `AppConfig`
+has become.
 
 #### Configuration contract
 
@@ -821,7 +842,7 @@ rounds would overflow are refused. Durations use ceiling division by the
 heartbeat interval and are measured in applied heartbeat rounds, as promotion
 and check-quorum already are. A delayed loop must not turn elapsed wall-clock
 time into fictitious missed rounds. Expose parsed values through `AppConfig`
-and wire them through `QraftControllerService` to the node; do not read JVM or
+and wire them through `QraftServerService` to the node; do not read JVM or
 environment overrides. Record the effective settings without secrets.
 
 #### Failure detection and replacement sequence
@@ -871,7 +892,7 @@ environment overrides. Record the effective settings without secrets.
 **Exit gate.**
 
 - Real configuration-parser tests reject invalid, unknown, and overflowing
-  settings, and a controller lifecycle test proves wiring of non-default
+  settings, and a server lifecycle test proves wiring of non-default
   promotion and cleanup values. An absent object preserves documented defaults,
   including when existing election or heartbeat intervals exceed the usual
   cleanup defaults.

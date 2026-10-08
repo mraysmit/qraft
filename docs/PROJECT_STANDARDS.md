@@ -86,7 +86,10 @@ packages of each layer are listed in the design document, section 1.1.
 - Asynchronous setup and teardown must be awaited with explicit timeouts.
 - Tests must not depend on execution order.
 - Timing-sensitive tests must use bounded polling rather than arbitrary long sleeps wherever practical.
-- Expected fault-injection errors must be clearly identified in test output.
+- Every error a test causes on purpose is declared and flagged in the log. A test injects a failure with `InjectedFaultFixture`, or declares an entry of `IntentionalErrorFixture` with `IntentionalErrorsHelper.expect`. The log line then carries `*** INJECTED FAILURE: <entry>, injected by <test> ***` or `*** INTENTIONAL ERROR: <entry>, caused by <test> ***` after its level.
+- An ERROR without a flag, or an exception logged at any level without one, fails the test that was running and is a defect to investigate. It is never filtered, suppressed, lowered in severity, or excused by a broader declaration.
+- A helper JVM and a container follow the same rule. [TESTING.md](TESTING.md#intentional-error-flags-and-log-auditing) has the declarations, the subprocess and Docker requirements, and how to read and audit a test log.
+- A run is accepted only after its retained Maven, application, subprocess, and Docker logs have been read and hold no unflagged error. Test totals and exit codes are not enough.
 
 ### 4.4 Deterministic tests
 

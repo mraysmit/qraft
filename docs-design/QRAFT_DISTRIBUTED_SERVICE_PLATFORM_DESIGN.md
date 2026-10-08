@@ -1548,7 +1548,7 @@ A server document uses the same envelope and keeps all server settings beneath
       "enabled": true,
       "otlpEndpoint": "http://otel-collector:4317",
       "prometheusPort": 9464,
-      "serviceName": "qraft-controller"
+      "serviceName": "qraft-server"
     },
     "shutdown": { "drainTimeoutMs": 5000, "timeoutMs": 30000 },
     "health": { "expiryIntervalMs": 1000, "nodeTtlMs": 90000, "nodeReapAfterMs": 259200000 },

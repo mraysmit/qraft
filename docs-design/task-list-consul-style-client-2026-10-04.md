@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-04
 **Status:** Proposed. It needs the `client` package and the new node model and routes of [`task-list-single-pom-and-quorus-removal-2026-10-04.md`](task-list-single-pom-and-quorus-removal-2026-10-04.md). It starts after that list and after the rest of [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md), Steps 5 to 8 (decided 2026-10-05).
-**Last updated:** 2026-10-05 (decision 8's takeover and rename rules, decision 9 on the Docker scenario, the design rule, and exit lines)
+**Last updated:** 2026-10-08 (review with the other task lists: the renamed contract test, the request bodies of decision 5, the open question on the `controllers` object, and the log audit in the rules)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 4.3, 5, 6.2, 7.3, 8, 12.1 and 16
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
@@ -42,6 +42,11 @@ Decisions 5 to 8 follow the Consul pattern.
    - `PUT /v1/catalog/check/observe` and `PUT /v1/catalog/node/heartbeat`.
 
    The old paths are removed in the same change; nothing is deployed.
+
+   The node routes move earlier, in the single-POM list's Phase 4. That phase
+   fixes the request bodies of the two catalog write paths for nodes and
+   services together, so that Phase 1 here adds services without changing
+   what a node sends (noted 2026-10-08).
 6. **The local API binds to `127.0.0.1` by default,** like Consul's
    `client_addr`. It has no authentication until
    [`task-list-acl-and-tokens-2026-10-05.md`](task-list-acl-and-tokens-2026-10-05.md),
@@ -98,6 +103,19 @@ Decisions 5 to 8 follow the Consul pattern.
      bind address of Phase 3 instead, as Consul's `client_addr` is set for
      containers. That is documented, not tested here.
 
+**Open, raised by the review of 2026-10-08: the client's `controllers`
+configuration object.**
+- The single-POM list's Phase 3 renamed the client's endpoint classes to
+  `ServerEndpoints`, `ServerRetryPolicy`, and `ServerContactTracker`. It kept
+  the `controllers` object in the client's JSON, because renaming it changes
+  a configuration contract.
+- No list owns that rename.
+- Phase 2 here already changes the contract, with `agent.nodeName` and a
+  required `agent.dataDirectory`.
+- Recommended: rename `controllers` to `servers` in Phase 2, in the same
+  change, and refuse the old key with a message that names the new one.
+  Decide before Phase 2 starts.
+
 ## 3. Rules
 
 - Red before green; mutation evidence for the safety guards; no Mockito;
@@ -109,6 +127,11 @@ Decisions 5 to 8 follow the Consul pattern.
   only checks that it did.
 - A phase without its own exit line exits on these rules, with each of its
   endpoints tested over real HTTP.
+- A run is accepted only after its retained Maven, application, subprocess,
+  and Docker logs have been read and hold no unflagged error (`AGENTS.md`, and
+  `docs/TESTING.md`, "Intentional error flags and log auditing"). A test that
+  causes an error on purpose declares it. Added 2026-10-08: this list predates
+  the logging policy.
 - The user runs the builds and commits.
 
 ## 4. Tasks
@@ -117,9 +140,10 @@ Decisions 5 to 8 follow the Consul pattern.
 
 - [ ] Move the server's write endpoints off `/v1/agent/` (decision 5). Keep the
   identity headers, idempotence, error envelope, and `X-Qraft-Index`.
-- [ ] Point `HttpCatalogClient`, the health publisher, and node registration
-  at the new paths. Extend `AgentControllerContractTest` to cover every client
-  call against a real server.
+- [ ] Point `HttpCatalogClient` and the health publisher at the new paths.
+  Node registration already uses its new paths, from the single-POM list's
+  Phase 4. Extend `AgentServerContractTest` (`AgentControllerContractTest`
+  until 2026-10-08) to cover every client call against a real server.
 - [ ] Make sure the server exposes every read the client forwards: catalog
   services, a service, nodes, and service health.
 
@@ -194,7 +218,7 @@ restart scenario passes end to end.
 ### Phase 6. Agent information
 
 - [ ] `GET /v1/agent/self`: node name and ID, version, configuration with
-  secrets redacted, controller contact, and readiness conditions.
+  secrets redacted, server contact, and readiness conditions.
 - [ ] `GET /v1/agent/members`: nodes and their status from the servers' catalog.
   Qraft has no gossip pool, so this is a forwarded read.
 - [ ] `PUT /v1/agent/leave`: the existing bounded graceful deregistration,

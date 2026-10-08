@@ -3,6 +3,7 @@
 **Date:** 2026-10-05
 **Status:** Proposed. Nothing in section 4 is decided: each item is a recommendation to confirm or change. No code exists.
 **Proposed start:** after [`task-list-consul-style-client-2026-10-04.md`](task-list-consul-style-client-2026-10-04.md) (proposal 15).
+**Last updated:** 2026-10-08 (review with the other task lists: three open points, on registering a service under proposal 11, on the authorize call, and on revoking the management token; the default exit rule and the log audit in the rules)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 7.3, 12, 15, 16 and 22
 **Related:** the client list's decisions 6 and 8; decision 6 of [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md), the operator token; item 9 of [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md); phase 7 of [`CONSUL_FEATURE_IMPLEMENTATION_PLAN.md`](CONSUL_FEATURE_IMPLEMENTATION_PLAN.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
@@ -78,6 +79,11 @@ the end of this section.
   - `operator`: the operator API, which includes the Raft configuration.
   - `acl`: reading and writing ACLs. `acl:write` also reveals any token's
     secret.
+- **Registering in the catalog.** A registration needs `node:write` only when
+  it creates the node or changes what is recorded for it. A service registered
+  on a node that already exists, with the node's details unchanged, needs
+  `service:write` alone. Read on 2026-10-08 in `vetRegisterWithACL`, in
+  Consul's `catalog_endpoint.go`.
 - **Policies and roles.** A policy is a named set of rules. A role is a named
   set of policies and identities. Tokens link to either.
 - **Identities** are policy templates:
@@ -130,6 +136,7 @@ Sources:
 - [ACL configuration reference](https://developer.hashicorp.com/consul/docs/reference/agent/configuration-file/acl)
 - [ACL HTTP API](https://developer.hashicorp.com/consul/api-docs/acl) and
   [token endpoints](https://developer.hashicorp.com/consul/api-docs/acl/tokens)
+- [Consul `catalog_endpoint.go`](https://github.com/hashicorp/consul/blob/main/agent/consul/catalog_endpoint.go)
 
 ## 4. Proposed decisions
 
@@ -234,6 +241,7 @@ so and why.
     | `GET /v1/operator/raft/configuration`, `/raft/status` | `operator:read` |
     | `DELETE /v1/operator/raft/peer` | `operator:write`, checked again by the leader |
     | The ACL API | `acl:read` or `acl:write` |
+    | `GET /v1/acl/token/self`, `POST /v1/acl/authorize` | any token: each answers only for the token that presents it |
     | The client's own endpoints (`/v1/agent/self`, `leave`, maintenance) | `agent:read` or `agent:write` on the node name |
     | `/health/live`, `/health/ready` | no token, ever: orchestrators call them |
     | The administrative interface's static files | no token; its API calls carry one (UI-5) |
@@ -241,6 +249,40 @@ so and why.
 
     Not covered: the Raft port, which stays trusted until transport security
     (proposal 14), and the Prometheus port.
+
+    The row for `token/self` and `authorize` was added by the review of
+    2026-10-08. Proposal 13 introduces `POST /v1/acl/authorize` without
+    saying what it needs. Under "The ACL API" row, an agent holding only a
+    node identity could not call it. The agent sends the caller's token as
+    the presenting token, and a request without one is answered for the
+    anonymous token.
+
+    **Open, found by the review of 2026-10-08: who holds `node:write` when an
+    application registers a service.** As written, the table cannot hold
+    together with proposals 9 and 13 and Phase 9's first scenario:
+    - the row for registering a service needs `service:write` and
+      `node:write` on one token;
+    - a service identity (proposal 9) gives `node:read` only;
+    - a service registered through the local API is synced under the token it
+      was registered with (proposal 13).
+
+    So an application that holds a service identity is refused. There are two
+    ways out:
+    - **A. Two credentials on a synced service write.** The agent sends its
+      own token and the registration's token. The server takes `node:write`
+      from the agent's and `service:write` from the registration's. A caller
+      that talks to a server directly needs both grants on its one token.
+      This keeps Phase 7's guard, that a token for node A cannot register a
+      service on node B. It costs a second header on the client's protocol.
+    - **B. Consul's rule** (section 3). `node:write` is needed only to create
+      or change the node; a service on an existing, unchanged node needs
+      `service:write` alone. It needs one token and no new header. It drops
+      that Phase 7 guard: a holder of `service:write` on a name can add an
+      instance of it on any registered node.
+
+    Recommended: A, because section 1 promises that a client registers "for
+    its own node only". Decide before Phase 4. The row, proposal 13, Phase 6,
+    and Phase 7 follow the choice.
 
 ### Configuration and bootstrap
 
@@ -260,6 +302,14 @@ so and why.
       secrets are mounted files, and it is also the recovery path: when every
       management secret is lost, put a new one in the file and restart the
       leader.
+    - **Open, found by the review of 2026-10-08: revoking that token.** A
+      leader installs the file's secret whenever no token has its hash. So a
+      management token deleted through the API returns at the next leadership
+      change while any server's file still holds its secret, and servers
+      with different files each install their own. Recommended: require the
+      same file on every server, and document the order for revoking, which
+      is to replace the secret in every server's file first and then delete
+      the old token. Phase 3 has a task for it.
     - With ACLs enabled, `server.operator.token` is refused as a conflicting
       setting, and `operator:write` replaces it. With ACLs disabled it guards
       removal as it does today.
@@ -317,11 +367,18 @@ so and why.
   and a snapshot written before ACLs still load.
 - A test searches the captured log of each ACL scenario for the secrets it
   used, and fails if it finds one.
-- A denial is not an error. It is logged at a level below ERROR, so it needs
-  no entry in `IntentionalError`.
+- A denial is not an error. It is logged at a level below ERROR and without
+  an exception, so it needs no entry in `IntentionalErrorFixture`.
+- A run is accepted only after its retained Maven, application, subprocess,
+  and Docker logs have been read and hold no unflagged error (`AGENTS.md`, and
+  `docs/TESTING.md`, "Intentional error flags and log auditing"). Added
+  2026-10-08.
 - The design document changes in the same phase as the behaviour.
 - Each phase ends with `mvn install`. Phases that change the runtime also run
   the end-to-end suite and the Docker suite on a fresh image.
+- A phase without its own exit line exits on these rules, with each of its
+  endpoints and commands tested over real HTTP. Added 2026-10-08, for
+  Phases 5 and 8.
 - The user runs the builds and commits.
 
 ## 6. Tasks
@@ -362,6 +419,9 @@ check.
 - [ ] The leader installs the management token when it gains leadership and
   none with that hash exists. Installing twice changes nothing.
 - [ ] Log the effective settings without the secret.
+- [ ] Settle and test how the management token is revoked (proposal 12, open
+  point of 2026-10-08): a deleted token is installed again while a server's
+  file still holds its secret, and is not once every file holds a new one.
 
 **Exit:** Lifecycle tests on real storage: a restarted cluster keeps its
 tokens, and a new secret in the file is installed at the next leadership.
@@ -405,8 +465,9 @@ With ACLs disabled, every existing test passes unchanged.
   sync that service under it.
 - [ ] Authorize the agent's own endpoints through the server.
 
-**Exit:** `AgentControllerContractTest` covers every client call with a
-sufficient token, an insufficient one, and none.
+**Exit:** `AgentServerContractTest` (`AgentControllerContractTest` until
+2026-10-08) covers every client call with a sufficient token, an insufficient
+one, and none.
 
 ### Phase 7. Node identity is enforced
 
