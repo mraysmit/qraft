@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.testing.fault;
 
-import dev.mars.qraft.controller.raft.SharedDockerClusterFixture;
+import dev.mars.qraft.raft.SharedDockerClusterFixture;
 import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;

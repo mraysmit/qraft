@@ -6,12 +6,12 @@ Write-Host ""
 # 1. Show application logging
 Write-Host "1. APPLICATION LAYER" -ForegroundColor Yellow
 Write-Host "   Java apps write to STDOUT/STDERR" -ForegroundColor Cyan
-Write-Host "   Format: 2025-08-26 10:36:39,337 INFO [dev.mar.quo.controller] (main) Message" -ForegroundColor Gray
+Write-Host "   Format: 2025-08-26 10:36:39,337 INFO [dev.mar.quo.server] (main) Message" -ForegroundColor Gray
 Write-Host ""
 
 # 2. Show Docker layer
 Write-Host "2. DOCKER LAYER" -ForegroundColor Yellow
-$logPath = docker inspect qraft-controller1 --format="{{.LogPath}}" 2>$null
+$logPath = docker inspect qraft-server1 --format="{{.LogPath}}" 2>$null
 if ($logPath) {
     Write-Host "   Docker stores logs in: $logPath" -ForegroundColor Cyan
 }
@@ -47,7 +47,7 @@ Write-Host ""
 
 # 5. Show recent Docker logs
 Write-Host "5. RECENT DOCKER LOGS" -ForegroundColor Yellow
-$dockerLogs = docker logs qraft-controller1 --tail 3 2>$null
+$dockerLogs = docker logs qraft-server1 --tail 3 2>$null
 if ($dockerLogs) {
     foreach ($line in $dockerLogs) {
         Write-Host "   $line" -ForegroundColor Gray
@@ -63,7 +63,7 @@ Write-Host "6. COMPLETE PIPELINE" -ForegroundColor Yellow
 Write-Host "   Java App → Docker JSON → Promtail → Loki → Grafana" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "   Access points:" -ForegroundColor White
-Write-Host "   - Docker logs: docker logs qraft-controller1" -ForegroundColor Gray
+Write-Host "   - Docker logs: docker logs qraft-server1" -ForegroundColor Gray
 Write-Host "   - Grafana UI: http://localhost:3000" -ForegroundColor Gray
 Write-Host "   - Loki API: http://localhost:3100" -ForegroundColor Gray
 

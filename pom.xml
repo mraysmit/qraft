@@ -321,9 +321,10 @@
                         <exclude>java/**</exclude>
                         <exclude>com/sun/**</exclude>
                         <exclude>org/jcp/**</exclude>
-                        <exclude>dev/mars/qraft/controller/**/grpc/**</exclude>
-                        <exclude>dev/mars/qraft/controller/QraftControllerApplication*</exclude>
-                        <exclude>dev/mars/qraft/controller/QraftControllerService*</exclude>
+                        <exclude>dev/mars/qraft/server/**/grpc/**</exclude>
+                        <exclude>dev/mars/qraft/raft/grpc/**</exclude>
+                        <exclude>dev/mars/qraft/server/QraftServerApplication*</exclude>
+                        <exclude>dev/mars/qraft/server/QraftServerService*</exclude>
                     </excludes>
                 </configuration>
                 <executions>

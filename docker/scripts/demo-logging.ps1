@@ -54,16 +54,16 @@ Write-Host ""
 
 # 4. Show sample LogQL queries
 Write-Host "4. Sample LogQL Queries for Grafana:" -ForegroundColor Yellow
-Write-Host "   - All controller logs: {container_name=`"qraft-controller1`"}" -ForegroundColor White
-Write-Host "   - Heartbeat logs: {container_name=`"qraft-controller1`"} |= `"heartbeat`"" -ForegroundColor White
-Write-Host "   - Error logs: {container_name=`"qraft-controller1`"} |= `"ERROR`"" -ForegroundColor White
-Write-Host "   - Registration logs: {container_name=`"qraft-controller1`"} |= `"registration`"" -ForegroundColor White
+Write-Host "   - All server logs: {container_name=`"qraft-server1`"}" -ForegroundColor White
+Write-Host "   - Heartbeat logs: {container_name=`"qraft-server1`"} |= `"heartbeat`"" -ForegroundColor White
+Write-Host "   - Error logs: {container_name=`"qraft-server1`"} |= `"ERROR`"" -ForegroundColor White
+Write-Host "   - Registration logs: {container_name=`"qraft-server1`"} |= `"registration`"" -ForegroundColor White
 Write-Host ""
 
 # 5. Show recent logs via Loki API
 Write-Host "5. Recent Logs from Loki:" -ForegroundColor Yellow
 try {
-    $lokiQuery = "http://localhost:3100/loki/api/v1/query_range?query={container_name=`"qraft-controller1`"}&limit=5"
+    $lokiQuery = "http://localhost:3100/loki/api/v1/query_range?query={container_name=`"qraft-server1`"}&limit=5"
     $lokiResponse = Invoke-RestMethod -Uri $lokiQuery -ErrorAction Stop
     if ($lokiResponse.data.result) {
         Write-Host "   Recent log entries:" -ForegroundColor Cyan

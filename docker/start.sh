@@ -8,20 +8,20 @@ service=${1:-help}
 case "$service" in
   cluster)
     "$SCRIPT_DIR/build-runtime.sh"
-    echo "Starting Qraft single-controller development environment..."
-    docker compose -f compose/docker-compose-single-controller.yml up -d
-    echo "Controller with embedded HTTP API available at http://localhost:8080"
+    echo "Starting Qraft single-server development environment..."
+    docker compose -f compose/docker-compose-single-server.yml up -d
+    echo "Server with embedded HTTP API available at http://localhost:8080"
     ;;
   multinode)
     "$SCRIPT_DIR/build-runtime.sh"
     echo "Starting Qraft multi-node cluster..."
     docker compose -f compose/docker-compose-cluster.yml up -d
-    echo "Controllers available at http://localhost:8081, :8082, and :8083"
+    echo "Servers available at http://localhost:8081, :8082, and :8083"
     ;;
-  controllers)
+  servers)
     "$SCRIPT_DIR/build-runtime.sh"
-    echo "Starting Qraft controller-first cluster..."
-    docker compose -f compose/docker-compose-controller-first.yml up -d
+    echo "Starting Qraft server-first cluster..."
+    docker compose -f compose/docker-compose-server-first.yml up -d
     echo "Load-balanced API available at http://localhost:8080"
     ;;
   logging)
@@ -29,7 +29,7 @@ case "$service" in
     echo "Grafana available at http://localhost:3000 (admin/admin)"
     ;;
   stop)
-    for file in docker-compose-single-controller.yml docker-compose-controller-first.yml docker-compose-cluster.yml docker-compose-5node.yml docker-compose-network-test.yml docker-compose-loki.yml; do
+    for file in docker-compose-single-server.yml docker-compose-server-first.yml docker-compose-cluster.yml docker-compose-5node.yml docker-compose-network-test.yml docker-compose-loki.yml; do
       docker compose -f "compose/$file" down >/dev/null 2>&1 || true
     done
     echo "Services stopped."
@@ -38,6 +38,6 @@ case "$service" in
     docker ps --filter name=qraft- --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
     ;;
   *)
-    echo "Usage: ./start.sh {cluster|multinode|controllers|logging|stop|status}"
+    echo "Usage: ./start.sh {cluster|multinode|servers|logging|stop|status}"
     ;;
 esac

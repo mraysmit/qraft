@@ -1,0 +1,47 @@
+networks:
+  qraft-dev:
+    driver: bridge
+
+services:
+  server:
+    command: ["server", "--config", "/etc/qraft/server.json"]
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile
+    container_name: qraft-server-dev
+    volumes:
+      - ../config/single/server.json:/etc/qraft/server.json:ro
+    ports:
+      - "8080:8080"
+    networks:
+      - qraft-dev
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  agent:
+    command: ["client"]
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile
+    container_name: qraft-agent-dev
+    volumes:
+      - ../config/client.json:/etc/qraft/client.json:ro
+    depends_on:
+      server:
+        condition: service_healthy
+    networks:
+      qraft-dev:
+        aliases:
+          - agent-example
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped

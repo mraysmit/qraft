@@ -2,15 +2,15 @@
 # (no Docker build step). Requires qraft-runtime:test image — built by SharedDockerClusterFixture.
 
 services:
-  controller1:
+  server1:
     image: qraft-runtime:test
-    hostname: controller1
+    hostname: server1
     command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
       - "8080"
     volumes:
-      - ../../../docker/config/three-node-acceptance/controller1.json:/etc/qraft/server.json:ro
-      - controller1-data:/app/data
+      - ../../../docker/config/three-node-acceptance/server1.json:/etc/qraft/server.json:ro
+      - server1-data:/app/data
     networks:
       - raft-cluster
     healthcheck:
@@ -20,15 +20,15 @@ services:
       retries: 5
       start_period: 10s
 
-  controller2:
+  server2:
     image: qraft-runtime:test
-    hostname: controller2
+    hostname: server2
     command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
       - "8080"
     volumes:
-      - ../../../docker/config/three-node-acceptance/controller2.json:/etc/qraft/server.json:ro
-      - controller2-data:/app/data
+      - ../../../docker/config/three-node-acceptance/server2.json:/etc/qraft/server.json:ro
+      - server2-data:/app/data
     networks:
       - raft-cluster
     healthcheck:
@@ -38,15 +38,15 @@ services:
       retries: 5
       start_period: 10s
 
-  controller3:
+  server3:
     image: qraft-runtime:test
-    hostname: controller3
+    hostname: server3
     command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
       - "8080"
     volumes:
-      - ../../../docker/config/three-node-acceptance/controller3.json:/etc/qraft/server.json:ro
-      - controller3-data:/app/data
+      - ../../../docker/config/three-node-acceptance/server3.json:/etc/qraft/server.json:ro
+      - server3-data:/app/data
     networks:
       - raft-cluster
     healthcheck:
@@ -78,6 +78,6 @@ networks:
     driver: bridge
 
 volumes:
-  controller1-data:
-  controller2-data:
-  controller3-data:
+  server1-data:
+  server2-data:
+  server3-data:

@@ -18,12 +18,12 @@ Qraft is a Consul-style service discovery and distributed coordination platform.
 - Shared mutable state must have an explicit ownership and serialization model.
 - A future's callbacks run on the thread that completes it. Blocking work must not run inline in a callback on a
   thread the code does not own; hand it to a thread created for that work.
-- Bound asynchronous waits with `dev.mars.qraft.concurrent.Deadlines`, never `CompletableFuture.orTimeout` or
+- Bound asynchronous waits with `dev.mars.qraft.common.concurrent.Deadlines`, never `CompletableFuture.orTimeout` or
   `completeOnTimeout`, which complete on one JVM-wide delay thread.
 
 ### 2.2 Network protocols
 
-- Retain gRPC for controller-to-controller Raft communication and supported service APIs.
+- Retain gRPC for server-to-server Raft communication and supported service APIs.
 - Use the JDK HTTP stack for HTTP endpoints and clients unless an approved requirement demonstrates that it is insufficient.
 - Transport implementations must provide explicit startup, shutdown, timeout, and failure behavior.
 - Transport callbacks must propagate failures to their returned future or completion stage.
@@ -49,11 +49,11 @@ Qraft is one Maven project that builds one executable jar. Its code is divided
 into layers of packages, which were separate Maven modules until 2026-10-04. The
 packages of each layer are listed in the design document, section 1.1.
 
-- Raft contracts define the Raft engine contracts and primitives.
-- Replicated state defines replicated-state commands and codecs.
-- Shared types contain shared domain models and framework primitives.
-- The client implements the Java 27 service-discovery agent.
-- The server implements distributed control, Raft coordination, HTTP APIs, and gRPC services.
+- Raft (`dev.mars.qraft.raft`) owns consensus implementation, contracts, transport, storage adapters, and metrics; it may use only Common.
+- State (`dev.mars.qraft.state`) owns the deterministic state host, commands, codecs, and catalog projections; it may use Raft and Common.
+- Common (`dev.mars.qraft.common`) owns shared models, configuration helpers, deadlines, and temporary async support; it uses no other Qraft layer.
+- Client (`dev.mars.qraft.client`) implements the Java 27 discovery agent and may use only Common.
+- Server (`dev.mars.qraft.server`) composes Raft and State, HTTP/external gRPC APIs, telemetry, and lifecycle; it may use Common, Raft, and State.
 - The entry point is the thin executable composition root that selects `server` or `client` mode and owns no domain logic.
 - A layer must not depend on implementation details from a higher-level layer. `PackageDependencyTest` enforces the allowed direction.
 - Shared abstractions belong in the lowest layer that can own them without creating a circular dependency.
@@ -142,17 +142,17 @@ Expected layout:
 
 ```text
 logs/
-|-- qraft-agent-<instance>.log
-|-- qraft-agent-<instance>.json
-|-- qraft-controller-<instance>.log
-|-- qraft-controller-<instance>.json
+|-- qraft-client.log
+|-- qraft-client.json
+|-- qraft-server.log
+|-- qraft-server.json
 |-- qraft-tests-<timestamp>.log
 `-- archive/
 ```
 
-Until the runtime names its log files by mode, both modes write
-`qraft-controller-server.log` and `.json`: the executable jar ships one
-`logback.xml`. The single-POM task list's Phase 3 corrects this.
+Both modes use the shipped `logback.xml`. Startup selects the runtime mode and the configuration's
+`logging.directory` before initializing any logger. Client files are `qraft-client.log` and
+`qraft-client.json`; server files are `qraft-server.log` and `qraft-server.json`.
 
 ### 6.3 Log format and quality
 

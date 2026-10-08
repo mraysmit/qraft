@@ -38,33 +38,33 @@ scrape_configs:
         labels:
           service: 'loki'
 
-  # Qraft Controller - Single node (standalone mode on port 9464)
-  - job_name: 'qraft-controller-standalone'
+  # Qraft Server - Single node (standalone mode on port 9464)
+  - job_name: 'qraft-server-standalone'
     scrape_interval: 10s
     static_configs:
       - targets: ['host.docker.internal:9464']
         labels:
-          service: 'qraft-controller'
+          service: 'qraft-server'
           deployment: 'standalone'
           node: 'standalone'
 
-  # Qraft Controller - 3-node local cluster
-  - job_name: 'qraft-controller-cluster'
+  # Qraft Server - 3-node local cluster
+  - job_name: 'qraft-server-cluster'
     scrape_interval: 10s
     static_configs:
       - targets: ['host.docker.internal:9471']
         labels:
-          service: 'qraft-controller'
+          service: 'qraft-server'
           deployment: 'cluster'
           node: 'node-1'
       - targets: ['host.docker.internal:9472']
         labels:
-          service: 'qraft-controller'
+          service: 'qraft-server'
           deployment: 'cluster'
           node: 'node-2'
       - targets: ['host.docker.internal:9473']
         labels:
-          service: 'qraft-controller'
+          service: 'qraft-server'
           deployment: 'cluster'
           node: 'node-3'
 
@@ -77,33 +77,33 @@ scrape_configs:
           service: 'qraft-agent'
           deployment: 'host'
 
-  # Qraft Controller cluster (controller-first architecture in Docker)
+  # Qraft Server cluster (server-first architecture in Docker)
   # These use the HTTP API metrics endpoint on port 8080
-  - job_name: 'qraft-controllers-compose'
+  - job_name: 'qraft-servers-compose'
     scrape_interval: 5s
     static_configs:
-      - targets: ['controller1:8080']
+      - targets: ['server1:8080']
         labels:
-          service: 'qraft-controller'
+          service: 'qraft-server'
           deployment: 'compose-cluster'
-          node: 'controller1'
-      - targets: ['controller2:8080']
+          node: 'server1'
+      - targets: ['server2:8080']
         labels:
-          service: 'qraft-controller'
+          service: 'qraft-server'
           deployment: 'compose-cluster'
-          node: 'controller2'
-      - targets: ['controller3:8080']
+          node: 'server2'
+      - targets: ['server3:8080']
         labels:
-          service: 'qraft-controller'
+          service: 'qraft-server'
           deployment: 'compose-cluster'
-          node: 'controller3'
+          node: 'server3'
 
-  # Qraft Controller cluster (when running in Docker)
-  - job_name: 'qraft-controller-docker'
+  # Qraft Server cluster (when running in Docker)
+  - job_name: 'qraft-server-docker'
     scrape_interval: 10s
     dns_sd_configs:
       - names:
-          - 'controller'
+          - 'server'
         type: 'A'
         port: 9464
     relabel_configs:
@@ -111,7 +111,7 @@ scrape_configs:
         target_label: instance
       - source_labels: []
         target_label: service
-        replacement: 'qraft-controller'
+        replacement: 'qraft-server'
       - source_labels: []
         target_label: deployment
         replacement: 'docker'

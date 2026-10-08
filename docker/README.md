@@ -1,16 +1,16 @@
 # Qraft Docker infrastructure
 
-This directory contains Docker Compose environments for Qraft controller
+This directory contains Docker Compose environments for Qraft server
 clusters and observability.
 
-## Controller clusters
+## Server clusters
 
 Run commands from this directory. The helper script exposes the maintained
 development entry points:
 
 ```powershell
-.\start.ps1 cluster       # single-controller development environment
-.\start.ps1 controllers   # three controllers behind a load balancer
+.\start.ps1 cluster       # single-server development environment
+.\start.ps1 servers   # three servers behind a load balancer
 .\start.ps1 status
 .\start.ps1 stop
 ```
@@ -19,7 +19,7 @@ POSIX shell equivalents are provided for Linux, macOS, and WSL:
 
 ```sh
 sh ./start.sh cluster
-sh ./start.sh controllers
+sh ./start.sh servers
 sh ./start.sh status
 sh ./start.sh stop
 ```
@@ -36,9 +36,9 @@ location. Operators may instead use `-Dqraft.config=<path>` or the local
 ## Client configuration
 
 [`config/client.json`](config/client.json) is a complete client example. It
-declares the agent, controller origins, reconciliation policy, and services in one
-versioned file; it contains no environment-variable placeholders. Controller URLs
-must be origins such as `http://controller:8080`, without an API path, query, or
+declares the agent, server origins, reconciliation policy, and services in one
+versioned file; it contains no environment-variable placeholders. Server URLs
+must be origins such as `http://server:8080`, without an API path, query, or
 fragment.
 
 Mount the file read-only and select it explicitly when the container may use an
@@ -91,7 +91,7 @@ the artifact without starting Docker, run either helper:
 sh ./build-runtime.sh
 ```
 
-Controller HTTP endpoints are exposed on ports 8080 or 8081-8085, depending
+Server HTTP endpoints are exposed on ports 8080 or 8081-8085, depending
 on the selected topology. Check a running endpoint with:
 
 ```powershell
@@ -100,7 +100,7 @@ Invoke-RestMethod http://localhost:8080/health
 
 ## Agent API checks
 
-With a controller running, `start-quick.ps1 test` uses the JSON payloads and
+With a server running, `start-quick.ps1 test` uses the JSON payloads and
 PowerShell scripts under `test-data/` to exercise agent registration,
 heartbeat, and listing endpoints.
 
@@ -144,6 +144,6 @@ The default Grafana development credentials are `admin` / `admin`.
 
 ## Persistent state
 
-Compose environments use named volumes for controller and observability data.
+Compose environments use named volumes for server and observability data.
 Use `docker compose down` to retain them or `docker compose down -v` when an
 explicit clean reset is required.

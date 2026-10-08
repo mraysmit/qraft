@@ -1,14 +1,14 @@
-# Qraft 3-Node Controller Cluster with Observability Stack
-# Grafana + Tempo + Prometheus + Loki + 3 Controllers
+# Qraft 3-Node Server Cluster with Observability Stack
+# Grafana + Tempo + Prometheus + Loki + 3 Servers
 #
 # Usage:
 #   docker-compose -f docker/compose/docker-compose-observability-cluster.yml up -d
 #
 # Access Points:
 #   - Grafana:       http://localhost:3000 (admin/admin)
-#   - Controller 1:  http://localhost:8081/health
-#   - Controller 2:  http://localhost:8082/health
-#   - Controller 3:  http://localhost:8083/health
+#   - Server 1:  http://localhost:8081/health
+#   - Server 2:  http://localhost:8082/health
+#   - Server 3:  http://localhost:8083/health
 #   - Prometheus:    http://localhost:9090
 
 services:
@@ -138,17 +138,17 @@ services:
     restart: unless-stopped
 
   # ==========================================================
-  # Qraft Controller Node 1
+  # Qraft Server Node 1
   # ==========================================================
-  controller1:
+  server1:
     build:
       context: ../..
       dockerfile: docker/Dockerfile
-    container_name: qraft-controller1
-    hostname: controller1
+    container_name: qraft-server1
+    hostname: server1
     command: ["server", "--config", "/etc/qraft/server.json"]
     volumes:
-      - ../config/three-node-observability/controller1.json:/etc/qraft/server.json:ro
+      - ../config/three-node-observability/server1.json:/etc/qraft/server.json:ro
     ports:
       - "8081:8080"
       - "9464:9464"
@@ -166,17 +166,17 @@ services:
     restart: unless-stopped
 
   # ==========================================================
-  # Qraft Controller Node 2
+  # Qraft Server Node 2
   # ==========================================================
-  controller2:
+  server2:
     build:
       context: ../..
       dockerfile: docker/Dockerfile
-    container_name: qraft-controller2
-    hostname: controller2
+    container_name: qraft-server2
+    hostname: server2
     command: ["server", "--config", "/etc/qraft/server.json"]
     volumes:
-      - ../config/three-node-observability/controller2.json:/etc/qraft/server.json:ro
+      - ../config/three-node-observability/server2.json:/etc/qraft/server.json:ro
     ports:
       - "8082:8080"
       - "9465:9464"
@@ -185,7 +185,7 @@ services:
     depends_on:
       otel-collector:
         condition: service_healthy
-      controller1:
+      server1:
         condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -196,17 +196,17 @@ services:
     restart: unless-stopped
 
   # ==========================================================
-  # Qraft Controller Node 3
+  # Qraft Server Node 3
   # ==========================================================
-  controller3:
+  server3:
     build:
       context: ../..
       dockerfile: docker/Dockerfile
-    container_name: qraft-controller3
-    hostname: controller3
+    container_name: qraft-server3
+    hostname: server3
     command: ["server", "--config", "/etc/qraft/server.json"]
     volumes:
-      - ../config/three-node-observability/controller3.json:/etc/qraft/server.json:ro
+      - ../config/three-node-observability/server3.json:/etc/qraft/server.json:ro
     ports:
       - "8083:8080"
       - "9466:9464"
@@ -215,9 +215,9 @@ services:
     depends_on:
       otel-collector:
         condition: service_healthy
-      controller1:
+      server1:
         condition: service_started
-      controller2:
+      server2:
         condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]

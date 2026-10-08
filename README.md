@@ -6,7 +6,7 @@ It is designed for systems that need strongly ordered commands, replicated state
 
 ## Core Model
 
-- Controllers accept commands and replicate them through the Raft log
+- Servers accept commands and replicate them through the Raft log
 - Commands are applied deterministically to maintain consistent cluster state
 - Agents register with the control plane and report health
 - Tenants and namespaces provide logical isolation for policies and state
@@ -30,7 +30,7 @@ Qraft is one Maven project that builds one executable jar, `target/qraft.jar`.
 Its code is divided into layers of packages, which a dependency test keeps
 apart:
 
-- Raft contracts: implementation-neutral Raft contracts and primitives
+- Raft: consensus implementation, contracts, transport, storage adapters, and metrics
 - Replicated state: deterministic replicated-state commands and projections
 - Shared types: shared service-discovery, health, node, and agent domain types
 - Client: client-mode registration, heartbeat, and local health behavior

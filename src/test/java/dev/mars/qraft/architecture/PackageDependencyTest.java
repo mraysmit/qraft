@@ -18,6 +18,7 @@ package dev.mars.qraft.architecture;
 
 import dev.mars.qraft.runtime.QraftRuntimeApplication;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.lang.classfile.ClassFile;
@@ -25,6 +26,7 @@ import java.lang.classfile.ClassModel;
 import java.lang.classfile.constantpool.ClassEntry;
 import java.lang.classfile.constantpool.PoolEntry;
 import java.lang.classfile.constantpool.Utf8Entry;
+import java.lang.constant.ClassDesc;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -44,11 +46,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests that production code keeps the dependency direction the Maven modules enforced before they were
- * merged into one build: the client never uses server, Raft, or replicated-state code; replicated state
- * uses only the Raft contracts; shared types use nothing else of Qraft's; and only the runtime entry point
- * may use everything. The compiled classes' constant pools are read with the JDK class-file API, so a
+ * Tests the final package dependency direction: the client and Raft use only Common; replicated state
+ * uses Raft and Common; server uses those three layers; and Common uses no other Qraft layer. Only the
+ * runtime entry point may use everything. The compiled classes' constant pools are read with the JDK
+ * class-file API, so a
  * reference counts whether it comes from an import, a same-package name, or a signature.
+ * Compiled mutation fixtures prove forbidden dependencies are rejected after the package migration.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-10-04
@@ -56,68 +59,110 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class PackageDependencyTest {
 
-    /** The former Maven modules, as layers of the one build. */
-    enum Layer { ENGINE, STATE, CORE, CLIENT, SERVER, RUNTIME }
+    /** Package ownership and permitted dependencies in the completed Phase 3 layout. */
+    enum Layer { RAFT, STATE, COMMON, CLIENT, SERVER, RUNTIME }
 
-    /** Each layer and the layers it may use, matching the former module dependencies. */
     private static final Map<Layer, Set<Layer>> ALLOWED = Map.of(
-            Layer.ENGINE, EnumSet.of(Layer.ENGINE),
-            Layer.STATE, EnumSet.of(Layer.STATE, Layer.ENGINE),
-            Layer.CORE, EnumSet.of(Layer.CORE),
-            Layer.CLIENT, EnumSet.of(Layer.CLIENT, Layer.CORE),
-            Layer.SERVER, EnumSet.of(Layer.SERVER, Layer.CORE, Layer.ENGINE, Layer.STATE),
+            Layer.RAFT, EnumSet.of(Layer.RAFT, Layer.COMMON),
+            Layer.STATE, EnumSet.of(Layer.STATE, Layer.RAFT, Layer.COMMON),
+            Layer.COMMON, EnumSet.of(Layer.COMMON),
+            Layer.CLIENT, EnumSet.of(Layer.CLIENT, Layer.COMMON),
+            Layer.SERVER, EnumSet.of(Layer.SERVER, Layer.COMMON, Layer.RAFT, Layer.STATE),
             Layer.RUNTIME, EnumSet.allOf(Layer.class));
-
-    /**
-     * Shared types in {@code dev.mars.qraft.agent}, a package two modules used. The rest of that package is
-     * client code. Phase 3 of the refactoring gives each its own package.
-     */
-    private static final Set<String> SHARED_AGENT_TYPES = Set.of(
-            "AgentCapabilities", "AgentInfo", "AgentNetworkInfo", "AgentStatus", "AgentSystemInfo");
 
     private static final Pattern QRAFT_TYPE = Pattern.compile("dev/mars/qraft/[A-Za-z0-9_$/]+");
 
-    @Test
-    void everyProductionClassBelongsToALayer() throws IOException {
-        Map<String, Set<String>> dependencies = dependencies(productionClasses());
+    @TempDir
+    Path fixtureClasses;
 
-        assertTrue(dependencies.size() > 300,
-                "the scan must find the production classes, found " + dependencies.size());
+    @Test
+    void everyProductionClassBelongsToAFinalPackage() throws IOException {
+        Map<String, Set<String>> dependencies = dependencies(productionClasses());
+        assertTrue(dependencies.size() > 300, "the scan must find production classes");
         Set<String> unclassified = new TreeSet<>();
         dependencies.forEach((type, used) -> {
             if (layerOf(type).isEmpty()) unclassified.add(type);
             used.stream().filter(name -> layerOf(name).isEmpty()).forEach(unclassified::add);
         });
-        assertEquals(Set.of(), unclassified, "assign these Qraft types to a layer");
+        assertEquals(Set.of(), unclassified, "all Qraft types must use the final Phase 3 packages");
     }
 
     @Test
-    void productionCodeKeepsTheModuleDependencyDirection() throws IOException {
+    void productionCodeKeepsThePackageDependencyDirection() throws IOException {
         assertEquals(List.of(), violations(dependencies(productionClasses())));
     }
 
     @Test
-    void reportsADependencyAgainstTheDirectionAndAcceptsOneWithIt() {
-        assertEquals(List.of("dev.mars.qraft.agent.QraftAgent (CLIENT) uses "
-                        + "dev.mars.qraft.controller.raft.RaftNode (SERVER)"),
-                violations(Map.of("dev.mars.qraft.agent.QraftAgent",
-                        Set.of("dev.mars.qraft.controller.raft.RaftNode"))));
-        assertEquals(List.of(), violations(Map.of("dev.mars.qraft.agent.QraftAgent",
-                Set.of("dev.mars.qraft.catalog.ServiceDefinition", "dev.mars.qraft.agent.AgentInfo"))));
-        assertEquals(List.of("dev.mars.qraft.catalog.ServiceDefinition (CORE) uses "
-                        + "dev.mars.qraft.catalog.ServiceCatalog$Snapshot (STATE)"),
-                violations(Map.of("dev.mars.qraft.catalog.ServiceDefinition",
-                        Set.of("dev.mars.qraft.catalog.ServiceCatalog$Snapshot"))));
+    void detectsCompiledRaftAndStateDependenciesOnHttp() throws IOException {
+        writeDependencyFixture("dev.mars.qraft.raft.RaftBoundaryFixture",
+                "dev.mars.qraft.server.http.HttpBoundaryFixture");
+        writeDependencyFixture("dev.mars.qraft.state.StateBoundaryFixture",
+                "dev.mars.qraft.server.http.HttpBoundaryFixture");
+        assertEquals(List.of(
+                "dev.mars.qraft.raft.RaftBoundaryFixture (RAFT) uses dev.mars.qraft.server.http.HttpBoundaryFixture (SERVER)",
+                "dev.mars.qraft.state.StateBoundaryFixture (STATE) uses dev.mars.qraft.server.http.HttpBoundaryFixture (SERVER)"),
+                violations(dependencies(fixtureClasses)));
     }
 
     @Test
-    void classifiesTheSharedPackagesTypeByType() {
-        assertEquals(Optional.of(Layer.CORE), layerOf("dev.mars.qraft.agent.AgentInfo$Builder"));
-        assertEquals(Optional.of(Layer.CLIENT), layerOf("dev.mars.qraft.agent.QraftAgent"));
-        assertEquals(Optional.of(Layer.CLIENT), layerOf("dev.mars.qraft.agent.health.HttpCheck"));
-        assertEquals(Optional.of(Layer.CORE), layerOf("dev.mars.qraft.catalog.ServiceDefinition"));
-        assertEquals(Optional.of(Layer.STATE), layerOf("dev.mars.qraft.catalog.ServiceInstance"));
-        assertEquals(Optional.empty(), layerOf("dev.mars.qraft.unknown.Type"));
+    void detectsCompiledRaftDependenciesOnReplicatedState() throws IOException {
+        writeDependencyFixture("dev.mars.qraft.raft.RaftBoundaryFixture",
+                "dev.mars.qraft.state.StateBoundaryFixture");
+        assertEquals(List.of("dev.mars.qraft.raft.RaftBoundaryFixture (RAFT) uses "
+                + "dev.mars.qraft.state.StateBoundaryFixture (STATE)"),
+                violations(dependencies(fixtureClasses)));
+    }
+
+    @Test
+    void detectsCompiledClientDependenciesOnServerRaftAndState() throws IOException {
+        for (String root : List.of("server", "raft", "state")) {
+            writeDependencyFixture("dev.mars.qraft.client." + root + ".ClientBoundaryFixture",
+                    "dev.mars.qraft." + root + ".DependencyFixture");
+        }
+        assertEquals(3, violations(dependencies(fixtureClasses)).size());
+    }
+
+    @Test
+    void detectsCompiledCommonDependenciesOnApplicationCode() throws IOException {
+        writeDependencyFixture("dev.mars.qraft.common.CommonBoundaryFixture",
+                "dev.mars.qraft.client.ClientBoundaryFixture");
+        assertEquals(List.of("dev.mars.qraft.common.CommonBoundaryFixture (COMMON) uses "
+                + "dev.mars.qraft.client.ClientBoundaryFixture (CLIENT)"),
+                violations(dependencies(fixtureClasses)));
+    }
+
+    @Test
+    void acceptsCompiledStateRaftAndClientDependenciesOnSharedSupport() throws IOException {
+        writeDependencyFixture("dev.mars.qraft.state.StateBoundaryFixture",
+                "dev.mars.qraft.raft.api.ReplicatedCommand");
+        writeDependencyFixture("dev.mars.qraft.raft.RaftBoundaryFixture",
+                "dev.mars.qraft.common.async.Future");
+        writeDependencyFixture("dev.mars.qraft.client.ClientBoundaryFixture",
+                "dev.mars.qraft.common.ServiceDefinition");
+        Map<String, Set<String>> scanned = dependencies(fixtureClasses);
+        assertEquals(3, scanned.size());
+        assertEquals(List.of(), violations(scanned));
+    }
+
+    @Test
+    void onlyRuntimeMayUseTheEntryPoint() throws IOException {
+        writeDependencyFixture("dev.mars.qraft.server.ServerBoundaryFixture",
+                "dev.mars.qraft.runtime.QraftRuntimeApplication");
+        assertEquals(List.of("dev.mars.qraft.server.ServerBoundaryFixture (SERVER) uses "
+                + "dev.mars.qraft.runtime.QraftRuntimeApplication (RUNTIME)"),
+                violations(dependencies(fixtureClasses)));
+    }
+
+    @Test
+    void classifiesNestedTypesAndRequiresAPackageBoundary() {
+        assertEquals(Optional.of(Layer.COMMON), layerOf("dev.mars.qraft.common.AgentInfo$Builder"));
+        assertEquals(Optional.of(Layer.RAFT), layerOf("dev.mars.qraft.raft.storage.Store"));
+        assertEquals(Optional.of(Layer.STATE), layerOf("dev.mars.qraft.state.catalog.ServiceCatalog$Snapshot"));
+        for (String root : List.of("common", "client", "server", "raft", "state", "runtime")) {
+            assertEquals(Optional.empty(), layerOf("dev.mars.qraft." + root + "like.Other"));
+        }
+        assertEquals(Optional.empty(), layerOf("dev.mars.qraft.controller.RaftNode"));
+        assertEquals(Optional.empty(), layerOf("dev.mars.qraft.agent.AgentInfo"));
     }
 
     static Optional<Layer> layerOf(String type) {
@@ -125,22 +170,11 @@ class PackageDependencyTest {
         String topLevel = nested < 0 ? type : type.substring(0, nested);
         int lastDot = topLevel.lastIndexOf('.');
         String packageName = lastDot < 0 ? "" : topLevel.substring(0, lastDot);
-        String simpleName = topLevel.substring(lastDot + 1);
-
-        if (within(packageName, "dev.mars.qraft.raft.api")) return Optional.of(Layer.ENGINE);
-        if (within(packageName, "dev.mars.qraft.distributedstate")) return Optional.of(Layer.STATE);
-        if (packageName.equals("dev.mars.qraft.catalog")) {
-            return Optional.of(simpleName.equals("ServiceDefinition") ? Layer.CORE : Layer.STATE);
+        for (Layer layer : Layer.values()) {
+            if (within(packageName, "dev.mars.qraft." + layer.name().toLowerCase(java.util.Locale.ROOT))) {
+                return Optional.of(layer);
+            }
         }
-        if (within(packageName, "dev.mars.qraft.concurrent") || within(packageName, "dev.mars.qraft.config")) {
-            return Optional.of(Layer.CORE);
-        }
-        if (packageName.equals("dev.mars.qraft.agent")) {
-            return Optional.of(SHARED_AGENT_TYPES.contains(simpleName) ? Layer.CORE : Layer.CLIENT);
-        }
-        if (within(packageName, "dev.mars.qraft.agent")) return Optional.of(Layer.CLIENT);
-        if (within(packageName, "dev.mars.qraft.controller")) return Optional.of(Layer.SERVER);
-        if (within(packageName, "dev.mars.qraft.runtime")) return Optional.of(Layer.RUNTIME);
         return Optional.empty();
     }
 
@@ -151,6 +185,16 @@ class PackageDependencyTest {
                         .filter(to -> !ALLOWED.get(from).contains(to))
                         .ifPresent(to -> violations.add(type + " (" + from + ") uses " + name + " (" + to + ")")))));
         return violations;
+    }
+
+
+    /** Writes a bytecode fixture with a field dependency, without changing production sources or classes. */
+    private void writeDependencyFixture(String owner, String dependency) throws IOException {
+        byte[] bytes = ClassFile.of().build(ClassDesc.of(owner), builder ->
+                builder.withField("dependency", ClassDesc.of(dependency), ClassFile.ACC_PRIVATE));
+        Path file = fixtureClasses.resolve(owner.replace('.', '/') + ".class");
+        Files.createDirectories(file.getParent());
+        Files.write(file, bytes);
     }
 
     /** Every Qraft type that each compiled class names in its constant pool, keyed by the class's own name. */

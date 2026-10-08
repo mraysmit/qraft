@@ -1,6 +1,6 @@
 # Raft Storage Operations
 
-This runbook covers the durable storage owned by a Qraft controller. Apply every
+This runbook covers the durable storage owned by a Qraft server. Apply every
 procedure to one node at a time unless the whole cluster is intentionally shut
 down. A healthy quorum must remain available whenever a node is rebuilt.
 
@@ -9,7 +9,7 @@ down. A healthy quorum must remain available whenever a node is rebuilt.
 Set `server.raft.storage.type` to `raftlog`, `server.raft.storage.path` to a
 persistent, node-specific directory, and `server.raft.storage.fsync` to `true`
 in the versioned JSON configuration file. In containers, the path is normally
-`/app/data`, backed by a separate named volume for each controller. For example,
+`/app/data`, backed by a separate named volume for each server. For example,
 the `storage` object inside `server.raft` is:
 
 ```json
@@ -38,8 +38,8 @@ The directory is one consistency unit:
   every file in the directory as implementation-owned; do not edit individual
   files.
 
-Never share a node directory between controller identities or mount one writable
-directory into two controller processes.
+Never share a node directory between server identities or mount one writable
+directory into two server processes.
 
 ## Backup
 
@@ -47,15 +47,15 @@ A valid backup is a copy of the complete node directory made while that node is
 stopped. Copying only `raft.log`, `meta.dat`, or `snapshot.dat` can combine
 different durability boundaries and is not a valid backup.
 
-1. Confirm the other controllers are ready and retain quorum.
-2. Stop the target controller cleanly and confirm its process has exited.
+1. Confirm the other servers are ready and retain quorum.
+2. Stop the target server cleanly and confirm its process has exited.
 3. Copy the entire configured storage directory, preserving file names,
    permissions, and bytes. For a container volume, use an offline helper or
-   storage-platform snapshot only after the controller using the volume has
+   storage-platform snapshot only after the server using the volume has
    stopped.
 4. Record the configured node name, durable server ID, Qraft version, time,
    source storage path, and whether the server is ever restarted after the copy.
-5. Start the controller and wait for `GET /health/ready` to return HTTP 200
+5. Start the server and wait for `GET /health/ready` to return HTTP 200
    before operating on another node.
 
 Do not copy a running node's WAL. A filesystem copy can observe `meta.dat`, the
@@ -109,10 +109,10 @@ backup must not be restarted as the same voter.
 
 ### Recover a corrupt replica from peers
 
-Use this procedure only when the remaining controllers are healthy, contain the
+Use this procedure only when the remaining servers are healthy, contain the
 required state, and retain quorum.
 
-1. Remove the fenced node from traffic and stop its controller process.
+1. Remove the fenced node from traffic and stop its server process.
 2. Move or snapshot its complete storage directory to a read-only evidence
    location. Preserve the original bytes and logs.
 3. Replace the server as described in "Replace a server that lost its storage"
@@ -204,10 +204,10 @@ existing owner continues serving.
 When this occurs:
 
 1. Identify the process or container that owns the node directory.
-2. If it is the intended controller, leave it running and correct the contender's
+2. If it is the intended server, leave it running and correct the contender's
    storage path or volume mapping.
 3. If the owner is stale, stop it cleanly and verify it has exited before
-   restarting the intended controller.
+   restarting the intended server.
 4. Never bypass, delete, or replace lock state while an owner process is alive.
 
 ## Upgrade and migration

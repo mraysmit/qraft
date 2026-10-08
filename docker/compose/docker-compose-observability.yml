@@ -13,7 +13,7 @@
 #
 # For Qraft Integration Tests:
 #   - Configure OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
-#   - Prometheus scrapes :9464 (controller), :9465 (agent)
+#   - Prometheus scrapes :9464 (server), :9465 (agent)
 
 services:
   # ==========================================================

@@ -6,9 +6,9 @@ param(
 switch ($Service) {
     "cluster" {
         & (Join-Path $PSScriptRoot "build-runtime.ps1")
-        Write-Host "Starting Qraft single-controller development environment..." -ForegroundColor Green
-        docker compose -f compose/docker-compose-single-controller.yml up -d
-        Write-Host "Controller with embedded HTTP API available at http://localhost:8080" -ForegroundColor Cyan
+        Write-Host "Starting Qraft single-server development environment..." -ForegroundColor Green
+        docker compose -f compose/docker-compose-single-server.yml up -d
+        Write-Host "Server with embedded HTTP API available at http://localhost:8080" -ForegroundColor Cyan
     }
     "multinode" {
         & (Join-Path $PSScriptRoot "build-runtime.ps1")
@@ -19,15 +19,15 @@ switch ($Service) {
         Write-Host "  - API Node 2: http://localhost:8082" -ForegroundColor White
         Write-Host "  - API Node 3: http://localhost:8083" -ForegroundColor White
     }
-    "controllers" {
+    "servers" {
         & (Join-Path $PSScriptRoot "build-runtime.ps1")
-        Write-Host "Starting Qraft controller-first cluster..." -ForegroundColor Green
-        docker compose -f compose/docker-compose-controller-first.yml up -d
-        Write-Host "Controller cluster available at:" -ForegroundColor Cyan
+        Write-Host "Starting Qraft server-first cluster..." -ForegroundColor Green
+        docker compose -f compose/docker-compose-server-first.yml up -d
+        Write-Host "Server cluster available at:" -ForegroundColor Cyan
         Write-Host "  - Load Balanced API: http://localhost:8080" -ForegroundColor Yellow
-        Write-Host "  - Controller 1: http://localhost:8081" -ForegroundColor White
-        Write-Host "  - Controller 2: http://localhost:8082" -ForegroundColor White
-        Write-Host "  - Controller 3: http://localhost:8083" -ForegroundColor White
+        Write-Host "  - Server 1: http://localhost:8081" -ForegroundColor White
+        Write-Host "  - Server 2: http://localhost:8082" -ForegroundColor White
+        Write-Host "  - Server 3: http://localhost:8083" -ForegroundColor White
     }
     "logging" {
         Write-Host "Starting log aggregation..." -ForegroundColor Green
@@ -36,8 +36,8 @@ switch ($Service) {
     }
     "stop" {
         Write-Host "Stopping services..." -ForegroundColor Yellow
-        docker compose -f compose/docker-compose-single-controller.yml down 2>$null
-        docker compose -f compose/docker-compose-controller-first.yml down 2>$null
+        docker compose -f compose/docker-compose-single-server.yml down 2>$null
+        docker compose -f compose/docker-compose-server-first.yml down 2>$null
         docker compose -f compose/docker-compose-cluster.yml down 2>$null
         docker compose -f compose/docker-compose-5node.yml down 2>$null
         docker compose -f compose/docker-compose-network-test.yml down 2>$null
@@ -49,14 +49,14 @@ switch ($Service) {
         docker ps --filter "name=qraft-" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
     }
     default {
-        Write-Host "Qraft Docker Starter - Controller-First Architecture" -ForegroundColor Green
+        Write-Host "Qraft Docker Starter - Server-First Architecture" -ForegroundColor Green
         Write-Host "Usage: .\start.ps1 <service>" -ForegroundColor Yellow
         Write-Host ""
         Write-Host "Production Configurations:" -ForegroundColor Cyan
-        Write-Host "  controllers  - Start controller-first cluster (3 controllers + load balancer) [RECOMMENDED]"
+        Write-Host "  servers  - Start server-first cluster (3 servers + load balancer) [RECOMMENDED]"
         Write-Host ""
         Write-Host "Development Configurations:" -ForegroundColor Cyan
-        Write-Host "  cluster      - Start single controller for development"
+        Write-Host "  cluster      - Start single server for development"
         Write-Host ""
         Write-Host "Legacy Configurations:" -ForegroundColor Yellow
         Write-Host "  multinode    - Start multi-node cluster (3 API instances) [DEPRECATED]"
@@ -69,7 +69,7 @@ switch ($Service) {
         Write-Host "  status       - Show service status"
         Write-Host ""
         Write-Host "Examples:" -ForegroundColor Green
-        Write-Host "  .\start.ps1 controllers  # Production cluster"
+        Write-Host "  .\start.ps1 servers  # Production cluster"
         Write-Host "  .\start.ps1 cluster      # Development"
         Write-Host "  .\start.ps1 logging      # Monitoring stack"
     }

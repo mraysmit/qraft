@@ -21,7 +21,7 @@ echo "Grafana: http://localhost:3000 (admin/admin)"
 echo "Loki: http://localhost:3100"
 echo "Prometheus: http://localhost:9090"
 curl --get --fail-with-body -sS \
-  --data-urlencode 'query={container_name="qraft-controller1"}' \
+  --data-urlencode 'query={container_name="qraft-server1"}' \
   --data-urlencode 'limit=5' \
   http://localhost:3100/loki/api/v1/query_range || echo "Loki is not ready yet."
 echo

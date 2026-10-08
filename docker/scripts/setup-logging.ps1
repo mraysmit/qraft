@@ -34,9 +34,9 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
 
-  - job_name: 'qraft-controllers'
+  - job_name: 'qraft-servers'
     static_configs:
-      - targets: ['controller1:8080', 'controller2:8080', 'controller3:8080']
+      - targets: ['server1:8080', 'server2:8080', 'server3:8080']
     metrics_path: '/metrics'
     scrape_interval: 5s
 "@
@@ -78,10 +78,10 @@ Write-Host "To view logs in Grafana:" -ForegroundColor Yellow
 Write-Host "  1. Open http://localhost:3000" -ForegroundColor White
 Write-Host "  2. Login with admin/admin" -ForegroundColor White
 Write-Host "  3. Go to Explore -> Select Loki datasource" -ForegroundColor White
-Write-Host "  4. Use queries like: {service=`"qraft-controller1`"}" -ForegroundColor White
+Write-Host "  4. Use queries like: {service=`"qraft-server1`"}" -ForegroundColor White
 Write-Host ""
 Write-Host "Useful LogQL queries:" -ForegroundColor Yellow
-Write-Host "  - All controller logs: {service=`"qraft-controller1`"}" -ForegroundColor White
-Write-Host "  - Error logs: {service=`"qraft-controller1`"} |= `"ERROR`"" -ForegroundColor White
-Write-Host "  - Heartbeat logs: {service=`"qraft-controller1`"} |= `"heartbeat`"" -ForegroundColor White
-Write-Host "  - Controller logs: {service=~\"qraft-controller.*\"}" -ForegroundColor White
+Write-Host "  - All server logs: {service=`"qraft-server1`"}" -ForegroundColor White
+Write-Host "  - Error logs: {service=`"qraft-server1`"} |= `"ERROR`"" -ForegroundColor White
+Write-Host "  - Heartbeat logs: {service=`"qraft-server1`"} |= `"heartbeat`"" -ForegroundColor White
+Write-Host "  - Server logs: {service=~\"qraft-server.*\"}" -ForegroundColor White

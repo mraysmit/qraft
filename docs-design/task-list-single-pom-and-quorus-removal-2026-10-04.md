@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-04
 **Status:** In progress. This is the current task list. It started on 2026-10-04 at the user's request, before the membership list's Step 4 close-out gate.
-**Active work:** Phase 2A, intentional-error labelling, added 2026-10-04 at the user's direction before Phase 3. Phases 0 to 2 were done 2026-10-04.
+**Active work:** Phase 3 is implemented and verified complete on 2026-10-08. The next coding task is Phase 4's first item: create immutable legacy node-command, capability-command, job-status, and node-snapshot fixtures before removing the old model. Phase 2A is accepted complete; Phases 0 to 2 were done 2026-10-04.
 **Last reviewed:** 2026-10-05, against the code at commit `24beac3`. The status table in section 4 and every item marked "review of 2026-10-05" come from that review. No build was run for it, and `logs/` was not in the working tree, so recorded test counts and jar comparisons were not re-checked.
 **Order of work:**
 - The membership list's Step 4 close-out gate is the first task of Phase 7 here.
@@ -57,6 +57,11 @@ runtime layer, or its unused tooling.
 ## 4. Tasks
 
 ### Status (2026-10-05)
+
+This table is the historical review snapshot. Current work is identified above; Phase 2A was accepted
+complete on 2026-10-08 after 845 default and 31 tagged tests passed, coverage passed, and all 80 retained
+log files were audited without unflagged errors or exceptions. See `docs/TESTING.md` for the flagging rules
+and extracts from that run.
 
 | Phase | State | Tasks done | Commit |
 |---|---|---|---|
@@ -500,15 +505,206 @@ child JVMs. A test class runs from an IDE as it does from Maven.
 
 ### Phase 3. Package layout follows the modes
 
-- [ ] `dev.mars.qraft.agent` (client code) becomes `dev.mars.qraft.client`.
-- [ ] `dev.mars.qraft.controller` becomes `dev.mars.qraft.server`. Rename
+**Whole-phase TDD task, authorized 2026-10-08.** Complete the following slices continuously, fixing
+defects found during implementation or verification. For each slice, add a meaningful failing
+architecture or behavioral regression, observe RED in the visible terminal, implement the change,
+observe GREEN, and then refactor. Keep the existing legacy WAL/snapshot fixtures immutable.
+
+1. [x] Support ownership: reject Raft dependencies on server-owned async/observability code; move the
+   six shared async types and their tests to `common.async`, and move Raft metrics into Raft.
+2. [x] Package boundaries: enforce the final `common`, `client`, `server`, `raft`, `state`, and runtime
+   layers with compiled mutation fixtures, including Raft and state host dependencies on HTTP;
+   migrate all production/test packages and callers and remove mixed agent/catalog ownership.
+3. [x] Generated protocol packages: prove the generated classes have their new Java packages while
+   the gRPC service names and existing command/snapshot bytes remain compatible; change only
+   `java_package` options, preserving `qraft.raft`, `qraft.api`, field numbers, and reserved fields.
+4. [x] Runtime names: prove server/client file logging and server telemetry defaults; rename server
+   application/service classes, client endpoint helper classes, server thread names, and default
+   configuration resources. Preserve the client's JSON `controllers` object and the `agent` object.
+5. [x] Deployment names: update Compose services/config references, launchers, dashboards, and
+   collector/scrape references together, with deployment contract tests before the changes.
+6. [x] Whole-phase verification: pass the clean default build and coverage gates, repeat changed
+   concurrency/lifecycle tests, run fresh-image Docker/e2e/slow suites, inspect artifact ownership and
+   protocol descriptors, and audit every retained log for unflagged errors or exceptions. Record
+   evidence and update current documentation. Generated logs remain ignored build artifacts.
+
+**Support and package slices, verified 2026-10-08.** RED rejected Raft's server-owned async/metrics
+dependencies; the focused GREEN run passed 40 tests and its two retained logs contained eight flagged
+ERROR headers and eight attributed exception headers, with no unflagged errors. Six async types now
+live in `common.async`; metrics live in `raft.metrics`.
+
+The final package/protocol RED run executed 12 tests with three expected failures: the old production
+packages and the two old generated Java packages. GREEN passed 54 architecture, async, codec,
+determinism, and immutable legacy fixture tests. The compiled mutation fixtures reject both Raft and
+state dependencies on server HTTP, Raft dependencies on state, client dependencies on server/Raft/state,
+common dependencies on application code, and application dependencies on the runtime entry point.
+Only protobuf Java packages changed; `qraft.raft` and `qraft.api` service names and fixture hashes
+passed unchanged. The two GREEN logs contained no ERROR or exception headers.
+Captures: `qraft-phase3-support-green-2026-10-08_18-44-08-646.log`,
+`qraft-phase3-packages-red-2026-10-08_18-48-33-998.log`, and
+`qraft-phase3-packages-green-2026-10-08_18-50-38-615.log`.
+**Runtime/deployment slices, verified 2026-10-08.** Fresh-JVM RED reproduced the old telemetry name
+and missing configured mode files. Startup now selects `qraft.log.mode` / `qraft.log.dir` before
+logger initialization, and text/JSON files use `qraft-server` or `qraft-client` with compressed
+archives under `archive/`. Server application/service and client endpoint helper classes, thread
+names, default resource, Compose services/DNS/config files, dashboards, scrapes, and existing
+launchers now use server names. The client's `agent` / `controllers` JSON keys and public paths
+remain unchanged.
+
+Verification caught and corrected a client-key rename mistake, dynamic fixture service strings,
+a PowerShell dispatcher/help mismatch, and acceptance-test configuration/property leakage into
+later tests. The 83-test focused verification passed after those corrections and its seven retained
+logs contained no ERROR or exception headers.
+
+The clean default run then passed 873 tests but exposed the retained 60% coverage gate for the
+new server-observability package: moving Raft metrics revealed previously untested telemetry.
+Real enabled/disabled SDK lifecycle tests now cover it. RED also reproduced a trace-exporter worker
+leak after Prometheus bind failure. Failed initialization now releases already-opened trace/metrics
+resources and preserves the primary failure; a regression also checks failed global SDK registration.
+Compose validation reproduced an inherited undeclared Fluentd volume; its declaration is restored.
+Final focused GREEN passed 34 tests, including real process logging, archive paths, every Compose
+model, launcher dispatch, and telemetry resource cleanup. Its seven retained logs contain no ERROR
+or exception headers. Captures: `qraft-phase3-telemetry-red-2026-10-08_19-09-01-429.log` and
+`qraft-phase3-final-fixes-green-2026-10-08_19-10-39-914.log`.
+**Docker logger migration follow-up, 2026-10-08.** The first complete acceptance run exercised all
+32 intended cases, but Docker auditing failed the durable-restart class on three undeclared headers.
+Its corruption and lock-contention cases were already explicitly declared; the two source signatures
+still used the old abbreviated controller logger. Updated audit fixtures to the actual emitted
+`dev.mars.qraft.server.QraftServerService` logger and observed eight failures among 20 tests in RED
+(`qraft-phase3-docker-logger-red-2026-10-08_19-26-01-636.log`). The two definitions now derive the
+exact source from `QraftServerService.class.getName()`, retaining their complete message patterns,
+ERROR severity, and uncaught-rethrow matching. No expectation was broadened. GREEN passed all 44
+Docker audit, attribution, and extension integration tests
+(`qraft-phase3-docker-logger-green-2026-10-08_19-27-20-667.log`).
+The failed acceptance capture `qraft-phase3-complete-tagged-2026-10-08_19-16-09-623.log` and its
+Docker/application logs remain diagnostic evidence; they do not count as successful verification.
+After this correction, the complete default suite and fresh-image acceptance suite both passed.
+
+**Whole Phase 3, verified complete 2026-10-08.** All six TDD slices and the original tasks below are
+complete. Final evidence is retained under `logs/`:
+
+- Clean `mvn install`: 876 default tests and all coverage gates passed
+  (`qraft-phase3-complete-default-2026-10-08_19-12-46-697.log`).
+- Lifecycle/concurrency repeat: 47 tests passed
+  (`qraft-phase3-complete-repeat-2026-10-08_19-15-23-119.log`).
+- After the Docker logger correction, `mvn install` again passed all 876 default tests and coverage gates
+  (`qraft-phase3-verified-default-2026-10-08_19-28-47-852.log`).
+- The fresh-image `docker,e2e,slow` suite passed all 32 tests, including all nine durable-restart cases
+  (`qraft-phase3-verified-tagged-2026-10-08_19-30-33-972.log`).
+
+Copied actual Surefire XML into `logs/phase3-final-evidence/default/` and `tagged/` before later suites
+could overwrite shared report names. These 140 reports independently total 908 tests in 139 distinct
+classes, with zero failures, errors, or skips. Comparing per-class counts with the immediately preceding
+successful 894-test run shows 14 additional cases; the former Raft-metrics telemetry case moved to
+`TelemetryConfigTest`, and all other functional class counts are retained after class renames. This
+comparison uses the retained 2026-10-08 captures, not the unavailable original Phase 0 baseline files.
+
+The successful final window contains 87 retained Maven, application, subprocess, and Docker log files:
+449 flagged ERROR headers, 301 exception headers attributed to flagged events, one flagged uncaught
+rethrow, and zero unflagged errors or exceptions. Counts include duplicate captures and are evidence of
+this run, not fixed expectations. Separately parsed both fresh-JVM JSON logs: 54 events, no ERROR or
+stack-trace events. Earlier failed/RED captures remain diagnostic evidence outside this successful window.
+
+The packaged jar contains 438 Qraft classes and no old package trees or test-only logging/fixture
+entries. Only protobuf `java_package` options changed; wire packages, service names, field numbers,
+and immutable catalog fixture bytes remain unchanged. Documentation now describes the final ownership,
+mode-specific startup logging, telemetry cleanup, and deployment names.
+
+**First slice, completed 2026-10-08: break the Raft/state cycle.** The user approved proceeding with the
+direction below: state may depend on Raft; Raft must not depend on state.
+
+- RED preparation: `PackageDependencyTest` now checks the compiled Raft implementation against state,
+  catalog, and distributed-state dependencies, independently of the old module classification. Bytecode
+  fixtures exercise rejection of the reverse edge and acceptance of the intended direction in both layouts.
+- RED confirmed before production changes: eight architecture tests ran, with exactly one failure listing
+  seven compiled Raft-to-state references (including `RaftNode$Builder`). Retained output:
+  `logs/qraft-phase3-red-2026-10-08_15-22-19-848.log`.
+- GREEN: moved `RaftCommand`, `RaftCommandResult`, and `ConfigurationCommand` into
+  `dev.mars.qraft.controller.raft` and updated production callers, implementations, codecs, and tests.
+  The focused clean run passed all 53 tests, including all eight architecture tests, configuration replication,
+  command codecs, immutable legacy command/snapshot fixtures, and replica determinism. Retained output:
+  `logs/qraft-phase3-green-2026-10-08_15-25-14-313.log`; its seven ERROR headers were explicitly intentional.
+- Refactored imports after GREEN. Verification exposed the following failures, investigated and remediated
+  under the mandatory logging policy:
+  - Health propagation teardown closed another follower while the new leader was still running. The two
+    unflagged peer failures are retained in `logs/qraft-phase3-tagged-2026-10-08_15-29-15-403.log` and its
+    application log `qraft-maven-tests-2026-10-08_15-29-33.log`. Teardown now declares only each peer it is about
+    to close. Four test-first logging regressions prove these optional cleanup declarations cannot satisfy
+    a required leader-loss count, accept other peers/signatures or earlier errors, or leak into another test.
+    The focused cleanup run passed 23 tests (`qraft-cleanup-green-2026-10-08_15-43-42-822.log`).
+  - The late-replication shutdown test raced initial leadership. Its setup now waits for the durable no-op,
+    and its transport gate waits for the actual command at index 3. It acknowledges that command after stop.
+  - The forwarded-join test sometimes ended before its deliberately unreachable learner failed an RPC,
+    leaving its required error count unmet. It now declares only `node4`, fires a heartbeat, and waits for
+    that exact error through a thread-safe log observer. The required occurrence is preserved.
+  - A second no-op/draining failure exposed the production cause: `becomeLeader` published `LEADER` and
+    notified listeners before queuing its initial transition. A deterministic test that requests stop from
+    the leader notification reproduced the undeclared error before the production fix
+    (`qraft-leadership-red-2026-10-08_16-00-14-790.log`). Raft now queues the no-op and initializes replication
+    state before publishing leadership. All 44 focused architecture, metadata, shutdown, gRPC, and configuration
+    tests passed (`qraft-leadership-green-2026-10-08_16-01-32-039.log`). Genuine failures keep their ERROR logging.
+- Final verification: `mvn clean install` passed 854 default tests and every coverage gate; the fresh-jar
+  `docker,e2e,slow` run passed all 31 tagged tests. All 885 tests passed with no failures, errors, or skips.
+  The same 126 default test classes remain; the count increased only by four architecture regressions,
+  four cleanup-declaration regressions, and the deterministic leader-notification/shutdown regression.
+  Retained successful output:
+  - `logs/qraft-phase3-final-clean-2026-10-08_16-03-01-464.log`;
+  - `logs/qraft-phase3-final-tagged-2026-10-08_16-04-37-245.log`.
+  Read all 80 logs written by this final verification window, including application and child-JVM logs and
+  Docker archives: 581 flagged ERROR headers, 357 exception headers under flagged events, one flagged
+  uncaught rethrow, and zero unflagged errors or exceptions. Counts include duplicate captures. Earlier
+  failed and deliberately RED runs remain as diagnosis evidence; the defects above are remediated, and
+  those failed runs are not counted as successful verification. The jar contains the seven command/result
+  class files only under Raft. Legacy command/snapshot fixtures and replica determinism remain green.
+  Async-layer placement, Raft metrics ownership, and the final package names follow as subsequent slices.
+
+**Review defect follow-up, verified 2026-10-08.** The original final-run results above remain
+historical evidence, rather than verification of these later changes. The focused RED run
+(`logs/qraft-review-red-2026-10-08_16-32-47-340.log` and application mirror
+`logs/qraft-maven-tests-2026-10-08_16-33-16.log`) compiled successfully and ran 51 tests with eight failures:
+one foreign-thread stop/election race, three cleanup-count isolation defects, and four Docker rethrow
+audit defects. The application mirror contains five ERROR events: four explicitly intentional and one
+unflagged leadership no-op/draining failure, reproducing the production defect fixed below.
+
+The implementation now serializes leadership admission with the stop-request lock, declining leadership
+when stop has already won; listeners remain outside that lock and genuine failures retain ERROR logging.
+Cleanup peer failures do not satisfy or increase any functional expectation. Docker audits discover ERROR
+events before matching rethrows, retain recognised context only for the same source, require the current
+declaration, and detect prefixed uncaught headers without changing message or stack text. The remaining
+inline shutdown-test wait now requires the durable no-op and checks that the blocked sync belongs to
+the active command. Forwarded-join polling fires further manual heartbeats. Partial bind-retry cleanup
+shares the final-teardown close path, declares only a peer being closed while another live peer remains,
+and removes closed runtimes from both registries.
+
+GREEN verification ran in a visible PowerShell terminal at the user's explicit request, with the
+documented Maven commands and timestamped `Tee-Object` captures; no script file was created:
+
+- Focused suite: all 75 tests passed, including the eight regressions that failed in RED and the
+  existing health propagation tests (`qraft-review-green-2026-10-08_17-32-59-491.log`).
+- Concurrency tests: both additional runs passed all 29 metadata, shutdown, and gRPC tests, so each
+  ran successfully three times (`qraft-review-repeat1-2026-10-08_17-34-01-103.log` and
+  `qraft-review-repeat2-2026-10-08_17-35-15-193.log`).
+- `mvn clean install`: all 863 default tests passed and all coverage checks were met
+  (`qraft-review-default-2026-10-08_17-35-33-237.log`).
+- Fresh-jar `docker,e2e,slow` suite: all 31 tagged tests passed
+  (`qraft-review-tagged-2026-10-08_17-37-10-226.log`).
+
+The final Surefire reports independently total 894 tests in 136 classes, with zero failures, errors,
+or skips. Audited all 86 logs written during this successful verification window, including application
+and subprocess mirrors and Docker archives: 567 flagged ERROR headers, 377 exception headers belonging
+to flagged events, one flagged uncaught rethrow, and zero unflagged errors or exceptions. Counts include
+duplicate captures and are evidence of this run, not fixed expectations. The earlier RED logs remain
+diagnostic evidence and are excluded from the successful verification window.
+
+- [x] `dev.mars.qraft.agent` (client code) becomes `dev.mars.qraft.client`.
+- [x] `dev.mars.qraft.controller` becomes `dev.mars.qraft.server`. Rename
   "controller" in class names, log file names, and the default telemetry
   service name. Name the log files by mode: client mode currently writes
   `qraft-controller-server.log`.
-- [ ] The Raft engine (`raft.api` and `controller.raft`) moves to `dev.mars.qraft.raft`.
-- [ ] Replicated state (`distributedstate`, `catalog`, and `controller.state`)
+- [x] The Raft engine (`raft.api` and `controller.raft`) moves to `dev.mars.qraft.raft`.
+- [x] Replicated state (`distributedstate`, `catalog`, and `controller.state`)
   moves to `dev.mars.qraft.state`.
-- [ ] Shared types (`Deadlines`, configuration resolver, `ServiceDefinition`,
+- [x] Shared types (`Deadlines`, configuration resolver, `ServiceDefinition`,
   node types) move to `dev.mars.qraft.common`. The `catalog` and `agent`
   packages that today span two modules are gone.
 
@@ -516,32 +712,30 @@ child JVMs. A test class runs from an IDE as it does from Maven.
 code stands, `raft` and `state` cannot be separate layers. The tasks below
 come first.
 
-- [ ] Break the cycle between Raft and state, and fix the direction between
+- [x] Break the cycle between Raft and state, and fix the direction between
   them.
-  - `controller.raft` imports three types from `controller.state`:
+  - Before this slice, `controller.raft` imported three types from `controller.state`:
     `RaftCommand`, `RaftCommandResult`, and `ConfigurationCommand` (six
     imports).
   - `controller.state` imports from `controller.raft`: `RaftConfiguration`,
     `RaftConfigurationCodec`, `RaftLogApplicator`, and every generated command
     message in `controller.raft.grpc`.
-  - Recommended: state may use Raft, and Raft never uses state. Then only the
-    three types above move, into `raft`: the command base type, its result,
-    and the configuration entry, which is Raft's own. Confirm when the phase
-    starts.
-- [ ] Give the async layer a home until Phase 7 removes it.
+  - Implemented: state uses Raft, and Raft never uses state. The command base type, its result, and
+    Raft's configuration entry now live in the final `dev.mars.qraft.raft` package.
+- [x] Give the async layer a home until Phase 7 removes it.
   `controller.runtime` is imported by nine files of `controller.raft`, by
   `ShutdownCoordinator`, and by the two classes of `controller`. As
   `server.runtime` it would make `raft` depend on `server`. It moves with
   `raft` or to `common`.
-- [ ] Remove Raft's one dependency on server observability: `controller.raft`
+- [x] Remove Raft's one dependency on server observability: `controller.raft`
   imports `RaftMetrics`. Move it into `raft`, or pass it in behind an
   interface.
-- [ ] Change the generated code's packages without changing the wire. The
+- [x] Change the generated code's packages without changing the wire. The
   protos' `java_package` options are `dev.mars.qraft.controller.raft.grpc`
   and `dev.mars.qraft.controller.api.grpc`, and follow the rename. Their
   `package` lines, `qraft.raft` and `qraft.api`, are part of the gRPC service
   names on the wire and stay as they are.
-- [ ] Decide which other "controller" names this phase renames. The second
+- [x] Decide which other "controller" names this phase renames. The second
   task above lists class names, log file names, and the telemetry service
   name. Not listed, and found in the code:
   - the client configuration's `controllers` object, which is a configuration
@@ -602,7 +796,7 @@ full suites.
 ### Phase 5. Configuration and version
 
 - [ ] Remove `AppConfig`'s static default instance and its classpath defaults
-  file `qraft-controller.json` (moved from Phase 1).
+  file `qraft-server.json` (moved from Phase 1).
 - [ ] Replace `AppConfig`'s flattened string map with typed records parsed
   directly from the JSON document. The map holds `qraft.*` keys, with cluster
   nodes re-encoded as `name=host:port,...`. Keep identical validation errors
@@ -665,13 +859,13 @@ start command work.
   gate: record its mutation evidence against the source as Phase 6 left it,
   under the rules of that list's "Step 4 close-out gate". The tests it
   validates are then the regression net for the changes to `RaftNode` below.
-- [ ] Replace `controller.runtime.Future`, `Promise`, and `AsyncResult` with
+- [ ] Replace `common.async.Future`, `Promise`, and `AsyncResult` with
   `CompletableFuture` and `CompletionStage` (11 production files import
   them, plus the runtime package itself).
 - [ ] Replace `JavaRuntime` (an emulated event loop) and `WorkerExecutor` with
   explicitly owned executors: the Raft state loop and a bounded
   virtual-thread pool. Keep the `CallerContext` MDC and OpenTelemetry propagation.
-- [ ] Replace the `JavaTestContext` and `JavaRuntimeExtension` test helpers
+- [ ] Replace the `JavaTestContextHelper` and `JavaRuntimeExtensionHelper` test helpers
   with plain futures and bounded waits.
 - [ ] Size the test side before starting (review of 2026-10-05). 56 test
   files import the async types, against 3 that use the two helpers above.

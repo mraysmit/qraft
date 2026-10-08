@@ -9,7 +9,7 @@
     "shutdownTimeoutMs": 8000
   },
   "controllers": {
-    "urls": ["http://controller1:8080", "http://controller2:8080", "http://controller3:8080"],
+    "urls": ["http://server1:8080", "http://server2:8080", "http://server3:8080"],
     "requestTimeoutMs": 3000
   },
   "catalog": {

@@ -85,8 +85,8 @@ scrape_configs:
       - output:
           source: message
 
-  # Qraft Controller logs
-  - job_name: qraft-controller
+  # Qraft Server logs
+  - job_name: qraft-server
     docker_sd_configs:
       - host: unix:///var/run/docker.sock
         refresh_interval: 5s
@@ -95,7 +95,7 @@ scrape_configs:
             values: ["logging=promtail"]
     relabel_configs:
       - source_labels: ['__meta_docker_container_name']
-        regex: '/(qraft-controller.*)'
+        regex: '/(qraft-server.*)'
         target_label: container_name
         replacement: '${1}'
       - source_labels: ['__meta_docker_container_log_stream']

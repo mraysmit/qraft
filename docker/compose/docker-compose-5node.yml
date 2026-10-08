@@ -1,21 +1,21 @@
-# Qraft Controller 5-Node Cluster for Advanced Testing
+# Qraft Server 5-Node Cluster for Advanced Testing
 # This configuration sets up a 5-node Raft cluster for testing more complex scenarios
 
 services:
-  controller1:
+  server1:
     build:
       context: ../..
       dockerfile: docker/Dockerfile
-    container_name: qraft-controller1
-    hostname: controller1
+    container_name: qraft-server1
+    hostname: server1
     command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
       - "8081:8080"
     networks:
       - raft-cluster-5
     volumes:
-      - ../config/five-node/controller1.json:/etc/qraft/server.json:ro
-      - controller1-data:/app/data
+      - ../config/five-node/server1.json:/etc/qraft/server.json:ro
+      - server1-data:/app/data
       - ../../logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -25,20 +25,20 @@ services:
       start_period: 30s
     restart: unless-stopped
 
-  controller2:
+  server2:
     build:
       context: ../..
       dockerfile: docker/Dockerfile
-    container_name: qraft-controller2
-    hostname: controller2
+    container_name: qraft-server2
+    hostname: server2
     command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
       - "8082:8080"
     networks:
       - raft-cluster-5
     volumes:
-      - ../config/five-node/controller2.json:/etc/qraft/server.json:ro
-      - controller2-data:/app/data
+      - ../config/five-node/server2.json:/etc/qraft/server.json:ro
+      - server2-data:/app/data
       - ../../logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -48,20 +48,20 @@ services:
       start_period: 30s
     restart: unless-stopped
 
-  controller3:
+  server3:
     build:
       context: ../..
       dockerfile: docker/Dockerfile
-    container_name: qraft-controller3
-    hostname: controller3
+    container_name: qraft-server3
+    hostname: server3
     command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
       - "8083:8080"
     networks:
       - raft-cluster-5
     volumes:
-      - ../config/five-node/controller3.json:/etc/qraft/server.json:ro
-      - controller3-data:/app/data
+      - ../config/five-node/server3.json:/etc/qraft/server.json:ro
+      - server3-data:/app/data
       - ../../logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -71,20 +71,20 @@ services:
       start_period: 30s
     restart: unless-stopped
 
-  controller4:
+  server4:
     build:
       context: ../..
       dockerfile: docker/Dockerfile
-    container_name: qraft-controller4
-    hostname: controller4
+    container_name: qraft-server4
+    hostname: server4
     command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
       - "8084:8080"
     networks:
       - raft-cluster-5
     volumes:
-      - ../config/five-node/controller4.json:/etc/qraft/server.json:ro
-      - controller4-data:/app/data
+      - ../config/five-node/server4.json:/etc/qraft/server.json:ro
+      - server4-data:/app/data
       - ../../logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -94,20 +94,20 @@ services:
       start_period: 30s
     restart: unless-stopped
 
-  controller5:
+  server5:
     build:
       context: ../..
       dockerfile: docker/Dockerfile
-    container_name: qraft-controller5
-    hostname: controller5
+    container_name: qraft-server5
+    hostname: server5
     command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
       - "8085:8080"
     networks:
       - raft-cluster-5
     volumes:
-      - ../config/five-node/controller5.json:/etc/qraft/server.json:ro
-      - controller5-data:/app/data
+      - ../config/five-node/server5.json:/etc/qraft/server.json:ro
+      - server5-data:/app/data
       - ../../logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -125,13 +125,13 @@ networks:
         - subnet: 172.21.0.0/16
 
 volumes:
-  controller1-data:
+  server1-data:
     driver: local
-  controller2-data:
+  server2-data:
     driver: local
-  controller3-data:
+  server3-data:
     driver: local
-  controller4-data:
+  server4-data:
     driver: local
-  controller5-data:
+  server5-data:
     driver: local

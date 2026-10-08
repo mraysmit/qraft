@@ -47,5 +47,7 @@ networks:
     driver: bridge
 
 volumes:
+  fluentd-logs:
+    driver: local
   elasticsearch-data:
     driver: local

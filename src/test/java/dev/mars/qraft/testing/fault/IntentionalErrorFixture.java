@@ -18,6 +18,7 @@ package dev.mars.qraft.testing.fault;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
+import dev.mars.qraft.server.QraftServerService;
 
 import java.util.Objects;
 import java.util.regex.Pattern;
@@ -34,7 +35,8 @@ import java.util.regex.Pattern;
  * <li>An {@link Kind#INTENTIONAL_ERROR} is an error that production code logs because a test arranged the
  * situation, with no injected exception: a partitioned peer, a corrupted file, a refused configuration. It names
  * the exact logger, level, and complete message pattern, and labels an event only during a test that declares it
- * with {@link IntentionalErrorsHelper#expect(IntentionalErrorFixture)}.</li>
+ * with {@link IntentionalErrorsHelper#expect(IntentionalErrorFixture)}. A declared uncaught rethrow signature
+ * also requires the exact failure to have been logged earlier in the same container output.</li>
  * </ul>
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
@@ -77,7 +79,7 @@ public enum IntentionalErrorFixture {
     RAFT_RECOVERY_STORAGE_FAILURE,
 
     /** Bootstrap refuses a peer whose advertised server list disagrees with the local list. */
-    BOOTSTRAP_SERVER_LISTS_DISAGREE("dev.mars.qraft.controller.raft.ClusterBootstrap", Level.ERROR,
+    BOOTSTRAP_SERVER_LISTS_DISAGREE("dev.mars.qraft.raft.ClusterBootstrap", Level.ERROR,
             "Bootstrap refused: \\S+ answers as \\S+ and lists \\[.*], but this server lists \\[.*]"),
 
     /** A second WAL writer is deliberately opened against a directory whose lock is already held. */
@@ -92,65 +94,69 @@ public enum IntentionalErrorFixture {
                     + " Storage instance is now fenced; close it and open a fresh instance"),
 
     /** A best-effort hook is deliberately left incomplete past its test's shutdown deadline. */
-    BEST_EFFORT_SHUTDOWN_HOOK_TIMEOUT("dev.mars.qraft.controller.lifecycle.ShutdownCoordinator", Level.ERROR,
+    BEST_EFFORT_SHUTDOWN_HOOK_TIMEOUT("dev.mars.qraft.server.lifecycle.ShutdownCoordinator", Level.ERROR,
             "Best-effort shutdown hook 'slow' timed out after 50 ms"),
 
     /** A critical hook is deliberately left incomplete, producing its hook and overall-shutdown errors. */
-    CRITICAL_SHUTDOWN_HOOK_TIMEOUT("dev.mars.qraft.controller.lifecycle.ShutdownCoordinator", Level.ERROR,
+    CRITICAL_SHUTDOWN_HOOK_TIMEOUT("dev.mars.qraft.server.lifecycle.ShutdownCoordinator", Level.ERROR,
             "(?:Critical shutdown hook 'node-stop' timed out after 50 ms"
                     + "|Shutdown failed before resources could be closed safely: null)"),
 
     /** Recovery refuses legacy Raft state that has no recorded cluster configuration. */
-    RAFT_STATE_WITHOUT_CONFIGURATION("dev.mars.qraft.controller.raft.RaftNode", Level.ERROR,
+    RAFT_STATE_WITHOUT_CONFIGURATION("dev.mars.qraft.raft.RaftNode", Level.ERROR,
             "Failed to recover Raft state from storage: Node \\S+ holds Raft state but no cluster configuration:"
                     + " the data predates configurations in the log and is not upgraded; start it on an empty"
                     + " data directory"),
 
     /** A follower refuses an append that would overwrite an entry it has already committed. */
-    COMMITTED_ENTRY_REPLACEMENT("dev.mars.qraft.controller.raft.RaftNode", Level.ERROR,
+    COMMITTED_ENTRY_REPLACEMENT("dev.mars.qraft.raft.RaftNode", Level.ERROR,
             "Refusing AppendEntries from leader \\S+: it would replace the committed entry at index \\d+"
                     + " \\(commit index \\d+\\)"),
 
     /** A stopped or partitioned Raft peer is deliberately made unreachable. */
-    RAFT_PEER_UNREACHABLE("dev.mars.qraft.controller.raft.RaftNode", Level.ERROR,
+    RAFT_PEER_UNREACHABLE("dev.mars.qraft.raft.RaftNode", Level.ERROR,
             "(?:Raft peer \\S+ became unreachable during AppendEntries|Failed to retrieve vote from \\S+)"),
 
     /** A stopped Docker peer interrupts an in-progress snapshot transfer or its completion callback. */
-    RAFT_SNAPSHOT_TRANSFER_INTERRUPTED("dev.mars.qraft.controller.raft.RaftNode", Level.ERROR,
+    RAFT_SNAPSHOT_TRANSFER_INTERRUPTED("dev.mars.qraft.raft.RaftNode", Level.ERROR,
             "(?:Failed to send InstallSnapshot chunk \\d+/\\d+ to \\S+: UNAVAILABLE:"
                     + " (?:io exception|Unable to resolve host \\S+)"
                     + "|Failed to process InstallSnapshot response from \\S+:"
                     + " Raft transition sequencer is draining)"),
 
     /** A test deliberately fences the transition sequencer and then exercises a rejected operation. */
-    RAFT_FENCED_OPERATION("dev.mars.qraft.controller.raft.RaftNode", Level.ERROR,
+    RAFT_FENCED_OPERATION("dev.mars.qraft.raft.RaftNode", Level.ERROR,
             "(?:Failed to persist command to WAL|AppendEntries failed during durable transition"
                     + "|Failed to establish leadership no-op for term \\d+):"
                     + " Raft transition sequencer is fenced"),
 
     /** A test fills the bounded transition queue and verifies that client admission is rejected. */
-    RAFT_TRANSITION_QUEUE_FULL("dev.mars.qraft.controller.raft.RaftNode", Level.ERROR,
+    RAFT_TRANSITION_QUEUE_FULL("dev.mars.qraft.raft.RaftNode", Level.ERROR,
             "Failed to persist command to WAL: Raft transition queue capacity \\d+ has been reached"),
 
     /** Startup propagates a deliberately corrupted WAL failure through both recovery log sites. */
-    RAFT_RECOVERY_AMBIGUOUS_CORRUPTION("dev.mars.qraft.controller.raft.RaftNode", Level.ERROR,
+    RAFT_RECOVERY_AMBIGUOUS_CORRUPTION("dev.mars.qraft.raft.RaftNode", Level.ERROR,
             "(?:Recovery failed|Failed to recover Raft state from storage): WAL .* is corrupt at byte \\d+ of \\d+;"
                     + " \\d+ entries precede the damage\\. Not repaired: restore this node from its peers\\."),
 
-    /** Controller startup reports that deliberately corrupted storage left the node live but fenced. */
-    CONTROLLER_RECOVERY_AMBIGUOUS_CORRUPTION("d.mars.qraft.controller.QraftControllerService", Level.ERROR,
+    /** Server startup reports that deliberately corrupted storage left the node live but fenced. */
+    CONTROLLER_RECOVERY_AMBIGUOUS_CORRUPTION(QraftServerService.class.getName(), Level.ERROR,
             "Raft recovery failed; node remains live but unready and will not participate\\."
                     + " Preserve the node directory for diagnosis, then replace it from a healthy peer and restart:"
                     + " WAL .* is corrupt at byte \\d+ of \\d+; \\d+ entries precede the damage\\."
                     + " Not repaired: restore this node from its peers\\."),
 
-    /** Controller startup propagates a deliberate cross-process WAL lock conflict. */
-    CONTROLLER_STORAGE_ALREADY_LOCKED("d.mars.qraft.controller.QraftControllerService", Level.ERROR,
-            "Failed to initialize Raft storage: Cannot acquire exclusive lock on WAL directory: .*\\."
-                    + " Another process may be using this storage\\."),
+    /** Server startup logs a deliberate cross-process WAL lock conflict, then rethrows it uncaught. */
+    CONTROLLER_STORAGE_ALREADY_LOCKED(QraftServerService.class.getName(), Level.ERROR,
+            "Failed to initialize Raft storage: (?<failure>Cannot acquire exclusive lock on WAL directory: .*\\."
+                    + " Another process may be using this storage\\.)",
+            "java\\.util\\.concurrent\\.CompletionException:"
+                    + " dev\\.mars\\.raftlog\\.storage\\.FileRaftStorage\\$StorageException:"
+                    + " (?<failure>Cannot acquire exclusive lock on WAL directory: .*\\."
+                    + " Another process may be using this storage\\.)"),
 
     /** Stopping during recovery deliberately makes already-scheduled startup work encounter the drain. */
-    RAFT_STARTUP_DRAINING("dev.mars.qraft.controller.raft.RaftNode", Level.ERROR,
+    RAFT_STARTUP_DRAINING("dev.mars.qraft.raft.RaftNode", Level.ERROR,
             "Failed to (?:establish leadership no-op for term \\d+|recover Raft state from storage):"
                     + " Raft transition sequencer is draining"),
 
@@ -186,19 +192,26 @@ public enum IntentionalErrorFixture {
     private final String loggerName;
     private final Level level;
     private final Pattern message;
+    private final Pattern uncaughtException;
 
     IntentionalErrorFixture() {
         this.kind = Kind.INJECTED_FAILURE;
         this.loggerName = null;
         this.level = null;
         this.message = null;
+        this.uncaughtException = null;
     }
 
     IntentionalErrorFixture(String loggerName, Level level, String messagePattern) {
+        this(loggerName, level, messagePattern, null);
+    }
+
+    IntentionalErrorFixture(String loggerName, Level level, String messagePattern, String uncaughtExceptionPattern) {
         this.kind = Kind.INTENTIONAL_ERROR;
         this.loggerName = Objects.requireNonNull(loggerName, "loggerName");
         this.level = Objects.requireNonNull(level, "level");
         this.message = Pattern.compile(Objects.requireNonNull(messagePattern, "messagePattern"));
+        this.uncaughtException = uncaughtExceptionPattern == null ? null : Pattern.compile(uncaughtExceptionPattern);
     }
 
     public Kind kind() {
@@ -219,5 +232,14 @@ public enum IntentionalErrorFixture {
                 && loggerName.equals(eventLogger)
                 && level.equals(eventLevel)
                 && message.matcher(eventMessage).matches();
+    }
+
+    /** Matches an uncaught rethrow only when its exact failure was already reported by this intentional error. */
+    boolean matchesUncaughtException(String exceptionDescription, String reportedMessage) {
+        if (uncaughtException == null) return false;
+        var exceptionMatch = uncaughtException.matcher(exceptionDescription);
+        var reportedMatch = message.matcher(reportedMessage);
+        return exceptionMatch.matches() && reportedMatch.matches()
+                && exceptionMatch.group("failure").equals(reportedMatch.group("failure"));
     }
 }

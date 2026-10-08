@@ -21,7 +21,7 @@ function Show-Help {
     Write-Host "  cluster [3node|5node|network-test]  - Start Qraft cluster" -ForegroundColor White
     Write-Host "  logging                             - Start log aggregation stack" -ForegroundColor White
     Write-Host "  test                                - Run test scenarios against http://localhost:8080," -ForegroundColor White
-    Write-Host "                                        which .\start.ps1 cluster or controllers serves" -ForegroundColor White
+    Write-Host "                                        which .\start.ps1 cluster or servers serves" -ForegroundColor White
     Write-Host "  stop                                - Stop all services" -ForegroundColor White
     Write-Host "  clean                               - Clean up containers and volumes" -ForegroundColor White
     Write-Host "  status                              - Show service status" -ForegroundColor White
@@ -54,13 +54,13 @@ function Start-Cluster {
         Write-Host "Cluster started successfully!" -ForegroundColor Green
         Write-Host ""
         Write-Host "Services available at:" -ForegroundColor Yellow
-        Write-Host "  - Controller 1: http://localhost:8081" -ForegroundColor White
-        Write-Host "  - Controller 2: http://localhost:8082" -ForegroundColor White
-        Write-Host "  - Controller 3: http://localhost:8083" -ForegroundColor White
+        Write-Host "  - Server 1: http://localhost:8081" -ForegroundColor White
+        Write-Host "  - Server 2: http://localhost:8082" -ForegroundColor White
+        Write-Host "  - Server 3: http://localhost:8083" -ForegroundColor White
         
         if ($Type -eq "5node" -or $Type -eq "network-test") {
-            Write-Host "  - Controller 4: http://localhost:8084" -ForegroundColor White
-            Write-Host "  - Controller 5: http://localhost:8085" -ForegroundColor White
+            Write-Host "  - Server 4: http://localhost:8084" -ForegroundColor White
+            Write-Host "  - Server 5: http://localhost:8085" -ForegroundColor White
         }
     } else {
         Write-Host "Failed to start cluster!" -ForegroundColor Red
@@ -108,8 +108,8 @@ function Stop-Services {
     Write-Host "Stopping all Qraft services..." -ForegroundColor Yellow
     
     # Stop all possible compose configurations
-    docker compose -f compose/docker-compose-single-controller.yml down 2>$null
-    docker compose -f compose/docker-compose-controller-first.yml down 2>$null
+    docker compose -f compose/docker-compose-single-server.yml down 2>$null
+    docker compose -f compose/docker-compose-server-first.yml down 2>$null
     docker compose -f compose/docker-compose-cluster.yml down 2>$null
     docker compose -f compose/docker-compose-5node.yml down 2>$null
     docker compose -f compose/docker-compose-network-test.yml down 2>$null

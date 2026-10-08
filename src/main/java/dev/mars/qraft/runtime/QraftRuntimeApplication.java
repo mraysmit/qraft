@@ -16,9 +16,9 @@
 
 package dev.mars.qraft.runtime;
 
-import dev.mars.qraft.agent.QraftAgent;
-import dev.mars.qraft.controller.QraftControllerApplication;
-import dev.mars.qraft.config.ConfigFileResolver;
+import dev.mars.qraft.client.QraftAgent;
+import dev.mars.qraft.server.QraftServerApplication;
+import dev.mars.qraft.common.config.ConfigFileResolver;
 
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -60,8 +60,8 @@ public final class QraftRuntimeApplication {
     }
 
     private static RuntimeLifecycle launchServer(Path configurationPath) {
-        QraftControllerApplication.RunningController controller =
-                QraftControllerApplication.launch(configurationPath);
+        QraftServerApplication.RunningServer controller =
+                QraftServerApplication.launch(configurationPath);
         return new ManagedRuntimeLifecycle(controller::closeAsync, controller::boundPorts);
     }
 

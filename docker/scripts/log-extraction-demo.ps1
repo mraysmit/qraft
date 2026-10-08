@@ -7,18 +7,18 @@ Write-Host ""
 
 # 1. Show application log configuration
 Write-Host "1. APPLICATION LAYER - Java Logging Configuration" -ForegroundColor Yellow
-Write-Host "   Controller logging format:" -ForegroundColor Cyan
+Write-Host "   Server logging format:" -ForegroundColor Cyan
 Write-Host "   %d{yyyy-MM-dd HH:mm:ss,SSS} %-5p [%c{3.}] (%t) %s%e%n" -ForegroundColor White
-Write-Host "   Example: 2025-08-26 10:36:39,337 INFO [dev.mar.quo.controller] (main) Application started" -ForegroundColor Gray
+Write-Host "   Example: 2025-08-26 10:36:39,337 INFO [dev.mar.quo.server] (main) Application started" -ForegroundColor Gray
 Write-Host ""
 
 # 2. Show Docker container logging
 Write-Host "2. DOCKER CONTAINER LAYER - JSON File Driver" -ForegroundColor Yellow
-$logPath = docker inspect qraft-controller1 --format="{{.LogPath}}" 2>$null
+$logPath = docker inspect qraft-server1 --format="{{.LogPath}}" 2>$null
 if ($logPath) {
     Write-Host "   Docker log file location: $logPath" -ForegroundColor Cyan
 }
-$logConfig = docker inspect qraft-controller1 --format="{{.HostConfig.LogConfig}}" 2>$null
+$logConfig = docker inspect qraft-server1 --format="{{.HostConfig.LogConfig}}" 2>$null
 if ($logConfig) {
     Write-Host "   Docker log driver: $logConfig" -ForegroundColor Cyan
 }
@@ -68,7 +68,7 @@ Write-Host ""
 
 # 5. Show raw Docker logs
 Write-Host "5. RAW DOCKER LOGS (Last 3 lines)" -ForegroundColor Yellow
-$dockerLogs = docker logs qraft-controller1 --tail 3 2>$null
+$dockerLogs = docker logs qraft-server1 --tail 3 2>$null
 if ($dockerLogs) {
     foreach ($line in $dockerLogs) {
         Write-Host "   $line" -ForegroundColor Gray
@@ -81,7 +81,7 @@ Write-Host ""
 # 6. Show Loki query results
 Write-Host "6. LOKI AGGREGATED LOGS (Via API)" -ForegroundColor Yellow
 try {
-    $lokiQuery = "http://localhost:3100/loki/api/v1/query_range?query={container_name=`"qraft-controller1`"}&limit=3"
+    $lokiQuery = "http://localhost:3100/loki/api/v1/query_range?query={container_name=`"qraft-server1`"}&limit=3"
     $lokiResponse = Invoke-RestMethod -Uri $lokiQuery -ErrorAction Stop
     if ($lokiResponse.data.result -and $lokiResponse.data.result.Count -gt 0) {
         Write-Host "   Recent aggregated logs:" -ForegroundColor Cyan
@@ -118,7 +118,7 @@ Write-Host "                                                              └─
 Write-Host ""
 
 Write-Host "8. ACCESS POINTS" -ForegroundColor Yellow
-Write-Host "   - Raw Docker logs: docker logs qraft-controller1" -ForegroundColor Cyan
+Write-Host "   - Raw Docker logs: docker logs qraft-server1" -ForegroundColor Cyan
 Write-Host "   - Loki API: http://localhost:3100/loki/api/v1/query" -ForegroundColor Cyan
 Write-Host "   - Grafana UI: http://localhost:3000 (admin/admin)" -ForegroundColor Cyan
 Write-Host ""

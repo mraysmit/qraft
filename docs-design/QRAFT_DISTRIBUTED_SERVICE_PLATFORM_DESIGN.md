@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-10-05 (section 1.1 and the module wording elsewhere, after the move to one Maven project)
+**Last updated:** 2026-10-08 (Phase 3 package ownership and dependency directions in section 1.1)
 
 ## 1. Purpose
 
@@ -16,68 +16,50 @@ target system.
 
 ### 1.1 Project structure
 
-Qraft is one Maven project. The root `pom.xml` is the only POM. It builds one
-executable jar, `target/qraft.jar`, which runs in either mode, and it owns the
-dependency versions, Java 27 compiler settings, test conventions, and coverage
-configuration.
+Qraft is one Maven project. The root `pom.xml` builds one executable jar,
+`target/qraft.jar`, for `server` and `client` modes and owns dependency versions,
+Java 27 compilation, test conventions, and coverage configuration.
 
-Until 2026-10-04 the build was a reactor of seven modules. Their boundaries are
-now package boundaries. `PackageDependencyTest` enforces them: it reads the
-Qraft types every compiled production class refers to, and fails on a reference
-against the allowed direction.
+Phase 3 gives each layer its own package tree. `PackageDependencyTest` reads
+compiled production references with the JDK class-file API. Compiled mutation
+fixtures prove forbidden dependencies are rejected, including Raft and replicated
+state referring to server HTTP or the runtime entry point.
 
-The package names below are those of 2026-10-05. Phase 3 of
-[`task-list-single-pom-and-quorus-removal-2026-10-04.md`](task-list-single-pom-and-quorus-removal-2026-10-04.md)
-renames them to follow the modes (`server`, `client`, `raft`, `state`, and
-`common`), and this section changes with it.
+| Layer | Packages | Responsibility |
+|---|---|---|
+| Raft | `dev.mars.qraft.raft` and subpackages | Consensus implementation, contracts under `raft.api`, transport, generated Raft protocol classes, durable storage adapters, and Raft metrics. |
+| Replicated state | `dev.mars.qraft.state`, `state.catalog`, `state.distributed` | Deterministic state host, replicated commands/codecs, catalog projections, health observations, and distributed metadata. |
+| Common | `dev.mars.qraft.common` and subpackages | Shared node models and `ServiceDefinition`, configuration helpers, deadlines, and the temporary `common.async` API until Phase 7 removes it. |
+| Client | `dev.mars.qraft.client` and subpackages | Registration, server-seed failover, reconciliation, heartbeat scheduling, local checks, liveness/readiness, and bounded graceful shutdown. |
+| Server | `dev.mars.qraft.server` and subpackages | Server composition/lifecycle, HTTP and external gRPC adapters, telemetry exporters, background health processing, and administrative UI. |
+| Runtime | `dev.mars.qraft.runtime` | Executable mode selection, operator command, and runtime-owned completion/shutdown boundary. |
 
-| Layer | Packages today | Former module | Responsibility |
-|---|---|---|---|
-| Raft contracts | `dev.mars.qraft.raft.api` | `qraft-raft-engine` | Own the implementation-neutral consensus contracts: replicated commands, command codecs, the state machine, and the snapshot store. It must not depend on service discovery, tenancy, HTTP, or a runtime mode. |
-| Replicated state | `dev.mars.qraft.distributedstate`, and `dev.mars.qraft.catalog` apart from `ServiceDefinition` | `qraft-distributed-state` | Own deterministic replicated-state commands and projections: key/value commands and codecs, and the service catalog with its composite health-check identity, ordered observations, and replicated check state. It must contain no network server, process lifecycle, or client-agent behavior. |
-| Shared types | `dev.mars.qraft.concurrent`, `dev.mars.qraft.config`, `ServiceDefinition` in `dev.mars.qraft.catalog`, and the node types in `dev.mars.qraft.agent`: `AgentInfo`, `AgentStatus`, `AgentCapabilities`, `AgentSystemInfo`, and `AgentNetworkInfo` | `qraft-core` | Own small, transport-neutral value types and helpers shared between server and client. Service definitions and common identity types belong here; Raft implementation and HTTP DTOs do not. |
-| Client | The rest of `dev.mars.qraft.agent`, and its subpackages | `qraft-agent` | Implement client mode: client identity, node registration, the typed outbound catalog HTTP adapter, controller-seed failover, single-flight service reconciliation, heartbeat scheduling, policy-derived local liveness and readiness HTTP endpoints, bounded graceful shutdown, local execution of configured HTTP, TCP, and TTL checks, and sequenced publication of their observations and renewals. Keep local health authoritative at the server without participating in Raft. |
-| Server | `dev.mars.qraft.controller` and its subpackages | `qraft-controller` | Operate one server member: the Raft node, transports, durable storage adapters, the replicated state host, HTTP and gRPC APIs, snapshots, and graceful shutdown. Participate in quorum, host authoritative replicated state, enforce request identity and policy, expose control-plane APIs and the built-in administrative interface, and own server lifecycle. |
-| Entry point | `dev.mars.qraft.runtime` | `qraft-runtime` | Remain a thin composition root that validates mode-specific configuration, constructs either server or client mode, and installs process shutdown handling, without owning domain logic. |
-
-Each layer may use only these others:
+Allowed dependencies are:
 
 ```text
-Entry point       -> every layer; nothing uses the entry point
-Server            -> shared types, Raft contracts, replicated state
-Client            -> shared types
-Replicated state  -> Raft contracts
-Shared types      -> none
-Raft contracts    -> none
+Runtime -> every layer; nothing else uses Runtime
+Server  -> Common, Raft, State
+Client  -> Common
+State   -> Common, Raft
+Raft    -> Common
+Common  -> no other Qraft layer
 ```
 
-Use runs from a higher-level composition or adapter toward a lower-level
-contract or domain layer. Cycles are prohibited. In particular:
+Cycles are prohibited. Raft never uses State, Server, Client, or Runtime.
+Replicated state never uses Server HTTP, server lifecycle, or client code.
+Public HTTP and external gRPC DTOs stay at adapter boundaries and map explicitly
+to domain commands. Protobuf Java packages follow ownership while the wire
+namespaces `qraft.raft` and `qraft.api` remain unchanged.
 
-- The entry point selects and assembles a mode but does not implement it.
-- The client depends on shared domain contracts, not server internals or
-  replicated-state implementations.
-- The server may compose every server-side layer, but those lower layers do not
-  call back into the server.
-- Replicated state depends only on the consensus contracts.
-- Public HTTP and gRPC request/response DTOs stay at adapter boundaries and are
-  mapped explicitly to domain commands.
+The client configuration retains its `agent` and `controllers` objects;
+`/v1/agent/*` paths move in the client implementation plan. Node models remain
+shared until Phase 4 replaces the inherited fleet fields.
 
-The seventh module, `qraft-tenant`, was removed on 2026-10-04: nothing used its
-in-memory namespace service. Namespaces return as replicated state with the
-tenancy work (section 15).
-
+Until 2026-10-04 the build had seven Maven modules. The unused `qraft-tenant`
+module was removed; namespaces return as replicated state in section 15.
 [`QRAFT_EVENT_ARCHITECTURE.md`](../docs/QRAFT_EVENT_ARCHITECTURE.md) proposes
-dependency-light event contracts under the name `qraft-events`. They do not
-exist yet. They will be a package and a layer of this build, added to this
-table when their first tranche is implemented.
+event contracts that will become another package/layer when implemented.
 
-Two packages do not yet match these boundaries. `dev.mars.qraft.catalog` holds
-both the shared `ServiceDefinition` and the server-side replicated catalog, and
-`dev.mars.qraft.agent` holds both the shared node types and client code.
-`PackageDependencyTest` classifies those two packages type by type until
-Phase 3 gives each layer its own package. The mutable replicated catalog remains
-server-side.
 
 ## 2. Goals
 

@@ -17,7 +17,7 @@
 syntax = "proto3";
 
 option java_multiple_files = true;
-option java_package = "dev.mars.qraft.controller.api.grpc";
+option java_package = "dev.mars.qraft.server.api.grpc";
 option java_outer_classname = "DistributedStateProto";
 
 package qraft.api;

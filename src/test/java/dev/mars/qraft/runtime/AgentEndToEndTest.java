@@ -16,18 +16,18 @@
 
 package dev.mars.qraft.runtime;
 
-import dev.mars.qraft.controller.raft.PeerlessTransportFixture;
-import dev.mars.qraft.catalog.ServiceKey;
-import dev.mars.qraft.agent.QraftAgent;
-import dev.mars.qraft.agent.config.AgentConfiguration;
-import dev.mars.qraft.catalog.ServiceDefinition;
-import dev.mars.qraft.controller.http.HttpApiServer;
-import dev.mars.qraft.controller.raft.InMemoryTransportSimulatorFixture;
-import dev.mars.qraft.controller.raft.ManualRaftClusterFixture;
-import dev.mars.qraft.controller.raft.RaftNode;
-import dev.mars.qraft.controller.raft.RaftNodeMode;
-import dev.mars.qraft.controller.runtime.JavaRuntime;
-import dev.mars.qraft.controller.state.QraftStateStore;
+import dev.mars.qraft.raft.PeerlessTransportFixture;
+import dev.mars.qraft.state.catalog.ServiceKey;
+import dev.mars.qraft.client.QraftAgent;
+import dev.mars.qraft.client.config.AgentConfiguration;
+import dev.mars.qraft.common.ServiceDefinition;
+import dev.mars.qraft.server.http.HttpApiServer;
+import dev.mars.qraft.raft.InMemoryTransportSimulatorFixture;
+import dev.mars.qraft.raft.ManualRaftClusterFixture;
+import dev.mars.qraft.raft.RaftNode;
+import dev.mars.qraft.raft.RaftNodeMode;
+import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.state.QraftStateStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 

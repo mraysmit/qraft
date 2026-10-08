@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.runtime;
 
-import dev.mars.qraft.agent.config.AgentConfiguration;
+import dev.mars.qraft.client.config.AgentConfiguration;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -41,10 +41,10 @@ class DockerDeploymentContractTest {
     private static final List<String> BUILD_COMPOSE_FILES = List.of(
             "docker/compose/docker-compose-5node.yml",
             "docker/compose/docker-compose-cluster.yml",
-            "docker/compose/docker-compose-controller-first.yml",
+            "docker/compose/docker-compose-server-first.yml",
             "docker/compose/docker-compose-network-test.yml",
             "docker/compose/docker-compose-observability-cluster.yml",
-            "docker/compose/docker-compose-single-controller.yml",
+            "docker/compose/docker-compose-single-server.yml",
             "src/test/resources/docker-compose-build-image.yml");
     private static final List<String> PREBUILT_COMPOSE_FILES = List.of(
             "src/test/resources/docker-compose-3node-prebuilt.yml",
@@ -96,7 +96,7 @@ class DockerDeploymentContractTest {
     void unifiedRuntimeComposeCoversExplicitAndConventionalConfigurationSelection() throws IOException {
         Path root = Path.of("").toAbsolutePath();
         String compose = Files.readString(root.resolve(
-                "docker/compose/docker-compose-single-controller.yml"));
+                "docker/compose/docker-compose-single-server.yml"));
 
         assertTrue(compose.contains("command: [\"server\", \"--config\", \"/etc/qraft/server.json\"]"));
         assertTrue(compose.contains("command: [\"client\"]"));
@@ -162,6 +162,8 @@ class DockerDeploymentContractTest {
 
         assertTrue(Files.readString(root.resolve("docker/start.ps1"))
                 .contains("build-runtime.ps1"));
+        assertTrue(Files.readString(root.resolve("docker/start.ps1")).contains("\"servers\" {"),
+                "the PowerShell dispatcher must accept the servers command its help documents");
         assertTrue(Files.readString(root.resolve("docker/start.sh"))
                 .contains("build-runtime.sh"));
         assertTrue(Files.readString(root.resolve("docker/start-quick.ps1"))
@@ -174,7 +176,7 @@ class DockerDeploymentContractTest {
     void dockerIntegrationTestsRequireTheHostBuiltRuntimeJar() throws IOException {
         Path root = Path.of("").toAbsolutePath();
         String sharedCluster = Files.readString(root.resolve(
-                "src/test/java/dev/mars/qraft/controller/raft/SharedDockerClusterFixture.java"));
+                "src/test/java/dev/mars/qraft/raft/SharedDockerClusterFixture.java"));
         assertTrue(sharedCluster.contains("target/qraft.jar"));
         assertTrue(sharedCluster.contains("assertRuntimeJarIsCurrent"));
         assertFalse(sharedCluster.contains("isImageCached"));
@@ -306,5 +308,70 @@ class DockerDeploymentContractTest {
             offset += target.length();
         }
         return count;
+    }
+
+    @Test
+    void deploymentServiceDnsConfigurationsAndTelemetryUseServerNames() throws IOException {
+        Path root = Path.of("").toAbsolutePath();
+        assertTrue(Files.exists(root.resolve("docker/compose/docker-compose-single-server.yml")));
+        assertTrue(Files.exists(root.resolve("docker/compose/docker-compose-server-first.yml")));
+        for (String profile : List.of("three-node", "five-node", "three-node-acceptance",
+                "five-node-acceptance", "three-node-observability")) {
+            Path configuration = root.resolve("docker/config/" + profile + "/server1.json");
+            assertTrue(Files.exists(configuration), configuration.toString());
+            String json = Files.readString(configuration);
+            assertTrue(json.contains("server1"), configuration.toString());
+            assertFalse(json.contains("controller"), configuration.toString());
+        }
+        for (String artifact : List.of("src/test/resources/docker-compose-3node-prebuilt.yml",
+                "docker/compose/prometheus-cluster.yml", "docker/compose/otel-collector-cluster-config.yaml")) {
+            String content = Files.readString(root.resolve(artifact));
+            assertTrue(content.contains("server1"), artifact);
+            assertFalse(content.contains("controller"), artifact);
+        }
+        String dashboard = Files.readString(root.resolve(
+                "docker/compose/grafana/provisioning/dashboards/json/qraft-server.json"));
+        assertTrue(dashboard.contains("qraft-servers-compose"));
+        assertFalse(dashboard.contains("controller"));
+        AgentConfiguration client = AgentConfiguration.fromFile(root.resolve("docker/config/client.json"));
+        assertTrue(client.getControllerUrls().stream().allMatch(url -> url.getHost().startsWith("server")));
+    }
+
+    @Test
+    void dockerFixturesConstructTheRenamedServiceDns() throws IOException {
+        Path directory = Path.of("src/test/java/dev/mars/qraft/raft");
+        try (var paths = Files.list(directory)) {
+            for (Path source : paths.filter(path -> path.getFileName().toString().startsWith("Docker")
+                    || path.getFileName().toString().equals("SharedDockerClusterFixture.java")).toList()) {
+                String content = Files.readString(source);
+                assertFalse(content.contains("\"controller\" +")
+                        || content.contains("\"http://controller\" +"), source.toString());
+            }
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("docker")
+    void everyDocumentedComposeModelIsValid() throws Exception {
+        try (var paths = Files.list(Path.of("docker/compose"))) {
+            for (Path compose : paths.filter(path -> path.getFileName().toString().startsWith("docker-compose-")
+                    && path.toString().endsWith(".yml")).sorted().toList()) {
+                Process process = new ProcessBuilder("docker", "compose", "-f", compose.toString(),
+                        "config", "--quiet").redirectErrorStream(true).start();
+                try {
+                    org.junit.jupiter.api.Assertions.assertTrue(process.waitFor(30,
+                            java.util.concurrent.TimeUnit.SECONDS), compose + ": compose validation timed out");
+                    String output = new String(process.getInputStream().readAllBytes(),
+                            java.nio.charset.StandardCharsets.UTF_8);
+                    System.out.print(output);
+                    assertEquals(0, process.exitValue(), compose + ": " + output);
+                } finally {
+                    if (process.isAlive()) {
+                        process.destroyForcibly();
+                        assertTrue(process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS));
+                    }
+                }
+            }
+        }
     }
 }

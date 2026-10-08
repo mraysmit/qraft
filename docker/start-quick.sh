@@ -7,7 +7,7 @@ action=${1:-help}
 cluster_type=${2:-3node}
 
 stop_services() {
-  for file in docker-compose-single-controller.yml docker-compose-controller-first.yml docker-compose-cluster.yml docker-compose-5node.yml docker-compose-network-test.yml docker-compose-loki.yml; do
+  for file in docker-compose-single-server.yml docker-compose-server-first.yml docker-compose-cluster.yml docker-compose-5node.yml docker-compose-network-test.yml docker-compose-loki.yml; do
     docker compose -f "compose/$file" down >/dev/null 2>&1 || true
   done
 }
@@ -43,6 +43,6 @@ case "$action" in
     ;;
   *)
     echo "Usage: ./start-quick.sh {cluster [3node|5node|network-test]|logging|test|stop|clean|status}"
-    echo "test sends to http://localhost:8080, which ./start.sh cluster or controllers serves"
+    echo "test sends to http://localhost:8080, which ./start.sh cluster or servers serves"
     ;;
 esac

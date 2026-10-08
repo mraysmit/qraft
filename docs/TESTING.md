@@ -171,7 +171,7 @@ There are two ways onto Docker, and they build differently.
 
 ```powershell
 .\start.ps1 cluster                # one server:                   http://localhost:8080
-.\start.ps1 controllers            # three servers, load balancer: http://localhost:8080 (8081-8083 direct)
+.\start.ps1 servers            # three servers, load balancer: http://localhost:8080 (8081-8083 direct)
 .\start-quick.ps1 cluster 3node    # three servers: http://localhost:8081-8083 (compose/docker-compose-cluster.yml)
 .\start-quick.ps1 cluster 5node    # five servers:  http://localhost:8081-8085 (compose/docker-compose-5node.yml)
 .\start.ps1 status                 # the running Qraft containers
@@ -179,8 +179,8 @@ There are two ways onto Docker, and they build differently.
 ```
 
 Only one cluster runs at a time: they share container names, so stop one before starting another.
-`start-quick.ps1 test` sends to `http://localhost:8080`, so it needs `start.ps1 cluster` or `controllers`.
-Each `cluster` or `controllers` command first runs `docker/build-runtime.ps1`, which packages the runtime
+`start-quick.ps1 test` sends to `http://localhost:8080`, so it needs `start.ps1 cluster` or `servers`.
+Each `cluster` or `servers` command first runs `docker/build-runtime.ps1`, which packages the runtime
 jar again with `package -DskipTests`, then starts the containers with
 `docker compose ... up -d` and returns. Follow a cluster's logs with
 `docker compose -f compose/<file>.yml logs -f`. `start.sh` and `start-quick.sh` are the shell
@@ -191,7 +191,7 @@ equivalents.
 1. `mvn install`, which runs the default suite and the coverage gates, and packages the runtime jar.
 2. `mvn test "-Dgroups=docker,e2e" "-Dtest.excludedGroups="`, the
    end-to-end and Docker suites, which build their own image from that jar.
-3. Optional: `docker\start.ps1 controllers`, to watch a hand-started cluster. It repackages the jar first,
+3. Optional: `docker\start.ps1 servers`, to watch a hand-started cluster. It repackages the jar first,
    which is redundant straight after step 1 but harmless.
 
 ## Making runs faster
@@ -209,15 +209,201 @@ equivalents.
   each class took.
 - Coverage: `target/site/jacoco/index.html`, written by `mvn install`.
 
+## Intentional error flags and log auditing
+
+Every error caused deliberately by a test must carry an explicit flag naming the failure and the test
+responsible. Every other error requires remediation. A successful Maven exit code or passing assertions
+alone do not establish that the logs are acceptable.
+
+The flags preserve the event's ERROR severity, message, diagnostic fields, and stack trace. They do not
+filter, suppress, or downgrade the event. A flag on an exception header applies to its following stack
+trace; individual frames and `Caused by:` lines are retained without repeating the flag on each line.
+
+| Flag | Meaning | Attribution |
+|---|---|---|
+| `*** INTENTIONAL ERROR: <entry>, caused by <test> ***` | The test deliberately arranged a condition that makes production code report an error. | Usually `TestClass#testMethod`; Docker capture uses the test class. |
+| `*** INJECTED FAILURE: <entry>, injected by <test> ***` | The test supplied an explicitly marked failure through `InjectedFaultFixture`. | The running test that owns the logging scope. |
+
+The following extracts come from the verified 2026-10-08 run. Filenames and line numbers identify the
+local, git-ignored logs; the extracts are included here so the examples remain available without those files.
+
+### Declared intentional errors
+
+The definitions in
+[`IntentionalErrorFixture`](../src/test/java/dev/mars/qraft/testing/fault/IntentionalErrorFixture.java)
+specify the exact logger, level, and complete message pattern. A test declares its expected error with
+`IntentionalErrorsHelper.expect` before causing it. The declaration belongs to the current test's scope;
+it does not permit matching errors everywhere in the suite.
+
+The default declaration requires at least one occurrence. `expect(error, times)` requires exactly that
+many. Missing occurrences or counts outside the declared bounds fail the audit. Leader-loss tests use
+`expect(RAFT_PEER_UNREACHABLE, formerLeader)` to accept RPC failures only for the deliberately stopped peer.
+A different peer, logger, level, or message remains unexpected.
+
+Cluster teardown also deliberately closes peers while a surviving leader may still contact them.
+`IntentionalErrorsHelper.expectPeerShutdownDuringCleanup(peer)` declares that specific peer immediately
+before its runtime is closed, after the functional assertions. It permits zero occurrences because cleanup
+does not guarantee an RPC is in flight. Only the same exact peer-unreachable logger, level, and message
+signatures match; earlier errors, other peers, and subsequent tests remain unaccepted. Once cleanup is
+declared for that peer, its matching failures never count toward functional expectations, whether the
+expectation names that same peer, another peer, or no peer, and whether its count is exact or at least once.
+Retry cleanup uses the same close path as final teardown and removes successfully closed runtimes from
+the cleanup registry. No allowance is added for the last live cluster peer or a runtime already closed.
+
+Source: `logs/qraft-tagged-2026-10-08_13-13-20-497.log`, line 5373. The stopped peer is `node-c`:
+
+```text
+13:21:09.381 [qraft-state-loop] ERROR *** INTENTIONAL ERROR: RAFT_PEER_UNREACHABLE, caused by HealthPropagationEndToEndTest#aRenewalHeldPastItsDeadlineAcrossALeaderChangeLandsInsideTheNewLeadersGraceSoTheCheckNeverExpires *** dev.mars.qraft.controller.raft.RaftNode [node-b] [LEADER/2] [bbc5514d-31cd-4743-83f5-0d3639e0fd7d] [AppendEntries] - Raft peer node-c became unreachable during AppendEntries
+```
+
+### Injected failures
+
+`InjectedFaultFixture` names an injected-failure entry in the same definitions. The logging helpers
+recognise that marker in the logged exception itself, its causes, or its suppressed-exception chain.
+Recognition is automatic; a test can additionally declare an expected count with `expect`.
+
+Source: `logs/qraft-default-2026-10-08_13-11-50-284.log`, lines 2323-2325:
+
+```text
+13:12:37.820 [main] ERROR *** INJECTED FAILURE: SHUTDOWN_HOOK_FAILURE, injected by TimeoutHandlingTests#synchronousCriticalHookFailureIsReportedAsynchronously *** d.m.q.controller.lifecycle.ShutdownCoordinator - Critical shutdown hook 'node-stop' failed with InjectedFaultFixture
+dev.mars.qraft.testing.fault.InjectedFaultFixture: node stop failed before returning
+	at dev.mars.qraft.controller.lifecycle.ShutdownCoordinatorTest$TimeoutHandlingTests.synchronousCriticalHookFailureIsReportedAsynchronously(ShutdownCoordinatorTest.java:311)
+```
+
+### Helper subprocesses
+
+A separate JVM must establish its own scope with `IntentionalErrorsHelper.inSubprocess`. Its body must
+return through the audit before calling `System.exit`; otherwise its errors and expectation counts would
+go unchecked. `DirectoryLockProcessFixture` receives the calling test's name and an `owner` or `contender`
+role. Only the contender declares exactly one `WAL_DIRECTORY_ALREADY_LOCKED` error. The parent test checks
+the contender's exit code `73` and the flagged error, and checks that the owner remains healthy and exits
+successfully. An audit failure cannot pass merely because the contender exited unsuccessfully.
+
+Source: `logs/qraft-maven-tests-2026-10-08_13-13-09.log`, line 3:
+
+```text
+2026-10-08 13:13:09.328 [wal-executor] ERROR *** INTENTIONAL ERROR: WAL_DIRECTORY_ALREADY_LOCKED, caused by RaftStorageProcessLockTest#secondJvmCannotOpenDirectoryWhileOwnerRemainsHealthy/contender *** dev.mars.raftlog.storage.FileRaftStorage - Cannot acquire exclusive lock at C:\Users\markr\AppData\Local\Temp\junit-709376945766950860\raft.lock: another process holds the lock
+```
+
+### Docker archives and uncaught exceptions
+
+Docker test classes declare their expected errors with `@ExpectedDockerErrorsHelper`. At class teardown,
+`DockerLogExtensionHelper` audits captured output against those declarations. Matching ERROR entries are
+flagged in `logs/docker/<TestClass>/`, retaining their original timestamps and stack traces. Recognised
+ERROR messages are also replayed into the main test log with class-level attribution. The replay's
+timestamp and `[main]` thread describe the audit reprinting the message, rather than the original event.
+
+An uncaught container exception is a separate audit check. It is flagged only when it matches a declared
+rethrow signature and the exact failure message of a recognised error from the same container or helper
+process. The ERROR may follow the rethrow when Docker merges stdout and stderr, or have been drained
+in an earlier capture of that same source. The current class must still declare that error; an error from
+another source cannot excuse the rethrow. For the lock conflict, matching requires the expected `CompletionException` and
+`FileRaftStorage$StorageException` types and the same directory and failure message. Cleanup INFO messages
+between the original error and the rethrow do not prevent the match. Compose and timestamp prefixes
+on uncaught headers are preserved and audited. A missing matching error, different
+directory or cause, undeclared exception, or malformed uncaught-exception header fails the audit and is
+archived without an intentional flag. The recognised rethrow is not replayed as a second ERROR event.
+
+Source: `logs/docker/DockerDurableRestartTest/lock-contender.log`, lines 82 and 95-97. These are nonadjacent
+extracts; intervening cleanup messages and the first error's trace are omitted:
+
+```text
+2026-10-08 05:18:17.122 [wal-executor] ERROR *** INTENTIONAL ERROR: CONTROLLER_STORAGE_ALREADY_LOCKED, caused by DockerDurableRestartTest *** d.mars.qraft.controller.QraftControllerService - Failed to initialize Raft storage: Cannot acquire exclusive lock on WAL directory: /app/data. Another process may be using this storage.
+Exception in thread "main" *** INTENTIONAL ERROR: CONTROLLER_STORAGE_ALREADY_LOCKED, caused by DockerDurableRestartTest *** java.util.concurrent.CompletionException: dev.mars.raftlog.storage.FileRaftStorage$StorageException: Cannot acquire exclusive lock on WAL directory: /app/data. Another process may be using this storage.
+	at java.base/java.util.concurrent.CompletableFuture.wrapInCompletionException(Unknown Source)
+	at java.base/java.util.concurrent.CompletableFuture.encodeThrowable(Unknown Source)
+```
+
+The corresponding replay appears in `logs/qraft-tagged-2026-10-08_13-13-20-497.log`, line 983:
+
+```text
+13:19:54.442 [main] ERROR *** INTENTIONAL ERROR: CONTROLLER_STORAGE_ALREADY_LOCKED, caused by DockerDurableRestartTest *** d.mars.qraft.controller.QraftControllerService - Failed to initialize Raft storage: Cannot acquire exclusive lock on WAL directory: /app/data. Another process may be using this storage.
+```
+
+### What makes verification fail
+
+The JUnit extension opens a scope around each test, including its teardown, and an enclosing scope around
+each test class. The Logback check records undeclared ERROR events and events carrying an undeclared
+exception at any level. Problems logged outside a scope are also checked when a class closes. The extension
+fails the test or class for those problems or unmet expected counts, even if its normal assertions passed.
+It also refuses a test runtime without the required started logging check attached to the root logger.
+Docker auditing separately rejects undeclared or unparseable ERROR entries and unmatched uncaught exceptions.
+
+Review the captured Maven output, application logs, subprocess logs, and Docker archives. Check that error
+headers carry the expected flag and identify the responsible test, and that their messages and traces
+describe the failure the test deliberately caused. Every unflagged error requires investigation and
+remediation; declaring a broad expectation merely to make an unrelated failure pass is not acceptable.
+
+The earlier 2026-10-08 verification, from which the extracts above were taken, ran 845 default tests and
+31 tagged tests with no failures, errors, or skips;
+coverage checks passed. Reviewing 80 log files found 543 flagged ERROR entries, 322 exception headers
+belonging to flagged events, and one flagged uncaught exception, with no unflagged errors or exceptions.
+The ERROR count includes duplicate copies across console captures, application logs, and Docker archives;
+it is not a count of unique failures. These figures describe that run, not fixed expectations for future runs.
+
+Phase 3's first Raft/state slice verification on 2026-10-08 passed 854 default tests, all coverage gates, and all 31 tagged
+tests on a fresh runtime image. Its captures are `qraft-phase3-final-clean-2026-10-08_16-03-01-464.log` and
+`qraft-phase3-final-tagged-2026-10-08_16-04-37-245.log`. Reading all 80 logs from that verification window
+found 581 flagged ERROR headers, 357 exception headers belonging to flagged events, one flagged uncaught
+rethrow, and zero unflagged errors or exceptions. Earlier failed runs remain as evidence of the defects
+remediated during verification; their failures are recorded in the Phase 3 implementation task list.
+
+The subsequent shutdown/audit defect follow-up passed 75 focused tests and two further runs of all 29
+concurrency tests. Its clean build passed 863 default tests and all coverage gates; its fresh-image
+`docker,e2e,slow` run passed 31 tagged tests, for 894 tests with zero failures, errors, or skips.
+Captures: `qraft-review-default-2026-10-08_17-35-33-237.log` and
+`qraft-review-tagged-2026-10-08_17-37-10-226.log`. All 86 logs written during that successful verification
+window were audited: 567 flagged ERROR headers, 377 exception headers under flagged events, one flagged
+uncaught rethrow, and zero unflagged errors or exceptions. The focused RED run is retained separately as
+diagnostic evidence of the defects; it is not counted as successful verification.
+
+## Phase 3 package and startup contracts
+
+- `PackageDependencyTest` scans compiled production references in the six final package trees:
+  `common`, `client`, `server`, `raft`, `state`, and `runtime`. Compiled mutation fixtures
+  prove that both Raft and State dependencies on server HTTP fail, alongside other forbidden edges.
+- `ProtocolPackageTest` checks generated Java ownership and unchanged `qraft.raft.RaftService` /
+  `qraft.api.DistributedStateService` names. `LegacyCatalogFixtureTest` retains immutable command
+  and snapshot bytes and hashes.
+- `RuntimeLoggingTest` starts each real mode in a fresh JVM through
+  `RuntimeLoggingProcessFixture`, using production Logback. It checks the configured directory
+  and mode filenames from the first configuration event: `qraft-server.log/json` or
+  `qraft-client.log/json`. Child console and file logs are retained under
+  `logs/phase3-runtime-process-<mode>-<id>/` and reprinted in the Maven capture.
+- `LoggingConfigurationTest` checks UTF-8, available appenders, no settings that drop errors,
+  and compressed rolling files under `archive/`.
+- `TelemetryConfigTest` exercises the real enabled SDK, disabled telemetry, and resource cleanup
+  after Prometheus binding or global SDK registration fails.
+- `DockerDeploymentContractTest` covers server DNS/configuration/dashboard names, dynamic fixture
+  service names, launcher dispatch, and preservation of the client `agent` / `controllers`
+  configuration objects. Its Docker-tagged contract validates every maintained Compose model.
+- Historical log extracts above retain their original package/class names. Current production
+  classes use the final packages; the intentional-error flag format and attribution rules are unchanged.
+
+Whole Phase 3 verification completed on 2026-10-08: 876 default tests with all coverage gates and
+32 fresh-image `docker,e2e,slow` tests passed, with zero failures, errors, or skips. A separate 47-test
+lifecycle/concurrency repeat also passed. Final captures are
+`logs/qraft-phase3-verified-default-2026-10-08_19-28-47-852.log` and
+`logs/qraft-phase3-verified-tagged-2026-10-08_19-30-33-972.log`; the repeat is
+`logs/qraft-phase3-complete-repeat-2026-10-08_19-15-23-119.log`.
+Actual Surefire XML is retained in `logs/phase3-final-evidence/default/` and `tagged/`, independently
+confirming 908 tests in 139 distinct classes. Preserve separate copies because later suites can
+overwrite reports for a class with both default and tagged cases.
+
+The final successful-window audit covered 87 retained Maven, application, subprocess, and Docker logs:
+449 explicitly flagged ERROR headers, 301 exception headers attributed to flagged events, one flagged
+uncaught rethrow, and zero unflagged errors or exceptions. Counts include duplicate captures. Both
+fresh-JVM JSON logs were also parsed: 54 events with no ERROR or stack trace. The earlier failed Docker
+run revealed two migrated logger signatures still naming the old controller logger. After failing
+regressions, the definitions now use `QraftServerService.class.getName()` with their existing exact
+message patterns and severity; all nine durable-restart cases and their log audit passed in the final run.
+
 ## Rules for tests
 
 - **Every error must be explicitly flagged intentional.** The logging audit fails on an undeclared ERROR
-  or an event carrying an undeclared exception, even when the test assertions pass. Declare expected
-  errors with `IntentionalErrorsHelper.expect` before causing them; leader-loss tests must name the stopped
-  peer. Helper subprocesses must use `IntentionalErrorsHelper.inSubprocess` and return through its audit
-  before exiting. Docker tests declare their expected errors with `@ExpectedDockerErrorsHelper`; matching
-  entries are flagged in both the main test log and `logs/docker/` archives. Messages and stack traces are
-  retained. Every other error requires remediation; a successful Maven exit code alone is insufficient.
+  or an event carrying an undeclared exception, even when the test assertions pass. Every other error
+  requires remediation. See [Intentional error flags and log auditing](#intentional-error-flags-and-log-auditing)
+  for declarations, subprocess and Docker requirements, log extracts, and audit checks.
 - **No Mockito.** Use real objects, or small hand-written fakes such as `HeldRaftTransportFixture`.
 - **No flaky tests.** A test that fails only sometimes is a defect. Find the race, check whether production
   code has it too, and make the test deterministic.

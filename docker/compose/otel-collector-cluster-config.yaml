@@ -1,5 +1,5 @@
 # OpenTelemetry Collector Configuration for 3-Node Cluster
-# Scrapes metrics from all controller nodes
+# Scrapes metrics from all server nodes
 
 receivers:
   otlp:
@@ -15,26 +15,26 @@ receivers:
   prometheus:
     config:
       scrape_configs:
-        - job_name: 'qraft-controller1'
+        - job_name: 'qraft-server1'
           scrape_interval: 10s
           static_configs:
-            - targets: ['controller1:9464']
+            - targets: ['server1:9464']
               labels:
-                node: 'controller1'
+                node: 'server1'
         
-        - job_name: 'qraft-controller2'
+        - job_name: 'qraft-server2'
           scrape_interval: 10s
           static_configs:
-            - targets: ['controller2:9464']
+            - targets: ['server2:9464']
               labels:
-                node: 'controller2'
+                node: 'server2'
         
-        - job_name: 'qraft-controller3'
+        - job_name: 'qraft-server3'
           scrape_interval: 10s
           static_configs:
-            - targets: ['controller3:9464']
+            - targets: ['server3:9464']
               labels:
-                node: 'controller3'
+                node: 'server3'
 
 processors:
   batch:

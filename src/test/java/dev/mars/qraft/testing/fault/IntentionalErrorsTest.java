@@ -149,7 +149,7 @@ class IntentionalErrorsTest {
 
     @Test
     void aStoppedPeerDeclarationLabelsBothRpcFailuresOnlyForThatPeer() {
-        Logger raft = (Logger) LoggerFactory.getLogger("dev.mars.qraft.controller.raft.RaftNode");
+        Logger raft = (Logger) LoggerFactory.getLogger("dev.mars.qraft.raft.RaftNode");
         List<String> problems = inWindow("SelfTest#stoppedPeer", () -> {
             IntentionalErrorsHelper.expect(RAFT_PEER_UNREACHABLE, "node.b");
             for (String message : List.of("Failed to retrieve vote from node.b",
@@ -184,6 +184,107 @@ class IntentionalErrorsTest {
                 () -> IntentionalErrorsHelper.expect(SELF_TEST_INTENTIONAL_ERROR, "node-b"));
         assertThrows(IllegalArgumentException.class,
                 () -> IntentionalErrorsHelper.expect(RAFT_PEER_UNREACHABLE, " "));
+    }
+
+    @Test
+    void cleanupShutdownLabelsOnlyTheNamedPeerAndDoesNotRequireAnError() {
+        assertEquals(List.of(), inWindow("SelfTest#quietCleanup", () ->
+                IntentionalErrorsHelper.expectPeerShutdownDuringCleanup("node-b")));
+        assertEquals(List.of(), inWindow("SelfTest#cleanup", () -> {
+            IntentionalErrorsHelper.expectPeerShutdownDuringCleanup("node-b");
+            Logger raft = (Logger) LoggerFactory.getLogger("dev.mars.qraft.raft.RaftNode");
+            for (String message : List.of("Raft peer node-b became unreachable during AppendEntries",
+                    "Failed to retrieve vote from node-b")) {
+                ILoggingEvent failure = event(raft, Level.ERROR, message, new IOException("peer stopped"));
+                assertEquals("*** INTENTIONAL ERROR: RAFT_PEER_UNREACHABLE, caused by SelfTest#cleanup *** ",
+                        IntentionalErrorsHelper.label(failure));
+                IntentionalErrorsHelper.record(failure);
+            }
+        }));
+    }
+
+    @Test
+    void cleanupShutdownRejectsOtherPeersSignaturesAndErrorsBeforeTheDeclaration() {
+        Logger raft = (Logger) LoggerFactory.getLogger("dev.mars.qraft.raft.RaftNode");
+        List<String> problems = inWindow("SelfTest#strictCleanup", () -> {
+            IntentionalErrorsHelper.record(event(raft, Level.ERROR,
+                    "Raft peer node-b became unreachable during AppendEntries", null));
+            IntentionalErrorsHelper.expectPeerShutdownDuringCleanup("node-b");
+            IntentionalErrorsHelper.record(event(raft, Level.ERROR,
+                    "Raft peer node-c became unreachable during AppendEntries", null));
+            IntentionalErrorsHelper.record(event(OTHER, Level.ERROR,
+                    "Raft peer node-b became unreachable during AppendEntries", null));
+            IntentionalErrorsHelper.record(event(raft, Level.WARN,
+                    "Raft peer node-b became unreachable during AppendEntries", new IOException("unexpected warning")));
+            IntentionalErrorsHelper.record(event(raft, Level.ERROR, "unrelated failure from node-b", null));
+        });
+        assertEquals(5, problems.size(), problems.toString());
+        assertTrue(problems.getFirst().contains("node-b"));
+    }
+
+    @Test
+    void cleanupShutdownCannotSatisfyTheRequiredLeaderLossDeclaration() {
+        assertEquals(List.of("INTENTIONAL ERROR RAFT_PEER_UNREACHABLE was declared at least 1 time(s)"
+                + " but occurred 0 time(s)"), inWindow("SelfTest#requiredLeaderLoss", () -> {
+            IntentionalErrorsHelper.expect(RAFT_PEER_UNREACHABLE, "node-a");
+            IntentionalErrorsHelper.expectPeerShutdownDuringCleanup("node-b");
+            Logger raft = (Logger) LoggerFactory.getLogger("dev.mars.qraft.raft.RaftNode");
+            IntentionalErrorsHelper.record(event(raft, Level.ERROR,
+                    "Raft peer node-b became unreachable during AppendEntries", null));
+        }));
+    }
+
+    @Test
+    void cleanupShutdownCannotSatisfyAPeerlessRequiredDeclaration() {
+        assertEquals(List.of("INTENTIONAL ERROR RAFT_PEER_UNREACHABLE was declared at least 1 time(s)"
+                + " but occurred 0 time(s)"), inWindow("SelfTest#peerlessRequired", () -> {
+            IntentionalErrorsHelper.expect(RAFT_PEER_UNREACHABLE);
+            IntentionalErrorsHelper.expectPeerShutdownDuringCleanup("node-b");
+            Logger raft = (Logger) LoggerFactory.getLogger("dev.mars.qraft.raft.RaftNode");
+            IntentionalErrorsHelper.record(event(raft, Level.ERROR,
+                    "Raft peer node-b became unreachable during AppendEntries", null));
+        }));
+    }
+
+    @Test
+    void cleanupShutdownDoesNotIncreaseAPeerlessExactCount() {
+        assertEquals(List.of(), inWindow("SelfTest#peerlessExact", () -> {
+            IntentionalErrorsHelper.expect(RAFT_PEER_UNREACHABLE, 2);
+            Logger raft = (Logger) LoggerFactory.getLogger("dev.mars.qraft.raft.RaftNode");
+            // Two functional failures count, including one for the same peer before cleanup begins.
+            IntentionalErrorsHelper.record(event(raft, Level.ERROR,
+                    "Raft peer node-b became unreachable during AppendEntries", null));
+            IntentionalErrorsHelper.record(event(raft, Level.ERROR, "Failed to retrieve vote from node-a", null));
+            IntentionalErrorsHelper.expectPeerShutdownDuringCleanup("node-b");
+            IntentionalErrorsHelper.record(event(raft, Level.ERROR,
+                    "Raft peer node-b became unreachable during AppendEntries", null));
+        }));
+    }
+
+    @Test
+    void cleanupShutdownCannotSatisfyARequiredDeclarationForTheSamePeer() {
+        assertEquals(List.of("INTENTIONAL ERROR RAFT_PEER_UNREACHABLE was declared at least 1 time(s)"
+                + " but occurred 0 time(s)"), inWindow("SelfTest#samePeerRequired", () -> {
+            IntentionalErrorsHelper.expect(RAFT_PEER_UNREACHABLE, "node-b");
+            IntentionalErrorsHelper.expectPeerShutdownDuringCleanup("node-b");
+            Logger raft = (Logger) LoggerFactory.getLogger("dev.mars.qraft.raft.RaftNode");
+            IntentionalErrorsHelper.record(event(raft, Level.ERROR, "Failed to retrieve vote from node-b", null));
+        }));
+    }
+
+    @Test
+    void cleanupShutdownDeclarationDoesNotLeakAndRejectsInvalidPeerIds() {
+        inWindow("SelfTest#oldCleanup", () -> IntentionalErrorsHelper.expectPeerShutdownDuringCleanup("node-b"));
+        List<String> problems = inWindow("SelfTest#nextTest", () -> {
+            Logger raft = (Logger) LoggerFactory.getLogger("dev.mars.qraft.raft.RaftNode");
+            IntentionalErrorsHelper.record(event(raft, Level.ERROR,
+                    "Raft peer node-b became unreachable during AppendEntries", null));
+        });
+        assertEquals(1, problems.size(), problems.toString());
+        assertThrows(IllegalArgumentException.class,
+                () -> IntentionalErrorsHelper.expectPeerShutdownDuringCleanup(" "));
+        assertThrows(IllegalArgumentException.class,
+                () -> IntentionalErrorsHelper.expectPeerShutdownDuringCleanup(null));
     }
 
     @Test

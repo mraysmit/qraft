@@ -19,7 +19,7 @@ package dev.mars.qraft.runtime;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
 
-import dev.mars.qraft.config.ConfigFileResolver;
+import dev.mars.qraft.common.config.ConfigFileResolver;
 
 import java.nio.file.Path;
 import java.util.ArrayList;

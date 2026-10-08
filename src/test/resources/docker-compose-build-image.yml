@@ -4,7 +4,7 @@
 # that the prebuilt compose files can reference.
 
 services:
-  controller:
+  server:
     build:
       context: ../../..
       dockerfile: docker/Dockerfile

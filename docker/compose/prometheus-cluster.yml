@@ -16,23 +16,23 @@ scrape_configs:
     static_configs:
       - targets: ['otel-collector:8888']
 
-  - job_name: 'qraft-controller1'
+  - job_name: 'qraft-server1'
     static_configs:
-      - targets: ['controller1:9464']
+      - targets: ['server1:9464']
         labels:
-          node: 'controller1'
-          service: 'qraft-controller'
+          node: 'server1'
+          service: 'qraft-server'
 
-  - job_name: 'qraft-controller2'
+  - job_name: 'qraft-server2'
     static_configs:
-      - targets: ['controller2:9464']
+      - targets: ['server2:9464']
         labels:
-          node: 'controller2'
-          service: 'qraft-controller'
+          node: 'server2'
+          service: 'qraft-server'
 
-  - job_name: 'qraft-controller3'
+  - job_name: 'qraft-server3'
     static_configs:
-      - targets: ['controller3:9464']
+      - targets: ['server3:9464']
         labels:
-          node: 'controller3'
-          service: 'qraft-controller'
+          node: 'server3'
+          service: 'qraft-server'

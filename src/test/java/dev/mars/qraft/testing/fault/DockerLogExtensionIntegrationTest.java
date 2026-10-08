@@ -27,7 +27,7 @@ class DockerLogExtensionIntegrationTest {
     @Test
     void declaredExternalErrorIsCheckedInTheClassWindow() {
         DockerLogCaptureHelper.capture("extension-fixture", "fixture", """
-                2026-10-06 14:00:00.000 [main] ERROR dev.mars.qraft.controller.raft.RaftNode - Raft peer n2 became unreachable during AppendEntries
+                2026-10-06 14:00:00.000 [main] ERROR dev.mars.qraft.raft.RaftNode - Raft peer n2 became unreachable during AppendEntries
                 """);
     }
 }

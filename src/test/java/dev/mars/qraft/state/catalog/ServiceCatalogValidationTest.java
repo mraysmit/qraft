@@ -1,0 +1,101 @@
+/*
+ * Copyright 2025 Mark Andrew Ray-Smith Cityline Ltd
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package dev.mars.qraft.state.catalog;
+
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * Tests {@link ServiceCatalog} input validation, scope and enabled defaults, unknown health
+ * updates, and moving an instance between services.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-09
+ * @version 1.0
+ */
+class ServiceCatalogValidationTest {
+
+    @Test
+    void rejectsInvalidServiceInstanceFields() {
+        assertThrows(IllegalArgumentException.class, () -> instance("", "payments", 8080));
+        assertThrows(IllegalArgumentException.class, () -> instance("id", "", 8080));
+        assertThrows(IllegalArgumentException.class, () -> instance("id", "payments", 0));
+        assertThrows(IllegalArgumentException.class, () -> instance("id", "payments", 65536));
+        assertThrows(NullPointerException.class, () -> new ServiceInstance(
+                "id", "payments", "node", "127.0.0.1", 8080, null, Map.of(), ServiceHealth.PASSING));
+        assertThrows(NullPointerException.class, () -> new ServiceInstance(
+                "id", "payments", "node", "127.0.0.1", 8080, List.of(), Map.of(), null));
+    }
+
+    @Test
+    void rejectsUnknownHealthUpdates() {
+        ServiceCatalog catalog = new ServiceCatalog();
+
+        assertThrows(IllegalArgumentException.class,
+                () -> catalog.setHealth(
+                        new ServiceInstanceId("default", "default", "node", "missing"),
+                        ServiceHealth.CRITICAL));
+    }
+
+    @Test
+    void defaultsScopeAndEnabledButRejectsSuppliedBlankScope() {
+        ServiceInstance defaults = new ServiceInstance(
+                "id", "payments", "node", "127.0.0.1", 8080,
+                List.of(), Map.of(), ServiceHealth.PASSING);
+
+        assertEquals("default", defaults.tenantId());
+        assertEquals("default", defaults.namespace());
+        assertEquals("", defaults.datacenter());
+        assertEquals("", defaults.region());
+        assertTrue(defaults.enabled());
+        assertThrows(IllegalArgumentException.class, () -> scoped(" ", "default", "dc-1"));
+        assertThrows(IllegalArgumentException.class, () -> scoped("default", " ", "dc-1"));
+        assertThrows(IllegalArgumentException.class, () -> scoped("default", "default", " "));
+    }
+
+    @Test
+    void replacementCanMoveAnInstanceBetweenServices() {
+        ServiceCatalog catalog = new ServiceCatalog();
+        catalog.register(instance("id", "payments", 8080));
+        catalog.register(instance("id", "orders", 8081));
+
+        assertEquals(List.of(), catalog.instances(ServiceKey.inDefaultScope("payments")));
+        assertEquals(List.of("orders"), catalog.services(ServiceInstance.DEFAULT_SCOPE, ServiceInstance.DEFAULT_SCOPE));
+        ServiceInstanceId identity = new ServiceInstanceId("default", "default", "node-1", "id");
+        assertTrue(catalog.deregister(identity));
+        assertFalse(catalog.deregister(identity));
+        assertEquals(List.of(), catalog.services(ServiceInstance.DEFAULT_SCOPE, ServiceInstance.DEFAULT_SCOPE));
+    }
+
+    private static ServiceInstance instance(String id, String name, int port) {
+        return new ServiceInstance(id, name, "node-1", "127.0.0.1", port,
+                List.of(), Map.of(), ServiceHealth.PASSING);
+    }
+
+    private static ServiceInstance scoped(String tenant, String namespace, String datacenter) {
+        return new ServiceInstance("id", "payments", "node", "127.0.0.1", 8080,
+                List.of(), Map.of(), ServiceHealth.PASSING,
+                tenant, namespace, datacenter, "eu-west", true);
+    }
+}

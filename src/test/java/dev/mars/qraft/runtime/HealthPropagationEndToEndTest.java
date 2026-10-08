@@ -20,9 +20,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
-import dev.mars.qraft.agent.QraftAgent;
-import dev.mars.qraft.agent.health.CheckStatus;
-import dev.mars.qraft.agent.health.LocalStatusReporter;
+import dev.mars.qraft.client.QraftAgent;
+import dev.mars.qraft.client.health.CheckStatus;
+import dev.mars.qraft.client.health.LocalStatusReporter;
 import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
@@ -96,6 +96,7 @@ class HealthPropagationEndToEndTest {
     Path temporaryDirectory;
 
     private final List<RuntimeLifecycle> lifecycles = new ArrayList<>();
+    private final Map<RuntimeLifecycle, String> clusterPeers = new LinkedHashMap<>();
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private final AtomicInteger workloadStatus = new AtomicInteger(200);
     private final AtomicReference<CheckStatus> reportedStatus = new AtomicReference<>(CheckStatus.PASSING);
@@ -114,8 +115,8 @@ class HealthPropagationEndToEndTest {
                 .run(this::stopReporting)
                 .run(() -> { if (agent != null) agent.shutdown().get(10, TimeUnit.SECONDS); })
                 .run(() -> holdObservations.set(false));
-        for (RuntimeLifecycle lifecycle : lifecycles.reversed()) {
-            cleanup.run(() -> lifecycle.closeAsync().get(10, TimeUnit.SECONDS));
+        for (RuntimeLifecycle lifecycle : List.copyOf(lifecycles).reversed()) {
+            cleanup.run(() -> closeLifecycleDuringCleanup(lifecycle));
         }
         proxies.forEach(proxy -> cleanup.run(() -> proxy.stop(0)));
         proxyExecutors.forEach(executor -> cleanup.run(executor::close));
@@ -266,14 +267,35 @@ class HealthPropagationEndToEndTest {
                 for (String nodeId : nodeIds) {
                     Path config = temporaryDirectory.resolve(nodeId + ".json");
                     writeServerConfig(config, nodeId, raftPorts);
-                    servers.put(nodeId, launch("server", config));
+                    RuntimeLifecycle server = launch("server", config);
+                    servers.put(nodeId, server);
+                    clusterPeers.put(server, nodeId);
                 }
                 return servers;
             } catch (RuntimeException failure) {
                 if (!causedByBindFailure(failure) || attempt == 3) throw failure;
-                for (RuntimeLifecycle server : servers.values()) server.closeAsync().get(10, TimeUnit.SECONDS);
+                CleanupHelper cleanup = new CleanupHelper();
+                for (RuntimeLifecycle server : servers.values()) {
+                    cleanup.run(() -> closeLifecycleDuringCleanup(server));
+                }
+                cleanup.rethrow();
             }
         }
+    }
+
+    /** Declares a deliberate peer loss only when another live cluster server could report it. */
+    private void closeLifecycleDuringCleanup(RuntimeLifecycle lifecycle) throws Exception {
+        String stoppedPeer = clusterPeers.get(lifecycle);
+        if (stoppedPeer != null && clusterPeers.size() > 1) {
+            IntentionalErrorsHelper.expectPeerShutdownDuringCleanup(stoppedPeer);
+        }
+        lifecycle.closeAsync().get(10, TimeUnit.SECONDS);
+        forgetClosedLifecycle(lifecycle);
+    }
+
+    private void forgetClosedLifecycle(RuntimeLifecycle lifecycle) {
+        clusterPeers.remove(lifecycle);
+        lifecycles.remove(lifecycle);
     }
 
     private static List<Integer> reserveDistinctPorts(int count) throws Exception {
@@ -298,7 +320,9 @@ class HealthPropagationEndToEndTest {
         String formerLeader = leader(cluster.controllers().values());
         assertNotNull(formerLeader);
         IntentionalErrorsHelper.expect(RAFT_PEER_UNREACHABLE, formerLeader);
-        cluster.servers().get(formerLeader).closeAsync().get(10, TimeUnit.SECONDS);
+        RuntimeLifecycle stoppedLeader = cluster.servers().get(formerLeader);
+        stoppedLeader.closeAsync().get(10, TimeUnit.SECONDS);
+        forgetClosedLifecycle(stoppedLeader);
         Map<String, URI> survivors = new LinkedHashMap<>(cluster.controllers());
         survivors.remove(formerLeader);
         return survivors;

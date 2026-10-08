@@ -1,0 +1,112 @@
+/*
+ * Copyright 2025 Mark Andrew Ray-Smith Cityline Ltd
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package dev.mars.qraft.raft;
+
+import dev.mars.qraft.raft.grpc.AppendEntriesRequest;
+import dev.mars.qraft.raft.grpc.AppendEntriesResponse;
+import dev.mars.qraft.raft.grpc.DescribeResponse;
+import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
+import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
+import dev.mars.qraft.raft.grpc.JoinRequest;
+import dev.mars.qraft.raft.grpc.MembershipResponse;
+import dev.mars.qraft.raft.grpc.RemoveServerRequest;
+import dev.mars.qraft.raft.grpc.VoteRequest;
+import dev.mars.qraft.raft.grpc.VoteResponse;
+import dev.mars.qraft.common.async.Future;
+
+import java.util.Map;
+import java.util.function.Consumer;
+
+/**
+ * Interface for Raft transport layer.
+ * 
+ * <p>Implementations handle network communication between Raft nodes,
+ * supporting both request-response RPCs and message-based notifications.
+ * 
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @version 3.0
+ * @since 2025-08-20
+ */
+public interface RaftTransport {
+
+    /**
+     * Starts the transport with a type-safe message handler.
+     * 
+     * @param messageHandler consumer for incoming {@link RaftMessage} instances
+     */
+    void start(Consumer<RaftMessage> messageHandler);
+
+    void stop();
+
+    Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request);
+
+    Future<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request);
+
+    /**
+     * Asks {@code targetId} to describe itself, for a server deciding whether to bootstrap a new cluster. A
+     * transport that cannot reach peers this way fails, and such a server never bootstraps a cluster of more
+     * than one.
+     */
+    default Future<DescribeResponse> describe(String targetId) {
+        return Future.failedFuture(new UnsupportedOperationException(
+                getClass().getSimpleName() + " cannot ask " + targetId + " to describe itself"));
+    }
+
+    /**
+     * Forwards a server's request to join to {@code targetId}, the leader as this server knows it. A transport
+     * that cannot forward fails, and the joining server asks again.
+     */
+    default Future<MembershipResponse> join(String targetId, JoinRequest request) {
+        return Future.failedFuture(new UnsupportedOperationException(
+                getClass().getSimpleName() + " cannot forward a join to " + targetId));
+    }
+
+    /** Forwards an operator's removal of a server to {@code targetId}, the leader as this server knows it. */
+    default Future<MembershipResponse> removeServer(String targetId, RemoveServerRequest request) {
+        return Future.failedFuture(new UnsupportedOperationException(
+                getClass().getSimpleName() + " cannot forward a removal to " + targetId));
+    }
+
+    /**
+     * The Raft addresses of the configured servers other than this one, by name, whenever the configuration
+     * in force changes. A server that joined is in no server's {@code server.raft.nodes}, so its address is
+     * known only from here.
+     */
+    default void useAddresses(Map<String, String> addresses) {
+    }
+
+    /**
+     * Sends an InstallSnapshot RPC to a target node.
+     * Used by leaders to bring lagging followers up to date when the
+     * required log entries have been compacted by a snapshot.
+     *
+     * @param targetId the target node's ID
+     * @param request the InstallSnapshot request (may be a single chunk)
+     * @return Future containing the response
+     */
+    Future<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request);
+
+    /**
+     * Sets the RaftNode reference for direct method invocation.
+     * <p>This allows transports to bypass the message handler and call
+     * RaftNode methods directly for request-response patterns.
+     * 
+     * @param node the RaftNode instance
+     */
+    default void setRaftNode(RaftNode node) {
+    }
+}

@@ -25,10 +25,12 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Supplier;
 
 /**
@@ -81,6 +83,22 @@ public final class IntentionalErrorsHelper {
         synchronized (LOCK) {
             declare(error, 1, Integer.MAX_VALUE);
             WINDOWS.peek().stoppedPeers.put(error, stoppedPeer);
+        }
+    }
+
+    /**
+     * Declares only a peer about to be deliberately stopped during cleanup. RPC failure is optional,
+     * and failures of this peer never count against a functional declaration, even a peerless one.
+     * Call immediately before closing that peer, after the test's functional assertions.
+     */
+    public static void expectPeerShutdownDuringCleanup(String stoppedPeer) {
+        if (stoppedPeer == null || !stoppedPeer.matches("\\S+")) {
+            throw new IllegalArgumentException("stoppedPeer must be a nonblank peer ID without whitespace");
+        }
+        synchronized (LOCK) {
+            WindowHelper window = WINDOWS.peek();
+            if (window == null) throw new IllegalStateException("peer cleanup was declared outside a test");
+            window.cleanupStoppedPeers.add(stoppedPeer);
         }
     }
 
@@ -186,7 +204,10 @@ public final class IntentionalErrorsHelper {
             WindowHelper window = WINDOWS.peek();
             Optional<IntentionalErrorFixture> intentional = classify(event, window);
             if (intentional.isPresent()) {
-                if (window != null) window.seen.merge(intentional.get(), 1, Integer::sum);
+                if (window != null && (intentional.get() != IntentionalErrorFixture.RAFT_PEER_UNREACHABLE
+                        || !matchesCleanupShutdown(event, window))) {
+                    window.seen.merge(intentional.get(), 1, Integer::sum);
+                }
                 return;
             }
             if (event.getLevel().isGreaterOrEqual(Level.ERROR) || event.getThrowableProxy() != null) {
@@ -205,16 +226,33 @@ public final class IntentionalErrorsHelper {
         }
         if (window != null) {
             for (IntentionalErrorFixture declared : window.expected.keySet()) {
-                String stoppedPeer = window.stoppedPeers.get(declared);
-                String message = event.getFormattedMessage();
-                if (declared.matches(event) && (stoppedPeer == null
-                        || message.equals("Failed to retrieve vote from " + stoppedPeer)
-                        || message.equals("Raft peer " + stoppedPeer + " became unreachable during AppendEntries"))) {
+                if (matchesDeclaration(event, declared, window)) {
                     return Optional.of(declared);
                 }
             }
+            if (matchesCleanupShutdown(event, window)) {
+                return Optional.of(IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
+            }
         }
         return Optional.empty();
+    }
+
+    private static boolean matchesCleanupShutdown(ILoggingEvent event, WindowHelper window) {
+        return IntentionalErrorFixture.RAFT_PEER_UNREACHABLE.matches(event)
+                && window.cleanupStoppedPeers.stream()
+                        .anyMatch(peer -> matchesStoppedPeer(event.getFormattedMessage(), peer));
+    }
+
+    private static boolean matchesDeclaration(ILoggingEvent event, IntentionalErrorFixture declared,
+                                               WindowHelper window) {
+        String stoppedPeer = window.stoppedPeers.get(declared);
+        return window.expected.containsKey(declared) && declared.matches(event)
+                && (stoppedPeer == null || matchesStoppedPeer(event.getFormattedMessage(), stoppedPeer));
+    }
+
+    private static boolean matchesStoppedPeer(String message, String stoppedPeer) {
+        return message.equals("Failed to retrieve vote from " + stoppedPeer)
+                || message.equals("Raft peer " + stoppedPeer + " became unreachable during AppendEntries");
     }
 
     private static String describe(ILoggingEvent event) {
@@ -232,6 +270,7 @@ public final class IntentionalErrorsHelper {
         private final Map<IntentionalErrorFixture, int[]> expected = new EnumMap<>(IntentionalErrorFixture.class);
         private final Map<IntentionalErrorFixture, Integer> seen = new EnumMap<>(IntentionalErrorFixture.class);
         private final Map<IntentionalErrorFixture, String> stoppedPeers = new EnumMap<>(IntentionalErrorFixture.class);
+        private final Set<String> cleanupStoppedPeers = new HashSet<>();
         private final List<String> problems = new ArrayList<>();
 
         private WindowHelper(String owner) {

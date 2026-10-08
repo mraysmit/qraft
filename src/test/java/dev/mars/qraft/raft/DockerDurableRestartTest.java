@@ -1,0 +1,590 @@
+/*
+ * Copyright 2025 Mark Andrew Ray-Smith Cityline Ltd
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package dev.mars.qraft.raft;
+
+import dev.mars.qraft.testing.fault.ExpectedDockerErrorsHelper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
+import org.junit.jupiter.api.parallel.ResourceLock;
+import org.testcontainers.containers.ComposeContainer;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+
+import static org.awaitility.Awaitility.await;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * Docker tests for durable restart of a three-node cluster: catalog, term, snapshot and server ID survival,
+ * killed follower and leader recovery, corrupt-follower readiness, and volume ownership.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-09-22
+ * @version 1.1
+ */
+@Tag("docker")
+@ExpectedDockerErrorsHelper({
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE,
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_SNAPSHOT_TRANSFER_INTERRUPTED,
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.WAL_AMBIGUOUS_CORRUPTION,
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_RECOVERY_AMBIGUOUS_CORRUPTION,
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.CONTROLLER_RECOVERY_AMBIGUOUS_CORRUPTION,
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.WAL_DIRECTORY_ALREADY_LOCKED,
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.CONTROLLER_STORAGE_ALREADY_LOCKED
+})
+// Each test waits only on bounded conditions, up to about 270 s in all; the method budget exceeds that,
+// so a failure reports the condition that was not met rather than the module's default method timeout.
+@Timeout(value = 10, unit = TimeUnit.MINUTES)
+@Execution(ExecutionMode.SAME_THREAD)
+@ResourceLock("shared-docker-clusters")
+class DockerDurableRestartTest {
+    private static final String TEST_TENANT = "platform";
+    private static final String TEST_NAMESPACE = "restart";
+    private static final String TEST_NODE = "restart-test";
+    private static final Map<String, String> REGISTRATION_HEADERS = Map.of(
+            "X-Qraft-Tenant", TEST_TENANT,
+            "X-Qraft-Namespace", TEST_NAMESPACE,
+            "X-Qraft-Node", TEST_NODE);
+    /** Catalog reads are confined to one tenant and namespace, so they carry the registrations' scope. */
+    private static final Map<String, String> SCOPE_HEADERS = Map.of(
+            "X-Qraft-Tenant", TEST_TENANT,
+            "X-Qraft-Namespace", TEST_NAMESPACE);
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final HttpClient HTTP = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(5))
+            .build();
+    private static final ComposeContainer CLUSTER = SharedDockerClusterFixture.getThreeNodeCluster();
+
+    @Test
+    void committedCatalogAndTermSurviveWholeClusterRestart() throws Exception {
+        List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(CLUSTER, 3);
+        String serviceName = "restart-" + System.nanoTime();
+        List<String> serviceIds = List.of(serviceName + "-1", serviceName + "-2", serviceName + "-3");
+
+        await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
+        for (int i = 0; i < serviceIds.size(); i++) {
+            registerOnLeader(endpoints, serviceIds.get(i), serviceName, 8100 + i);
+        }
+        await().atMost(Duration.ofSeconds(30))
+                .until(() -> everyNodeContains(endpoints, serviceName, serviceIds));
+        long termBeforeRestart = maximumTerm(endpoints);
+        List<String> serverIdsBeforeRestart = serverIds(endpoints);
+        assertEquals(3, Set.copyOf(serverIdsBeforeRestart).size(), "each server has its own ID: " + serverIdsBeforeRestart);
+
+        SharedDockerClusterFixture.restartCluster(CLUSTER, 3);
+
+        await().atMost(Duration.ofSeconds(90)).until(() -> allNodesReady(endpoints));
+        await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
+        await().atMost(Duration.ofSeconds(30))
+                .until(() -> everyNodeContains(endpoints, serviceName, serviceIds));
+        assertTrue(maximumTerm(endpoints) >= termBeforeRestart,
+                "the recovered cluster must not move its durable term backwards");
+        assertEquals(serverIdsBeforeRestart, serverIds(endpoints),
+                "a server restarted on its own storage keeps its server ID");
+    }
+
+    private static List<String> serverIds(List<String> endpoints) throws Exception {
+        List<String> ids = new ArrayList<>();
+        for (String endpoint : endpoints) {
+            String id = status(endpoint).path("serverId").asText("");
+            assertEquals(id, UUID.fromString(id).toString(), endpoint + " reports a server ID");
+            ids.add(id);
+        }
+        return ids;
+    }
+
+    @Test
+    void snapshotAndPostSnapshotWalSuffixSurviveWholeClusterRestart() throws Exception {
+        List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(CLUSTER, 3);
+        String serviceName = "snapshot-restart-" + System.nanoTime();
+        List<String> snapshottedIds = List.of(
+                serviceName + "-1", serviceName + "-2", serviceName + "-3",
+                serviceName + "-4", serviceName + "-5");
+
+        await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
+        for (int i = 0; i < snapshottedIds.size(); i++) {
+            registerOnLeader(endpoints, snapshottedIds.get(i), serviceName, 8200 + i);
+        }
+        await().atMost(Duration.ofSeconds(30))
+                .until(() -> everyNodeContains(endpoints, serviceName, snapshottedIds));
+        await().atMost(Duration.ofSeconds(30))
+                .until(() -> maximumSnapshotIndex(endpoints) >= 5);
+
+        String suffixId = serviceName + "-suffix";
+        registerOnLeader(endpoints, suffixId, serviceName, 8299);
+        List<String> allIds = new java.util.ArrayList<>(snapshottedIds);
+        allIds.add(suffixId);
+        await().atMost(Duration.ofSeconds(30))
+                .until(() -> everyNodeContains(endpoints, serviceName, allIds));
+
+        SharedDockerClusterFixture.restartCluster(CLUSTER, 3);
+
+        await().atMost(Duration.ofSeconds(90)).until(() -> allNodesReady(endpoints));
+        await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
+        await().atMost(Duration.ofSeconds(30))
+                .until(() -> everyNodeContains(endpoints, serviceName, allIds));
+        assertTrue(maximumSnapshotIndex(endpoints) >= 5,
+                "restart must retain a published snapshot rather than rebuilding only from a full WAL");
+    }
+
+    @Test
+    void killedFollowerReplaysMissedCommitAfterRestart() throws Exception {
+        List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(CLUSTER, 3);
+        await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
+        int leaderIndex = leaderIndex(endpoints);
+        int followerIndex = (leaderIndex + 1) % endpoints.size();
+        String followerService = "server" + (followerIndex + 1);
+        String serviceName = "follower-rejoin-" + System.nanoTime();
+        String serviceId = serviceName + "-1";
+
+        SharedDockerClusterFixture.killContainer(CLUSTER, followerService);
+        try {
+            registerOnLeader(endpoints, serviceId, serviceName, 8301);
+            List<String> liveEndpoints = endpoints.stream()
+                    .filter(endpoint -> !endpoint.equals(endpoints.get(followerIndex)))
+                    .toList();
+            await().atMost(Duration.ofSeconds(30))
+                    .until(() -> everyNodeContains(liveEndpoints, serviceName, List.of(serviceId)));
+        } finally {
+            SharedDockerClusterFixture.startContainer(CLUSTER, followerService);
+        }
+
+        await().atMost(Duration.ofSeconds(60))
+                .until(() -> nodeReady(endpoints.get(followerIndex)));
+        await().atMost(Duration.ofSeconds(30))
+                .until(() -> everyNodeContains(endpoints, serviceName, List.of(serviceId)));
+        assertEquals("FOLLOWER", status(endpoints.get(followerIndex)).path("state").asText());
+    }
+
+    @Test
+    void killedLeaderIsReplacedAndRejoinsWithCompleteCatalog() throws Exception {
+        List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(CLUSTER, 3);
+        await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
+        int oldLeaderIndex = leaderIndex(endpoints);
+        String oldLeaderService = "server" + (oldLeaderIndex + 1);
+        String serviceName = "leader-rejoin-" + System.nanoTime();
+        String serviceId = serviceName + "-1";
+
+        SharedDockerClusterFixture.killContainer(CLUSTER, oldLeaderService);
+        try {
+            await().atMost(Duration.ofSeconds(60))
+                    .until(() -> oneLeaderAmongTwoReachable(endpoints));
+            registerOnLeader(endpoints, serviceId, serviceName, 8401);
+        } finally {
+            SharedDockerClusterFixture.startContainer(CLUSTER, oldLeaderService);
+        }
+
+        await().atMost(Duration.ofSeconds(60))
+                .until(() -> nodeReady(endpoints.get(oldLeaderIndex)));
+        await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
+        await().atMost(Duration.ofSeconds(30))
+                .until(() -> everyNodeContains(endpoints, serviceName, List.of(serviceId)));
+        await().atMost(Duration.ofSeconds(30)).until(() ->
+                "FOLLOWER".equals(status(endpoints.get(oldLeaderIndex)).path("state").asText()));
+    }
+
+    @Test
+    void retryAfterLeaderCrashConvergesToOneCatalogInstance() throws Exception {
+        List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(CLUSTER, 3);
+        await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
+        int oldLeaderIndex = leaderIndex(endpoints);
+        String oldLeaderService = "server" + (oldLeaderIndex + 1);
+        String serviceName = "crash-retry-" + System.nanoTime();
+        String serviceId = serviceName + "-1";
+        String body = registrationBody(serviceId, serviceName, 8501);
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(endpoints.get(oldLeaderIndex) + "/v1/agent/service/register"))
+                .timeout(Duration.ofSeconds(5))
+                .header("Content-Type", "application/json")
+                .header("X-Qraft-Tenant", TEST_TENANT)
+                .header("X-Qraft-Namespace", TEST_NAMESPACE)
+                .header("X-Qraft-Node", TEST_NODE)
+                .PUT(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+
+        CompletableFuture<HttpResponse<String>> firstAttempt =
+                HTTP.sendAsync(request, HttpResponse.BodyHandlers.ofString());
+        SharedDockerClusterFixture.killContainer(CLUSTER, oldLeaderService);
+        try {
+            try {
+                firstAttempt.get(6, TimeUnit.SECONDS);
+            } catch (Exception ignored) {
+                // A response is deliberately not guaranteed across the crash boundary.
+            }
+            await().atMost(Duration.ofSeconds(60))
+                    .until(() -> oneLeaderAmongTwoReachable(endpoints));
+            registerOnLeader(endpoints, serviceId, serviceName, 8501);
+        } finally {
+            SharedDockerClusterFixture.startContainer(CLUSTER, oldLeaderService);
+        }
+
+        await().atMost(Duration.ofSeconds(60)).until(() -> allNodesReady(endpoints));
+        await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
+        await().atMost(Duration.ofSeconds(30))
+                .until(() -> everyNodeContainsExactlyOnce(endpoints, serviceName, serviceId,
+                        TEST_TENANT, TEST_NAMESPACE, TEST_NODE));
+    }
+
+    /**
+     * A follower whose disk is lost restarts with a new server ID. The configuration still records its old one,
+     * so it cannot stand in for the server it replaced: with the other follower stopped, the leader and the
+     * wiped server cannot commit. Before server IDs, the wiped server rejoined as its old self, was refilled, and
+     * was counted, so the write committed.
+     */
+    @Test
+    void aWipedFollowerRejoinsAsANewServerAndIsNotCountedTowardsACommit() throws Exception {
+        ComposeContainer cluster = SharedDockerClusterFixture.startIsolatedThreeNodeCluster();
+        try {
+            List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(cluster, 3);
+            await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
+            int leaderIndex = leaderIndex(endpoints);
+            int wipedIndex = (leaderIndex + 1) % endpoints.size();
+            int otherIndex = (leaderIndex + 2) % endpoints.size();
+            String leader = endpoints.get(leaderIndex);
+            String wipedService = "server" + (wipedIndex + 1);
+            String otherService = "server" + (otherIndex + 1);
+            String oldServerId = status(endpoints.get(wipedIndex)).path("serverId").asText();
+            String serviceName = "wiped-" + System.nanoTime();
+            registerOnLeader(endpoints, serviceName + "-before", serviceName, 8701);
+            await().atMost(Duration.ofSeconds(30))
+                    .until(() -> everyNodeContains(endpoints, serviceName, List.of(serviceName + "-before")));
+
+            SharedDockerClusterFixture.stopContainer(cluster, wipedService);
+            SharedDockerClusterFixture.wipeDataDirectory(cluster, wipedService);
+            SharedDockerClusterFixture.startContainer(cluster, wipedService);
+            await().atMost(Duration.ofSeconds(60)).until(() -> {
+                try {
+                    String id = status(endpoints.get(wipedIndex)).path("serverId").asText("");
+                    return !id.isEmpty() && !id.equals(oldServerId);
+                } catch (Exception notYetUp) {
+                    return false;
+                }
+            });
+
+            SharedDockerClusterFixture.stopContainer(cluster, otherService);
+            long commitBefore = status(leader).path("commitIndex").asLong();
+            HttpResponse<String> write;
+            try {
+                write = send(leader + "/v1/agent/service/register", "PUT",
+                        registrationBody(serviceName + "-during", serviceName, 8702), REGISTRATION_HEADERS);
+            } catch (java.io.IOException timedOut) {
+                write = null;
+            }
+            assertTrue(write == null || write.statusCode() == 503,
+                    "the leader and a wiped server are not a majority: " + (write == null ? "timed out" : write.body()));
+            assertEquals(commitBefore, status(leader).path("commitIndex").asLong(), "nothing was committed");
+
+            SharedDockerClusterFixture.startContainer(cluster, otherService);
+            await().atMost(Duration.ofSeconds(60)).until(() -> {
+                try {
+                    registerOnLeader(endpoints, serviceName + "-after", serviceName, 8703);
+                    return true;
+                } catch (AssertionError notYet) {
+                    return false;
+                }
+            });
+        } finally {
+            SharedDockerClusterFixture.stopAndCapture(cluster);
+        }
+    }
+
+    @Test
+    void corruptFollowerStaysLiveButUnreadyWhileHealthyQuorumServes() throws Exception {
+        ComposeContainer cluster = SharedDockerClusterFixture.startIsolatedThreeNodeCluster();
+        try {
+            List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(cluster, 3);
+            await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
+            int leaderIndex = leaderIndex(endpoints);
+            int corruptIndex = (leaderIndex + 1) % endpoints.size();
+            String corruptService = "server" + (corruptIndex + 1);
+            String serviceName = "corruption-" + System.nanoTime();
+            String serviceId = serviceName + "-1";
+            registerOnLeader(endpoints, serviceId, serviceName, 8601);
+            await().atMost(Duration.ofSeconds(30))
+                    .until(() -> everyNodeContains(endpoints, serviceName, List.of(serviceId)));
+
+            SharedDockerClusterFixture.stopContainer(cluster, corruptService);
+            SharedDockerClusterFixture.overwriteVolumeFileByte(
+                    cluster, corruptService, "/app/data/raft.log", 0);
+            SharedDockerClusterFixture.startContainer(cluster, corruptService);
+
+            List<String> healthyEndpoints = endpoints.stream()
+                    .filter(endpoint -> !endpoint.equals(endpoints.get(corruptIndex)))
+                    .toList();
+            await().atMost(Duration.ofSeconds(60))
+                    .until(() -> everyNodeContains(healthyEndpoints, serviceName, List.of(serviceId)));
+            await().atMost(Duration.ofSeconds(30)).until(() -> {
+                try {
+                    HttpResponse<String> response = send(
+                            endpoints.get(corruptIndex) + "/health/ready", "GET", null);
+                    return response.statusCode() == 503 && response.body().contains("fenced");
+                } catch (Exception ignored) {
+                    return false;
+                }
+            });
+            String logs = cluster.getContainerByServiceName(corruptService).orElseThrow().getLogs();
+            assertTrue(logs.contains("raft.log") && logs.contains("corrupt at byte"), logs);
+        } finally {
+            SharedDockerClusterFixture.stopAndCapture(cluster);
+        }
+    }
+
+    @Test
+    void secondContainerCannotOwnAnActiveNodeVolume() throws Exception {
+        List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(CLUSTER, 3);
+        await().atMost(Duration.ofSeconds(60)).until(() -> allNodesReady(endpoints));
+        await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
+        String serviceName = "lock-owner-" + System.nanoTime();
+        String serviceId = serviceName + "-1";
+        registerOnLeader(endpoints, serviceId, serviceName, 8701);
+        await().atMost(Duration.ofSeconds(30))
+                .until(() -> everyNodeContains(endpoints, serviceName, List.of(serviceId)));
+
+        SharedDockerClusterFixture.DockerCommandResult contender =
+                SharedDockerClusterFixture.runStorageLockContender(CLUSTER, "server1");
+
+        assertTrue(contender.exited(), "the contender must stop on its own, not serve the volume: "
+                + contender.output());
+        assertTrue(contender.exitCode() != 0, contender.output());
+        assertTrue(contender.output().contains("/app/data"), contender.output());
+        assertTrue(contender.output().toLowerCase().contains("lock"), contender.output());
+        assertTrue(nodeReady(endpoints.getFirst()), "original volume owner must remain ready");
+        assertTrue(everyNodeContains(endpoints, serviceName, List.of(serviceId)),
+                "lock contender must not disturb the serving cluster");
+    }
+
+    @Test
+    void partitionedFollowerCatchesUpBySnapshotAndSurvivesRestart() throws Exception {
+        List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(CLUSTER, 3);
+        await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
+        int leaderIndex = leaderIndex(endpoints);
+        int followerIndex = (leaderIndex + 1) % endpoints.size();
+        String leaderService = "server" + (leaderIndex + 1);
+        String followerService = "server" + (followerIndex + 1);
+        List<String> majorityEndpoints = endpoints.stream()
+                .filter(endpoint -> !endpoint.equals(endpoints.get(followerIndex)))
+                .toList();
+        long snapshotBefore = maximumSnapshotIndex(majorityEndpoints);
+        String serviceName = "partition-snapshot-" + System.nanoTime();
+        List<String> serviceIds = new ArrayList<>();
+
+        SharedDockerClusterFixture.isolateContainerNetwork(CLUSTER, followerService);
+        try {
+            for (int i = 0; i < 6; i++) {
+                String serviceId = serviceName + "-" + i;
+                serviceIds.add(serviceId);
+                registerOnLeader(majorityEndpoints, serviceId, serviceName, 8800 + i);
+            }
+            await().atMost(Duration.ofSeconds(30))
+                    .until(() -> everyNodeContains(majorityEndpoints, serviceName, serviceIds));
+            await().atMost(Duration.ofSeconds(30))
+                    .until(() -> maximumSnapshotIndex(majorityEndpoints) > snapshotBefore);
+        } finally {
+            SharedDockerClusterFixture.restoreContainerNetwork(CLUSTER, followerService);
+        }
+
+        await().atMost(Duration.ofSeconds(90)).until(() -> allNodesReady(endpoints));
+        await().atMost(Duration.ofSeconds(60))
+                .until(() -> everyNodeContains(endpoints, serviceName, serviceIds));
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
+            String leaderLogs = CLUSTER.getContainerByServiceName(leaderService).orElseThrow().getLogs();
+            String followerLogs = CLUSTER.getContainerByServiceName(followerService).orElseThrow().getLogs();
+            String diagnostic = "LEADER LOGS:\n" + leaderLogs + "\nFOLLOWER LOGS:\n" + followerLogs;
+            assertTrue(leaderLogs.contains("Sending InstallSnapshot to lagging follower " + followerService),
+                    diagnostic);
+            // The isolated follower can advance its term and replace the original leader on
+            // reconnection, so the receiver's durable install is the stable completion signal.
+            assertTrue(followerLogs.contains("Snapshot installed: snapshotLastIndex="), diagnostic);
+        });
+
+        SharedDockerClusterFixture.stopContainer(CLUSTER, followerService);
+        SharedDockerClusterFixture.startContainer(CLUSTER, followerService);
+        await().atMost(Duration.ofSeconds(60))
+                .until(() -> nodeReady(endpoints.get(followerIndex)));
+        await().atMost(Duration.ofSeconds(30))
+                .until(() -> everyNodeContains(endpoints, serviceName, serviceIds));
+        assertTrue(status(endpoints.get(followerIndex)).path("snapshotLastIndex").asLong() > snapshotBefore);
+    }
+
+    private static void registerOnLeader(
+            List<String> endpoints, String serviceId, String serviceName, int port) throws Exception {
+        String body = registrationBody(serviceId, serviceName, port);
+        for (String endpoint : endpoints) {
+            try {
+                HttpResponse<String> response = send(endpoint + "/v1/agent/service/register", "PUT", body,
+                        REGISTRATION_HEADERS);
+                if (response.statusCode() == 200) return;
+                assertEquals(503, response.statusCode(), response.body());
+            } catch (java.io.IOException ignored) {
+                // A deliberately killed node is unavailable while the surviving quorum elects a leader.
+            }
+        }
+        throw new AssertionError("no leader accepted registration " + serviceId);
+    }
+
+    private static String registrationBody(String serviceId, String serviceName, int port) {
+        return """
+                {"serviceId":"%s","serviceName":"%s",
+                 "address":"127.0.0.1","port":%d,"tags":["restart"],
+                 "metadata":{"scenario":"whole-cluster-restart"},"health":"PASSING"}
+                """.formatted(serviceId, serviceName, port);
+    }
+
+    private static boolean everyNodeContains(
+            List<String> endpoints, String serviceName, List<String> serviceIds) {
+        return endpoints.stream().allMatch(endpoint -> {
+            try {
+                HttpResponse<String> response = send(
+                        endpoint + "/v1/catalog/service/" + serviceName, "GET", null, SCOPE_HEADERS);
+                return response.statusCode() == 200
+                        && serviceIds.stream().allMatch(response.body()::contains);
+            } catch (Exception ignored) {
+                return false;
+            }
+        });
+    }
+
+    private static boolean everyNodeContainsExactlyOnce(
+            List<String> endpoints, String serviceName, String serviceId,
+            String tenantId, String namespace, String nodeId) {
+        return endpoints.stream().allMatch(endpoint -> {
+            try {
+                HttpResponse<String> response = send(
+                        endpoint + "/v1/catalog/service/" + serviceName, "GET", null,
+                        Map.of("X-Qraft-Tenant", tenantId, "X-Qraft-Namespace", namespace));
+                if (response.statusCode() != 200) return false;
+                JsonNode instances = JSON.readTree(response.body());
+                int matches = 0;
+                for (JsonNode instance : instances) {
+                    if (serviceId.equals(instance.path("serviceId").asText())
+                            && tenantId.equals(instance.path("tenantId").asText())
+                            && namespace.equals(instance.path("namespace").asText())
+                            && nodeId.equals(instance.path("nodeId").asText())) matches++;
+                }
+                return matches == 1;
+            } catch (Exception ignored) {
+                return false;
+            }
+        });
+    }
+
+    private static boolean allNodesReady(List<String> endpoints) {
+        return endpoints.stream().allMatch(DockerDurableRestartTest::nodeReady);
+    }
+
+    private static boolean nodeReady(String endpoint) {
+        try {
+            return send(endpoint + "/health/ready", "GET", null).statusCode() == 200;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private static boolean exactlyOneLeader(List<String> endpoints) {
+        int leaders = 0;
+        for (String endpoint : endpoints) {
+            try {
+                JsonNode status = status(endpoint);
+                if ("LEADER".equals(status.path("state").asText())) leaders++;
+            } catch (Exception ignored) {
+                return false;
+            }
+        }
+        return leaders == 1;
+    }
+
+    private static int leaderIndex(List<String> endpoints) throws Exception {
+        for (int i = 0; i < endpoints.size(); i++) {
+            if ("LEADER".equals(status(endpoints.get(i)).path("state").asText())) return i;
+        }
+        throw new AssertionError("cluster has no leader");
+    }
+
+    private static boolean oneLeaderAmongTwoReachable(List<String> endpoints) {
+        int reachable = 0;
+        int leaders = 0;
+        for (String endpoint : endpoints) {
+            try {
+                JsonNode nodeStatus = status(endpoint);
+                reachable++;
+                if ("LEADER".equals(nodeStatus.path("state").asText())) leaders++;
+            } catch (Exception ignored) {
+                // The killed node is expected to be unreachable.
+            }
+        }
+        return reachable == 2 && leaders == 1;
+    }
+
+    private static long maximumTerm(List<String> endpoints) throws Exception {
+        long maximum = -1;
+        for (String endpoint : endpoints) {
+            maximum = Math.max(maximum, status(endpoint).path("term").asLong(-1));
+        }
+        assertTrue(maximum >= 0, "raft status must expose the current term");
+        return maximum;
+    }
+
+    private static long maximumSnapshotIndex(List<String> endpoints) throws Exception {
+        long maximum = -1;
+        for (String endpoint : endpoints) {
+            maximum = Math.max(maximum, status(endpoint).path("snapshotLastIndex").asLong(-1));
+        }
+        return maximum;
+    }
+
+    private static JsonNode status(String endpoint) throws Exception {
+        HttpResponse<String> response = send(endpoint + "/raft/status", "GET", null);
+        assertEquals(200, response.statusCode(), response.body());
+        return JSON.readTree(response.body());
+    }
+
+    private static HttpResponse<String> send(
+            String uri, String method, String body) throws Exception {
+        return send(uri, method, body, Map.of());
+    }
+
+    private static HttpResponse<String> send(
+            String uri, String method, String body, Map<String, String> headers) throws Exception {
+        HttpRequest.Builder request = HttpRequest.newBuilder()
+                .uri(URI.create(uri))
+                .timeout(Duration.ofSeconds(5));
+        headers.forEach(request::header);
+        if (body == null) {
+            request.method(method, HttpRequest.BodyPublishers.noBody());
+        } else {
+            request.header("Content-Type", "application/json")
+                    .method(method, HttpRequest.BodyPublishers.ofString(body));
+        }
+        return HTTP.send(request.build(), HttpResponse.BodyHandlers.ofString());
+    }
+}

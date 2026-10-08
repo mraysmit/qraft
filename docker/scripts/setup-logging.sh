@@ -17,9 +17,9 @@ scrape_configs:
   - job_name: prometheus
     static_configs:
       - targets: ['localhost:9090']
-  - job_name: qraft-controllers
+  - job_name: qraft-servers
     static_configs:
-      - targets: ['controller1:8080', 'controller2:8080', 'controller3:8080']
+      - targets: ['server1:8080', 'server2:8080', 'server3:8080']
     metrics_path: /metrics
     scrape_interval: 5s
 EOF
