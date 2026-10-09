@@ -70,7 +70,7 @@ recovery case remained red:
 timed out after 90 seconds while waiting for the restarted follower to install and expose the leader's
 snapshot state. This is a test/product integration result rather than a Jenkins configuration failure.
 Finding its cause is a task in Phase 6 of
-[the single-POM task list](../docs-design/task-list-single-pom-and-quorus-removal-2026-10-04.md).
+[the single-POM task list](../docs-design/task-list-single-pom-and-quorus-removal-2026-10-09.md).
 Until it is found, the complete pipeline has not passed on this server.
 
 ## Historical: the memory fault, 2026-10-03

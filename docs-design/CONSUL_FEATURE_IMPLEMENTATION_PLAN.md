@@ -350,7 +350,7 @@ merged into one Maven project on 2026-10-04.
 - [ ] Implement ACL tokens, policies, token validation, and audit events
   (phase 7; item 9).
 - [ ] Implement server membership change. Decided 2026-09-29, and in progress
-  in [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md):
+  in [`task-list-raft-membership-changes-2026-10-09.md`](task-list-raft-membership-changes-2026-10-09.md):
   server IDs, the configuration in the log, and non-voter promotion are done.
 - [ ] Decide on and implement DNS discovery and persisted generated node
   identity (item 10).

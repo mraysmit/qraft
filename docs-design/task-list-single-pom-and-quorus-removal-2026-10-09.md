@@ -1,15 +1,16 @@
 # Task List: Single POM and Removal of the Quorus Leftovers
 
 **Date:** 2026-10-04
+**Last updated:** 2026-10-09 (Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
 **Status:** In progress. This is the current task list. It started on 2026-10-04 at the user's request, before the membership list's Step 4 close-out gate.
-**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09; it is not committed yet. Phase 3 is implemented and verified complete on 2026-10-08. The next coding task is Phase 4's first item: create immutable legacy node-command, capability-command, job-status, and node-snapshot fixtures before removing the old model. Phase 2A was accepted on 2026-10-08; the review of that day found one of its tasks still open, the audit of child JVMs that cannot audit themselves (Phase 2A, "Tasks"). Phases 0 to 2 were done 2026-10-04.
+**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09; it is not committed yet. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4's first item, the legacy node fixtures, was done on 2026-10-09. The next coding task is Phase 4's second item: replace the node model with a Consul-shaped node. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
 **Last reviewed:** 2026-10-08, against the code at commit `9a4adf0`, with the other four task lists. The status table in section 4 and every item marked "review of 2026-10-08" come from that review. No build was run for it. The logs that the Phase 2A and Phase 3 records cite were written in another working tree and were not available, so their counts were checked for arithmetic only. The earlier review of 2026-10-05 was against `24beac3`; its items keep their date.
 **Order of work:**
 - The membership list's Step 4 close-out gate is the first task of Phase 7 here.
 - After this list, the membership list resumes at its Step 5, on the new layout, and runs to its end.
-- [`task-list-consul-style-client-2026-10-04.md`](task-list-consul-style-client-2026-10-04.md) follows the membership list. Decided 2026-10-05.
+- [`task-list-consul-style-client-2026-10-09.md`](task-list-consul-style-client-2026-10-09.md) follows the membership list. Decided 2026-10-05.
 
-**Related:** [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md) (interrupted by this list), [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md)
+**Related:** [`task-list-raft-membership-changes-2026-10-09.md`](task-list-raft-membership-changes-2026-10-09.md) (interrupted by this list), [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md), section 2.4: inherited components must not remain without a clear role
 
 ## 1. Goal
@@ -22,7 +23,7 @@ runtime layer, or its unused tooling.
 
 1. **Client mode stays and becomes a full Consul-style client.** Decided
    2026-10-04, for VMs and bare metal. That work is
-   [`task-list-consul-style-client-2026-10-04.md`](task-list-consul-style-client-2026-10-04.md).
+   [`task-list-consul-style-client-2026-10-09.md`](task-list-consul-style-client-2026-10-09.md).
    This list removes only the client's Quorus-era node model.
 2. **One POM, one artifact.** The root `pom.xml` is the only POM and builds
    `target/qraft.jar`. Module boundaries become package boundaries, enforced by
@@ -81,10 +82,10 @@ rules and extracts from that run.
 | 0. Baseline | Done; the evidence was copied into the repository on 2026-10-08 | 3 of 3 | none before 2026-10-08: its output was in `logs/` only |
 | 1. Delete dead code and files | Done; verified against the code | 6 of 6 | `bbf5046` |
 | 2. Single POM | Done; verified against the code | 7 of 7 | `04dddeb` |
-| 2A. Intentional errors labelled | Accepted 2026-10-08; one task open, for child JVMs that cannot audit themselves | 8 of 9 | `24beac3` to `077e930` |
+| 2A. Intentional errors labelled | Done: accepted 2026-10-08; the audit of child JVMs added 2026-10-09 | 9 of 9 | `24beac3` to `26a3570` |
 | 3. Package layout | Done; verified 2026-10-08. One task added by the review: the comparison of test names with the Phase 0 baseline | 10 of 11 | `9a4adf0` |
 | 3A. One word for each mode | Added and done 2026-10-09; verified the same day | 5 of 5 | not committed |
-| 4. Node model and API | Not started | 0 of 7 | |
+| 4. Node model and API | Started 2026-10-09: the legacy node fixtures are written | 1 of 7 | not committed |
 | 5. Configuration and version | Not started | 0 of 6 | |
 | 6. Docker and observability | Not started | 0 of 10 | |
 | 7. Async layer | Not started | 0 of 6 | |
@@ -499,7 +500,7 @@ conversion task is done. This phase is committed in parts, unlike the others.
   once when its daemon returned HTTP 503 and stopped, the complete Docker suite
   passed 24 tests with no failures or errors. The final default regression suite
   passed 830 tests with no failures or errors.
-- [ ] Child JVMs, by the same rule as containers (review of 2026-10-05). Five
+- [x] Child JVMs, by the same rule as containers (review of 2026-10-05). Five
   test classes start a Java process whose output goes to a file in a
   temporary directory, where no window sees it and the test log does not
   hold it:
@@ -526,7 +527,7 @@ conversion task is done. This phase is committed in parts, unlike the others.
     checkpoint, and the client of `CrashedAgentExpiryEndToEndTest` is killed,
     so neither returns through the audit.
 
-  In progress (2026-10-09). `SubprocessOutputAuditHelper.requireNoErrors`
+  Done 2026-10-09. `SubprocessOutputAuditHelper.requireNoErrors`
   gives the parent test the check. It fails the calling test for an ERROR
   line, a Logback status error, or an uncaught exception in a finished
   child's console output, and quotes each error with its stack trace. A child
@@ -596,9 +597,20 @@ conversion task is done. This phase is committed in parts, unlike the others.
     The Docker, end-to-end, and slow suites were not run: the change is in
     test code only. `CrashedAgentExpiryEndToEndTest`, the one tagged class
     it touches, ran in the GREEN run above.
-  - Still to do: mutations in the isolated copy. They are a crash writer and
-    a client that log an ERROR, which must fail their tests, and an audit
-    that drops stack traces, which must fail the eighth test.
+  - Mutations, 2026-10-09, in an isolated copy of the committed code
+    (`5a00975`) with five faults: each of the three crash writers logs an
+    ERROR, the client logs an ERROR at launch, and the audit drops stack
+    traces. The five classes ran 31 tests with 17 failures, the 17 predicted
+    (`logs/qraft-subprocess-audit-mutants-2026-10-09_16-36-45-389.log`):
+    - 3, 7, and 4 in the three recovery classes, which is every test that
+      launches a crash writer;
+    - both tests of the class that kills its client;
+    - the stack-trace test of `SubprocessOutputAuditHelperTest`.
+
+    The first sixteen failed with the audit's own message, naming the helper
+    JVM and quoting the planted line. The 14 tests that launch no helper JVM
+    passed. So the audit is called wherever a helper JVM is launched, and
+    the eighth test fails when stack traces are dropped.
 - [x] After each suite, check its log file: every ERROR line carries a label.
   This also covers anything logged after the last test class closed, which no
   window sees.
@@ -1025,13 +1037,52 @@ history, and descriptions of Consul's own software.
 
 ### Phase 4. Node model and API
 
-- [ ] First, write the legacy fixtures from the code as it stands (review of
+- [x] First, write the legacy fixtures from the code as it stands (review of
   2026-10-05). Only four catalog fixtures and their manifest exist, under
   `src/test/resources/fixtures/catalog/`. There is none for a node command, an
   `UpdateCapabilities` command, a job-system status, or a snapshot holding
   nodes. Once the old model is removed, nothing can write the old format, so
   the fixtures of decision 4 are generated before any other task here, and
   committed with a manifest like the catalog's.
+
+  Done 2026-10-09. Eleven fixtures, under
+  `src/test/resources/fixtures/node/`:
+  - eight node commands, from the production codec: a registration with
+    every field set, a minimal one, a deregistration, a status update, a
+    capabilities update, a heartbeat with a status, a sequence, and a
+    registration identifier, a plain heartbeat, and an expiry;
+  - two status updates holding the job system's four statuses. The codec
+    never writes those, so they are built from the generated protocol
+    classes;
+  - one snapshot from `QraftStateStore.takeSnapshot`, holding a fully
+    described node that has had a heartbeat, and a minimal node.
+
+  `LegacyNodeFixtureTest`, seven tests, decodes and restores them with exact
+  fields and checks their digests. `MANIFEST.md` beside them records the
+  digests and how they were made. They were written once, by
+  `LegacyNodeFixtureWriterFixture`, which refused to replace a file and was
+  deleted afterwards. `.gitattributes` now marks the fixtures' `.bin` files
+  as binary, so that no checkout can convert a line-feed byte inside one.
+
+  Two limits, known and not papered over:
+  - the snapshot uses today's key names. The key names from before
+    Phase 3A are covered by the catalog snapshot fixture, whose node has no
+    capabilities;
+  - in a snapshot, only the job system's `active` status has a fixture, the
+    catalog's. Today's code cannot write the other three into a snapshot,
+    and none was made up.
+
+  Verified 2026-10-09.
+  - The writer ran once and wrote the eleven files
+    (`logs/qraft-node-fixtures-write-2026-10-09_16-32-26-930.log`).
+  - `LegacyNodeFixtureTest` and `LegacyCatalogFixtureTest` passed, 7 and 3
+    (`logs/qraft-node-fixtures-test-2026-10-09_16-34-18-759.log`).
+  - `mvn install` passed: 891 tests, every coverage gate met
+    (`logs/qraft-tests-2026-10-09_16-34-48-739.log`). The 891 are the 884 of
+    Phase 3A and these 7. Its 20 retained files hold 257 ERROR headers, every
+    one flagged, and no unflagged error or exception.
+  - The seven tests passed at once, as tests of existing behaviour do. Their
+    mutation evidence belongs to this phase's exit.
 - [ ] Replace `ClientInfo`, `ClientCapabilities`, `ClientSystemInfo`, and
   `ClientNetworkInfo` with a Consul-shaped node: name, address, datacenter,
   region, metadata, status, and server-stamped times. The client list

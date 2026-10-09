@@ -1,11 +1,11 @@
 # Task List: ACLs and Tokens
 
 **Date:** 2026-10-05
-**Status:** Proposed. Section 4's items are recommendations to confirm or change, except the two points marked "Decided 2026-10-09", in proposals 11 and 12. One point in proposal 11 is marked open. No code exists.
-**Proposed start:** after [`task-list-consul-style-client-2026-10-04.md`](task-list-consul-style-client-2026-10-04.md) (proposal 15).
-**Last updated:** 2026-10-09 (two points decided: the authorize call, and revoking the management token. Still open: who holds `node:write` when an application registers a service, with what the code shows for each option)
+**Status:** Proposed. Section 4's items are recommendations to confirm or change, except the points marked "Decided 2026-10-09", in proposals 11, 12, and 14. No point is open. No code exists.
+**Proposed start:** after [`task-list-consul-style-client-2026-10-09.md`](task-list-consul-style-client-2026-10-09.md) (proposal 15).
+**Last updated:** 2026-10-09 (the file renamed to the date of its last change; four points decided: the authorize call; revoking the management token; Consul's rule for registering a service, which needs `service:write` alone on a registered node; and a client certificate on the server's HTTP listener, for the transport security list)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 7.3, 12, 15, 16 and 22
-**Related:** the client list's decisions 6 and 8; decision 6 of [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md), the operator token; item 9 of [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md); phase 7 of [`CONSUL_FEATURE_IMPLEMENTATION_PLAN.md`](CONSUL_FEATURE_IMPLEMENTATION_PLAN.md)
+**Related:** the client list's decisions 6 and 8; decision 6 of [`task-list-raft-membership-changes-2026-10-09.md`](task-list-raft-membership-changes-2026-10-09.md), the operator token; item 9 of [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md); phase 7 of [`CONSUL_FEATURE_IMPLEMENTATION_PLAN.md`](CONSUL_FEATURE_IMPLEMENTATION_PLAN.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
 ## 1. Goal
@@ -17,8 +17,8 @@ identity". Today the server does exactly that.
 When this list is complete:
 
 - every request to a server is made under a token, or as the anonymous token;
-- a client can register, renew, and publish for its own node only, and for the
-  services its token allows;
+- a client can register and renew its own node only, and can register and
+  publish for the services its token allows;
 - the node identity rules of the client list's decision 8 are enforced, not
   only detected: a takeover or a rename needs a token that may write that name;
 - operator actions use the same tokens, in place of the one shared operator
@@ -140,6 +140,12 @@ Sources:
 - [ACL configuration reference](https://developer.hashicorp.com/consul/docs/reference/agent/configuration-file/acl)
 - [ACL HTTP API](https://developer.hashicorp.com/consul/api-docs/acl) and
   [token endpoints](https://developer.hashicorp.com/consul/api-docs/acl/tokens)
+- [Consul security model](https://developer.hashicorp.com/consul/docs/security/security-models/core)
+  and [general configuration](https://developer.hashicorp.com/consul/docs/reference/agent/configuration-file/general),
+  read on 2026-10-09 for how Consul limits the use of a stolen token: its
+  HTTP API binds to `127.0.0.1` by default (`client_addr`), `verify_incoming`
+  makes it require a client certificate, and `allow_write_http_from` limits
+  write calls to listed networks
 - [Consul `catalog_endpoint.go`](https://github.com/hashicorp/consul/blob/main/agent/consul/catalog_endpoint.go)
 - [Anti-entropy](https://developer.hashicorp.com/consul/docs/architecture/anti-entropy)
 
@@ -240,7 +246,7 @@ so and why.
     | Register, renew, or deregister a node | `node:write` on the node name |
     | Take over a node name (client decision 8) | `node:write` on that name |
     | Rename a node | `node:write` on the old name and on the new |
-    | Register or deregister a service | `service:write` on the service name in its scope, and `node:write` on its node |
+    | Register or deregister a service | `service:write` on the service name in its scope. A request that also creates or changes the node needs `node:write` on it |
     | Publish a check observation | `service:write` for a service's check; `node:write` for a node's |
     | Catalog and health reads | `service:read` or `node:read`; lists are filtered |
     | `GET /v1/operator/raft/configuration`, `/raft/status` | `operator:read` |
@@ -267,54 +273,40 @@ so and why.
     The review of 2026-10-08 added the row: proposal 13 introduces the call
     without saying what it needs.
 
-    **Open, found by the review of 2026-10-08: who holds `node:write` when an
-    application registers a service.** As written, the table cannot hold
-    together with proposals 9 and 13 and Phase 9's first scenario:
-    - the row for registering a service needs `service:write` and
-      `node:write` on one token;
-    - a service identity (proposal 9) gives `node:read` only;
-    - a service registered through the local API is synced under the token it
-      was registered with (proposal 13).
-
-    So an application that holds a service identity is refused. The ways out:
-    - **A. Two credentials on a synced service write.** The client sends its
-      own token and the registration's token. The server takes `node:write`
-      from the client's own and `service:write` from the registration's. A
-      caller that talks to a server directly needs both grants on its one
-      token.
-      - It keeps Phase 7's guard, that a token for node A cannot register a
-        service on node B, and section 1's "for its own node only".
-      - It costs a second header on the client's protocol, and a departure
-        from Consul. To be consistent it covers every service-scoped write
-        the client syncs: registering, deregistering, and a service's check
-        observations, which the table above lets through on `service:write`
-        alone.
-    - **B. Consul's rule** (section 3). `node:write` is needed only to create
-      or change the node; a service on an existing, unchanged node needs
-      `service:write` alone. It needs one token and no new header. It drops
-      that Phase 7 guard: a holder of `service:write` on a name can add an
-      instance of it on any registered node.
-    - **C. Consul's rule, with the client authoritative for its node.** As B,
-      and the client also deregisters the services on its node that it did
-      not register. A planted instance then lasts until the client on that
-      node next reconciles. It is new client behaviour, and it does nothing
-      for a node with no process running in client mode.
-
-    Two differences from Consul weigh on B (checked in the code on
-    2026-10-09):
-    - The server's HTTP API listens on every interface (`HttpApiServer`),
-      where Consul's binds to `127.0.0.1` by default. Under B, a stolen
-      service token works from anywhere that reaches a server.
-    - The client's `ServiceReconciler` deregisters only what it registered
-      itself. It never removes another caller's service from its node, so
-      under B a planted instance stays until someone deregisters it. Consul
-      treats its own agent's view of its node as authoritative when it syncs.
-
-    Recommended: A, because section 1 promises that a client registers "for
-    its own node only", and because of those two differences. B is the
-    simpler design, and the right one if that promise is not worth a second
-    credential; section 1 and Phase 7 then change. Decide before Phase 4.
-    The row, proposal 13, Phase 6, and Phase 7 follow the choice.
+    **Decided 2026-10-09: Consul's rule for registering a service.**
+    `node:write` is needed only to create or change a node. A service on a
+    node that is already registered, with the node's details unchanged, needs
+    `service:write` alone (section 3). The row above reads accordingly.
+    - **What it settled.** As first written, the table could not hold with
+      proposals 9 and 13. It asked one token for `service:write` and
+      `node:write`; a service identity gives only `node:read`; and a service
+      registered through the local API is synced under the application's
+      token. An application holding a service identity would have been
+      refused, and Phase 9's first scenario with it. The review of
+      2026-10-08 found this.
+    - **Not a requirement.** No decision required a service registration to
+      be tied to a node. The words "for its own node only" were in section 1
+      of this proposal and nowhere else. The design's section 15 asks that
+      the server not trust a caller's claim to be a node, and creating or
+      changing a node still needs `node:write`. Consul has no such rule.
+    - **What it allows.** A holder of `service:write` on a name can add an
+      instance of that service on any registered node. Section 1 and Phase 7
+      no longer say otherwise.
+    - **A stolen service token** works from anywhere that reaches a server.
+      Consul limits that outside its ACL rules: its HTTP API binds to
+      `127.0.0.1` by default, and when opened to a network it can require a
+      client certificate. Qraft's servers must listen on a network, because
+      clients reach them over the HTTP API (client list, decision 2). So
+      Qraft takes the second: proposal 14's transport security list makes
+      the server's HTTP listener require a client certificate.
+    - **A planted instance** stays until someone deregisters it: the client's
+      `ServiceReconciler` deregisters only what it registered itself. Making
+      the client remove the services on its node that it did not register is
+      left for later, if it is wanted.
+    - **Rejected: two credentials on a synced service write,** the client's
+      own token for the node and the registration's for the service. It
+      would have tied a registration to a node, at the cost of a second
+      header on every service-scoped write and a departure from Consul.
 
 ### Configuration and bootstrap
 
@@ -376,6 +368,13 @@ so and why.
     traffic. Until then, a server with ACLs enabled on a listener without TLS
     logs one startup warning, as the administrative interface does for being
     unauthenticated.
+
+    **Decided 2026-10-09: that list makes the server's HTTP listener require
+    a client certificate.** HTTPS alone hides a token on the wire. A required
+    certificate also stops a stolen token being used from a machine that has
+    none, which is the protection proposal 11 leaves to this list. Clients,
+    operators' tools, and the administrative interface's users each need a
+    certificate then; that list says how they get one.
 
 ### Order
 
@@ -502,14 +501,15 @@ With ACLs disabled, every existing test passes unchanged.
   sync that service under it.
 - [ ] Authorize the client's own endpoints through the server.
 
-**Exit:** `ClientServerContractTest` (`AgentControllerContractTest` until
-2026-10-08) covers every client call with a sufficient token, an insufficient
-one, and none.
+**Exit:** `ClientServerContractTest` covers every client call with a
+sufficient token, an insufficient one, and none.
 
 ### Phase 7. Node identity is enforced
 
-- [ ] A token for node A cannot register, renew, take over, or rename node B,
-  and cannot register a service on node B.
+- [ ] A token for node A cannot register, renew, take over, or rename node B.
+- [ ] A token with `service:write` and no `node:write` cannot create a node
+  or change one, and can register its service on a node that is already
+  registered (proposal 11, decided 2026-10-09).
 - [ ] A takeover and a rename succeed with the right token, under the rules of
   the client list's decision 8.
 
@@ -546,7 +546,8 @@ consecutive runs; audits as in the other lists.
 
 ## 7. Out of scope
 
-- TLS and mutual TLS, and so the Raft port (proposal 14's following list).
+- TLS and mutual TLS, and so the Raft port and the client certificate on the
+  server's HTTP listener (proposal 14's following list).
 - Roles, authentication methods and login, and any templated policy beyond
   the two identities.
 - `key` and `session` rules, which the key/value and sessions lists add.

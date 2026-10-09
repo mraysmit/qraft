@@ -4,8 +4,8 @@
 **Active work:** None. Steps 1 to 8 are complete. Archived 2026-10-02 with the user's agreement.
 **Source review:** [`QRAFT_TEST_SUITE_REVIEW_2026-09-27.md`](../../docs-design/QRAFT_TEST_SUITE_REVIEW_2026-09-27.md), sections 3 to 7
 **Predecessor, run alongside:** [`task-list-platform-hygiene-and-readiness-2026-09-27.md`](task-list-platform-hygiene-and-readiness-2026-09-27.md), archived 2026-09-28
-**Successor:** [`task-list-raft-membership-changes-2026-09-29.md`](../../docs-design/task-list-raft-membership-changes-2026-09-29.md)
-**Paused:** [`task-list-embedded-admin-interface-2026-09-27.md`](../../docs-design/task-list-embedded-admin-interface-2026-09-27.md), after its Step 1
+**Successor:** [`task-list-raft-membership-changes-2026-10-09.md`](../../docs-design/task-list-raft-membership-changes-2026-10-09.md)
+**Paused:** [`task-list-embedded-admin-interface-2026-10-09.md`](../../docs-design/task-list-embedded-admin-interface-2026-10-09.md), after its Step 1
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
 This was the current task list for the project until 2026-09-29. When the
@@ -906,7 +906,7 @@ Found in Step 8. Both change Raft behaviour, so they need a decision first.
    - Protection from a removed or misconfigured server belongs to the
      leader-stickiness rule or pre-vote (thesis section 4.2.3).
    - Membership changes now have their own list:
-     [`task-list-raft-membership-changes-2026-09-29.md`](../../docs-design/task-list-raft-membership-changes-2026-09-29.md).
+     [`task-list-raft-membership-changes-2026-10-09.md`](../../docs-design/task-list-raft-membership-changes-2026-10-09.md).
 2. **The maximum term.** One vote request at `Long.MAX_VALUE` moves a node to
    that term. The node's next election would overflow the term to a negative
    number. A node could instead refuse terms that leave no room for another
