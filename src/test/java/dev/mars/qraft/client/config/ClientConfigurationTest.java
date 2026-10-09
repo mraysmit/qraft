@@ -287,6 +287,13 @@ class ClientConfigurationTest {
                 """));
         assertEquals("Unknown client setting: hostname", removed.getMessage(),
                 "a node has no host name, so the setting that named one is gone");
+        IllegalArgumentException versionSetting = assertThrows(IllegalArgumentException.class,
+                () -> ClientConfiguration.fromJson("""
+                {"version":1,"client":{"id":"a","version":"1.0.0"},
+                 "servers":{"urls":["http://localhost:8080"]}}
+                """));
+        assertEquals("Unknown client setting: version", versionSetting.getMessage(),
+                "a client reports the version of its build, so no setting names one");
     }
 
     @Test

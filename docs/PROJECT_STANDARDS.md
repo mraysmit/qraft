@@ -179,12 +179,12 @@ Both modes use the shipped `logback.xml`. Startup selects the runtime mode and t
 
 ## 7. Standard Maven verification command
 
-Run builds and tests in a terminal the user can watch, with combined output
-captured by `Tee-Object` under the central `logs/` directory. That terminal is
-the VS Code integrated terminal, or one console window that an assistant opens
-once and reuses. An assistant may run the commands itself there, and reads the
-retained log; it must not open several windows or launch a hidden background
-build.
+Run builds and tests in the visible VS Code integrated terminal, with combined
+output captured by `Tee-Object` under the central `logs/` directory. An assistant
+must not run builds or open a console unless the user specifically requests it:
+it provides the command for that terminal and reads the retained log. When the
+user does request a run, the assistant uses one visible console window, reuses
+it, and never launches a hidden background build.
 
 For change completion, run the default build and coverage gates from the
 repository root with PowerShell:

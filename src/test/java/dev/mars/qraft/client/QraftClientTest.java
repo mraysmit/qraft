@@ -26,6 +26,7 @@ import dev.mars.qraft.client.catalog.ServerRetryPolicy;
 import dev.mars.qraft.client.config.ClientConfiguration;
 import dev.mars.qraft.client.service.RegistrationClient;
 import dev.mars.qraft.common.Node;
+import dev.mars.qraft.common.QraftVersion;
 import dev.mars.qraft.common.ServiceDefinition;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -89,7 +90,7 @@ class QraftClientTest {
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
                 .clientId("client-1").address("127.0.0.1").clientPort(0)
-                .datacenter("dc-1").region("eu-west").version("1.2.3")
+                .datacenter("dc-1").region("eu-west")
                 .serverUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000)
                 .build();
@@ -110,8 +111,9 @@ class QraftClientTest {
             assertEquals("eu-west", node.path("region").asText());
             assertEquals(Set.of(Node.VERSION_METADATA_KEY, Node.REGISTRATION_ID_METADATA_KEY),
                     Set.copyOf(fieldNames(node.path("metadata"))));
-            assertEquals("1.2.3", node.path("metadata").path(Node.VERSION_METADATA_KEY).asText(),
-                    "the client's version travels in the node's metadata");
+            assertEquals(QraftVersion.DEVELOPMENT, node.path("metadata").path(Node.VERSION_METADATA_KEY).asText(),
+                    "the node's metadata carries the version of the client's build, which a test run does not"
+                            + " take from the jar");
         } finally {
             client.shutdown().get(10, TimeUnit.SECONDS);
         }

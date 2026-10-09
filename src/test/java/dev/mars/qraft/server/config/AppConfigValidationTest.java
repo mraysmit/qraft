@@ -122,6 +122,15 @@ class AppConfigValidationTest {
         assertTrue(logging.getMessage().startsWith("logging.directory"), logging.getMessage());
     }
 
+    @Test
+    void theApplicationVersionSettingIsGone() {
+        IllegalArgumentException refused = assertThrows(IllegalArgumentException.class,
+                () -> config("\"applicationVersion\":\"2.0-ext\""));
+
+        assertEquals("Unknown server setting: applicationVersion", refused.getMessage(),
+                "a server reports the version of its build, so no setting names one");
+    }
+
     private static void accepted(String server) {
         assertDoesNotThrow(() -> config(server).validate(), server);
     }

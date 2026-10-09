@@ -75,11 +75,10 @@ does not prove Maven passed. The shared Logback test configuration also writes
 `logs/qraft-maven-tests-<timestamp>.log`; that application log complements the
 captured Maven output.
 
-The terminal is one you can watch: the VS Code integrated terminal, or one console window that an
-assistant opens once and reuses for every run. Since 2026-10-09 an assistant may run the commands itself
-there. It must never run a build hidden in the background, and must never open a second window while one
-is open. Whoever runs a command, it goes through `Tee-Object` as above, and the results are read from the
-log.
+The terminal is the VS Code integrated terminal. An assistant must not run builds or open a console unless
+you specifically request it. It gives you the command to run in the VS Code terminal, through `Tee-Object`
+as above, and then reads the results from the log. When you do request a run, the assistant uses one
+visible console window, reuses it, and never runs a build hidden in the background.
 
 ## The three suites
 

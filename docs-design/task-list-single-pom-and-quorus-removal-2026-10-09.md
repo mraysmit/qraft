@@ -3,7 +3,7 @@
 **Date:** 2026-10-04
 **Last updated:** 2026-10-09 (the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
 **Status:** In progress. This is the current task list. It started on 2026-10-04 at the user's request, before the membership list's Step 4 close-out gate.
-**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it is not committed yet. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. The next coding task is Phase 5. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
+**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. The next coding task is Phase 5. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
 **Last reviewed:** 2026-10-08, against the code at commit `9a4adf0`, with the other four task lists. The status table in section 4 and every item marked "review of 2026-10-08" come from that review. No build was run for it. The logs that the Phase 2A and Phase 3 records cite were written in another working tree and were not available, so their counts were checked for arithmetic only. The earlier review of 2026-10-05 was against `24beac3`; its items keep their date.
 **Order of work:**
 - The membership list's Step 4 close-out gate is the first task of Phase 7 here.
@@ -85,7 +85,7 @@ rules and extracts from that run.
 | 2A. Intentional errors labelled | Done: accepted 2026-10-08; the audit of child JVMs added 2026-10-09 | 9 of 9 | `24beac3` to `26a3570` |
 | 3. Package layout | Done; verified 2026-10-08. One task added by the review: the comparison of test names with the Phase 0 baseline | 10 of 11 | `9a4adf0` |
 | 3A. One word for each mode | Added and done 2026-10-09; verified the same day | 5 of 5 | `5a00975` |
-| 4. Node model and API | Done 2026-10-09, exit met; its four open points settled and its decisions confirmed by the user the same day | 7 of 7 | not committed |
+| 4. Node model and API | Done 2026-10-09, exit met; its four open points settled and its decisions confirmed by the user the same day | 7 of 7 | `e4bf00d` to `a6e7930` |
 | 5. Configuration and version | Not started | 0 of 6 | |
 | 6. Docker and observability | Not started | 0 of 10 | |
 | 7. Async layer | Not started | 0 of 6 | |
@@ -1630,11 +1630,11 @@ decisions that followed it:
 - `RAFT_STORAGE_OPERATIONS.md`: node commands and snapshot nodes from before
   2026-10-09 still decode.
 - `docker/README.md`: its `test` action calls routes that are gone.
-- `TESTING.md` and `PROJECT_STANDARDS.md` section 7 said that an assistant
-  must not run builds itself or open a console. The user changed that on
-  2026-10-09, and both now say what is done: one visible console, reused.
-  `AGENTS.md` still speaks of the VS Code terminal; it is the user's file and
-  was left alone.
+- `TESTING.md` and `PROJECT_STANDARDS.md` section 7: an assistant must not run
+  builds or open a console unless the user specifically requests it. Both
+  state that rule now, in the user's words of 2026-10-09, with what applies
+  when the user does request a run: one visible console, reused, never
+  hidden. A request covers that request; it is not a standing permission.
 
 What remains for this phase:
 
