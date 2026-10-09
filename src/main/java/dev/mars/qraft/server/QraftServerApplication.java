@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.server;
 
+import dev.mars.qraft.common.QraftVersion;
 import dev.mars.qraft.server.config.AppConfig;
 import dev.mars.qraft.server.observability.TelemetryConfig;
 import dev.mars.qraft.common.async.JavaRuntime;
@@ -58,6 +59,7 @@ public class QraftServerApplication {
         AppConfig config = AppConfig.fromFile(configPath);
         System.setProperty("qraft.log.mode", "server");
         System.setProperty("qraft.log.dir", config.getLoggingDirectory());
+        Logging.LOGGER.info("Qraft {} starting in server mode", QraftVersion.current());
         AppConfig.install(config);
         T resource = resourceFactory.apply(config);
         try {

@@ -249,8 +249,7 @@ class UnifiedRuntimeEndToEndTest {
                     "heartbeatIntervalMs": 40,
                     "shutdownTimeoutMs": 3000,
                     "datacenter": "test-dc",
-                    "region": "test-region",
-                    "version": "1.0.0"
+                    "region": "test-region"
                   },
                   "servers": {
                     "urls": ["http://127.0.0.1:%d"],

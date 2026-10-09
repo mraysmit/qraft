@@ -59,7 +59,7 @@ class AppConfigCoverageTest {
                 {
                   "version": 1,
                   "server": {
-                    "id": "server-a", "applicationVersion": "3.0",
+                    "id": "server-a",
                     "http": {"host": "127.0.0.1", "port": 8180},
                     "apiGrpcPort": 10180,
                     "raft": {

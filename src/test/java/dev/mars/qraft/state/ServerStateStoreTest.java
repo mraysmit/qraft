@@ -47,7 +47,7 @@ class ServerStateStoreTest {
 
     @Test
     void serverStoreAppliesClientAndMetadataLifecycle() {
-        QraftStateStore store = new QraftStateStore(Map.of("environment", "test"));
+        QraftStateStore store = new QraftStateStore();
         Instant now = Instant.parse("2026-01-01T00:00:00Z");
         Node client = Node.of("client-1", "127.0.0.1", null, null, null);
 

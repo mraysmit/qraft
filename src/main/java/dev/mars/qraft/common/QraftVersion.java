@@ -38,11 +38,14 @@ public final class QraftVersion {
 
     /** The version of this build. */
     public static String current() {
-        return "not implemented";
+        return from(QraftVersion.class.getPackage().getImplementationVersion());
     }
 
     /** The version that a manifest's {@code Implementation-Version} entry gives, or {@link #DEVELOPMENT} without one. */
     static String from(String implementationVersion) {
-        return "not implemented";
+        if (implementationVersion == null || implementationVersion.isBlank()) {
+            return DEVELOPMENT;
+        }
+        return implementationVersion.trim();
     }
 }

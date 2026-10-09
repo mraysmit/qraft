@@ -51,7 +51,7 @@ class ClientConfigurationTest {
                 .clientId("client-1").address("127.0.0.1")
                 .clientPort(8081).region("eu").datacenter("dc1")
                 .serverUrl("http://localhost:9000").heartbeatInterval(1000)
-                .requestTimeoutMs(2500).version("2.0").build();
+                .requestTimeoutMs(2500).build();
 
         assertEquals("client-1", config.getClientId());
         assertEquals(8081, config.getClientPort());
@@ -59,7 +59,6 @@ class ClientConfigurationTest {
         assertEquals("dc1", config.getDatacenter());
         assertEquals(1000, config.getHeartbeatInterval());
         assertEquals(2500, config.getRequestTimeoutMs());
-        assertEquals("2.0", config.getVersion());
     }
 
     @Test
@@ -95,7 +94,7 @@ class ClientConfigurationTest {
                     "id": "node-a", "address": "10.0.0.4",
                     "httpPort": 8181, "heartbeatIntervalMs": 4000,
                     "shutdownTimeoutMs": 12000,
-                    "datacenter": "dc1", "region": "eu-west", "version": "2.1"
+                    "datacenter": "dc1", "region": "eu-west"
                   },
                   "servers": {
                     "urls": ["http://one:8080", "http://two:8080/", "http://one:8080"],
@@ -150,7 +149,6 @@ class ClientConfigurationTest {
         assertEquals(30_000, config.getShutdownTimeoutMs());
         assertEquals("default", config.getDatacenter());
         assertEquals("default", config.getRegion());
-        assertEquals("1.0.0", config.getVersion());
         assertEquals(5_000, config.getRequestTimeoutMs());
         assertEquals("default", config.getTenant());
         assertEquals("default", config.getNamespace());

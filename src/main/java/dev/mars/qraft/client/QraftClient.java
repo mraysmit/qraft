@@ -17,6 +17,7 @@
 package dev.mars.qraft.client;
 
 import dev.mars.qraft.common.Node;
+import dev.mars.qraft.common.QraftVersion;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.mars.qraft.client.catalog.ServerContactTracker;
@@ -149,9 +150,9 @@ public final class QraftClient implements AutoCloseable {
             return CompletableFuture.completedFuture(registrationClient.isRegistered());
         }
         healthService.start();
-        // A node is a name, an address, and where it is; the client's version travels in its metadata.
+        // A node is a name, an address, and where it is; the version of the client's build travels in its metadata.
         Node client = Node.of(config.getClientId(), config.getAddress(), config.getDatacenter(), config.getRegion(),
-                java.util.Map.of(Node.VERSION_METADATA_KEY, config.getVersion()));
+                java.util.Map.of(Node.VERSION_METADATA_KEY, QraftVersion.current()));
         return registrationClient.register(client).thenApply(registered -> {
             if (registered) activateHeartbeat(client);
             else if (registrationClient.shouldRetryRegistration()) scheduleRegistrationRetry(client);
@@ -308,6 +309,7 @@ public final class QraftClient implements AutoCloseable {
         ClientConfiguration configuration = ClientConfiguration.fromFile(configPath);
         System.setProperty("qraft.log.mode", "client");
         System.setProperty("qraft.log.dir", configuration.getLoggingDirectory());
+        Logging.LOGGER.info("Qraft {} starting in client mode", QraftVersion.current());
         T resource = resourceFactory.apply(configuration);
         try {
             starter.apply(resource).join();

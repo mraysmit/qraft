@@ -68,15 +68,12 @@ public final class QraftStateStore implements RaftLogApplicator {
             // Map entries in key order make snapshot bytes reproducible on every replica and JVM.
             .configure(com.fasterxml.jackson.databind.SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
 
+    /**
+     * A state store in its initial state. That state is the same on every server: replicated state changes
+     * only through committed commands, so nothing a server knows on its own can be put into it here.
+     */
     public QraftStateStore() {
-        this(null);
-    }
-
-    public QraftStateStore(Map<String, String> initialMetadata) {
         metadata.put("version", DEFAULT_VERSION);
-        if (initialMetadata != null) {
-            metadata.putAll(initialMetadata);
-        }
     }
 
     @Override

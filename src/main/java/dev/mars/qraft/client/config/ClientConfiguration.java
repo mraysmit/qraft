@@ -72,7 +72,6 @@ public final class ClientConfiguration {
     private final List<ServiceDefinition> services;
     private final List<HealthCheckDefinition> healthChecks;
     private final String loggingDirectory;
-    private final String version;
 
     private ClientConfiguration(Builder builder) {
         clientId = builder.clientId.trim();
@@ -97,7 +96,6 @@ public final class ClientConfiguration {
                         .map(HealthCheckDefinition::checkId).toList()))
                 .toList();
         loggingDirectory = builder.loggingDirectory.trim();
-        version = builder.version.trim();
     }
 
     public static ClientConfiguration fromFile(Path path) {
@@ -132,7 +130,7 @@ public final class ClientConfiguration {
         JsonNode catalog = optionalObject(root, "catalog");
         JsonNode logging = optionalObject(root, "logging");
         rejectUnknown(client, "client", "id", "address", "httpPort",
-                "heartbeatIntervalMs", "shutdownTimeoutMs", "datacenter", "region", "version");
+                "heartbeatIntervalMs", "shutdownTimeoutMs", "datacenter", "region");
         rejectUnknown(servers, "servers", "urls", "requestTimeoutMs");
         rejectUnknown(catalog, "catalog", "tenant", "namespace", "registrationRetryMinMs",
                 "registrationRetryMaxMs", "contactFreshnessMs", "services");
@@ -147,7 +145,6 @@ public final class ClientConfiguration {
                 .shutdownTimeoutMs(optionalLong(client, "shutdownTimeoutMs", 30_000))
                 .datacenter(optionalText(client, "datacenter", "default"))
                 .region(optionalText(client, "region", "default"))
-                .version(optionalText(client, "version", "1.0.0"))
                 .serverUrls(parseServerUrls(servers.get("urls")))
                 .requestTimeoutMs(optionalInt(servers, "requestTimeoutMs", 5_000))
                 .tenant(optionalText(catalog, "tenant", "default"))
@@ -419,7 +416,6 @@ public final class ClientConfiguration {
     public List<ServiceDefinition> getServices() { return services; }
     public List<HealthCheckDefinition> getHealthChecks() { return healthChecks; }
     public String getLoggingDirectory() { return loggingDirectory; }
-    public String getVersion() { return version; }
 
     public static final class Builder {
         private String clientId;
@@ -439,7 +435,6 @@ public final class ClientConfiguration {
         private List<ServiceDefinition> services = List.of();
         private List<HealthCheckDefinition> healthChecks = List.of();
         private String loggingDirectory = "./logs";
-        private String version = "1.0.0";
 
         public Builder clientId(String value) { clientId = value; return this; }
         public Builder address(String value) { address = value; return this; }
@@ -461,7 +456,6 @@ public final class ClientConfiguration {
         public Builder services(List<ServiceDefinition> value) { services = List.copyOf(value); return this; }
         public Builder healthChecks(List<HealthCheckDefinition> value) { healthChecks = List.copyOf(value); return this; }
         public Builder loggingDirectory(String value) { loggingDirectory = value; return this; }
-        public Builder version(String value) { version = value; return this; }
 
         public ClientConfiguration build() {
             requireNonBlank("client.id", clientId);
@@ -471,7 +465,6 @@ public final class ClientConfiguration {
             requireNonBlank("catalog.tenant", tenant);
             requireNonBlank("catalog.namespace", namespace);
             requireNonBlank("logging.directory", loggingDirectory);
-            requireNonBlank("client.version", version);
             if (serverUrls.isEmpty()) throw new IllegalArgumentException("servers.urls is required");
             // Port 0 asks the system for any free port; the client registers the port it actually bound.
             if (clientPort < 0 || clientPort > 65_535) throw new IllegalArgumentException("client.httpPort is invalid");

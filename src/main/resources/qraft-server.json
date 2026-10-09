@@ -2,7 +2,6 @@
   "version": 1,
   "server": {
     "id": "",
-    "applicationVersion": "2.0-ext",
     "http": {"host": "0.0.0.0", "port": 8080},
     "apiGrpcPort": 10080,
     "raft": {

@@ -124,7 +124,7 @@ public final class AppConfig {
         JsonNode ui = optionalObject(server, "ui");
         JsonNode operator = optionalObject(server, "operator");
         JsonNode logging = optionalObject(root, "logging");
-        rejectUnknown(server, "server", "id", "applicationVersion", "http", "apiGrpcPort",
+        rejectUnknown(server, "server", "id", "http", "apiGrpcPort",
                 "raft", "telemetry", "shutdown", "health", "ui", "operator");
         rejectUnknown(http, "server.http", "host", "port");
         rejectUnknown(raft, "server.raft", "port", "nodes", "electionTimeoutMs",
@@ -141,7 +141,6 @@ public final class AppConfig {
         rejectUnknown(logging, "logging", "directory");
 
         Map<String, Object> values = new LinkedHashMap<>();
-        values.put("qraft.version", optionalText(server, "applicationVersion", "2.0-ext"));
         values.put("qraft.node.id", optionalText(server, "id", ""));
         values.put("qraft.http.host", optionalText(http, "host", "0.0.0.0"));
         values.put("qraft.http.port", optionalInt(http, "port", 8080));
@@ -271,7 +270,6 @@ public final class AppConfig {
 
     public int getRaftIoPoolSize() { return getInt("qraft.raft.io.pool-size", 10); }
     public int getRaftIoQueueSize() { return getInt("qraft.raft.io.queue-size", 1000); }
-    public String getVersion() { return getString("qraft.version", "2.0-ext"); }
     public String getLoggingDirectory() { return getString("qraft.logging.directory", "./logs"); }
     /** The validated {@code server.ui} settings; parsing already rejected any invalid combination. */
     public AdminUiConfig getAdminUi() {

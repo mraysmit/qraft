@@ -1646,6 +1646,12 @@ Every `servers.urls` entry is an HTTP or HTTPS origin. Paths, queries,
 fragments, and user information are rejected. A root trailing slash is removed,
 scheme and host case are normalized, and equivalent origins are deduplicated.
 
+No setting names a version of Qraft. Both modes report the version of their
+build: the project version, which the build writes into the manifest of the
+executable jar. Each mode logs it when it starts, and a client carries it in its
+node's metadata as `qraft.version`. A process that does not run from the jar
+reports `development`.
+
 A server document uses the same envelope and keeps all server settings beneath
 `server`:
 
@@ -1654,7 +1660,6 @@ A server document uses the same envelope and keeps all server settings beneath
   "version": 1,
   "server": {
     "id": "server-a",
-    "applicationVersion": "2.0-ext",
     "http": { "host": "0.0.0.0", "port": 8080 },
     "apiGrpcPort": 10080,
     "raft": {

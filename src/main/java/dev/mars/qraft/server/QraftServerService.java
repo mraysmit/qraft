@@ -171,11 +171,9 @@ public class QraftServerService {
             String serverId = ServerIdentity.loadOrCreate(Path.of(config.getRaftStoragePath()));
             logger.info("Raft server identity: nodeId={}, serverId={}", nodeId, serverId);
 
-            // 6. Create Raft Node with storage
-            Map<String, String> initialMetadata = new HashMap<>();
-            initialMetadata.put("version", config.getVersion());
-
-            QraftStateStore stateMachine = new QraftStateStore(initialMetadata);
+            // 6. Create Raft Node with storage. Replicated state starts the same on every server: nothing of a
+            //    server's own build or configuration is put into it.
+            QraftStateStore stateMachine = new QraftStateStore();
 
             // Use the builder with storage and snapshot configuration
             RaftNode node = RaftNode.builder()
