@@ -21,7 +21,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
-import dev.mars.qraft.common.AgentInfo;
+import dev.mars.qraft.common.ClientInfo;
 import dev.mars.qraft.client.catalog.HttpCatalogClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -44,18 +44,18 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests {@link AgentRegistrationClient} node registration and deregistration, seed selection,
+ * Tests {@link RegistrationClient} node registration and deregistration, seed selection,
  * rejection handling, and shutdown ordering against a local HTTP server.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-09
  * @version 1.0
  */
-class AgentRegistrationClientTest {
+class RegistrationClientTest {
     private HttpServer server;
     private String requestPath;
     private String requestBody;
-    private HttpCatalogClient controllerClient;
+    private HttpCatalogClient serverClient;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -72,40 +72,40 @@ class AgentRegistrationClientTest {
 
     @AfterEach
     void tearDown() {
-        if (controllerClient != null) controllerClient.close();
+        if (serverClient != null) serverClient.close();
         server.stop(0);
     }
 
     @Test
-    void registersAgentUsingJdkHttpClient() throws Exception {
-        AgentRegistrationClient client = client();
-        AgentInfo agent = new AgentInfo("agent-1", "host", "127.0.0.1", 8080);
+    void registersClientUsingJdkHttpClient() throws Exception {
+        RegistrationClient client = client();
+        ClientInfo info = new ClientInfo("client-1", "host", "127.0.0.1", 8080);
 
-        assertTrue(client.register(agent).join());
-        assertEquals("/api/v1/agents/register", requestPath);
-        assertTrue(requestBody.contains("agent-1"));
+        assertTrue(client.register(info).join());
+        assertEquals("/api/v1/clients/register", requestPath);
+        assertTrue(requestBody.contains("client-1"));
     }
 
     @Test
-    void deregistersAgentUsingJdkHttpClient() {
-        assertTrue(client().deregister("agent-1").join());
-        assertEquals("/api/v1/agents/agent-1", requestPath);
+    void deregistersClientUsingJdkHttpClient() {
+        assertTrue(client().deregister("client-1").join());
+        assertEquals("/api/v1/clients/client-1", requestPath);
     }
 
     @Test
-    void nodeRegistrationUsesTheSharedControllerSeedSelector() throws Exception {
+    void nodeRegistrationUsesTheSharedServerSeedSelector() throws Exception {
         URI refused;
         try (ServerSocket socket = new ServerSocket(0)) {
             refused = URI.create("http://127.0.0.1:" + socket.getLocalPort());
         }
         URI available = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
-        controllerClient = new HttpCatalogClient(HttpClient.newHttpClient(), new ObjectMapper(),
-                List.of(refused, available), "agent-1", "default", "default",
+        serverClient = new HttpCatalogClient(HttpClient.newHttpClient(), new ObjectMapper(),
+                List.of(refused, available), "client-1", "default", "default",
                 "default", "default", Duration.ofSeconds(10));
-        AgentRegistrationClient client = new AgentRegistrationClient(controllerClient);
+        RegistrationClient client = new RegistrationClient(serverClient);
 
-        assertTrue(client.register(new AgentInfo("agent-1", "host", "127.0.0.1", 8080)).join());
-        assertEquals("/api/v1/agents/register", requestPath);
+        assertTrue(client.register(new ClientInfo("client-1", "host", "127.0.0.1", 8080)).join());
+        assertEquals("/api/v1/clients/register", requestPath);
     }
 
     @Test
@@ -114,24 +114,24 @@ class AgentRegistrationClientTest {
         AtomicInteger registrations = new AtomicInteger();
         server.createContext("/api/v1", exchange -> {
             registrations.incrementAndGet();
-            byte[] body = ("{\"code\":\"invalid_agent\",\"message\":\"bad address\","
+            byte[] body = ("{\"code\":\"invalid_client\",\"message\":\"bad address\","
                     + "\"retryable\":false}").getBytes(java.nio.charset.StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(400, body.length);
             try (var output = exchange.getResponseBody()) { output.write(body); }
         });
-        AgentRegistrationClient client = client();
-        Logger logger = (Logger) LoggerFactory.getLogger(AgentRegistrationClient.class);
+        RegistrationClient client = client();
+        Logger logger = (Logger) LoggerFactory.getLogger(RegistrationClient.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
         logger.addAppender(appender);
         try {
-            assertFalse(client.register(new AgentInfo("agent-1", "host", "127.0.0.1", 8080)).join());
+            assertFalse(client.register(new ClientInfo("client-1", "host", "127.0.0.1", 8080)).join());
 
             assertFalse(client.shouldRetryRegistration());
             assertEquals(1, registrations.get());
             assertEquals(1, appender.list.stream().filter(event ->
-                    event.getFormattedMessage().contains("agentId=agent-1")
-                            && event.getFormattedMessage().contains("invalid_agent")
+                    event.getFormattedMessage().contains("clientId=client-1")
+                            && event.getFormattedMessage().contains("invalid_client")
                             && event.getFormattedMessage().contains("bad address")).count());
         } finally {
             logger.detachAppender(appender);
@@ -161,12 +161,12 @@ class AgentRegistrationClientTest {
                 Thread.currentThread().interrupt();
             }
         });
-        AgentRegistrationClient client = client();
+        RegistrationClient client = client();
         CompletableFuture<Boolean> registration = client.register(
-                new AgentInfo("agent-1", "host", "127.0.0.1", 8080));
+                new ClientInfo("client-1", "host", "127.0.0.1", 8080));
         assertTrue(registrationStarted.await(10, TimeUnit.SECONDS));
 
-        CompletableFuture<Boolean> shutdown = client.beginShutdownAndDeregister("agent-1");
+        CompletableFuture<Boolean> shutdown = client.beginShutdownAndDeregister("client-1");
 
         assertFalse(shutdown.isDone());
         releaseRegistration.countDown();
@@ -185,19 +185,19 @@ class AgentRegistrationClientTest {
             if (exchange.getRequestURI().getPath().endsWith("/heartbeat")) {
                 heartbeatArrived.countDown();
                 await(releaseHeartbeat);
-                respond(exchange, 404, "{\"code\":\"agent_not_found\",\"message\":\"gone\",\"retryable\":false}");
+                respond(exchange, 404, "{\"code\":\"client_not_found\",\"message\":\"gone\",\"retryable\":false}");
             } else {
                 exchange.sendResponseHeaders(201, -1);
                 exchange.close();
             }
         });
-        AgentRegistrationClient client = client();
-        AgentInfo agent = new AgentInfo("agent-1", "host", "127.0.0.1", 8080);
-        assertTrue(client.register(agent).get(10, TimeUnit.SECONDS));
+        RegistrationClient client = client();
+        ClientInfo info = new ClientInfo("client-1", "host", "127.0.0.1", 8080);
+        assertTrue(client.register(info).get(10, TimeUnit.SECONDS));
 
-        CompletableFuture<Boolean> staleHeartbeat = client.heartbeat("agent-1", java.time.Instant.now(), 1, "passing");
+        CompletableFuture<Boolean> staleHeartbeat = client.heartbeat("client-1", java.time.Instant.now(), 1, "passing");
         assertTrue(heartbeatArrived.await(10, TimeUnit.SECONDS));
-        assertTrue(client.register(agent).get(10, TimeUnit.SECONDS), "a newer registration succeeds");
+        assertTrue(client.register(info).get(10, TimeUnit.SECONDS), "a newer registration succeeds");
         String current = client.registrationId();
         releaseHeartbeat.countDown();
         staleHeartbeat.get(10, TimeUnit.SECONDS);
@@ -222,15 +222,15 @@ class AgentRegistrationClientTest {
                 exchange.close();
             }
         });
-        controllerClient = new HttpCatalogClient(HttpClient.newHttpClient(), new ObjectMapper(),
+        serverClient = new HttpCatalogClient(HttpClient.newHttpClient(), new ObjectMapper(),
                 List.of(java.net.URI.create("http://localhost:" + server.getAddress().getPort())),
-                "agent-1", "default", "default", "default", "default", Duration.ofSeconds(30));
-        AgentRegistrationClient client = new AgentRegistrationClient(controllerClient);
-        AgentInfo agent = new AgentInfo("agent-1", "host", "127.0.0.1", 8080);
+                "client-1", "default", "default", "default", "default", Duration.ofSeconds(30));
+        RegistrationClient client = new RegistrationClient(serverClient);
+        ClientInfo info = new ClientInfo("client-1", "host", "127.0.0.1", 8080);
 
-        CompletableFuture<Boolean> slowFailure = client.register(agent);
+        CompletableFuture<Boolean> slowFailure = client.register(info);
         assertTrue(firstArrived.await(10, TimeUnit.SECONDS));
-        assertTrue(client.register(agent).get(10, TimeUnit.SECONDS));
+        assertTrue(client.register(info).get(10, TimeUnit.SECONDS));
         releaseFirst.countDown();
         assertEquals(false, slowFailure.get(10, TimeUnit.SECONDS));
 
@@ -261,10 +261,10 @@ class AgentRegistrationClientTest {
         try (var output = exchange.getResponseBody()) { output.write(bytes); }
     }
 
-    private AgentRegistrationClient client() {
-        controllerClient = new HttpCatalogClient(HttpClient.newHttpClient(), new ObjectMapper(),
+    private RegistrationClient client() {
+        serverClient = new HttpCatalogClient(HttpClient.newHttpClient(), new ObjectMapper(),
                 List.of(java.net.URI.create("http://localhost:" + server.getAddress().getPort())),
-                "agent-1", "default", "default", "default", "default", Duration.ofSeconds(10));
-        return new AgentRegistrationClient(controllerClient);
+                "client-1", "default", "default", "default", "default", Duration.ofSeconds(10));
+        return new RegistrationClient(serverClient);
     }
 }

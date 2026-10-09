@@ -140,14 +140,14 @@ public enum IntentionalErrorFixture {
                     + " \\d+ entries precede the damage\\. Not repaired: restore this node from its peers\\."),
 
     /** Server startup reports that deliberately corrupted storage left the node live but fenced. */
-    CONTROLLER_RECOVERY_AMBIGUOUS_CORRUPTION(QraftServerService.class.getName(), Level.ERROR,
+    SERVER_RECOVERY_AMBIGUOUS_CORRUPTION(QraftServerService.class.getName(), Level.ERROR,
             "Raft recovery failed; node remains live but unready and will not participate\\."
                     + " Preserve the node directory for diagnosis, then replace it from a healthy peer and restart:"
                     + " WAL .* is corrupt at byte \\d+ of \\d+; \\d+ entries precede the damage\\."
                     + " Not repaired: restore this node from its peers\\."),
 
     /** Server startup logs a deliberate cross-process WAL lock conflict, then rethrows it uncaught. */
-    CONTROLLER_STORAGE_ALREADY_LOCKED(QraftServerService.class.getName(), Level.ERROR,
+    SERVER_STORAGE_ALREADY_LOCKED(QraftServerService.class.getName(), Level.ERROR,
             "Failed to initialize Raft storage: (?<failure>Cannot acquire exclusive lock on WAL directory: .*\\."
                     + " Another process may be using this storage\\.)",
             "java\\.util\\.concurrent\\.CompletionException:"

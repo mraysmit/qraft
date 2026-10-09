@@ -50,8 +50,8 @@ class ConfigurationPlaceholdersTest {
 
     @Test
     void aPlaceholderInAnArrayElementIsRejectedWithItsIndex() {
-        assertRejected("{\"controllers\":{\"urls\":[\"http://a:8080\",\"http://${CONTROLLER}:8080\"]}}",
-                "controllers.urls[1]");
+        assertRejected("{\"servers\":{\"urls\":[\"http://a:8080\",\"http://${SERVER}:8080\"]}}",
+                "servers.urls[1]");
         assertRejected("{\"catalog\":{\"services\":[{\"checks\":[{\"url\":\"http://${HOST}/health\"}]}]}}",
                 "catalog.services[0].checks[0].url");
     }

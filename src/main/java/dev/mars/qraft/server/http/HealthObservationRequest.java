@@ -26,7 +26,7 @@ import java.time.format.DateTimeParseException;
 import java.util.Locale;
 
 /**
- * Agent-reported health observation or TTL renewal for one check on a registered service.
+ * Client-reported health observation or TTL renewal for one check on a registered service.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-26

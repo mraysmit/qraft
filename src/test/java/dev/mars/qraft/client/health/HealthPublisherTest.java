@@ -152,7 +152,7 @@ class HealthPublisherTest {
         publisher.onResult(HTTP, result(CheckStatus.PASSING, "HTTP 200"));
 
         assertEquals(2, client.sent().size(), "with the clock behind the last acceptance the elapsed time is "
-                + "unknown, so the check renews rather than let the controller's TTL lapse");
+                + "unknown, so the check renews rather than let the server's TTL lapse");
         assertTrue(client.sent().get(1).sequenceNumber() > client.sent().get(0).sequenceNumber(),
                 "sequence numbers keep increasing although the clock went back");
         client.accept(1);

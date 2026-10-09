@@ -22,13 +22,13 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Capabilities advertised by an agent during registration and discovery.
+ * Capabilities advertised by a client during registration and discovery.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-03-15
  * @version 2.0
  */
-public class AgentCapabilities {
+public class ClientCapabilities {
     @JsonProperty("supportedServices")
     private Set<String> supportedServices = new HashSet<>();
     @JsonProperty("availableRegions")
@@ -36,9 +36,9 @@ public class AgentCapabilities {
     @JsonProperty("customCapabilities")
     private Map<String, Object> customCapabilities = new HashMap<>();
     @JsonProperty("systemInfo")
-    private AgentSystemInfo systemInfo;
+    private ClientSystemInfo systemInfo;
     @JsonProperty("networkInfo")
-    private AgentNetworkInfo networkInfo;
+    private ClientNetworkInfo networkInfo;
 
     public Set<String> getSupportedServices() { return supportedServices; }
     public void setSupportedServices(Set<String> services) { supportedServices = services == null ? new HashSet<>() : services; }
@@ -49,14 +49,14 @@ public class AgentCapabilities {
     public Map<String, Object> getCustomCapabilities() { return customCapabilities; }
     public void setCustomCapabilities(Map<String, Object> capabilities) { customCapabilities = capabilities == null ? new HashMap<>() : capabilities; }
     public void addCustomCapability(String key, Object value) { customCapabilities.put(key, value); }
-    public AgentSystemInfo getSystemInfo() { return systemInfo; }
-    public void setSystemInfo(AgentSystemInfo value) { systemInfo = value; }
-    public AgentNetworkInfo getNetworkInfo() { return networkInfo; }
-    public void setNetworkInfo(AgentNetworkInfo value) { networkInfo = value; }
+    public ClientSystemInfo getSystemInfo() { return systemInfo; }
+    public void setSystemInfo(ClientSystemInfo value) { systemInfo = value; }
+    public ClientNetworkInfo getNetworkInfo() { return networkInfo; }
+    public void setNetworkInfo(ClientNetworkInfo value) { networkInfo = value; }
 
     @Override
     public String toString() {
-        return "AgentCapabilities{" +
+        return "ClientCapabilities{" +
                 "supportedServices=" + supportedServices +
                 ", availableRegions=" + availableRegions +
                 '}';

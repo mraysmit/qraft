@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests the wire form of {@link AgentNetworkInfo}, the network facts an agent reports: the exact JSON field set,
+ * Tests the wire form of {@link ClientNetworkInfo}, the network facts a client reports: the exact JSON field set,
  * a round trip that keeps every value, the legacy name of the NAT traversal flag, and the fields
  * {@code toString} names.
  *
@@ -35,12 +35,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @since 2025-08-27
  * @version 2.0
  */
-class AgentNetworkInfoTest {
+class ClientNetworkInfoTest {
 
     @Test
     void serializesOnlyReportedFieldsAndNoDerivedScores() throws Exception {
         TreeSet<String> fields = new TreeSet<>();
-        new ObjectMapper().readTree(new ObjectMapper().writeValueAsString(new AgentNetworkInfo()))
+        new ObjectMapper().readTree(new ObjectMapper().writeValueAsString(new ClientNetworkInfo()))
                 .fieldNames().forEachRemaining(fields::add);
 
         assertEquals(new TreeSet<>(Set.of("publicIpAddress", "privateIpAddress",
@@ -52,7 +52,7 @@ class AgentNetworkInfoTest {
     void aJsonRoundTripKeepsEveryValue() throws Exception {
         ObjectMapper mapper = new ObjectMapper();
 
-        AgentNetworkInfo read = mapper.readValue(mapper.writeValueAsString(reported()), AgentNetworkInfo.class);
+        ClientNetworkInfo read = mapper.readValue(mapper.writeValueAsString(reported()), ClientNetworkInfo.class);
 
         assertEquals("203.0.113.42", read.getPublicIpAddress());
         assertEquals("192.168.1.100", read.getPrivateIpAddress());
@@ -70,9 +70,9 @@ class AgentNetworkInfoTest {
     void readsTheNatTraversalFlagUnderEitherName() throws Exception {
         ObjectMapper mapper = new ObjectMapper();
 
-        assertTrue(mapper.readValue("{\"isNatTraversal\":true}", AgentNetworkInfo.class).isNatTraversal());
-        assertTrue(mapper.readValue("{\"natTraversal\":true}", AgentNetworkInfo.class).isNatTraversal(),
-                "agents built before the duplicate was removed also sent natTraversal");
+        assertTrue(mapper.readValue("{\"isNatTraversal\":true}", ClientNetworkInfo.class).isNatTraversal());
+        assertTrue(mapper.readValue("{\"natTraversal\":true}", ClientNetworkInfo.class).isNatTraversal(),
+                "clients built before the duplicate was removed also sent natTraversal");
     }
 
     @Test
@@ -87,8 +87,8 @@ class AgentNetworkInfoTest {
     }
 
     /** Network facts with every field set to a value that differs from its default. */
-    private static AgentNetworkInfo reported() {
-        AgentNetworkInfo info = new AgentNetworkInfo();
+    private static ClientNetworkInfo reported() {
+        ClientNetworkInfo info = new ClientNetworkInfo();
         info.setPublicIpAddress("203.0.113.42");
         info.setPrivateIpAddress("192.168.1.100");
         info.setNetworkInterfaces(List.of("eth0", "eth1"));

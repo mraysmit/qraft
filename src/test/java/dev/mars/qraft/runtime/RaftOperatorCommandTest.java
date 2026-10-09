@@ -153,7 +153,7 @@ class RaftOperatorCommandTest {
     @Test
     void misusePrintsTheUsage() {
         for (String[] misuse : new String[][] {
-                {}, {"raft"}, {"raft", "rename-peer"}, {"agents", "list-peers"},
+                {}, {"raft"}, {"raft", "rename-peer"}, {"clients", "list-peers"},
                 {"raft", "remove-peer"}, {"raft", "remove-peer", "--id", "x", "--name", "y"},
                 {"raft", "list-peers", "--http-addr"}, {"raft", "list-peers", "--verbose"},
                 {"raft", "remove-peer", "--name", "c", "--token", "t", "--token-file", "f"}}) {

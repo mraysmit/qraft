@@ -2,9 +2,9 @@
 
 ## 1. Purpose
 
-QRaft needs a common event architecture for both its current Raft controller
+QRaft needs a common event architecture for both its current Raft server
 and planned platform features such as key/value storage, service discovery,
-agents, health checks, sessions, tenancy, access control, and dynamic
+clients, health checks, sessions, tenancy, access control, and dynamic
 configuration.
 
 The event architecture has four purposes:
@@ -78,7 +78,7 @@ deletion, compare-and-set outcomes, and lock ownership changes.
 
 ### Shared types (`qraft-core`)
 
-Owns domain events for the service catalog, agents, nodes, health state, and
+Owns domain events for the service catalog, clients, nodes, health state, and
 other core platform concepts.
 
 ### Tenancy (formerly `qraft-tenant`, removed 2026-10-04)
@@ -97,7 +97,7 @@ Owns concrete event production and local delivery:
 - recent-event queries and streaming HTTP endpoints;
 - event-related readiness and health information.
 
-The controller must publish events only at sequenced application points.
+The server must publish events only at sequenced application points.
 
 ### Entry point (`qraft-runtime`)
 
@@ -133,7 +133,7 @@ Domain events describe successful changes to replicated application state.
 Examples include:
 
 - service registered, updated, or deregistered;
-- agent registered, changed, or removed;
+- client registered, changed, or removed;
 - key created, updated, or deleted;
 - session created, renewed, expired, or destroyed;
 - lock acquired, released, or invalidated;
@@ -148,7 +148,7 @@ not separate commands and must not be appended back into the Raft log.
 Observation events represent facts measured outside replicated state, such as:
 
 - a health-check result;
-- an agent heartbeat observation;
+- a client heartbeat observation;
 - a reconciliation attempt;
 - a network or endpoint probe;
 - a local resource warning.
@@ -347,7 +347,7 @@ GET /v1/system/events/stream?after=<cursor>
 ```
 
 These use the `/v1/` prefix shared by the catalog and other target APIs. The
-controller's older `/api/v1/` agent and info routes are not a pattern for new
+server's older `/api/v1/` client and info routes are not a pattern for new
 endpoints.
 
 The bounded query should be implemented before live streaming. Both interfaces
@@ -487,7 +487,7 @@ fakes to prove:
 
 ### Phase 4: State-machine outcomes
 
-Introduce `QraftApplyOutcome` and adapt the existing catalog and agent commands.
+Introduce `QraftApplyOutcome` and adapt the existing catalog and client commands.
 Tests must prove state mutation, result, and events agree for successful,
 not-found, no-op, and compare-and-set outcomes.
 

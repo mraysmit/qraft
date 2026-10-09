@@ -41,9 +41,9 @@ public sealed interface CatalogCommand extends RaftCommand
 
     /**
      * Registers or replaces an instance. {@code declaredCheckIds} lists the checks the registering
-     * agent will publish, sorted and distinct; replicated checks outside the list are pruned and later
+     * client will publish, sorted and distinct; replicated checks outside the list are pruned and later
      * observations for them are rejected. {@code null} means the registration declares nothing, as
-     * older agents and log entries do, and existing checks are kept.
+     * older clients and log entries do, and existing checks are kept.
      */
     record Register(ServiceInstance instance, List<String> declaredCheckIds) implements CatalogCommand {
         public Register {

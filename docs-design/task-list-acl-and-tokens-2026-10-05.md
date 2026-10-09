@@ -45,7 +45,7 @@ Checked in the code on 2026-10-05.
 - **Everything else is open:** node registration and heartbeats, service
   writes, check observations, every catalog and health read, `/raft/status`,
   the gRPC `DistributedStateService`, and the administrative interface.
-- **The client has no credential.** `AgentConfiguration` has no token setting.
+- **The client has no credential.** `ClientConfiguration` has no token setting.
 - **Nodes have no scope.** Services carry a tenant and a namespace; a node
   does not.
 - **The Raft port is trusted,** including a claim to an existing server ID
@@ -181,7 +181,7 @@ so and why.
 
 ### Rules and scope
 
-6. **Resources in this list:** `node`, `service`, `agent`, `operator`, and
+6. **Resources in this list:** `node`, `service`, `client`, `operator`, and
    `acl`. Access is `read`, `write`, or `deny`. A rule matches an exact name
    or a prefix; an exact name beats a prefix, a longer prefix beats a shorter
    one, and `deny` beats an allow of equal specificity. `key` and `session`
@@ -191,7 +191,7 @@ so and why.
    defaulting to `default`, and `*` matches any. A rule for one tenant grants
    nothing in another. The scope headers stay, as the caller's choice of
    scope; authorization checks that choice against the token. `node`,
-   `agent`, `operator`, and `acl` rules have no scope, because nodes have
+   `client`, `operator`, and `acl` rules have no scope, because nodes have
    none today (section 2). If the tenancy list scopes nodes, their rules gain
    the same two fields.
 8. **Policies are JSON documents,** like every other Qraft configuration,
@@ -221,7 +221,7 @@ so and why.
 10. **One enforcement point: the server's HTTP adapter.** A successor to
     `HeaderRequestContext` resolves the token against the answering server's
     applied state, authorizes, and only then proposes or reads.
-    - **No agent-side cache and no down policy.** This departs from Consul. A
+    - **No client-side cache and no down policy.** This departs from Consul. A
       client that cannot reach a server already answers 503 (client list,
       Phase 7), so there is nothing for a cached decision to protect.
     - **The state machine does not check again when it applies a command,** as
@@ -247,7 +247,7 @@ so and why.
     | `DELETE /v1/operator/raft/peer` | `operator:write`, checked again by the leader |
     | The ACL API | `acl:read` or `acl:write` |
     | `GET /v1/acl/token/self`, `POST /v1/acl/authorize` | any token: each answers only for the token that presents it |
-    | The client's own endpoints (`/v1/agent/self`, `leave`, maintenance) | `agent:read` or `agent:write` on the node name |
+    | The client's own endpoints (`/v1/client/self`, `leave`, maintenance) | `client:read` or `client:write` on the node name |
     | `/health/live`, `/health/ready` | no token, ever: orchestrators call them |
     | The administrative interface's static files | no token; its API calls carry one (UI-5) |
     | gRPC `DistributedStateService` | `operator:write`, sent as `x-qraft-token` metadata, until the key/value list adds `key` rules |
@@ -351,24 +351,24 @@ so and why.
       setting, and `operator:write` replaces it. With ACLs disabled it guards
       removal as it does today.
 13. **The client.**
-    - `agent.acl.tokenFile` holds the agent's own token. The agent uses it to
+    - `client.acl.tokenFile` holds the client's own token. The client uses it to
       register and renew its node, and to register the services and checks of
       its configuration file. Consul splits these into two tokens; one is
-      enough here. A node identity for the agent's node name, plus service
+      enough here. A node identity for the client's node name, plus service
       identities for its configured services, is the intended grant.
     - A request to the local API is forwarded under the caller's own token,
       unchanged. Without one it is forwarded as anonymous. There is no
       default token: this departs from Consul, and means a process on the
       host gets no rights merely by being on the host.
     - A service registered through the local API keeps the token it was
-      registered with, as in Consul. The agent stores it with the
-      registration in `agent.dataDirectory`, in a file only its own user can
+      registered with, as in Consul. The client stores it with the
+      registration in `client.dataDirectory`, in a file only its own user can
       read, and syncs that service and its checks under it.
-    - The agent's own endpoints are authorized by asking a server, through a
+    - The client's own endpoints are authorized by asking a server, through a
       new `POST /v1/acl/authorize`. With no server reachable they answer 503.
       There is no recovery token.
     - A 401 or 403 from a server is a rejected outcome, not a retryable one:
-      the agent reports not ready and logs it once.
+      the client reports not ready and logs it once.
 14. **Tokens cross the network unencrypted until TLS exists.** Consul allows
     the same and recommends TLS. Propose a transport security list to follow
     this one directly: HTTPS on the server listener and the client's calls,
@@ -493,16 +493,16 @@ With ACLs disabled, every existing test passes unchanged.
 
 ### Phase 6. The client
 
-- [ ] Add `agent.acl.tokenFile`, validated at startup. Send the token on
-  every call the agent makes for itself.
+- [ ] Add `client.acl.tokenFile`, validated at startup. Send the token on
+  every call the client makes for itself.
 - [ ] Treat 401 and 403 as rejected outcomes: not ready, logged once, no
   retry storm.
 - [ ] Forward local API requests under the caller's token.
 - [ ] Keep each API registration's token with it in the data directory, and
   sync that service under it.
-- [ ] Authorize the agent's own endpoints through the server.
+- [ ] Authorize the client's own endpoints through the server.
 
-**Exit:** `AgentServerContractTest` (`AgentControllerContractTest` until
+**Exit:** `ClientServerContractTest` (`AgentControllerContractTest` until
 2026-10-08) covers every client call with a sufficient token, an insufficient
 one, and none.
 
@@ -525,7 +525,7 @@ one, and none.
 
 ### Phase 9. Verification and documentation
 
-- [ ] End-to-end: an application registers through its agent under a service
+- [ ] End-to-end: an application registers through its client under a service
   identity, is discovered by a reader with `service:read`, and is invisible
   to one without it.
 - [ ] End-to-end: a second host with another node's name and its own token
@@ -554,5 +554,5 @@ consecutive runs; audits as in the other lists.
   scope; the tenancy list creates and validates them.
 - Structured audit events and a durable audit sink, which need the event
   journal. This list logs ACL changes and denials with the accessor ID.
-- Agent-side caching of decisions, a down policy, and a recovery token.
+- Client-side caching of decisions, a down policy, and a recovery token.
 - More than one datacentre.

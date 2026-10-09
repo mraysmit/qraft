@@ -16,9 +16,9 @@
 
 package dev.mars.qraft.server.health;
 
-import dev.mars.qraft.common.AgentInfo;
-import dev.mars.qraft.common.AgentStatus;
-import dev.mars.qraft.state.AgentCommand;
+import dev.mars.qraft.common.ClientInfo;
+import dev.mars.qraft.common.ClientStatus;
+import dev.mars.qraft.state.ClientCommand;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -47,13 +47,13 @@ class NodeExpiryEvaluatorTest {
 
     @Test
     void aSilentNodeFallsDueOneTtlAfterItsLastContact() {
-        AgentInfo registeredOnly = node("agent-1", null, AgentStatus.REGISTERING);
-        AgentInfo heartbeating = node("agent-2", REGISTERED.plusSeconds(30), AgentStatus.HEALTHY);
+        ClientInfo registeredOnly = node("client-1", null, ClientStatus.REGISTERING);
+        ClientInfo heartbeating = node("client-2", REGISTERED.plusSeconds(30), ClientStatus.HEALTHY);
         Instant now = REGISTERED.plusSeconds(90);
 
         NodeExpiryPlan plan = evaluator.plan(List.of(heartbeating, registeredOnly), now, LONG_LEADER, POLICY);
 
-        assertEquals(List.of(AgentCommand.expire("agent-1", REGISTERED, false, now)), plan.commands(),
+        assertEquals(List.of(ClientCommand.expire("client-1", REGISTERED, false, now)), plan.commands(),
                 "before its first heartbeat a node's last contact is its registration time");
         assertEquals(Optional.of(REGISTERED.plusSeconds(120)), plan.nextDue());
         assertEquals(List.of(), evaluator.plan(List.of(registeredOnly), now.minusMillis(1), LONG_LEADER, POLICY)
@@ -62,7 +62,7 @@ class NodeExpiryEvaluatorTest {
 
     @Test
     void aNewLeaderGrantsEveryNodeAFullTtl() {
-        AgentInfo silent = node("agent-1", REGISTERED, AgentStatus.HEALTHY);
+        ClientInfo silent = node("client-1", REGISTERED, ClientStatus.HEALTHY);
         Instant elected = REGISTERED.plusSeconds(600);
 
         NodeExpiryPlan withinGrace = evaluator.plan(List.of(silent), elected.plusSeconds(89), elected, POLICY);
@@ -70,18 +70,18 @@ class NodeExpiryEvaluatorTest {
 
         assertEquals(List.of(), withinGrace.commands());
         assertEquals(Optional.of(elected.plusSeconds(90)), withinGrace.nextDue());
-        assertEquals(List.of(AgentCommand.expire("agent-1", REGISTERED, false, elected.plusSeconds(90))),
+        assertEquals(List.of(ClientCommand.expire("client-1", REGISTERED, false, elected.plusSeconds(90))),
                 afterGrace.commands(), "the command names the stored last contact, not the grace deadline");
     }
 
     @Test
     void anUnreachableNodeIsReapedOnlyAfterTheReapDelayAndNeverWhenItIsZero() {
-        AgentInfo unreachable = node("agent-1", REGISTERED, AgentStatus.UNREACHABLE);
+        ClientInfo unreachable = node("client-1", REGISTERED, ClientStatus.UNREACHABLE);
         Instant reapAt = REGISTERED.plusSeconds(150);
 
         assertEquals(List.of(), evaluator.plan(List.of(unreachable), reapAt.minusMillis(1), LONG_LEADER, POLICY)
                 .commands(), "an unreachable node is not marked again");
-        assertEquals(List.of(AgentCommand.expire("agent-1", REGISTERED, true, reapAt)),
+        assertEquals(List.of(ClientCommand.expire("client-1", REGISTERED, true, reapAt)),
                 evaluator.plan(List.of(unreachable), reapAt, LONG_LEADER, POLICY).commands());
 
         NodeExpiryPlan neverReap = evaluator.plan(List.of(unreachable), reapAt.plus(Duration.ofDays(30)), LONG_LEADER,
@@ -94,18 +94,18 @@ class NodeExpiryEvaluatorTest {
     void dueNodesAreOrderedByIdentifier() {
         Instant now = REGISTERED.plusSeconds(200);
 
-        NodeExpiryPlan plan = evaluator.plan(List.of(node("c", REGISTERED, AgentStatus.HEALTHY),
-                node("a", REGISTERED, AgentStatus.HEALTHY), node("b", REGISTERED, AgentStatus.HEALTHY)),
+        NodeExpiryPlan plan = evaluator.plan(List.of(node("c", REGISTERED, ClientStatus.HEALTHY),
+                node("a", REGISTERED, ClientStatus.HEALTHY), node("b", REGISTERED, ClientStatus.HEALTHY)),
                 now, LONG_LEADER, POLICY);
 
-        assertEquals(List.of("a", "b", "c"), plan.commands().stream().map(AgentCommand.Expire::agentId).toList());
+        assertEquals(List.of("a", "b", "c"), plan.commands().stream().map(ClientCommand.Expire::clientId).toList());
     }
 
     @Test
     void extremeDurationsSaturateInsteadOfOverflowing() {
         NodeExpiryPolicy huge = new NodeExpiryPolicy(Duration.ofSeconds(Long.MAX_VALUE / 2), Duration.ZERO);
 
-        NodeExpiryPlan plan = evaluator.plan(List.of(node("agent-1", REGISTERED, AgentStatus.HEALTHY)),
+        NodeExpiryPlan plan = evaluator.plan(List.of(node("client-1", REGISTERED, ClientStatus.HEALTHY)),
                 REGISTERED.plusSeconds(60), REGISTERED, huge);
 
         assertEquals(List.of(), plan.commands());
@@ -119,8 +119,8 @@ class NodeExpiryEvaluatorTest {
                 () -> new NodeExpiryPolicy(Duration.ofSeconds(1), Duration.ofSeconds(-1)));
     }
 
-    private static AgentInfo node(String agentId, Instant lastHeartbeat, AgentStatus status) {
-        AgentInfo info = new AgentInfo(agentId, agentId + "-host", "127.0.0.1", 8080);
+    private static ClientInfo node(String clientId, Instant lastHeartbeat, ClientStatus status) {
+        ClientInfo info = new ClientInfo(clientId, clientId + "-host", "127.0.0.1", 8080);
         info.setRegistrationTime(REGISTERED);
         info.setLastHeartbeat(lastHeartbeat);
         info.setStatus(status);

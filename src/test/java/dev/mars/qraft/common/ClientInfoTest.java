@@ -34,59 +34,59 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests {@link AgentInfo}: a new agent's defaults, its endpoint, identity by agent ID alone, the copy the state
- * store takes before changing an agent, metadata handling, the fields {@code toString} names, and a JSON round
+ * Tests {@link ClientInfo}: a new client's defaults, its endpoint, identity by client ID alone, the copy the state
+ * store takes before changing a client, metadata handling, the fields {@code toString} names, and a JSON round
  * trip of every field.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-03-15
  * @version 2.0
  */
-class AgentInfoTest {
+class ClientInfoTest {
     private static final Instant REGISTERED = Instant.parse("2026-01-01T00:00:00Z");
     private static final Instant HEARTBEAT = Instant.parse("2026-01-01T00:00:05Z");
 
     @Test
-    void aNewAgentIsRegisteringWithEmptyMetadataAndItsCreationTime() {
+    void aNewClientIsRegisteringWithEmptyMetadataAndItsCreationTime() {
         Instant before = Instant.now();
-        AgentInfo agent = new AgentInfo("agent-001", "host1.example.com", "192.168.1.100", 8080);
+        ClientInfo client = new ClientInfo("client-001", "host1.example.com", "192.168.1.100", 8080);
         Instant after = Instant.now();
 
-        assertEquals(AgentStatus.REGISTERING, agent.getStatus());
-        assertTrue(agent.getMetadata().isEmpty());
-        assertFalse(agent.getRegistrationTime().isBefore(before), "registered no earlier than its creation");
-        assertFalse(agent.getRegistrationTime().isAfter(after), "registered no later than its creation");
-        assertEquals("agent-001", agent.getAgentId());
-        assertEquals("host1.example.com", agent.getHostname());
-        assertEquals("192.168.1.100", agent.getAddress());
-        assertEquals(8080, agent.getPort());
+        assertEquals(ClientStatus.REGISTERING, client.getStatus());
+        assertTrue(client.getMetadata().isEmpty());
+        assertFalse(client.getRegistrationTime().isBefore(before), "registered no earlier than its creation");
+        assertFalse(client.getRegistrationTime().isAfter(after), "registered no later than its creation");
+        assertEquals("client-001", client.getClientId());
+        assertEquals("host1.example.com", client.getHostname());
+        assertEquals("192.168.1.100", client.getAddress());
+        assertEquals(8080, client.getPort());
     }
 
     @Test
     void theEndpointIsAnHttpUrlOfTheAddressAndPort() {
         assertEquals("http://192.168.1.100:8080",
-                new AgentInfo("agent-001", "host1", "192.168.1.100", 8080).getEndpoint());
+                new ClientInfo("client-001", "host1", "192.168.1.100", 8080).getEndpoint());
     }
 
     @Test
-    void agentsAreEqualExactlyWhenTheirIdsAre() {
-        AgentInfo agent = new AgentInfo("agent-001", "host1", "192.168.1.1", 8080);
-        AgentInfo sameIdElsewhere = new AgentInfo("agent-001", "host2", "192.168.1.2", 9090);
-        sameIdElsewhere.setStatus(AgentStatus.FAILED);
-        AgentInfo otherIdSameHost = new AgentInfo("agent-002", "host1", "192.168.1.1", 8080);
+    void clientsAreEqualExactlyWhenTheirIdsAre() {
+        ClientInfo client = new ClientInfo("client-001", "host1", "192.168.1.1", 8080);
+        ClientInfo sameIdElsewhere = new ClientInfo("client-001", "host2", "192.168.1.2", 9090);
+        sameIdElsewhere.setStatus(ClientStatus.FAILED);
+        ClientInfo otherIdSameHost = new ClientInfo("client-002", "host1", "192.168.1.1", 8080);
 
-        assertEquals(agent, sameIdElsewhere, "only the ID identifies an agent");
-        assertEquals(agent.hashCode(), sameIdElsewhere.hashCode());
-        assertNotEquals(agent, otherIdSameHost);
-        assertNotEquals(agent, null);
-        assertNotEquals(agent, "agent-001");
+        assertEquals(client, sameIdElsewhere, "only the ID identifies a client");
+        assertEquals(client.hashCode(), sameIdElsewhere.hashCode());
+        assertNotEquals(client, otherIdSameHost);
+        assertNotEquals(client, null);
+        assertNotEquals(client, "client-001");
     }
 
     @Test
     void aCopyHasEveryFieldAndItsOwnMetadata() {
-        AgentInfo source = fullyPopulated();
+        ClientInfo source = fullyPopulated();
 
-        AgentInfo copy = AgentInfo.copyOf(source);
+        ClientInfo copy = ClientInfo.copyOf(source);
 
         assertNotSame(source, copy);
         assertFullyPopulated(copy);
@@ -101,25 +101,25 @@ class AgentInfoTest {
 
     @Test
     void metadataAccumulatesByKeyAndIsNeverNull() {
-        AgentInfo agent = new AgentInfo();
+        ClientInfo client = new ClientInfo();
 
-        agent.addMetadata("environment", "production");
-        agent.addMetadata("tier", "premium");
-        agent.addMetadata("tier", "standard");
-        assertEquals(Map.of("environment", "production", "tier", "standard"), agent.getMetadata());
+        client.addMetadata("environment", "production");
+        client.addMetadata("tier", "premium");
+        client.addMetadata("tier", "standard");
+        assertEquals(Map.of("environment", "production", "tier", "standard"), client.getMetadata());
 
-        agent.setMetadata(null);
-        assertTrue(agent.getMetadata().isEmpty(), "clearing metadata leaves an empty map");
-        agent.addMetadata("after", "clearing");
-        assertEquals(Map.of("after", "clearing"), agent.getMetadata());
+        client.setMetadata(null);
+        assertTrue(client.getMetadata().isEmpty(), "clearing metadata leaves an empty map");
+        client.addMetadata("after", "clearing");
+        assertEquals(Map.of("after", "clearing"), client.getMetadata());
     }
 
     @Test
     void toStringNamesTheIdentifyingFieldsWithTheirValues() {
         String text = fullyPopulated().toString();
 
-        for (String expected : List.of("agentId='agent-001'", "hostname='host1'", "address='192.168.1.1'",
-                "port=8080", "status=" + AgentStatus.HEALTHY, "version='1.2.3'", "region='us-west-2'", "datacenter='dc1'")) {
+        for (String expected : List.of("clientId='client-001'", "hostname='host1'", "address='192.168.1.1'",
+                "port=8080", "status=" + ClientStatus.HEALTHY, "version='1.2.3'", "region='us-west-2'", "datacenter='dc1'")) {
             assertTrue(text.contains(expected), expected + " in " + text);
         }
     }
@@ -128,9 +128,9 @@ class AgentInfoTest {
     void aJsonRoundTripKeepsEveryField() throws Exception {
         ObjectMapper mapper = new ObjectMapper().findAndRegisterModules()
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-        AgentInfo source = fullyPopulated();
+        ClientInfo source = fullyPopulated();
 
-        AgentInfo read = mapper.readValue(mapper.writeValueAsString(source), AgentInfo.class);
+        ClientInfo read = mapper.readValue(mapper.writeValueAsString(source), ClientInfo.class);
 
         assertFullyPopulated(read);
         assertEquals(Set.of("transfer"), read.getCapabilities().getSupportedServices());
@@ -138,49 +138,49 @@ class AgentInfoTest {
 
     @Test
     void onlyAHealthyNodeIsHealthy() {
-        AgentInfo agentInfo = new AgentInfo();
+        ClientInfo clientInfo = new ClientInfo();
 
-        agentInfo.setStatus(AgentStatus.HEALTHY);
-        assertTrue(agentInfo.isHealthy());
+        clientInfo.setStatus(ClientStatus.HEALTHY);
+        assertTrue(clientInfo.isHealthy());
 
-        for (AgentStatus status : List.of(AgentStatus.DEGRADED, AgentStatus.MAINTENANCE,
-                AgentStatus.UNREACHABLE, AgentStatus.FAILED)) {
-            agentInfo.setStatus(status);
-            assertFalse(agentInfo.isHealthy(), status.toString());
+        for (ClientStatus status : List.of(ClientStatus.DEGRADED, ClientStatus.MAINTENANCE,
+                ClientStatus.UNREACHABLE, ClientStatus.FAILED)) {
+            clientInfo.setStatus(status);
+            assertFalse(clientInfo.isHealthy(), status.toString());
         }
     }
 
     @Test
-    void anAgentHasNoWorkAvailabilityProperty() throws Exception {
+    void aClientHasNoWorkAvailabilityProperty() throws Exception {
         String json = new ObjectMapper().findAndRegisterModules()
-                .writeValueAsString(new AgentInfo("agent-1", "host", "10.0.0.1", 8080));
+                .writeValueAsString(new ClientInfo("client-1", "host", "10.0.0.1", 8080));
 
         assertFalse(json.contains("\"available\""), "the job system's availability for work is gone: " + json);
     }
 
-    /** An agent with every field set to a value that differs from its default. */
-    private static AgentInfo fullyPopulated() {
-        AgentCapabilities capabilities = new AgentCapabilities();
+    /** A client with every field set to a value that differs from its default. */
+    private static ClientInfo fullyPopulated() {
+        ClientCapabilities capabilities = new ClientCapabilities();
         capabilities.setSupportedServices(Set.of("transfer"));
-        AgentInfo agent = new AgentInfo("agent-001", "host1", "192.168.1.1", 8080);
-        agent.setCapabilities(capabilities);
-        agent.setStatus(AgentStatus.HEALTHY);
-        agent.setRegistrationTime(REGISTERED);
-        agent.setLastHeartbeat(HEARTBEAT);
-        agent.setVersion("1.2.3");
-        agent.setRegion("us-west-2");
-        agent.setDatacenter("dc1");
-        agent.setMetadata(new HashMap<>(Map.of("tier", "premium")));
-        return agent;
+        ClientInfo client = new ClientInfo("client-001", "host1", "192.168.1.1", 8080);
+        client.setCapabilities(capabilities);
+        client.setStatus(ClientStatus.HEALTHY);
+        client.setRegistrationTime(REGISTERED);
+        client.setLastHeartbeat(HEARTBEAT);
+        client.setVersion("1.2.3");
+        client.setRegion("us-west-2");
+        client.setDatacenter("dc1");
+        client.setMetadata(new HashMap<>(Map.of("tier", "premium")));
+        return client;
     }
 
     /** Checks each field against the literal {@link #fullyPopulated()} sets, so a setter that drops its value fails. */
-    private static void assertFullyPopulated(AgentInfo actual) {
-        assertEquals("agent-001", actual.getAgentId());
+    private static void assertFullyPopulated(ClientInfo actual) {
+        assertEquals("client-001", actual.getClientId());
         assertEquals("host1", actual.getHostname());
         assertEquals("192.168.1.1", actual.getAddress());
         assertEquals(8080, actual.getPort());
-        assertEquals(AgentStatus.HEALTHY, actual.getStatus());
+        assertEquals(ClientStatus.HEALTHY, actual.getStatus());
         assertEquals(REGISTERED, actual.getRegistrationTime());
         assertEquals(HEARTBEAT, actual.getLastHeartbeat());
         assertEquals("1.2.3", actual.getVersion());

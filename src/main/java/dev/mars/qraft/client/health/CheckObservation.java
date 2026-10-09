@@ -21,7 +21,7 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * One sequenced observation of a local check, as published to the controller. Retrying the same
+ * One sequenced observation of a local check, as published to the server. Retrying the same
  * instance is idempotent at the server; a new sequence number makes it a new observation or renewal.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd

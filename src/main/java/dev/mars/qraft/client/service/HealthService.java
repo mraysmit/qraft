@@ -18,7 +18,7 @@ package dev.mars.qraft.client.service;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
-import dev.mars.qraft.client.config.AgentConfiguration;
+import dev.mars.qraft.client.config.ClientConfiguration;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -29,20 +29,20 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 
 /**
- * Local health state for the discovery agent.
+ * Local health state for the discovery client.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-03-15
  * @version 1.0
  */
 public final class HealthService {
-    private final AgentConfiguration config;
+    private final ClientConfiguration config;
     private final BooleanSupplier readiness;
     private final AtomicBoolean running = new AtomicBoolean();
     private HttpServer server;
     private ExecutorService executor;
 
-    public HealthService(AgentConfiguration config, BooleanSupplier readiness) {
+    public HealthService(ClientConfiguration config, BooleanSupplier readiness) {
         this.config = config;
         this.readiness = readiness;
     }
@@ -50,7 +50,7 @@ public final class HealthService {
     public synchronized void start() {
         if (running.get()) return;
         try {
-            server = HttpServer.create(new InetSocketAddress(config.getAgentPort()), 0);
+            server = HttpServer.create(new InetSocketAddress(config.getClientPort()), 0);
             executor = Executors.newVirtualThreadPerTaskExecutor();
             server.setExecutor(executor);
             server.createContext("/health/live", exchange -> respond(exchange, 200, "{\"status\":\"alive\"}"));
@@ -70,7 +70,7 @@ public final class HealthService {
             if (executor != null) executor.close();
             server = null;
             executor = null;
-            throw new IllegalStateException("Failed to start agent health server on port " + config.getAgentPort(), e);
+            throw new IllegalStateException("Failed to start client health server on port " + config.getClientPort(), e);
         }
     }
 
@@ -89,13 +89,13 @@ public final class HealthService {
      * @throws IllegalStateException when the service is not running
      */
     public synchronized int port() {
-        if (server == null) throw new IllegalStateException("the agent health server is not running");
+        if (server == null) throw new IllegalStateException("the client health server is not running");
         return server.getAddress().getPort();
     }
 
     public boolean isHealthy() { return running.get(); }
     public boolean isReady() { return running.get() && readiness.getAsBoolean(); }
-    public String agentId() { return config.getAgentId(); }
+    public String clientId() { return config.getClientId(); }
 
     private static void respond(HttpExchange exchange, int status, String body) throws IOException {
         if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {

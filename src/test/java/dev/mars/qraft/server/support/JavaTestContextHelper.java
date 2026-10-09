@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
- * Test helper providing a completion latch for asynchronous controller tests.
+ * Test helper providing a completion latch for asynchronous server tests.
  * Records the first failure and provides succeeding and
  * failing result handlers.
  *

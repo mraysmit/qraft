@@ -118,32 +118,32 @@ public final class SharedDockerClusterFixture {
     }
 
     /**
-     * Starts a disposable three-node cluster with one client-mode {@code agent} container using the expiry
+     * Starts a disposable three-node cluster with one client-mode {@code client} container using the expiry
      * profile: HTTP and TCP checks with a 5-second TTL, so expiry and deregistration are quick to observe.
      */
-    public static ComposeContainer startIsolatedThreeNodeClusterWithAgent() {
-        return startIsolatedThreeNodeClusterWithAgent("docker-compose-3node-agent-prebuilt.yml");
+    public static ComposeContainer startIsolatedThreeNodeClusterWithClient() {
+        return startIsolatedThreeNodeClusterWithClient("docker-compose-3node-client-prebuilt.yml");
     }
 
     /**
-     * Starts a disposable three-node cluster with one client-mode {@code agent} container using the restart
-     * profile: a 15-second check TTL, a 30-second deregistration delay, and 5-second controller contact
+     * Starts a disposable three-node cluster with one client-mode {@code client} container using the restart
+     * profile: a 15-second check TTL, a 30-second deregistration delay, and 5-second server contact
      * freshness, which leave margins of several seconds for container and JVM start.
      */
-    public static ComposeContainer startIsolatedThreeNodeClusterWithRestartAgent() {
-        return startIsolatedThreeNodeClusterWithAgent("docker-compose-3node-agent-restart-prebuilt.yml");
+    public static ComposeContainer startIsolatedThreeNodeClusterWithRestartClient() {
+        return startIsolatedThreeNodeClusterWithClient("docker-compose-3node-client-restart-prebuilt.yml");
     }
 
-    private static ComposeContainer startIsolatedThreeNodeClusterWithAgent(String composeFile) {
+    private static ComposeContainer startIsolatedThreeNodeClusterWithClient(String composeFile) {
         ensureImageBuilt();
         ComposeContainer cluster = new ComposeContainer(new File("src/test/resources/" + composeFile))
                 .withExposedService("server1", 8080, Wait.forHttp("/health").forStatusCode(200))
                 .withExposedService("server2", 8080, Wait.forHttp("/health").forStatusCode(200))
                 .withExposedService("server3", 8080, Wait.forHttp("/health").forStatusCode(200))
-                .withExposedService("agent", 8080, Wait.forHttp("/health/live").forStatusCode(200))
+                .withExposedService("client", 8080, Wait.forHttp("/health/live").forStatusCode(200))
                 .withStartupTimeout(Duration.ofSeconds(90));
         cluster.start();
-        registerCluster(cluster, List.of("server1", "server2", "server3", "agent"));
+        registerCluster(cluster, List.of("server1", "server2", "server3", "client"));
         return cluster;
     }
 
@@ -234,7 +234,7 @@ public final class SharedDockerClusterFixture {
         }
     }
 
-    /** Runs a second controller against an active controller's volume and captures its exit. */
+    /** Runs a second server against an active server's volume and captures its exit. */
     public static DockerCommandResult runStorageLockContender(
             ComposeContainer cluster, String ownerService) {
         Path config = null;
@@ -285,9 +285,9 @@ public final class SharedDockerClusterFixture {
     /** A command's outcome; {@code exited} is false when it was still running at its bound and was removed. */
     public record DockerCommandResult(boolean exited, int exitCode, String output) { }
 
-    /** An agent container started beside a compose cluster; {@link #close()} removes it and its configuration. */
-    public record DetachedAgent(String name, Path config) implements AutoCloseable {
-        /** Stops the agent gracefully, so it deregisters its services, and waits for it to exit. */
+    /** A client container started beside a compose cluster; {@link #close()} removes it and its configuration. */
+    public record DetachedClient(String name, Path config) implements AutoCloseable {
+        /** Stops the client gracefully, so it deregisters its services, and waits for it to exit. */
         public void stopGracefully() throws Exception {
             runCommand(List.of("docker", "stop", "--time", "20", name));
         }
@@ -305,16 +305,16 @@ public final class SharedDockerClusterFixture {
     }
 
     /**
-     * Starts a client-mode agent on {@code cluster}'s network with a configuration chosen at run time, such as
+     * Starts a client-mode client on {@code cluster}'s network with a configuration chosen at run time, such as
      * seeds ordered by which server is the leader. It is reachable on that network as {@code alias}.
      */
-    public static DetachedAgent startDetachedAgent(ComposeContainer cluster, String alias, String clientJson)
+    public static DetachedClient startDetachedClient(ComposeContainer cluster, String alias, String clientJson)
             throws Exception {
         String network = cluster.getContainerByServiceName("server1")
                 .orElseThrow(() -> new IllegalStateException("the cluster has no server1"))
                 .getContainerInfo().getNetworkSettings().getNetworks().keySet().iterator().next();
-        Path config = Files.createTempFile("qraft-agent-", ".json");
-        String name = "qraft-agent-" + alias + "-" + java.util.UUID.randomUUID();
+        Path config = Files.createTempFile("qraft-client-", ".json");
+        String name = "qraft-client-" + alias + "-" + java.util.UUID.randomUUID();
         try {
             Files.writeString(config, clientJson);
             makeContainerConfigReadable(config);
@@ -326,7 +326,7 @@ public final class SharedDockerClusterFixture {
             Files.deleteIfExists(config);
             throw failed;
         }
-        return new DetachedAgent(name, config);
+        return new DetachedClient(name, config);
     }
 
     /** Makes a non-secret test configuration readable by the image's non-root user on POSIX hosts. */

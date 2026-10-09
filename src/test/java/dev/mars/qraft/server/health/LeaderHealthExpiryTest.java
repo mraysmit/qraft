@@ -16,14 +16,14 @@
 
 package dev.mars.qraft.server.health;
 
-import dev.mars.qraft.common.AgentInfo;
-import dev.mars.qraft.common.AgentStatus;
+import dev.mars.qraft.common.ClientInfo;
+import dev.mars.qraft.common.ClientStatus;
 import dev.mars.qraft.state.catalog.HealthCheckState;
 import dev.mars.qraft.state.catalog.HealthObservation;
 import dev.mars.qraft.state.catalog.ServiceCheckId;
 import dev.mars.qraft.state.catalog.ServiceHealth;
 import dev.mars.qraft.state.catalog.ServiceInstanceId;
-import dev.mars.qraft.state.AgentCommand;
+import dev.mars.qraft.state.ClientCommand;
 import dev.mars.qraft.state.CatalogCommand;
 import dev.mars.qraft.raft.RaftCommand;
 import dev.mars.qraft.raft.RaftCommandResult;
@@ -185,9 +185,9 @@ class LeaderHealthExpiryTest {
 
     @Test
     void silentNodesAreExpiredOnlyByTheLeaderAndNeverProposedTwiceWhileInFlight() {
-        AgentInfo silent = new AgentInfo("agent-1", "host", "127.0.0.1", 8080);
+        ClientInfo silent = new ClientInfo("client-1", "host", "127.0.0.1", 8080);
         silent.setRegistrationTime(START);
-        silent.setStatus(AgentStatus.HEALTHY);
+        silent.setStatus(ClientStatus.HEALTHY);
         LeaderHealthExpiry withNodes = new LeaderHealthExpiry(checks::get, () -> List.of(silent),
                 new NodeExpiryPolicy(Duration.ofSeconds(90), Duration.ofSeconds(60)), command -> {
                     proposed.add(command);
@@ -203,17 +203,17 @@ class LeaderHealthExpiryTest {
         time.advance(Duration.ofSeconds(89));
         assertEquals(List.of(), proposed, "the new leader grants a full TTL");
         time.advance(Duration.ofSeconds(1));
-        assertEquals(List.of(AgentCommand.expire("agent-1", START, false, START.plusSeconds(390))), proposed);
+        assertEquals(List.of(ClientCommand.expire("client-1", START, false, START.plusSeconds(390))), proposed);
 
         time.advance(Duration.ofSeconds(10));
         assertEquals(1, proposed.size(), "commands differing only in their proposal time are the same expiry");
 
         replies.getFirst().complete(new RaftCommandResult.Success<>(silent));
-        silent.setStatus(AgentStatus.UNREACHABLE);
+        silent.setStatus(ClientStatus.UNREACHABLE);
         time.advance(Duration.ofSeconds(49));
         assertEquals(1, proposed.size(), "the reap delay runs from the grace-adjusted deadline");
         time.advance(Duration.ofSeconds(1));
-        assertEquals(AgentCommand.expire("agent-1", START, true, START.plusSeconds(450)), proposed.get(1));
+        assertEquals(ClientCommand.expire("client-1", START, true, START.plusSeconds(450)), proposed.get(1));
         withNodes.close();
     }
 

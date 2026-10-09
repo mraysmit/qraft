@@ -193,7 +193,7 @@ critical and warning services before passing services.
 The service detail page contains:
 
 - **Overview:** identity, scope, aggregate health, configuration, and endpoints;
-- **Instances:** address, port, node, owner agent, health, and renewal state;
+- **Instances:** address, port, node, owner client, health, and renewal state;
 - **Health Checks:** definitions, latest authoritative result, observation time,
   output subject to redaction, and failure reason;
 - **Topology:** upstreams, downstreams, gateways, routes, and traffic status;
@@ -206,9 +206,9 @@ The service detail page contains:
 Authorized users can register, update, enable, disable, or deregister a service.
 These operations use the standard replicated command path.
 
-### 5.2 Nodes and agents
+### 5.2 Nodes and clients
 
-Qraft distinguishes server members from client agents.
+Qraft distinguishes server members from clients.
 
 Server rows show:
 
@@ -220,17 +220,17 @@ Server rows show:
 - storage and snapshot state;
 - lifecycle state, including draining or fenced.
 
-Agent rows show:
+Client rows show:
 
-- agent and node identity;
+- client and node identity;
 - liveness and readiness;
-- current controller endpoint;
+- current server endpoint;
 - last heartbeat and successful reconciliation;
 - owned services and failing checks;
 - tenant, namespace, datacenter, and region;
 - version and relevant capabilities.
 
-Node and agent detail pages provide Summary, Services, Health Checks,
+Node and client detail pages provide Summary, Services, Health Checks,
 Reconciliation, Metadata, Sessions, Raft, Storage, and Events tabs when those
 tabs apply to the selected type.
 
@@ -365,7 +365,7 @@ The cluster overview answers whether the cluster is safe to operate. It shows:
 - commit and applied indexes;
 - maximum and per-member replication lag;
 - peer reachability;
-- service and agent health totals;
+- service and client health totals;
 - transition queue depth and saturation;
 - WAL state and size;
 - snapshot boundary, age, and last result;
@@ -403,7 +403,7 @@ The event experience follows
 
 - **System:** node lifecycle, elections, leadership, replication, snapshots,
   storage, queue saturation, and fencing;
-- **Domain:** services, agents, keys, sessions, locks, tenants, namespaces, and
+- **Domain:** services, clients, keys, sessions, locks, tenants, namespaces, and
   replicated configuration;
 - **Observation:** health checks, heartbeats, reconciliation, probes, and local
   resource warnings;
@@ -555,7 +555,7 @@ feature flags expose only backed capabilities.
 ### Stage 1: Operational discovery
 
 - application shell, scope selection, consistency selection, and cluster strip;
-- Services, service instances, Nodes and Agents, and Health Checks;
+- Services, service instances, Nodes and Clients, and Health Checks;
 - Cluster Overview and Raft Members;
 - Storage and Snapshots;
 - read-only Events and Configuration.

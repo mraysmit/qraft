@@ -83,9 +83,9 @@ terminal, through `Tee-Object` as above, and then reads the results from the log
 
 | Suite | What it covers | Where | Time in tests* |
 |---|---|---|---|
-| **Default** | Unit and in-process integration tests: Raft on manual timers, gRPC on local ports, HTTP, storage, agent, and a runtime start-up test | `src/test` | about 40 s (estimate) |
-| **End-to-end** | Real server and agent processes that wait out real TTLs and a real leader change | tagged `@Tag("e2e")` | about 50 s |
-| **Docker** | Real three-server clusters in containers: restarts, partitions, agents | tagged `@Tag("docker")` | about 5.5 min |
+| **Default** | Unit and in-process integration tests: Raft on manual timers, gRPC on local ports, HTTP, storage, client, and a runtime start-up test | `src/test` | about 40 s (estimate) |
+| **End-to-end** | Real server and client processes that wait out real TTLs and a real leader change | tagged `@Tag("e2e")` | about 50 s |
+| **Docker** | Real three-server clusters in containers: restarts, partitions, clients | tagged `@Tag("docker")` | about 5.5 min |
 
 \* Time spent running tests, measured 2026-09-29 before the end-to-end tests were separated. Compiling
 and packaging come on top.
@@ -131,7 +131,7 @@ unzip -p target/qraft.jar META-INF/maven/io.github.mraysmit/raftlog-core/pom.pro
 
 ## When the change touches the runtime: the end-to-end and Docker suites
 
-Run them when a change touches server or agent start-up, health checks and their TTLs, ports,
+Run them when a change touches server or client start-up, health checks and their TTLs, ports,
 configuration files, the poms, or the Dockerfiles. They aren't needed for every change. Run them straight
 after `mvn install`, together:
 
@@ -287,12 +287,12 @@ Source: `logs/qraft-maven-tests-2026-10-08_13-13-09.log`, line 3:
 ```
 
 A helper JVM that never returns cannot audit itself: a crash writer halts at its checkpoint, and
-`CrashedAgentExpiryEndToEndTest` kills its client. Its parent test audits it instead. Once the JVM has ended,
+`CrashedClientExpiryEndToEndTest` kills its client. Its parent test audits it instead. Once the JVM has ended,
 the test passes its complete console output to `SubprocessOutputAuditHelper.requireNoErrors`. An ERROR line,
 a Logback status error, or an uncaught exception in that output fails the calling test, and the failure
 quotes each error with its stack trace. These JVMs declare no intentional error, so a flag does not excuse
 one. The three crash-writer recovery tests call it when their writer exits, and
-`CrashedAgentExpiryEndToEndTest` calls it in its teardown. Such a JVM also writes its own
+`CrashedClientExpiryEndToEndTest` calls it in its teardown. Such a JVM also writes its own
 `logs/qraft-maven-tests-<timestamp>.log`, which the review of retained logs covers.
 
 ### Docker archives and uncaught exceptions
@@ -385,7 +385,7 @@ diagnostic evidence of the defects; it is not counted as successful verification
 - `TelemetryConfigTest` exercises the real enabled SDK, disabled telemetry, and resource cleanup
   after Prometheus binding or global SDK registration fails.
 - `DockerDeploymentContractTest` covers server DNS/configuration/dashboard names, dynamic fixture
-  service names, launcher dispatch, and preservation of the client `agent` / `controllers`
+  service names, launcher dispatch, and the client's `client` / `servers`
   configuration objects. Its Docker-tagged contract validates every maintained Compose model.
 - Historical log extracts above retain their original package/class names. Current production
   classes use the final packages; the intentional-error flag format and attribution rules are unchanged.
@@ -404,7 +404,7 @@ The final successful-window audit covered 87 retained Maven, application, subpro
 449 explicitly flagged ERROR headers, 301 exception headers attributed to flagged events, one flagged
 uncaught rethrow, and zero unflagged errors or exceptions. Counts include duplicate captures. Both
 fresh-JVM JSON logs were also parsed: 54 events with no ERROR or stack trace. The earlier failed Docker
-run revealed two migrated logger signatures still naming the old controller logger. After failing
+run revealed two migrated logger signatures still naming the old server logger. After failing
 regressions, the definitions now use `QraftServerService.class.getName()` with their existing exact
 message patterns and severity; all nine durable-restart cases and their log audit passed in the final run.
 

@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.server.health;
 
-import dev.mars.qraft.state.AgentCommand;
+import dev.mars.qraft.state.ClientCommand;
 
 import java.time.Instant;
 import java.util.List;
@@ -31,7 +31,7 @@ import java.util.Optional;
  * @since 2026-09-26
  * @version 1.0
  */
-public record NodeExpiryPlan(List<AgentCommand.Expire> commands, Optional<Instant> nextDue) {
+public record NodeExpiryPlan(List<ClientCommand.Expire> commands, Optional<Instant> nextDue) {
     public NodeExpiryPlan {
         commands = List.copyOf(commands);
         Objects.requireNonNull(nextDue, "nextDue");

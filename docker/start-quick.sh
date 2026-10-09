@@ -26,9 +26,9 @@ case "$action" in
   logging) docker compose -f compose/docker-compose-loki.yml up -d ;;
   test)
     curl --fail-with-body -sS -H 'Content-Type: application/json' \
-      --data-binary @test-data/test-registration.json http://localhost:8080/api/v1/agents/register
+      --data-binary @test-data/test-registration.json http://localhost:8080/api/v1/clients/register
     "$SCRIPT_DIR/test-data/send-heartbeat.sh" 1
-    "$SCRIPT_DIR/test-data/check-agents.sh"
+    "$SCRIPT_DIR/test-data/check-clients.sh"
     ;;
   stop) stop_services ;;
   clean)

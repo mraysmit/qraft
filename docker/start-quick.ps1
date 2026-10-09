@@ -86,11 +86,11 @@ function Start-Logging {
 function Run-Tests {
     Write-Host "Running test scenarios..." -ForegroundColor Green
     
-    # Register test agent
-    Write-Host "Registering test agent..." -ForegroundColor Cyan
+    # Register test client
+    Write-Host "Registering test client..." -ForegroundColor Cyan
     try {
-        $response = Invoke-RestMethod -Uri "http://localhost:8080/api/v1/agents/register" -Method POST -Body (Get-Content test-data/test-registration.json -Raw) -ContentType "application/json"
-        Write-Host "✓ Agent registered: $($response.agentId)" -ForegroundColor Green
+        $response = Invoke-RestMethod -Uri "http://localhost:8080/api/v1/clients/register" -Method POST -Body (Get-Content test-data/test-registration.json -Raw) -ContentType "application/json"
+        Write-Host "✓ Client registered: $($response.clientId)" -ForegroundColor Green
     } catch {
         Write-Host "⚠ Registration failed (may already exist)" -ForegroundColor Yellow
     }
@@ -99,9 +99,9 @@ function Run-Tests {
     Write-Host "Sending test heartbeats..." -ForegroundColor Cyan
     & "test-data/send-heartbeat.ps1" -SequenceNumber 1
     
-    # Check agent status
-    Write-Host "Checking agent status..." -ForegroundColor Cyan
-    & "test-data/check-agents.ps1"
+    # Check client status
+    Write-Host "Checking client status..." -ForegroundColor Cyan
+    & "test-data/check-clients.ps1"
 }
 
 function Stop-Services {

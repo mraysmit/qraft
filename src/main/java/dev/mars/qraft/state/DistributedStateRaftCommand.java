@@ -22,7 +22,7 @@ import dev.mars.qraft.state.distributed.DistributedStateCommand;
 import java.util.Objects;
 
 /**
- * Controller-level Raft command wrapper for generic distributed-state commands.
+ * Server-level Raft command wrapper for generic distributed-state commands.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-03-15

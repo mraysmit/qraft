@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.client;
 
-import dev.mars.qraft.client.config.AgentConfiguration;
+import dev.mars.qraft.client.config.ClientConfiguration;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -32,14 +32,14 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * Tests that the {@link QraftAgent} launch path validates {@link AgentConfiguration} before opening
+ * Tests that the {@link QraftClient} launch path validates {@link ClientConfiguration} before opening
  * resources and closes acquired resources when startup fails.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-24
  * @version 1.0
  */
-class QraftAgentApplicationTest {
+class QraftClientApplicationTest {
     @TempDir
     Path temporaryDirectory;
 
@@ -56,33 +56,33 @@ class QraftAgentApplicationTest {
     }
 
     @Test
-    void validatesConfigurationBeforeOpeningAgentResources() throws Exception {
+    void validatesConfigurationBeforeOpeningClientResources() throws Exception {
         Path configuration = temporaryDirectory.resolve("invalid-client.json");
         Files.writeString(configuration, """
-                {"version":1,"agent":{"id":"agent-a","httpPort":-1},
-                 "controllers":{"urls":["http://127.0.0.1:8080"]}}
+                {"version":1,"client":{"id":"client-a","httpPort":-1},
+                 "servers":{"urls":["http://127.0.0.1:8080"]}}
                 """);
         AtomicInteger opened = new AtomicInteger();
 
-        assertThrows(IllegalArgumentException.class, () -> QraftAgent.launch(configuration,
+        assertThrows(IllegalArgumentException.class, () -> QraftClient.launch(configuration,
                 ignored -> {
                     opened.incrementAndGet();
-                    return new TestAgentResourceFixture();
-                }, TestAgentResourceFixture::start, TestAgentResourceFixture::shutdown));
+                    return new TestClientResourceFixture();
+                }, TestClientResourceFixture::start, TestClientResourceFixture::shutdown));
 
         assertEquals(0, opened.get());
     }
 
     @Test
-    void failedStartupClosesAcquiredAgentResources() throws Exception {
+    void failedStartupClosesAcquiredClientResources() throws Exception {
         Path configuration = validConfiguration();
         RuntimeException expected = new RuntimeException("registration failed");
-        TestAgentResourceFixture resource = new TestAgentResourceFixture();
+        TestClientResourceFixture resource = new TestClientResourceFixture();
         resource.startup = CompletableFuture.failedFuture(expected);
 
         CompletionException actual = assertThrows(CompletionException.class,
-                () -> QraftAgent.launch(configuration, ignored -> resource,
-                        TestAgentResourceFixture::start, TestAgentResourceFixture::shutdown));
+                () -> QraftClient.launch(configuration, ignored -> resource,
+                        TestClientResourceFixture::start, TestClientResourceFixture::shutdown));
 
         assertSame(expected, actual.getCause());
         assertEquals(1, resource.shutdowns.get());
@@ -91,14 +91,14 @@ class QraftAgentApplicationTest {
     private Path validConfiguration() throws Exception {
         Path configuration = temporaryDirectory.resolve("client.json");
         Files.writeString(configuration, """
-                {"version":1,"agent":{"id":"agent-a","httpPort":8500},
-                 "controllers":{"urls":["http://127.0.0.1:8080"]}}
+                {"version":1,"client":{"id":"client-a","httpPort":8500},
+                 "servers":{"urls":["http://127.0.0.1:8080"]}}
                 """);
         return configuration;
     }
 
-    /** Test fixture that supplies controllable agent startup and records shutdown calls for lifecycle assertions. */
-    private static final class TestAgentResourceFixture {
+    /** Test fixture that supplies controllable client startup and records shutdown calls for lifecycle assertions. */
+    private static final class TestClientResourceFixture {
         private CompletableFuture<Boolean> startup = CompletableFuture.completedFuture(true);
         private final AtomicInteger shutdowns = new AtomicInteger();
 

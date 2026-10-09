@@ -27,7 +27,7 @@ import java.util.Objects;
  * @version 1.0
  */
 public record CheckResult(CheckStatus status, String output, Instant observedAt) {
-    /** Matches the controller's accepted observation output limit. */
+    /** Matches the server's accepted observation output limit. */
     public static final int MAX_OUTPUT_LENGTH = 4096;
 
     public CheckResult {

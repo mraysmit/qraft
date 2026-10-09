@@ -22,7 +22,7 @@ import java.util.Map;
 import java.util.TreeSet;
 
 /**
- * Client-owned declaration of a service that an agent should publish.
+ * Client-owned declaration of a service that a client should publish.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-24

@@ -25,7 +25,7 @@ import java.util.Objects;
 import java.util.function.BooleanSupplier;
 
 /**
- * Derived agent readiness; it owns no mutable lifecycle state.
+ * Derived client readiness; it owns no mutable lifecycle state.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-24

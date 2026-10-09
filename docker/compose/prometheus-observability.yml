@@ -68,13 +68,13 @@ scrape_configs:
           deployment: 'cluster'
           node: 'node-3'
 
-  # Qraft Agent (when running on Docker host)
-  - job_name: 'qraft-agent-host'
+  # Qraft Client (when running on Docker host)
+  - job_name: 'qraft-client-host'
     scrape_interval: 10s
     static_configs:
       - targets: ['host.docker.internal:9465']
         labels:
-          service: 'qraft-agent'
+          service: 'qraft-client'
           deployment: 'host'
 
   # Qraft Server cluster (server-first architecture in Docker)

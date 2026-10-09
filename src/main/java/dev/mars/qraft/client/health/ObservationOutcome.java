@@ -19,7 +19,7 @@ package dev.mars.qraft.client.health;
 import java.time.Instant;
 
 /**
- * Machine-actionable result of publishing one {@link CheckObservation} across the controller seeds.
+ * Machine-actionable result of publishing one {@link CheckObservation} across the server seeds.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-26
@@ -34,9 +34,9 @@ public sealed interface ObservationOutcome permits ObservationOutcome.Accepted, 
     /** The server already holds a newer or conflicting observation with this sequence number. */
     record Stale(long currentSequenceNumber) implements ObservationOutcome { }
 
-    /** A transport or server outcome that may succeed at another controller or later. */
+    /** A transport or server outcome that may succeed at another server or later. */
     record Retryable(String code, String message, String leaderId) implements ObservationOutcome { }
 
-    /** A validation or semantic outcome, such as an unregistered service, from a reachable controller. */
+    /** A validation or semantic outcome, such as an unregistered service, from a reachable server. */
     record Rejected(String code, String message, String leaderId) implements ObservationOutcome { }
 }

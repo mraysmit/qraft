@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "agent": {
-    "id": "agent-example",
-    "hostname": "agent-example",
-    "address": "agent-example",
+  "client": {
+    "id": "client-example",
+    "hostname": "client-example",
+    "address": "client-example",
     "httpPort": 8080,
     "heartbeatIntervalMs": 5000,
     "shutdownTimeoutMs": 30000,
@@ -11,7 +11,7 @@
     "region": "eu-west",
     "version": "1.0.0"
   },
-  "controllers": {
+  "servers": {
     "urls": [
       "http://server:8080"
     ],
@@ -27,7 +27,7 @@
       {
         "id": "web",
         "name": "web",
-        "address": "agent-example",
+        "address": "client-example",
         "port": 8080,
         "tags": [
           "http"

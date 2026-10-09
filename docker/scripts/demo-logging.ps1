@@ -11,11 +11,11 @@ Write-Host ""
 # 2. Generate some activity
 Write-Host "2. Generating log activity..." -ForegroundColor Yellow
 
-# Register an agent
-Write-Host "   - Registering agent..." -ForegroundColor Cyan
-$regResponse = Invoke-RestMethod -Uri "http://localhost:8080/api/v1/agents/register" -Method POST -Body (Get-Content ../test-data/test-registration.json) -ContentType "application/json" -ErrorAction SilentlyContinue
+# Register a client
+Write-Host "   - Registering client..." -ForegroundColor Cyan
+$regResponse = Invoke-RestMethod -Uri "http://localhost:8080/api/v1/clients/register" -Method POST -Body (Get-Content ../test-data/test-registration.json) -ContentType "application/json" -ErrorAction SilentlyContinue
 if ($regResponse) {
-    Write-Host "     Agent registered: $($regResponse.agentId)" -ForegroundColor Green
+    Write-Host "     Client registered: $($regResponse.clientId)" -ForegroundColor Green
 }
 
 # Send heartbeats
@@ -23,13 +23,13 @@ Write-Host "   - Sending heartbeats..." -ForegroundColor Cyan
 for ($i = 1; $i -le 3; $i++) {
     $timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
     $json = @{
-        agentId = "test-agent-002"
+        clientId = "test-client-002"
         timestamp = $timestamp
         sequenceNumber = $i
         status = "healthy"
     } | ConvertTo-Json
 
-    $response = Invoke-RestMethod -Uri "http://localhost:8080/api/v1/agents/heartbeat" -Method POST -Body $json -ContentType "application/json" -ErrorAction SilentlyContinue
+    $response = Invoke-RestMethod -Uri "http://localhost:8080/api/v1/clients/heartbeat" -Method POST -Body $json -ContentType "application/json" -ErrorAction SilentlyContinue
     if ($response -and $response.success) {
         Write-Host "     Heartbeat $i acknowledged" -ForegroundColor Green
     }
@@ -37,10 +37,10 @@ for ($i = 1; $i -le 3; $i++) {
 }
 
 # Get statistics
-Write-Host "   - Getting agent statistics..." -ForegroundColor Cyan
-$stats = Invoke-RestMethod -Uri "http://localhost:8080/api/v1/agents/heartbeat/stats" -ErrorAction SilentlyContinue
+Write-Host "   - Getting client statistics..." -ForegroundColor Cyan
+$stats = Invoke-RestMethod -Uri "http://localhost:8080/api/v1/clients/heartbeat/stats" -ErrorAction SilentlyContinue
 if ($stats) {
-    Write-Host "     Total agents: $($stats.totalAgents), Healthy: $($stats.healthyAgents)" -ForegroundColor Green
+    Write-Host "     Total clients: $($stats.totalClients), Healthy: $($stats.healthyClients)" -ForegroundColor Green
 }
 
 Write-Host ""

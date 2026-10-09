@@ -20,11 +20,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import dev.mars.qraft.raft.PeerlessTransportFixture;
-import dev.mars.qraft.common.AgentStatus;
-import dev.mars.qraft.client.QraftAgent;
+import dev.mars.qraft.common.ClientStatus;
+import dev.mars.qraft.client.QraftClient;
 import dev.mars.qraft.client.catalog.CatalogOutcome;
 import dev.mars.qraft.client.catalog.HttpCatalogClient;
-import dev.mars.qraft.client.config.AgentConfiguration;
+import dev.mars.qraft.client.config.ClientConfiguration;
 import dev.mars.qraft.common.ServiceDefinition;
 import dev.mars.qraft.server.http.HttpApiServer;
 import dev.mars.qraft.raft.RaftNode;
@@ -54,25 +54,25 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Contract tests for {@link HttpCatalogClient} and {@link QraftAgent} registration, heartbeat, and
- * deregistration against a real single-node controller.
+ * Contract tests for {@link HttpCatalogClient} and {@link QraftClient} registration, heartbeat, and
+ * deregistration against a real single-node server.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-21
  * @version 1.0
  */
-class AgentServerContractTest {
+class ClientServerContractTest {
     private JavaRuntime runtime;
     private RaftNode node;
     private HttpApiServer server;
-    private QraftAgent agent;
+    private QraftClient client;
     private HttpCatalogClient catalogClient;
     private HttpServer retryableServer;
 
     @AfterEach
     void closeResources() throws Exception {
         new CleanupHelper()
-                .run(() -> { if (agent != null) agent.shutdown().get(10, TimeUnit.SECONDS); })
+                .run(() -> { if (client != null) client.shutdown().get(10, TimeUnit.SECONDS); })
                 .run(() -> { if (catalogClient != null) catalogClient.close(); })
                 .run(() -> { if (retryableServer != null) retryableServer.stop(0); })
                 .run(() -> { if (server != null) server.close(); })
@@ -86,8 +86,8 @@ class AgentServerContractTest {
     }
 
     @Test
-    void httpCatalogClientRegistersAndDeregistersAgainstRealController() throws Exception {
-        startController();
+    void httpCatalogClientRegistersAndDeregistersAgainstRealServer() throws Exception {
+        startServer();
         URI endpoint = URI.create("http://127.0.0.1:" + server.port());
         URI refused;
         try (ServerSocket socket = new ServerSocket(0)) {
@@ -106,7 +106,7 @@ class AgentServerContractTest {
         URI retryable = URI.create("http://127.0.0.1:" + retryableServer.getAddress().getPort());
         catalogClient = new HttpCatalogClient(HttpClient.newHttpClient(), new ObjectMapper(),
                 List.of(refused, retryable, endpoint),
-                "catalog-agent", "default", "default", "dc-1", "eu-west", Duration.ofSeconds(2));
+                "catalog-client", "default", "default", "dc-1", "eu-west", Duration.ofSeconds(2));
         ServiceDefinition service = new ServiceDefinition("payments-1", "payments", "127.0.0.1", 9090,
                 List.of("blue"), Map.of("team", "platform"), true);
 
@@ -117,44 +117,44 @@ class AgentServerContractTest {
         JsonNode afterRegistration = readCatalog(endpoint, "payments");
         assertEquals(1, afterRegistration.size());
         assertEquals("payments-1", afterRegistration.get(0).path("serviceId").textValue());
-        assertEquals("catalog-agent", afterRegistration.get(0).path("nodeId").textValue());
+        assertEquals("catalog-client", afterRegistration.get(0).path("nodeId").textValue());
 
         CatalogOutcome.Success deregistered = assertInstanceOf(CatalogOutcome.Success.class,
                 catalogClient.deregister("payments-1").get(10, TimeUnit.SECONDS));
         assertTrue(deregistered.changed());
-        assertEquals(1, retryableAttempts.get(), "the successful controller must be preferred next");
+        assertEquals(1, retryableAttempts.get(), "the successful server must be preferred next");
         assertTrue(readCatalog(endpoint, "payments").isEmpty());
     }
 
     @Test
-    void realAgentCompletesRegistrationHeartbeatAndDeregistrationAgainstController() throws Exception {
-        QraftStateStore store = startController();
-        AgentConfiguration configuration = AgentConfiguration.builder()
-                .agentId("contract-agent")
+    void realClientCompletesRegistrationHeartbeatAndDeregistrationAgainstServer() throws Exception {
+        QraftStateStore store = startServer();
+        ClientConfiguration configuration = ClientConfiguration.builder()
+                .clientId("contract-client")
                 .hostname("contract-host")
                 .address("127.0.0.1")
-                .agentPort(0)
-                .controllerUrl("http://localhost:" + server.port())
+                .clientPort(0)
+                .serverUrl("http://localhost:" + server.port())
                 .heartbeatInterval(25)
                 .requestTimeoutMs(1_000)
                 .build();
-        agent = new QraftAgent(configuration);
+        client = new QraftClient(configuration);
 
-        assertTrue(agent.start().get(10, TimeUnit.SECONDS),
-                () -> "the real agent rejected the controller response; replicated state="
-                        + store.findAgent("contract-agent"));
-        assertTrue(agent.healthService().isReady());
-        waitUntil(() -> store.findAgent("contract-agent")
-                .filter(info -> info.getStatus() == AgentStatus.HEALTHY && info.getLastHeartbeat() != null)
+        assertTrue(client.start().get(10, TimeUnit.SECONDS),
+                () -> "the real client rejected the server response; replicated state="
+                        + store.findClient("contract-client"));
+        assertTrue(client.healthService().isReady());
+        waitUntil(() -> store.findClient("contract-client")
+                .filter(info -> info.getStatus() == ClientStatus.HEALTHY && info.getLastHeartbeat() != null)
                 .isPresent());
 
-        assertTrue(agent.shutdown().get(10, TimeUnit.SECONDS));
-        waitUntil(() -> store.findAgent("contract-agent").isEmpty());
-        assertFalse(agent.isRunning());
-        assertEquals(0, store.getAgents().size());
+        assertTrue(client.shutdown().get(10, TimeUnit.SECONDS));
+        waitUntil(() -> store.findClient("contract-client").isEmpty());
+        assertFalse(client.isRunning());
+        assertEquals(0, store.getClients().size());
     }
 
-    private QraftStateStore startController() throws Exception {
+    private QraftStateStore startServer() throws Exception {
         runtime = JavaRuntime.create();
         QraftStateStore store = new QraftStateStore();
         node = RaftNode.builder()

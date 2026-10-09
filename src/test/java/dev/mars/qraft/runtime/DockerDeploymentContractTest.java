@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.runtime;
 
-import dev.mars.qraft.client.config.AgentConfiguration;
+import dev.mars.qraft.client.config.ClientConfiguration;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -48,11 +48,11 @@ class DockerDeploymentContractTest {
             "src/test/resources/docker-compose-build-image.yml");
     private static final List<String> PREBUILT_COMPOSE_FILES = List.of(
             "src/test/resources/docker-compose-3node-prebuilt.yml",
-            "src/test/resources/docker-compose-3node-agent-prebuilt.yml",
-            "src/test/resources/docker-compose-3node-agent-restart-prebuilt.yml");
+            "src/test/resources/docker-compose-3node-client-prebuilt.yml",
+            "src/test/resources/docker-compose-3node-client-restart-prebuilt.yml");
 
     @Test
-    void controllerDeploymentsBuildTheUnifiedRuntimeInServerMode() throws IOException {
+    void serverDeploymentsBuildTheUnifiedRuntimeInServerMode() throws IOException {
         Path root = Path.of("").toAbsolutePath();
         assertFalse(Files.exists(root.resolve("qraft-controller/Dockerfile")),
                 "the obsolete controller-only image must not return");
@@ -220,30 +220,30 @@ class DockerDeploymentContractTest {
     @Test
     void documentedClientConfigurationIsAValidCompleteExample() {
         Path root = Path.of("").toAbsolutePath();
-        AgentConfiguration configuration = AgentConfiguration.fromFile(
+        ClientConfiguration configuration = ClientConfiguration.fromFile(
                 root.resolve("docker/config/client.json"));
 
-        assertEquals("agent-example", configuration.getAgentId());
-        assertTrue(configuration.getControllerUrls().size() == 1);
+        assertEquals("client-example", configuration.getClientId());
+        assertTrue(configuration.getServerUrls().size() == 1);
         assertTrue(configuration.getServices().size() == 1);
         assertEquals("web", configuration.getServices().getFirst().id());
     }
 
     @Test
-    void agentAcceptanceProfilesRunTheirHealthChecksAgainstEveryServer() throws IOException {
+    void clientAcceptanceProfilesRunTheirHealthChecksAgainstEveryServer() throws IOException {
         Path root = Path.of("").toAbsolutePath();
         Map<String, String> composeByProfile = Map.of(
-                "agent.json", "docker-compose-3node-agent-prebuilt.yml",
-                "agent-restart.json", "docker-compose-3node-agent-restart-prebuilt.yml");
+                "client.json", "docker-compose-3node-client-prebuilt.yml",
+                "client-restart.json", "docker-compose-3node-client-restart-prebuilt.yml");
         for (Map.Entry<String, String> profile : composeByProfile.entrySet()) {
-            AgentConfiguration configuration = AgentConfiguration.fromFile(
-                    root.resolve("docker/config/agent-acceptance/" + profile.getKey()));
-            assertTrue(configuration.getControllerUrls().size() == 3, profile.getKey());
+            ClientConfiguration configuration = ClientConfiguration.fromFile(
+                    root.resolve("docker/config/client-acceptance/" + profile.getKey()));
+            assertTrue(configuration.getServerUrls().size() == 3, profile.getKey());
             assertTrue(configuration.getHealthChecks().size() == 2, profile.getKey());
             String compose = Files.readString(root.resolve(
                     "src/test/resources/" + profile.getValue()));
             assertTrue(compose.contains("command: [\"client\", \"--config\", \"/etc/qraft/client.json\"]"));
-            assertTrue(compose.contains("agent-acceptance/" + profile.getKey() + ":/etc/qraft/client.json:ro"),
+            assertTrue(compose.contains("client-acceptance/" + profile.getKey() + ":/etc/qraft/client.json:ro"),
                     profile.getValue());
         }
     }
@@ -251,8 +251,8 @@ class DockerDeploymentContractTest {
     @Test
     void theRestartProfileLeavesMarginsOfSeveralSecondsForContainerAndJvmStart() {
         Path root = Path.of("").toAbsolutePath();
-        AgentConfiguration restart = AgentConfiguration.fromFile(
-                root.resolve("docker/config/agent-acceptance/agent-restart.json"));
+        ClientConfiguration restart = ClientConfiguration.fromFile(
+                root.resolve("docker/config/client-acceptance/client-restart.json"));
 
         for (var check : restart.getHealthChecks()) {
             assertTrue(check.ttl().compareTo(java.time.Duration.ofSeconds(15)) >= 0, check.checkId());
@@ -333,8 +333,8 @@ class DockerDeploymentContractTest {
                 "docker/compose/grafana/provisioning/dashboards/json/qraft-server.json"));
         assertTrue(dashboard.contains("qraft-servers-compose"));
         assertFalse(dashboard.contains("controller"));
-        AgentConfiguration client = AgentConfiguration.fromFile(root.resolve("docker/config/client.json"));
-        assertTrue(client.getControllerUrls().stream().allMatch(url -> url.getHost().startsWith("server")));
+        ClientConfiguration client = ClientConfiguration.fromFile(root.resolve("docker/config/client.json"));
+        assertTrue(client.getServerUrls().stream().allMatch(url -> url.getHost().startsWith("server")));
     }
 
     @Test

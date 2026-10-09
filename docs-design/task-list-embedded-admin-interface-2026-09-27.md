@@ -40,7 +40,7 @@ Updated 2026-09-27.
   - `/raft/status`: node, role, term, leader, commit, applied, and last log
     index, snapshot index, and the fenced flag, read as one consistent view;
   - `/health/*`;
-  - `/api/v1/agents`: nodes with status, heartbeat, and metadata;
+  - `/api/v1/clients`: nodes with status, heartbeat, and metadata;
   - `/v1/catalog/services`, `/v1/catalog/service/{name}`;
   - `/v1/health/service/{name}` with checks and the `passing` filter.
 - Stage 1 views that need APIs which do not exist yet:
@@ -119,7 +119,7 @@ and corrects the build and security weaknesses the review found.
      the health endpoints;
    - Services, fetching once per service until UI-2 adds a summary endpoint;
    - service detail: Overview, Instances, Health Checks, and Metadata;
-   - agent rows in Nodes and Agents.
+   - client rows in Nodes and Clients.
 
    Views that need new APIs follow the implementation plan's later increments.
 6. **Design tranche.** Tranche 8, the embedded administrative interface, is
@@ -236,7 +236,7 @@ This step builds the scope agreed in decision 5:
 - the application shell and cluster status strip;
 - Services;
 - service instances with checks;
-- Nodes and Agents.
+- Nodes and Clients.
 
 The views follow the admin UI design principles: explicit scope, observations
 distinguished from state, and colour never the only signal.

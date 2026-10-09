@@ -314,7 +314,7 @@
                 <configuration>
                     <!-- Exclude JDK internal classes that cause instrumentation errors.
                          com/sun/** and org/jcp/** are JDK-shipped classes that JaCoCo's
-                         runtime agent tries to instrument when the JVM loads them. -->
+                         runtime client tries to instrument when the JVM loads them. -->
                     <excludes>
                         <exclude>sun/**</exclude>
                         <exclude>jdk/**</exclude>

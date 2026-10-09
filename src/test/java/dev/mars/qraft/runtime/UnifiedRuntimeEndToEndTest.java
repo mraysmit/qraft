@@ -87,7 +87,7 @@ class UnifiedRuntimeEndToEndTest {
     void serverAndClientConvergeRecoverAndShutDownThroughUnifiedRuntime() throws Exception {
         // Every port is 0, so the system picks free ones and each lifecycle reports what it bound; no port is
         // guessed before it is bound. Only the restart reuses a port: the client was configured with the
-        // controller's URL, and a restarted controller must answer there.
+        // server's URL, and a restarted server must answer there.
         Path serverConfig = temporaryDirectory.resolve("server.json");
         Path clientConfig = temporaryDirectory.resolve("client.json");
         writeServerConfig(serverConfig, temporaryDirectory.resolve("raft-first"), 0, 0, 0);
@@ -98,25 +98,25 @@ class UnifiedRuntimeEndToEndTest {
         assertEquals(Set.of("http", "raft", "apiGrpc"), serverPorts.keySet());
         assertEquals(3, Set.copyOf(serverPorts.values()).size(), "each listener has its own port");
         assertTrue(serverPorts.values().stream().allMatch(port -> port > 0), serverPorts.toString());
-        URI controller = URI.create("http://127.0.0.1:" + httpPort);
-        await(() -> status(controller.resolve("/health/ready")) == 200);
-        String firstId = serverId(controller);
+        URI server = URI.create("http://127.0.0.1:" + httpPort);
+        await(() -> status(server.resolve("/health/ready")) == 200);
+        String firstId = serverId(server);
         assertEquals(Files.readString(temporaryDirectory.resolve("raft-first").resolve("server-id")), firstId,
                 "the server reports the ID kept in its data directory");
 
         writeClientConfig(clientConfig, httpPort, 0);
         RuntimeLifecycle client = launch("client", clientConfig);
-        int agentPort = client.boundPorts().get("http");
+        int clientPort = client.boundPorts().get("http");
         assertEquals(Set.of("http"), client.boundPorts().keySet());
-        URI agent = URI.create("http://127.0.0.1:" + agentPort);
-        await(() -> status(agent.resolve("/health/ready")) == 200
-                && serviceCount(controller, "web") == 1
-                && serviceCount(controller, "api") == 1
-                && agentPresent(controller, "runtime-agent"));
+        URI clientUri = URI.create("http://127.0.0.1:" + clientPort);
+        await(() -> status(clientUri.resolve("/health/ready")) == 200
+                && serviceCount(server, "web") == 1
+                && serviceCount(server, "api") == 1
+                && clientPresent(server, "runtime-client"));
 
         firstServer.closeAsync().get(10, TimeUnit.SECONDS);
         assertTrue(firstServer.completion().isDone());
-        await(() -> status(agent.resolve("/health/ready")) == 503);
+        await(() -> status(clientUri.resolve("/health/ready")) == 503);
 
         assertPortAvailable(serverPorts.get("raft"));
         assertPortAvailable(serverPorts.get("apiGrpc"));
@@ -124,20 +124,20 @@ class UnifiedRuntimeEndToEndTest {
         RuntimeLifecycle restartedServer = launch("server", serverConfig);
         Map<String, Integer> restartedPorts = restartedServer.boundPorts();
         assertEquals(httpPort, restartedPorts.get("http"), "a configured nonzero port is bound as given");
-        await(() -> status(agent.resolve("/health/ready")) == 200
-                && serviceCount(controller, "web") == 1
-                && serviceCount(controller, "api") == 1
-                && agentPresent(controller, "runtime-agent"));
-        String restartedId = serverId(controller);
+        await(() -> status(clientUri.resolve("/health/ready")) == 200
+                && serviceCount(server, "web") == 1
+                && serviceCount(server, "api") == 1
+                && clientPresent(server, "runtime-client"));
+        String restartedId = serverId(server);
         assertEquals(Files.readString(temporaryDirectory.resolve("raft-restarted").resolve("server-id")), restartedId);
         assertNotEquals(firstId, restartedId, "a server started on empty storage is a new server");
 
         client.closeAsync().get(10, TimeUnit.SECONDS);
         assertTrue(client.completion().isDone());
-        await(() -> serviceCount(controller, "web") == 0
-                && serviceCount(controller, "api") == 0
-                && !agentPresent(controller, "runtime-agent"));
-        assertPortAvailable(agentPort);
+        await(() -> serviceCount(server, "web") == 0
+                && serviceCount(server, "api") == 0
+                && !clientPresent(server, "runtime-client"));
+        assertPortAvailable(clientPort);
 
         restartedServer.closeAsync().get(10, TimeUnit.SECONDS);
         assertTrue(restartedServer.completion().isDone());
@@ -161,21 +161,21 @@ class UnifiedRuntimeEndToEndTest {
         }
     }
 
-    private String serverId(URI controller) {
-        JsonNode status = getJson(controller.resolve("/raft/status"));
+    private String serverId(URI server) {
+        JsonNode status = getJson(server.resolve("/raft/status"));
         return status == null ? null : status.path("serverId").asText(null);
     }
 
-    private int serviceCount(URI controller, String serviceName) {
-        JsonNode response = getJson(controller.resolve("/v1/catalog/service/" + serviceName));
+    private int serviceCount(URI server, String serviceName) {
+        JsonNode response = getJson(server.resolve("/v1/catalog/service/" + serviceName));
         return response == null || !response.isArray() ? -1 : response.size();
     }
 
-    private boolean agentPresent(URI controller, String agentId) {
-        JsonNode response = getJson(controller.resolve("/api/v1/agents"));
+    private boolean clientPresent(URI server, String clientId) {
+        JsonNode response = getJson(server.resolve("/api/v1/clients"));
         if (response == null || !response.isArray()) return false;
-        for (JsonNode agent : response) {
-            if (agentId.equals(agent.path("agentId").asText())) return true;
+        for (JsonNode client : response) {
+            if (clientId.equals(client.path("clientId").asText())) return true;
         }
         return false;
     }
@@ -238,13 +238,13 @@ class UnifiedRuntimeEndToEndTest {
         Files.writeString(target, document);
     }
 
-    private void writeClientConfig(Path target, int controllerPort, int agentPort) throws Exception {
+    private void writeClientConfig(Path target, int serverPort, int clientPort) throws Exception {
         String document = """
                 {
                   "version": 1,
-                  "agent": {
-                    "id": "runtime-agent",
-                    "hostname": "runtime-agent",
+                  "client": {
+                    "id": "runtime-client",
+                    "hostname": "runtime-client",
                     "address": "127.0.0.1",
                     "httpPort": %d,
                     "heartbeatIntervalMs": 40,
@@ -253,7 +253,7 @@ class UnifiedRuntimeEndToEndTest {
                     "region": "test-region",
                     "version": "1.0.0"
                   },
-                  "controllers": {
+                  "servers": {
                     "urls": ["http://127.0.0.1:%d"],
                     "requestTimeoutMs": 5000
                   },
@@ -272,7 +272,7 @@ class UnifiedRuntimeEndToEndTest {
                   },
                   "logging": {"directory": %s}
                 }
-                """.formatted(agentPort, controllerPort,
+                """.formatted(clientPort, serverPort,
                 JSON.writeValueAsString(temporaryDirectory.resolve("logs").toString()));
         Files.writeString(target, document);
     }

@@ -20,7 +20,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
-import dev.mars.qraft.client.QraftAgent;
+import dev.mars.qraft.client.QraftClient;
 import dev.mars.qraft.client.health.CheckStatus;
 import dev.mars.qraft.client.health.LocalStatusReporter;
 import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
@@ -65,12 +65,12 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * End-to-end tests of health propagation through servers launched from configuration files. An agent
+ * End-to-end tests of health propagation through servers launched from configuration files. A client
  * started from its configuration file, as client mode starts it, runs HTTP, TCP, and TTL checks. The tests
  * observe results only through each server's public HTTP API: health transitions, {@code passing}
  * discovery filtering, local TTL lapse, and deregistration on shutdown.
  *
- * <p>In a three-server cluster, proxies in front of each server hold the agent's observations so the
+ * <p>In a three-server cluster, proxies in front of each server hold the client's observations so the
  * renewal/expiry boundary is crossed on purpose. The leader is replaced while the held observation falls
  * due. A renewal released inside the new leader's grace means the check never expires. A renewal held
  * beyond the grace means every survivor expires the check, and the renewal then restores it.
@@ -83,7 +83,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class HealthPropagationEndToEndTest {
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Duration CONVERGENCE = Duration.ofSeconds(30);
-    /** Observation lifetime in the cluster tests; the agent renews at half of it. */
+    /** Observation lifetime in the cluster tests; the client renews at half of it. */
     private static final Duration CLUSTER_TTL = Duration.ofSeconds(8);
     /** How long before the held observation's deadline the leader is shut down. */
     private static final Duration LEADER_LOSS_LEAD = Duration.ofMillis(2_500);
@@ -103,7 +103,7 @@ class HealthPropagationEndToEndTest {
     private HttpServer workload;
     private ServerSocket tcpListener;
     private ScheduledExecutorService reporter;
-    private QraftAgent agent;
+    private QraftClient client;
     private final AtomicBoolean holdObservations = new AtomicBoolean();
     private final AtomicInteger observationsInFlight = new AtomicInteger();
     private final List<HttpServer> proxies = new ArrayList<>();
@@ -113,7 +113,7 @@ class HealthPropagationEndToEndTest {
     void closeResources() throws Exception {
         CleanupHelper cleanup = new CleanupHelper()
                 .run(this::stopReporting)
-                .run(() -> { if (agent != null) agent.shutdown().get(10, TimeUnit.SECONDS); })
+                .run(() -> { if (client != null) client.shutdown().get(10, TimeUnit.SECONDS); })
                 .run(() -> holdObservations.set(false));
         for (RuntimeLifecycle lifecycle : List.copyOf(lifecycles).reversed()) {
             cleanup.run(() -> closeLifecycleDuringCleanup(lifecycle));
@@ -131,45 +131,45 @@ class HealthPropagationEndToEndTest {
         Path serverConfig = temporaryDirectory.resolve("server.json");
         writeServerConfig(serverConfig, "health-node", Map.of("health-node", 0));
         int httpPort = launch("server", serverConfig).boundPorts().get("http");
-        URI controller = URI.create("http://127.0.0.1:" + httpPort);
-        await(() -> status(controller.resolve("/health/ready")) == 200);
+        URI serverUri = URI.create("http://127.0.0.1:" + httpPort);
+        await(() -> status(serverUri.resolve("/health/ready")) == 200);
 
         URI workloadUrl = startWorkload();
         startTcpListener();
         Path clientConfig = temporaryDirectory.resolve("client.json");
-        writeChecksClientConfig(clientConfig, controller, workloadUrl, tcpListener.getLocalPort());
-        agent = QraftAgent.launch(clientConfig);
-        startReporting(agent.statusReporter("web-b", "app").orElseThrow());
+        writeChecksClientConfig(clientConfig, serverUri, workloadUrl, tcpListener.getLocalPort());
+        client = QraftClient.launch(clientConfig);
+        startReporting(client.statusReporter("web-b", "app").orElseThrow());
 
-        await(() -> passing(controller).equals(Set.of("web-a", "web-b")));
+        await(() -> passing(serverUri).equals(Set.of("web-a", "web-b")));
 
         reportedStatus.set(CheckStatus.WARNING);
-        await(() -> passing(controller).equals(Set.of("web-a"))
-                && "WARNING".equals(checkField(controller, "web-b", "app", "status"))
-                && "WARNING".equals(serviceHealth(controller, "web-b")));
+        await(() -> passing(serverUri).equals(Set.of("web-a"))
+                && "WARNING".equals(checkField(serverUri, "web-b", "app", "status"))
+                && "WARNING".equals(serviceHealth(serverUri, "web-b")));
 
         reportedStatus.set(CheckStatus.PASSING);
         workloadStatus.set(503);
-        await(() -> passing(controller).equals(Set.of("web-b"))
-                && "CRITICAL".equals(checkField(controller, "web-a", "http", "status"))
-                && "CRITICAL".equals(serviceHealth(controller, "web-a")));
+        await(() -> passing(serverUri).equals(Set.of("web-b"))
+                && "CRITICAL".equals(checkField(serverUri, "web-a", "http", "status"))
+                && "CRITICAL".equals(serviceHealth(serverUri, "web-a")));
 
         workloadStatus.set(200);
-        await(() -> passing(controller).equals(Set.of("web-a", "web-b")));
+        await(() -> passing(serverUri).equals(Set.of("web-a", "web-b")));
 
         tcpListener.close();
-        await(() -> passing(controller).equals(Set.of("web-a"))
-                && "CRITICAL".equals(checkField(controller, "web-b", "tcp", "status")));
-        assertEquals(Set.of("web-a", "web-b"), instances(controller, false),
+        await(() -> passing(serverUri).equals(Set.of("web-a"))
+                && "CRITICAL".equals(checkField(serverUri, "web-b", "tcp", "status")));
+        assertEquals(Set.of("web-a", "web-b"), instances(serverUri, false),
                 "a critical instance stays registered and is only hidden by the passing filter");
 
         stopReporting();
-        await(() -> "CRITICAL".equals(checkField(controller, "web-b", "app", "status"))
-                && checkField(controller, "web-b", "app", "output").contains("expired"));
+        await(() -> "CRITICAL".equals(checkField(serverUri, "web-b", "app", "status"))
+                && checkField(serverUri, "web-b", "app", "output").contains("expired"));
 
-        assertTrue(agent.shutdown().get(10, TimeUnit.SECONDS));
-        agent = null;
-        await(() -> instances(controller, false).isEmpty());
+        assertTrue(client.shutdown().get(10, TimeUnit.SECONDS));
+        client = null;
+        await(() -> instances(serverUri, false).isEmpty());
     }
 
     @Test
@@ -177,7 +177,7 @@ class HealthPropagationEndToEndTest {
             throws Exception {
         Cluster cluster = startClusterWithClient();
         holdObservationsUntilQuiet();
-        JsonNode held = awaitAgreedCheck(cluster.controllers().values());
+        JsonNode held = awaitAgreedCheck(cluster.serverUris().values());
         long heldSequence = held.path("sequenceNumber").asLong();
         Instant deadline = Instant.parse(held.path("deadline").asText());
 
@@ -205,18 +205,18 @@ class HealthPropagationEndToEndTest {
             throws Exception {
         Cluster cluster = startClusterWithClient();
         holdObservationsUntilQuiet();
-        long heldSequence = awaitAgreedCheck(cluster.controllers().values()).path("sequenceNumber").asLong();
+        long heldSequence = awaitAgreedCheck(cluster.serverUris().values()).path("sequenceNumber").asLong();
         Map<String, URI> survivors = replaceLeader(cluster);
 
         await(() -> {
             if (leader(survivors.values()) == null) return false;
             List<JsonNode> checks = survivors.values().stream()
-                    .map(controller -> check(controller, "web", "http")).toList();
+                    .map(serverUri -> check(serverUri, "web", "http")).toList();
             return checks.stream().allMatch(check -> check != null && check.path("expired").asBoolean()
                     && check.path("sequenceNumber").asLong() == heldSequence)
                     && checks.stream().distinct().count() == 1
-                    && survivors.values().stream().allMatch(controller ->
-                            "CRITICAL".equals(serviceHealth(controller, "web")));
+                    && survivors.values().stream().allMatch(serverUri ->
+                            "CRITICAL".equals(serviceHealth(serverUri, "web")));
         });
         for (URI survivor : survivors.values()) {
             assertEquals(Set.of("web"), instances(survivor, false), "expiry marks the check but keeps the service");
@@ -226,27 +226,27 @@ class HealthPropagationEndToEndTest {
         await(() -> convergedOnRenewalAfter(survivors.values(), heldSequence));
     }
 
-    private record Cluster(Map<String, URI> controllers, Map<String, RuntimeLifecycle> servers) { }
+    private record Cluster(Map<String, URI> serverUris, Map<String, RuntimeLifecycle> servers) { }
 
     /** Three servers, and a client-mode runtime that reaches each of them through a holding proxy. */
     private Cluster startClusterWithClient() throws Exception {
         Map<String, RuntimeLifecycle> servers = launchThreeServers();
-        Map<String, URI> controllers = new LinkedHashMap<>();
+        Map<String, URI> serverUris = new LinkedHashMap<>();
         List<URI> proxied = new ArrayList<>();
         for (Map.Entry<String, RuntimeLifecycle> server : servers.entrySet()) {
-            URI controller = URI.create("http://127.0.0.1:" + server.getValue().boundPorts().get("http"));
-            controllers.put(server.getKey(), controller);
-            proxied.add(startProxy(controller));
+            URI serverUri = URI.create("http://127.0.0.1:" + server.getValue().boundPorts().get("http"));
+            serverUris.put(server.getKey(), serverUri);
+            proxied.add(startProxy(serverUri));
         }
-        await(() -> leader(controllers.values()) != null);
+        await(() -> leader(serverUris.values()) != null);
 
         URI workloadUrl = startWorkload();
         Path clientConfig = temporaryDirectory.resolve("client.json");
         writeClusterClientConfig(clientConfig, proxied, workloadUrl);
         launch("client", clientConfig);
-        await(() -> controllers.values().stream().allMatch(controller ->
-                "PASSING".equals(checkField(controller, "web", "http", "status"))));
-        return new Cluster(controllers, servers);
+        await(() -> serverUris.values().stream().allMatch(serverUri ->
+                "PASSING".equals(checkField(serverUri, "web", "http", "status"))));
+        return new Cluster(serverUris, servers);
     }
 
     /**
@@ -317,13 +317,13 @@ class HealthPropagationEndToEndTest {
 
     /** Deliberately stops the leader, declares only that peer's RPC failures, and returns the survivors. */
     private Map<String, URI> replaceLeader(Cluster cluster) throws Exception {
-        String formerLeader = leader(cluster.controllers().values());
+        String formerLeader = leader(cluster.serverUris().values());
         assertNotNull(formerLeader);
         IntentionalErrorsHelper.expect(RAFT_PEER_UNREACHABLE, formerLeader);
         RuntimeLifecycle stoppedLeader = cluster.servers().get(formerLeader);
         stoppedLeader.closeAsync().get(10, TimeUnit.SECONDS);
         forgetClosedLifecycle(stoppedLeader);
-        Map<String, URI> survivors = new LinkedHashMap<>(cluster.controllers());
+        Map<String, URI> survivors = new LinkedHashMap<>(cluster.serverUris());
         survivors.remove(formerLeader);
         return survivors;
     }
@@ -335,10 +335,10 @@ class HealthPropagationEndToEndTest {
     }
 
     /** The check state every server holds once all of them agree. */
-    private JsonNode awaitAgreedCheck(Collection<URI> controllers) throws Exception {
+    private JsonNode awaitAgreedCheck(Collection<URI> serverUris) throws Exception {
         AtomicReference<JsonNode> agreed = new AtomicReference<>();
         await(() -> {
-            List<JsonNode> checks = controllers.stream().map(controller -> check(controller, "web", "http")).toList();
+            List<JsonNode> checks = serverUris.stream().map(serverUri -> check(serverUri, "web", "http")).toList();
             if (checks.stream().anyMatch(Objects::isNull) || checks.stream().distinct().count() != 1) return false;
             agreed.set(checks.getFirst());
             return true;
@@ -346,22 +346,22 @@ class HealthPropagationEndToEndTest {
         return agreed.get();
     }
 
-    private void recordExpiry(Collection<URI> controllers, AtomicBoolean sawExpiry) {
-        for (URI controller : controllers) {
-            if ("true".equals(checkField(controller, "web", "http", "expired"))) sawExpiry.set(true);
+    private void recordExpiry(Collection<URI> serverUris, AtomicBoolean sawExpiry) {
+        for (URI serverUri : serverUris) {
+            if ("true".equals(checkField(serverUri, "web", "http", "expired"))) sawExpiry.set(true);
         }
     }
 
     /** One leader, and every server holding the same passing, unexpired renewal newer than {@code sequence}. */
-    private boolean convergedOnRenewalAfter(Collection<URI> controllers, long sequence) {
-        if (leader(controllers) == null) return false;
-        List<JsonNode> checks = controllers.stream().map(controller -> check(controller, "web", "http")).toList();
+    private boolean convergedOnRenewalAfter(Collection<URI> serverUris, long sequence) {
+        if (leader(serverUris) == null) return false;
+        List<JsonNode> checks = serverUris.stream().map(serverUri -> check(serverUri, "web", "http")).toList();
         return checks.stream().allMatch(check -> check != null
                 && check.path("sequenceNumber").asLong() > sequence
                 && "PASSING".equals(check.path("status").asText())
                 && !check.path("expired").asBoolean())
                 && checks.stream().distinct().count() == 1
-                && controllers.stream().allMatch(controller -> "PASSING".equals(serviceHealth(controller, "web")));
+                && serverUris.stream().allMatch(serverUri -> "PASSING".equals(serviceHealth(serverUri, "web")));
     }
 
     /**
@@ -374,7 +374,7 @@ class HealthPropagationEndToEndTest {
         HttpServer proxy = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         proxy.setExecutor(executor);
         proxy.createContext("/", exchange -> {
-            boolean observation = "/v1/agent/check/observe".equals(exchange.getRequestURI().getPath());
+            boolean observation = "/v1/client/check/observe".equals(exchange.getRequestURI().getPath());
             if (observation) observationsInFlight.incrementAndGet();
             try (exchange) {
                 byte[] body = exchange.getRequestBody().readAllBytes();
@@ -467,40 +467,40 @@ class HealthPropagationEndToEndTest {
     }
 
     /** The node ID of the only server reporting itself leader, or {@code null} while there is not exactly one. */
-    private String leader(Collection<URI> controllers) {
+    private String leader(Collection<URI> serverUris) {
         List<String> leaders = new ArrayList<>();
-        for (URI controller : controllers) {
-            JsonNode raft = getJson(controller.resolve("/raft/status"));
+        for (URI serverUri : serverUris) {
+            JsonNode raft = getJson(serverUri.resolve("/raft/status"));
             if (raft != null && "LEADER".equals(raft.path("state").asText())) leaders.add(raft.path("nodeId").asText());
         }
         return leaders.size() == 1 ? leaders.getFirst() : null;
     }
 
-    private Set<String> passing(URI controller) {
-        return instances(controller, true);
+    private Set<String> passing(URI serverUri) {
+        return instances(serverUri, true);
     }
 
     /** Service IDs of the {@code web} instances the server returns, or an impossible marker if it cannot answer. */
-    private Set<String> instances(URI controller, boolean passingOnly) {
-        JsonNode entries = healthEntries(controller, passingOnly);
+    private Set<String> instances(URI serverUri, boolean passingOnly) {
+        JsonNode entries = healthEntries(serverUri, passingOnly);
         if (entries == null) return Set.of("<unavailable>");
         Set<String> serviceIds = new TreeSet<>();
         entries.forEach(entry -> serviceIds.add(entry.path("service").path("serviceId").asText()));
         return serviceIds;
     }
 
-    private String serviceHealth(URI controller, String serviceId) {
-        JsonNode entry = entry(controller, serviceId);
+    private String serviceHealth(URI serverUri, String serviceId) {
+        JsonNode entry = entry(serverUri, serviceId);
         return entry == null ? null : entry.path("service").path("health").asText();
     }
 
-    private String checkField(URI controller, String serviceId, String checkId, String field) {
-        JsonNode check = check(controller, serviceId, checkId);
+    private String checkField(URI serverUri, String serviceId, String checkId, String field) {
+        JsonNode check = check(serverUri, serviceId, checkId);
         return check == null ? "" : check.path(field).asText();
     }
 
-    private JsonNode check(URI controller, String serviceId, String checkId) {
-        JsonNode entry = entry(controller, serviceId);
+    private JsonNode check(URI serverUri, String serviceId, String checkId) {
+        JsonNode entry = entry(serverUri, serviceId);
         if (entry == null) return null;
         for (JsonNode check : entry.path("checks")) {
             if (checkId.equals(check.path("checkId").asText())) return check;
@@ -508,8 +508,8 @@ class HealthPropagationEndToEndTest {
         return null;
     }
 
-    private JsonNode entry(URI controller, String serviceId) {
-        JsonNode entries = healthEntries(controller, false);
+    private JsonNode entry(URI serverUri, String serviceId) {
+        JsonNode entries = healthEntries(serverUri, false);
         if (entries == null) return null;
         for (JsonNode entry : entries) {
             if (serviceId.equals(entry.path("service").path("serviceId").asText())) return entry;
@@ -517,8 +517,8 @@ class HealthPropagationEndToEndTest {
         return null;
     }
 
-    private JsonNode healthEntries(URI controller, boolean passingOnly) {
-        return getJson(controller.resolve("/v1/health/service/web" + (passingOnly ? "?passing" : "")));
+    private JsonNode healthEntries(URI serverUri, boolean passingOnly) {
+        return getJson(serverUri.resolve("/v1/health/service/web" + (passingOnly ? "?passing" : "")));
     }
 
     private JsonNode getJson(URI uri) {
@@ -582,15 +582,15 @@ class HealthPropagationEndToEndTest {
 
     /**
      * Two instances of {@code web}: {@code web-a} is probed over HTTP, and {@code web-b} is probed over TCP
-     * and also carries a TTL check that the test reports through the agent's process-local input.
+     * and also carries a TTL check that the test reports through the client's process-local input.
      */
-    private void writeChecksClientConfig(Path target, URI controller, URI workloadUrl, int tcpPort) throws Exception {
+    private void writeChecksClientConfig(Path target, URI serverUri, URI workloadUrl, int tcpPort) throws Exception {
         Files.writeString(target, """
                 {
                   "version": 1,
-                  "agent": {"id": "checks-agent", "address": "127.0.0.1", "httpPort": %d,
+                  "client": {"id": "checks-client", "address": "127.0.0.1", "httpPort": %d,
                             "heartbeatIntervalMs": 50, "shutdownTimeoutMs": 5000},
-                  "controllers": {"urls": [%s], "requestTimeoutMs": 5000},
+                  "servers": {"urls": [%s], "requestTimeoutMs": 5000},
                   "catalog": {
                     "registrationRetryMinMs": 25, "registrationRetryMaxMs": 100, "contactFreshnessMs": 5000,
                     "services": [
@@ -604,20 +604,20 @@ class HealthPropagationEndToEndTest {
                   },
                   "logging": {"directory": %s}
                 }
-                """.formatted(0, JSON.writeValueAsString(controller.toString()), workloadUrl.getPort(),
+                """.formatted(0, JSON.writeValueAsString(serverUri.toString()), workloadUrl.getPort(),
                 JSON.writeValueAsString(workloadUrl.resolve("/health").toString()), tcpPort,
                 JSON.writeValueAsString(temporaryDirectory.resolve("client-logs").toString())));
     }
 
     /** One {@code web} instance whose HTTP observations live for {@link #CLUSTER_TTL} and renew at half of it. */
-    private void writeClusterClientConfig(Path target, Collection<URI> controllers, URI workloadUrl) throws Exception {
-        List<String> urls = controllers.stream().map(URI::toString).toList();
+    private void writeClusterClientConfig(Path target, Collection<URI> serverUris, URI workloadUrl) throws Exception {
+        List<String> urls = serverUris.stream().map(URI::toString).toList();
         Files.writeString(target, """
                 {
                   "version": 1,
-                  "agent": {"id": "cluster-agent", "address": "127.0.0.1", "httpPort": %d,
+                  "client": {"id": "cluster-client", "address": "127.0.0.1", "httpPort": %d,
                             "heartbeatIntervalMs": 50, "shutdownTimeoutMs": 5000},
-                  "controllers": {"urls": %s, "requestTimeoutMs": 5000},
+                  "servers": {"urls": %s, "requestTimeoutMs": 5000},
                   "catalog": {
                     "registrationRetryMinMs": 25, "registrationRetryMaxMs": 100, "contactFreshnessMs": 5000,
                     "services": [

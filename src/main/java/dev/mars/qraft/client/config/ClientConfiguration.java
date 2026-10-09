@@ -45,23 +45,23 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Immutable, file-backed configuration for a Qraft discovery agent.
+ * Immutable, file-backed configuration for a Qraft discovery client.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-03-15
  * @version 1.0
  */
-public final class AgentConfiguration {
+public final class ClientConfiguration {
     private static final ObjectMapper JSON = JsonMapper.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build();
 
-    private final String agentId;
+    private final String clientId;
     private final String hostname;
     private final String address;
-    private final int agentPort;
+    private final int clientPort;
     private final String region;
     private final String datacenter;
-    private final List<URI> controllerUrls;
+    private final List<URI> serverUrls;
     private final long heartbeatInterval;
     private final long shutdownTimeoutMs;
     private final int requestTimeoutMs;
@@ -75,14 +75,14 @@ public final class AgentConfiguration {
     private final String loggingDirectory;
     private final String version;
 
-    private AgentConfiguration(Builder builder) {
-        agentId = builder.agentId.trim();
+    private ClientConfiguration(Builder builder) {
+        clientId = builder.clientId.trim();
         hostname = builder.hostname.trim();
         address = builder.address.trim();
-        agentPort = builder.agentPort;
+        clientPort = builder.clientPort;
         region = builder.region.trim();
         datacenter = builder.datacenter.trim();
-        controllerUrls = List.copyOf(builder.controllerUrls);
+        serverUrls = List.copyOf(builder.serverUrls);
         heartbeatInterval = builder.heartbeatInterval;
         shutdownTimeoutMs = builder.shutdownTimeoutMs;
         requestTimeoutMs = builder.requestTimeoutMs;
@@ -102,40 +102,40 @@ public final class AgentConfiguration {
         version = builder.version.trim();
     }
 
-    public static AgentConfiguration fromFile(Path path) {
+    public static ClientConfiguration fromFile(Path path) {
         if (path == null) throw new IllegalArgumentException("configuration path is required");
         try {
             return fromJson(Files.readString(path));
         } catch (IOException error) {
-            throw new IllegalArgumentException("Could not read agent configuration " + path, error);
+            throw new IllegalArgumentException("Could not read client configuration " + path, error);
         }
     }
 
     /** Parses an injected document without consulting process-global configuration. */
-    public static AgentConfiguration fromJson(String document) {
+    public static ClientConfiguration fromJson(String document) {
         final JsonNode root;
         try {
             root = JSON.readTree(document);
         } catch (JsonProcessingException error) {
-            throw new IllegalArgumentException("Agent configuration is not valid JSON", error);
+            throw new IllegalArgumentException("Client configuration is not valid JSON", error);
         }
         if (root == null || !root.isObject()) {
-            throw new IllegalArgumentException("Agent configuration must be a JSON object");
+            throw new IllegalArgumentException("Client configuration must be a JSON object");
         }
         ConfigurationPlaceholders.reject(root);
-        rejectUnknown(root, "root", "version", "agent", "controllers", "catalog", "logging");
+        rejectUnknown(root, "root", "version", "client", "servers", "catalog", "logging");
         int formatVersion = requiredInt(root, "version");
         if (formatVersion != 1) {
             throw new IllegalArgumentException("Unsupported configuration version: " + formatVersion);
         }
 
-        JsonNode agent = requiredObject(root, "agent");
-        JsonNode controllers = requiredObject(root, "controllers");
+        JsonNode client = requiredObject(root, "client");
+        JsonNode servers = requiredObject(root, "servers");
         JsonNode catalog = optionalObject(root, "catalog");
         JsonNode logging = optionalObject(root, "logging");
-        rejectUnknown(agent, "agent", "id", "hostname", "address", "httpPort",
+        rejectUnknown(client, "client", "id", "hostname", "address", "httpPort",
                 "heartbeatIntervalMs", "shutdownTimeoutMs", "datacenter", "region", "version");
-        rejectUnknown(controllers, "controllers", "urls", "requestTimeoutMs");
+        rejectUnknown(servers, "servers", "urls", "requestTimeoutMs");
         rejectUnknown(catalog, "catalog", "tenant", "namespace", "registrationRetryMinMs",
                 "registrationRetryMaxMs", "contactFreshnessMs", "services");
         rejectUnknown(logging, "logging", "directory");
@@ -143,17 +143,17 @@ public final class AgentConfiguration {
         List<HealthCheckDefinition> healthChecks = new ArrayList<>();
         List<ServiceDefinition> services = parseServices(catalog.get("services"), healthChecks);
         return builder()
-                .agentId(requiredText(agent, "id"))
-                .hostname(optionalText(agent, "hostname", local.hostname()))
-                .address(optionalText(agent, "address", local.address()))
-                .agentPort(optionalInt(agent, "httpPort", 8080))
-                .heartbeatInterval(optionalLong(agent, "heartbeatIntervalMs", 30_000))
-                .shutdownTimeoutMs(optionalLong(agent, "shutdownTimeoutMs", 30_000))
-                .datacenter(optionalText(agent, "datacenter", "default"))
-                .region(optionalText(agent, "region", "default"))
-                .version(optionalText(agent, "version", "1.0.0"))
-                .controllerUrls(parseControllerUrls(controllers.get("urls")))
-                .requestTimeoutMs(optionalInt(controllers, "requestTimeoutMs", 5_000))
+                .clientId(requiredText(client, "id"))
+                .hostname(optionalText(client, "hostname", local.hostname()))
+                .address(optionalText(client, "address", local.address()))
+                .clientPort(optionalInt(client, "httpPort", 8080))
+                .heartbeatInterval(optionalLong(client, "heartbeatIntervalMs", 30_000))
+                .shutdownTimeoutMs(optionalLong(client, "shutdownTimeoutMs", 30_000))
+                .datacenter(optionalText(client, "datacenter", "default"))
+                .region(optionalText(client, "region", "default"))
+                .version(optionalText(client, "version", "1.0.0"))
+                .serverUrls(parseServerUrls(servers.get("urls")))
+                .requestTimeoutMs(optionalInt(servers, "requestTimeoutMs", 5_000))
                 .tenant(optionalText(catalog, "tenant", "default"))
                 .namespace(optionalText(catalog, "namespace", "default"))
                 .registrationRetryMinMs(optionalLong(catalog, "registrationRetryMinMs", 250))
@@ -165,53 +165,53 @@ public final class AgentConfiguration {
                 .build();
     }
 
-    private static List<URI> parseControllerUrls(JsonNode urls) {
+    private static List<URI> parseServerUrls(JsonNode urls) {
         if (urls == null || !urls.isArray() || urls.isEmpty()) {
-            throw new IllegalArgumentException("controllers.urls must be a non-empty array");
+            throw new IllegalArgumentException("servers.urls must be a non-empty array");
         }
         Set<URI> unique = new LinkedHashSet<>();
         for (JsonNode value : urls) {
             if (!value.isTextual() || value.textValue().isBlank()) {
-                throw new IllegalArgumentException("controllers.urls entries must be non-blank strings");
+                throw new IllegalArgumentException("servers.urls entries must be non-blank strings");
             }
             try {
                 URI uri = new URI(value.textValue().trim());
-                unique.add(normalizeControllerUrl(uri, value.textValue()));
+                unique.add(normalizeServerUrl(uri, value.textValue()));
             } catch (URISyntaxException error) {
-                throw new IllegalArgumentException("Malformed controller URL: " + value.textValue(), error);
+                throw new IllegalArgumentException("Malformed server URL: " + value.textValue(), error);
             }
         }
         return List.copyOf(unique);
     }
 
-    private static URI normalizeControllerUrl(URI uri, String source) {
+    private static URI normalizeServerUrl(URI uri, String source) {
         if (!("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
                 || uri.getHost() == null) {
-            throw new IllegalArgumentException("Controller URL must use HTTP or HTTPS: " + source);
+            throw new IllegalArgumentException("Server URL must use HTTP or HTTPS: " + source);
         }
         String path = uri.getRawPath();
         if ((path != null && !path.isEmpty() && !"/".equals(path))
                 || uri.getRawQuery() != null || uri.getRawFragment() != null) {
             throw new IllegalArgumentException(
-                    "Controller URL must be an origin without a path, query, or fragment: " + source);
+                    "Server URL must be an origin without a path, query, or fragment: " + source);
         }
         if (uri.getRawUserInfo() != null) {
-            throw new IllegalArgumentException("Controller URL must not contain user information: " + source);
+            throw new IllegalArgumentException("Server URL must not contain user information: " + source);
         }
         try {
             return new URI(uri.getScheme().toLowerCase(Locale.ROOT), null,
                     uri.getHost().toLowerCase(Locale.ROOT), uri.getPort(), null, null, null);
         } catch (URISyntaxException impossible) {
-            throw new IllegalArgumentException("Malformed controller URL: " + source, impossible);
+            throw new IllegalArgumentException("Malformed server URL: " + source, impossible);
         }
     }
 
-    private static List<URI> normalizeControllerUrls(List<URI> urls) {
-        if (urls == null) throw new IllegalArgumentException("controllers.urls is required");
+    private static List<URI> normalizeServerUrls(List<URI> urls) {
+        if (urls == null) throw new IllegalArgumentException("servers.urls is required");
         Set<URI> unique = new LinkedHashSet<>();
         for (URI uri : urls) {
-            if (uri == null) throw new IllegalArgumentException("controllers.urls must not contain null");
-            unique.add(normalizeControllerUrl(uri, uri.toString()));
+            if (uri == null) throw new IllegalArgumentException("servers.urls must not contain null");
+            unique.add(normalizeServerUrl(uri, uri.toString()));
         }
         return List.copyOf(unique);
     }
@@ -406,14 +406,14 @@ public final class AgentConfiguration {
     }
 
     public static Builder builder() { return new Builder(); }
-    public String getAgentId() { return agentId; }
+    public String getClientId() { return clientId; }
     public String getHostname() { return hostname; }
     public String getAddress() { return address; }
-    public int getAgentPort() { return agentPort; }
+    public int getClientPort() { return clientPort; }
     public String getRegion() { return region; }
     public String getDatacenter() { return datacenter; }
-    public String getControllerUrl() { return controllerUrls.getFirst().toString(); }
-    public List<URI> getControllerUrls() { return controllerUrls; }
+    public String getServerUrl() { return serverUrls.getFirst().toString(); }
+    public List<URI> getServerUrls() { return serverUrls; }
     public long getHeartbeatInterval() { return heartbeatInterval; }
     public long getShutdownTimeoutMs() { return shutdownTimeoutMs; }
     public int getRequestTimeoutMs() { return requestTimeoutMs; }
@@ -428,13 +428,13 @@ public final class AgentConfiguration {
     public String getVersion() { return version; }
 
     public static final class Builder {
-        private String agentId;
+        private String clientId;
         private String hostname = "unknown";
         private String address = "127.0.0.1";
-        private int agentPort = 8080;
+        private int clientPort = 8080;
         private String region = "default";
         private String datacenter = "default";
-        private List<URI> controllerUrls = List.of();
+        private List<URI> serverUrls = List.of();
         private long heartbeatInterval = 30_000;
         private long shutdownTimeoutMs = 30_000;
         private int requestTimeoutMs = 5_000;
@@ -448,16 +448,16 @@ public final class AgentConfiguration {
         private String loggingDirectory = "./logs";
         private String version = "1.0.0";
 
-        public Builder agentId(String value) { agentId = value; return this; }
+        public Builder clientId(String value) { clientId = value; return this; }
         public Builder hostname(String value) { hostname = value; return this; }
         public Builder address(String value) { address = value; return this; }
-        public Builder agentPort(int value) { agentPort = value; return this; }
+        public Builder clientPort(int value) { clientPort = value; return this; }
         public Builder region(String value) { region = value; return this; }
         public Builder datacenter(String value) { datacenter = value; return this; }
-        public Builder controllerUrl(String value) {
-            return controllerUrls(parseControllerUrls(JSON.createArrayNode().add(value)));
+        public Builder serverUrl(String value) {
+            return serverUrls(parseServerUrls(JSON.createArrayNode().add(value)));
         }
-        public Builder controllerUrls(List<URI> value) { controllerUrls = normalizeControllerUrls(value); return this; }
+        public Builder serverUrls(List<URI> value) { serverUrls = normalizeServerUrls(value); return this; }
         public Builder heartbeatInterval(long value) { heartbeatInterval = value; return this; }
         public Builder shutdownTimeoutMs(long value) { shutdownTimeoutMs = value; return this; }
         public Builder requestTimeoutMs(int value) { requestTimeoutMs = value; return this; }
@@ -471,22 +471,22 @@ public final class AgentConfiguration {
         public Builder loggingDirectory(String value) { loggingDirectory = value; return this; }
         public Builder version(String value) { version = value; return this; }
 
-        public AgentConfiguration build() {
-            requireNonBlank("agent.id", agentId);
-            requireNonBlank("agent.hostname", hostname);
-            requireNonBlank("agent.address", address);
-            requireNonBlank("agent.region", region);
-            requireNonBlank("agent.datacenter", datacenter);
+        public ClientConfiguration build() {
+            requireNonBlank("client.id", clientId);
+            requireNonBlank("client.hostname", hostname);
+            requireNonBlank("client.address", address);
+            requireNonBlank("client.region", region);
+            requireNonBlank("client.datacenter", datacenter);
             requireNonBlank("catalog.tenant", tenant);
             requireNonBlank("catalog.namespace", namespace);
             requireNonBlank("logging.directory", loggingDirectory);
-            requireNonBlank("agent.version", version);
-            if (controllerUrls.isEmpty()) throw new IllegalArgumentException("controllers.urls is required");
-            // Port 0 asks the system for any free port; the agent registers the port it actually bound.
-            if (agentPort < 0 || agentPort > 65_535) throw new IllegalArgumentException("agent.httpPort is invalid");
-            if (heartbeatInterval < 1) throw new IllegalArgumentException("agent.heartbeatIntervalMs must be positive");
-            if (shutdownTimeoutMs < 1) throw new IllegalArgumentException("agent.shutdownTimeoutMs must be positive");
-            if (requestTimeoutMs < 1) throw new IllegalArgumentException("controllers.requestTimeoutMs must be positive");
+            requireNonBlank("client.version", version);
+            if (serverUrls.isEmpty()) throw new IllegalArgumentException("servers.urls is required");
+            // Port 0 asks the system for any free port; the client registers the port it actually bound.
+            if (clientPort < 0 || clientPort > 65_535) throw new IllegalArgumentException("client.httpPort is invalid");
+            if (heartbeatInterval < 1) throw new IllegalArgumentException("client.heartbeatIntervalMs must be positive");
+            if (shutdownTimeoutMs < 1) throw new IllegalArgumentException("client.shutdownTimeoutMs must be positive");
+            if (requestTimeoutMs < 1) throw new IllegalArgumentException("servers.requestTimeoutMs must be positive");
             if (registrationRetryMinMs < 1 || registrationRetryMaxMs < 1) {
                 throw new IllegalArgumentException("catalog retry intervals must be positive");
             }
@@ -511,7 +511,7 @@ public final class AgentConfiguration {
                             + " for service " + check.serviceId());
                 }
             }
-            return new AgentConfiguration(this);
+            return new ClientConfiguration(this);
         }
 
         private static void requireNonBlank(String field, String value) {

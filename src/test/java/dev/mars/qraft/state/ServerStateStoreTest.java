@@ -18,9 +18,9 @@ package dev.mars.qraft.state;
 
 import dev.mars.qraft.raft.RaftCommandResult;
 import dev.mars.qraft.state.catalog.ServiceKey;
-import dev.mars.qraft.common.AgentCapabilities;
-import dev.mars.qraft.common.AgentInfo;
-import dev.mars.qraft.common.AgentStatus;
+import dev.mars.qraft.common.ClientCapabilities;
+import dev.mars.qraft.common.ClientInfo;
+import dev.mars.qraft.common.ClientStatus;
 import dev.mars.qraft.state.distributed.DistributedStateCommand;
 import dev.mars.qraft.state.catalog.ServiceHealth;
 import dev.mars.qraft.state.catalog.ServiceInstance;
@@ -37,7 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests {@link QraftStateStore} command application, agent and
+ * Tests {@link QraftStateStore} command application, client and
  * catalog lifecycle, heartbeat epochs, and snapshot restore.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
@@ -47,44 +47,44 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ServerStateStoreTest {
 
     @Test
-    void controllerStoreAppliesAgentAndMetadataLifecycle() {
+    void serverStoreAppliesClientAndMetadataLifecycle() {
         QraftStateStore store = new QraftStateStore(Map.of("environment", "test"));
         Instant now = Instant.parse("2026-01-01T00:00:00Z");
-        AgentInfo agent = new AgentInfo("agent-1", "host", "127.0.0.1", 9000);
-        agent.setStatus(AgentStatus.REGISTERING);
+        ClientInfo client = new ClientInfo("client-1", "host", "127.0.0.1", 9000);
+        client.setStatus(ClientStatus.REGISTERING);
 
         assertInstanceOf(RaftCommandResult.NoOp.class, store.apply(null));
         assertInstanceOf(RaftCommandResult.Success.class,
-                store.apply(new AgentCommand.Register("agent-1", agent, now)));
-        assertTrue(store.findAgent("agent-1").isPresent());
+                store.apply(new ClientCommand.Register("client-1", client, now)));
+        assertTrue(store.findClient("client-1").isPresent());
 
-        assertInstanceOf(RaftCommandResult.CasMismatch.class, store.apply(new AgentCommand.UpdateStatus(
-                "agent-1", AgentStatus.HEALTHY, AgentStatus.HEALTHY, now)));
-        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new AgentCommand.UpdateStatus(
-                "agent-1", AgentStatus.REGISTERING, AgentStatus.HEALTHY, now)));
+        assertInstanceOf(RaftCommandResult.CasMismatch.class, store.apply(new ClientCommand.UpdateStatus(
+                "client-1", ClientStatus.HEALTHY, ClientStatus.HEALTHY, now)));
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new ClientCommand.UpdateStatus(
+                "client-1", ClientStatus.REGISTERING, ClientStatus.HEALTHY, now)));
 
-        AgentCapabilities capabilities = new AgentCapabilities();
+        ClientCapabilities capabilities = new ClientCapabilities();
         capabilities.setSupportedServices(java.util.Set.of("kv"));
-        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new AgentCommand.UpdateCapabilities(
-                "agent-1", capabilities, now.plusSeconds(1))));
-        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new AgentCommand.Heartbeat(
-                "agent-1", AgentStatus.DEGRADED, now.plusSeconds(2))));
-        assertEquals(AgentStatus.DEGRADED, store.findAgent("agent-1").orElseThrow().getStatus());
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new ClientCommand.UpdateCapabilities(
+                "client-1", capabilities, now.plusSeconds(1))));
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new ClientCommand.Heartbeat(
+                "client-1", ClientStatus.DEGRADED, now.plusSeconds(2))));
+        assertEquals(ClientStatus.DEGRADED, store.findClient("client-1").orElseThrow().getStatus());
 
-        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new AgentCommand.Heartbeat(
-                "agent-1", AgentStatus.HEALTHY, now.plusSeconds(3), 2)));
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new ClientCommand.Heartbeat(
+                "client-1", ClientStatus.HEALTHY, now.plusSeconds(3), 2)));
         byte[] sequencedSnapshot = store.takeSnapshot();
-        assertInstanceOf(RaftCommandResult.CasMismatch.class, store.apply(new AgentCommand.Heartbeat(
-                "agent-1", AgentStatus.DEGRADED, now.plusSeconds(2), 1)));
+        assertInstanceOf(RaftCommandResult.CasMismatch.class, store.apply(new ClientCommand.Heartbeat(
+                "client-1", ClientStatus.DEGRADED, now.plusSeconds(2), 1)));
         store.restoreSnapshot(sequencedSnapshot);
-        assertInstanceOf(RaftCommandResult.CasMismatch.class, store.apply(new AgentCommand.Heartbeat(
-                "agent-1", AgentStatus.DEGRADED, now.plusSeconds(2), 1)));
-        assertEquals(AgentStatus.HEALTHY, store.findAgent("agent-1").orElseThrow().getStatus());
+        assertInstanceOf(RaftCommandResult.CasMismatch.class, store.apply(new ClientCommand.Heartbeat(
+                "client-1", ClientStatus.DEGRADED, now.plusSeconds(2), 1)));
+        assertEquals(ClientStatus.HEALTHY, store.findClient("client-1").orElseThrow().getStatus());
 
-        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(AgentCommand.heartbeat("missing")));
-        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(AgentCommand.updateCapabilities("missing", capabilities)));
-        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(AgentCommand.updateStatus(
-                "missing", AgentStatus.HEALTHY, AgentStatus.HEALTHY)));
+        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(ClientCommand.heartbeat("missing")));
+        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(ClientCommand.updateCapabilities("missing", capabilities)));
+        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(ClientCommand.updateStatus(
+                "missing", ClientStatus.HEALTHY, ClientStatus.HEALTHY)));
 
         store.apply(command(DistributedStateCommand.put("feature", "enabled")));
         assertEquals("enabled", store.getMetadata("feature"));
@@ -94,17 +94,17 @@ class ServerStateStoreTest {
 
         store.setLastAppliedIndex(21);
         byte[] snapshot = store.takeSnapshot();
-        assertInstanceOf(RaftCommandResult.Success.class, store.apply(AgentCommand.deregister("agent-1")));
-        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(AgentCommand.deregister("agent-1")));
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(ClientCommand.deregister("client-1")));
+        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(ClientCommand.deregister("client-1")));
         store.restoreSnapshot(snapshot);
         assertEquals(21, store.getLastAppliedIndex());
-        assertEquals(1, store.getAgents().size());
+        assertEquals(1, store.getClients().size());
         IllegalStateException corrupt = assertThrows(IllegalStateException.class,
                 () -> store.restoreSnapshot(new byte[]{9}));
-        assertEquals("Failed to restore controller snapshot", corrupt.getMessage());
+        assertEquals("Failed to restore server snapshot", corrupt.getMessage());
         assertInstanceOf(IOException.class, corrupt.getCause(), "the unreadable bytes are the cause");
         assertEquals(21, store.getLastAppliedIndex(), "a snapshot that cannot be read changes nothing");
-        assertEquals(1, store.getAgents().size());
+        assertEquals(1, store.getClients().size());
 
         store.reset();
         assertEquals("3.0", store.getMetadata("version"));
@@ -112,7 +112,7 @@ class ServerStateStoreTest {
     }
 
     @Test
-    void controllerStoreReplicatesCatalogAndIncludesItInSnapshots() {
+    void serverStoreReplicatesCatalogAndIncludesItInSnapshots() {
         QraftStateStore store = new QraftStateStore();
         ServiceInstance instance = new ServiceInstance("payments-1", "payments", "node-1",
                 "127.0.0.1", 8080, List.of("v1"), Map.of("team", "platform"), ServiceHealth.PASSING);
@@ -132,33 +132,33 @@ class ServerStateStoreTest {
     @Test
     void lateHeartbeatFromPreviousRegistrationCannotPoisonNewSequenceEpoch() {
         QraftStateStore store = new QraftStateStore();
-        AgentInfo agent = new AgentInfo("agent-1", "host", "127.0.0.1", 9000);
+        ClientInfo client = new ClientInfo("client-1", "host", "127.0.0.1", 9000);
         Instant firstRegistration = Instant.parse("2026-09-21T10:00:00Z");
         Instant secondRegistration = firstRegistration.plusSeconds(10);
 
-        agent.addMetadata(AgentInfo.REGISTRATION_ID_METADATA_KEY, "first");
+        client.addMetadata(ClientInfo.REGISTRATION_ID_METADATA_KEY, "first");
         assertInstanceOf(RaftCommandResult.Success.class,
-                store.apply(new AgentCommand.Register("agent-1", agent, firstRegistration)));
-        agent.addMetadata(AgentInfo.REGISTRATION_ID_METADATA_KEY, "second");
+                store.apply(new ClientCommand.Register("client-1", client, firstRegistration)));
+        client.addMetadata(ClientInfo.REGISTRATION_ID_METADATA_KEY, "second");
         assertInstanceOf(RaftCommandResult.Success.class,
-                store.apply(new AgentCommand.Register("agent-1", agent, secondRegistration)));
+                store.apply(new ClientCommand.Register("client-1", client, secondRegistration)));
 
         assertInstanceOf(RaftCommandResult.CasMismatch.class,
-                store.apply(new AgentCommand.Heartbeat("agent-1", AgentStatus.DEGRADED,
+                store.apply(new ClientCommand.Heartbeat("client-1", ClientStatus.DEGRADED,
                         firstRegistration.plusSeconds(5), 50, "first")));
         assertInstanceOf(RaftCommandResult.Success.class,
-                store.apply(new AgentCommand.Heartbeat("agent-1", AgentStatus.HEALTHY,
+                store.apply(new ClientCommand.Heartbeat("client-1", ClientStatus.HEALTHY,
                         secondRegistration.plusSeconds(1), 1, "second")));
-        assertEquals(AgentStatus.HEALTHY, store.findAgent("agent-1").orElseThrow().getStatus());
+        assertEquals(ClientStatus.HEALTHY, store.findClient("client-1").orElseThrow().getStatus());
         assertEquals(secondRegistration.plusSeconds(1),
-                store.findAgent("agent-1").orElseThrow().getLastHeartbeat());
+                store.findClient("client-1").orElseThrow().getLastHeartbeat());
     }
 
     @Test
     void restoresSnapshotsWrittenBeforeCatalogStateWasAdded() {
         QraftStateStore store = new QraftStateStore();
         byte[] legacySnapshot = """
-                {"agents":{},"metadata":{"version":"2.0","feature":"enabled"},"lastAppliedIndex":17}
+                {"clients":{},"metadata":{"version":"2.0","feature":"enabled"},"lastAppliedIndex":17}
                 """.getBytes(java.nio.charset.StandardCharsets.UTF_8);
 
         store.restoreSnapshot(legacySnapshot);

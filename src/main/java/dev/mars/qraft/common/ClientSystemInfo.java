@@ -19,14 +19,14 @@ package dev.mars.qraft.common;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
- * System information for a Qraft agent.
- * Contains the hardware and operating-system details an agent reports about its node.
+ * System information for a Qraft client.
+ * Contains the hardware and operating-system details a client reports about its node.
  * 
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2025-08-26
  * @version 2.0
  */
-public class AgentSystemInfo {
+public class ClientSystemInfo {
 
     @JsonProperty("operatingSystem")
     private String operatingSystem;
@@ -61,7 +61,7 @@ public class AgentSystemInfo {
     /**
      * Default constructor.
      */
-    public AgentSystemInfo() {
+    public ClientSystemInfo() {
     }
 
     /**
@@ -246,7 +246,7 @@ public class AgentSystemInfo {
 
     @Override
     public String toString() {
-        return "AgentSystemInfo{" +
+        return "ClientSystemInfo{" +
                 "operatingSystem='" + operatingSystem + '\'' +
                 ", architecture='" + architecture + '\'' +
                 ", javaVersion='" + javaVersion + '\'' +

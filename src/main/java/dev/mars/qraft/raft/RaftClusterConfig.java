@@ -163,8 +163,8 @@ public class RaftClusterConfig {
                 .setHeartbeatIntervalMs(1000);
 
         for (int i = 1; i <= nodeCount; i++) {
-            String nodeId = "controller" + i;
-            String host = "controller" + i; // Docker service name
+            String nodeId = "server" + i;
+            String host = "server" + i; // Docker service name
             int port = basePort;
             builder.addNode(nodeId, host, port);
         }

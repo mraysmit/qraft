@@ -25,17 +25,17 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests {@link AgentCapabilities} discovery metadata defaults, advertised services and regions, and
+ * Tests {@link ClientCapabilities} discovery metadata defaults, advertised services and regions, and
  * JSON serialization shape.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-03-15
  * @version 1.0
  */
-class AgentCapabilitiesTest {
+class ClientCapabilitiesTest {
     @Test
     void startsWithEmptyDiscoveryMetadata() {
-        AgentCapabilities capabilities = new AgentCapabilities();
+        ClientCapabilities capabilities = new ClientCapabilities();
 
         assertTrue(capabilities.getSupportedServices().isEmpty());
         assertTrue(capabilities.getAvailableRegions().isEmpty());
@@ -44,7 +44,7 @@ class AgentCapabilitiesTest {
 
     @Test
     void advertisesServicesAndRegions() {
-        AgentCapabilities capabilities = new AgentCapabilities();
+        ClientCapabilities capabilities = new ClientCapabilities();
         capabilities.setSupportedServices(Set.of("catalog", "health"));
         capabilities.addAvailableRegion("eu-west-1");
 
@@ -54,12 +54,12 @@ class AgentCapabilitiesTest {
 
     @Test
     void serializesDiscoveryShape() throws Exception {
-        AgentCapabilities capabilities = new AgentCapabilities();
+        ClientCapabilities capabilities = new ClientCapabilities();
         capabilities.addSupportedService("catalog");
         capabilities.addCustomCapability("version", "1");
 
-        AgentCapabilities decoded = new ObjectMapper().readValue(
-                new ObjectMapper().writeValueAsString(capabilities), AgentCapabilities.class);
+        ClientCapabilities decoded = new ObjectMapper().readValue(
+                new ObjectMapper().writeValueAsString(capabilities), ClientCapabilities.class);
 
         assertEquals(Set.of("catalog"), decoded.getSupportedServices());
         assertEquals("1", decoded.getCustomCapabilities().get("version"));

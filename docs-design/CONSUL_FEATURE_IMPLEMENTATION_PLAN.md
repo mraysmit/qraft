@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-Qraft will evolve into a Consul-like distributed service with Raft-backed state, service discovery, health monitoring, agent lifecycle management, sessions, and distributed locks.
+Qraft will evolve into a Consul-like distributed service with Raft-backed state, service discovery, health monitoring, client lifecycle management, sessions, and distributed locks.
 
 **Delivery status.** This plan defines the target feature set. What is built is
 recorded in
@@ -16,7 +16,7 @@ to date on 2026-10-05 with the move to one Maven project and the removal of
 ## 2. Target Feature Set
 
 - Raft-backed distributed key/value state
-- Agent registration and health heartbeats
+- Client registration and health heartbeats
 - Service catalog and service discovery
 - Health checks and automatic deregistration
 - Sessions, locks, and leader election helpers
@@ -28,12 +28,12 @@ to date on 2026-10-05 with the move to one Maven project and the removal of
 
 Qraft will not use Vert.x. The runtime model will use Java 27 platform APIs and standard-library concurrency primitives.
 
-The active Maven build is Java-native. The controller uses Java 27 concurrency primitives and native grpc-java transport with no Vert.x runtime dependency.
+The active Maven build is Java-native. The server uses Java 27 concurrency primitives and native grpc-java transport with no Vert.x runtime dependency.
 
 ### Replacement principles
 
 - Use `com.sun.net.httpserver.HttpServer` or a small Java 27 HTTP abstraction for server endpoints.
-- Use `java.net.http.HttpClient` for outbound agent and health-check requests.
+- Use `java.net.http.HttpClient` for outbound client and health-check requests.
 - Use virtual threads for blocking request and background service work.
 - Use `StructuredTaskScope` where structured concurrency improves lifecycle management.
 - Use `CompletableFuture`, `ExecutorService`, and `ScheduledExecutorService` only where they fit the operation model.
@@ -48,24 +48,24 @@ The active Maven build is Java-native. The controller uses Java 27 concurrency p
 2. Introduce Java-native HTTP server and client abstractions.
 3. Replace Vert.x timers with scheduled executors or virtual-thread loops.
 4. Replace Vert.x `Future` and `Promise` usage with `CompletableFuture` or direct results.
-5. Migrate health checks and agent heartbeats.
-6. Migrate controller endpoints and middleware.
+5. Migrate health checks and client heartbeats.
+6. Migrate server endpoints and middleware.
 7. Remove Vert.x dependencies and configuration from the Maven build.
 8. Remove obsolete reactive integration tests and examples.
 
 ### Single-binary runtime and startup modes
 
 Qraft will be distributed as one executable runtime and one container image. The
-runtime will select its role at startup rather than requiring separate controller
-and agent distributions:
+runtime will select its role at startup rather than requiring separate server
+and client distributions:
 
 ```text
 qraft server
 qraft client
 ```
 
-- `server` starts the controller runtime, participates in the Raft quorum, owns replicated state, and exposes the control-plane APIs.
-- `client` starts the agent runtime, represents a managed node or service, registers with a controller, reports health, and sends heartbeats.
+- `server` starts the server runtime, participates in the Raft quorum, owns replicated state, and exposes the control-plane APIs.
+- `client` starts the client runtime, represents a managed node or service, registers with a server, reports health, and sends heartbeats.
 - Client mode never participates in the Raft quorum.
 - Runtime mode is selected only by the `server` or `client` command-line
   subcommand. Environment-variable mode selection is not supported.
@@ -85,8 +85,8 @@ not separate production deployment artifacts.
 The container image must support both modes without rebuilding the application:
 
 ```text
-qraft-image server   # controller/Raft server
-qraft-image client   # node/service agent
+qraft-image server   # server/Raft server
+qraft-image client   # node/service client
 ```
 
 Client mode must expose real local liveness and readiness endpoints. Maintaining
@@ -120,8 +120,8 @@ responsibilities and their packages are defined in
 
 - All cluster mutations must be Raft-replicated.
 - Reads must expose explicit consistency behavior.
-- Agents own local health observations.
-- Controllers own the replicated service catalog.
+- Clients own local health observations.
+- Servers own the replicated service catalog.
 - Only server mode participates in Raft consensus; client mode is an outbound control-plane participant.
 - One runtime image must be deployable in either mode without rebuilding the application.
 - Service discovery must not depend on transfer or workflow concepts.
@@ -169,15 +169,15 @@ Introduce service registration with:
 
 Endpoints:
 
-- `PUT /v1/agent/service/register`
-- `PUT /v1/agent/service/deregister/:serviceId`
+- `PUT /v1/client/service/register`
+- `PUT /v1/client/service/deregister/:serviceId`
 - `GET /v1/catalog/services`
 - `GET /v1/catalog/service/:service`
 - `GET /v1/health/service/:service`
 
-### Phase 4: Agent lifecycle and health
+### Phase 4: Client lifecycle and health
 
-The agent will be responsible for:
+The client will be responsible for:
 
 - Node registration.
 - Service registration.
@@ -189,10 +189,10 @@ The agent will be responsible for:
 - Running as the `client` mode of the unified Qraft runtime.
 - Serving local liveness and readiness endpoints for orchestration.
 
-The agent will not poll for jobs or execute transfers.
+The client will not poll for jobs or execute transfers.
 
-Client mode is not a Raft node. It communicates with the controller cluster and
-reports local observations; the controller cluster remains responsible for
+Client mode is not a Raft node. It communicates with the server cluster and
+reports local observations; the server cluster remains responsible for
 replicating the resulting catalog and health state.
 
 ### Phase 5: Sessions and distributed locks
@@ -255,10 +255,10 @@ Add:
 The first delivery should establish the basic Consul-like behavior:
 
 1. Add the unified executable runtime with `server` and `client` modes.
-2. Remove remaining transfer/job references from active controller and agent code.
+2. Remove remaining transfer/job references from active server and client code.
 3. Introduce `ServiceRegistration` and `ServiceInstance`.
 4. Implement service registration and deregistration through Raft.
-5. Expose controller catalog/health APIs and client liveness/readiness APIs.
+5. Expose server catalog/health APIs and client liveness/readiness APIs.
 6. Add one end-to-end multi-node registration flow using one image in both modes.
 
 This slice should be complete before implementing sessions, ACLs, or DNS.
@@ -270,10 +270,10 @@ The implementation will be considered aligned with the target design when:
 - No transfer or workflow classes remain in the active build.
 - One binary and container image start successfully in both `server` and `client` modes.
 - Client mode exposes working liveness and readiness endpoints.
-- Agents register services and report health.
-- Controllers replicate catalog mutations through Raft.
+- Clients register services and report health.
+- Servers replicate catalog mutations through Raft.
 - KV operations support versioning and CAS semantics.
-- Service discovery works during controller leadership changes.
+- Service discovery works during server leadership changes.
 - Sessions and locks have deterministic expiration behavior.
 - Operational state is exposed through health and metrics endpoints.
 - No Vert.x dependencies, types, timers, event loops, or framework futures remain.
@@ -290,13 +290,13 @@ merged into one Maven project on 2026-10-04.
 - [x] Support `server` and `client` startup modes.
 - [x] Resolve the mode from a command-line argument.
 - [x] Package one Docker image with a mode-aware entrypoint.
-- [x] Compile and test the runtime module with its controller and agent dependencies.
+- [x] Compile and test the runtime module with its server and client dependencies.
 
 ### Health and lifecycle foundation
 
 - [x] Expose client liveness and readiness endpoints.
-- [x] Mark the client ready only after successful controller registration.
-- [x] Start and stop the controller HTTP health server with the controller lifecycle.
+- [x] Mark the client ready only after successful server registration.
+- [x] Start and stop the server HTTP health server with the server lifecycle.
 - [x] Add real HTTP tests for client health transitions.
 - [x] Add runtime mode-resolution tests.
 - [x] Bound client shutdown, deregister services before the node, and terminate
@@ -307,17 +307,17 @@ merged into one Maven project on 2026-10-04.
 - [x] Complete server-mode configuration and bootstrap behavior. A cluster
   forms from `server.raft.nodes`; from then on, membership lives in the
   replicated log.
-- [x] Complete versioned client-mode configuration and the one-controller catalog
+- [x] Complete versioned client-mode configuration and the one-server catalog
   HTTP adapter with typed retryable and rejected outcomes.
-- [x] Complete controller discovery behavior: seed rotation, preferred-endpoint
+- [x] Complete server discovery behavior: seed rotation, preferred-endpoint
   memory, capped backoff for repeated node-registration cycles, and shared
   node/catalog transport ownership. Periodic reconciliation remains on the
   configured heartbeat cadence.
 - [x] Implement single-flight service reconciliation with stable fingerprints,
   partial-success retention, catalog absence repair, and rejection suppression.
-- [x] Derive agent readiness from node membership, required service convergence,
-  and controller-contact freshness.
-- [x] Implement agent membership and failure detection semantics: unreachable
+- [x] Derive client readiness from node membership, required service convergence,
+  and server-contact freshness.
+- [x] Implement client membership and failure detection semantics: unreachable
   after the node TTL, reaped with its services after the reap delay.
 - [x] Implement service registration, catalog replication, and query behavior.
 - [x] Add composite `(tenant, namespace, node, serviceId)` catalog identity with
@@ -344,7 +344,7 @@ merged into one Maven project on 2026-10-04.
 - [ ] Add `default`, `stale`, and `consistent` reads, and blocking queries
   (phase 6; item 4).
 - [ ] Implement sessions, locks, and leader-election helpers (phase 5; item 5).
-- [ ] Add catalog, health, request, agent, and session metrics, and cluster
+- [ ] Add catalog, health, request, client, and session metrics, and cluster
   membership and storage status (phase 8; item 7).
 - [ ] Implement the bounded event journal (item 8).
 - [ ] Implement ACL tokens, policies, token validation, and audit events

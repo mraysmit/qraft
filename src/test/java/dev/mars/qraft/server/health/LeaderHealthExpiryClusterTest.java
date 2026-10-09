@@ -73,7 +73,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class LeaderHealthExpiryClusterTest {
     private static final Instant START = Instant.parse("2026-09-26T12:00:00Z");
     private static final Duration INTERVAL = Duration.ofSeconds(1);
-    private static final ServiceInstance WEB = new ServiceInstance("web", "web", "agent-1", "127.0.0.1", 8080,
+    private static final ServiceInstance WEB = new ServiceInstance("web", "web", "client-1", "127.0.0.1", 8080,
             List.of(), Map.of(), ServiceHealth.UNKNOWN, "default", "default", "", "", true);
     private static final ServiceCheckId CHECK = new ServiceCheckId(WEB.identity(), "ttl");
 

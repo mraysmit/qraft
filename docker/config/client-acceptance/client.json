@@ -1,14 +1,14 @@
 {
   "version": 1,
-  "agent": {
-    "id": "docker-agent",
-    "hostname": "docker-agent",
-    "address": "agent",
+  "client": {
+    "id": "docker-client",
+    "hostname": "docker-client",
+    "address": "client",
     "httpPort": 8080,
     "heartbeatIntervalMs": 1000,
     "shutdownTimeoutMs": 8000
   },
-  "controllers": {
+  "servers": {
     "urls": ["http://server1:8080", "http://server2:8080", "http://server3:8080"],
     "requestTimeoutMs": 3000
   },
@@ -20,7 +20,7 @@
       {
         "id": "web",
         "name": "web",
-        "address": "agent",
+        "address": "client",
         "port": 8080,
         "checks": [
           {"id": "http", "type": "http", "url": "http://127.0.0.1:8080/health/live",

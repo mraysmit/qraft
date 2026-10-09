@@ -34,7 +34,7 @@ complete:
   disrupt a working cluster;
 - the loss of quorum has a documented, tested recovery procedure.
 
-This concerns server membership only. Agents never join the Raft membership
+This concerns server membership only. Clients never join the Raft membership
 (design principle 8), and their registration and expiry are unchanged.
 
 ## 2. State before this list
@@ -816,9 +816,8 @@ mutations is the one that closes the single-POM list's Phase 6.
 the document review on 2026-10-03. Current server JSON rejects these new settings;
 the promotion settings still exist only on `RaftNode.Builder`.
 
-The single-POM list's Phase 3 renamed `QraftControllerService` to
-`QraftServerService` on 2026-10-08, and the text below uses the new name. Its
-Phase 5 replaces `AppConfig`'s flattened map with typed records. This step
+`QraftServerService` is the class that wires these settings. The single-POM
+list's Phase 5 replaces `AppConfig`'s flattened map with typed records. This step
 resumes after that list, so wire the settings through whatever `AppConfig`
 has become.
 
@@ -980,7 +979,7 @@ explicitly implements and tests it.
 |---|---|
 | Form three servers from empty storage | Identical bootstrap configuration and server IDs on all three; one leader; replicated writes |
 | Wipe and replace a server at the same name/address | New server ID; collision refused before authenticated removal; no second bootstrap or old-target snapshot accepted; new non-voter catches up, promotes, and retains state/identity after restart |
-| Grow 3 to 5 and shrink 5 to 3 while an agent publishes | Every committed registration survives; membership changes commit one at a time; new servers replicate before voting; all retained nodes converge |
+| Grow 3 to 5 and shrink 5 to 3 while a client publishes | Every committed registration survives; membership changes commit one at a time; new servers replicate before voting; all retained nodes converge |
 | Automatic cleanup after promotion | Replacement has distinct name/address; failed member remains until grace and promotion commit; cleanup observes budget/minimum/quorum and persists across restart |
 | Periodic cleanup and blocked cleanup | Removal without a join when limits permit; no removal below minimum or without reachable quorum; a returning peer resets failure eligibility |
 | Leader removes itself | Authenticated removal commits; former leader reports removed and unready; retained voters elect one leader and preserve registrations |
@@ -1086,7 +1085,7 @@ The fix for the build defect above.
 
 ## 8. Out of scope
 
-- Agent membership, which stays outside Raft (design principle 8).
+- Client membership, which stays outside Raft (design principle 8).
 - Enterprise-style features: redundancy zones and automated upgrade migrations.
   They can build on non-voters later.
 - Multiple datacenters.

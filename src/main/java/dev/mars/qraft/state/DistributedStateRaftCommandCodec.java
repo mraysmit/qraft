@@ -22,7 +22,7 @@ import dev.mars.qraft.state.distributed.DistributedStateCommandCodec;
 import dev.mars.qraft.raft.api.CommandCodec;
 
 /**
- * Adapter codec that bridges controller RaftCommand and distributed-state command codec.
+ * Adapter codec that bridges server RaftCommand and distributed-state command codec.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-03-15

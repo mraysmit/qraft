@@ -17,7 +17,7 @@
 package dev.mars.qraft.client.catalog;
 
 /**
- * Machine-actionable result of one catalog operation against one controller.
+ * Machine-actionable result of one catalog operation against one server.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-24
@@ -29,7 +29,7 @@ public sealed interface CatalogOutcome
     /** A parsed 2xx response. {@code changed} is false for an idempotent no-op. */
     record Success(String serviceId, boolean changed) implements CatalogOutcome { }
 
-    /** A transport or server outcome that may succeed at another controller or later. */
+    /** A transport or server outcome that may succeed at another server or later. */
     record Retryable(String code, String message, String leaderId) implements CatalogOutcome { }
 
     /** A validation or semantic outcome that must not be retried unchanged. */

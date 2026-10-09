@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.runtime;
 
-import dev.mars.qraft.client.QraftAgent;
+import dev.mars.qraft.client.QraftClient;
 import dev.mars.qraft.server.QraftServerApplication;
 import dev.mars.qraft.common.config.ConfigFileResolver;
 
@@ -60,15 +60,15 @@ public final class QraftRuntimeApplication {
     }
 
     private static RuntimeLifecycle launchServer(Path configurationPath) {
-        QraftServerApplication.RunningServer controller =
+        QraftServerApplication.RunningServer server =
                 QraftServerApplication.launch(configurationPath);
-        return new ManagedRuntimeLifecycle(controller::closeAsync, controller::boundPorts);
+        return new ManagedRuntimeLifecycle(server::closeAsync, server::boundPorts);
     }
 
     private static RuntimeLifecycle launchClient(Path configurationPath) {
-        QraftAgent agent = QraftAgent.launch(configurationPath);
-        return new ManagedRuntimeLifecycle(() -> agent.shutdown().thenApply(ignored -> null),
-                () -> java.util.Map.of("http", agent.healthService().port()));
+        QraftClient client = QraftClient.launch(configurationPath);
+        return new ManagedRuntimeLifecycle(() -> client.shutdown().thenApply(ignored -> null),
+                () -> java.util.Map.of("http", client.healthService().port()));
     }
 
     static Startup parseArguments(String[] args) {

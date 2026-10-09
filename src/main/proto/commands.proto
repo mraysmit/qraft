@@ -8,29 +8,29 @@ package qraft.raft;
 
 // Values 3, 4, 6, and 8 are the job system's statuses. They are never written, and replicated history that
 // holds them decodes as HEALTHY, HEALTHY, DEGRADED, and MAINTENANCE.
-enum AgentStatusProto {
-  AGENT_STATUS_UNSPECIFIED = 0;
-  AGENT_STATUS_REGISTERING = 1;
-  AGENT_STATUS_HEALTHY = 2;
-  AGENT_STATUS_ACTIVE = 3 [deprecated = true];
-  AGENT_STATUS_IDLE = 4 [deprecated = true];
-  AGENT_STATUS_DEGRADED = 5;
-  AGENT_STATUS_OVERLOADED = 6 [deprecated = true];
-  AGENT_STATUS_MAINTENANCE = 7;
-  AGENT_STATUS_DRAINING = 8 [deprecated = true];
-  AGENT_STATUS_UNREACHABLE = 9;
-  AGENT_STATUS_FAILED = 10;
-  AGENT_STATUS_DEREGISTERED = 11;
+enum ClientStatusProto {
+  CLIENT_STATUS_UNSPECIFIED = 0;
+  CLIENT_STATUS_REGISTERING = 1;
+  CLIENT_STATUS_HEALTHY = 2;
+  CLIENT_STATUS_ACTIVE = 3 [deprecated = true];
+  CLIENT_STATUS_IDLE = 4 [deprecated = true];
+  CLIENT_STATUS_DEGRADED = 5;
+  CLIENT_STATUS_OVERLOADED = 6 [deprecated = true];
+  CLIENT_STATUS_MAINTENANCE = 7;
+  CLIENT_STATUS_DRAINING = 8 [deprecated = true];
+  CLIENT_STATUS_UNREACHABLE = 9;
+  CLIENT_STATUS_FAILED = 10;
+  CLIENT_STATUS_DEREGISTERED = 11;
 }
 
-enum AgentCommandType {
-  AGENT_CMD_UNSPECIFIED = 0;
-  AGENT_CMD_REGISTER = 1;
-  AGENT_CMD_DEREGISTER = 2;
-  AGENT_CMD_UPDATE_STATUS = 3;
-  AGENT_CMD_UPDATE_CAPABILITIES = 4;
-  AGENT_CMD_HEARTBEAT = 5;
-  AGENT_CMD_EXPIRE = 6;
+enum ClientCommandType {
+  CLIENT_CMD_UNSPECIFIED = 0;
+  CLIENT_CMD_REGISTER = 1;
+  CLIENT_CMD_DEREGISTER = 2;
+  CLIENT_CMD_UPDATE_STATUS = 3;
+  CLIENT_CMD_UPDATE_CAPABILITIES = 4;
+  CLIENT_CMD_HEARTBEAT = 5;
+  CLIENT_CMD_EXPIRE = 6;
 }
 
 enum SystemMetadataCommandType {
@@ -39,7 +39,7 @@ enum SystemMetadataCommandType {
   SYSTEM_METADATA_CMD_DELETE = 2;
 }
 
-message AgentSystemInfoProto {
+message ClientSystemInfoProto {
   optional string operating_system = 1;
   optional string architecture = 2;
   optional string java_version = 3;
@@ -52,7 +52,7 @@ message AgentSystemInfoProto {
   double load_average = 10;
 }
 
-message AgentNetworkInfoProto {
+message ClientNetworkInfoProto {
   optional string public_ip_address = 1;
   optional string private_ip_address = 2;
   repeated string network_interfaces = 3;
@@ -65,26 +65,26 @@ message AgentNetworkInfoProto {
   repeated int32 firewall_ports = 10;
 }
 
-message AgentCapabilitiesProto {
+message ClientCapabilitiesProto {
   repeated string supported_services = 1;
   reserved 2, 3, 4;
   repeated string available_regions = 5;
   reserved 6, 7;
   // Legacy: values rendered as text, which loses their JSON types. Read only when field 11 is empty.
   map<string, string> custom_capabilities = 8;
-  AgentSystemInfoProto system_info = 9;
-  AgentNetworkInfoProto network_info = 10;
+  ClientSystemInfoProto system_info = 9;
+  ClientNetworkInfoProto network_info = 10;
   // Each value encoded as JSON so numbers, booleans, lists, objects, and null survive replication.
   map<string, string> custom_capabilities_json = 11;
 }
 
-message AgentInfoProto {
-  string agent_id = 1;
+message ClientInfoProto {
+  string client_id = 1;
   optional string hostname = 2;
   optional string address = 3;
   int32 port = 4;
-  AgentCapabilitiesProto capabilities = 5;
-  AgentStatusProto status = 6;
+  ClientCapabilitiesProto capabilities = 5;
+  ClientStatusProto status = 6;
   int64 registration_time_epoch_ms = 7;
   int64 last_heartbeat_epoch_ms = 8;
   optional string version = 9;
@@ -93,14 +93,14 @@ message AgentInfoProto {
   map<string, string> metadata = 12;
 }
 
-message AgentCommandProto {
-  AgentCommandType type = 1;
-  string agent_id = 2;
-  AgentInfoProto agent_info = 3;
-  AgentStatusProto new_status = 4;
-  AgentCapabilitiesProto new_capabilities = 5;
+message ClientCommandProto {
+  ClientCommandType type = 1;
+  string client_id = 2;
+  ClientInfoProto client_info = 3;
+  ClientStatusProto new_status = 4;
+  ClientCapabilitiesProto new_capabilities = 5;
   int64 timestamp_epoch_ms = 6;
-  AgentStatusProto expected_status = 7;
+  ClientStatusProto expected_status = 7;
   int64 sequence_number = 8;
   string registration_id = 9;
   int64 expected_last_contact_epoch_ms = 10;
@@ -194,7 +194,7 @@ message RaftConfigurationProto {
 
 message RaftCommandMessage {
   oneof command {
-    AgentCommandProto agent_command = 1;
+    ClientCommandProto client_command = 1;
     SystemMetadataCommandProto system_metadata_command = 2;
     CatalogCommandProto catalog_command = 3;
     RaftConfigurationProto configuration = 4;

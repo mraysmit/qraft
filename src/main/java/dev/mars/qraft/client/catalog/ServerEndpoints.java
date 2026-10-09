@@ -24,7 +24,7 @@ import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Thread-safe ordered controller selector that prefers the last successful seed.
+ * Thread-safe ordered server selector that prefers the last successful seed.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-24
@@ -36,13 +36,13 @@ public final class ServerEndpoints {
 
     public ServerEndpoints(List<URI> seeds) {
         Objects.requireNonNull(seeds, "seeds");
-        if (seeds.isEmpty()) throw new IllegalArgumentException("At least one controller seed is required");
+        if (seeds.isEmpty()) throw new IllegalArgumentException("At least one server seed is required");
         this.seeds = List.copyOf(seeds);
         if (this.seeds.stream().anyMatch(Objects::isNull)) {
-            throw new IllegalArgumentException("Controller seeds must not contain null");
+            throw new IllegalArgumentException("Server seeds must not contain null");
         }
         if (new HashSet<>(this.seeds).size() != this.seeds.size()) {
-            throw new IllegalArgumentException("Controller seeds must be unique");
+            throw new IllegalArgumentException("Server seeds must be unique");
         }
     }
 
@@ -58,7 +58,7 @@ public final class ServerEndpoints {
 
     public void markSuccessful(URI endpoint) {
         int index = seeds.indexOf(Objects.requireNonNull(endpoint, "endpoint"));
-        if (index < 0) throw new IllegalArgumentException("Unknown controller endpoint: " + endpoint);
+        if (index < 0) throw new IllegalArgumentException("Unknown server endpoint: " + endpoint);
         preferredIndex.set(index);
     }
 }

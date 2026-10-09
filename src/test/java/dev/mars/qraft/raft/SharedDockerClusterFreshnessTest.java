@@ -59,11 +59,11 @@ class SharedDockerClusterFreshnessTest {
 
     @Test
     void rejectsJarOlderThanProductionSource() throws Exception {
-        Path source = repositoryRoot.resolve("src/main/java/Controller.java");
+        Path source = repositoryRoot.resolve("src/main/java/Server.java");
         Path jar = repositoryRoot.resolve("target/qraft.jar");
         Files.createDirectories(source.getParent());
         Files.createDirectories(jar.getParent());
-        Files.writeString(source, "class Controller {}");
+        Files.writeString(source, "class Server {}");
         Files.writeString(jar, "old jar");
         Files.setLastModifiedTime(jar, FileTime.from(Instant.parse("2026-01-01T00:00:00Z")));
         Files.setLastModifiedTime(source, FileTime.from(Instant.parse("2026-01-02T00:00:00Z")));
@@ -72,12 +72,12 @@ class SharedDockerClusterFreshnessTest {
                 () -> SharedDockerClusterFixture.assertRuntimeJarIsCurrent(repositoryRoot, jar));
 
         assertTrue(error.getMessage().contains("older than build input"));
-        assertTrue(error.getMessage().contains("Controller.java"));
+        assertTrue(error.getMessage().contains("Server.java"));
     }
 
     @Test
     void acceptsJarNewerThanSourcesAndPoms() throws Exception {
-        Path source = repositoryRoot.resolve("src/main/resources/agent.properties");
+        Path source = repositoryRoot.resolve("src/main/resources/client.properties");
         Path pom = repositoryRoot.resolve("pom.xml");
         Path jar = repositoryRoot.resolve("target/qraft.jar");
         Files.createDirectories(source.getParent());

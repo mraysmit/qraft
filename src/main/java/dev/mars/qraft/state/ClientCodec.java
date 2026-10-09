@@ -18,18 +18,18 @@ package dev.mars.qraft.state;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.mars.qraft.common.AgentCapabilities;
-import dev.mars.qraft.common.AgentInfo;
-import dev.mars.qraft.common.AgentNetworkInfo;
-import dev.mars.qraft.common.AgentStatus;
-import dev.mars.qraft.common.AgentSystemInfo;
-import dev.mars.qraft.raft.grpc.AgentCapabilitiesProto;
-import dev.mars.qraft.raft.grpc.AgentCommandProto;
-import dev.mars.qraft.raft.grpc.AgentCommandType;
-import dev.mars.qraft.raft.grpc.AgentInfoProto;
-import dev.mars.qraft.raft.grpc.AgentNetworkInfoProto;
-import dev.mars.qraft.raft.grpc.AgentStatusProto;
-import dev.mars.qraft.raft.grpc.AgentSystemInfoProto;
+import dev.mars.qraft.common.ClientCapabilities;
+import dev.mars.qraft.common.ClientInfo;
+import dev.mars.qraft.common.ClientNetworkInfo;
+import dev.mars.qraft.common.ClientStatus;
+import dev.mars.qraft.common.ClientSystemInfo;
+import dev.mars.qraft.raft.grpc.ClientCapabilitiesProto;
+import dev.mars.qraft.raft.grpc.ClientCommandProto;
+import dev.mars.qraft.raft.grpc.ClientCommandType;
+import dev.mars.qraft.raft.grpc.ClientInfoProto;
+import dev.mars.qraft.raft.grpc.ClientNetworkInfoProto;
+import dev.mars.qraft.raft.grpc.ClientStatusProto;
+import dev.mars.qraft.raft.grpc.ClientSystemInfoProto;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -39,51 +39,51 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Protobuf codec for agent-related types: {@link AgentCommand},
- * {@link AgentInfo}, {@link AgentCapabilities}, {@link AgentSystemInfo},
- * {@link AgentNetworkInfo}, and {@link AgentStatus}.
+ * Protobuf codec for client-related types: {@link ClientCommand},
+ * {@link ClientInfo}, {@link ClientCapabilities}, {@link ClientSystemInfo},
+ * {@link ClientNetworkInfo}, and {@link ClientStatus}.
  *
  * <p>Package-private utility class used by {@link ProtobufCommandCodec}.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2025
  */
-final class AgentCodec {
+final class ClientCodec {
 
-    private AgentCodec() {
+    private ClientCodec() {
     }
 
     // ── Command ─────────────────────────────────────────────────
 
-    static AgentCommandProto toProto(AgentCommand cmd) {
-        AgentCommandProto.Builder builder = AgentCommandProto.newBuilder()
-                .setAgentId(cmd.agentId())
+    static ClientCommandProto toProto(ClientCommand cmd) {
+        ClientCommandProto.Builder builder = ClientCommandProto.newBuilder()
+                .setClientId(cmd.clientId())
                 .setTimestampEpochMs(cmd.timestamp().toEpochMilli());
 
         switch (cmd) {
-            case AgentCommand.Register r -> {
-                builder.setType(AgentCommandType.AGENT_CMD_REGISTER);
-                builder.setAgentInfo(toProto(r.agentInfo()));
+            case ClientCommand.Register r -> {
+                builder.setType(ClientCommandType.CLIENT_CMD_REGISTER);
+                builder.setClientInfo(toProto(r.clientInfo()));
             }
-            case AgentCommand.Deregister ignored -> {
-                builder.setType(AgentCommandType.AGENT_CMD_DEREGISTER);
+            case ClientCommand.Deregister ignored -> {
+                builder.setType(ClientCommandType.CLIENT_CMD_DEREGISTER);
             }
-            case AgentCommand.UpdateStatus u -> {
-                builder.setType(AgentCommandType.AGENT_CMD_UPDATE_STATUS);
+            case ClientCommand.UpdateStatus u -> {
+                builder.setType(ClientCommandType.CLIENT_CMD_UPDATE_STATUS);
                 builder.setNewStatus(toProto(u.newStatus()));
                 builder.setExpectedStatus(toProto(u.expectedStatus()));
             }
-            case AgentCommand.UpdateCapabilities c -> {
-                builder.setType(AgentCommandType.AGENT_CMD_UPDATE_CAPABILITIES);
+            case ClientCommand.UpdateCapabilities c -> {
+                builder.setType(ClientCommandType.CLIENT_CMD_UPDATE_CAPABILITIES);
                 builder.setNewCapabilities(toProto(c.newCapabilities()));
             }
-            case AgentCommand.Expire e -> {
-                builder.setType(AgentCommandType.AGENT_CMD_EXPIRE);
+            case ClientCommand.Expire e -> {
+                builder.setType(ClientCommandType.CLIENT_CMD_EXPIRE);
                 builder.setExpectedLastContactEpochMs(e.expectedLastContact().toEpochMilli());
                 builder.setReap(e.reap());
             }
-            case AgentCommand.Heartbeat h -> {
-                builder.setType(AgentCommandType.AGENT_CMD_HEARTBEAT);
+            case ClientCommand.Heartbeat h -> {
+                builder.setType(ClientCommandType.CLIENT_CMD_HEARTBEAT);
                 builder.setSequenceNumber(h.sequenceNumber());
                 if (h.registrationId() != null) builder.setRegistrationId(h.registrationId());
                 if (h.status() != null) {
@@ -95,28 +95,28 @@ final class AgentCodec {
         return builder.build();
     }
 
-    static AgentCommand fromProto(AgentCommandProto proto) {
+    static ClientCommand fromProto(ClientCommandProto proto) {
         // Decoding must never read the local clock: every replica and every replay must see one value.
         Instant timestamp = Instant.ofEpochMilli(proto.getTimestampEpochMs());
-        AgentStatus newStatus = proto.getNewStatus() != AgentStatusProto.AGENT_STATUS_UNSPECIFIED
+        ClientStatus newStatus = proto.getNewStatus() != ClientStatusProto.CLIENT_STATUS_UNSPECIFIED
                 ? fromProto(proto.getNewStatus()) : null;
         return switch (proto.getType()) {
-            case AGENT_CMD_REGISTER -> new AgentCommand.Register(
-                    proto.getAgentId(), fromProto(proto.getAgentInfo()), timestamp);
-            case AGENT_CMD_DEREGISTER -> new AgentCommand.Deregister(
-                    proto.getAgentId(), timestamp);
-            case AGENT_CMD_UPDATE_STATUS -> {
-                yield new AgentCommand.UpdateStatus(
-                        proto.getAgentId(), fromProto(proto.getExpectedStatus()), newStatus, timestamp);
+            case CLIENT_CMD_REGISTER -> new ClientCommand.Register(
+                    proto.getClientId(), fromProto(proto.getClientInfo()), timestamp);
+            case CLIENT_CMD_DEREGISTER -> new ClientCommand.Deregister(
+                    proto.getClientId(), timestamp);
+            case CLIENT_CMD_UPDATE_STATUS -> {
+                yield new ClientCommand.UpdateStatus(
+                        proto.getClientId(), fromProto(proto.getExpectedStatus()), newStatus, timestamp);
             }
-            case AGENT_CMD_UPDATE_CAPABILITIES -> new AgentCommand.UpdateCapabilities(
-                    proto.getAgentId(), fromProto(proto.getNewCapabilities()), timestamp);
-            case AGENT_CMD_HEARTBEAT -> new AgentCommand.Heartbeat(
-                    proto.getAgentId(), newStatus, timestamp, proto.getSequenceNumber(),
+            case CLIENT_CMD_UPDATE_CAPABILITIES -> new ClientCommand.UpdateCapabilities(
+                    proto.getClientId(), fromProto(proto.getNewCapabilities()), timestamp);
+            case CLIENT_CMD_HEARTBEAT -> new ClientCommand.Heartbeat(
+                    proto.getClientId(), newStatus, timestamp, proto.getSequenceNumber(),
                     proto.getRegistrationId().isEmpty() ? null : proto.getRegistrationId());
-            case AGENT_CMD_EXPIRE -> new AgentCommand.Expire(proto.getAgentId(),
+            case CLIENT_CMD_EXPIRE -> new ClientCommand.Expire(proto.getClientId(),
                     Instant.ofEpochMilli(proto.getExpectedLastContactEpochMs()), proto.getReap(), timestamp);
-            default -> throw new IllegalArgumentException("Unknown AgentCommandType: " + proto.getType());
+            default -> throw new IllegalArgumentException("Unknown ClientCommandType: " + proto.getType());
         };
     }
 
@@ -140,10 +140,10 @@ final class AgentCodec {
 
     // ── Domain models ───────────────────────────────────────────
 
-    private static AgentInfoProto toProto(AgentInfo info) {
-        AgentInfoProto.Builder builder = AgentInfoProto.newBuilder()
+    private static ClientInfoProto toProto(ClientInfo info) {
+        ClientInfoProto.Builder builder = ClientInfoProto.newBuilder()
                 .setPort(info.getPort());
-        Optional.ofNullable(info.getAgentId()).ifPresent(builder::setAgentId);
+        Optional.ofNullable(info.getClientId()).ifPresent(builder::setClientId);
         Optional.ofNullable(info.getHostname()).ifPresent(builder::setHostname);
         Optional.ofNullable(info.getAddress()).ifPresent(builder::setAddress);
         Optional.ofNullable(info.getCapabilities()).ifPresent(c -> builder.setCapabilities(toProto(c)));
@@ -157,19 +157,19 @@ final class AgentCodec {
         return builder.build();
     }
 
-    private static AgentInfo fromProto(AgentInfoProto proto) {
-        AgentInfo info = new AgentInfo(
-                proto.getAgentId(),
+    private static ClientInfo fromProto(ClientInfoProto proto) {
+        ClientInfo info = new ClientInfo(
+                proto.getClientId(),
                 proto.hasHostname() ? proto.getHostname() : null,
                 proto.hasAddress() ? proto.getAddress() : null,
                 proto.getPort());
         if (proto.hasCapabilities()) {
             info.setCapabilities(fromProto(proto.getCapabilities()));
         }
-        if (proto.getStatus() != AgentStatusProto.AGENT_STATUS_UNSPECIFIED) {
+        if (proto.getStatus() != ClientStatusProto.CLIENT_STATUS_UNSPECIFIED) {
             info.setStatus(fromProto(proto.getStatus()));
         }
-        // The AgentInfo constructor stamps the local clock; a decoded value must come from the entry only.
+        // The ClientInfo constructor stamps the local clock; a decoded value must come from the entry only.
         info.setRegistrationTime(proto.getRegistrationTimeEpochMs() > 0
                 ? Instant.ofEpochMilli(proto.getRegistrationTimeEpochMs()) : null);
         if (proto.getLastHeartbeatEpochMs() > 0) {
@@ -184,8 +184,8 @@ final class AgentCodec {
         return info;
     }
 
-    private static AgentCapabilitiesProto toProto(AgentCapabilities caps) {
-        AgentCapabilitiesProto.Builder builder = AgentCapabilitiesProto.newBuilder()
+    private static ClientCapabilitiesProto toProto(ClientCapabilities caps) {
+        ClientCapabilitiesProto.Builder builder = ClientCapabilitiesProto.newBuilder()
                 .addAllSupportedServices(caps.getSupportedServices());
         Optional.ofNullable(caps.getAvailableRegions()).ifPresent(builder::addAllAvailableRegions);
         Optional.ofNullable(caps.getCustomCapabilities()).ifPresent(cc ->
@@ -195,8 +195,8 @@ final class AgentCodec {
         return builder.build();
     }
 
-    private static AgentCapabilities fromProto(AgentCapabilitiesProto proto) {
-        AgentCapabilities caps = new AgentCapabilities();
+    private static ClientCapabilities fromProto(ClientCapabilitiesProto proto) {
+        ClientCapabilities caps = new ClientCapabilities();
         caps.setSupportedServices(new HashSet<>(proto.getSupportedServicesList()));
         caps.setAvailableRegions(new HashSet<>(proto.getAvailableRegionsList()));
         if (proto.getCustomCapabilitiesJsonCount() > 0) {
@@ -215,8 +215,8 @@ final class AgentCodec {
         return caps;
     }
 
-    private static AgentSystemInfoProto toProto(AgentSystemInfo info) {
-        AgentSystemInfoProto.Builder builder = AgentSystemInfoProto.newBuilder()
+    private static ClientSystemInfoProto toProto(ClientSystemInfo info) {
+        ClientSystemInfoProto.Builder builder = ClientSystemInfoProto.newBuilder()
                 .setTotalMemory(info.getTotalMemory())
                 .setAvailableMemory(info.getAvailableMemory())
                 .setTotalDiskSpace(info.getTotalDiskSpace())
@@ -230,8 +230,8 @@ final class AgentCodec {
         return builder.build();
     }
 
-    private static AgentSystemInfo fromProto(AgentSystemInfoProto proto) {
-        AgentSystemInfo info = new AgentSystemInfo();
+    private static ClientSystemInfo fromProto(ClientSystemInfoProto proto) {
+        ClientSystemInfo info = new ClientSystemInfo();
         info.setOperatingSystem(proto.hasOperatingSystem() ? proto.getOperatingSystem() : null);
         info.setArchitecture(proto.hasArchitecture() ? proto.getArchitecture() : null);
         info.setJavaVersion(proto.hasJavaVersion() ? proto.getJavaVersion() : null);
@@ -245,8 +245,8 @@ final class AgentCodec {
         return info;
     }
 
-    private static AgentNetworkInfoProto toProto(AgentNetworkInfo info) {
-        AgentNetworkInfoProto.Builder builder = AgentNetworkInfoProto.newBuilder()
+    private static ClientNetworkInfoProto toProto(ClientNetworkInfo info) {
+        ClientNetworkInfoProto.Builder builder = ClientNetworkInfoProto.newBuilder()
                 .setBandwidthCapacity(info.getBandwidthCapacity())
                 .setCurrentBandwidthUsage(info.getCurrentBandwidthUsage())
                 .setLatencyMs(info.getLatencyMs())
@@ -260,8 +260,8 @@ final class AgentCodec {
         return builder.build();
     }
 
-    private static AgentNetworkInfo fromProto(AgentNetworkInfoProto proto) {
-        AgentNetworkInfo info = new AgentNetworkInfo();
+    private static ClientNetworkInfo fromProto(ClientNetworkInfoProto proto) {
+        ClientNetworkInfo info = new ClientNetworkInfo();
         info.setPublicIpAddress(proto.hasPublicIpAddress() ? proto.getPublicIpAddress() : null);
         info.setPrivateIpAddress(proto.hasPrivateIpAddress() ? proto.getPrivateIpAddress() : null);
         info.setNetworkInterfaces(new ArrayList<>(proto.getNetworkInterfacesList()));
@@ -277,32 +277,32 @@ final class AgentCodec {
 
     // ── Enums ───────────────────────────────────────────────────
 
-    private static AgentStatusProto toProto(AgentStatus status) {
+    private static ClientStatusProto toProto(ClientStatus status) {
         return switch (status) {
-            case REGISTERING -> AgentStatusProto.AGENT_STATUS_REGISTERING;
-            case HEALTHY -> AgentStatusProto.AGENT_STATUS_HEALTHY;
-            case DEGRADED -> AgentStatusProto.AGENT_STATUS_DEGRADED;
-            case MAINTENANCE -> AgentStatusProto.AGENT_STATUS_MAINTENANCE;
-            case UNREACHABLE -> AgentStatusProto.AGENT_STATUS_UNREACHABLE;
-            case FAILED -> AgentStatusProto.AGENT_STATUS_FAILED;
-            case DEREGISTERED -> AgentStatusProto.AGENT_STATUS_DEREGISTERED;
+            case REGISTERING -> ClientStatusProto.CLIENT_STATUS_REGISTERING;
+            case HEALTHY -> ClientStatusProto.CLIENT_STATUS_HEALTHY;
+            case DEGRADED -> ClientStatusProto.CLIENT_STATUS_DEGRADED;
+            case MAINTENANCE -> ClientStatusProto.CLIENT_STATUS_MAINTENANCE;
+            case UNREACHABLE -> ClientStatusProto.CLIENT_STATUS_UNREACHABLE;
+            case FAILED -> ClientStatusProto.CLIENT_STATUS_FAILED;
+            case DEREGISTERED -> ClientStatusProto.CLIENT_STATUS_DEREGISTERED;
         };
     }
 
-    private static AgentStatus fromProto(AgentStatusProto status) {
+    private static ClientStatus fromProto(ClientStatusProto status) {
         return switch (status) {
-            case AGENT_STATUS_REGISTERING -> AgentStatus.REGISTERING;
-            case AGENT_STATUS_HEALTHY -> AgentStatus.HEALTHY;
+            case CLIENT_STATUS_REGISTERING -> ClientStatus.REGISTERING;
+            case CLIENT_STATUS_HEALTHY -> ClientStatus.HEALTHY;
             // Statuses of the job system: replicated history written earlier may hold them.
-            case AGENT_STATUS_ACTIVE, AGENT_STATUS_IDLE -> AgentStatus.HEALTHY;
-            case AGENT_STATUS_DEGRADED -> AgentStatus.DEGRADED;
-            case AGENT_STATUS_OVERLOADED -> AgentStatus.DEGRADED;
-            case AGENT_STATUS_MAINTENANCE -> AgentStatus.MAINTENANCE;
-            case AGENT_STATUS_DRAINING -> AgentStatus.MAINTENANCE;
-            case AGENT_STATUS_UNREACHABLE -> AgentStatus.UNREACHABLE;
-            case AGENT_STATUS_FAILED -> AgentStatus.FAILED;
-            case AGENT_STATUS_DEREGISTERED -> AgentStatus.DEREGISTERED;
-            default -> throw new IllegalArgumentException("Unknown AgentStatusProto: " + status);
+            case CLIENT_STATUS_ACTIVE, CLIENT_STATUS_IDLE -> ClientStatus.HEALTHY;
+            case CLIENT_STATUS_DEGRADED -> ClientStatus.DEGRADED;
+            case CLIENT_STATUS_OVERLOADED -> ClientStatus.DEGRADED;
+            case CLIENT_STATUS_MAINTENANCE -> ClientStatus.MAINTENANCE;
+            case CLIENT_STATUS_DRAINING -> ClientStatus.MAINTENANCE;
+            case CLIENT_STATUS_UNREACHABLE -> ClientStatus.UNREACHABLE;
+            case CLIENT_STATUS_FAILED -> ClientStatus.FAILED;
+            case CLIENT_STATUS_DEREGISTERED -> ClientStatus.DEREGISTERED;
+            default -> throw new IllegalArgumentException("Unknown ClientStatusProto: " + status);
         };
     }
 }

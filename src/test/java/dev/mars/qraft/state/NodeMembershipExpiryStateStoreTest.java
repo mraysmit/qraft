@@ -17,8 +17,8 @@
 package dev.mars.qraft.state;
 
 import dev.mars.qraft.raft.RaftCommandResult;
-import dev.mars.qraft.common.AgentInfo;
-import dev.mars.qraft.common.AgentStatus;
+import dev.mars.qraft.common.ClientInfo;
+import dev.mars.qraft.common.ClientStatus;
 import dev.mars.qraft.state.catalog.HealthObservation;
 import dev.mars.qraft.state.catalog.ServiceCheckId;
 import dev.mars.qraft.state.catalog.ServiceHealth;
@@ -47,56 +47,56 @@ class NodeMembershipExpiryStateStoreTest {
 
     @Test
     void expiryMarksASilentNodeUnreachableOnlyForItsExactLastContact() {
-        QraftStateStore store = storeWithNode("agent-1", REGISTERED);
+        QraftStateStore store = storeWithNode("client-1", REGISTERED);
 
         assertInstanceOf(RaftCommandResult.NoOp.class,
-                store.apply(AgentCommand.expire("agent-1", REGISTERED.plusMillis(1), false, REGISTERED)));
-        assertEquals(AgentStatus.REGISTERING, status(store, "agent-1"));
+                store.apply(ClientCommand.expire("client-1", REGISTERED.plusMillis(1), false, REGISTERED)));
+        assertEquals(ClientStatus.REGISTERING, status(store, "client-1"));
 
         assertInstanceOf(RaftCommandResult.Success.class,
-                store.apply(AgentCommand.expire("agent-1", REGISTERED, false, REGISTERED)));
-        assertEquals(AgentStatus.UNREACHABLE, status(store, "agent-1"));
+                store.apply(ClientCommand.expire("client-1", REGISTERED, false, REGISTERED)));
+        assertEquals(ClientStatus.UNREACHABLE, status(store, "client-1"));
         assertInstanceOf(RaftCommandResult.NoOp.class,
-                store.apply(AgentCommand.expire("agent-1", REGISTERED, false, REGISTERED)),
+                store.apply(ClientCommand.expire("client-1", REGISTERED, false, REGISTERED)),
                 "an unreachable node is not marked again");
         assertInstanceOf(RaftCommandResult.NoOp.class,
-                store.apply(AgentCommand.expire("missing", REGISTERED, false, REGISTERED)));
+                store.apply(ClientCommand.expire("missing", REGISTERED, false, REGISTERED)));
     }
 
     @Test
     void aHeartbeatAfterExpiryRestoresTheNodeAndDefeatsAStaleReap() {
-        QraftStateStore store = storeWithNode("agent-1", REGISTERED);
-        store.apply(AgentCommand.expire("agent-1", REGISTERED, false, REGISTERED));
+        QraftStateStore store = storeWithNode("client-1", REGISTERED);
+        store.apply(ClientCommand.expire("client-1", REGISTERED, false, REGISTERED));
 
-        store.apply(AgentCommand.heartbeat("agent-1", null, REGISTERED.plusSeconds(5), 1));
+        store.apply(ClientCommand.heartbeat("client-1", null, REGISTERED.plusSeconds(5), 1));
 
-        assertEquals(AgentStatus.HEALTHY, status(store, "agent-1"), "a heartbeat revives an unreachable node");
+        assertEquals(ClientStatus.HEALTHY, status(store, "client-1"), "a heartbeat revives an unreachable node");
         assertInstanceOf(RaftCommandResult.NoOp.class,
-                store.apply(AgentCommand.expire("agent-1", REGISTERED, true, REGISTERED)));
-        assertTrue(store.findAgent("agent-1").isPresent());
+                store.apply(ClientCommand.expire("client-1", REGISTERED, true, REGISTERED)));
+        assertTrue(store.findClient("client-1").isPresent());
     }
 
     @Test
     void reapingRequiresTheUnreachablePhaseAndRemovesEveryServiceTheNodeRegistered() {
-        QraftStateStore store = storeWithNode("agent-1", REGISTERED);
-        store.apply(AgentCommand.register(node("agent-2"), REGISTERED));
-        ServiceInstance web = service("web", "agent-1", "tenant-a");
-        ServiceInstance api = service("api", "agent-1", "tenant-b");
-        ServiceInstance other = service("web", "agent-2", "tenant-a");
+        QraftStateStore store = storeWithNode("client-1", REGISTERED);
+        store.apply(ClientCommand.register(node("client-2"), REGISTERED));
+        ServiceInstance web = service("web", "client-1", "tenant-a");
+        ServiceInstance api = service("api", "client-1", "tenant-b");
+        ServiceInstance other = service("web", "client-2", "tenant-a");
         List.of(web, api, other).forEach(instance -> store.apply(CatalogCommand.register(instance, List.of("ttl"))));
         ServiceCheckId webCheck = new ServiceCheckId(web.identity(), "ttl");
         store.apply(CatalogCommand.observe(new HealthObservation(webCheck, ServiceHealth.PASSING, 1, REGISTERED,
                 30_000, true, ""), REGISTERED));
 
         assertInstanceOf(RaftCommandResult.NoOp.class,
-                store.apply(AgentCommand.expire("agent-1", REGISTERED, true, REGISTERED)),
+                store.apply(ClientCommand.expire("client-1", REGISTERED, true, REGISTERED)),
                 "a node that was never marked unreachable cannot be reaped");
-        store.apply(AgentCommand.expire("agent-1", REGISTERED, false, REGISTERED));
+        store.apply(ClientCommand.expire("client-1", REGISTERED, false, REGISTERED));
         assertInstanceOf(RaftCommandResult.Success.class,
-                store.apply(AgentCommand.expire("agent-1", REGISTERED, true, REGISTERED)));
+                store.apply(ClientCommand.expire("client-1", REGISTERED, true, REGISTERED)));
 
-        assertTrue(store.findAgent("agent-1").isEmpty());
-        assertTrue(store.findAgent("agent-2").isPresent());
+        assertTrue(store.findClient("client-1").isEmpty());
+        assertTrue(store.findClient("client-2").isPresent());
         assertEquals(List.of(other), store.getServiceCatalog().instances());
         assertTrue(store.findHealthCheck(webCheck).isEmpty(), "the reaped node's checks go with its services");
         assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(CatalogCommand.observe(new HealthObservation(
@@ -106,22 +106,22 @@ class NodeMembershipExpiryStateStoreTest {
 
     @Test
     void reRegistrationDefeatsAStaleExpiry() {
-        QraftStateStore store = storeWithNode("agent-1", REGISTERED);
+        QraftStateStore store = storeWithNode("client-1", REGISTERED);
 
-        store.apply(AgentCommand.register(node("agent-1"), REGISTERED.plusSeconds(10)));
+        store.apply(ClientCommand.register(node("client-1"), REGISTERED.plusSeconds(10)));
 
         assertInstanceOf(RaftCommandResult.NoOp.class,
-                store.apply(AgentCommand.expire("agent-1", REGISTERED, false, REGISTERED)));
-        assertEquals(AgentStatus.REGISTERING, status(store, "agent-1"));
+                store.apply(ClientCommand.expire("client-1", REGISTERED, false, REGISTERED)));
+        assertEquals(ClientStatus.REGISTERING, status(store, "client-1"));
     }
 
     @Test
     void membershipTimesUseTheReplicatedMillisecondPrecision() {
         Instant withNanos = Instant.parse("2026-09-26T12:00:00.123456789Z");
 
-        AgentCommand.Register register = (AgentCommand.Register) AgentCommand.register(node("agent-1"), withNanos);
-        AgentCommand.Heartbeat heartbeat = (AgentCommand.Heartbeat) AgentCommand.heartbeat("agent-1", null, withNanos, 1);
-        AgentCommand.Expire expire = (AgentCommand.Expire) AgentCommand.expire("agent-1", withNanos, false, withNanos);
+        ClientCommand.Register register = (ClientCommand.Register) ClientCommand.register(node("client-1"), withNanos);
+        ClientCommand.Heartbeat heartbeat = (ClientCommand.Heartbeat) ClientCommand.heartbeat("client-1", null, withNanos, 1);
+        ClientCommand.Expire expire = (ClientCommand.Expire) ClientCommand.expire("client-1", withNanos, false, withNanos);
 
         Instant millis = Instant.parse("2026-09-26T12:00:00.123Z");
         assertEquals(millis, register.timestamp(), "the leader and its followers must hold identical times");
@@ -131,25 +131,25 @@ class NodeMembershipExpiryStateStoreTest {
     }
 
     @Test
-    void expiryCommandsRoundTripTheCodecWithoutRenumberingAgentCommands() {
-        AgentCommand mark = AgentCommand.expire("agent-1", REGISTERED, false, REGISTERED.plusSeconds(90));
-        AgentCommand reap = AgentCommand.expire("agent-1", REGISTERED, true, REGISTERED.plusSeconds(180));
+    void expiryCommandsRoundTripTheCodecWithoutRenumberingClientCommands() {
+        ClientCommand mark = ClientCommand.expire("client-1", REGISTERED, false, REGISTERED.plusSeconds(90));
+        ClientCommand reap = ClientCommand.expire("client-1", REGISTERED, true, REGISTERED.plusSeconds(180));
 
-        assertEquals(mark, AgentCodec.fromProto(AgentCodec.toProto(mark)));
-        assertEquals(reap, AgentCodec.fromProto(AgentCodec.toProto(reap)));
-        assertEquals(5, dev.mars.qraft.raft.grpc.AgentCommandType.AGENT_CMD_HEARTBEAT_VALUE);
-        assertEquals(6, dev.mars.qraft.raft.grpc.AgentCommandType.AGENT_CMD_EXPIRE_VALUE);
+        assertEquals(mark, ClientCodec.fromProto(ClientCodec.toProto(mark)));
+        assertEquals(reap, ClientCodec.fromProto(ClientCodec.toProto(reap)));
+        assertEquals(5, dev.mars.qraft.raft.grpc.ClientCommandType.CLIENT_CMD_HEARTBEAT_VALUE);
+        assertEquals(6, dev.mars.qraft.raft.grpc.ClientCommandType.CLIENT_CMD_EXPIRE_VALUE);
     }
 
-    private static QraftStateStore storeWithNode(String agentId, Instant registeredAt) {
+    private static QraftStateStore storeWithNode(String clientId, Instant registeredAt) {
         QraftStateStore store = new QraftStateStore();
-        store.apply(AgentCommand.register(node(agentId), registeredAt));
+        store.apply(ClientCommand.register(node(clientId), registeredAt));
         return store;
     }
 
-    private static AgentInfo node(String agentId) {
-        AgentInfo info = new AgentInfo(agentId, agentId + "-host", "127.0.0.1", 8080);
-        info.setStatus(AgentStatus.REGISTERING);
+    private static ClientInfo node(String clientId) {
+        ClientInfo info = new ClientInfo(clientId, clientId + "-host", "127.0.0.1", 8080);
+        info.setStatus(ClientStatus.REGISTERING);
         return info;
     }
 
@@ -158,7 +158,7 @@ class NodeMembershipExpiryStateStoreTest {
                 ServiceHealth.UNKNOWN, tenant, "default", "", "", true);
     }
 
-    private static AgentStatus status(QraftStateStore store, String agentId) {
-        return store.findAgent(agentId).orElseThrow().getStatus();
+    private static ClientStatus status(QraftStateStore store, String clientId) {
+        return store.findClient(clientId).orElseThrow().getStatus();
     }
 }

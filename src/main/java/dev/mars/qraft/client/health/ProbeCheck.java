@@ -19,7 +19,7 @@ package dev.mars.qraft.client.health;
 import java.time.Duration;
 
 /**
- * A check the agent actively probes on an interval with a bounded timeout.
+ * A check the client actively probes on an interval with a bounded timeout.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-26

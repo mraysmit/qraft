@@ -130,7 +130,7 @@ class RaftNodeCheckQuorumTest {
         transport.silence("peer-2", "peer-3");
 
         CompletableFuture<?> write = node.submitCommand(CatalogCommand.register(new ServiceInstance(
-                "web", "web", "agent-1", "127.0.0.1", 8080, List.of(), Map.of(), ServiceHealth.UNKNOWN)))
+                "web", "web", "client-1", "127.0.0.1", 8080, List.of(), Map.of(), ServiceHealth.UNKNOWN)))
                 .toCompletionStage().toCompletableFuture();
         heartbeats(4);
 

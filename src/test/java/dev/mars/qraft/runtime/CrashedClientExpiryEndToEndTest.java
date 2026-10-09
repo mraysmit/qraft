@@ -43,14 +43,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * End-to-end test in which a client runtime in a separate JVM publishes a check to a real server
  * runtime and is then killed without graceful shutdown: the server's leader expires the unrenewed
- * check and, after the check's deregistration delay, deregisters the crashed agent's service.
+ * check and, after the check's deregistration delay, deregisters the crashed client's service.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-26
  * @version 1.0
  */
 @Tag("e2e")
-class CrashedAgentExpiryEndToEndTest {
+class CrashedClientExpiryEndToEndTest {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     @TempDir
@@ -91,8 +91,8 @@ class CrashedAgentExpiryEndToEndTest {
         lifecycles.add(server);
         int httpPort = server.boundPorts().get("http");
         writeClientConfig(clientConfig, httpPort, 0);
-        URI controller = URI.create("http://127.0.0.1:" + httpPort);
-        await(Duration.ofSeconds(10), () -> status(controller.resolve("/health/ready")) == 200);
+        URI serverUri = URI.create("http://127.0.0.1:" + httpPort);
+        await(Duration.ofSeconds(10), () -> status(serverUri.resolve("/health/ready")) == 200);
 
         client = new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                 "-cp", System.getProperty("java.class.path"),
@@ -100,8 +100,8 @@ class CrashedAgentExpiryEndToEndTest {
                 .redirectErrorStream(true)
                 .redirectOutput(temporaryDirectory.resolve("client.out").toFile())
                 .start();
-        await(Duration.ofSeconds(30), () -> "PASSING".equals(checkField(controller, "status"))
-                && "PASSING".equals(serviceHealth(controller)));
+        await(Duration.ofSeconds(30), () -> "PASSING".equals(checkField(serverUri, "status"))
+                && "PASSING".equals(serviceHealth(serverUri)));
 
         client.destroyForcibly();
         assertTrue(client.waitFor(10, TimeUnit.SECONDS), "the client process did not terminate");
@@ -110,11 +110,11 @@ class CrashedAgentExpiryEndToEndTest {
         // poll on a loaded machine can miss.
         AtomicBoolean sawExpiry = new AtomicBoolean();
         await(Duration.ofSeconds(30), () -> {
-            if ("true".equals(checkField(controller, "expired"))
-                    && "CRITICAL".equals(serviceHealth(controller))) {
+            if ("true".equals(checkField(serverUri, "expired"))
+                    && "CRITICAL".equals(serviceHealth(serverUri))) {
                 sawExpiry.set(true);
             }
-            return sawExpiry.get() && instanceCount(controller) == 0;
+            return sawExpiry.get() && instanceCount(serverUri) == 0;
         });
         assertTrue(sawExpiry.get(), "the unrenewed check was expired before its service was deregistered");
     }
@@ -128,11 +128,11 @@ class CrashedAgentExpiryEndToEndTest {
         lifecycles.add(server);
         int httpPort = server.boundPorts().get("http");
         writeCheckFreeClientConfig(clientConfig, httpPort, 0);
-        URI controller = URI.create("http://127.0.0.1:" + httpPort);
-        await(Duration.ofSeconds(10), () -> status(controller.resolve("/health/ready")) == 200);
+        URI serverUri = URI.create("http://127.0.0.1:" + httpPort);
+        await(Duration.ofSeconds(10), () -> status(serverUri.resolve("/health/ready")) == 200);
 
         client = startClient(clientConfig);
-        await(Duration.ofSeconds(30), () -> "HEALTHY".equals(nodeStatus(controller)) && instanceCount(controller) == 1);
+        await(Duration.ofSeconds(30), () -> "HEALTHY".equals(nodeStatus(serverUri)) && instanceCount(serverUri) == 1);
 
         client.destroyForcibly();
         assertTrue(client.waitFor(10, TimeUnit.SECONDS), "the client process did not terminate");
@@ -140,8 +140,8 @@ class CrashedAgentExpiryEndToEndTest {
         // The node stays unreachable for nodeReapAfterMs (5 s) before it is reaped.
         AtomicBoolean sawUnreachable = new AtomicBoolean();
         await(Duration.ofSeconds(30), () -> {
-            if ("UNREACHABLE".equals(nodeStatus(controller)) && instanceCount(controller) == 1) sawUnreachable.set(true);
-            return sawUnreachable.get() && nodeStatus(controller) == null && instanceCount(controller) == 0;
+            if ("UNREACHABLE".equals(nodeStatus(serverUri)) && instanceCount(serverUri) == 1) sawUnreachable.set(true);
+            return sawUnreachable.get() && nodeStatus(serverUri) == null && instanceCount(serverUri) == 0;
         });
         assertTrue(sawUnreachable.get(), "the node was marked unreachable before it and its services were reaped");
     }
@@ -155,14 +155,14 @@ class CrashedAgentExpiryEndToEndTest {
                 .start();
     }
 
-    /** Status of the crashing agent in the node registry, or {@code null} once it is gone. */
-    private String nodeStatus(URI controller) {
+    /** Status of the crashing client in the node registry, or {@code null} once it is gone. */
+    private String nodeStatus(URI serverUri) {
         try {
-            HttpResponse<String> response = http.send(HttpRequest.newBuilder(controller.resolve("/api/v1/agents"))
+            HttpResponse<String> response = http.send(HttpRequest.newBuilder(serverUri.resolve("/api/v1/clients"))
                     .timeout(Duration.ofSeconds(5)).GET().build(), HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() != 200) return "unavailable";
-            for (JsonNode agent : JSON.readTree(response.body())) {
-                if ("crashing-agent".equals(agent.path("agentId").asText())) return agent.path("status").asText().toUpperCase(java.util.Locale.ROOT);
+            for (JsonNode client : JSON.readTree(response.body())) {
+                if ("crashing-client".equals(client.path("clientId").asText())) return client.path("status").asText().toUpperCase(java.util.Locale.ROOT);
             }
             return null;
         } catch (Exception unavailable) {
@@ -170,27 +170,27 @@ class CrashedAgentExpiryEndToEndTest {
         }
     }
 
-    private void writeCheckFreeClientConfig(Path target, int controllerPort, int agentPort) throws Exception {
+    private void writeCheckFreeClientConfig(Path target, int serverPort, int clientPort) throws Exception {
         Files.writeString(target, """
                 {
                   "version": 1,
-                  "agent": {"id": "crashing-agent", "address": "127.0.0.1", "httpPort": %d,
+                  "client": {"id": "crashing-client", "address": "127.0.0.1", "httpPort": %d,
                             "heartbeatIntervalMs": 50, "shutdownTimeoutMs": 3000},
-                  "controllers": {"urls": ["http://127.0.0.1:%d"], "requestTimeoutMs": 5000},
+                  "servers": {"urls": ["http://127.0.0.1:%d"], "requestTimeoutMs": 5000},
                   "catalog": {
                     "registrationRetryMinMs": 25, "registrationRetryMaxMs": 100, "contactFreshnessMs": 1000,
                     "services": [{"id": "web", "name": "web", "address": "127.0.0.1", "port": %d}]
                   },
                   "logging": {"directory": %s}
                 }
-                """.formatted(agentPort, controllerPort, controllerPort,
+                """.formatted(clientPort, serverPort, serverPort,
                 JSON.writeValueAsString(temporaryDirectory.resolve("client-logs").toString())));
     }
 
-    private JsonNode healthEntries(URI controller) {
+    private JsonNode healthEntries(URI serverUri) {
         try {
             HttpResponse<String> response = http.send(HttpRequest.newBuilder(
-                            controller.resolve("/v1/health/service/web")).timeout(Duration.ofSeconds(5)).GET().build(),
+                            serverUri.resolve("/v1/health/service/web")).timeout(Duration.ofSeconds(5)).GET().build(),
                     HttpResponse.BodyHandlers.ofString());
             return response.statusCode() == 200 ? JSON.readTree(response.body()) : null;
         } catch (Exception unavailable) {
@@ -198,19 +198,19 @@ class CrashedAgentExpiryEndToEndTest {
         }
     }
 
-    private String checkField(URI controller, String field) {
-        JsonNode entries = healthEntries(controller);
+    private String checkField(URI serverUri, String field) {
+        JsonNode entries = healthEntries(serverUri);
         if (entries == null || entries.size() != 1 || entries.get(0).get("checks").isEmpty()) return null;
         return entries.get(0).get("checks").get(0).get(field).asText();
     }
 
-    private String serviceHealth(URI controller) {
-        JsonNode entries = healthEntries(controller);
+    private String serviceHealth(URI serverUri) {
+        JsonNode entries = healthEntries(serverUri);
         return entries == null || entries.size() != 1 ? null : entries.get(0).get("service").get("health").asText();
     }
 
-    private int instanceCount(URI controller) {
-        JsonNode entries = healthEntries(controller);
+    private int instanceCount(URI serverUri) {
+        JsonNode entries = healthEntries(serverUri);
         return entries == null ? -1 : entries.size();
     }
 
@@ -258,13 +258,13 @@ class CrashedAgentExpiryEndToEndTest {
                 JSON.writeValueAsString(temporaryDirectory.resolve("logs").toString())));
     }
 
-    private void writeClientConfig(Path target, int controllerPort, int agentPort) throws Exception {
+    private void writeClientConfig(Path target, int serverPort, int clientPort) throws Exception {
         Files.writeString(target, """
                 {
                   "version": 1,
-                  "agent": {"id": "crashing-agent", "address": "127.0.0.1", "httpPort": %d,
+                  "client": {"id": "crashing-client", "address": "127.0.0.1", "httpPort": %d,
                             "heartbeatIntervalMs": 50, "shutdownTimeoutMs": 3000},
-                  "controllers": {"urls": ["http://127.0.0.1:%d"], "requestTimeoutMs": 5000},
+                  "servers": {"urls": ["http://127.0.0.1:%d"], "requestTimeoutMs": 5000},
                   "catalog": {
                     "registrationRetryMinMs": 25, "registrationRetryMaxMs": 100, "contactFreshnessMs": 1000,
                     "services": [
@@ -275,7 +275,7 @@ class CrashedAgentExpiryEndToEndTest {
                   },
                   "logging": {"directory": %s}
                 }
-                """.formatted(agentPort, controllerPort, controllerPort,
+                """.formatted(clientPort, serverPort, serverPort,
                 JSON.writeValueAsString(temporaryDirectory.resolve("client-logs").toString())));
     }
 

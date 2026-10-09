@@ -44,7 +44,7 @@ final class Quiescence {
         executors.forEach(ExecutorService::shutdownNow);
         clients.forEach(HttpClient::shutdownNow);
         CompletableFuture<Boolean> terminated = new CompletableFuture<>();
-        Thread.ofVirtual().name("qraft-agent-quiescence").start(() -> {
+        Thread.ofVirtual().name("qraft-client-quiescence").start(() -> {
             long deadline = System.nanoTime() + bound.toNanos();
             try {
                 boolean all = true;

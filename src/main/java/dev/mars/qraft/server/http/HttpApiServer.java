@@ -21,8 +21,8 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
-import dev.mars.qraft.common.AgentInfo;
-import dev.mars.qraft.common.AgentStatus;
+import dev.mars.qraft.common.ClientInfo;
+import dev.mars.qraft.common.ClientStatus;
 import dev.mars.qraft.state.catalog.HealthCheckState;
 import dev.mars.qraft.state.catalog.HealthObservation;
 import dev.mars.qraft.state.catalog.ServiceHealth;
@@ -40,7 +40,7 @@ import dev.mars.qraft.server.ui.AdminUiConfig;
 import dev.mars.qraft.server.ui.AdminUiHandler;
 import dev.mars.qraft.server.ui.UiAssets;
 import dev.mars.qraft.raft.CommandOutcomeUnknownException;
-import dev.mars.qraft.state.AgentCommand;
+import dev.mars.qraft.state.ClientCommand;
 import dev.mars.qraft.state.CatalogCommand;
 import dev.mars.qraft.raft.RaftCommand;
 import dev.mars.qraft.raft.RaftCommandResult;
@@ -166,12 +166,12 @@ public final class HttpApiServer implements AutoCloseable {
         server.createContext("/raft/status", requestAware(this::raftStatus));
         server.createContext("/v1/operator/raft/configuration", requestAware(this::raftConfiguration));
         server.createContext("/v1/operator/raft/peer", requestAware(this::removeRaftPeer));
-        server.createContext("/api/v1/agents/register", requestAware(this::registerAgent));
-        server.createContext("/api/v1/agents/heartbeat", requestAware(this::heartbeatAgent));
-        server.createContext("/api/v1/agents", requestAware(this::agents));
-        server.createContext("/v1/agent/service/register", requestAware(this::registerService));
-        server.createContext("/v1/agent/service/deregister", requestAware(this::deregisterService));
-        server.createContext("/v1/agent/check/observe", requestAware(this::observeHealth));
+        server.createContext("/api/v1/clients/register", requestAware(this::registerClient));
+        server.createContext("/api/v1/clients/heartbeat", requestAware(this::heartbeatClient));
+        server.createContext("/api/v1/clients", requestAware(this::clients));
+        server.createContext("/v1/client/service/register", requestAware(this::registerService));
+        server.createContext("/v1/client/service/deregister", requestAware(this::deregisterService));
+        server.createContext("/v1/client/check/observe", requestAware(this::observeHealth));
         server.createContext("/v1/catalog/services", requestAware(this::listServices));
         server.createContext("/v1/catalog/service", requestAware(this::listServiceInstances));
         server.createContext("/v1/health/service", requestAware(this::listServiceHealth));
@@ -429,43 +429,43 @@ public final class HttpApiServer implements AutoCloseable {
         return parameters;
     }
 
-    private void registerAgent(HttpExchange exchange) throws IOException {
+    private void registerClient(HttpExchange exchange) throws IOException {
         if (!prepareStateRequest(exchange, "POST")) return;
         try {
-            AgentInfo agent = objectMapper.readValue(exchange.getRequestBody(), AgentInfo.class);
-            if (agent.getAgentId() == null || agent.getAgentId().isBlank()) {
-                throw new IllegalArgumentException("agentId is required");
+            ClientInfo client = objectMapper.readValue(exchange.getRequestBody(), ClientInfo.class);
+            if (client.getClientId() == null || client.getClientId().isBlank()) {
+                throw new IllegalArgumentException("clientId is required");
             }
-            submit(AgentCommand.register(agent, clock.instant()));
-            respondJson(exchange, 201, Map.of("registered", true, "agentId", agent.getAgentId()));
+            submit(ClientCommand.register(client, clock.instant()));
+            respondJson(exchange, 201, Map.of("registered", true, "clientId", client.getClientId()));
         } catch (IllegalArgumentException | com.fasterxml.jackson.core.JacksonException e) {
-            respondError(exchange, 400, "invalid_agent", safeMessage(e), false);
+            respondError(exchange, 400, "invalid_client", safeMessage(e), false);
         } catch (CompletionException e) {
             respondUnavailable(exchange, e);
         }
     }
 
-    private void heartbeatAgent(HttpExchange exchange) throws IOException {
+    private void heartbeatClient(HttpExchange exchange) throws IOException {
         if (!prepareStateRequest(exchange, "POST")) return;
         try {
-            AgentHeartbeat heartbeat = objectMapper.readValue(exchange.getRequestBody(), AgentHeartbeat.class);
-            if (heartbeat.agentId() == null || heartbeat.agentId().isBlank()) {
-                throw new IllegalArgumentException("agentId is required");
+            ClientHeartbeat heartbeat = objectMapper.readValue(exchange.getRequestBody(), ClientHeartbeat.class);
+            if (heartbeat.clientId() == null || heartbeat.clientId().isBlank()) {
+                throw new IllegalArgumentException("clientId is required");
             }
-            AgentStatus status = heartbeat.status() == null || heartbeat.status().isBlank()
+            ClientStatus status = heartbeat.status() == null || heartbeat.status().isBlank()
                     ? null : heartbeatStatus(heartbeat.status());
-            // Membership expiry is measured from server receipt time; the agent's own timestamp is not trusted.
+            // Membership expiry is measured from server receipt time; the client's own timestamp is not trusted.
             Instant timestamp = clock.instant();
-            RaftCommandResult<?> result = submit(AgentCommand.heartbeat(
-                    heartbeat.agentId(), status, timestamp, heartbeat.sequenceNumber(), heartbeat.registrationId()));
+            RaftCommandResult<?> result = submit(ClientCommand.heartbeat(
+                    heartbeat.clientId(), status, timestamp, heartbeat.sequenceNumber(), heartbeat.registrationId()));
             if (result instanceof RaftCommandResult.NotFound<?>) {
-                respondError(exchange, 404, "agent_not_found", "Agent not found", false,
-                        Map.of("agentId", heartbeat.agentId()));
+                respondError(exchange, 404, "client_not_found", "Client not found", false,
+                        Map.of("clientId", heartbeat.clientId()));
                 return;
             }
             if (result instanceof RaftCommandResult.CasMismatch<?>) {
                 respondError(exchange, 409, "stale_heartbeat", "Heartbeat validation failed", false,
-                        Map.of("agentId", heartbeat.agentId(), "sequenceNumber", heartbeat.sequenceNumber()));
+                        Map.of("clientId", heartbeat.clientId(), "sequenceNumber", heartbeat.sequenceNumber()));
                 return;
             }
             respondNoContent(exchange);
@@ -476,24 +476,24 @@ public final class HttpApiServer implements AutoCloseable {
         }
     }
 
-    private void agents(HttpExchange exchange) throws IOException {
+    private void clients(HttpExchange exchange) throws IOException {
         String path = exchange.getRequestURI().getPath();
-        if ("/api/v1/agents".equals(path)) {
+        if ("/api/v1/clients".equals(path)) {
             if (!prepareStateRequest(exchange, "GET")) return;
-            respondJson(exchange, 200, stateStore.getAgents().values());
+            respondJson(exchange, 200, stateStore.getClients().values());
             return;
         }
         if (!prepareStateRequest(exchange, "DELETE")) return;
-        String agentId = pathParameter(exchange, "/api/v1/agents/");
-        if (agentId == null) {
-            respondError(exchange, 400, "agent_id_required", "Agent ID is required", false);
+        String clientId = pathParameter(exchange, "/api/v1/clients/");
+        if (clientId == null) {
+            respondError(exchange, 400, "client_id_required", "Client ID is required", false);
             return;
         }
         try {
-            RaftCommandResult<?> result = submit(AgentCommand.deregister(agentId));
+            RaftCommandResult<?> result = submit(ClientCommand.deregister(clientId));
             if (result instanceof RaftCommandResult.NotFound<?>) {
-                respondError(exchange, 404, "agent_not_found", "Agent not found", false,
-                        Map.of("agentId", agentId));
+                respondError(exchange, 404, "client_not_found", "Client not found", false,
+                        Map.of("clientId", clientId));
                 return;
             }
             respondNoContent(exchange);
@@ -504,7 +504,7 @@ public final class HttpApiServer implements AutoCloseable {
 
     private void deregisterService(HttpExchange exchange) throws IOException {
         if (!prepareCatalogRequest(exchange, "PUT")) return;
-        String serviceId = pathParameter(exchange, "/v1/agent/service/deregister/");
+        String serviceId = pathParameter(exchange, "/v1/client/service/deregister/");
         if (serviceId == null) {
             respondError(exchange, 400, "service_id_required", "Service ID is required", false);
             return;
@@ -687,9 +687,9 @@ public final class HttpApiServer implements AutoCloseable {
                 .join();
     }
 
-    private static AgentStatus heartbeatStatus(String value) {
-        if ("passing".equalsIgnoreCase(value)) return AgentStatus.HEALTHY;
-        return AgentStatus.fromValue(value);
+    private static ClientStatus heartbeatStatus(String value) {
+        if ("passing".equalsIgnoreCase(value)) return ClientStatus.HEALTHY;
+        return ClientStatus.fromValue(value);
     }
 
     private static void respondNoContent(HttpExchange exchange) throws IOException {
@@ -764,7 +764,7 @@ public final class HttpApiServer implements AutoCloseable {
         return Objects.toString(error.getMessage(), error.getClass().getSimpleName());
     }
 
-    private record AgentHeartbeat(String agentId, Instant timestamp, long sequenceNumber, String status,
+    private record ClientHeartbeat(String clientId, Instant timestamp, long sequenceNumber, String status,
                                   String registrationId) {
     }
 }

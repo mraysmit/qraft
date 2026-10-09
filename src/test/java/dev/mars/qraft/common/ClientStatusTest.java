@@ -31,21 +31,21 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * Tests {@link AgentStatus}: its values and categories, strict parsing of API input, lenient reading of
+ * Tests {@link ClientStatus}: its values and categories, strict parsing of API input, lenient reading of
  * replicated JSON written while the job system's statuses existed, and the absence of those statuses.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-03-15
  * @version 2.0
  */
-class AgentStatusTest {
+class ClientStatusTest {
 
     @Test
     void theStatusesAreTheNodeLifecycle() {
-        assertEquals(List.of(AgentStatus.REGISTERING, AgentStatus.HEALTHY, AgentStatus.DEGRADED,
-                AgentStatus.MAINTENANCE, AgentStatus.UNREACHABLE, AgentStatus.FAILED, AgentStatus.DEREGISTERED),
-                List.of(AgentStatus.values()));
-        for (AgentStatus status : AgentStatus.values()) {
+        assertEquals(List.of(ClientStatus.REGISTERING, ClientStatus.HEALTHY, ClientStatus.DEGRADED,
+                ClientStatus.MAINTENANCE, ClientStatus.UNREACHABLE, ClientStatus.FAILED, ClientStatus.DEREGISTERED),
+                List.of(ClientStatus.values()));
+        for (ClientStatus status : ClientStatus.values()) {
             assertEquals(status.name().toLowerCase(Locale.ROOT), status.getValue());
             assertEquals(status.getValue(), status.toString());
             assertFalse(status.getDescription().isBlank());
@@ -54,38 +54,38 @@ class AgentStatusTest {
 
     @Test
     void onlyHealthyAndDegradedNodesAreOperational() {
-        Set<AgentStatus> operational = Arrays.stream(AgentStatus.values()).filter(AgentStatus::isOperational)
+        Set<ClientStatus> operational = Arrays.stream(ClientStatus.values()).filter(ClientStatus::isOperational)
                 .collect(Collectors.toSet());
 
-        assertEquals(Set.of(AgentStatus.HEALTHY, AgentStatus.DEGRADED), operational);
+        assertEquals(Set.of(ClientStatus.HEALTHY, ClientStatus.DEGRADED), operational);
     }
 
     @Test
     void categoriesPartitionTheStatuses() {
-        assertEquals(Set.of(AgentStatus.HEALTHY), matching(AgentStatus::isHealthy));
-        assertEquals(Set.of(AgentStatus.DEGRADED, AgentStatus.UNREACHABLE, AgentStatus.FAILED),
-                matching(AgentStatus::isProblematic));
-        assertEquals(Set.of(AgentStatus.REGISTERING, AgentStatus.MAINTENANCE), matching(AgentStatus::isTransitional));
-        assertEquals(Set.of(AgentStatus.DEREGISTERED), matching(AgentStatus::isTerminal));
-        assertFalse(AgentStatus.FAILED.isTerminal(), "a failed node can still be deregistered");
+        assertEquals(Set.of(ClientStatus.HEALTHY), matching(ClientStatus::isHealthy));
+        assertEquals(Set.of(ClientStatus.DEGRADED, ClientStatus.UNREACHABLE, ClientStatus.FAILED),
+                matching(ClientStatus::isProblematic));
+        assertEquals(Set.of(ClientStatus.REGISTERING, ClientStatus.MAINTENANCE), matching(ClientStatus::isTransitional));
+        assertEquals(Set.of(ClientStatus.DEREGISTERED), matching(ClientStatus::isTerminal));
+        assertFalse(ClientStatus.FAILED.isTerminal(), "a failed node can still be deregistered");
     }
 
     @Test
     void apiInputIsParsedStrictlyAndCaseInsensitively() {
-        assertEquals(AgentStatus.HEALTHY, AgentStatus.fromValue("healthy"));
-        assertEquals(AgentStatus.HEALTHY, AgentStatus.fromValue("HEALTHY"));
-        assertEquals(AgentStatus.MAINTENANCE, AgentStatus.fromValue("Maintenance"));
-        assertThrows(IllegalArgumentException.class, () -> AgentStatus.fromValue("invalid-status"));
-        assertThrows(IllegalArgumentException.class, () -> AgentStatus.fromValue(null));
+        assertEquals(ClientStatus.HEALTHY, ClientStatus.fromValue("healthy"));
+        assertEquals(ClientStatus.HEALTHY, ClientStatus.fromValue("HEALTHY"));
+        assertEquals(ClientStatus.MAINTENANCE, ClientStatus.fromValue("Maintenance"));
+        assertThrows(IllegalArgumentException.class, () -> ClientStatus.fromValue("invalid-status"));
+        assertThrows(IllegalArgumentException.class, () -> ClientStatus.fromValue(null));
     }
 
     @Test
     void theJobSystemsWorkSchedulingStatusesAreGone() {
-        Set<String> names = Arrays.stream(AgentStatus.values()).map(Enum::name).collect(Collectors.toSet());
+        Set<String> names = Arrays.stream(ClientStatus.values()).map(Enum::name).collect(Collectors.toSet());
         for (String legacy : List.of("ACTIVE", "IDLE", "OVERLOADED", "DRAINING")) {
             assertFalse(names.contains(legacy), legacy);
             assertThrows(IllegalArgumentException.class,
-                    () -> AgentStatus.fromValue(legacy.toLowerCase(Locale.ROOT)),
+                    () -> ClientStatus.fromValue(legacy.toLowerCase(Locale.ROOT)),
                     "an API caller can no longer send " + legacy);
         }
     }
@@ -93,23 +93,23 @@ class AgentStatusTest {
     @Test
     void replicatedJsonWrittenWithTheJobSystemsStatusesReadsAsTheirCurrentMeaning() throws Exception {
         ObjectMapper json = new ObjectMapper();
-        Map<String, AgentStatus> legacy = Map.of(
-                "active", AgentStatus.HEALTHY,
-                "idle", AgentStatus.HEALTHY,
-                "overloaded", AgentStatus.DEGRADED,
-                "draining", AgentStatus.MAINTENANCE);
+        Map<String, ClientStatus> legacy = Map.of(
+                "active", ClientStatus.HEALTHY,
+                "idle", ClientStatus.HEALTHY,
+                "overloaded", ClientStatus.DEGRADED,
+                "draining", ClientStatus.MAINTENANCE);
 
         legacy.forEach((stored, current) -> {
-            assertEquals(current, AgentStatus.fromStoredValue(stored), stored);
-            assertEquals(current, AgentStatus.fromStoredValue(stored.toUpperCase(Locale.ROOT)), stored);
+            assertEquals(current, ClientStatus.fromStoredValue(stored), stored);
+            assertEquals(current, ClientStatus.fromStoredValue(stored.toUpperCase(Locale.ROOT)), stored);
         });
-        assertEquals(AgentStatus.DEGRADED, json.readValue("\"overloaded\"", AgentStatus.class));
-        assertEquals(AgentStatus.UNREACHABLE, json.readValue("\"unreachable\"", AgentStatus.class));
-        assertEquals("\"healthy\"", json.writeValueAsString(AgentStatus.HEALTHY), "a current value is written");
-        assertThrows(IllegalArgumentException.class, () -> AgentStatus.fromStoredValue("unknown"));
+        assertEquals(ClientStatus.DEGRADED, json.readValue("\"overloaded\"", ClientStatus.class));
+        assertEquals(ClientStatus.UNREACHABLE, json.readValue("\"unreachable\"", ClientStatus.class));
+        assertEquals("\"healthy\"", json.writeValueAsString(ClientStatus.HEALTHY), "a current value is written");
+        assertThrows(IllegalArgumentException.class, () -> ClientStatus.fromStoredValue("unknown"));
     }
 
-    private static Set<AgentStatus> matching(java.util.function.Predicate<AgentStatus> predicate) {
-        return Arrays.stream(AgentStatus.values()).filter(predicate).collect(Collectors.toSet());
+    private static Set<ClientStatus> matching(java.util.function.Predicate<ClientStatus> predicate) {
+        return Arrays.stream(ClientStatus.values()).filter(predicate).collect(Collectors.toSet());
     }
 }

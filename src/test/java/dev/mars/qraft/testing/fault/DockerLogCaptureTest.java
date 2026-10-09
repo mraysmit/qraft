@@ -31,7 +31,7 @@ class DockerLogCaptureTest {
 
     private static final String LOCK_FAILURE = "Cannot acquire exclusive lock on WAL directory: /app/data."
             + " Another process may be using this storage.";
-    private static final String CONTROLLER_LOCK_ERROR = "2026-10-06 14:00:00.000 [wal-executor] ERROR "
+    private static final String SERVER_LOCK_ERROR = "2026-10-06 14:00:00.000 [wal-executor] ERROR "
             + "dev.mars.qraft.server.QraftServerService - Failed to initialize Raft storage: " + LOCK_FAILURE;
     private static final String UNCAUGHT_LOCK_FAILURE = "Exception in thread \"main\" "
             + "java.util.concurrent.CompletionException: dev.mars.raftlog.storage.FileRaftStorage$StorageException: "
@@ -127,15 +127,15 @@ class DockerLogCaptureTest {
         String trace = "\r\n\tat java.base/java.util.concurrent.CompletableFuture.encodeThrowable(Unknown Source)"
                 + "\r\nCaused by: dev.mars.raftlog.storage.FileRaftStorage$StorageException: " + LOCK_FAILURE
                 + "\r\n\tat dev.mars.raftlog.storage.FileRaftStorage.acquireExclusiveLock(FileRaftStorage.java:1879)\r\n";
-        String output = CONTROLLER_LOCK_ERROR + "\r\n" + cleanup + "\r\n" + UNCAUGHT_LOCK_FAILURE + trace;
+        String output = SERVER_LOCK_ERROR + "\r\n" + cleanup + "\r\n" + UNCAUGHT_LOCK_FAILURE + trace;
 
         DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(output,
-                Set.of(IntentionalErrorFixture.CONTROLLER_STORAGE_ALREADY_LOCKED), "LockConflictDockerClass");
+                Set.of(IntentionalErrorFixture.SERVER_STORAGE_ALREADY_LOCKED), "LockConflictDockerClass");
 
-        String label = "*** INTENTIONAL ERROR: CONTROLLER_STORAGE_ALREADY_LOCKED, caused by LockConflictDockerClass *** ";
+        String label = "*** INTENTIONAL ERROR: SERVER_STORAGE_ALREADY_LOCKED, caused by LockConflictDockerClass *** ";
         assertTrue(audit.problems().isEmpty(), audit.problems().toString());
         assertEquals(1, audit.recognised().size(), "the uncaught rethrow must not replay the same error twice");
-        assertEquals(CONTROLLER_LOCK_ERROR.replace("ERROR ", "ERROR " + label)
+        assertEquals(SERVER_LOCK_ERROR.replace("ERROR ", "ERROR " + label)
                 + "\r\n" + cleanup + "\r\n"
                 + UNCAUGHT_LOCK_FAILURE.replace("Exception in thread \"main\" ", "Exception in thread \"main\" " + label)
                 + trace, audit.archivedOutput());
@@ -156,12 +156,12 @@ class DockerLogCaptureTest {
     @Test
     void anUncaughtLockFailureNeedsADeclaredMatchingError() {
         DockerLogCaptureHelper.Audit undeclared = DockerLogCaptureHelper.audit(
-                CONTROLLER_LOCK_ERROR + "\n" + UNCAUGHT_LOCK_FAILURE, Set.of(), "DockerClass");
+                SERVER_LOCK_ERROR + "\n" + UNCAUGHT_LOCK_FAILURE, Set.of(), "DockerClass");
         assertEquals(2, undeclared.problems().size());
-        assertEquals(CONTROLLER_LOCK_ERROR + "\n" + UNCAUGHT_LOCK_FAILURE, undeclared.archivedOutput());
+        assertEquals(SERVER_LOCK_ERROR + "\n" + UNCAUGHT_LOCK_FAILURE, undeclared.archivedOutput());
 
         DockerLogCaptureHelper.Audit unmatched = DockerLogCaptureHelper.audit(UNCAUGHT_LOCK_FAILURE,
-                Set.of(IntentionalErrorFixture.CONTROLLER_STORAGE_ALREADY_LOCKED), "DockerClass");
+                Set.of(IntentionalErrorFixture.SERVER_STORAGE_ALREADY_LOCKED), "DockerClass");
         assertEquals(java.util.List.of("undeclared container uncaught exception: " + UNCAUGHT_LOCK_FAILURE),
                 unmatched.problems());
         assertEquals(UNCAUGHT_LOCK_FAILURE, unmatched.archivedOutput());
@@ -169,16 +169,16 @@ class DockerLogCaptureTest {
 
     @Test
     void anUncaughtRethrowBeforeItsErrorIsFlaggedWithoutReorderingTheOutput() {
-        String output = UNCAUGHT_LOCK_FAILURE + "\r\n" + CONTROLLER_LOCK_ERROR + "\r\n";
+        String output = UNCAUGHT_LOCK_FAILURE + "\r\n" + SERVER_LOCK_ERROR + "\r\n";
         DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(output,
-                Set.of(IntentionalErrorFixture.CONTROLLER_STORAGE_ALREADY_LOCKED), "DockerClass");
-        String label = "*** INTENTIONAL ERROR: CONTROLLER_STORAGE_ALREADY_LOCKED, caused by DockerClass *** ";
+                Set.of(IntentionalErrorFixture.SERVER_STORAGE_ALREADY_LOCKED), "DockerClass");
+        String label = "*** INTENTIONAL ERROR: SERVER_STORAGE_ALREADY_LOCKED, caused by DockerClass *** ";
 
         assertEquals(java.util.List.of(), audit.problems());
         assertEquals(1, audit.recognised().size());
         assertEquals(UNCAUGHT_LOCK_FAILURE.replace("Exception in thread \"main\" ",
                         "Exception in thread \"main\" " + label) + "\r\n"
-                        + CONTROLLER_LOCK_ERROR.replace("ERROR ", "ERROR " + label) + "\r\n",
+                        + SERVER_LOCK_ERROR.replace("ERROR ", "ERROR " + label) + "\r\n",
                 audit.archivedOutput());
     }
 
@@ -202,30 +202,30 @@ class DockerLogCaptureTest {
         String header = "server1 | 2026-10-08T16:00:00Z " + UNCAUGHT_LOCK_FAILURE;
         String trace = "\nserver1 | \tat example.Trace.call(Trace.java:1)\n";
         DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(
-                CONTROLLER_LOCK_ERROR + "\n" + header + trace,
-                Set.of(IntentionalErrorFixture.CONTROLLER_STORAGE_ALREADY_LOCKED), "DockerClass");
-        String label = "*** INTENTIONAL ERROR: CONTROLLER_STORAGE_ALREADY_LOCKED, caused by DockerClass *** ";
+                SERVER_LOCK_ERROR + "\n" + header + trace,
+                Set.of(IntentionalErrorFixture.SERVER_STORAGE_ALREADY_LOCKED), "DockerClass");
+        String label = "*** INTENTIONAL ERROR: SERVER_STORAGE_ALREADY_LOCKED, caused by DockerClass *** ";
 
         assertEquals(java.util.List.of(), audit.problems());
-        assertEquals(CONTROLLER_LOCK_ERROR.replace("ERROR ", "ERROR " + label) + "\n"
+        assertEquals(SERVER_LOCK_ERROR.replace("ERROR ", "ERROR " + label) + "\n"
                         + header.replace("Exception in thread \"main\" ", "Exception in thread \"main\" " + label)
                         + trace, audit.archivedOutput());
     }
 
     @Test
     void aRethrowMatchesAnErrorPreviouslyDrainedFromTheSameSource() throws Exception {
-        Set<IntentionalErrorFixture> expected = Set.of(IntentionalErrorFixture.CONTROLLER_STORAGE_ALREADY_LOCKED);
+        Set<IntentionalErrorFixture> expected = Set.of(IntentionalErrorFixture.SERVER_STORAGE_ALREADY_LOCKED);
         String source = "split-lock-rethrow-container";
         DockerLogCaptureHelper.beginClass("FirstDrainDockerClass", expected);
-        DockerLogCaptureHelper.capture(source, "lock-contender", CONTROLLER_LOCK_ERROR + "\n");
+        DockerLogCaptureHelper.capture(source, "lock-contender", SERVER_LOCK_ERROR + "\n");
         assertEquals(java.util.List.of(), DockerLogCaptureHelper.finishClass(directory));
 
         DockerLogCaptureHelper.beginClass("SecondDrainDockerClass", expected);
         DockerLogCaptureHelper.capture(source, "lock-contender",
-                CONTROLLER_LOCK_ERROR + "\n" + UNCAUGHT_LOCK_FAILURE + "\n");
+                SERVER_LOCK_ERROR + "\n" + UNCAUGHT_LOCK_FAILURE + "\n");
         assertEquals(java.util.List.of(), DockerLogCaptureHelper.finishClass(directory));
 
-        String label = "*** INTENTIONAL ERROR: CONTROLLER_STORAGE_ALREADY_LOCKED, caused by SecondDrainDockerClass *** ";
+        String label = "*** INTENTIONAL ERROR: SERVER_STORAGE_ALREADY_LOCKED, caused by SecondDrainDockerClass *** ";
         assertEquals(UNCAUGHT_LOCK_FAILURE.replace("Exception in thread \"main\" ",
                         "Exception in thread \"main\" " + label) + "\n",
                 Files.readString(directory.resolve("SecondDrainDockerClass/lock-contender.log")));
@@ -233,9 +233,9 @@ class DockerLogCaptureTest {
 
     @Test
     void anErrorDrainedFromAnotherSourceCannotExcuseARethrow() throws Exception {
-        Set<IntentionalErrorFixture> expected = Set.of(IntentionalErrorFixture.CONTROLLER_STORAGE_ALREADY_LOCKED);
+        Set<IntentionalErrorFixture> expected = Set.of(IntentionalErrorFixture.SERVER_STORAGE_ALREADY_LOCKED);
         DockerLogCaptureHelper.beginClass("OtherSourceFirstDrainDockerClass", expected);
-        DockerLogCaptureHelper.capture("original-lock-container", "lock-contender", CONTROLLER_LOCK_ERROR + "\n");
+        DockerLogCaptureHelper.capture("original-lock-container", "lock-contender", SERVER_LOCK_ERROR + "\n");
         assertEquals(java.util.List.of(), DockerLogCaptureHelper.finishClass(directory));
 
         DockerLogCaptureHelper.beginClass("OtherSourceRethrowDockerClass", expected);
@@ -254,8 +254,8 @@ class DockerLogCaptureTest {
                 UNCAUGHT_LOCK_FAILURE.replace("java.util.concurrent.CompletionException", "java.lang.IllegalStateException"),
                 UNCAUGHT_LOCK_FAILURE + " and an unrelated failure",
                 "Exception in thread \"main\" java.lang.NullPointerException: shutdown failed")) {
-            DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(CONTROLLER_LOCK_ERROR + "\n" + line,
-                    Set.of(IntentionalErrorFixture.CONTROLLER_STORAGE_ALREADY_LOCKED), "DockerClass");
+            DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(SERVER_LOCK_ERROR + "\n" + line,
+                    Set.of(IntentionalErrorFixture.SERVER_STORAGE_ALREADY_LOCKED), "DockerClass");
             assertEquals(java.util.List.of("undeclared container uncaught exception: " + line), audit.problems());
             assertTrue(audit.archivedOutput().endsWith("\n" + line));
         }
@@ -274,14 +274,14 @@ class DockerLogCaptureTest {
 
     @Test
     void classCaptureArchivesTheDeclaredUncaughtLockExceptionWithItsFlag() throws Exception {
-        String output = CONTROLLER_LOCK_ERROR + "\n" + UNCAUGHT_LOCK_FAILURE + "\n";
+        String output = SERVER_LOCK_ERROR + "\n" + UNCAUGHT_LOCK_FAILURE + "\n";
         DockerLogCaptureHelper.beginClass("UncaughtLockDockerClass",
-                Set.of(IntentionalErrorFixture.CONTROLLER_STORAGE_ALREADY_LOCKED));
+                Set.of(IntentionalErrorFixture.SERVER_STORAGE_ALREADY_LOCKED));
         DockerLogCaptureHelper.capture("lock-contender-container", "lock-contender", output);
         assertTrue(DockerLogCaptureHelper.finishClass(directory).isEmpty());
 
-        String label = "*** INTENTIONAL ERROR: CONTROLLER_STORAGE_ALREADY_LOCKED, caused by UncaughtLockDockerClass *** ";
-        assertEquals(CONTROLLER_LOCK_ERROR.replace("ERROR ", "ERROR " + label) + "\n"
+        String label = "*** INTENTIONAL ERROR: SERVER_STORAGE_ALREADY_LOCKED, caused by UncaughtLockDockerClass *** ";
+        assertEquals(SERVER_LOCK_ERROR.replace("ERROR ", "ERROR " + label) + "\n"
                         + UNCAUGHT_LOCK_FAILURE.replace("Exception in thread \"main\" ", "Exception in thread \"main\" " + label)
                         + "\n",
                 Files.readString(directory.resolve("UncaughtLockDockerClass/lock-contender.log")));
@@ -309,9 +309,9 @@ class DockerLogCaptureTest {
 
         DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(log, Set.of(
                 IntentionalErrorFixture.RAFT_SNAPSHOT_TRANSFER_INTERRUPTED,
-                IntentionalErrorFixture.CONTROLLER_RECOVERY_AMBIGUOUS_CORRUPTION,
+                IntentionalErrorFixture.SERVER_RECOVERY_AMBIGUOUS_CORRUPTION,
                 IntentionalErrorFixture.WAL_DIRECTORY_ALREADY_LOCKED,
-                IntentionalErrorFixture.CONTROLLER_STORAGE_ALREADY_LOCKED));
+                IntentionalErrorFixture.SERVER_STORAGE_ALREADY_LOCKED));
 
         assertEquals(5, audit.recognised().size());
         assertTrue(audit.problems().isEmpty());

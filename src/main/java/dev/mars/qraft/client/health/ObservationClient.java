@@ -19,7 +19,7 @@ package dev.mars.qraft.client.health;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Outbound port that publishes health observations to the controller. The returned future completes
+ * Outbound port that publishes health observations to the server. The returned future completes
  * with a classified outcome and does not complete exceptionally for transport failures.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd

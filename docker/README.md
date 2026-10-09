@@ -28,7 +28,7 @@ The compose directory also contains dedicated three-node, five-node, and
 network-partition configurations used for distributed testing. These require
 the unified `qraft-runtime` image. Qraft does not use environment variables for
 runtime configuration. Compose mounts a versioned JSON file for each process and
-starts servers with `server --config /etc/qraft/server.json`. The agent image uses
+starts servers with `server --config /etc/qraft/server.json`. The client image uses
 `client` and discovers its mounted `/etc/qraft/client.json` through the standard
 location. Operators may instead use `-Dqraft.config=<path>` or the local
 `config/<role>.json` convention. No discovery method reads an environment variable.
@@ -36,7 +36,7 @@ location. Operators may instead use `-Dqraft.config=<path>` or the local
 ## Client configuration
 
 [`config/client.json`](config/client.json) is a complete client example. It
-declares the agent, server origins, reconciliation policy, and services in one
+declares the client, server origins, reconciliation policy, and services in one
 versioned file; it contains no environment-variable placeholders. Server URLs
 must be origins such as `http://server:8080`, without an API path, query, or
 fragment.
@@ -46,7 +46,7 @@ arbitrary destination:
 
 ```yaml
 services:
-  agent:
+  client:
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -59,7 +59,7 @@ When mounted at the conventional system path, the path argument is unnecessary:
 
 ```yaml
 services:
-  agent:
+  client:
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -98,10 +98,10 @@ on the selected topology. Check a running endpoint with:
 Invoke-RestMethod http://localhost:8080/health
 ```
 
-## Agent API checks
+## Client API checks
 
 With a server running, `start-quick.ps1 test` uses the JSON payloads and
-PowerShell scripts under `test-data/` to exercise agent registration,
+PowerShell scripts under `test-data/` to exercise client registration,
 heartbeat, and listing endpoints.
 
 ```powershell

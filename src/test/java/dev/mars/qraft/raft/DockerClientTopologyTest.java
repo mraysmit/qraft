@@ -45,13 +45,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /**
- * Docker tests of agents and servers in topologies the single-agent tests do not reach:
+ * Docker tests of clients and servers in topologies the single-client tests do not reach:
  * <ul>
- *   <li>a second agent container registers the same local service ID as the first, reaching the leader
- *       through an offline first seed and then a follower, and each agent's instance is its own;</li>
- *   <li>an agent keeps publishing while the running leader is cut off from the network, and its checks
+ *   <li>a second client container registers the same local service ID as the first, reaching the leader
+ *       through an offline first seed and then a follower, and each client's instance is its own;</li>
+ *   <li>a client keeps publishing while the running leader is cut off from the network, and its checks
  *       never expire;</li>
- *   <li>every server is restarted in turn while the agent publishes, and the service is never expired or
+ *   <li>every server is restarted in turn while the client publishes, and the service is never expired or
  *       removed.</li>
  * </ul>
  *
@@ -68,13 +68,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 @Timeout(value = 10, unit = TimeUnit.MINUTES)
 @Execution(ExecutionMode.SAME_THREAD)
 @ResourceLock("shared-docker-clusters")
-class DockerAgentTopologyTest {
-    private static final String FIRST_AGENT = "docker-agent";
-    private static final String SECOND_AGENT = "docker-agent-2";
+class DockerClientTopologyTest {
+    private static final String FIRST_CLIENT = "docker-client";
+    private static final String SECOND_CLIENT = "docker-client-2";
 
     @Test
-    void aSecondAgentWithTheSameServiceIdRegistersItsOwnInstanceThroughAnOfflineThenFollowerSeed() throws Exception {
-        ComposeContainer cluster = SharedDockerClusterFixture.startIsolatedThreeNodeClusterWithAgent();
+    void aSecondClientWithTheSameServiceIdRegistersItsOwnInstanceThroughAnOfflineThenFollowerSeed() throws Exception {
+        ComposeContainer cluster = SharedDockerClusterFixture.startIsolatedThreeNodeClusterWithClient();
         try {
             List<String> servers = SharedDockerClusterFixture.getNodeEndpoints(cluster, 3);
             await().atMost(Duration.ofSeconds(60)).until(() -> leaderIndex(servers) >= 0
@@ -84,15 +84,15 @@ class DockerAgentTopologyTest {
             List<String> seeds = List.of("http://offline-seed:8080", "http://server" + (follower + 1) + ":8080",
                     "http://server" + (leader + 1) + ":8080");
 
-            try (SharedDockerClusterFixture.DetachedAgent second = SharedDockerClusterFixture.startDetachedAgent(
-                    cluster, "agent2", clientJson(SECOND_AGENT, "agent2", seeds))) {
+            try (SharedDockerClusterFixture.DetachedClient second = SharedDockerClusterFixture.startDetachedClient(
+                    cluster, "client2", clientJson(SECOND_CLIENT, "client2", seeds))) {
                 await().atMost(Duration.ofSeconds(60)).until(() -> servers.stream()
-                        .allMatch(server -> Set.of(FIRST_AGENT, SECOND_AGENT).equals(webNodes(server))));
+                        .allMatch(server -> Set.of(FIRST_CLIENT, SECOND_CLIENT).equals(webNodes(server))));
 
                 second.stopGracefully();
 
                 await().atMost(Duration.ofSeconds(60)).until(() -> servers.stream()
-                        .allMatch(server -> Set.of(FIRST_AGENT).equals(webNodes(server))));
+                        .allMatch(server -> Set.of(FIRST_CLIENT).equals(webNodes(server))));
                 await().atMost(Duration.ofSeconds(30)).until(() ->
                         servers.stream().allMatch(DockerHealthApiHelper::passingWithBothChecks));
             }
@@ -102,8 +102,8 @@ class DockerAgentTopologyTest {
     }
 
     @Test
-    void anAgentKeepsPublishingWhileTheRunningLeaderIsCutOff() {
-        ComposeContainer cluster = SharedDockerClusterFixture.startIsolatedThreeNodeClusterWithAgent();
+    void aClientKeepsPublishingWhileTheRunningLeaderIsCutOff() {
+        ComposeContainer cluster = SharedDockerClusterFixture.startIsolatedThreeNodeClusterWithClient();
         String cutOff = null;
         try {
             List<String> servers = SharedDockerClusterFixture.getNodeEndpoints(cluster, 3);
@@ -118,7 +118,7 @@ class DockerAgentTopologyTest {
             cutOff = "server" + (leader + 1);
             SharedDockerClusterFixture.partitionContainer(cluster, cutOff);
 
-            // Sequence numbers are seeded from the agent's clock in milliseconds, so a sequence three seconds
+            // Sequence numbers are seeded from the client's clock in milliseconds, so a sequence three seconds
             // past the one before the partition shows publications continuing through it.
             // A disconnect can leave established connections working, so the partition is only trusted once the
             // old leader itself, read inside its container, has stepped down for lost quorum.
@@ -130,7 +130,7 @@ class DockerAgentTopologyTest {
                         && majority.stream().allMatch(server ->
                                 passingWithBothChecks(server) && httpSequence(server) > sequenceBefore + 3_000);
             });
-            assertFalse(sawExpiry.get(), "the agent's publications reach the majority throughout the partition");
+            assertFalse(sawExpiry.get(), "the client's publications reach the majority throughout the partition");
 
             long majorityAtHeal = httpSequence(majority.getFirst());
             SharedDockerClusterFixture.restoreContainerNetwork(cluster, cutOff);
@@ -145,8 +145,8 @@ class DockerAgentTopologyTest {
     }
 
     @Test
-    void restartingEveryServerInTurnNeverExpiresOrRemovesTheAgentsService() {
-        ComposeContainer cluster = SharedDockerClusterFixture.startIsolatedThreeNodeClusterWithAgent();
+    void restartingEveryServerInTurnNeverExpiresOrRemovesTheClientsService() {
+        ComposeContainer cluster = SharedDockerClusterFixture.startIsolatedThreeNodeClusterWithClient();
         try {
             List<String> servers = SharedDockerClusterFixture.getNodeEndpoints(cluster, 3);
             await().atMost(Duration.ofSeconds(60)).until(() -> leaderIndex(servers) >= 0
@@ -188,7 +188,7 @@ class DockerAgentTopologyTest {
         }
     }
 
-    /** Records whether any running server shows the agent's checks expired or its instance gone. */
+    /** Records whether any running server shows the client's checks expired or its instance gone. */
     private static void watchForLoss(List<String> running, AtomicBoolean sawLoss) {
         for (String server : running) {
             if (DockerHealthApiHelper.anyCheckExpired(server) || instanceCount(server) == 0) sawLoss.set(true);
@@ -203,13 +203,13 @@ class DockerAgentTopologyTest {
         return nodes;
     }
 
-    /** A client document like the acceptance agent's: the same {@code web} service and checks. */
-    private static String clientJson(String agentId, String address, List<String> seeds) {
+    /** A client document like the acceptance client's: the same {@code web} service and checks. */
+    private static String clientJson(String clientId, String address, List<String> seeds) {
         return """
                 {"version":1,
-                 "agent":{"id":"%s","hostname":"%s","address":"%s","httpPort":8080,
+                 "client":{"id":"%s","hostname":"%s","address":"%s","httpPort":8080,
                           "heartbeatIntervalMs":1000,"shutdownTimeoutMs":8000},
-                 "controllers":{"urls":[%s],"requestTimeoutMs":3000},
+                 "servers":{"urls":[%s],"requestTimeoutMs":3000},
                  "catalog":{"registrationRetryMinMs":100,"registrationRetryMaxMs":1000,"contactFreshnessMs":5000,
                    "services":[{"id":"web","name":"web","address":"%s","port":8080,
                      "checks":[
@@ -218,7 +218,7 @@ class DockerAgentTopologyTest {
                        {"id":"tcp","type":"tcp","address":"127.0.0.1","intervalMs":1000,"timeoutMs":1000,
                         "ttlMs":5000}]}]},
                  "logging":{"directory":"/app/logs"}}
-                """.formatted(agentId, agentId, address,
+                """.formatted(clientId, clientId, address,
                 String.join(",", seeds.stream().map(seed -> "\"" + seed + "\"").toList()), address);
     }
 }

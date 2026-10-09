@@ -27,7 +27,7 @@ rest of the platform is. This plan changes only when scope or ordering changes.
 
 - **The interface is an API client.** Every view reads, and every mutation
   writes, through the same public HTTP API any other client uses. A view whose
-  data has no API waits for that API; the UI never reaches into controller
+  data has no API waits for that API; the UI never reaches into server
   objects to fill a gap.
 - **Backend first, per increment.** An increment's server APIs are delivered and
   tested before its views, each on the normal red-green path. The views then
@@ -78,11 +78,11 @@ section 4.1, after reviewing the `peegeeq-management-ui` and
 | `GET /v1/operator/raft/configuration` | each configured server: server ID, name, address, voter, leader, as the answering server holds them | No reachability, match or next index, last contact, or lag |
 | `DELETE /v1/operator/raft/peer` | removal of a server, guarded by the operator token and forwarded to the leader | A mutation: not offered by the interface before UI-5 |
 | `GET /health`, `/health/live`, `/health/ready` | node liveness and readiness | None for the status strip |
-| `GET /api/v1/agents` | nodes with status, registration and heartbeat times, and metadata | No owned-service or failing-check counts; no tenant or namespace filter |
+| `GET /api/v1/clients` | nodes with status, registration and heartbeat times, and metadata | No owned-service or failing-check counts; no tenant or namespace filter |
 | `GET /v1/catalog/services` | service names with their tags, in the scope of the `X-Qraft-Tenant` and `X-Qraft-Namespace` headers | No health or instance count; one request per service to learn more; no listing of the scopes that exist |
 | `GET /v1/catalog/service/{name}` | instances in the requested scope: identity, address, port, tags, metadata, health, tenant, namespace, datacenter, region, enabled | No registration source or last-change index |
 | `GET /v1/health/service/{name}` (`?passing`) | instances in the requested scope with their checks: status, sequence, observed, accepted, deadline, expired, output, deregistration delay | One service at a time; no cross-service check listing |
-| `PUT /v1/agent/service/register`, `/deregister` | replicated service writes, scoped by `X-Qraft-Tenant`, `X-Qraft-Namespace`, and `X-Qraft-Node` headers | Unauthenticated |
+| `PUT /v1/client/service/register`, `/deregister` | replicated service writes, scoped by `X-Qraft-Tenant`, `X-Qraft-Namespace`, and `X-Qraft-Node` headers | Unauthenticated |
 | Response metadata | `X-Qraft-Index` (applied index) on catalog reads; `X-Qraft-Leader-Id` and a structured error envelope (`code`, `message`, `retryable`) on errors | No answering-node header; no consistency mode |
 | gRPC `DistributedStateService` | key/value `Put`, `Get`, `Delete`, `List` | Not reachable from a browser; no HTTP equivalent |
 | OpenTelemetry Prometheus exporter | metrics on a separate port (`prometheusPort`, default 9464) | Not on the API listener; the UI only links to it |
@@ -91,17 +91,17 @@ section 4.1, after reviewing the `peegeeq-management-ui` and
 
 | Capability | Needed by | Owner |
 |---|---|---|
-| Tenant- and namespace-scoped agent reads, and a listing of the scopes present. Catalog and health reads are scoped as of 2026-09-27 | Scope selector; every Discover view | Controller HTTP API |
-| Services summary: health, instance count, scope, and last change per service | Services landing page | Controller HTTP API |
-| Cross-service health-check listing with filters | Health Checks page | Controller HTTP API |
+| Tenant- and namespace-scoped client reads, and a listing of the scopes present. Catalog and health reads are scoped as of 2026-09-27 | Scope selector; every Discover view | Server HTTP API |
+| Services summary: health, instance count, scope, and last change per service | Services landing page | Server HTTP API |
+| Cross-service health-check listing with filters | Health Checks page | Server HTTP API |
 | Cluster membership detail: role, match and next index, last contact, lag, reachability, quorum. The configured servers are listed as of 2026-09-29 (section 4.1) | Status strip, Cluster Overview, Raft Members, server rows in Nodes | Raft (leader-side view) and HTTP API |
 | Storage and snapshot state: WAL size and health, fenced and lock state, snapshot index, term, age, and last result, retained boundary | Storage & Snapshots, Cluster Overview | Raft persistence and HTTP API |
 | Transition-queue depth and saturation | Cluster Overview | Raft sequencer and HTTP API |
 | Bounded event journal and query | Events page, Events tabs, recent elections and failures | `qraft-events` (event architecture sections 8 to 10), not started |
-| Redacted effective configuration | Configuration page | Controller HTTP API |
-| Read consistency modes (`default`, `consistent`, `stale`) and an answering-node header | Consistency selector, read metadata (UI/UX design section 12) | Controller HTTP API |
-| Blocking queries (last index plus bounded wait) or watches | Live updates, Watches | Controller HTTP API (platform design section 12.3) |
-| HTTP key/value API with indexes and compare-and-set | Key/Value browser | Controller HTTP API over the existing replicated state |
+| Redacted effective configuration | Configuration page | Server HTTP API |
+| Read consistency modes (`default`, `consistent`, `stale`) and an answering-node header | Consistency selector, read metadata (UI/UX design section 12) | Server HTTP API |
+| Blocking queries (last index plus bounded wait) or watches | Live updates, Watches | Server HTTP API (platform design section 12.3) |
+| HTTP key/value API with indexes and compare-and-set | Key/Value browser | Server HTTP API over the existing replicated state |
 | Sessions and locks | Sessions, Locks | Platform design section 11, not started |
 | Replicated tenants and namespaces with an API | Tenants, Namespaces, scope selector options | Tenancy work; nothing exists today (`qraft-tenant` was removed on 2026-10-04) |
 | Authentication, authorization, and ACL resources | Any mutation; Tokens, Policies, Roles, Auth Methods; permission-shaped navigation | Security, not started |
@@ -124,10 +124,10 @@ Status key:
 | 1 | Services list (5.1) | Partial | Ready by calling the catalog and then health once per service. The summary endpoint removes that fan-out and adds last change. |
 | 1 | Service detail: Overview, Instances, Health Checks, Metadata (5.1) | Ready | Registration source and indexes need the catalog to record them. |
 | 1 | Service detail: Events tab | Blocked | Event journal |
-| 1 | Nodes and Agents: agent rows (5.2) | Partial | Owned services and failing checks can be derived from the catalog; a summary field avoids that. Scope needs scoped reads. |
-| 1 | Nodes and Agents: server rows (5.2) | Blocked | Membership; storage state |
+| 1 | Nodes and Clients: client rows (5.2) | Partial | Owned services and failing checks can be derived from the catalog; a summary field avoids that. Scope needs scoped reads. |
+| 1 | Nodes and Clients: server rows (5.2) | Blocked | Membership; storage state |
 | 1 | Health Checks, cross-service (5.3) | Partial | Ready by iterating services; the listing endpoint makes it scale. |
-| 1 | Cluster Overview (9.1) | Partial | Answering-node Raft state and service and agent totals are ready. Quorum, lag, queue, WAL, snapshot, and recent events are blocked. |
+| 1 | Cluster Overview (9.1) | Partial | Answering-node Raft state and service and client totals are ready. Quorum, lag, queue, WAL, snapshot, and recent events are blocked. |
 | 1 | Raft Members (9.2) | Blocked | Membership |
 | 1 | Storage & Snapshots (9.3) | Blocked | Storage state |
 | 1 | Events, read-only (9.4) | Blocked | Event journal |
@@ -166,7 +166,7 @@ Views:
   provide;
 - the Services list, fetching once per service;
 - service detail: Overview, Instances, Health Checks, and Metadata;
-- agent rows in Nodes and Agents.
+- client rows in Nodes and Clients.
 
 The shared frontend pieces also land here:
 
@@ -186,7 +186,7 @@ UI-0 and UI-1 together are the scope of
 
 Backend first:
 
-- tenant- and namespace-scoped agent reads (catalog and health reads are
+- tenant- and namespace-scoped client reads (catalog and health reads are
   already scoped);
 - the services summary endpoint;
 - the cross-service health-check listing.
@@ -207,7 +207,7 @@ Backend first:
 Views:
 
 - the full status strip;
-- server rows in Nodes and Agents;
+- server rows in Nodes and Clients;
 - Cluster Overview;
 - Raft Members, read-only (membership changes are not offered);
 - Storage & Snapshots, including the persistent fenced banner.

@@ -30,17 +30,17 @@ Write-Host "   Sending heartbeat to create log activity..." -ForegroundColor Cya
 
 $timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 $json = @{
-    agentId = "demo-agent"
+    clientId = "demo-client"
     timestamp = $timestamp
     sequenceNumber = 999
     status = "healthy"
 } | ConvertTo-Json
 
 try {
-    $response = Invoke-RestMethod -Uri "http://localhost:8081/api/v1/agents/heartbeat" -Method POST -Body $json -ContentType "application/json" -ErrorAction Stop
+    $response = Invoke-RestMethod -Uri "http://localhost:8081/api/v1/clients/heartbeat" -Method POST -Body $json -ContentType "application/json" -ErrorAction Stop
     Write-Host "   ✓ Heartbeat sent - logs generated!" -ForegroundColor Green
 } catch {
-    Write-Host "   ⚠ Heartbeat failed (agent may need registration)" -ForegroundColor Yellow
+    Write-Host "   ⚠ Heartbeat failed (client may need registration)" -ForegroundColor Yellow
 }
 
 Write-Host ""

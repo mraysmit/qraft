@@ -31,7 +31,7 @@ import java.util.Optional;
  * Decides which replicated health checks are due for expiry or automatic deregistration. It has no
  * side effects and reads no clock; the caller supplies the leader's current time.
  *
- * <p>A check is due for expiry at its server-derived deadline. Because agents cannot renew while there
+ * <p>A check is due for expiry at its server-derived deadline. Because clients cannot renew while there
  * is no leader, a new leader first grants every check one full TTL from the moment it acquired
  * leadership: the effective deadline is the later of the stored deadline and {@code leaderSince + ttl}.
  * An expired check whose observation carries a positive deregistration delay is due for deregistration

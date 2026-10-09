@@ -71,8 +71,8 @@ class RuntimeLoggingTest {
                             "raft", Map.of("port", 0, "storage", Map.of("path", retained.resolve("raft").toString())),
                             "telemetry", Map.of("enabled", false)))
                     : Map.of("version", 1, "logging", Map.of("directory", directory.toString()),
-                        "agent", Map.of("id", "logging-fixture", "httpPort", 0),
-                        "controllers", Map.of("urls", java.util.List.of(
+                        "client", Map.of("id", "logging-fixture", "httpPort", 0),
+                        "servers", Map.of("urls", java.util.List.of(
                             "http://127.0.0.1:" + endpoint.getAddress().getPort())));
             Path configuration = retained.resolve("config.json");
             JSON.writeValue(configuration.toFile(), config);

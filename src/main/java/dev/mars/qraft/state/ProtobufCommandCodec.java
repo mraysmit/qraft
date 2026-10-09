@@ -16,11 +16,11 @@
 
 package dev.mars.qraft.state;
 
-import dev.mars.qraft.common.AgentStatus;
+import dev.mars.qraft.common.ClientStatus;
 
-import dev.mars.qraft.common.AgentInfo;
+import dev.mars.qraft.common.ClientInfo;
 
-import dev.mars.qraft.common.AgentCapabilities;
+import dev.mars.qraft.common.ClientCapabilities;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
@@ -51,7 +51,7 @@ import java.time.Instant;
  *
  * <p>Delegates to domain-specific codecs for supported {@link RaftCommand} subtypes:
  * <ul>
- *   <li>{@link AgentCodec} — {@link AgentCommand}, AgentInfo, AgentCapabilities, AgentStatus</li>
+ *   <li>{@link ClientCodec} — {@link ClientCommand}, ClientInfo, ClientCapabilities, ClientStatus</li>
  *   <li>Inline mapping — {@link DistributedStateRaftCommand} via SystemMetadata protobuf envelope</li>
  * </ul>
  *
@@ -76,8 +76,8 @@ public final class ProtobufCommandCodec {
             return RaftCommandMessage.getDefaultInstance().toByteString();
         }
         RaftCommandMessage raftMessage = switch (command) {
-            case AgentCommand cmd -> RaftCommandMessage.newBuilder()
-                    .setAgentCommand(AgentCodec.toProto(cmd)).build();
+            case ClientCommand cmd -> RaftCommandMessage.newBuilder()
+                    .setClientCommand(ClientCodec.toProto(cmd)).build();
             case DistributedStateRaftCommand cmd -> RaftCommandMessage.newBuilder()
                 .setSystemMetadataCommand(toSystemMetadataProto(cmd.delegate())).build();
             case CatalogCommand cmd -> RaftCommandMessage.newBuilder()
@@ -101,7 +101,7 @@ public final class ProtobufCommandCodec {
         try {
             RaftCommandMessage raftMessage = RaftCommandMessage.parseFrom(data);
             return switch (raftMessage.getCommandCase()) {
-                case AGENT_COMMAND -> AgentCodec.fromProto(raftMessage.getAgentCommand());
+                case CLIENT_COMMAND -> ClientCodec.fromProto(raftMessage.getClientCommand());
                 case SYSTEM_METADATA_COMMAND -> fromSystemMetadataProto(raftMessage.getSystemMetadataCommand());
                 case CATALOG_COMMAND -> fromCatalogProto(raftMessage.getCatalogCommand());
                 case CONFIGURATION -> new ConfigurationCommand(RaftConfigurationCodec.fromProto(raftMessage.getConfiguration()));

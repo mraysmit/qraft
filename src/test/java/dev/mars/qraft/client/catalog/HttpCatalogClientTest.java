@@ -96,7 +96,7 @@ class HttpCatalogClientTest {
         assertEquals(2, requests.size());
         CapturedRequest first = requests.getFirst();
         assertEquals("PUT", first.method());
-        assertEquals("/v1/agent/service/register", first.path());
+        assertEquals("/v1/client/service/register", first.path());
         assertEquals("node-a", first.header("X-Qraft-Node"));
         assertEquals("tenant-a", first.header("X-Qraft-Tenant"));
         assertEquals("prod", first.header("X-Qraft-Namespace"));
@@ -129,7 +129,7 @@ class HttpCatalogClientTest {
         CatalogOutcome.Success outcome = assertInstanceOf(CatalogOutcome.Success.class,
                 client.deregister(endpoint, "payments-1").get(10, TimeUnit.SECONDS));
         assertFalse(outcome.changed());
-        assertEquals("/v1/agent/service/deregister/payments-1", requests.getFirst().path());
+        assertEquals("/v1/client/service/deregister/payments-1", requests.getFirst().path());
         assertEquals("node-a", requests.getFirst().header("X-Qraft-Node"));
     }
 
@@ -351,7 +351,7 @@ class HttpCatalogClientTest {
         assertInstanceOf(CatalogLookupOutcome.Absent.class,
                 client.lookup(service()).get(10, TimeUnit.SECONDS));
         // The server confines a catalog read to the scope headers; without them it would read the
-        // default scope, and an agent in any other scope would find its own services absent.
+        // default scope, and a client in any other scope would find its own services absent.
         assertEquals("tenant-a", lookups.getFirst().header("X-Qraft-Tenant"));
         assertEquals("prod", lookups.getFirst().header("X-Qraft-Namespace"));
 
@@ -381,7 +381,7 @@ class HttpCatalogClientTest {
         assertEquals(new ObservationOutcome.Accepted(7, Instant.parse("2026-09-26T10:00:30Z")), outcome);
         CapturedRequest request = requests.getFirst();
         assertEquals("PUT", request.method());
-        assertEquals("/v1/agent/check/observe", request.path());
+        assertEquals("/v1/client/check/observe", request.path());
         assertEquals("node-a", request.header("X-Qraft-Node"));
         assertEquals("tenant-a", request.header("X-Qraft-Tenant"));
         assertEquals("prod", request.header("X-Qraft-Namespace"));
@@ -448,7 +448,7 @@ class HttpCatalogClientTest {
         assertEquals(new ObservationOutcome.Stale(12), client.observe(observation(7)).get(10, TimeUnit.SECONDS));
         assertEquals(1, staleAttempts.get());
         assertEquals(0, laterAttempts.get());
-        assertNotNull(contact.lastSuccessfulContact(), "a stale answer is still a successful controller contact");
+        assertNotNull(contact.lastSuccessfulContact(), "a stale answer is still a successful server contact");
 
         client.observe(observation(13)).get(10, TimeUnit.SECONDS);
         assertEquals(2, staleAttempts.get(), "the endpoint that answered is preferred next time");

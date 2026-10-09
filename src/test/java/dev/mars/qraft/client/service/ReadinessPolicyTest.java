@@ -31,7 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests {@link ReadinessPolicy} readiness conditions: running, registered, converged services,
- * satisfied required checks, and fresh controller contact.
+ * satisfied required checks, and fresh server contact.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-24
@@ -56,7 +56,7 @@ class ReadinessPolicyTest {
         assertTrue(policy.isReady());
 
         clock.advance(Duration.ofSeconds(31));
-        assertFalse(policy.isReady(), "stale controller contact must expire readiness");
+        assertFalse(policy.isReady(), "stale server contact must expire readiness");
         contact.recordSuccessfulContact();
         assertTrue(policy.isReady(), "successful contact must restore readiness");
 
@@ -65,7 +65,7 @@ class ReadinessPolicyTest {
     }
 
     @Test
-    void noServiceAgentIsReadyAfterNodeRegistrationAndFreshContact() {
+    void noServiceClientIsReadyAfterNodeRegistrationAndFreshContact() {
         MutableClockHelper clock = new MutableClockHelper(Instant.parse("2026-09-24T12:00:00Z"));
         ServerContactTracker contact = new ServerContactTracker(clock);
         AtomicBoolean registered = new AtomicBoolean(true);

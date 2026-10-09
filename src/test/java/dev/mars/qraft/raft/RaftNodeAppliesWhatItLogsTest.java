@@ -117,7 +117,7 @@ class RaftNodeAppliesWhatItLogsTest {
         Map<String, String> metadata = new LinkedHashMap<>();
         for (char key = 'a'; key <= 'h'; key++) metadata.put(String.valueOf(key), "v" + key);
         byte[] encoded = codec.serialize(dev.mars.qraft.state.CatalogCommand.register(
-                new dev.mars.qraft.state.catalog.ServiceInstance("web", "web", "agent-1", "127.0.0.1", 8080,
+                new dev.mars.qraft.state.catalog.ServiceInstance("web", "web", "client-1", "127.0.0.1", 8080,
                         List.of(), metadata, dev.mars.qraft.state.catalog.ServiceHealth.UNKNOWN)));
         var message = dev.mars.qraft.raft.grpc.RaftCommandMessage.parseFrom(encoded).toBuilder();
         var instance = message.getCatalogCommandBuilder().getInstanceBuilder();

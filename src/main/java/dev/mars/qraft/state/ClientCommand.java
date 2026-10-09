@@ -17,15 +17,15 @@
 package dev.mars.qraft.state;
 
 import dev.mars.qraft.raft.RaftCommand;
-import dev.mars.qraft.common.AgentInfo;
-import dev.mars.qraft.common.AgentStatus;
-import dev.mars.qraft.common.AgentCapabilities;
+import dev.mars.qraft.common.ClientInfo;
+import dev.mars.qraft.common.ClientStatus;
+import dev.mars.qraft.common.ClientCapabilities;
 
 import java.time.Instant;
 import java.util.Objects;
 
 /**
- * Sealed interface for agent lifecycle commands.
+ * Sealed interface for client lifecycle commands.
  *
  * <p>Each permitted subtype carries only the fields relevant to its operation,
  * eliminating nullable "bag-of-fields" patterns. Pattern matching in
@@ -33,78 +33,78 @@ import java.util.Objects;
  *
  * <h3>Permitted subtypes</h3>
  * <ul>
- *   <li>{@link Register} — register a new agent</li>
- *   <li>{@link Deregister} — deregister an agent</li>
- *   <li>{@link UpdateStatus} — change agent status</li>
- *   <li>{@link UpdateCapabilities} — update agent capabilities</li>
- *   <li>{@link Heartbeat} — record an agent heartbeat</li>
+ *   <li>{@link Register} — register a new client</li>
+ *   <li>{@link Deregister} — deregister a client</li>
+ *   <li>{@link UpdateStatus} — change client status</li>
+ *   <li>{@link UpdateCapabilities} — update client capabilities</li>
+ *   <li>{@link Heartbeat} — record a client heartbeat</li>
  * </ul>
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @version 2.0
  * @since 2025-08-26
  */
-public sealed interface AgentCommand extends RaftCommand
-        permits AgentCommand.Register,
-                AgentCommand.Deregister,
-                AgentCommand.UpdateStatus,
-                AgentCommand.UpdateCapabilities,
-                AgentCommand.Heartbeat,
-                AgentCommand.Expire {
+public sealed interface ClientCommand extends RaftCommand
+        permits ClientCommand.Register,
+                ClientCommand.Deregister,
+                ClientCommand.UpdateStatus,
+                ClientCommand.UpdateCapabilities,
+                ClientCommand.Heartbeat,
+                ClientCommand.Expire {
 
-    /** Common accessor: every subtype carries an agent ID. */
-    String agentId();
+    /** Common accessor: every subtype carries a client ID. */
+    String clientId();
 
     /** Common accessor: every subtype carries a timestamp. */
     Instant timestamp();
 
     /**
-     * Register a new agent.
+     * Register a new client.
      *
-     * @param agentId   the agent identifier
-     * @param agentInfo the full agent information
+     * @param clientId   the client identifier
+     * @param clientInfo the full client information
      * @param timestamp the command timestamp
      */
-    record Register(String agentId, AgentInfo agentInfo, Instant timestamp) implements AgentCommand {
+    record Register(String clientId, ClientInfo clientInfo, Instant timestamp) implements ClientCommand {
         private static final long serialVersionUID = 1L;
 
         public Register {
-            Objects.requireNonNull(agentId, "agentId");
-            Objects.requireNonNull(agentInfo, "agentInfo");
+            Objects.requireNonNull(clientId, "clientId");
+            Objects.requireNonNull(clientInfo, "clientInfo");
             Objects.requireNonNull(timestamp, "timestamp");
             timestamp = replicated(timestamp);
         }
     }
 
     /**
-     * Deregister an agent.
+     * Deregister a client.
      *
-     * @param agentId   the agent identifier
+     * @param clientId   the client identifier
      * @param timestamp the command timestamp
      */
-    record Deregister(String agentId, Instant timestamp) implements AgentCommand {
+    record Deregister(String clientId, Instant timestamp) implements ClientCommand {
         private static final long serialVersionUID = 1L;
 
         public Deregister {
-            Objects.requireNonNull(agentId, "agentId");
+            Objects.requireNonNull(clientId, "clientId");
             Objects.requireNonNull(timestamp, "timestamp");
             timestamp = replicated(timestamp);
         }
     }
 
     /**
-     * Update the status of an existing agent.
+     * Update the status of an existing client.
      *
-     * @param agentId        the agent identifier
+     * @param clientId        the client identifier
      * @param expectedStatus the expected current status for CAS validation (null to skip check)
      * @param newStatus      the new status
      * @param timestamp      the command timestamp
      */
-    record UpdateStatus(String agentId, AgentStatus expectedStatus, AgentStatus newStatus, Instant timestamp) implements AgentCommand {
+    record UpdateStatus(String clientId, ClientStatus expectedStatus, ClientStatus newStatus, Instant timestamp) implements ClientCommand {
         private static final long serialVersionUID = 1L;
 
         public UpdateStatus {
-            Objects.requireNonNull(agentId, "agentId");
+            Objects.requireNonNull(clientId, "clientId");
             Objects.requireNonNull(expectedStatus, "expectedStatus");
             Objects.requireNonNull(newStatus, "newStatus");
             Objects.requireNonNull(timestamp, "timestamp");
@@ -113,17 +113,17 @@ public sealed interface AgentCommand extends RaftCommand
     }
 
     /**
-     * Update the capabilities of an existing agent.
+     * Update the capabilities of an existing client.
      *
-     * @param agentId         the agent identifier
+     * @param clientId         the client identifier
      * @param newCapabilities the new capabilities
      * @param timestamp       the command timestamp
      */
-    record UpdateCapabilities(String agentId, AgentCapabilities newCapabilities, Instant timestamp) implements AgentCommand {
+    record UpdateCapabilities(String clientId, ClientCapabilities newCapabilities, Instant timestamp) implements ClientCommand {
         private static final long serialVersionUID = 1L;
 
         public UpdateCapabilities {
-            Objects.requireNonNull(agentId, "agentId");
+            Objects.requireNonNull(clientId, "clientId");
             Objects.requireNonNull(newCapabilities, "newCapabilities");
             Objects.requireNonNull(timestamp, "timestamp");
             timestamp = replicated(timestamp);
@@ -131,19 +131,19 @@ public sealed interface AgentCommand extends RaftCommand
     }
 
     /**
-     * Record an agent heartbeat.
+     * Record a client heartbeat.
      *
-     * @param agentId   the agent identifier
+     * @param clientId   the client identifier
      * @param status    optional status update with heartbeat (may be null)
      * @param timestamp the command timestamp
      * @param sequenceNumber sender-local ordering value; zero means unsequenced
      */
-    record Heartbeat(String agentId, AgentStatus status, Instant timestamp,
-                     long sequenceNumber, String registrationId) implements AgentCommand {
+    record Heartbeat(String clientId, ClientStatus status, Instant timestamp,
+                     long sequenceNumber, String registrationId) implements ClientCommand {
         private static final long serialVersionUID = 1L;
 
         public Heartbeat {
-            Objects.requireNonNull(agentId, "agentId");
+            Objects.requireNonNull(clientId, "clientId");
             Objects.requireNonNull(timestamp, "timestamp");
             timestamp = replicated(timestamp);
             if (sequenceNumber < 0) throw new IllegalArgumentException("sequenceNumber must not be negative");
@@ -152,12 +152,12 @@ public sealed interface AgentCommand extends RaftCommand
             // status may be null — heartbeat doesn't always carry a status update
         }
 
-        public Heartbeat(String agentId, AgentStatus status, Instant timestamp) {
-            this(agentId, status, timestamp, 0, null);
+        public Heartbeat(String clientId, ClientStatus status, Instant timestamp) {
+            this(clientId, status, timestamp, 0, null);
         }
 
-        public Heartbeat(String agentId, AgentStatus status, Instant timestamp, long sequenceNumber) {
-            this(agentId, status, timestamp, sequenceNumber, null);
+        public Heartbeat(String clientId, ClientStatus status, Instant timestamp, long sequenceNumber) {
+            this(clientId, status, timestamp, sequenceNumber, null);
         }
     }
 
@@ -168,12 +168,12 @@ public sealed interface AgentCommand extends RaftCommand
      * registration time, still equals {@code expectedLastContact}, so a heartbeat or re-registration
      * committed first turns a stale command into a no-op.
      */
-    record Expire(String agentId, Instant expectedLastContact, boolean reap, Instant timestamp)
-            implements AgentCommand {
+    record Expire(String clientId, Instant expectedLastContact, boolean reap, Instant timestamp)
+            implements ClientCommand {
         private static final long serialVersionUID = 1L;
 
         public Expire {
-            Objects.requireNonNull(agentId, "agentId");
+            Objects.requireNonNull(clientId, "clientId");
             Objects.requireNonNull(expectedLastContact, "expectedLastContact");
             Objects.requireNonNull(timestamp, "timestamp");
             expectedLastContact = replicated(expectedLastContact);
@@ -192,71 +192,71 @@ public sealed interface AgentCommand extends RaftCommand
     // ── Factory methods (preserve existing API) ─────────────────
 
     /**
-     * Create a command to register a new agent.
+     * Create a command to register a new client.
      */
-    static AgentCommand register(AgentInfo agentInfo) {
-        return register(agentInfo, Instant.now());
+    static ClientCommand register(ClientInfo clientInfo) {
+        return register(clientInfo, Instant.now());
     }
 
     /** Registration stamped with the proposing server's clock, which membership expiry relies on. */
-    static AgentCommand register(AgentInfo agentInfo, Instant timestamp) {
-        return new Register(agentInfo.getAgentId(), agentInfo, timestamp);
+    static ClientCommand register(ClientInfo clientInfo, Instant timestamp) {
+        return new Register(clientInfo.getClientId(), clientInfo, timestamp);
     }
 
     /**
-     * Create a command to deregister an agent.
+     * Create a command to deregister a client.
      */
-    static AgentCommand expire(String agentId, Instant expectedLastContact, boolean reap, Instant timestamp) {
-        return new Expire(agentId, expectedLastContact, reap, timestamp);
+    static ClientCommand expire(String clientId, Instant expectedLastContact, boolean reap, Instant timestamp) {
+        return new Expire(clientId, expectedLastContact, reap, timestamp);
     }
 
-    static AgentCommand deregister(String agentId) {
-        return new Deregister(agentId, Instant.now());
+    static ClientCommand deregister(String clientId) {
+        return new Deregister(clientId, Instant.now());
     }
 
     /**
-     * Create a command to update an agent's status with CAS protection.
+     * Create a command to update a client's status with CAS protection.
      *
-     * @param agentId        the agent identifier
+     * @param clientId        the client identifier
      * @param expectedStatus the expected current status (must match for command to apply)
      * @param newStatus      the new status
      */
-    static AgentCommand updateStatus(String agentId, AgentStatus expectedStatus, AgentStatus newStatus) {
-        return new UpdateStatus(agentId, expectedStatus, newStatus, Instant.now());
+    static ClientCommand updateStatus(String clientId, ClientStatus expectedStatus, ClientStatus newStatus) {
+        return new UpdateStatus(clientId, expectedStatus, newStatus, Instant.now());
     }
 
     /**
-     * Create a command to update an agent's capabilities.
+     * Create a command to update a client's capabilities.
      */
-    static AgentCommand updateCapabilities(String agentId, AgentCapabilities newCapabilities) {
-        return new UpdateCapabilities(agentId, newCapabilities, Instant.now());
+    static ClientCommand updateCapabilities(String clientId, ClientCapabilities newCapabilities) {
+        return new UpdateCapabilities(clientId, newCapabilities, Instant.now());
     }
 
     /**
-     * Create a command to record an agent heartbeat.
+     * Create a command to record a client heartbeat.
      */
-    static AgentCommand heartbeat(String agentId) {
-        return new Heartbeat(agentId, null, Instant.now(), 0, null);
+    static ClientCommand heartbeat(String clientId) {
+        return new Heartbeat(clientId, null, Instant.now(), 0, null);
     }
 
     /**
-     * Create a command to record an agent heartbeat with status.
+     * Create a command to record a client heartbeat with status.
      */
-    static AgentCommand heartbeat(String agentId, AgentStatus status, Instant timestamp) {
-        return heartbeat(agentId, status, timestamp, 0);
+    static ClientCommand heartbeat(String clientId, ClientStatus status, Instant timestamp) {
+        return heartbeat(clientId, status, timestamp, 0);
     }
 
     /**
      * Create a sequenced heartbeat command. Sequence zero means the sender does not
-     * participate in ordering; positive values must increase for each agent.
+     * participate in ordering; positive values must increase for each client.
      */
-    static AgentCommand heartbeat(String agentId, AgentStatus status, Instant timestamp, long sequenceNumber) {
-        return heartbeat(agentId, status, timestamp, sequenceNumber, null);
+    static ClientCommand heartbeat(String clientId, ClientStatus status, Instant timestamp, long sequenceNumber) {
+        return heartbeat(clientId, status, timestamp, sequenceNumber, null);
     }
 
-    static AgentCommand heartbeat(String agentId, AgentStatus status, Instant timestamp, long sequenceNumber,
+    static ClientCommand heartbeat(String clientId, ClientStatus status, Instant timestamp, long sequenceNumber,
                                   String registrationId) {
-        return new Heartbeat(agentId, status, timestamp != null ? timestamp : Instant.now(), sequenceNumber,
+        return new Heartbeat(clientId, status, timestamp != null ? timestamp : Instant.now(), sequenceNumber,
                 registrationId);
     }
 }

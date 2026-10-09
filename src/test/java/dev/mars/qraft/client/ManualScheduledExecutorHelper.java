@@ -32,7 +32,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * Test helper implementing {@link ScheduledExecutorService} for agent tests that control scheduled work.
+ * Test helper implementing {@link ScheduledExecutorService} for client tests that control scheduled work.
  * Time moves only when a test calls {@link #advance}. Due tasks
  * run on the advancing thread in due-time order; fixed-rate tasks are rescheduled after each run. The
  * pending task count proves exactly that nothing is scheduled, without waiting to observe nothing.

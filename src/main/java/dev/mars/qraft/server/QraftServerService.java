@@ -224,7 +224,7 @@ public class QraftServerService {
             NodeExpiryPolicy nodePolicy = new NodeExpiryPolicy(Duration.ofMillis(config.getNodeTtlMs()),
                     Duration.ofMillis(config.getNodeReapAfterMs()));
             this.healthExpiry = Optional.of(LeaderHealthExpiry.attach(node, stateMachine::healthChecks,
-                    () -> stateMachine.getAgents().values(), nodePolicy,
+                    () -> stateMachine.getClients().values(), nodePolicy,
                     command -> Deadlines.bound(node.submitCommand(command).toCompletionStage(),
                             HEALTH_EXPIRY_PROPOSAL_TIMEOUT_MS, TimeUnit.MILLISECONDS),
                     ExpiryScheduler.of(expiryExecutor), Clock.systemUTC(),

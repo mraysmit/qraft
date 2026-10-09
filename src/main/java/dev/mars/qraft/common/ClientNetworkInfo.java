@@ -22,14 +22,14 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
 /**
- * Network information for a Qraft agent.
+ * Network information for a Qraft client.
  * Contains network configuration and performance metrics.
  * 
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2025-08-26
  * @version 2.0
  */
-public class AgentNetworkInfo {
+public class ClientNetworkInfo {
 
     @JsonProperty("publicIpAddress")
     private String publicIpAddress;
@@ -47,7 +47,7 @@ public class AgentNetworkInfo {
     private long currentBandwidthUsage; // bytes per second
 
     @JsonProperty("latencyMs")
-    private double latencyMs; // milliseconds to controller
+    private double latencyMs; // milliseconds to server
 
     @JsonProperty("packetLossPercentage")
     private double packetLossPercentage;
@@ -64,7 +64,7 @@ public class AgentNetworkInfo {
     /**
      * Default constructor.
      */
-    public AgentNetworkInfo() {
+    public ClientNetworkInfo() {
     }
 
     /**
@@ -158,7 +158,7 @@ public class AgentNetworkInfo {
     }
 
     /**
-     * Get the latency to the controller in milliseconds.
+     * Get the latency to the server in milliseconds.
      * 
      * @return the latency in milliseconds
      */
@@ -167,7 +167,7 @@ public class AgentNetworkInfo {
     }
 
     /**
-     * Set the latency to the controller in milliseconds.
+     * Set the latency to the server in milliseconds.
      * 
      * @param latencyMs the latency in milliseconds
      */
@@ -252,7 +252,7 @@ public class AgentNetworkInfo {
 
     @Override
     public String toString() {
-        return "AgentNetworkInfo{" +
+        return "ClientNetworkInfo{" +
                 "publicIpAddress='" + publicIpAddress + '\'' +
                 ", privateIpAddress='" + privateIpAddress + '\'' +
                 ", bandwidthCapacity=" + bandwidthCapacity +

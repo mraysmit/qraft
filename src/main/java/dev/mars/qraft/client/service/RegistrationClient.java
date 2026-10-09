@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.client.service;
 
-import dev.mars.qraft.common.AgentInfo;
+import dev.mars.qraft.common.ClientInfo;
 import dev.mars.qraft.client.catalog.CatalogOutcome;
 import dev.mars.qraft.client.catalog.HttpCatalogClient;
 import org.slf4j.Logger;
@@ -32,15 +32,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Agent membership facade over the shared controller HTTP client.
+ * Client membership facade over the shared server HTTP client.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-09
  * @version 1.0
  */
-public final class AgentRegistrationClient {
-    private static final Logger LOGGER = LoggerFactory.getLogger(AgentRegistrationClient.class);
-    private final HttpCatalogClient controllerClient;
+public final class RegistrationClient {
+    private static final Logger LOGGER = LoggerFactory.getLogger(RegistrationClient.class);
+    private final HttpCatalogClient serverClient;
     private final AtomicBoolean registered = new AtomicBoolean();
     private final AtomicBoolean registrationRetryable = new AtomicBoolean();
     private final AtomicReference<String> registrationId = new AtomicReference<>();
@@ -48,21 +48,21 @@ public final class AgentRegistrationClient {
     private CompletableFuture<Boolean> registrationInFlight = CompletableFuture.completedFuture(false);
     private CompletableFuture<Boolean> shutdown;
 
-    public AgentRegistrationClient(HttpCatalogClient controllerClient) {
-        this.controllerClient = Objects.requireNonNull(controllerClient, "controllerClient");
+    public RegistrationClient(HttpCatalogClient serverClient) {
+        this.serverClient = Objects.requireNonNull(serverClient, "serverClient");
     }
 
-    public synchronized CompletableFuture<Boolean> register(AgentInfo agent) {
+    public synchronized CompletableFuture<Boolean> register(ClientInfo client) {
         if (!acceptingRegistrations) return CompletableFuture.completedFuture(false);
         String attemptId = UUID.randomUUID().toString();
-        agent.addMetadata(AgentInfo.REGISTRATION_ID_METADATA_KEY, attemptId);
+        client.addMetadata(ClientInfo.REGISTRATION_ID_METADATA_KEY, attemptId);
         registrationId.set(attemptId);
-        registrationInFlight = controllerClient.registerAgent(agent)
+        registrationInFlight = serverClient.registerClient(client)
                 .thenApply(outcome -> {
                     registrationRetryable.set(outcome instanceof CatalogOutcome.Retryable);
                     if (outcome instanceof CatalogOutcome.Rejected rejected) {
-                        LOGGER.warn("Agent registration rejected: agentId={}, code={}, message={}",
-                                agent.getAgentId(), rejected.code(), rejected.message());
+                        LOGGER.warn("Client registration rejected: clientId={}, code={}, message={}",
+                                client.getClientId(), rejected.code(), rejected.message());
                     }
                     return outcome instanceof CatalogOutcome.Success;
                 })
@@ -70,19 +70,19 @@ public final class AgentRegistrationClient {
         return registrationInFlight;
     }
 
-    public CompletableFuture<Boolean> heartbeat(String agentId, Instant timestamp,
+    public CompletableFuture<Boolean> heartbeat(String clientId, Instant timestamp,
                                                 long sequenceNumber, String status) {
         if (!registered.get()) return CompletableFuture.completedFuture(false);
         Map<String, Object> heartbeat = new LinkedHashMap<>();
-        heartbeat.put("agentId", agentId);
+        heartbeat.put("clientId", clientId);
         heartbeat.put("timestamp", timestamp.toString());
         heartbeat.put("sequenceNumber", sequenceNumber);
         heartbeat.put("status", status);
         String heartbeatRegistrationId = registrationId.get();
         if (heartbeatRegistrationId != null) heartbeat.put("registrationId", heartbeatRegistrationId);
-        return controllerClient.heartbeatAgent(heartbeat).thenApply(outcome -> {
+        return serverClient.heartbeatClient(heartbeat).thenApply(outcome -> {
             if (outcome instanceof CatalogOutcome.Rejected rejected
-                    && ("agent_not_found".equals(rejected.code()) || "http_404".equals(rejected.code()))) {
+                    && ("client_not_found".equals(rejected.code()) || "http_404".equals(rejected.code()))) {
                 recordOutcome(heartbeatRegistrationId, false);
                 return false;
             }
@@ -90,8 +90,8 @@ public final class AgentRegistrationClient {
         });
     }
 
-    public CompletableFuture<Boolean> deregister(String agentId) {
-        return controllerClient.deregisterAgent(agentId)
+    public CompletableFuture<Boolean> deregister(String clientId) {
+        return serverClient.deregisterClient(clientId)
                 .thenApply(CatalogOutcome.Success.class::isInstance)
                 .whenComplete((success, error) -> {
                     if (Boolean.TRUE.equals(success)) registered.set(false);
@@ -99,11 +99,11 @@ public final class AgentRegistrationClient {
     }
 
     /** Stops new registrations, waits for an active attempt, then always removes the node. */
-    public synchronized CompletableFuture<Boolean> beginShutdownAndDeregister(String agentId) {
+    public synchronized CompletableFuture<Boolean> beginShutdownAndDeregister(String clientId) {
         if (shutdown != null) return shutdown;
         acceptingRegistrations = false;
         shutdown = registrationInFlight.handle((ignored, failure) -> null)
-                .thenCompose(ignored -> deregister(agentId));
+                .thenCompose(ignored -> deregister(clientId));
         return shutdown;
     }
 

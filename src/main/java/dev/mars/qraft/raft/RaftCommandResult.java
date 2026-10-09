@@ -57,7 +57,7 @@ public sealed interface RaftCommandResult<T>
      * The target entity was not found in the state store.
      *
      * @param id         the entity identifier that was looked up
-     * @param entityType a human-readable entity type name (for example, "Agent" or "Metadata")
+     * @param entityType a human-readable entity type name (for example, "Client" or "Metadata")
      * @param <T>        entity type (phantom — no entity is available)
      */
     record NotFound<T>(String id, String entityType) implements RaftCommandResult<T> {

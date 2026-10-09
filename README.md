@@ -2,13 +2,13 @@
 
 Qraft is a Java 27 service-discovery and distributed-coordination platform built on Raft consensus.
 
-It is designed for systems that need strongly ordered commands, replicated state, service discovery, health reporting, agent coordination, and tenant isolation across a cluster.
+It is designed for systems that need strongly ordered commands, replicated state, service discovery, health reporting, client coordination, and tenant isolation across a cluster.
 
 ## Core Model
 
 - Servers accept commands and replicate them through the Raft log
 - Commands are applied deterministically to maintain consistent cluster state
-- Agents register with the control plane and report health
+- Clients register with the control plane and report health
 - Tenants and namespaces provide logical isolation for policies and state
 
 ## Good Fit
@@ -32,7 +32,7 @@ apart:
 
 - Raft: consensus implementation, contracts, transport, storage adapters, and metrics
 - Replicated state: deterministic replicated-state commands and projections
-- Shared types: shared service-discovery, health, node, and agent domain types
+- Shared types: shared service-discovery, health, node, and client domain types
 - Client: client-mode registration, heartbeat, and local health behavior
 - Server: Raft coordination, replicated state, and control-plane APIs
 - Entry point: the executable composition root for `server` and `client` modes

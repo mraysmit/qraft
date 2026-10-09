@@ -18,7 +18,7 @@ package dev.mars.qraft.client.catalog;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.mars.qraft.common.AgentInfo;
+import dev.mars.qraft.common.ClientInfo;
 import dev.mars.qraft.client.health.CheckObservation;
 import dev.mars.qraft.client.health.ObservationClient;
 import dev.mars.qraft.client.health.ObservationOutcome;
@@ -48,7 +48,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
 /**
- * JDK HTTP implementation shared by catalog and agent control-plane requests.
+ * JDK HTTP implementation shared by catalog and client control-plane requests.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-24
@@ -77,19 +77,19 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
                 datacenter, region, requestTimeout, new ServerContactTracker(Clock.systemUTC()));
     }
 
-    /** Production constructor with ordered controller-seed selection. */
-    public HttpCatalogClient(HttpClient httpClient, ObjectMapper objectMapper, List<URI> controllers,
+    /** Production constructor with ordered server-seed selection. */
+    public HttpCatalogClient(HttpClient httpClient, ObjectMapper objectMapper, List<URI> servers,
                              String nodeId, String tenant, String namespace,
                              String datacenter, String region, Duration requestTimeout) {
-        this(httpClient, objectMapper, new ServerEndpoints(controllers), nodeId, tenant, namespace,
+        this(httpClient, objectMapper, new ServerEndpoints(servers), nodeId, tenant, namespace,
                 datacenter, region, requestTimeout, new ServerContactTracker(Clock.systemUTC()));
     }
 
-    public HttpCatalogClient(HttpClient httpClient, ObjectMapper objectMapper, List<URI> controllers,
+    public HttpCatalogClient(HttpClient httpClient, ObjectMapper objectMapper, List<URI> servers,
                              String nodeId, String tenant, String namespace,
                              String datacenter, String region, Duration requestTimeout,
                              ServerContactTracker contactTracker) {
-        this(httpClient, objectMapper, new ServerEndpoints(controllers), nodeId, tenant, namespace,
+        this(httpClient, objectMapper, new ServerEndpoints(servers), nodeId, tenant, namespace,
                 datacenter, region, requestTimeout, contactTracker);
     }
 
@@ -122,7 +122,7 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         return acrossSeeds(endpoint -> deregister(endpoint, serviceId));
     }
 
-    public CompletableFuture<CatalogOutcome> register(URI controller, ServiceDefinition service) {
+    public CompletableFuture<CatalogOutcome> register(URI server, ServiceDefinition service) {
         ensureOpen();
         Objects.requireNonNull(service, "service");
         Map<String, Object> body = new LinkedHashMap<>();
@@ -137,7 +137,7 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         body.put("enabled", service.enabled());
         body.put("checks", service.checkIds());
         try {
-            HttpRequest request = request(controller, "/v1/agent/service/register")
+            HttpRequest request = request(server, "/v1/client/service/register")
                     .header("Content-Type", "application/json")
                     .PUT(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
                     .build();
@@ -147,10 +147,10 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         }
     }
 
-    public CompletableFuture<CatalogOutcome> deregister(URI controller, String serviceId) {
+    public CompletableFuture<CatalogOutcome> deregister(URI server, String serviceId) {
         ensureOpen();
         String id = required("serviceId", serviceId);
-        HttpRequest request = request(controller, "/v1/agent/service/deregister/" + encode(id))
+        HttpRequest request = request(server, "/v1/client/service/deregister/" + encode(id))
                 .PUT(HttpRequest.BodyPublishers.noBody()).build();
         return send(request, response -> classifyCatalog(response, CatalogOperation.DEREGISTER));
     }
@@ -160,7 +160,7 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         ensureOpen();
         Objects.requireNonNull(service, "service");
         if (endpoints == null) {
-            throw new IllegalStateException("No controller seeds were configured for automatic selection");
+            throw new IllegalStateException("No server seeds were configured for automatic selection");
         }
         List<URI> cycle = endpoints.cycle();
         return lookupAttempt(cycle, 0, service);
@@ -205,7 +205,7 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
                 JsonNode instances = objectMapper.readTree(response.body());
                 if (instances == null || !instances.isArray()) {
                     return new CatalogLookupOutcome.Retryable("invalid_response",
-                            "Controller returned a malformed catalog response", null);
+                            "Server returned a malformed catalog response", null);
                 }
                 for (JsonNode instance : instances) {
                     if (nodeId.equals(instance.path("nodeId").asText())
@@ -237,8 +237,8 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
     }
 
     /**
-     * Publishes one health observation across the controller seeds. Retryable outcomes rotate to the
-     * next seed; an accepted or stale answer marks the endpoint successful and records controller
+     * Publishes one health observation across the server seeds. Retryable outcomes rotate to the
+     * next seed; an accepted or stale answer marks the endpoint successful and records server
      * contact; any other rejection ends the cycle.
      */
     @Override
@@ -246,7 +246,7 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         ensureOpen();
         Objects.requireNonNull(observation, "observation");
         if (endpoints == null) {
-            throw new IllegalStateException("No controller seeds were configured for automatic selection");
+            throw new IllegalStateException("No server seeds were configured for automatic selection");
         }
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("serviceId", observation.serviceId());
@@ -268,7 +268,7 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
 
     private CompletableFuture<ObservationOutcome> observeAttempt(List<URI> cycle, int index, String body) {
         URI endpoint = cycle.get(index);
-        HttpRequest request = request(endpoint, "/v1/agent/check/observe")
+        HttpRequest request = request(endpoint, "/v1/client/check/observe")
                 .header("Content-Type", "application/json")
                 .PUT(HttpRequest.BodyPublishers.ofString(body)).build();
         return sendObservation(request).thenCompose(outcome -> {
@@ -309,7 +309,7 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
                 }
             }
             return new ObservationOutcome.Retryable(
-                    "invalid_response", "Controller returned a malformed observation response", null);
+                    "invalid_response", "Server returned a malformed observation response", null);
         }
         if (response.statusCode() == 409 && isErrorEnvelope(body)
                 && "stale_observation".equals(body.path("code").textValue())
@@ -329,33 +329,33 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         return new ObservationOutcome.Retryable(failure.code(), failure.message(), failure.leaderId());
     }
 
-    public CompletableFuture<CatalogOutcome> registerAgent(AgentInfo agent) {
-        Objects.requireNonNull(agent, "agent");
+    public CompletableFuture<CatalogOutcome> registerClient(ClientInfo client) {
+        Objects.requireNonNull(client, "client");
         try {
-            String body = objectMapper.writeValueAsString(agent);
-            return acrossSeeds(endpoint -> send(nodeRequest(endpoint, "/api/v1/agents/register", "POST", body),
-                    response -> classifyNode(response, NodeOperation.REGISTER, agent.getAgentId())));
+            String body = objectMapper.writeValueAsString(client);
+            return acrossSeeds(endpoint -> send(nodeRequest(endpoint, "/api/v1/clients/register", "POST", body),
+                    response -> classifyNode(response, NodeOperation.REGISTER, client.getClientId())));
         } catch (IOException error) {
             return CompletableFuture.completedFuture(retryable("request_encoding", error));
         }
     }
 
-    public CompletableFuture<CatalogOutcome> heartbeatAgent(Map<String, Object> heartbeat) {
+    public CompletableFuture<CatalogOutcome> heartbeatClient(Map<String, Object> heartbeat) {
         Objects.requireNonNull(heartbeat, "heartbeat");
-        String agentId = required("agentId", Objects.toString(heartbeat.get("agentId"), null));
+        String clientId = required("clientId", Objects.toString(heartbeat.get("clientId"), null));
         try {
             String body = objectMapper.writeValueAsString(heartbeat);
-            return acrossSeeds(endpoint -> send(nodeRequest(endpoint, "/api/v1/agents/heartbeat", "POST", body),
-                    response -> classifyNode(response, NodeOperation.HEARTBEAT, agentId)));
+            return acrossSeeds(endpoint -> send(nodeRequest(endpoint, "/api/v1/clients/heartbeat", "POST", body),
+                    response -> classifyNode(response, NodeOperation.HEARTBEAT, clientId)));
         } catch (IOException error) {
             return CompletableFuture.completedFuture(retryable("request_encoding", error));
         }
     }
 
-    public CompletableFuture<CatalogOutcome> deregisterAgent(String agentId) {
-        String id = required("agentId", agentId);
+    public CompletableFuture<CatalogOutcome> deregisterClient(String clientId) {
+        String id = required("clientId", clientId);
         return acrossSeeds(endpoint -> send(
-                nodeRequest(endpoint, "/api/v1/agents/" + encode(id), "DELETE", null),
+                nodeRequest(endpoint, "/api/v1/clients/" + encode(id), "DELETE", null),
                 response -> classifyNode(response, NodeOperation.DEREGISTER, id)));
     }
 
@@ -363,7 +363,7 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
             Function<URI, CompletableFuture<CatalogOutcome>> operation) {
         ensureOpen();
         if (endpoints == null) {
-            throw new IllegalStateException("No controller seeds were configured for automatic selection");
+            throw new IllegalStateException("No server seeds were configured for automatic selection");
         }
         List<URI> cycle = endpoints.cycle();
         return attempt(cycle, 0, operation);
@@ -392,12 +392,12 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
                 .method(method, HttpRequest.BodyPublishers.ofString(body)).build();
     }
 
-    private HttpRequest.Builder request(URI controller, String path) {
-        Objects.requireNonNull(controller, "controller");
-        if (!"http".equalsIgnoreCase(controller.getScheme()) && !"https".equalsIgnoreCase(controller.getScheme())) {
-            throw new IllegalArgumentException("controller must use HTTP or HTTPS");
+    private HttpRequest.Builder request(URI server, String path) {
+        Objects.requireNonNull(server, "server");
+        if (!"http".equalsIgnoreCase(server.getScheme()) && !"https".equalsIgnoreCase(server.getScheme())) {
+            throw new IllegalArgumentException("server must use HTTP or HTTPS");
         }
-        return HttpRequest.newBuilder(controller.resolve(path))
+        return HttpRequest.newBuilder(server.resolve(path))
                 .timeout(requestTimeout)
                 .header("X-Qraft-Node", nodeId)
                 .header("X-Qraft-Tenant", tenant)
@@ -423,9 +423,9 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         return classifyError(response);
     }
 
-    private CatalogOutcome classifyNode(HttpResponse<String> response, NodeOperation operation, String agentId) {
+    private CatalogOutcome classifyNode(HttpResponse<String> response, NodeOperation operation, String clientId) {
         int status = response.statusCode();
-        if (operation.accepts(status)) return new CatalogOutcome.Success(agentId, status != 404);
+        if (operation.accepts(status)) return new CatalogOutcome.Success(clientId, status != 404);
         return classifyError(response);
     }
 
@@ -453,7 +453,7 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         JsonNode changed = parsed == null ? null : parsed.path(operation.resultField);
         if (serviceId == null || changed == null || !changed.isBoolean()) {
             return new CatalogOutcome.Retryable(
-                    "invalid_response", "Controller returned a malformed success response", null);
+                    "invalid_response", "Server returned a malformed success response", null);
         }
         return new CatalogOutcome.Success(serviceId, changed.booleanValue());
     }

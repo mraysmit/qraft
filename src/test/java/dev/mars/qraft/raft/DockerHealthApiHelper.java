@@ -27,7 +27,7 @@ import java.time.Duration;
 import java.util.List;
 
 /**
- * Test helper that reads Raft, node, and health state through container HTTP APIs for Docker agent tests.
+ * Test helper that reads Raft, node, and health state through container HTTP APIs for Docker client tests.
  * Every read tolerates an unreachable container by returning {@code null} or {@code -1}, so
  * callers can poll across crashes and restarts.
  *
@@ -36,7 +36,7 @@ import java.util.List;
  * @version 1.0
  */
 final class DockerHealthApiHelper {
-    static final String AGENT_ID = "docker-agent";
+    static final String CLIENT_ID = "docker-client";
 
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
@@ -44,12 +44,12 @@ final class DockerHealthApiHelper {
     private DockerHealthApiHelper() {
     }
 
-    /** The agent's {@code web} instance is discoverable as passing, with both of its checks passing. */
+    /** The client's {@code web} instance is discoverable as passing, with both of its checks passing. */
     static boolean passingWithBothChecks(String server) {
         JsonNode entries = get(server + "/v1/health/service/web?passing");
         if (entries == null || entries.size() != 1) return false;
         JsonNode checks = entries.get(0).path("checks");
-        return AGENT_ID.equals(entries.get(0).path("service").path("nodeId").asText())
+        return CLIENT_ID.equals(entries.get(0).path("service").path("nodeId").asText())
                 && checks.size() == 2
                 && "PASSING".equals(checks.get(0).path("status").asText())
                 && "PASSING".equals(checks.get(1).path("status").asText());
@@ -93,12 +93,12 @@ final class DockerHealthApiHelper {
         return entries == null ? -1 : entries.size();
     }
 
-    /** The agent's node entry from {@code /api/v1/agents}, or {@code null}. */
-    static JsonNode agentNode(String server) {
-        JsonNode agents = get(server + "/api/v1/agents");
-        if (agents == null) return null;
-        for (JsonNode agent : agents) {
-            if (AGENT_ID.equals(agent.path("agentId").asText())) return agent;
+    /** The client's node entry from {@code /api/v1/clients}, or {@code null}. */
+    static JsonNode clientNode(String server) {
+        JsonNode clients = get(server + "/api/v1/clients");
+        if (clients == null) return null;
+        for (JsonNode client : clients) {
+            if (CLIENT_ID.equals(client.path("clientId").asText())) return client;
         }
         return null;
     }
@@ -128,7 +128,7 @@ final class DockerHealthApiHelper {
                 {"serviceId":"filler-%d","serviceName":"filler","address":"127.0.0.1","port":%d}
                 """.formatted(number, 10_000 + number);
         try {
-            return HTTP.send(HttpRequest.newBuilder(URI.create(server + "/v1/agent/service/register"))
+            return HTTP.send(HttpRequest.newBuilder(URI.create(server + "/v1/client/service/register"))
                     .timeout(Duration.ofSeconds(5))
                     .header("Content-Type", "application/json")
                     .header("X-Qraft-Tenant", "filler").header("X-Qraft-Namespace", "filler")

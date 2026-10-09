@@ -19,16 +19,16 @@ package dev.mars.qraft.state;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.mars.qraft.state.catalog.ServiceKey;
-import dev.mars.qraft.common.AgentCapabilities;
-import dev.mars.qraft.common.AgentInfo;
-import dev.mars.qraft.common.AgentStatus;
+import dev.mars.qraft.common.ClientCapabilities;
+import dev.mars.qraft.common.ClientInfo;
+import dev.mars.qraft.common.ClientStatus;
 import dev.mars.qraft.state.catalog.HealthObservation;
 import dev.mars.qraft.state.catalog.ServiceCheckId;
 import dev.mars.qraft.state.catalog.ServiceHealth;
 import dev.mars.qraft.state.catalog.ServiceInstance;
 import dev.mars.qraft.raft.RaftCommand;
-import dev.mars.qraft.raft.grpc.AgentCommandProto;
-import dev.mars.qraft.raft.grpc.AgentCommandType;
+import dev.mars.qraft.raft.grpc.ClientCommandProto;
+import dev.mars.qraft.raft.grpc.ClientCommandType;
 import dev.mars.qraft.state.distributed.DistributedStateCommand;
 import org.junit.jupiter.api.Test;
 
@@ -74,14 +74,14 @@ class ReplicaDeterminismTest {
 
     @Test
     void registrationDataSurvivesTheLogWithoutCorruption() throws Exception {
-        AgentInfo original = agentFromRequest();
-        AgentInfo bare = new AgentInfo("agent-2", null, "", 0);
+        ClientInfo original = clientFromRequest();
+        ClientInfo bare = new ClientInfo("client-2", null, "", 0);
         bare.setRegistrationTime(null);
 
-        AgentInfo decoded = ((AgentCommand.Register) codec.deserialize(
-                codec.serialize(AgentCommand.register(original, NANOS)))).agentInfo();
-        AgentInfo decodedBare = ((AgentCommand.Register) codec.deserialize(
-                codec.serialize(AgentCommand.register(bare, NANOS)))).agentInfo();
+        ClientInfo decoded = ((ClientCommand.Register) codec.deserialize(
+                codec.serialize(ClientCommand.register(original, NANOS)))).clientInfo();
+        ClientInfo decodedBare = ((ClientCommand.Register) codec.deserialize(
+                codec.serialize(ClientCommand.register(bare, NANOS)))).clientInfo();
 
         assertEquals(original.getCapabilities().getCustomCapabilities(),
                 decoded.getCapabilities().getCustomCapabilities(), "typed capability values keep their types");
@@ -99,13 +99,13 @@ class ReplicaDeterminismTest {
     @Test
     void decodingAnEntryDoesNotDependOnWhenItIsDecoded() throws Exception {
         byte[] withoutTimestamp = dev.mars.qraft.raft.grpc.RaftCommandMessage.newBuilder()
-                .setAgentCommand(AgentCommandProto.newBuilder().setType(AgentCommandType.AGENT_CMD_DEREGISTER)
-                        .setAgentId("agent-1"))
+                .setClientCommand(ClientCommandProto.newBuilder().setType(ClientCommandType.CLIENT_CMD_DEREGISTER)
+                        .setClientId("client-1"))
                 .build().toByteArray();
 
-        AgentCommand first = (AgentCommand) codec.deserialize(withoutTimestamp);
+        ClientCommand first = (ClientCommand) codec.deserialize(withoutTimestamp);
         Thread.sleep(5);
-        AgentCommand second = (AgentCommand) codec.deserialize(withoutTimestamp);
+        ClientCommand second = (ClientCommand) codec.deserialize(withoutTimestamp);
 
         assertEquals(first, second, "replaying an entry must not read the replaying node's clock");
         assertEquals(Instant.EPOCH, first.timestamp());
@@ -115,10 +115,10 @@ class ReplicaDeterminismTest {
     void snapshotsAreByteForByteReproducibleAndRoundTripExactly() throws Exception {
         QraftStateStore store = new QraftStateStore();
         List<RaftCommand> log = new ArrayList<>(edgeCaseLog());
-        // Twenty agents and metadata keys in reverse order: the store holds them in maps whose iteration
+        // Twenty clients and metadata keys in reverse order: the store holds them in maps whose iteration
         // order is randomised per JVM, so only an explicitly ordered writer produces sorted keys.
         for (char suffix = 't'; suffix >= 'a'; suffix--) {
-            log.add(AgentCommand.register(new AgentInfo("order-" + suffix, "host", "10.0.0.2", 8080), NANOS));
+            log.add(ClientCommand.register(new ClientInfo("order-" + suffix, "host", "10.0.0.2", 8080), NANOS));
             log.add(new DistributedStateRaftCommand(DistributedStateCommand.put("order-" + suffix, "v")));
         }
         log.forEach(command -> store.apply(codec.deserialize(codec.serialize(command))));
@@ -128,7 +128,7 @@ class ReplicaDeterminismTest {
         restored.restoreSnapshot(snapshot);
 
         assertEquals(new String(snapshot, StandardCharsets.UTF_8), snapshotText(restored));
-        for (String map : List.of("agents", "metadata")) {
+        for (String map : List.of("clients", "metadata")) {
             JsonNode entries = JSON.readTree(snapshot).get(map);
             List<String> order = new ArrayList<>();
             entries.fieldNames().forEachRemaining(order::add);
@@ -140,14 +140,14 @@ class ReplicaDeterminismTest {
     @Test
     void readersReceiveCopiesThatCannotChangeReplicatedState() throws Exception {
         QraftStateStore store = new QraftStateStore();
-        store.apply(AgentCommand.register(agentFromRequest(), NANOS));
+        store.apply(ClientCommand.register(clientFromRequest(), NANOS));
         String before = snapshotText(store);
 
-        AgentInfo found = store.findAgent("agent-1").orElseThrow();
-        found.setStatus(AgentStatus.FAILED);
+        ClientInfo found = store.findClient("client-1").orElseThrow();
+        found.setStatus(ClientStatus.FAILED);
         found.getMetadata().put("injected", "yes");
         found.getCapabilities().getSupportedServices().add("injected");
-        AgentInfo listed = store.getAgents().get("agent-1");
+        ClientInfo listed = store.getClients().get("client-1");
         listed.setRegion("injected");
 
         assertEquals(before, snapshotText(store));
@@ -156,7 +156,7 @@ class ReplicaDeterminismTest {
     @Test
     void theCatalogIsExposedOnlyThroughAReadOnlyView() throws Exception {
         QraftStateStore store = new QraftStateStore();
-        store.apply(CatalogCommand.register(new ServiceInstance("web", "web", "agent-1", "127.0.0.1", 8080,
+        store.apply(CatalogCommand.register(new ServiceInstance("web", "web", "client-1", "127.0.0.1", 8080,
                 List.of(), Map.of(), ServiceHealth.UNKNOWN)));
         Object view = store.getServiceCatalog();
 
@@ -172,11 +172,11 @@ class ReplicaDeterminismTest {
     @Test
     void commandObjectsAreNotAliasedIntoReplicatedState() throws Exception {
         QraftStateStore store = new QraftStateStore();
-        AgentInfo registered = agentFromRequest();
-        store.apply(AgentCommand.register(registered, NANOS));
-        AgentCapabilities capabilities = new AgentCapabilities();
+        ClientInfo registered = clientFromRequest();
+        store.apply(ClientCommand.register(registered, NANOS));
+        ClientCapabilities capabilities = new ClientCapabilities();
         capabilities.setSupportedServices(new java.util.HashSet<>(Set.of("kv")));
-        store.apply(AgentCommand.updateCapabilities("agent-1", capabilities));
+        store.apply(ClientCommand.updateCapabilities("client-1", capabilities));
         String before = snapshotText(store);
 
         registered.getCapabilities().getSupportedServices().add("mutated");
@@ -190,18 +190,18 @@ class ReplicaDeterminismTest {
     void registrationCannotClaimServerOwnedLifecycleStateOrTimes() throws Exception {
         QraftStateStore store = new QraftStateStore();
 
-        store.apply(AgentCommand.register(agentFromRequest(), NANOS));
+        store.apply(ClientCommand.register(clientFromRequest(), NANOS));
 
-        AgentInfo stored = store.findAgent("agent-1").orElseThrow();
-        assertEquals(AgentStatus.REGISTERING, stored.getStatus(), "the agent claimed UNREACHABLE");
+        ClientInfo stored = store.findClient("client-1").orElseThrow();
+        assertEquals(ClientStatus.REGISTERING, stored.getStatus(), "the client claimed UNREACHABLE");
         assertEquals(Instant.parse("2026-09-26T12:00:00.123Z"), stored.getRegistrationTime());
-        assertNull(stored.getLastHeartbeat(), "the agent claimed a heartbeat time");
+        assertNull(stored.getLastHeartbeat(), "the client claimed a heartbeat time");
     }
 
     @Test
     void aBlankRegistrationIdMeansNoRegistrationCheckOnEveryReplica() {
-        AgentCommand.Heartbeat heartbeat = (AgentCommand.Heartbeat) AgentCommand.heartbeat(
-                "agent-1", null, NANOS, 1, " ");
+        ClientCommand.Heartbeat heartbeat = (ClientCommand.Heartbeat) ClientCommand.heartbeat(
+                "client-1", null, NANOS, 1, " ");
 
         assertNull(heartbeat.registrationId());
     }
@@ -209,13 +209,13 @@ class ReplicaDeterminismTest {
     /** Commands with the edge values that reach the log from real requests. */
     private List<RaftCommand> edgeCaseLog() throws Exception {
         List<RaftCommand> log = new ArrayList<>();
-        log.add(AgentCommand.register(agentFromRequest(), NANOS));
-        log.add(AgentCommand.heartbeat("agent-1", null, NANOS.plusSeconds(1), 1, ""));
-        log.add(AgentCommand.heartbeat("agent-1", AgentStatus.DEGRADED, NANOS.plusSeconds(2), 2, null));
-        AgentInfo bare = new AgentInfo("agent-2", null, null, 0);
+        log.add(ClientCommand.register(clientFromRequest(), NANOS));
+        log.add(ClientCommand.heartbeat("client-1", null, NANOS.plusSeconds(1), 1, ""));
+        log.add(ClientCommand.heartbeat("client-1", ClientStatus.DEGRADED, NANOS.plusSeconds(2), 2, null));
+        ClientInfo bare = new ClientInfo("client-2", null, null, 0);
         bare.setMetadata(null);
-        log.add(AgentCommand.register(bare, NANOS));
-        ServiceInstance web = new ServiceInstance("web", "web", "agent-1", "127.0.0.1", 8080,
+        log.add(ClientCommand.register(bare, NANOS));
+        ServiceInstance web = new ServiceInstance("web", "web", "client-1", "127.0.0.1", 8080,
                 List.of("b", "a"), Map.of("zone", "a", "tier", ""), ServiceHealth.UNKNOWN,
                 "tenant-a", "default", "", "eu-west", false);
         log.add(CatalogCommand.register(web, List.of("ttl", "http")));
@@ -223,17 +223,17 @@ class ReplicaDeterminismTest {
                 ServiceHealth.WARNING, 3, NANOS, 30_000, false, "", 60_000), NANOS));
         log.add(CatalogCommand.expire(new ServiceCheckId(web.identity(), "ttl"), 3,
                 Instant.parse("2026-09-26T12:00:30.123Z"), false));
-        log.add(AgentCommand.expire("agent-2", NANOS, false, NANOS));
+        log.add(ClientCommand.expire("client-2", NANOS, false, NANOS));
         log.add(new DistributedStateRaftCommand(DistributedStateCommand.put("key", "")));
         log.add(new DistributedStateRaftCommand(DistributedStateCommand.put("other", "value")));
         log.add(new DistributedStateRaftCommand(DistributedStateCommand.delete("other")));
         return log;
     }
 
-    /** An agent registration as the HTTP API deserializes it from an agent's request body. */
-    private static AgentInfo agentFromRequest() throws Exception {
+    /** A client registration as the HTTP API deserializes it from a client's request body. */
+    private static ClientInfo clientFromRequest() throws Exception {
         return JSON.readValue("""
-                {"agentId":"agent-1","hostname":"","address":"10.0.0.1","port":8080,
+                {"clientId":"client-1","hostname":"","address":"10.0.0.1","port":8080,
                  "status":"unreachable","registrationTime":"2000-01-01T00:00:00Z",
                  "lastHeartbeat":"2000-01-01T00:00:01Z","version":"","region":null,"datacenter":"dc-1",
                  "metadata":{"qraft.registrationId":"reg-1","empty":""},
@@ -244,7 +244,7 @@ class ReplicaDeterminismTest {
                    "systemInfo":{"operatingSystem":"linux","cpuCores":4,"cpuUsage":12.5},
                    "networkInfo":{"privateIpAddress":"10.0.0.1","firewallPorts":[80,443],
                                   "networkInterfaces":null}}}
-                """, AgentInfo.class);
+                """, ClientInfo.class);
     }
 
     private static String snapshotText(QraftStateStore store) {

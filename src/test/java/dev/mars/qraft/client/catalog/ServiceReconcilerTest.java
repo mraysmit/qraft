@@ -103,7 +103,7 @@ class ServiceReconcilerTest {
     }
 
     @Test
-    void aChangedCheckSetIsReRegisteredSoTheControllerCanPruneRemovedChecks() {
+    void aChangedCheckSetIsReRegisteredSoTheServerCanPruneRemovedChecks() {
         FakeCatalogClientFixture client = new FakeCatalogClientFixture();
         ServiceDefinition web = service("web", "web", 8080, true).withCheckIds(List.of("http", "tcp"));
         AtomicReference<List<ServiceDefinition>> definitions = new AtomicReference<>(List.of(web));
@@ -183,7 +183,7 @@ class ServiceReconcilerTest {
     }
 
     @Test
-    void registersAgainWhenControllerReportsTheInstanceAbsent() {
+    void registersAgainWhenServerReportsTheInstanceAbsent() {
         FakeCatalogClientFixture client = new FakeCatalogClientFixture();
         ServiceDefinition web = service("web", "web", 8080, true);
         ServiceReconciler reconciler = new ServiceReconciler(client, () -> List.of(web), CLOCK);

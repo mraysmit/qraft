@@ -46,7 +46,7 @@ class SubprocessOutputAuditHelperTest {
                 "12:00:00.002 [main] DEBUG dev.mars.qraft.client.catalog.HttpCatalogClient"
                         + " - Retrying after an error response: ERROR_COUNT=1",
                 "12:00:00,003 |-INFO in ch.qos.logback.core.FileAppender[FILE] - File property is set",
-                "12:00:00.004 [main] WARN  dev.mars.qraft.client.QraftAgent - Heartbeat was late");
+                "12:00:00.004 [main] WARN  dev.mars.qraft.client.QraftClient - Heartbeat was late");
 
         assertDoesNotThrow(() -> SubprocessOutputAuditHelper.requireNoErrors("crash-writer", output));
     }

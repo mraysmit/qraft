@@ -1,9 +1,9 @@
-$response = Invoke-RestMethod -Uri 'http://localhost:8080/api/v1/agents'
-foreach ($agent in $response) {
-    Write-Host "Agent: $($agent.agentId)"
-    Write-Host "  Status: $($agent.status)"
-    Write-Host "  Healthy: $($agent.healthy)"
-    Write-Host "  Available: $($agent.available)"
-    Write-Host "  Last Heartbeat: $($agent.lastHeartbeat)"
+$response = Invoke-RestMethod -Uri 'http://localhost:8080/api/v1/clients'
+foreach ($client in $response) {
+    Write-Host "Client: $($client.clientId)"
+    Write-Host "  Status: $($client.status)"
+    Write-Host "  Healthy: $($client.healthy)"
+    Write-Host "  Available: $($client.available)"
+    Write-Host "  Last Heartbeat: $($client.lastHeartbeat)"
     Write-Host ""
 }

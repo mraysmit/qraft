@@ -22,7 +22,7 @@ import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Records the most recent successfully classified controller response.
+ * Records the most recent successfully classified server response.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-24

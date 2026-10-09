@@ -743,12 +743,12 @@
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 48 },
       "id": 120,
       "panels": [],
-      "title": "Agents and Topology",
+      "title": "Clients and Topology",
       "type": "row"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "Live topology from server nodes to the agent pool. Edge weight equals agents visible by each server.",
+      "description": "Live topology from server nodes to the client pool. Edge weight equals clients visible by each server.",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -772,25 +772,25 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "label_replace(label_replace(label_replace(qraft_cluster_state{job=\"qraft-servers-compose\",node=~\"server1|server2|server3\"}, \"id\", \"$1\", \"node\", \"(.*)\"), \"title\", \"$1\", \"node\", \"(.*)\"), \"detail__type\", \"Server\", \"__name__\", \".*\") or label_replace(label_replace(label_replace(vector(1), \"id\", \"agent-pool\", \"__name__\", \".*\"), \"title\", \"Agent Pool\", \"__name__\", \".*\"), \"detail__type\", \"Agents\", \"__name__\", \".*\")",
+          "expr": "label_replace(label_replace(label_replace(qraft_cluster_state{job=\"qraft-servers-compose\",node=~\"server1|server2|server3\"}, \"id\", \"$1\", \"node\", \"(.*)\"), \"title\", \"$1\", \"node\", \"(.*)\"), \"detail__type\", \"Server\", \"__name__\", \".*\") or label_replace(label_replace(label_replace(vector(1), \"id\", \"client-pool\", \"__name__\", \".*\"), \"title\", \"Client Pool\", \"__name__\", \".*\"), \"detail__type\", \"Clients\", \"__name__\", \".*\")",
           "format": "table",
           "instant": true,
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "label_join(label_replace(label_replace(qraft_agents{job=\"qraft-servers-compose\"}, \"source\", \"$1\", \"node\", \"(.*)\"), \"target\", \"agent-pool\", \"__name__\", \".*\"), \"id\", \"->\", \"source\", \"target\")",
+          "expr": "label_join(label_replace(label_replace(qraft_clients{job=\"qraft-servers-compose\"}, \"source\", \"$1\", \"node\", \"(.*)\"), \"target\", \"client-pool\", \"__name__\", \".*\"), \"id\", \"->\", \"source\", \"target\")",
           "format": "table",
           "instant": true,
           "refId": "B"
         }
       ],
-      "title": "Agent Connectivity Topology",
+      "title": "Client Connectivity Topology",
       "type": "nodeGraph"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "Server-side view of registered agents over time",
+      "description": "Server-side view of registered clients over time",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
@@ -818,23 +818,23 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "qraft_agents{job=\"qraft-servers-compose\"}",
+          "expr": "qraft_clients{job=\"qraft-servers-compose\"}",
           "legendFormat": "{{node}}",
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "max(qraft_agents{job=\"qraft-servers-compose\"})",
+          "expr": "max(qraft_clients{job=\"qraft-servers-compose\"})",
           "legendFormat": "cluster max",
           "refId": "B"
         }
       ],
-      "title": "Agents Seen By Each Server",
+      "title": "Clients Seen By Each Server",
       "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "Current server and agent counts with per-node context",
+      "description": "Current server and client counts with per-node context",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -863,7 +863,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "qraft_agents{job=\"qraft-servers-compose\"}",
+          "expr": "qraft_clients{job=\"qraft-servers-compose\"}",
           "format": "table",
           "instant": true,
           "refId": "A"
@@ -876,7 +876,7 @@
           "refId": "B"
         }
       ],
-      "title": "Agent Topology Snapshot",
+      "title": "Client Topology Snapshot",
       "transformations": [
         {
           "id": "seriesToColumns",
@@ -910,7 +910,7 @@
             "renameByName": {
               "node 1": "Server",
               "instance 1": "Address",
-              "Value #A": "Agents",
+              "Value #A": "Clients",
               "Value #B": "State(0F/1C/2L)"
             }
           }
@@ -920,7 +920,7 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "Health signal: green when all servers agree on agent count and at least one agent is registered",
+      "description": "Health signal: green when all servers agree on client count and at least one client is registered",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -958,17 +958,17 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "((max(qraft_agents{job=\"qraft-servers-compose\"}) > bool 0) * (stddev(qraft_agents{job=\"qraft-servers-compose\"}) == bool 0))",
+          "expr": "((max(qraft_clients{job=\"qraft-servers-compose\"}) > bool 0) * (stddev(qraft_clients{job=\"qraft-servers-compose\"}) == bool 0))",
           "legendFormat": "health",
           "refId": "A"
         }
       ],
-      "title": "Agent Visibility Health",
+      "title": "Client Visibility Health",
       "type": "stat"
     },
     {
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "description": "Difference between highest and lowest server-reported agent counts; should be 0",
+      "description": "Difference between highest and lowest server-reported client counts; should be 0",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -999,17 +999,17 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "max(qraft_agents{job=\"qraft-servers-compose\"}) - min(qraft_agents{job=\"qraft-servers-compose\"})",
+          "expr": "max(qraft_clients{job=\"qraft-servers-compose\"}) - min(qraft_clients{job=\"qraft-servers-compose\"})",
           "legendFormat": "drift",
           "refId": "A"
         }
       ],
-      "title": "Server Agent Count Drift",
+      "title": "Server Client Count Drift",
       "type": "stat"
     },
     {
       "datasource": { "type": "yesoreyeram-infinity-datasource", "uid": "infinity" },
-      "description": "Live agent identity from server API (agentId, region, datacenter, health and heartbeat)",
+      "description": "Live client identity from server API (clientId, region, datacenter, health and heartbeat)",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -1052,10 +1052,10 @@
           "format": "table",
           "source": "url",
           "type": "json",
-          "url": "http://host.docker.internal:8080/api/v1/agents",
-          "root_selector": "agents",
+          "url": "http://host.docker.internal:8080/api/v1/clients",
+          "root_selector": "clients",
           "columns": [
-            { "selector": "agentId", "text": "agentId", "type": "string" },
+            { "selector": "clientId", "text": "clientId", "type": "string" },
             { "selector": "hostname", "text": "hostname", "type": "string" },
             { "selector": "address", "text": "address", "type": "string" },
             { "selector": "port", "text": "port", "type": "number" },
@@ -1069,7 +1069,7 @@
           ]
         }
       ],
-      "title": "Agent Identity (API)",
+      "title": "Client Identity (API)",
       "type": "table"
     }
   ],

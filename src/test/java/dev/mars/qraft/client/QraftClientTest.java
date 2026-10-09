@@ -21,8 +21,8 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.sun.net.httpserver.HttpServer;
 import dev.mars.qraft.client.catalog.ServerRetryPolicy;
-import dev.mars.qraft.client.config.AgentConfiguration;
-import dev.mars.qraft.client.service.AgentRegistrationClient;
+import dev.mars.qraft.client.config.ClientConfiguration;
+import dev.mars.qraft.client.service.RegistrationClient;
 import dev.mars.qraft.common.ServiceDefinition;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -52,8 +52,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests {@link QraftAgent} registration, retry, readiness, service reconciliation, and ordered
- * shutdown against a stub controller. Retry delays and periodic heartbeats run on a
+ * Tests {@link QraftClient} registration, retry, readiness, service reconciliation, and ordered
+ * shutdown against a stub server. Retry delays and periodic heartbeats run on a
  * {@link ManualScheduledExecutorHelper}, so a test decides when they fire and proves exactly that none is
  * scheduled.
  *
@@ -61,7 +61,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @since 2026-03-15
  * @version 1.0
  */
-class QraftAgentTest {
+class QraftClientTest {
     private HttpServer server;
     private final ManualScheduledExecutorHelper scheduler = new ManualScheduledExecutorHelper();
 
@@ -73,93 +73,93 @@ class QraftAgentTest {
     }
 
     @Test
-    void anAgentOnPortZeroRegistersThePortItActuallyBound() throws Exception {
+    void aClientOnPortZeroRegistersThePortItActuallyBound() throws Exception {
         AtomicReference<String> registration = new AtomicReference<>();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/agents/register", exchange -> {
+        server.createContext("/api/v1/clients/register", exchange -> {
             registration.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             exchange.sendResponseHeaders(201, -1);
             exchange.close();
         });
-        server.createContext("/api/v1/agents/agent-1", exchange -> {
+        server.createContext("/api/v1/clients/client-1", exchange -> {
             exchange.sendResponseHeaders(204, -1);
             exchange.close();
         });
         server.start();
-        AgentConfiguration config = AgentConfiguration.builder()
-                .agentId("agent-1").hostname("host").address("127.0.0.1").agentPort(0)
-                .controllerUrl("http://localhost:" + server.getAddress().getPort())
+        ClientConfiguration config = ClientConfiguration.builder()
+                .clientId("client-1").hostname("host").address("127.0.0.1").clientPort(0)
+                .serverUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000)
                 .build();
-        QraftAgent agent = manuallyTimedAgent(config);
+        QraftClient client = manuallyTimedClient(config);
 
         try {
-            assertTrue(agent.start().get(10, TimeUnit.SECONDS));
-            int bound = agent.healthService().port();
+            assertTrue(client.start().get(10, TimeUnit.SECONDS));
+            int bound = client.healthService().port();
             assertTrue(bound > 0);
             assertEquals(bound, new com.fasterxml.jackson.databind.ObjectMapper()
                     .readTree(registration.get()).path("port").intValue(),
-                    "the controller must be told the port the agent can actually be reached on");
+                    "the server must be told the port the client can actually be reached on");
         } finally {
-            agent.shutdown().get(10, TimeUnit.SECONDS);
+            client.shutdown().get(10, TimeUnit.SECONDS);
         }
     }
 
     @Test
-    void startsAndShutsDownAgainstController() throws Exception {
+    void startsAndShutsDownAgainstServer() throws Exception {
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/agents/register", exchange -> {
+        server.createContext("/api/v1/clients/register", exchange -> {
             exchange.sendResponseHeaders(201, -1);
             exchange.close();
         });
-        server.createContext("/api/v1/agents/agent-1", exchange -> {
+        server.createContext("/api/v1/clients/client-1", exchange -> {
             exchange.sendResponseHeaders(204, -1);
             exchange.close();
         });
         server.start();
 
-        AgentConfiguration config = AgentConfiguration.builder()
-                .agentId("agent-1")
+        ClientConfiguration config = ClientConfiguration.builder()
+                .clientId("client-1")
                 .hostname("host")
                 .address("127.0.0.1")
-                .agentPort(0)
-                .controllerUrl("http://localhost:" + server.getAddress().getPort())
+                .clientPort(0)
+                .serverUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000)
                 .build();
-        QraftAgent agent = new QraftAgent(config);
+        QraftClient client = new QraftClient(config);
 
-        assertTrue(agent.start().join());
-        assertTrue(agent.isRunning());
-        assertTrue(agent.healthService().isHealthy());
-        assertTrue(agent.shutdown().join());
-        assertFalse(agent.isRunning());
-        assertFalse(agent.healthService().isHealthy());
+        assertTrue(client.start().join());
+        assertTrue(client.isRunning());
+        assertTrue(client.healthService().isHealthy());
+        assertTrue(client.shutdown().join());
+        assertFalse(client.isRunning());
+        assertFalse(client.healthService().isHealthy());
     }
 
     @Test
     void remainsLiveButUnreadyWhenInitialRegistrationFails() throws Exception {
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/agents/register", exchange -> {
+        server.createContext("/api/v1/clients/register", exchange -> {
             exchange.sendResponseHeaders(503, -1);
             exchange.close();
         });
         server.start();
-        AgentConfiguration config = AgentConfiguration.builder()
-                .agentId("agent-1")
+        ClientConfiguration config = ClientConfiguration.builder()
+                .clientId("client-1")
                 .hostname("host")
                 .address("127.0.0.1")
-                .agentPort(0)
-                .controllerUrl("http://localhost:" + server.getAddress().getPort())
+                .clientPort(0)
+                .serverUrl("http://localhost:" + server.getAddress().getPort())
                 .build();
-        QraftAgent agent = new QraftAgent(config);
+        QraftClient client = new QraftClient(config);
 
         try {
-            assertFalse(agent.start().join());
-            assertTrue(agent.isRunning());
-            assertTrue(agent.healthService().isHealthy());
-            assertFalse(agent.healthService().isReady());
+            assertFalse(client.start().join());
+            assertTrue(client.isRunning());
+            assertTrue(client.healthService().isHealthy());
+            assertFalse(client.healthService().isReady());
         } finally {
-            agent.shutdown().join();
+            client.shutdown().join();
         }
     }
 
@@ -167,74 +167,74 @@ class QraftAgentTest {
     void rejectedNodeRegistrationIsLoggedAndNeverRetried() throws Exception {
         AtomicInteger registrations = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/agents/register", exchange -> {
+        server.createContext("/api/v1/clients/register", exchange -> {
             registrations.incrementAndGet();
-            byte[] body = ("{\"code\":\"invalid_agent\",\"message\":\"bad address\","
+            byte[] body = ("{\"code\":\"invalid_client\",\"message\":\"bad address\","
                     + "\"retryable\":false}").getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(400, body.length);
             try (var output = exchange.getResponseBody()) { output.write(body); }
         });
-        server.createContext("/api/v1/agents/agent-1", exchange -> {
+        server.createContext("/api/v1/clients/client-1", exchange -> {
             exchange.sendResponseHeaders(404, -1);
             exchange.close();
         });
         server.start();
-        AgentConfiguration config = AgentConfiguration.builder()
-                .agentId("agent-1").hostname("host").address("127.0.0.1")
-                .agentPort(0).controllerUrl("http://localhost:" + server.getAddress().getPort())
+        ClientConfiguration config = ClientConfiguration.builder()
+                .clientId("client-1").hostname("host").address("127.0.0.1")
+                .clientPort(0).serverUrl("http://localhost:" + server.getAddress().getPort())
                 .build();
-        QraftAgent agent = manuallyTimedAgent(config);
-        Logger logger = (Logger) LoggerFactory.getLogger(AgentRegistrationClient.class);
+        QraftClient client = manuallyTimedClient(config);
+        Logger logger = (Logger) LoggerFactory.getLogger(RegistrationClient.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
         logger.addAppender(appender);
         try {
-            assertFalse(agent.start().get(10, TimeUnit.SECONDS));
+            assertFalse(client.start().get(10, TimeUnit.SECONDS));
 
             assertEquals(0, scheduler.pendingCount(), "no registration retry may be scheduled");
             assertEquals(1, registrations.get());
             assertEquals(1, appender.list.stream().filter(event ->
-                    event.getFormattedMessage().contains("agentId=agent-1")
-                            && event.getFormattedMessage().contains("invalid_agent")
+                    event.getFormattedMessage().contains("clientId=client-1")
+                            && event.getFormattedMessage().contains("invalid_client")
                             && event.getFormattedMessage().contains("bad address")).count());
         } finally {
             logger.detachAppender(appender);
-            assertTrue(agent.shutdown().get(10, TimeUnit.SECONDS));
+            assertTrue(client.shutdown().get(10, TimeUnit.SECONDS));
         }
     }
 
     @Test
-    void retriesRegistrationAndBecomesReadyWhenControllerRecovers() throws Exception {
+    void retriesRegistrationAndBecomesReadyWhenServerRecovers() throws Exception {
         AtomicInteger registrations = new AtomicInteger();
         AtomicInteger heartbeats = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/agents/register", exchange -> {
+        server.createContext("/api/v1/clients/register", exchange -> {
             int status = registrations.incrementAndGet() == 1 ? 503 : 201;
             exchange.sendResponseHeaders(status, -1);
             exchange.close();
         });
-        server.createContext("/api/v1/agents/heartbeat", exchange -> {
+        server.createContext("/api/v1/clients/heartbeat", exchange -> {
             heartbeats.incrementAndGet();
             exchange.sendResponseHeaders(204, -1);
             exchange.close();
         });
-        server.createContext("/api/v1/agents/agent-1", exchange -> {
+        server.createContext("/api/v1/clients/client-1", exchange -> {
             exchange.sendResponseHeaders(204, -1);
             exchange.close();
         });
         server.start();
-        AgentConfiguration config = AgentConfiguration.builder()
-                .agentId("agent-1")
+        ClientConfiguration config = ClientConfiguration.builder()
+                .clientId("client-1")
                 .hostname("host")
                 .address("127.0.0.1")
-                .agentPort(0)
-                .controllerUrl("http://localhost:" + server.getAddress().getPort())
+                .clientPort(0)
+                .serverUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000)
                 .build();
-        QraftAgent agent = manuallyTimedAgent(config);
+        QraftClient client = manuallyTimedClient(config);
 
         try {
-            assertFalse(agent.start().get(10, TimeUnit.SECONDS),
+            assertFalse(client.start().get(10, TimeUnit.SECONDS),
                     "the initial registration should expose the outage");
             assertEquals(1, scheduler.pendingCount(), "exactly one registration retry is scheduled");
             assertEquals(0, heartbeats.get());
@@ -242,20 +242,20 @@ class QraftAgentTest {
             scheduler.advance(RETRY_WINDOW);
             awaitTrue(() -> scheduler.pendingCount() == 2, "reconciliation and heartbeat are scheduled");
             assertEquals(2, registrations.get(), "registration is retried once");
-            assertTrue(agent.healthService().isReady(), "successful retry must make the agent ready");
+            assertTrue(client.healthService().isReady(), "successful retry must make the client ready");
 
             scheduler.advance(Duration.ofMillis(config.getHeartbeatInterval()));
             awaitTrue(() -> heartbeats.get() == 1, "heartbeats begin after recovery");
         } finally {
-            agent.shutdown().join();
+            client.shutdown().join();
         }
     }
 
     @Test
     void checksOfADisabledServiceAreNeverRun() throws Exception {
-        AgentConfiguration config = AgentConfiguration.builder()
-                .agentId("agent-1").hostname("host").address("127.0.0.1").agentPort(0)
-                .controllerUrl("http://localhost:1")
+        ClientConfiguration config = ClientConfiguration.builder()
+                .clientId("client-1").hostname("host").address("127.0.0.1").clientPort(0)
+                .serverUrl("http://localhost:1")
                 .services(List.of(
                         new ServiceDefinition("web", "web", "127.0.0.1", 8080, List.of(), Map.of(), true),
                         new ServiceDefinition("legacy", "legacy", "127.0.0.1", 8081, List.of(), Map.of(), false)))
@@ -263,45 +263,45 @@ class QraftAgentTest {
                         new dev.mars.qraft.client.health.TtlCheck("web", "app", Duration.ofSeconds(30), true),
                         new dev.mars.qraft.client.health.TtlCheck("legacy", "app", Duration.ofSeconds(30), true)))
                 .build();
-        QraftAgent agent = new QraftAgent(config);
+        QraftClient client = new QraftClient(config);
         try {
-            assertTrue(agent.statusReporter("web", "app").isPresent(), "an enabled service's check runs");
-            assertTrue(agent.statusReporter("legacy", "app").isEmpty(),
+            assertTrue(client.statusReporter("web", "app").isPresent(), "an enabled service's check runs");
+            assertTrue(client.statusReporter("legacy", "app").isEmpty(),
                     "a disabled service is not registered, so its checks are never run or reported");
         } finally {
-            agent.shutdown().get(10, TimeUnit.SECONDS);
+            client.shutdown().get(10, TimeUnit.SECONDS);
         }
     }
 
     @Test
-    void registrationBackoffGrowsWhileTheControllerIsDownAndRestartsAfterSuccess() throws Exception {
+    void registrationBackoffGrowsWhileTheServerIsDownAndRestartsAfterSuccess() throws Exception {
         AtomicInteger registrations = new AtomicInteger();
         AtomicInteger heartbeats = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/agents/register", exchange -> {
+        server.createContext("/api/v1/clients/register", exchange -> {
             int status = registrations.incrementAndGet() <= 3 ? 503 : 201;
             exchange.sendResponseHeaders(status, -1);
             exchange.close();
         });
-        server.createContext("/api/v1/agents/heartbeat", exchange -> {
+        server.createContext("/api/v1/clients/heartbeat", exchange -> {
             int status = heartbeats.incrementAndGet() == 1 ? 404 : 204;
             exchange.sendResponseHeaders(status, -1);
             exchange.close();
         });
-        server.createContext("/api/v1/agents/agent-1", exchange -> {
+        server.createContext("/api/v1/clients/client-1", exchange -> {
             exchange.sendResponseHeaders(204, -1);
             exchange.close();
         });
         server.start();
-        AgentConfiguration config = AgentConfiguration.builder()
-                .agentId("agent-1").hostname("host").address("127.0.0.1")
-                .agentPort(0).controllerUrl("http://localhost:" + server.getAddress().getPort())
+        ClientConfiguration config = ClientConfiguration.builder()
+                .clientId("client-1").hostname("host").address("127.0.0.1")
+                .clientPort(0).serverUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000)
                 .build();
-        QraftAgent agent = manuallyTimedAgent(config);
+        QraftClient client = manuallyTimedClient(config);
 
         try {
-            assertFalse(agent.start().get(10, TimeUnit.SECONDS));
+            assertFalse(client.start().get(10, TimeUnit.SECONDS));
             // With a zero jitter sample, retry n waits half of min(10 ms * 2^n, 100 ms).
             assertEquals(Duration.ofMillis(5), scheduler.nextDelay());
             advanceToRegistration(2, registrations);
@@ -312,14 +312,14 @@ class QraftAgentTest {
             scheduler.advance(scheduler.nextDelay());
             awaitTrue(() -> registrations.get() == 4 && scheduler.pendingCount() == 2,
                     "the fourth attempt registers and schedules heartbeats");
-            assertTrue(agent.healthService().isReady());
+            assertTrue(client.healthService().isReady());
 
             scheduler.advance(Duration.ofMillis(config.getHeartbeatInterval()));
             awaitTrue(() -> scheduler.pendingCount() == 3, "the rejected heartbeat schedules a retry");
             assertEquals(Duration.ofMillis(5), scheduler.nextDelay(),
                     "a successful registration restarts the backoff");
         } finally {
-            agent.shutdown().get(10, TimeUnit.SECONDS);
+            client.shutdown().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -327,27 +327,27 @@ class QraftAgentTest {
     void shutdownCancelsAPendingRegistrationRetry() throws Exception {
         AtomicInteger registrations = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/agents/register", exchange -> {
+        server.createContext("/api/v1/clients/register", exchange -> {
             registrations.incrementAndGet();
             exchange.sendResponseHeaders(503, -1);
             exchange.close();
         });
         server.start();
-        AgentConfiguration config = AgentConfiguration.builder()
-                .agentId("agent-1").hostname("host").address("127.0.0.1")
-                .agentPort(0).controllerUrl("http://localhost:" + server.getAddress().getPort())
+        ClientConfiguration config = ClientConfiguration.builder()
+                .clientId("client-1").hostname("host").address("127.0.0.1")
+                .clientPort(0).serverUrl("http://localhost:" + server.getAddress().getPort())
                 .build();
-        QraftAgent agent = manuallyTimedAgent(config);
+        QraftClient client = manuallyTimedClient(config);
 
-        assertFalse(agent.start().get(10, TimeUnit.SECONDS));
+        assertFalse(client.start().get(10, TimeUnit.SECONDS));
         assertEquals(1, scheduler.pendingCount(), "a registration retry is pending");
 
-        agent.shutdown().get(10, TimeUnit.SECONDS);
+        client.shutdown().get(10, TimeUnit.SECONDS);
 
         assertEquals(0, scheduler.pendingCount(), "shutdown leaves no retry scheduled");
         scheduler.advance(Duration.ofHours(1));
         assertEquals(1, registrations.get(), "no registration is attempted after shutdown");
-        assertTrue(agent.isTerminated());
+        assertTrue(client.isTerminated());
     }
 
     private void advanceToRegistration(int attempt, AtomicInteger registrations) throws InterruptedException {
@@ -357,54 +357,54 @@ class QraftAgentTest {
     }
 
     @Test
-    void registersAgainWhenControllerForgetsAgent() throws Exception {
+    void registersAgainWhenServerForgetsClient() throws Exception {
         AtomicInteger registrations = new AtomicInteger();
         AtomicInteger heartbeats = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/agents/register", exchange -> {
+        server.createContext("/api/v1/clients/register", exchange -> {
             registrations.incrementAndGet();
             exchange.sendResponseHeaders(201, -1);
             exchange.close();
         });
-        server.createContext("/api/v1/agents/heartbeat", exchange -> {
+        server.createContext("/api/v1/clients/heartbeat", exchange -> {
             int status = heartbeats.incrementAndGet() == 1 ? 404 : 204;
             exchange.sendResponseHeaders(status, -1);
             exchange.close();
         });
-        server.createContext("/api/v1/agents/agent-1", exchange -> {
+        server.createContext("/api/v1/clients/client-1", exchange -> {
             exchange.sendResponseHeaders(204, -1);
             exchange.close();
         });
         server.start();
-        AgentConfiguration config = AgentConfiguration.builder()
-                .agentId("agent-1")
+        ClientConfiguration config = ClientConfiguration.builder()
+                .clientId("client-1")
                 .hostname("host")
                 .address("127.0.0.1")
-                .agentPort(0)
-                .controllerUrl("http://localhost:" + server.getAddress().getPort())
+                .clientPort(0)
+                .serverUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000)
                 .build();
-        QraftAgent agent = manuallyTimedAgent(config);
+        QraftClient client = manuallyTimedClient(config);
         Duration heartbeatInterval = Duration.ofMillis(config.getHeartbeatInterval());
 
         try {
-            assertTrue(agent.start().get(10, TimeUnit.SECONDS));
+            assertTrue(client.start().get(10, TimeUnit.SECONDS));
             assertEquals(2, scheduler.pendingCount(), "reconciliation and heartbeat are scheduled");
 
             scheduler.advance(heartbeatInterval);
             awaitTrue(() -> scheduler.pendingCount() == 3,
                     "the rejected heartbeat schedules a registration retry");
             assertEquals(1, heartbeats.get());
-            assertFalse(agent.healthService().isReady(), "a forgotten agent is not ready");
+            assertFalse(client.healthService().isReady(), "a forgotten client is not ready");
 
             scheduler.advance(RETRY_WINDOW);
-            awaitTrue(() -> registrations.get() == 2 && agent.healthService().isReady(),
-                    "the retry registers the agent again");
+            awaitTrue(() -> registrations.get() == 2 && client.healthService().isReady(),
+                    "the retry registers the client again");
             scheduler.advance(heartbeatInterval);
             awaitTrue(() -> heartbeats.get() == 2, "heartbeats resume after registration");
             assertEquals(2, registrations.get());
         } finally {
-            agent.shutdown().join();
+            client.shutdown().join();
         }
     }
 
@@ -412,45 +412,45 @@ class QraftAgentTest {
     void startsServiceReconciliationAfterNodeRegistration() throws Exception {
         AtomicInteger serviceRegistrations = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/agents/register", exchange -> {
+        server.createContext("/api/v1/clients/register", exchange -> {
             exchange.sendResponseHeaders(201, -1);
             exchange.close();
         });
-        server.createContext("/v1/agent/service/register", exchange -> {
+        server.createContext("/v1/client/service/register", exchange -> {
             serviceRegistrations.incrementAndGet();
             byte[] body = "{\"serviceId\":\"web\",\"registered\":true}"
                     .getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             try (var output = exchange.getResponseBody()) { output.write(body); }
         });
-        server.createContext("/api/v1/agents/agent-1", exchange -> {
+        server.createContext("/api/v1/clients/client-1", exchange -> {
             exchange.sendResponseHeaders(204, -1);
             exchange.close();
         });
         server.start();
-        AgentConfiguration config = AgentConfiguration.builder()
-                .agentId("agent-1")
+        ClientConfiguration config = ClientConfiguration.builder()
+                .clientId("client-1")
                 .hostname("host")
                 .address("127.0.0.1")
-                .agentPort(0)
-                .controllerUrl("http://localhost:" + server.getAddress().getPort())
+                .clientPort(0)
+                .serverUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000)
                 .services(List.of(new ServiceDefinition("web", "web", "127.0.0.1", 8080,
                         List.of(), Map.of(), true)))
                 .build();
-        QraftAgent agent = new QraftAgent(config);
+        QraftClient client = new QraftClient(config);
 
         try {
-            assertTrue(agent.start().get(10, TimeUnit.SECONDS));
+            assertTrue(client.start().get(10, TimeUnit.SECONDS));
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-            while (agent.serviceReconciler().registeredCount() == 0
+            while (client.serviceReconciler().registeredCount() == 0
                     && System.nanoTime() < deadline) Thread.onSpinWait();
 
             assertEquals(1, serviceRegistrations.get());
-            assertEquals(1, agent.serviceReconciler().registeredCount());
-            assertTrue(agent.healthService().isReady());
+            assertEquals(1, client.serviceReconciler().registeredCount());
+            assertTrue(client.healthService().isReady());
         } finally {
-            agent.shutdown().join();
+            client.shutdown().join();
         }
     }
 
@@ -458,76 +458,76 @@ class QraftAgentTest {
     void remainsLiveButUnreadyWhenAnEnabledServiceIsRejected() throws Exception {
         AtomicInteger serviceRegistrations = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/agents/register", exchange -> {
+        server.createContext("/api/v1/clients/register", exchange -> {
             exchange.sendResponseHeaders(201, -1);
             exchange.close();
         });
-        server.createContext("/v1/agent/service/register", exchange -> {
+        server.createContext("/v1/client/service/register", exchange -> {
             serviceRegistrations.incrementAndGet();
             byte[] body = ("{\"code\":\"invalid_registration\",\"message\":\"bad service\","
                     + "\"retryable\":false}").getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(400, body.length);
             try (var output = exchange.getResponseBody()) { output.write(body); }
         });
-        server.createContext("/api/v1/agents/agent-1", exchange -> {
+        server.createContext("/api/v1/clients/client-1", exchange -> {
             exchange.sendResponseHeaders(204, -1);
             exchange.close();
         });
         server.start();
-        AgentConfiguration config = AgentConfiguration.builder()
-                .agentId("agent-1").hostname("host").address("127.0.0.1")
-                .agentPort(0).controllerUrl("http://localhost:" + server.getAddress().getPort())
+        ClientConfiguration config = ClientConfiguration.builder()
+                .clientId("client-1").hostname("host").address("127.0.0.1")
+                .clientPort(0).serverUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000)
                 .services(List.of(new ServiceDefinition("web", "web", "127.0.0.1", 8080,
                         List.of(), Map.of(), true)))
                 .build();
-        QraftAgent agent = new QraftAgent(config);
+        QraftClient client = new QraftClient(config);
 
         try {
-            assertTrue(agent.start().get(10, TimeUnit.SECONDS));
+            assertTrue(client.start().get(10, TimeUnit.SECONDS));
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-            while ((serviceRegistrations.get() == 0 || agent.serviceReconciler().isReconciling())
+            while ((serviceRegistrations.get() == 0 || client.serviceReconciler().isReconciling())
                     && System.nanoTime() < deadline) Thread.onSpinWait();
 
             assertEquals(1, serviceRegistrations.get());
-            assertTrue(agent.healthService().isHealthy());
-            assertFalse(agent.healthService().isReady());
+            assertTrue(client.healthService().isHealthy());
+            assertFalse(client.healthService().isReady());
         } finally {
-            agent.shutdown().join();
+            client.shutdown().join();
         }
     }
 
     @Test
-    void remainsLiveWhenControllerContactBecomesStale() throws Exception {
+    void remainsLiveWhenServerContactBecomesStale() throws Exception {
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/agents/register", exchange -> {
+        server.createContext("/api/v1/clients/register", exchange -> {
             exchange.sendResponseHeaders(201, -1);
             exchange.close();
         });
-        server.createContext("/api/v1/agents/agent-1", exchange -> {
+        server.createContext("/api/v1/clients/client-1", exchange -> {
             exchange.sendResponseHeaders(204, -1);
             exchange.close();
         });
         server.start();
-        AgentConfiguration config = AgentConfiguration.builder()
-                .agentId("agent-1").hostname("host").address("127.0.0.1")
-                .agentPort(0).controllerUrl("http://localhost:" + server.getAddress().getPort())
+        ClientConfiguration config = ClientConfiguration.builder()
+                .clientId("client-1").hostname("host").address("127.0.0.1")
+                .clientPort(0).serverUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000).contactFreshnessMs(1_000)
                 .build();
         MutableClockHelper clock = new MutableClockHelper(Instant.parse("2026-09-24T10:00:00Z"));
-        QraftAgent agent = new QraftAgent(config,
+        QraftClient client = new QraftClient(config,
                 new ServerRetryPolicy(10, 100, () -> 0.0), clock);
 
         try {
-            assertTrue(agent.start().get(10, TimeUnit.SECONDS));
-            assertTrue(agent.healthService().isReady());
+            assertTrue(client.start().get(10, TimeUnit.SECONDS));
+            assertTrue(client.healthService().isReady());
 
             clock.advance(Duration.ofMillis(1_001));
 
-            assertTrue(agent.healthService().isHealthy());
-            assertFalse(agent.healthService().isReady());
+            assertTrue(client.healthService().isHealthy());
+            assertFalse(client.healthService().isReady());
         } finally {
-            agent.shutdown().join();
+            client.shutdown().join();
         }
     }
 
@@ -537,11 +537,11 @@ class QraftAgentTest {
         CountDownLatch servicesStarted = new CountDownLatch(1);
         CountDownLatch releaseServices = new CountDownLatch(1);
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/agents/register", exchange -> {
+        server.createContext("/api/v1/clients/register", exchange -> {
             exchange.sendResponseHeaders(201, -1);
             exchange.close();
         });
-        server.createContext("/v1/agent/service/register", exchange -> {
+        server.createContext("/v1/client/service/register", exchange -> {
             String id = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8)
                     .contains("\"web\"") ? "web" : "api";
             byte[] body = ("{\"serviceId\":\"" + id + "\",\"registered\":true}")
@@ -549,7 +549,7 @@ class QraftAgentTest {
             exchange.sendResponseHeaders(200, body.length);
             try (var output = exchange.getResponseBody()) { output.write(body); }
         });
-        server.createContext("/v1/agent/service/deregister", exchange -> {
+        server.createContext("/v1/client/service/deregister", exchange -> {
             String serviceId = exchange.getRequestURI().getPath()
                     .substring(exchange.getRequestURI().getPath().lastIndexOf('/') + 1);
             events.add("service:" + serviceId);
@@ -564,24 +564,24 @@ class QraftAgentTest {
                 Thread.currentThread().interrupt();
             }
         });
-        server.createContext("/api/v1/agents/agent-1", exchange -> {
+        server.createContext("/api/v1/clients/client-1", exchange -> {
             events.add("node");
             exchange.sendResponseHeaders(204, -1);
             exchange.close();
         });
         server.start();
         // The test releases deregistration itself, so the deadline must never be what ends shutdown.
-        AgentConfiguration config = agentConfigWithServices(60_000);
-        QraftAgent agent = new QraftAgent(config);
+        ClientConfiguration config = clientConfigWithServices(60_000);
+        QraftClient client = new QraftClient(config);
 
-        assertTrue(agent.start().get(10, TimeUnit.SECONDS));
-        awaitRegisteredServices(agent, 2);
-        CompletableFuture<Boolean> shutdown = agent.shutdown();
-        CompletableFuture<Boolean> repeated = agent.shutdown();
+        assertTrue(client.start().get(10, TimeUnit.SECONDS));
+        awaitRegisteredServices(client, 2);
+        CompletableFuture<Boolean> shutdown = client.shutdown();
+        CompletableFuture<Boolean> repeated = client.shutdown();
 
         assertSame(shutdown, repeated);
-        assertFalse(agent.healthService().isReady(), "readiness must be withdrawn synchronously");
-        assertTrue(agent.healthService().isHealthy(), "local health must remain live during deregistration");
+        assertFalse(client.healthService().isReady(), "readiness must be withdrawn synchronously");
+        assertTrue(client.healthService().isHealthy(), "local health must remain live during deregistration");
         assertTrue(servicesStarted.await(10, TimeUnit.SECONDS));
         assertFalse(events.contains("node"), "node deregistration must wait for every service");
         releaseServices.countDown();
@@ -589,25 +589,25 @@ class QraftAgentTest {
         assertTrue(shutdown.get(10, TimeUnit.SECONDS));
         assertEquals(Set.of("service:web", "service:api"), Set.copyOf(events.subList(0, 2)));
         assertEquals("node", events.get(2));
-        assertFalse(agent.healthService().isHealthy());
-        assertTrue(agent.isTerminated());
+        assertFalse(client.healthService().isHealthy());
+        assertTrue(client.isTerminated());
     }
 
     @Test
-    void unreachableControllerCannotExtendShutdownPastDeadlineAndLogsOnce() throws Exception {
+    void unreachableServerCannotExtendShutdownPastDeadlineAndLogsOnce() throws Exception {
         CountDownLatch releaseDeregistration = new CountDownLatch(1);
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/agents/register", exchange -> {
+        server.createContext("/api/v1/clients/register", exchange -> {
             exchange.sendResponseHeaders(201, -1);
             exchange.close();
         });
-        server.createContext("/v1/agent/service/register", exchange -> {
+        server.createContext("/v1/client/service/register", exchange -> {
             byte[] body = "{\"serviceId\":\"web\",\"registered\":true}"
                     .getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(200, body.length);
             try (var output = exchange.getResponseBody()) { output.write(body); }
         });
-        server.createContext("/v1/agent/service/deregister", exchange -> {
+        server.createContext("/v1/client/service/deregister", exchange -> {
             try {
                 // Held until the test has asserted, so a shutdown that completes cannot have waited for it.
                 releaseDeregistration.await(30, TimeUnit.SECONDS);
@@ -616,36 +616,36 @@ class QraftAgentTest {
             }
         });
         server.start();
-        AgentConfiguration config = agentConfigWithServices(100);
-        QraftAgent agent = new QraftAgent(config);
-        Logger logger = (Logger) LoggerFactory.getLogger(QraftAgent.class);
+        ClientConfiguration config = clientConfigWithServices(100);
+        QraftClient client = new QraftClient(config);
+        Logger logger = (Logger) LoggerFactory.getLogger(QraftClient.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
         logger.addAppender(appender);
 
         try {
-            assertTrue(agent.start().get(10, TimeUnit.SECONDS));
-            awaitRegisteredServices(agent, 2);
+            assertTrue(client.start().get(10, TimeUnit.SECONDS));
+            awaitRegisteredServices(client, 2);
 
-            assertFalse(agent.shutdown().get(10, TimeUnit.SECONDS),
+            assertFalse(client.shutdown().get(10, TimeUnit.SECONDS),
                     "shutdown completes at its deadline while every deregistration is still held open");
-            assertSame(agent.shutdown(), agent.shutdown());
+            assertSame(client.shutdown(), client.shutdown());
             assertEquals(1, appender.list.stream()
                     .filter(event -> event.getFormattedMessage().contains("shutdown incomplete"))
                     .count());
-            assertFalse(agent.healthService().isHealthy());
-            assertTrue(agent.isTerminated());
+            assertFalse(client.healthService().isHealthy());
+            assertTrue(client.isTerminated());
         } finally {
             releaseDeregistration.countDown();
             logger.detachAppender(appender);
-            agent.shutdown().join();
+            client.shutdown().join();
         }
     }
 
-    private AgentConfiguration agentConfigWithServices(long shutdownTimeoutMs) throws Exception {
-        return AgentConfiguration.builder()
-                .agentId("agent-1").hostname("host").address("127.0.0.1")
-                .agentPort(0).controllerUrl("http://localhost:" + server.getAddress().getPort())
+    private ClientConfiguration clientConfigWithServices(long shutdownTimeoutMs) throws Exception {
+        return ClientConfiguration.builder()
+                .clientId("client-1").hostname("host").address("127.0.0.1")
+                .clientPort(0).serverUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000).requestTimeoutMs(10_000)
                 .shutdownTimeoutMs(shutdownTimeoutMs)
                 .services(List.of(
@@ -654,19 +654,19 @@ class QraftAgentTest {
                 .build();
     }
 
-    private static void awaitRegisteredServices(QraftAgent agent, int count) throws Exception {
+    private static void awaitRegisteredServices(QraftClient client, int count) throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (agent.serviceReconciler().registeredCount() < count && System.nanoTime() < deadline) {
+        while (client.serviceReconciler().registeredCount() < count && System.nanoTime() < deadline) {
             Thread.onSpinWait();
         }
-        assertEquals(count, agent.serviceReconciler().registeredCount());
+        assertEquals(count, client.serviceReconciler().registeredCount());
     }
 
-    /** A retry window longer than any delay the retry policy of {@link #manuallyTimedAgent} produces. */
+    /** A retry window longer than any delay the retry policy of {@link #manuallyTimedClient} produces. */
     private static final Duration RETRY_WINDOW = Duration.ofMillis(100);
 
-    private QraftAgent manuallyTimedAgent(AgentConfiguration config) {
-        return new QraftAgent(config, new ServerRetryPolicy(10, 100, () -> 0.0), Clock.systemUTC(),
+    private QraftClient manuallyTimedClient(ClientConfiguration config) {
+        return new QraftClient(config, new ServerRetryPolicy(10, 100, () -> 0.0), Clock.systemUTC(),
                 scheduler, Executors.newSingleThreadScheduledExecutor());
     }
 

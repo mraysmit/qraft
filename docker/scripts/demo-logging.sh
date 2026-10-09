@@ -7,11 +7,11 @@ docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' --filter name=qra
 
 curl --fail-with-body -sS -H 'Content-Type: application/json' \
   --data-binary "@$SCRIPT_DIR/../test-data/test-registration.json" \
-  http://localhost:8080/api/v1/agents/register >/dev/null || true
+  http://localhost:8080/api/v1/clients/register >/dev/null || true
 
 i=1
 while [ "$i" -le 3 ]; do
-  "$SCRIPT_DIR/../test-data/send-heartbeat.sh" "$i" test-agent-002 >/dev/null
+  "$SCRIPT_DIR/../test-data/send-heartbeat.sh" "$i" test-client-002 >/dev/null
   echo "Heartbeat $i acknowledged"
   sleep 1
   i=$((i + 1))

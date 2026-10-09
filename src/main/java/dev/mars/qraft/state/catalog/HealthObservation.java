@@ -20,7 +20,7 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * Ordered agent observation for one service health check. {@code deregisterAfterMillis} is how long
+ * Ordered client observation for one service health check. {@code deregisterAfterMillis} is how long
  * the check may remain expired before its service is deregistered automatically; zero means never.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd

@@ -52,7 +52,7 @@ packages of each layer are listed in the design document, section 1.1.
 - Raft (`dev.mars.qraft.raft`) owns consensus implementation, contracts, transport, storage adapters, and metrics; it may use only Common.
 - State (`dev.mars.qraft.state`) owns the deterministic state host, commands, codecs, and catalog projections; it may use Raft and Common.
 - Common (`dev.mars.qraft.common`) owns shared models, configuration helpers, deadlines, and temporary async support; it uses no other Qraft layer.
-- Client (`dev.mars.qraft.client`) implements the Java 27 discovery agent and may use only Common.
+- Client (`dev.mars.qraft.client`) implements the Java 27 discovery client and may use only Common.
 - Server (`dev.mars.qraft.server`) composes Raft and State, HTTP/external gRPC APIs, telemetry, and lifecycle; it may use Common, Raft, and State.
 - The entry point is the thin executable composition root that selects `server` or `client` mode and owns no domain logic.
 - A layer must not depend on implementation details from a higher-level layer. `PackageDependencyTest` enforces the allowed direction.
@@ -75,7 +75,7 @@ packages of each layer are listed in the design document, section 1.1.
 - Apply these names to nested test helpers and doubles as well as standalone source files. Test support annotations and fault definitions must also identify their helper or fixture role.
 - Their class Javadoc must identify their test support role and explain how tests use them. Subprocess fixtures must name the tests that launch them and state where the assertions live.
 - Mockito is prohibited.
-- Do not add Mockito dependencies, imports, extensions, agents, configuration, examples, or generated test code.
+- Do not add Mockito dependencies, imports, extensions, clients, configuration, examples, or generated test code.
 - Do not substitute another mocking framework to evade this rule.
 - Test observable behavior with real implementations, protocol-level fixtures, or lightweight purpose-built fakes.
 - External adapters should exercise serialization, transport, response parsing, failure behavior, and cleanup.
@@ -164,7 +164,7 @@ Both modes use the shipped `logback.xml`. Startup selects the runtime mode and t
 - Runtime logs must include timestamp, thread, level, logger, and message.
 - Raft logs should include MDC fields for node ID, role, and term.
 - RPC logs should include request ID and RPC type where available.
-- Agent logs should include agent ID and request ID where available.
+- Client logs should include client ID and request ID where available.
 - Exceptions must include the stack trace at the point where the failure is handled.
 - Routine retries should not repeatedly emit full stack traces after the first actionable warning.
 - Secrets, credentials, tokens, and sensitive payloads must never be logged.

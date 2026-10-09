@@ -1,5 +1,5 @@
 pipeline {
-    agent { label 'linux' }
+    client { label 'linux' }
 
     options {
         disableConcurrentBuilds()

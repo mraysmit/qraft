@@ -27,20 +27,20 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests the wire form of {@link AgentSystemInfo}, the system facts an agent reports: the exact JSON field set, a
+ * Tests the wire form of {@link ClientSystemInfo}, the system facts a client reports: the exact JSON field set, a
  * round trip that keeps every value, and the fields {@code toString} names.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2025-08-27
  * @version 2.0
  */
-class AgentSystemInfoTest {
+class ClientSystemInfoTest {
     private static final long GIB = 1024L * 1024 * 1024;
 
     @Test
     void serializesOnlyReportedFieldsAndNoDerivedScores() throws Exception {
         TreeSet<String> fields = new TreeSet<>();
-        new ObjectMapper().readTree(new ObjectMapper().writeValueAsString(new AgentSystemInfo()))
+        new ObjectMapper().readTree(new ObjectMapper().writeValueAsString(new ClientSystemInfo()))
                 .fieldNames().forEachRemaining(fields::add);
 
         assertEquals(new TreeSet<>(Set.of("operatingSystem", "architecture", "javaVersion",
@@ -52,7 +52,7 @@ class AgentSystemInfoTest {
     void aJsonRoundTripKeepsEveryValue() throws Exception {
         ObjectMapper mapper = new ObjectMapper();
 
-        AgentSystemInfo read = mapper.readValue(mapper.writeValueAsString(reported()), AgentSystemInfo.class);
+        ClientSystemInfo read = mapper.readValue(mapper.writeValueAsString(reported()), ClientSystemInfo.class);
 
         assertEquals("Linux", read.getOperatingSystem());
         assertEquals("x86_64", read.getArchitecture());
@@ -77,8 +77,8 @@ class AgentSystemInfoTest {
     }
 
     /** System facts with every field set to a value that differs from its default. */
-    private static AgentSystemInfo reported() {
-        AgentSystemInfo info = new AgentSystemInfo();
+    private static ClientSystemInfo reported() {
+        ClientSystemInfo info = new ClientSystemInfo();
         info.setOperatingSystem("Linux");
         info.setArchitecture("x86_64");
         info.setJavaVersion("21.0.1");

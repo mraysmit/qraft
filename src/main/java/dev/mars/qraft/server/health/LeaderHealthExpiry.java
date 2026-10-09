@@ -16,10 +16,10 @@
 
 package dev.mars.qraft.server.health;
 
-import dev.mars.qraft.common.AgentInfo;
+import dev.mars.qraft.common.ClientInfo;
 import dev.mars.qraft.state.catalog.HealthCheckState;
 import dev.mars.qraft.raft.RaftNode;
-import dev.mars.qraft.state.AgentCommand;
+import dev.mars.qraft.state.ClientCommand;
 import dev.mars.qraft.state.CatalogCommand;
 import dev.mars.qraft.raft.RaftCommand;
 import dev.mars.qraft.raft.RaftCommandResult;
@@ -59,7 +59,7 @@ public final class LeaderHealthExpiry implements AutoCloseable {
     private static final Logger LOGGER = LoggerFactory.getLogger(LeaderHealthExpiry.class);
 
     private final Supplier<List<HealthCheckState>> checks;
-    private final Supplier<? extends Collection<AgentInfo>> nodes;
+    private final Supplier<? extends Collection<ClientInfo>> nodes;
     private final NodeExpiryPolicy nodePolicy;
     private final NodeExpiryEvaluator nodeEvaluator = new NodeExpiryEvaluator();
     private final Function<RaftCommand, CompletableFuture<RaftCommandResult<?>>> proposer;
@@ -86,7 +86,7 @@ public final class LeaderHealthExpiry implements AutoCloseable {
      * Health-check and node membership expiry; a {@code null} node policy disables node expiry.
      */
     public LeaderHealthExpiry(Supplier<List<HealthCheckState>> checks,
-                              Supplier<? extends Collection<AgentInfo>> nodes, NodeExpiryPolicy nodePolicy,
+                              Supplier<? extends Collection<ClientInfo>> nodes, NodeExpiryPolicy nodePolicy,
                               Function<RaftCommand, CompletableFuture<RaftCommandResult<?>>> proposer,
                               ExpiryScheduler scheduler, Clock clock, Duration interval) {
         this.checks = Objects.requireNonNull(checks, "checks");
@@ -111,7 +111,7 @@ public final class LeaderHealthExpiry implements AutoCloseable {
 
     /** As {@link #attach(RaftNode, Supplier, Function, ExpiryScheduler, Clock, Duration)}, with node expiry. */
     public static LeaderHealthExpiry attach(RaftNode node, Supplier<List<HealthCheckState>> checks,
-                                            Supplier<? extends Collection<AgentInfo>> nodes,
+                                            Supplier<? extends Collection<ClientInfo>> nodes,
                                             NodeExpiryPolicy nodePolicy,
                                             Function<RaftCommand, CompletableFuture<RaftCommandResult<?>>> proposer,
                                             ExpiryScheduler scheduler, Clock clock, Duration interval) {
@@ -184,12 +184,12 @@ public final class LeaderHealthExpiry implements AutoCloseable {
     }
 
     private static Object key(RaftCommand command) {
-        return command instanceof AgentCommand.Expire node
-                ? new NodeExpiryKey(node.agentId(), node.expectedLastContact(), node.reap())
+        return command instanceof ClientCommand.Expire node
+                ? new NodeExpiryKey(node.clientId(), node.expectedLastContact(), node.reap())
                 : command;
     }
 
-    private record NodeExpiryKey(String agentId, Instant expectedLastContact, boolean reap) {
+    private record NodeExpiryKey(String clientId, Instant expectedLastContact, boolean reap) {
     }
 
     private void propose(RaftCommand command, long armedTerm) {
@@ -198,9 +198,9 @@ public final class LeaderHealthExpiry implements AutoCloseable {
                     "Proposing health {}: check={}, sequence={}, deadline={}",
                     check.deregisterService() ? "deregistration" : "expiry",
                     check.checkId(), check.expectedSequenceNumber(), check.expectedDeadline());
-            case AgentCommand.Expire node -> LOGGER.info("Proposing node {}: node={}, lastContact={}",
+            case ClientCommand.Expire node -> LOGGER.info("Proposing node {}: node={}, lastContact={}",
                     node.reap() ? "reap with its services" : "unreachable marking",
-                    node.agentId(), node.expectedLastContact());
+                    node.clientId(), node.expectedLastContact());
             default -> LOGGER.info("Proposing expiry command {}", command);
         }
         CompletableFuture<RaftCommandResult<?>> reply;

@@ -39,9 +39,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests that controller launch validates configuration before opening resources, closes acquired
+ * Tests that server launch validates configuration before opening resources, closes acquired
  * resources when startup fails, and releases the runtime and telemetry off the thread that finished
- * stopping the controller.
+ * stopping the server.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-24
@@ -100,19 +100,19 @@ class QraftServerLifecycleTest {
     }
 
     @Test
-    void theRuntimeAndTelemetryAreReleasedOffTheThreadThatFinishedStoppingTheController() throws Exception {
-        CompletableFuture<Void> controllerStopped = new CompletableFuture<>();
+    void theRuntimeAndTelemetryAreReleasedOffTheThreadThatFinishedStoppingTheServer() throws Exception {
+        CompletableFuture<Void> serverStopped = new CompletableFuture<>();
         CountDownLatch stoppingThreadReturned = new CountDownLatch(1);
         CompletableFuture<Boolean> runtimeSawTheStoppingThreadReturn = new CompletableFuture<>();
         AtomicBoolean telemetryClosed = new AtomicBoolean();
 
         // Like JavaRuntime.shutdown when the stop finished on one of its workers: it waits for that thread.
-        CompletableFuture<Void> released = QraftServerApplication.releaseAfter(controllerStopped, () -> {
+        CompletableFuture<Void> released = QraftServerApplication.releaseAfter(serverStopped, () -> {
             runtimeSawTheStoppingThreadReturn.complete(awaitQuietly(stoppingThreadReturned));
             return CompletableFuture.completedFuture(null);
         }, () -> telemetryClosed.set(true));
         Thread stoppingThread = Thread.ofPlatform().start(() -> {
-            controllerStopped.complete(null);
+            serverStopped.complete(null);
             stoppingThreadReturned.countDown();
         });
 
@@ -125,17 +125,17 @@ class QraftServerLifecycleTest {
 
     @Test
     void everyReleaseStepRunsAndTheFirstFailureCarriesTheOthers() {
-        IllegalStateException controllerFailure = new IllegalStateException("controller");
+        IllegalStateException serverFailure = new IllegalStateException("server");
         IllegalStateException runtimeFailure = new IllegalStateException("runtime");
         IllegalStateException telemetryFailure = new IllegalStateException("telemetry");
 
         ExecutionException error = assertThrows(ExecutionException.class, () ->
-                QraftServerApplication.releaseAfter(CompletableFuture.failedFuture(controllerFailure),
+                QraftServerApplication.releaseAfter(CompletableFuture.failedFuture(serverFailure),
                         () -> CompletableFuture.failedFuture(runtimeFailure),
                         () -> { throw telemetryFailure; }).get(10, TimeUnit.SECONDS));
 
-        assertSame(controllerFailure, error.getCause());
-        assertArrayEquals(new Throwable[]{runtimeFailure, telemetryFailure}, controllerFailure.getSuppressed());
+        assertSame(serverFailure, error.getCause());
+        assertArrayEquals(new Throwable[]{runtimeFailure, telemetryFailure}, serverFailure.getSuppressed());
     }
 
     @Test
@@ -206,7 +206,7 @@ class QraftServerLifecycleTest {
         return configuration;
     }
 
-    /** Test fixture that supplies controllable controller lifecycle operations for startup and shutdown assertions. */
+    /** Test fixture that supplies controllable server lifecycle operations for startup and shutdown assertions. */
     private static final class TestServerResourceFixture {
         private CompletableFuture<Void> startup = CompletableFuture.completedFuture(null);
         private final AtomicInteger shutdowns = new AtomicInteger();

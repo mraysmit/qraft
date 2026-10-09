@@ -17,9 +17,9 @@
 package dev.mars.qraft.client.service;
 
 import com.sun.net.httpserver.HttpServer;
-import dev.mars.qraft.common.AgentInfo;
+import dev.mars.qraft.common.ClientInfo;
 import dev.mars.qraft.client.catalog.HttpCatalogClient;
-import dev.mars.qraft.client.config.AgentConfiguration;
+import dev.mars.qraft.client.config.ClientConfiguration;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -35,7 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests that {@link HeartbeatService} publishes heartbeats only after agent registration.
+ * Tests that {@link HeartbeatService} publishes heartbeats only after client registration.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-03-15
@@ -43,37 +43,37 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class HeartbeatServiceTest {
     private HttpServer server;
-    private HttpCatalogClient controllerClient;
+    private HttpCatalogClient serverClient;
 
     @AfterEach
     void stopServer() {
         if (server != null) {
             server.stop(0);
         }
-        if (controllerClient != null) controllerClient.close();
+        if (serverClient != null) serverClient.close();
     }
 
     @Test
     void publishesHeartbeatAfterRegistration() throws Exception {
         AtomicInteger heartbeats = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/agents/register", exchange -> {
+        server.createContext("/api/v1/clients/register", exchange -> {
             exchange.sendResponseHeaders(201, -1);
             exchange.close();
         });
-        server.createContext("/api/v1/agents/heartbeat", exchange -> {
+        server.createContext("/api/v1/clients/heartbeat", exchange -> {
             heartbeats.incrementAndGet();
             exchange.sendResponseHeaders(204, -1);
             exchange.close();
         });
         server.start();
 
-        AgentConfiguration config = AgentConfiguration.builder()
-                .agentId("agent-1").controllerUrl("http://localhost:" + server.getAddress().getPort())
+        ClientConfiguration config = ClientConfiguration.builder()
+                .clientId("client-1").serverUrl("http://localhost:" + server.getAddress().getPort())
                 .requestTimeoutMs(1000).build();
-        AgentRegistrationClient registration = registration(config);
-        AgentInfo agent = new AgentInfo("agent-1", "host", "127.0.0.1", 8080);
-        assertTrue(registration.register(agent).join());
+        RegistrationClient registration = registration(config);
+        ClientInfo client = new ClientInfo("client-1", "host", "127.0.0.1", 8080);
+        assertTrue(registration.register(client).join());
 
         HeartbeatService heartbeat = new HeartbeatService(config, registration);
         assertTrue(heartbeat.sendHeartbeat().join());
@@ -84,25 +84,25 @@ class HeartbeatServiceTest {
     void doesNotPublishBeforeRegistration() throws Exception {
         AtomicInteger heartbeats = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/agents/heartbeat", exchange -> {
+        server.createContext("/api/v1/clients/heartbeat", exchange -> {
             heartbeats.incrementAndGet();
             exchange.sendResponseHeaders(204, -1);
             exchange.close();
         });
         server.start();
-        AgentConfiguration config = AgentConfiguration.builder()
-                .agentId("agent-1").controllerUrl("http://localhost:" + server.getAddress().getPort()).build();
-        AgentRegistrationClient registration = registration(config);
+        ClientConfiguration config = ClientConfiguration.builder()
+                .clientId("client-1").serverUrl("http://localhost:" + server.getAddress().getPort()).build();
+        RegistrationClient registration = registration(config);
 
         assertFalse(new HeartbeatService(config, registration).sendHeartbeat().join());
-        assertEquals(0, heartbeats.get(), "an unregistered agent sends nothing, though the controller would accept it");
+        assertEquals(0, heartbeats.get(), "an unregistered client sends nothing, though the server would accept it");
     }
 
-    private AgentRegistrationClient registration(AgentConfiguration config) {
-        controllerClient = new HttpCatalogClient(HttpClient.newHttpClient(),
-                new com.fasterxml.jackson.databind.ObjectMapper(), config.getControllerUrls(),
-                config.getAgentId(), config.getTenant(), config.getNamespace(),
+    private RegistrationClient registration(ClientConfiguration config) {
+        serverClient = new HttpCatalogClient(HttpClient.newHttpClient(),
+                new com.fasterxml.jackson.databind.ObjectMapper(), config.getServerUrls(),
+                config.getClientId(), config.getTenant(), config.getNamespace(),
                 config.getDatacenter(), config.getRegion(), Duration.ofMillis(config.getRequestTimeoutMs()));
-        return new AgentRegistrationClient(controllerClient);
+        return new RegistrationClient(serverClient);
     }
 }

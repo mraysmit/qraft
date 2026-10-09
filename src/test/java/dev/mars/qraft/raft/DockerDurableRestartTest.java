@@ -58,9 +58,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_SNAPSHOT_TRANSFER_INTERRUPTED,
         dev.mars.qraft.testing.fault.IntentionalErrorFixture.WAL_AMBIGUOUS_CORRUPTION,
         dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_RECOVERY_AMBIGUOUS_CORRUPTION,
-        dev.mars.qraft.testing.fault.IntentionalErrorFixture.CONTROLLER_RECOVERY_AMBIGUOUS_CORRUPTION,
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.SERVER_RECOVERY_AMBIGUOUS_CORRUPTION,
         dev.mars.qraft.testing.fault.IntentionalErrorFixture.WAL_DIRECTORY_ALREADY_LOCKED,
-        dev.mars.qraft.testing.fault.IntentionalErrorFixture.CONTROLLER_STORAGE_ALREADY_LOCKED
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.SERVER_STORAGE_ALREADY_LOCKED
 })
 // Each test waits only on bounded conditions, up to about 270 s in all; the method budget exceeds that,
 // so a failure reports the condition that was not met rather than the module's default method timeout.
@@ -223,7 +223,7 @@ class DockerDurableRestartTest {
         String serviceId = serviceName + "-1";
         String body = registrationBody(serviceId, serviceName, 8501);
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(endpoints.get(oldLeaderIndex) + "/v1/agent/service/register"))
+                .uri(URI.create(endpoints.get(oldLeaderIndex) + "/v1/client/service/register"))
                 .timeout(Duration.ofSeconds(5))
                 .header("Content-Type", "application/json")
                 .header("X-Qraft-Tenant", TEST_TENANT)
@@ -295,7 +295,7 @@ class DockerDurableRestartTest {
             long commitBefore = status(leader).path("commitIndex").asLong();
             HttpResponse<String> write;
             try {
-                write = send(leader + "/v1/agent/service/register", "PUT",
+                write = send(leader + "/v1/client/service/register", "PUT",
                         registrationBody(serviceName + "-during", serviceName, 8702), REGISTRATION_HEADERS);
             } catch (java.io.IOException timedOut) {
                 write = null;
@@ -441,7 +441,7 @@ class DockerDurableRestartTest {
         String body = registrationBody(serviceId, serviceName, port);
         for (String endpoint : endpoints) {
             try {
-                HttpResponse<String> response = send(endpoint + "/v1/agent/service/register", "PUT", body,
+                HttpResponse<String> response = send(endpoint + "/v1/client/service/register", "PUT", body,
                         REGISTRATION_HEADERS);
                 if (response.statusCode() == 200) return;
                 assertEquals(503, response.statusCode(), response.body());

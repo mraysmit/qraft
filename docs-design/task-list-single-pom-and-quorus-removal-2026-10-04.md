@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-04
 **Status:** In progress. This is the current task list. It started on 2026-10-04 at the user's request, before the membership list's Step 4 close-out gate.
-**Active work:** Phase 3 is implemented and verified complete on 2026-10-08. The next coding task is Phase 4's first item: create immutable legacy node-command, capability-command, job-status, and node-snapshot fixtures before removing the old model. Phase 2A was accepted on 2026-10-08; the review of that day found one of its tasks still open, the audit of child JVMs that cannot audit themselves (Phase 2A, "Tasks"). Phases 0 to 2 were done 2026-10-04.
+**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09; it is not committed yet. Phase 3 is implemented and verified complete on 2026-10-08. The next coding task is Phase 4's first item: create immutable legacy node-command, capability-command, job-status, and node-snapshot fixtures before removing the old model. Phase 2A was accepted on 2026-10-08; the review of that day found one of its tasks still open, the audit of child JVMs that cannot audit themselves (Phase 2A, "Tasks"). Phases 0 to 2 were done 2026-10-04.
 **Last reviewed:** 2026-10-08, against the code at commit `9a4adf0`, with the other four task lists. The status table in section 4 and every item marked "review of 2026-10-08" come from that review. No build was run for it. The logs that the Phase 2A and Phase 3 records cite were written in another working tree and were not available, so their counts were checked for arithmetic only. The earlier review of 2026-10-05 was against `24beac3`; its items keep their date.
 **Order of work:**
 - The membership list's Step 4 close-out gate is the first task of Phase 7 here.
@@ -20,7 +20,7 @@ runtime layer, or its unused tooling.
 
 ## 2. Decisions
 
-1. **Client mode stays and becomes a full Consul-style client agent.** Decided
+1. **Client mode stays and becomes a full Consul-style client.** Decided
    2026-10-04, for VMs and bare metal. That work is
    [`task-list-consul-style-client-2026-10-04.md`](task-list-consul-style-client-2026-10-04.md).
    This list removes only the client's Quorus-era node model.
@@ -28,8 +28,9 @@ runtime layer, or its unused tooling.
    `target/qraft.jar`. Module boundaries become package boundaries, enforced by
    a dependency test.
 3. **Packages follow the modes:** `server` (was `controller`) and `client` (was
-   `agent`). The client configuration's `agent` object keeps its name. The
-   server's `/v1/agent/*` paths move in the client list, not here.
+   `agent`). The client configuration's object kept its old name until
+   2026-10-09, when Phase 3A renamed it to `client`. The server's
+   `/v1/client/*` paths move in the client list, not here.
 4. **Removed formats stay readable.** Removed protobuf fields and messages are
    `reserved`; snapshot readers ignore removed fields; fixtures prove old WAL
    entries and snapshots still load.
@@ -82,6 +83,7 @@ rules and extracts from that run.
 | 2. Single POM | Done; verified against the code | 7 of 7 | `04dddeb` |
 | 2A. Intentional errors labelled | Accepted 2026-10-08; one task open, for child JVMs that cannot audit themselves | 8 of 9 | `24beac3` to `077e930` |
 | 3. Package layout | Done; verified 2026-10-08. One task added by the review: the comparison of test names with the Phase 0 baseline | 10 of 11 | `9a4adf0` |
+| 3A. One word for each mode | Added and done 2026-10-09; verified the same day | 5 of 5 | not committed |
 | 4. Node model and API | Not started | 0 of 7 | |
 | 5. Configuration and version | Not started | 0 of 6 | |
 | 6. Docker and observability | Not started | 0 of 10 | |
@@ -897,6 +899,130 @@ in part.
   Account for each name that is missing, added, or renamed since Phase 0, as
   the Phase 1 and Phase 2 records do.
 
+### Phase 3A. One word for each mode
+
+**Added 2026-10-09, at the user's direction.** Qraft has two modes, server
+mode and client mode. Two older words for them survived Phase 3: `agent` for
+client mode and `controller` for server mode. This phase replaces both with
+`client` and `server`, everywhere.
+
+**Decisions (2026-10-09).**
+- Both words go, in every letter case: class, method, field, and variable
+  names; protobuf names; configuration keys; HTTP routes, JSON fields, and
+  error codes; thread names and log keys; Docker files and service names;
+  and the documents.
+- The client's configuration objects are `client` and `servers`. This
+  replaces decision 3's sentence that the object keeps its name, and carries
+  out the client list's decision 10 here.
+- The names planned after Consul's change too: the client's local API is
+  `/v1/client/*`, and the ACL list's resource for it is `client`.
+- Snapshots written before the rename stay readable (decision 4). The reader
+  accepts the two old key names and writes the new ones. The legacy fixtures
+  keep their bytes.
+- It is a rename. It is verified by a word search and the existing suites; no
+  test was added for it.
+
+**Tasks.**
+
+- [x] Replace both words in `src/`, `docker/`, `pom.xml`, and the
+  `Jenkinsfile`: 3,115 occurrences in 125 files, and 33 files and folders
+  renamed. `AgentRegistrationClient` became `RegistrationClient`, which
+  would otherwise have repeated the word.
+- [x] Keep old snapshots readable. `QraftStateStore` reads the old keys
+  `agents` and `agentId` as `clients` and `clientId`. Unknown properties are
+  ignored on restore, so without this an old snapshot would have restored
+  with its registered clients silently missing. `LegacyCatalogFixtureTest`
+  covers it.
+- [x] Give distinct names to the variables that the replacement made
+  collide, in four test classes: `RegistrationClientTest`,
+  `CrashedClientExpiryEndToEndTest`, `HealthPropagationEndToEndTest`, and
+  `UnifiedRuntimeEndToEndTest`. Production code had none.
+- [x] Update the documents that describe Qraft as it is: the design, the
+  README files, the standards, `TESTING.md` outside its log extracts, the
+  administrative interface's design and plan, the Consul plan, the feature
+  validation, and the forward-looking parts of the five task lists.
+- [x] Verify: `mvn clean install`; then the Docker, end-to-end, and slow
+  suites on a fresh image, because the configuration, the routes, and the
+  compose files changed; then the review of the logs those runs retain.
+  Done 2026-10-09: see "Verified" below.
+
+**First build (2026-10-09).** `mvn clean install` compiled without an error
+and ran 884 tests with 4 failures
+(`logs/qraft-tests-2026-10-09_12-24-59-246.log`). The run's 21 retained files
+hold no unflagged error.
+- **Cause.** Three existing tests assert that an old name is absent: an old
+  package is not a layer (`PackageDependencyTest`), deployment files and
+  Docker fixtures do not name the old service (`DockerDeploymentContractTest`,
+  two tests), and no log file carries the old name (`RuntimeLoggingTest`).
+  The replacement turned the name they forbid into `server`, which is
+  present everywhere.
+- **Fix.** Those assertions have their committed text again: 15 lines in the
+  three classes. They are the one place where the old words belong, because
+  they are what the tests forbid.
+
+**Second build (2026-10-09).** `mvn install` passed: 884 tests, no failures,
+every coverage gate met (`logs/qraft-tests-2026-10-09_12-40-59-738.log`). The
+run wrote 21 files, and all were read: 255 ERROR headers, every one flagged,
+no unflagged error or uncaught exception, and neither old word in anything
+the running code logged.
+
+**Tagged suites, first attempt (2026-10-09).** 31 tests ran with 22 errors
+(`logs/qraft-tests-2026-10-09_13-06-42-215.log`). It does not count as
+verification.
+- **Cause.** The Docker daemon was not running. Every one of the 22 is a
+  Docker test, and each failed building the image: "failed to connect to
+  the docker API at npipe:////./pipe/dockerDesktopLinuxEngine". None reached
+  Qraft's code.
+- **What did run.** The 9 tests that need no Docker passed, among them the
+  end-to-end classes that start real server and client processes with the
+  renamed configuration. The application logs of the run hold 11 ERROR
+  events, all flagged.
+- **Found in its output.** Five test methods began `anClient`, an article
+  the replacement left wrong. They now begin `aClient`.
+
+**Verified (2026-10-09),** with Docker running and after the five method
+names changed.
+- The Docker, end-to-end, and slow suites passed all 32 tests, three times
+  (`logs/qraft-tests-2026-10-09_13-24-04-147.log`,
+  `…_13-35-10-295.log`, and `…_14-34-39-151.log`). The containers ran the
+  image built from the renamed jar, with the renamed configuration and
+  compose files.
+- `mvn install` passed 884 tests with every coverage gate met, twice
+  (`…_13-51-11-615.log` and `…_14-52-07-087.log`).
+- The five runs wrote 236 files: Maven captures, application and helper-JVM
+  logs, fresh-JVM runtime logs, and Docker archives. All were read. They
+  hold 894 ERROR headers, every one flagged; one uncaught rethrow, flagged;
+  and no unflagged error or exception. Counts include duplicate captures.
+- Neither old word appears in anything the running code or the containers
+  logged.
+
+**Word search (2026-10-09).** In `src/`, `docker/`, `pom.xml`, and the
+`Jenkinsfile`, 21 lines still hold either word, each on purpose:
+- the JaCoCo goal `prepare-agent`, twice, in `pom.xml`;
+- the `User-Agent` HTTP header in `docker/test-data/nginx.conf`;
+- the two old snapshot key names in `QraftStateStore`;
+- the node name `agent-legacy`, which is data inside the immutable snapshot
+  fixture, in `LegacyCatalogFixtureTest`;
+- the 15 lines above, in tests that assert an old name is absent.
+
+The fixtures under `src/test/resources/fixtures/catalog/` were not touched.
+In the documents the words remain only in dated records, `docs/archive/`,
+the log extracts of `TESTING.md`, former module and class names given as
+history, and descriptions of Consul's own software.
+
+**What changes for someone using Qraft.**
+- The client's configuration: `client` and `servers`, where the file had the
+  two old words.
+- The routes: `/api/v1/clients*`, `/v1/client/service/*`, and
+  `/v1/client/check/observe`. They are interim: Phase 4 and the client list
+  move them to `/v1/catalog/*`.
+- JSON fields and error codes, for example `clientId` and
+  `client_not_found`.
+- Protobuf message, field, and enum value names. The field numbers are
+  unchanged, so existing WAL entries decode as before.
+- A snapshot written after the rename uses the new key names. A server from
+  before the rename cannot restore it.
+
 ### Phase 4. Node model and API
 
 - [ ] First, write the legacy fixtures from the code as it stands (review of
@@ -906,8 +1032,8 @@ in part.
   nodes. Once the old model is removed, nothing can write the old format, so
   the fixtures of decision 4 are generated before any other task here, and
   committed with a manifest like the catalog's.
-- [ ] Replace `AgentInfo`, `AgentCapabilities`, `AgentSystemInfo`, and
-  `AgentNetworkInfo` with a Consul-shaped node: name, address, datacenter,
+- [ ] Replace `ClientInfo`, `ClientCapabilities`, `ClientSystemInfo`, and
+  `ClientNetworkInfo` with a Consul-shaped node: name, address, datacenter,
   region, metadata, status, and server-stamped times. The client list
   (decision 8) adds the generated node ID. The Quorus fleet fields
   are removed: CPU, memory, disk, bandwidth, packet loss, NAT, connection
@@ -918,7 +1044,7 @@ in part.
 - [ ] Reduce node status to the states Qraft sets, and drop the job-system
   status mapping if the fixtures allow.
 - [ ] Move node registration, heartbeat, deregistration, and listing from
-  `/api/v1/agents*` to Consul-aligned `/v1/` routes with the standard error
+  `/api/v1/clients*` to Consul-aligned `/v1/` routes with the standard error
   envelope and identity headers (for example `GET /v1/catalog/nodes`). Use the
   paths of the client list's decision 5, so the node routes move only once.
   The service and check write paths move later, in the client list's Phase 1.
@@ -932,7 +1058,7 @@ in part.
   twice. Record the bodies in the design's section 12.1.
 - [ ] Remove `/api/v1/info`, `/status`, and bare `/health`. Compose
   healthchecks and the documentation use `/health/live` or `/health/ready`.
-- [ ] Delete the old agent DTO tests. Add node codec, replica-determinism, and
+- [ ] Delete the old client DTO tests. Add node codec, replica-determinism, and
   legacy-fixture tests.
 
 **Exit:** Red before green with mutations for the codec and fixture guards;
@@ -955,7 +1081,7 @@ full suites.
   sets only the main class. The POM's version is `1.0-SNAPSHOT`, while the
   server reports `2.0-ext`. Add the implementation entries to the manifest,
   and choose the POM version that Qraft reports.
-- [ ] Do the same for the client (review of 2026-10-05). `agent.version` in
+- [ ] Do the same for the client (review of 2026-10-05). `client.version` in
   the client configuration is the same kind of setting as
   `applicationVersion`, and the Docker example sets it to `1.0.0`. The client
   reports the manifest's version too, and the setting is removed.
@@ -977,7 +1103,7 @@ both modes.
   breaks them, whatever the nginx decision below.
 - [ ] Delete the four logging demo scripts (`.ps1` and `.sh`): demo-logging,
   log-extraction-demo, setup-logging, and simple-log-demo.
-- [ ] Remove the Grafana panels built on `qraft_agents`, a metric the server
+- [ ] Remove the Grafana panels built on `qraft_clients`, a metric the server
   never emits.
 - [ ] Rework `docker/test-data` to use the Phase 4 node routes, or delete it in
   favour of the end-to-end suite. Delete the unreferenced `test-heartbeat.json`.
@@ -989,7 +1115,7 @@ both modes.
   rotate through their seeds themselves. Reduce `start.*` and `start-quick.*`
   to the remaining topologies.
 - [ ] Find the cause of the one Docker failure on Jenkins (added 2026-10-05):
-  `DockerAgentRecoveryTest.aKilledFollowerInstallsTheLeadersSnapshotAndThenHoldsTheLeadersHealthState`
+  `DockerClientRecoveryTest.aKilledFollowerInstallsTheLeadersSnapshotAndThenHoldsTheLeadersHealthState`
   timed out after 90 seconds in build 2 of 2026-10-04 (`docs/JENKINS.md`),
   while the Phase 2 run on the development machine passed 30 of 30. An
   intermittent or machine-dependent failure is a defect
@@ -1050,14 +1176,14 @@ What remains for this phase:
     that `TESTING.md` marks as historical;
   - the log file names of `PROJECT_STANDARDS.md` section 6.2. Done with
     Phase 3: the section names the files by mode, and its note that both
-    modes write the controller's log is gone;
+    modes write one log file is gone;
   - the names and removals of Phases 4 to 7, as each phase ends;
   - the version source, in `OPEN_SOURCE_USAGE.md` if Phase 5 changes it.
 - [ ] Record the removals of Phases 4 to 7 in the feature validation and the
   Consul plan checklist.
 - [ ] Update the administrative interface's plan and task list for Phase 4:
   the plan's section 4.1, the list's read APIs, its reserved path segments,
-  and the development proxy lose the routes Phase 4 removes: `/api/v1/agents`,
+  and the development proxy lose the routes Phase 4 removes: `/api/v1/clients`,
   `/status`, and bare `/health`.
 - [ ] Update the membership list for its resumption: the class names in its
   Step 5 contract, after Phases 3 and 5. The Phase 3 name,
@@ -1078,5 +1204,5 @@ What remains for this phase:
 - New features: key/value completion, consistency modes, sessions, tenancy, security.
 - The gRPC `DistributedStateService`: the key/value completion list decides
   whether `/v1/kv` replaces it.
-- The client's local API, the move of the server's `/v1/agent/*` paths, and
+- The client's local API, the move of the server's `/v1/client/*` paths, and
   DNS. The first two are in the client list; DNS gets a later list.

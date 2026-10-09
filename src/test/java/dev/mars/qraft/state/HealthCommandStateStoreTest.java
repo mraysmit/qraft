@@ -173,7 +173,7 @@ class HealthCommandStateStoreTest {
                 new String(restored.takeSnapshot(), java.nio.charset.StandardCharsets.UTF_8));
 
         restored.restoreSnapshot("""
-                {"agents":{},"metadata":{"version":"3.0"},"services":[],"lastAppliedIndex":4}
+                {"clients":{},"metadata":{"version":"3.0"},"services":[],"lastAppliedIndex":4}
                 """.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         assertTrue(restored.healthChecks().isEmpty());
     }
@@ -208,7 +208,7 @@ class HealthCommandStateStoreTest {
 
         store.apply(CatalogCommand.register(instance(), List.of("tcp")));
 
-        assertTrue(store.findHealthCheck(check("http")).isEmpty(), "a check removed from the agent is pruned");
+        assertTrue(store.findHealthCheck(check("http")).isEmpty(), "a check removed from the client is pruned");
         assertTrue(store.findHealthCheck(check("tcp")).isPresent());
         assertEquals(ServiceHealth.PASSING, service(store).health());
 
@@ -218,7 +218,7 @@ class HealthCommandStateStoreTest {
     }
 
     @Test
-    void registrationThatDeclaresNothingKeepsExistingChecksForOlderAgents() {
+    void registrationThatDeclaresNothingKeepsExistingChecksForOlderClients() {
         QraftStateStore store = registeredStore();
         store.apply(CatalogCommand.observe(observation(check("http"), ServiceHealth.PASSING, 1, true, "ok"), ACCEPTED_AT));
 

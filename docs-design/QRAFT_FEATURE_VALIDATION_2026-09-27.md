@@ -11,7 +11,7 @@ goes further than its first increment
 
 ## 1. Summary
 
-The runtime, Raft, the service catalog, health propagation, and the client agent
+The runtime, Raft, the service catalog, health propagation, and the client
 are implemented and verified, including multi-node container acceptance. Five
 feature areas the plans require are missing or only partly present:
 
@@ -38,19 +38,19 @@ Status key:
 
 | Area | Feature | Status | Evidence or gap |
 |---|---|---|---|
-| Runtime | `qraft server` from one image; file configuration validated before resources open | Done | `QraftRuntimeApplication`, `AppConfig`, `QraftControllerLifecycleTest` |
+| Runtime | `qraft server` from one image; file configuration validated before resources open | Done | `QraftRuntimeApplication`, `AppConfig`, `QraftServerLifecycleTest` |
 | Runtime | Drain before shutdown; bounded shutdown | Done | `ShutdownCoordinator`, `RaftNodeShutdownSequencingTest` |
 | Runtime | Readiness that reflects recovery, fencing, draining, and leadership (design 6.1) | Done | `HttpApiServerReadinessTest`; done 2026-09-27 |
 | Raft | Election, replication, check-quorum, fencing | Done | `RaftNode*Test`, `RaftNodeCheckQuorumTest` |
-| Raft | Durable WAL, snapshots in every role, installation, recovery | Done | `RaftNodeFollowerLogTest`, `DockerDurableRestartTest`, `DockerAgentRecoveryTest` |
+| Raft | Durable WAL, snapshots in every role, installation, recovery | Done | `RaftNodeFollowerLogTest`, `DockerDurableRestartTest`, `DockerClientRecoveryTest` |
 | Raft | Replica determinism; follower match index limited to verified entries | Done | `ReplicaDeterminismTest`, `RaftNodeFollowerLogTest` |
 | Raft | Adding or removing servers (membership change) | Partial | Updated 2026-10-02. Durable server IDs, the configuration in the replicated log, bootstrapping, and non-voter promotion are done (`RaftNodeServerIdentityTest`, `RaftNodeConfigurationChangeTest`, `RaftNodePromotionTest`). Joining, operator list and remove, and leader stickiness against disruptive servers are built and pass the default and Docker suites; mutation validation is outstanding (`RaftNodeMembershipTest`, `MembershipServiceTest`); failed-server cleanup and lost-quorum recovery are open. See [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md) |
-| Catalog | Register and deregister through Raft; composite identity; idempotence | Done | `HttpApiServerTest`, `AgentEndToEndTest` |
+| Catalog | Register and deregister through Raft; composite identity; idempotence | Done | `HttpApiServerTest`, `ClientEndToEndTest` |
 | Catalog | Catalog and health queries with deterministic ordering | Done | `ServiceCatalog` sorts names and instances |
 | Catalog | Registration and modification indexes on instances (design 7.5) | Missing | `ServiceInstance` has no index fields |
 | Catalog | Reads scoped by tenant and namespace | Done | Catalog and health reads honour the scope headers; `HttpApiServerTest`, `ServiceCatalogTest`; done 2026-09-27 |
 | Health | Ordered observations, derived service health, all five states | Done | `HealthCommandStateStoreTest`, `HealthPropagationEndToEndTest` |
-| Health | Leader-owned expiry and automatic deregistration | Done | `LeaderHealthExpiry*Test`, `CrashedAgentExpiryEndToEndTest` |
+| Health | Leader-owned expiry and automatic deregistration | Done | `LeaderHealthExpiry*Test`, `CrashedClientExpiryEndToEndTest` |
 | Health | Node membership expiry: unreachable, then reaped | Done | `NodeExpiryEvaluatorTest`, `NodeMembershipExpiryStateStoreTest` |
 | Key/value | Replicated put, get, delete, and list | Partial | gRPC `DistributedStateService` only, with string values |
 | Key/value | HTTP `/v1/kv/{key}` (Consul plan phase 2) | Missing | No route |
@@ -62,7 +62,7 @@ Status key:
 | Locks | Acquire and release on keys, owner enforcement, leader-election helpers | Missing | — |
 | Consistency | `default`, `stale`, and `consistent` reads (design 13) | Missing | Every read is the answering node's applied state |
 | Consistency | Blocking queries on the index (design 10, 12.3) | Missing | — |
-| Consistency | Monotonic applied index on reads | Partial | `X-Qraft-Index` on catalog and health reads; not on agent or Raft reads |
+| Consistency | Monotonic applied index on reads | Partial | `X-Qraft-Index` on catalog and health reads; not on client or Raft reads |
 | Consistency | Leader forwarding for writes | Partial | Leader hint (`X-Qraft-Leader-Id`) and seed rotation; forwarding is out of scope by decision |
 | API | Structured error envelope with request ID | Done | `code`, `message`, `retryable`, `requestId`; the deprecated `error` field is due for removal after 2026-12-31 |
 | Tenancy | Tenant and namespace identity in catalog commands and keys | Done | Composite `ServiceInstanceId` |
@@ -81,15 +81,15 @@ Status key:
 
 | Feature | Status | Evidence or gap |
 |---|---|---|
-| `qraft client` from one image; file configuration validated first | Done | `AgentConfiguration`, `QraftRuntimeApplicationTest` |
-| Local liveness and readiness from membership, convergence, required checks, and controller contact | Done | `QraftAgentTest`, `DockerAgentRecoveryTest` |
-| Node registration, heartbeats, capped backoff, seed rotation, preferred endpoint | Done | `AgentRegistrationClientTest`, `HttpCatalogClientTest` |
+| `qraft client` from one image; file configuration validated first | Done | `ClientConfiguration`, `QraftRuntimeApplicationTest` |
+| Local liveness and readiness from membership, convergence, required checks, and server contact | Done | `QraftClientTest`, `DockerClientRecoveryTest` |
+| Node registration, heartbeats, capped backoff, seed rotation, preferred endpoint | Done | `RegistrationClientTest`, `HttpCatalogClientTest` |
 | Single-flight service reconciliation with fingerprints | Done | `ServiceReconcilerTest` |
 | HTTP, TCP (with a warning threshold), and TTL checks; sequenced publication and renewal | Done | `*CheckRunnerTest`, `HealthPublisherTest` |
-| Bounded graceful shutdown: checks, services, then node | Done | `QraftAgentTest`, `DockerAgentHealthTest` |
-| Recovery from crash, partition, and whole-cluster outage | Done | `DockerAgentRecoveryTest`, `DockerAgentHealthTest` |
-| A generated node identity persisted locally (design 7.3) | Missing | Deferred by the health-propagation list; `agent.id` is required in configuration |
-| Agent metrics: reconciliation attempts, failures, endpoint, readiness (design 18) | Missing | The agent has no metrics |
+| Bounded graceful shutdown: checks, services, then node | Done | `QraftClientTest`, `DockerClientHealthTest` |
+| Recovery from crash, partition, and whole-cluster outage | Done | `DockerClientRecoveryTest`, `DockerClientHealthTest` |
+| A generated node identity persisted locally (design 7.3) | Missing | Deferred by the health-propagation list; `client.id` is required in configuration |
+| Client metrics: reconciliation attempts, failures, endpoint, readiness (design 18) | Missing | The client has no metrics |
 | Client libraries for key/value, sessions, and leader election | Missing | Depends on the server features |
 
 ## 4. Consistency of the plans with the code
@@ -97,13 +97,13 @@ Status key:
 - **Legacy concepts remained.** Resolved 2026-09-27 by
   [`task-list-platform-hygiene-and-readiness-2026-09-27.md`](../docs/archive/task-list-platform-hygiene-and-readiness-2026-09-27.md).
   The Consul plan's completion criteria require that no job or workflow concepts
-  remain. `AgentStatus` still has
+  remain. `ClientStatus` still has
   `getJobAssignmentPriority()`, which nothing calls, and the work-scheduling
-  states `IDLE`, `ACTIVE`, and `OVERLOADED`. The `AgentSystemInfo` Javadoc
+  states `IDLE`, `ACTIVE`, and `OVERLOADED`. The `ClientSystemInfo` Javadoc
   describes "capacity planning and job assignment".
 - **The Consul plan's checklist was stale.** Reconciled 2026-09-27. Several
   unchecked items were done:
-  - agent membership and failure detection;
+  - client membership and failure detection;
   - health checks and health-state propagation through Raft;
   - multi-node integration and failure-injection coverage.
 
@@ -129,16 +129,16 @@ need:
 5. **Sessions and locks.** Replicated sessions with TTL and expiry, key
    acquire and release with owner enforcement, and a leader-election helper.
 6. **Tenancy end to end.** Replicated tenants and namespaces with validation
-   and lifecycle, and scoped reads for agents and key/value. Catalog and health
+   and lifecycle, and scoped reads for clients and key/value. Catalog and health
    reads are scoped as of 2026-09-27.
-7. **Observability.** Catalog, health, request, agent, and session metrics; a
+7. **Observability.** Catalog, health, request, client, and session metrics; a
    leader-side membership and replication status; and storage and snapshot
    status.
 8. **Events.** The `qraft-events` bounded journal, phases 1 to 4 of the event
    architecture.
 9. **Security.** Authentication, ACL tokens and policies, and audit events.
    The token and ACL core is proposed, as of 2026-10-05, to come earlier,
-   straight after the client agent:
+   straight after the client:
    [`task-list-acl-and-tokens-2026-10-05.md`](task-list-acl-and-tokens-2026-10-05.md).
 10. **Deferred until decided.** DNS discovery, and persisted generated node
     identity. Server membership change was decided on 2026-09-29 and is in

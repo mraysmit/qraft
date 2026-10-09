@@ -42,7 +42,7 @@ Write-Host "   Generating log activity..." -ForegroundColor Cyan
 # Generate a heartbeat to create logs
 $timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 $json = @{
-    agentId = "demo-agent"
+    clientId = "demo-client"
     timestamp = $timestamp
     sequenceNumber = 999
     status = "healthy"
@@ -50,14 +50,14 @@ $json = @{
 
 Write-Host "   Sending heartbeat to generate logs..." -ForegroundColor White
 try {
-    $response = Invoke-RestMethod -Uri \"http://localhost:8081/api/v1/agents/heartbeat\" -Method POST -Body $json -ContentType \"application/json\" -ErrorAction Stop
+    $response = Invoke-RestMethod -Uri \"http://localhost:8081/api/v1/clients/heartbeat\" -Method POST -Body $json -ContentType \"application/json\" -ErrorAction Stop
     Write-Host "   ✓ Heartbeat sent successfully" -ForegroundColor Green
 } catch {
-    Write-Host "   ⚠ Need to register agent first..." -ForegroundColor Yellow
+    Write-Host "   ⚠ Need to register client first..." -ForegroundColor Yellow
     try {
-        $regResponse = Invoke-RestMethod -Uri "http://localhost:8081/api/v1/agents/register" -Method POST -Body (Get-Content test-registration.json -Raw) -ContentType "application/json" -ErrorAction Stop
-        Write-Host "   ✓ Agent registered" -ForegroundColor Green
-        $response = Invoke-RestMethod -Uri "http://localhost:8081/api/v1/agents/heartbeat" -Method POST -Body $json -ContentType "application/json" -ErrorAction Stop
+        $regResponse = Invoke-RestMethod -Uri "http://localhost:8081/api/v1/clients/register" -Method POST -Body (Get-Content test-registration.json -Raw) -ContentType "application/json" -ErrorAction Stop
+        Write-Host "   ✓ Client registered" -ForegroundColor Green
+        $response = Invoke-RestMethod -Uri "http://localhost:8081/api/v1/clients/heartbeat" -Method POST -Body $json -ContentType "application/json" -ErrorAction Stop
         Write-Host "   ✓ Heartbeat sent successfully" -ForegroundColor Green
     } catch {
         Write-Host "   ✗ Failed to generate logs: $($_.Exception.Message)" -ForegroundColor Red

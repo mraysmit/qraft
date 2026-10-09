@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.client.service;
 
-import dev.mars.qraft.client.config.AgentConfiguration;
+import dev.mars.qraft.client.config.ClientConfiguration;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
@@ -40,13 +40,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class HealthServiceTest {
     @Test
-    void tracksLocalAgentHealth() {
-        AgentConfiguration config = AgentConfiguration.builder()
-                .agentId("agent-1").controllerUrl("http://localhost").agentPort(0).build();
+    void tracksLocalClientHealth() {
+        ClientConfiguration config = ClientConfiguration.builder()
+                .clientId("client-1").serverUrl("http://localhost").clientPort(0).build();
         HealthService health = new HealthService(config, () -> false);
 
         assertFalse(health.isHealthy());
-        assertEquals("agent-1", health.agentId());
+        assertEquals("client-1", health.clientId());
         health.start();
         assertTrue(health.isHealthy());
         health.shutdown();
@@ -55,8 +55,8 @@ class HealthServiceTest {
 
     @Test
     void servesLivenessAndReadinessEndpoints() throws Exception {
-        AgentConfiguration config = AgentConfiguration.builder()
-                .agentId("agent-health").controllerUrl("http://localhost").agentPort(0).build();
+        ClientConfiguration config = ClientConfiguration.builder()
+                .clientId("client-health").serverUrl("http://localhost").clientPort(0).build();
         AtomicBoolean ready = new AtomicBoolean();
         HealthService health = new HealthService(config, ready::get);
         HttpClient client = HttpClient.newHttpClient();
@@ -80,8 +80,8 @@ class HealthServiceTest {
 
     @Test
     void reportsThePortItBoundOnlyWhileRunning() throws Exception {
-        AgentConfiguration config = AgentConfiguration.builder()
-                .agentId("agent-port").controllerUrl("http://localhost").agentPort(0).build();
+        ClientConfiguration config = ClientConfiguration.builder()
+                .clientId("client-port").serverUrl("http://localhost").clientPort(0).build();
         HealthService health = new HealthService(config, () -> true);
 
         assertThrows(IllegalStateException.class, health::port, "no port is bound before start");

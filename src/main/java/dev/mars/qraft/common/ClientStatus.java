@@ -42,31 +42,31 @@ import java.util.Locale;
  * @since 2025-08-26
  * @version 2.0
  */
-public enum AgentStatus {
+public enum ClientStatus {
 
     /** The node has registered and has not yet sent a heartbeat. */
-    REGISTERING("registering", "Agent is registering with the controller", false),
+    REGISTERING("registering", "Client is registering with the server", false),
 
     /** The node is registered and heartbeating. */
-    HEALTHY("healthy", "Agent is healthy", true),
+    HEALTHY("healthy", "Client is healthy", true),
 
     /** The node reports degradation but is still operating. */
-    DEGRADED("degraded", "Agent is experiencing performance issues", true),
+    DEGRADED("degraded", "Client is experiencing performance issues", true),
 
     /** The node has been taken out of service on purpose. */
-    MAINTENANCE("maintenance", "Agent is in maintenance mode", false),
+    MAINTENANCE("maintenance", "Client is in maintenance mode", false),
 
     /** The node has stopped heartbeating for longer than the node TTL. */
-    UNREACHABLE("unreachable", "Agent is unreachable", false),
+    UNREACHABLE("unreachable", "Client is unreachable", false),
 
     /**
      * The node has encountered a critical error and requires intervention. This is not terminal: the node
      * can still be {@linkplain #DEREGISTERED deregistered}.
      */
-    FAILED("failed", "Agent has failed and requires intervention", false),
+    FAILED("failed", "Client has failed and requires intervention", false),
 
     /** The node has been removed. This is the only terminal status. */
-    DEREGISTERED("deregistered", "Agent has been deregistered", false);
+    DEREGISTERED("deregistered", "Client has been deregistered", false);
 
     private final String value;
     private final String description;
@@ -77,7 +77,7 @@ public enum AgentStatus {
      * @param description a human-readable description
      * @param operational whether a node in this status is operating
      */
-    AgentStatus(String value, String description, boolean operational) {
+    ClientStatus(String value, String description, boolean operational) {
         this.value = value;
         this.description = description;
         this.operational = operational;
@@ -126,16 +126,16 @@ public enum AgentStatus {
      *
      * @throws IllegalArgumentException if the value is {@code null} or not a current status
      */
-    public static AgentStatus fromValue(String value) {
+    public static ClientStatus fromValue(String value) {
         if (value == null) {
-            throw new IllegalArgumentException("Agent status value must not be null");
+            throw new IllegalArgumentException("Client status value must not be null");
         }
-        for (AgentStatus status : values()) {
+        for (ClientStatus status : values()) {
             if (status.value.equalsIgnoreCase(value)) {
                 return status;
             }
         }
-        throw new IllegalArgumentException("Unknown agent status: " + value);
+        throw new IllegalArgumentException("Unknown client status: " + value);
     }
 
     /**
@@ -145,7 +145,7 @@ public enum AgentStatus {
      * {@link #MAINTENANCE}. Every replica therefore restores the same state.
      */
     @JsonCreator
-    public static AgentStatus fromStoredValue(String value) {
+    public static ClientStatus fromStoredValue(String value) {
         if (value != null) {
             switch (value.toLowerCase(Locale.ROOT)) {
                 case "active", "idle" -> {

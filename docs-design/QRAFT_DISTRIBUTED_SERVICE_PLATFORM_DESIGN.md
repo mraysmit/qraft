@@ -7,7 +7,7 @@
 
 Qraft is a distributed service-discovery and coordination platform built around a
 Raft-replicated state machine. It provides a single runtime that can operate as a
-cluster server or as a client agent, together with APIs for service registration,
+cluster server or as a client, together with APIs for service registration,
 discovery, health, key/value data, sessions, and locks.
 
 This document records the current architecture, the target design, the important
@@ -51,8 +51,8 @@ Public HTTP and external gRPC DTOs stay at adapter boundaries and map explicitly
 to domain commands. Protobuf Java packages follow ownership while the wire
 namespaces `qraft.raft` and `qraft.api` remain unchanged.
 
-The client configuration retains its `agent` and `controllers` objects;
-`/v1/agent/*` paths move in the client implementation plan. Node models remain
+The client configuration retains its `client` and `servers` objects;
+`/v1/client/*` paths move in the client implementation plan. Node models remain
 shared until Phase 4 replaces the inherited fleet fields.
 
 Until 2026-10-04 the build had seven Maven modules. The unused `qraft-tenant`
@@ -75,14 +75,14 @@ and acceptance requirements.
   mutation through Raft and acknowledge it only after it is committed and
   applied. No HTTP handler, background task, or administrative operation may
   create a competing mutation path around consensus.
-- **Independent client agents.** Keep client agents outside the Raft quorum so
+- **Independent clients.** Keep clients outside the Raft quorum so
   workload nodes can scale, restart, and lose connectivity without changing
-  consensus membership. Agents contribute registrations and observations;
+  consensus membership. Clients contribute registrations and observations;
   servers decide and retain authoritative cluster state.
 - **Scoped and useful discovery.** Discover services by tenant, namespace,
   service name, and health state, with stable instance identity and deterministic
   ordering. Callers must be able to distinguish healthy candidates, degraded
-  candidates, and absent services without depending on controller-local state.
+  candidates, and absent services without depending on server-local state.
 - **Deterministic replicated behavior.** Applying the same committed command
   sequence and snapshot must produce the same state and indexes on every server.
   State-machine application therefore cannot depend on a local clock, network
@@ -140,7 +140,7 @@ and acceptance requirements.
    clusters rather than mocking frameworks. Tests at persistence, transport, and
    packaging boundaries verify serialization, failure behavior, recovery, and
    cleanup as well as the successful path.
-8. **Keep consensus membership server-only.** Client agents never participate in
+8. **Keep consensus membership server-only.** Clients never participate in
    Raft elections, quorum membership, or log replication. They communicate only
    through public control-plane protocols, allowing the client population to
    change independently of the small, deliberately configured server quorum.
@@ -155,13 +155,13 @@ packages the runtime and selects the mode through its command, never through an
 environment variable.
 
 The runtime resolves the selected versioned configuration file before dispatch,
-then launches the controller or agent through an injected mode boundary. Both
+then launches the server or client through an injected mode boundary. Both
 modes return the same runtime-owned lifecycle, which exposes completion and one
 idempotent asynchronous close operation. The process entry point and shutdown
 hook use that lifecycle directly; neither mode is started by invoking another
 application's static `main` method. A runtime-boundary acceptance test exercises
 real server and client startup, registration, discovery, readiness loss,
-controller restart and reconciliation, deregistration, and ordered shutdown.
+server restart and reconciliation, deregistration, and ordered shutdown.
 
 ### 4.2 Server
 
@@ -313,7 +313,7 @@ the exact sequence and deadline. Catalog and health-check contents are included 
 snapshots, and the command codec can read legacy JSON log entries during
 migration.
 
-`PUT /v1/agent/check/observe` stamps each observation with the receiving server's
+`PUT /v1/client/check/observe` stamps each observation with the receiving server's
 time before proposing it. `GET /v1/health/service/{serviceName}` returns each
 instance with its replicated checks and can be filtered to passing instances
 (section 12.1.1).
@@ -323,38 +323,38 @@ commands, and followers apply them only as committed log entries. A registration
 may declare its check IDs; re-registering prunes undeclared checks and rejects
 later observations for them.
 
-### 4.3 Client agent
+### 4.3 Client
 
 Client mode currently owns:
 
 - A local identity and network address.
 - A JDK HTTP liveness and readiness server.
-- An agent-membership facade over the shared outbound controller client.
-- A validated list of controller seeds and local service definitions.
+- A client-membership facade over the shared outbound server client.
+- A validated list of server seeds and local service definitions.
 - A `CatalogClient` port and `HttpCatalogClient` adapter for service registration,
-  deregistration, and scoped presence reads across controller seeds.
+  deregistration, and scoped presence reads across server seeds.
 - A single-flight reconciler for enabled local service definitions.
 - A scheduled heartbeat publisher.
 - `LocalHealthChecks`, which runs configured HTTP, TCP, and TTL checks
   independently through an injected scheduler and clock and accepts
   process-local TTL status through `LocalStatusReporter`.
 - `HealthPublisher`, which publishes check results as sequenced observations
-  through the shared controller client.
+  through the shared server client.
 
-The client registers its node identity through the controller's
-`/api/v1/agents/register`, `/api/v1/agents/heartbeat`, and
-`DELETE /api/v1/agents/{agentId}` endpoints. A failed initial registration
+The client registers its node identity through the server's
+`/api/v1/clients/register`, `/api/v1/clients/heartbeat`, and
+`DELETE /api/v1/clients/{clientId}` endpoints. A failed initial registration
 keeps the local health server live and unready and retries in the background;
 readiness is derived continuously from lifecycle state, accepted node
 registration, convergence of every enabled local service definition, required
-checks, and the freshness of the last successful controller response.
+checks, and the freshness of the last successful server response.
 
 Checks of enabled services start once node registration is accepted. The
-required-check readiness policy is: the agent is unready while any required check
+required-check readiness policy is: the client is unready while any required check
 has produced no result yet, or its latest local result is critical. Warning and
-maintenance results keep the agent ready, optional checks never affect readiness,
+maintenance results keep the client ready, optional checks never affect readiness,
 and liveness is unaffected by check results. Readiness therefore follows the
-health of the workloads the agent represents, while controller outages continue
+health of the workloads the client represents, while server outages continue
 to withdraw readiness through contact freshness.
 
 `HealthPublisher` keeps at most one publication in flight per check and
@@ -362,7 +362,7 @@ coalesces results that arrive meanwhile to the latest. A changed status or outpu
 is published immediately. An unchanged result is republished as a renewal once
 half the check's TTL has passed since the last acceptance. Sequence numbers are
 strictly increasing per check and start from the wall clock in milliseconds, so a
-restarted agent normally exceeds the sequence its predecessor left behind. A
+restarted client normally exceeds the sequence its predecessor left behind. A
 `stale_observation` answer raises the floor to the server's current sequence and
 republishes. Retryable failures and `service_not_found` answers resend the same
 observation after the capped registration backoff, which the server treats as an
@@ -375,7 +375,7 @@ outcomes. Catalog operations, node registration, heartbeat, and node deregistrat
 share this classified transport. It owns and idempotently closes its JDK
 `HttpClient`.
 
-After node registration, `QraftAgent` immediately reconciles enabled service
+After node registration, `QraftClient` immediately reconciles enabled service
 definitions and schedules subsequent passes on its lifecycle-owned scheduler.
 Successful registrations are retained across partial failures. Unchanged
 definitions are verified by catalog read rather than rewritten; missing instances
@@ -388,26 +388,26 @@ are not implemented. The reconciler's removal path is therefore exercised by its
 mutable source contract and tests today and becomes externally reachable when a
 future reload mechanism supplies a changed definition set.
 
-Node, heartbeat, and catalog operations update one controller-contact timestamp.
+Node, heartbeat, and catalog operations update one server-contact timestamp.
 If that timestamp becomes older than `catalog.contactFreshnessMs`, readiness
 returns 503 while liveness and background reconciliation continue. A later
 successful response restores readiness once node membership and service
-convergence are also satisfied. An agent with no service definitions requires
-only accepted node registration and fresh controller contact.
+convergence are also satisfied. A client with no service definitions requires
+only accepted node registration and fresh server contact.
 
 Rejected node and service registrations are logged with their machine-readable
-code and message while the agent remains live and unready. On shutdown, the client
+code and message while the client remains live and unready. On shutdown, the client
 withdraws readiness before stopping scheduled work. It waits for an active
 reconciliation pass, deregisters every service known to have committed, prevents
 new node registrations, waits for an in-flight node registration, and then sends
 an idempotent node deregistration before stopping local health and HTTP resources.
-All callers share one completion bounded by `agent.shutdownTimeoutMs`; when the
+All callers share one completion bounded by `client.shutdownTimeoutMs`; when the
 deadline expires, outstanding HTTP work is cancelled and incomplete cleanup is
 reported once.
 
 ### 4.4 Known model gaps
 
-- Client operations rotate across ordered controller seeds on retryable outcomes,
+- Client operations rotate across ordered server seeds on retryable outcomes,
   stop on rejection, and remember the last successful endpoint.
 - Reconciliation runs at the configured heartbeat cadence and has no independent
   exponential-backoff schedule. Repeated node-registration cycles use the
@@ -443,14 +443,14 @@ Applications and operators
           | registration, health observations, renewal
           |
 +---------+----------+       +-------------------------+
-| Client agent       |       | Client agent            |
+| Client              |       | Client                   |
 | node-a              |       | node-b                  |
 | local checks        |       | local checks            |
 | service definitions |       | service definitions     |
 +--------------------+       +-------------------------+
 ```
 
-Servers are authoritative for committed cluster state. Client agents are
+Servers are authoritative for committed cluster state. Clients are
 authoritative only for local observations and submit those observations as
 commands to the server cluster.
 
@@ -489,11 +489,11 @@ not exist yet. `/health/live` is unaffected by every condition.
 
 `qraft client`:
 
-- Validates client identity, controller seeds, and service definitions.
+- Validates client identity, server seeds, and service definitions.
 - Starts local liveness before contacting the cluster.
 - Reconciles configured services with the replicated catalog.
 - Runs local health checks and publishes changes or TTL renewals.
-- Remains live but unready during a controller outage.
+- Remains live but unready during a server outage.
 - Never opens Raft transport or durable Raft storage.
 
 ## 7. Domain model
@@ -513,20 +513,20 @@ A namespace is an isolation boundary within a tenant, commonly representing an
 environment, team, or application group. Every namespaced resource defaults to
 the `default` namespace when no explicit value is supplied.
 
-### 7.3 Agent and node
+### 7.3 Client and node
 
-An agent is the client-mode process. A node is the stable logical identity that
-the agent represents. One node can host multiple service instances.
+A client is the client-mode process. A node is the stable logical identity that
+the client represents. One node can host multiple service instances.
 
-`nodeId` must remain stable across ordinary agent restarts. An automatically
+`nodeId` must remain stable across ordinary client restarts. An automatically
 generated ID must be persisted locally; a hostname alone is not a sufficient
 identity in environments where names can be reused.
 
-Agent state includes:
+Client state includes:
 
 - Tenant and namespace context.
 - Node ID, hostname, address, datacenter, and region.
-- Agent version and metadata.
+- Client version and metadata.
 - Last accepted contact and lifecycle status.
 - Locally configured service definitions and health checks.
 
@@ -566,7 +566,7 @@ registration index, modification index, and optional deregistration deadline.
 
 ### 7.6 Health
 
-Health is server-owned state based on observations reported by agents or produced
+Health is server-owned state based on observations reported by clients or produced
 by server-side checks. The target states are:
 
 - `UNKNOWN`: no valid observation has been accepted.
@@ -582,21 +582,21 @@ authoritative health result.
 
 ### 8.1 Registration flow
 
-1. The agent loads and validates all service definitions.
+1. The client loads and validates all service definitions.
 2. The local health server becomes live and reports not ready.
-3. The agent selects a configured controller seed.
+3. The client selects a configured server seed.
 4. Each enabled definition is submitted as an idempotent registration request.
 5. The receiving server validates and proposes a Raft command.
 6. Success is returned only after the command is committed and applied.
-7. The agent becomes ready after every required definition is registered and
-   controller contact is sufficiently recent.
+7. The client becomes ready after every required definition is registered and
+   server contact is sufficiently recent.
 
-Partial registration is retained. The agent retries only missing or changed
+Partial registration is retained. The client retries only missing or changed
 definitions and does not roll back successfully committed registrations.
 
 ### 8.2 Reconciliation
 
-The agent periodically reconciles its startup service-definition snapshot rather
+The client periodically reconciles its startup service-definition snapshot rather
 than relying on one startup request. Reconciliation repairs state after
 administrative deletion or interrupted communication. Its source abstraction can
 also reconcile changed or removed definitions, but the production JSON source is
@@ -606,9 +606,9 @@ implemented.
 Only one reconciliation may run at a time. A stable content fingerprint prevents
 unnecessary writes when the desired definition has not changed.
 
-### 8.3 Controller selection and retry
+### 8.3 Server selection and retry
 
-Client configuration supplies an ordered, deduplicated list of controller seed
+Client configuration supplies an ordered, deduplicated list of server seed
 URIs. For an idempotent operation, the client may try each seed once in a cycle.
 
 Retryable outcomes include:
@@ -629,7 +629,7 @@ operation, irrespective of whether it is a leader or follower.
 ### 8.4 Deregistration
 
 Deregistration is node-scoped and idempotent. Removing an absent instance is a
-successful no-op. During graceful shutdown, the agent:
+successful no-op. During graceful shutdown, the client:
 
 1. Marks itself unready.
 2. Stops local checks and health publications, then waits for in-flight
@@ -640,7 +640,7 @@ successful no-op. During graceful shutdown, the agent:
 6. Closes its scheduler and HTTP resources.
 
 Repeated and concurrent shutdown calls share one completion. The entire sequence
-is bounded by the positive `agent.shutdownTimeoutMs` file setting, which defaults
+is bounded by the positive `client.shutdownTimeoutMs` file setting, which defaults
 to 30 seconds. Deadline expiry force-cancels outstanding HTTP work and logs one
 incomplete-cleanup warning; it does not delay process termination indefinitely.
 
@@ -648,17 +648,17 @@ Automatic expiry remains necessary because graceful shutdown cannot be guarantee
 
 ## 9. Health checks and failure detection
 
-Agents execute checks close to the workload and report observations. Initial
+Clients execute checks close to the workload and report observations. Initial
 check types are:
 
 - TTL renewal.
 - HTTP request.
 - TCP connection.
-- Process-local status supplied through an agent API.
+- Process-local status supplied through a client API.
 
 Each observation contains tenant, namespace, node, service, check ID, status,
 sequence number, observed time, and optional diagnostic output. Servers reject
-stale sequence numbers. Server time determines expiry deadlines so agent clock
+stale sequence numbers. Server time determines expiry deadlines so client clock
 skew cannot indefinitely preserve a registration.
 
 TTL expiry and automatic deregistration must be deterministic. A leader evaluates
@@ -676,7 +676,7 @@ after five seconds so a lost proposal is re-evaluated.
 
 The side-effect-free `HealthExpiryEvaluator` applies these rules:
 
-- **Grace after failover.** Agents cannot renew while there is no leader, and
+- **Grace after failover.** Clients cannot renew while there is no leader, and
   servers' clocks may differ. A check is therefore due only at the later of its
   stored deadline and the current leader's acquisition time plus the check's TTL.
   A failover never mass-expires checks, and a leader whose clock runs ahead still
@@ -692,15 +692,15 @@ The side-effect-free `HealthExpiryEvaluator` applies these rules:
 - **Saturation.** Deadlines beyond the representable time range never fall due.
 
 Deregistration removes the instance, its checks, and its declared check set. An
-agent that is still alive re-registers the instance through reconciliation.
+client that is still alive re-registers the instance through reconciliation.
 
 ### 9.2 Node membership expiry
 
 The same leader-only component expires silent nodes under a server-wide policy:
 `server.health.nodeTtlMs` (default 90000) and `server.health.nodeReapAfterMs`
 (default 259200000, 72 hours, Consul's reconnect window; 0 never reaps). Node registration and heartbeat times are
-stamped with the receiving server's clock; the timestamp an agent sends is
-ignored. All replicated agent command times are stored in milliseconds, so the
+stamped with the receiving server's clock; the timestamp a client sends is
+ignored. All replicated client command times are stored in milliseconds, so the
 leader and its followers hold identical values that expiry can match exactly.
 
 - A node's last contact is its last heartbeat, or its registration time before
@@ -711,7 +711,7 @@ leader and its followers hold identical values that expiry can match exactly.
 - With a positive reap delay, an unreachable node is reaped that long after its
   effective deadline. Reaping removes the node entry and every service instance
   whose node is that node, in every tenant and namespace, together with their
-  checks and declared check sets. This removes the services of a crashed agent
+  checks and declared check sets. This removes the services of a crashed client
   even when they have no checks.
 - Both phases name the stored last contact, so a heartbeat or re-registration
   committed first makes a stale command a no-op. Reaping applies only to a node
@@ -756,9 +756,9 @@ than a separate consensus mechanism.
 Initial HTTP endpoints are:
 
 ```text
-PUT /v1/agent/service/register
-PUT /v1/agent/service/deregister/{serviceId}
-PUT /v1/agent/check/observe
+PUT /v1/client/service/register
+PUT /v1/client/service/deregister/{serviceId}
+PUT /v1/client/check/observe
 GET /v1/catalog/services
 GET /v1/catalog/service/{serviceName}
 GET /v1/health/service/{serviceName}
@@ -796,11 +796,11 @@ The registration body is:
 
 `tags` and `metadata` default to empty collections, while `datacenter` and
 `region` default to empty strings. `checks` optionally declares the check IDs the
-agent will publish for this instance. A registration that declares checks prunes
+client will publish for this instance. A registration that declares checks prunes
 any replicated check not in the list and makes the server reject later
 observations for undeclared checks; an empty list declares that there are none.
-Omitting `checks`, as older agents do, keeps the existing checks and accepts any
-check ID. The agent always declares the checks configured for the service. Unknown fields are rejected with
+Omitting `checks`, as older clients do, keeps the existing checks and accepts any
+check ID. The client always declares the checks configured for the service. Unknown fields are rejected with
 `invalid_registration`. For one compatibility window only, a `health` field is
 recognized but ignored; the stored health is always initialized to `UNKNOWN`.
 No aliases are currently accepted.
@@ -828,8 +828,8 @@ instance is already absent.
 
 #### 12.1.1 Health observations and health discovery
 
-Agents report check results and TTL renewals with
-`PUT /v1/agent/check/observe`, using the same identity headers as registration.
+Clients report check results and TTL renewals with
+`PUT /v1/client/check/observe`, using the same identity headers as registration.
 A renewal is simply a newer observation of the same check. The body is:
 
 ```json
@@ -856,7 +856,7 @@ and defaults to zero, meaning the service is never deregistered automatically
 `invalid_observation`.
 
 The receiving server stamps the command with its own receipt time, and the
-deadline is that receipt time plus `ttlMillis`; the agent clock never determines
+deadline is that receipt time plus `ttlMillis`; the client clock never determines
 expiry. Success is returned only after the observation is committed and applied:
 
 ```json
@@ -883,7 +883,7 @@ observation. Other outcomes are:
 - An observation for a composite instance that is not registered returns HTTP 404
   `service_not_found`.
 - An observation for a check that the instance's registration does not declare
-  returns HTTP 404 `check_not_declared` with `checkId`. The agent retries both 404
+  returns HTTP 404 `check_not_declared` with `checkId`. The client retries both 404
   outcomes, because either can be caused by its own re-registration not having
   committed yet.
 
@@ -941,7 +941,7 @@ The current `HttpCatalogClient` applies this contract for registration and
 deregistration. It treats parsed 2xx responses as success; transport failures,
 timeouts, HTTP 429/502/503/504, retryable envelopes, and malformed 5xx bodies as
 retryable; and non-retryable envelopes or malformed 4xx bodies as rejected. A
-returned `leaderId` is exposed as an outcome hint. The shared controller transport
+returned `leaderId` is exposed as an outcome hint. The shared server transport
 rotates through ordered seeds on retryable outcomes and remembers the last
 successful endpoint. Failed node-registration cycles use capped exponential
 backoff with jitter; catalog operations are retried by the periodic reconciler on
@@ -959,7 +959,7 @@ The current catalog read endpoints return the index as `X-Qraft-Index`.
 
 The server provides a built-in administrative interface backed exclusively by
 the same authenticated, authorized APIs available to other clients. It must not
-read or mutate controller implementation objects directly, and it must not
+read or mutate server implementation objects directly, and it must not
 introduce an alternate consistency or persistence path.
 
 The interface is part of the main executable artifact. Its static assets are
@@ -1042,11 +1042,11 @@ The supported capabilities are:
   age, last successful snapshot, and reported persistence or recovery failures;
 - browse services by tenant, namespace, service name, node, tags, metadata, and
   authoritative health state;
-- inspect service instances, their owning agents, configured checks, latest
+- inspect service instances, their owning clients, configured checks, latest
   observations, failure reasons, and registration or renewal status;
 - register, update, and deregister services when the authenticated principal has
   permission, using the normal replicated command path;
-- inspect agents and nodes, including identity, metadata, advertised addresses,
+- inspect clients and nodes, including identity, metadata, advertised addresses,
   owned services, last successful reconciliation, and liveness status;
 - browse key/value entries by tenant, namespace, and prefix, including creation
   and modification indexes, flags, and session ownership;
@@ -1152,7 +1152,7 @@ enforce that:
   without a time decodes to the epoch, not to the replaying node's clock.
 - **Clients do not own server state.** Registration status, registration time,
   heartbeat time, and observation receipt time come from the receiving server.
-  Agent-supplied values for these are ignored, although an observation's
+  Client-supplied values for these are ignored, although an observation's
   `observedAt` is kept for display.
 - **Lossless encoding.** Nullable strings use protobuf `optional` fields, so null
   and the empty string stay distinct. Custom capability values are encoded as
@@ -1160,7 +1160,7 @@ enforce that:
   entries fall back to the legacy text map. Null and empty lists are treated as
   the same.
 - **No shared mutable state.** The state machine stores deep copies of command
-  objects. Readers receive detached copies of agents and a read-only catalog
+  objects. Readers receive detached copies of clients and a read-only catalog
   view, so nothing outside a committed command can change replicated state.
 - **Reproducible snapshots.** Snapshot JSON writes map entries in key order, so
   replicas and JVMs produce identical bytes for identical state.
@@ -1205,7 +1205,7 @@ interface SnapshotStore extends AutoCloseable {
 ```
 
 Qraft uses RaftLog's `RaftStorage` interface directly. A private future-conversion
-helper adapts `CompletableFuture` to the controller runtime without recreating a
+helper adapts `CompletableFuture` to the server runtime without recreating a
 storage interface. No semantic storage adapter exists, so prefix compaction and
 every other WAL operation reach the external implementation.
 
@@ -1485,7 +1485,7 @@ The path names one versioned JSON document. A client document has this shape:
 ```json
 {
   "version": 1,
-  "agent": {
+  "client": {
     "id": "node-a",
     "httpPort": 8080,
     "heartbeatIntervalMs": 5000,
@@ -1493,7 +1493,7 @@ The path names one versioned JSON document. A client document has this shape:
     "datacenter": "dc1",
     "region": "eu-west"
   },
-  "controllers": {
+  "servers": {
     "urls": [
       "http://server-a:8080",
       "http://server-b:8080",
@@ -1515,7 +1515,7 @@ The path names one versioned JSON document. A client document has this shape:
 }
 ```
 
-Every `controllers.urls` entry is an HTTP or HTTPS origin. Paths, queries,
+Every `servers.urls` entry is an HTTP or HTTPS origin. Paths, queries,
 fragments, and user information are rejected. A root trailing slash is removed,
 scheme and host case are normalized, and equivalent origins are deduplicated.
 
@@ -1561,7 +1561,7 @@ A server document uses the same envelope and keeps all server settings beneath
 Listening ports accept 1 to 65535, or 0 to bind any free port:
 
 - This covers `server.http.port`, `server.apiGrpcPort`, `server.raft.port`, and
-  the client's `agent.httpPort`.
+  the client's `client.httpPort`.
 - A component reports the port it actually bound, and its startup log names that
   port. The runtime lifecycle exposes the bound ports by name: `http`, `raft`,
   and `apiGrpc` for a server, and `http` for a client.
@@ -1623,8 +1623,8 @@ their service, and the same ID may be reused by different services:
   warning. The threshold must be shorter than `timeoutMs`, and zero or absent
   never warns.
 - `ttl` has no probe. The local process reports its status (`passing`,
-  `warning`, `critical`, or `maintenance`) through an internal agent input. If no
-  report arrives within `ttlMs`, the agent records a critical result locally.
+  `warning`, `critical`, or `maintenance`) through an internal client input. If no
+  report arrives within `ttlMs`, the client records a critical result locally.
   `ttlMs` is required and it is the only timing setting.
 
 For `http` and `tcp`, `intervalMs` defaults to 10000, `timeoutMs` to the lesser
@@ -1635,11 +1635,11 @@ may set `deregisterAfterMs`: how long the check may stay expired at the server
 before its service is deregistered automatically. It defaults to zero, meaning
 never, and must not be negative. Unknown check settings are rejected.
 
-Each check runs independently on the agent. The next attempt starts only after
+Each check runs independently on the client. The next attempt starts only after
 the previous one completes or times out, so a check never overlaps itself. A
 timeout cancels the in-flight request or connection and records a critical
-result. Diagnostic output is limited to 4096 characters, matching the controller
-limit. Local results never modify server state directly; the agent publishes them
+result. Diagnostic output is limited to 4096 characters, matching the server
+limit. Local results never modify server state directly; the client publishes them
 as health observations (section 12.1.1).
 
 Configuration parsing accepts an injected parsed document for deterministic
@@ -1649,7 +1649,7 @@ Invalid configuration fails before background work starts. Unknown settings,
 missing files, duplicate JSON keys, and environment-style placeholders are
 invalid. A placeholder is any `${` in a string value or field name, in a server
 or client document. The error names its JSON path, such as
-`controllers.urls[0]`. A lone `$` is ordinary text.
+`servers.urls[0]`. A lone `$` is ordinary text.
 
 ## 17. Lifecycle and resource ownership
 
@@ -1678,10 +1678,10 @@ runs inline on a thread the component did not create for that work:
   where a blocked callback would stall every timeout in the process. `Deadlines`
   delivers each timeout on a new virtual thread and releases the pending expiry
   once the result arrives.
-- The controller releases its runtime and telemetry on a virtual thread of its
+- The server releases its runtime and telemetry on a virtual thread of its
   own after the service stops. Otherwise the runtime shutdown could wait for the
   thread running it.
-- The agent awaits executor and HTTP client termination on a virtual thread
+- The client awaits executor and HTTP client termination on a virtual thread
   before reporting shutdown complete.
 
 ## 18. Observability
@@ -1691,7 +1691,7 @@ Required signals include:
 - Raft role, term, commit index, applied index, and leader identity.
 - Replication lag and peer reachability.
 - Catalog registration, deregistration, and health-transition counters.
-- Agent reconciliation attempts, failures, current endpoint, and readiness.
+- Client reconciliation attempts, failures, current endpoint, and readiness.
 - Snapshot age, WAL size, recovery duration, and recovery failures.
 - Request latency and errors by stable route and error code.
 - Session count, expiry count, and lock contention.
@@ -1736,7 +1736,7 @@ Development follows red-green-refactor in small behavioral increments.
 
 Outbound HTTP adapters use a real JDK HTTP fixture to verify method, path, headers,
 body, timeout, response parsing, failure classification, and resource cleanup.
-Controller HTTP tests run against a real bound port and a real single-node Raft
+Server HTTP tests run against a real bound port and a real single-node Raft
 state machine.
 
 Administrative-resource tests run against the same real HTTP server and verify
@@ -1760,7 +1760,7 @@ In-memory and real-transport clusters cover:
 - Conflicting uncommitted entries.
 - Partition healing and follower catch-up.
 - Snapshot installation and restart recovery.
-- Client failover across controller seeds.
+- Client failover across server seeds.
 
 ### 19.6 Container acceptance tests
 
@@ -1823,7 +1823,7 @@ Status: complete (verified 2026-09-24).
 
 1. [x] Add real-HTTP contract tests for registration and deregistration.
 2. [x] Implement `CatalogClient` and `HttpCatalogClient`.
-3. [x] Replace the legacy agent HTTP path with the shared classified controller
+3. [x] Replace the legacy client HTTP path with the shared classified server
    transport and seed selector.
 
 ### Tranche 4: Reconciliation and readiness
@@ -1832,7 +1832,7 @@ Status: complete (verified 2026-09-24).
 
 1. [x] Add reconciliation tests for partial registration, recovery, changed and
    deleted definitions, rejection suppression, and overlapping triggers.
-2. [x] Implement single-flight reconciliation and controller-seed rotation.
+2. [x] Implement single-flight reconciliation and server-seed rotation.
 3. [x] Keep liveness active during cluster outages and derive readiness from policy.
 
 ### Tranche 5: Unified runtime flow
@@ -1843,7 +1843,7 @@ Status: complete (verified 2026-09-25).
 2. [x] Give both production modes one runtime-owned managed lifecycle.
 3. [x] Start one real server and one real client through the runtime boundary.
 4. [x] Verify registration, discovery, readiness loss and recovery,
-   reconciliation after controller restart, deregistration, and shutdown end to
+   reconciliation after server restart, deregistration, and shutdown end to
    end.
 5. [x] Exercise explicit and conventional configuration-file selection through
    the maintained one-image Docker deployment contract.
@@ -1852,15 +1852,15 @@ Status: complete (verified 2026-09-25).
 
 Status: complete (2026-09-26). See the archived
 [`task-list-health-propagation-2026-09-25.md`](../docs/archive/task-list-health-propagation-2026-09-25.md).
-The replicated model, the controller health API, local check
-execution, agent publication, leader-owned expiry, and end-to-end verification are
-done. The end-to-end tests cover servers and an agent started from configuration
+The replicated model, the server health API, local check
+execution, client publication, leader-owned expiry, and end-to-end verification are
+done. The end-to-end tests cover servers and a client started from configuration
 files, HTTP, TCP, and TTL transitions with `passing` discovery, and a killed
 client. Proxies that hold renewals force the renewal/expiry boundary across a
 leader change in both directions. In one, a renewal inside the new leader's grace
 means the check never expires. In the other, a renewal held beyond the grace
 expires the check, and the renewal then restores it. The Docker-tagged suite
-includes an agent container that runs health checks.
+includes a client container that runs health checks.
 
 1. [x] Define health observation and expiry commands with deterministic tests.
 2. [x] Implement local checks and TTL renewal.
@@ -1873,9 +1873,9 @@ Status: complete (2026-09-27). See the archived
 [`task-list-multi-node-container-acceptance-2026-09-26.md`](../docs/archive/task-list-multi-node-container-acceptance-2026-09-26.md).
 The tests fall into two classes:
 
-- `DockerAgentHealthTest` covers items 1 to 3, and a client partitioned from
+- `DockerClientHealthTest` covers items 1 to 3, and a client partitioned from
   every server and then healed.
-- `DockerAgentRecoveryTest` covers item 4 with a running client:
+- `DockerClientRecoveryTest` covers item 4 with a running client:
   - a whole-cluster crash that outlasts the check TTL, recovered from disk
     without expiring anything;
   - a killed follower that must install the leader's snapshot to learn health
@@ -1911,7 +1911,7 @@ The first complete service-discovery slice is accepted when:
 
 - One image starts successfully in both modes.
 - Two nodes can register the same local service ID safely.
-- Client mode remains live and unready when all controllers are unavailable.
+- Client mode remains live and unready when all servers are unavailable.
 - Client mode becomes ready after all required services are committed.
 - Registration succeeds when the first configured server is a follower or offline.
 - Catalog data survives restart and snapshot recovery.
@@ -1925,14 +1925,14 @@ Evidence as of 2026-09-27, except where a row gives a later date:
 
 | Criterion | Status | Evidence |
 |---|---|---|
-| One image in both modes | Met | `DockerAgentHealthTest`, `DockerAgentRecoveryTest` |
-| Same local service ID on two nodes | Met | `AgentEndToEndTest.twoAgentsCanRegisterTheSameLocalServiceId` |
-| Live and unready without controllers | Met | `DockerAgentRecoveryTest` (whole-cluster crash), `DockerAgentHealthTest` (partition) |
-| Ready after required services commit | Met | `QraftAgentTest.retriesRegistrationAndBecomesReadyWhenControllerRecovers`, `DockerAgentRecoveryTest` |
-| Registration via a follower or offline seed | Met | `AgentEndToEndTest.threeNodeClusterAcceptsAgentWhenFirstSeedIsAFollower`, `AgentHealthPublicationTest` |
-| Catalog survives restart and snapshot recovery | Met | `DockerDurableRestartTest`, `DockerAgentRecoveryTest` |
-| Leadership change keeps committed registrations | Met | `DockerDurableRestartTest.killedLeaderIsReplacedAndRejoinsWithCompleteCatalog`, `DockerAgentHealthTest` |
-| Bounded graceful deregistration; expiry handles crashes | Met | `QraftAgentTest.unreachableControllerCannotExtendShutdownPastDeadlineAndLogsOnce`, `DockerAgentHealthTest`, `CrashedAgentExpiryEndToEndTest` |
+| One image in both modes | Met | `DockerClientHealthTest`, `DockerClientRecoveryTest` |
+| Same local service ID on two nodes | Met | `ClientEndToEndTest.twoClientsCanRegisterTheSameLocalServiceId` |
+| Live and unready without servers | Met | `DockerClientRecoveryTest` (whole-cluster crash), `DockerClientHealthTest` (partition) |
+| Ready after required services commit | Met | `QraftClientTest.retriesRegistrationAndBecomesReadyWhenServerRecovers`, `DockerClientRecoveryTest` |
+| Registration via a follower or offline seed | Met | `ClientEndToEndTest.threeNodeClusterAcceptsClientWhenFirstSeedIsAFollower`, `ClientHealthPublicationTest` |
+| Catalog survives restart and snapshot recovery | Met | `DockerDurableRestartTest`, `DockerClientRecoveryTest` |
+| Leadership change keeps committed registrations | Met | `DockerDurableRestartTest.killedLeaderIsReplacedAndRejoinsWithCompleteCatalog`, `DockerClientHealthTest` |
+| Bounded graceful deregistration; expiry handles crashes | Met | `QraftClientTest.unreachableServerCannotExtendShutdownPastDeadlineAndLogsOnce`, `DockerClientHealthTest`, `CrashedClientExpiryEndToEndTest` |
 | Embedded administrative interface | Open | Not implemented (sections 12.4 and 19.6) |
 | Full default suite and container suite pass | Met | 812 default tests, 23 Docker-tagged tests, and 7 end-to-end tests, run on 2026-10-02 (membership list, full-suite run). The counts fell from 807 and 30 when the test-suite remediation deleted tests that verified nothing |
 
@@ -1948,16 +1948,16 @@ Evidence as of 2026-09-27, except where a row gives a later date:
 - How long legacy command and snapshot readers remain supported.
 
 Resolved on 2026-10-04, recorded here on 2026-10-05: how a node's identity is
-made and kept, which was half of the open item "how agent identity is
+made and kept, which was half of the open item "how client identity is
 established". It is decision 8 of
 [`task-list-consul-style-client-2026-10-04.md`](task-list-consul-style-client-2026-10-04.md)
 and is not yet built; section 7.3 changes when it is. It follows Consul: a node
-ID generated at first start and kept in the agent's data directory, a node name
+ID generated at first start and kept in the client's data directory, a node name
 that defaults to the host name, a catalog keyed by name, and a registration
 under a name held by another node ID refused unless that holder is dead. It
 departs from Consul in two ways. Qraft has no gossip, so a holder is dead when
 its node TTL has lapsed. A takeover removes the old node's services and checks
-in the same replicated step, where Consul leaves them to the new agent's
+in the same replicated step, where Consul leaves them to the new client's
 anti-entropy, which Qraft's reconciler does not have (D3 below). The other
 half, trusting the claim, is the open item above.
 

@@ -16,11 +16,11 @@
 
 package dev.mars.qraft.state;
 
-import dev.mars.qraft.common.AgentCapabilities;
-import dev.mars.qraft.common.AgentInfo;
-import dev.mars.qraft.common.AgentStatus;
-import dev.mars.qraft.raft.grpc.AgentCommandProto;
-import dev.mars.qraft.raft.grpc.AgentStatusProto;
+import dev.mars.qraft.common.ClientCapabilities;
+import dev.mars.qraft.common.ClientInfo;
+import dev.mars.qraft.common.ClientStatus;
+import dev.mars.qraft.raft.grpc.ClientCommandProto;
+import dev.mars.qraft.raft.grpc.ClientStatusProto;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -35,98 +35,98 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * Tests {@link AgentCodec} round trips for every agent command variant, rejection of unspecified
+ * Tests {@link ClientCodec} round trips for every client command variant, rejection of unspecified
  * types, and typed command factories.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-09
  * @version 1.0
  */
-class AgentCodecTest {
+class ClientCodecTest {
 
     @Test
-    void roundTripsEveryAgentCommandVariant() {
+    void roundTripsEveryClientCommandVariant() {
         Instant timestamp = Instant.parse("2026-02-03T04:05:06Z");
-        AgentCapabilities capabilities = new AgentCapabilities();
+        ClientCapabilities capabilities = new ClientCapabilities();
         capabilities.setSupportedServices(Set.of("kv", "health"));
         capabilities.setAvailableRegions(Set.of("eu-west"));
 
-        AgentInfo info = new AgentInfo("agent-1", "host", "10.0.0.1", 8080);
-        info.setStatus(AgentStatus.HEALTHY);
+        ClientInfo info = new ClientInfo("client-1", "host", "10.0.0.1", 8080);
+        info.setStatus(ClientStatus.HEALTHY);
         info.setCapabilities(capabilities);
         info.setVersion("1.2.3");
         info.setRegion("eu-west");
         info.setDatacenter("dc-1");
 
-        List<AgentCommand> commands = List.of(
-                new AgentCommand.Register("agent-1", info, timestamp),
-                new AgentCommand.Deregister("agent-1", timestamp),
-                new AgentCommand.UpdateStatus("agent-1", AgentStatus.HEALTHY, AgentStatus.DEGRADED, timestamp),
-                new AgentCommand.UpdateCapabilities("agent-1", capabilities, timestamp),
-                new AgentCommand.Heartbeat("agent-1", AgentStatus.DEGRADED, timestamp, 42));
+        List<ClientCommand> commands = List.of(
+                new ClientCommand.Register("client-1", info, timestamp),
+                new ClientCommand.Deregister("client-1", timestamp),
+                new ClientCommand.UpdateStatus("client-1", ClientStatus.HEALTHY, ClientStatus.DEGRADED, timestamp),
+                new ClientCommand.UpdateCapabilities("client-1", capabilities, timestamp),
+                new ClientCommand.Heartbeat("client-1", ClientStatus.DEGRADED, timestamp, 42));
 
-        for (AgentCommand command : commands) {
-            AgentCommand decoded = AgentCodec.fromProto(AgentCodec.toProto(command));
+        for (ClientCommand command : commands) {
+            ClientCommand decoded = ClientCodec.fromProto(ClientCodec.toProto(command));
             assertEquals(command.getClass(), decoded.getClass());
-            assertEquals(command.agentId(), decoded.agentId());
+            assertEquals(command.clientId(), decoded.clientId());
             assertEquals(timestamp, decoded.timestamp());
         }
 
-        AgentCommand.Register register = (AgentCommand.Register) AgentCodec.fromProto(AgentCodec.toProto(commands.getFirst()));
-        assertEquals("host", register.agentInfo().getHostname());
-        assertEquals(Set.of("kv", "health"), register.agentInfo().getCapabilities().getSupportedServices());
-        assertEquals(AgentStatus.HEALTHY, register.agentInfo().getStatus());
-        AgentCommand.Heartbeat heartbeat = (AgentCommand.Heartbeat)
-                AgentCodec.fromProto(AgentCodec.toProto(commands.getLast()));
+        ClientCommand.Register register = (ClientCommand.Register) ClientCodec.fromProto(ClientCodec.toProto(commands.getFirst()));
+        assertEquals("host", register.clientInfo().getHostname());
+        assertEquals(Set.of("kv", "health"), register.clientInfo().getCapabilities().getSupportedServices());
+        assertEquals(ClientStatus.HEALTHY, register.clientInfo().getStatus());
+        ClientCommand.Heartbeat heartbeat = (ClientCommand.Heartbeat)
+                ClientCodec.fromProto(ClientCodec.toProto(commands.getLast()));
         assertEquals(42, heartbeat.sequenceNumber());
     }
 
     @Test
     void rejectsUnspecifiedCommandType() {
-        AgentCommandProto proto = AgentCommandProto.newBuilder().setAgentId("agent").build();
-        assertThrows(IllegalArgumentException.class, () -> AgentCodec.fromProto(proto));
+        ClientCommandProto proto = ClientCommandProto.newBuilder().setClientId("client").build();
+        assertThrows(IllegalArgumentException.class, () -> ClientCodec.fromProto(proto));
     }
 
     @Test
     void factoriesProduceTypedCommands() {
-        AgentInfo info = new AgentInfo("agent", "host", "address", 1);
-        assertInstanceOf(AgentCommand.Register.class, AgentCommand.register(info));
-        assertInstanceOf(AgentCommand.Deregister.class, AgentCommand.deregister("agent"));
-        assertInstanceOf(AgentCommand.Heartbeat.class, AgentCommand.heartbeat("agent"));
-        assertInstanceOf(AgentCommand.Heartbeat.class, AgentCommand.heartbeat("agent", null, null));
+        ClientInfo info = new ClientInfo("client", "host", "address", 1);
+        assertInstanceOf(ClientCommand.Register.class, ClientCommand.register(info));
+        assertInstanceOf(ClientCommand.Deregister.class, ClientCommand.deregister("client"));
+        assertInstanceOf(ClientCommand.Heartbeat.class, ClientCommand.heartbeat("client"));
+        assertInstanceOf(ClientCommand.Heartbeat.class, ClientCommand.heartbeat("client", null, null));
     }
 
     /** Statuses inherited from the job system, which replicated history written earlier may still hold. */
-    private static final Map<AgentStatusProto, AgentStatus> LEGACY_STATUSES = Map.of(
-            AgentStatusProto.AGENT_STATUS_ACTIVE, AgentStatus.HEALTHY,
-            AgentStatusProto.AGENT_STATUS_IDLE, AgentStatus.HEALTHY,
-            AgentStatusProto.AGENT_STATUS_OVERLOADED, AgentStatus.DEGRADED,
-            AgentStatusProto.AGENT_STATUS_DRAINING, AgentStatus.MAINTENANCE);
+    private static final Map<ClientStatusProto, ClientStatus> LEGACY_STATUSES = Map.of(
+            ClientStatusProto.CLIENT_STATUS_ACTIVE, ClientStatus.HEALTHY,
+            ClientStatusProto.CLIENT_STATUS_IDLE, ClientStatus.HEALTHY,
+            ClientStatusProto.CLIENT_STATUS_OVERLOADED, ClientStatus.DEGRADED,
+            ClientStatusProto.CLIENT_STATUS_DRAINING, ClientStatus.MAINTENANCE);
 
     @Test
     void legacyStatusesInReplicatedHistoryDecodeToTheirCurrentMeaning() {
         Instant timestamp = Instant.parse("2026-02-03T04:05:06Z");
-        AgentCommandProto heartbeat = AgentCodec.toProto(
-                new AgentCommand.Heartbeat("agent-1", AgentStatus.HEALTHY, timestamp, 1));
-        AgentCommandProto register = AgentCodec.toProto(new AgentCommand.Register("agent-1",
-                new AgentInfo("agent-1", "host", "10.0.0.1", 8080), timestamp));
+        ClientCommandProto heartbeat = ClientCodec.toProto(
+                new ClientCommand.Heartbeat("client-1", ClientStatus.HEALTHY, timestamp, 1));
+        ClientCommandProto register = ClientCodec.toProto(new ClientCommand.Register("client-1",
+                new ClientInfo("client-1", "host", "10.0.0.1", 8080), timestamp));
 
         LEGACY_STATUSES.forEach((legacy, current) -> {
-            AgentCommand.Heartbeat decodedHeartbeat = (AgentCommand.Heartbeat) AgentCodec.fromProto(
+            ClientCommand.Heartbeat decodedHeartbeat = (ClientCommand.Heartbeat) ClientCodec.fromProto(
                     heartbeat.toBuilder().setNewStatus(legacy).build());
-            AgentCommand.Register decodedRegister = (AgentCommand.Register) AgentCodec.fromProto(register.toBuilder()
-                    .setAgentInfo(register.getAgentInfo().toBuilder().setStatus(legacy)).build());
+            ClientCommand.Register decodedRegister = (ClientCommand.Register) ClientCodec.fromProto(register.toBuilder()
+                    .setClientInfo(register.getClientInfo().toBuilder().setStatus(legacy)).build());
             assertEquals(current, decodedHeartbeat.status(), legacy.name());
-            assertEquals(current, decodedRegister.agentInfo().getStatus(), legacy.name());
+            assertEquals(current, decodedRegister.clientInfo().getStatus(), legacy.name());
         });
     }
 
     @Test
     void noCurrentStatusIsEncodedAsALegacyValue() {
         Instant timestamp = Instant.parse("2026-02-03T04:05:06Z");
-        for (AgentStatus status : EnumSet.allOf(AgentStatus.class)) {
-            AgentStatusProto encoded = AgentCodec.toProto(
-                    new AgentCommand.Heartbeat("agent-1", status, timestamp, 1)).getNewStatus();
+        for (ClientStatus status : EnumSet.allOf(ClientStatus.class)) {
+            ClientStatusProto encoded = ClientCodec.toProto(
+                    new ClientCommand.Heartbeat("client-1", status, timestamp, 1)).getNewStatus();
             assertFalse(LEGACY_STATUSES.containsKey(encoded), status + " encodes as " + encoded);
         }
     }

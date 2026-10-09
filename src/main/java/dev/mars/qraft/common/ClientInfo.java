@@ -24,20 +24,20 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Represents comprehensive information about a Qraft agent in the fleet.
+ * Represents comprehensive information about a Qraft client in the fleet.
  * This class contains all the metadata needed to manage and communicate with an
- * agent.
+ * client.
  * 
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2025-08-26
  * @version 1.0
  */
-public class AgentInfo {
+public class ClientInfo {
 
     public static final String REGISTRATION_ID_METADATA_KEY = "qraft.registrationId";
 
-    @JsonProperty("agentId")
-    private String agentId;
+    @JsonProperty("clientId")
+    private String clientId;
 
     @JsonProperty("hostname")
     private String hostname;
@@ -49,10 +49,10 @@ public class AgentInfo {
     private int port;
 
     @JsonProperty("capabilities")
-    private AgentCapabilities capabilities;
+    private ClientCapabilities capabilities;
 
     @JsonProperty("status")
-    private AgentStatus status;
+    private ClientStatus status;
 
     @JsonProperty("registrationTime")
     private Instant registrationTime;
@@ -75,38 +75,38 @@ public class AgentInfo {
     /**
      * Default constructor for JSON deserialization.
      */
-    public AgentInfo() {
+    public ClientInfo() {
         this.metadata = new HashMap<>();
-        this.status = AgentStatus.REGISTERING;
+        this.status = ClientStatus.REGISTERING;
         this.registrationTime = Instant.now();
     }
 
     /**
-     * Constructor for creating agent info with basic details.
+     * Constructor for creating client info with basic details.
      * 
-     * @param agentId  unique identifier for the agent
-     * @param hostname the hostname of the agent
-     * @param address  the IP address of the agent
-     * @param port     the port the agent is listening on
+     * @param clientId  unique identifier for the client
+     * @param hostname the hostname of the client
+     * @param address  the IP address of the client
+     * @param port     the port the client is listening on
      */
-    public AgentInfo(String agentId, String hostname, String address, int port) {
+    public ClientInfo(String clientId, String hostname, String address, int port) {
         this();
-        this.agentId = agentId;
+        this.clientId = clientId;
         this.hostname = hostname;
         this.address = address;
         this.port = port;
     }
 
     /**
-     * Create a deep copy of the given AgentInfo.
+     * Create a deep copy of the given ClientInfo.
      * Used by the Raft state machine to avoid in-place mutation of
      * objects visible to concurrent readers.
      *
-     * @param source the agent info to copy
-     * @return a new AgentInfo instance with the same field values
+     * @param source the client info to copy
+     * @return a new ClientInfo instance with the same field values
      */
-    public static AgentInfo copyOf(AgentInfo source) {
-        AgentInfo copy = new AgentInfo(source.agentId, source.hostname, source.address, source.port);
+    public static ClientInfo copyOf(ClientInfo source) {
+        ClientInfo copy = new ClientInfo(source.clientId, source.hostname, source.address, source.port);
         copy.capabilities = source.capabilities;
         copy.status = source.status;
         copy.registrationTime = source.registrationTime;
@@ -121,25 +121,25 @@ public class AgentInfo {
     }
 
     /**
-     * Get the unique agent identifier.
+     * Get the unique client identifier.
      * 
-     * @return the agent ID
+     * @return the client ID
      */
-    public String getAgentId() {
-        return agentId;
+    public String getClientId() {
+        return clientId;
     }
 
     /**
-     * Set the agent identifier.
+     * Set the client identifier.
      * 
-     * @param agentId the agent ID
+     * @param clientId the client ID
      */
-    public void setAgentId(String agentId) {
-        this.agentId = agentId;
+    public void setClientId(String clientId) {
+        this.clientId = clientId;
     }
 
     /**
-     * Get the agent hostname.
+     * Get the client hostname.
      * 
      * @return the hostname
      */
@@ -148,7 +148,7 @@ public class AgentInfo {
     }
 
     /**
-     * Set the agent hostname.
+     * Set the client hostname.
      * 
      * @param hostname the hostname
      */
@@ -157,7 +157,7 @@ public class AgentInfo {
     }
 
     /**
-     * Get the agent IP address as a string.
+     * Get the client IP address as a string.
      * 
      * @return the IP address
      */
@@ -166,7 +166,7 @@ public class AgentInfo {
     }
 
     /**
-     * Set the agent IP address.
+     * Set the client IP address.
      * 
      * @param address the IP address
      */
@@ -175,7 +175,7 @@ public class AgentInfo {
     }
 
     /**
-     * Get the agent port.
+     * Get the client port.
      * 
      * @return the port number
      */
@@ -184,7 +184,7 @@ public class AgentInfo {
     }
 
     /**
-     * Set the agent port.
+     * Set the client port.
      * 
      * @param port the port number
      */
@@ -193,38 +193,38 @@ public class AgentInfo {
     }
 
     /**
-     * Get the agent capabilities.
+     * Get the client capabilities.
      * 
      * @return the capabilities
      */
-    public AgentCapabilities getCapabilities() {
+    public ClientCapabilities getCapabilities() {
         return capabilities;
     }
 
     /**
-     * Set the agent capabilities.
+     * Set the client capabilities.
      * 
      * @param capabilities the capabilities
      */
-    public void setCapabilities(AgentCapabilities capabilities) {
+    public void setCapabilities(ClientCapabilities capabilities) {
         this.capabilities = capabilities;
     }
 
     /**
-     * Get the current agent status.
+     * Get the current client status.
      * 
      * @return the status
      */
-    public AgentStatus getStatus() {
+    public ClientStatus getStatus() {
         return status;
     }
 
     /**
-     * Set the agent status.
+     * Set the client status.
      * 
      * @param status the status
      */
-    public void setStatus(AgentStatus status) {
+    public void setStatus(ClientStatus status) {
         this.status = status;
     }
 
@@ -265,7 +265,7 @@ public class AgentInfo {
     }
 
     /**
-     * Get the agent version.
+     * Get the client version.
      * 
      * @return the version string
      */
@@ -274,7 +274,7 @@ public class AgentInfo {
     }
 
     /**
-     * Set the agent version.
+     * Set the client version.
      * 
      * @param version the version string
      */
@@ -283,7 +283,7 @@ public class AgentInfo {
     }
 
     /**
-     * Get the agent region.
+     * Get the client region.
      * 
      * @return the region
      */
@@ -292,7 +292,7 @@ public class AgentInfo {
     }
 
     /**
-     * Set the agent region.
+     * Set the client region.
      * 
      * @param region the region
      */
@@ -301,7 +301,7 @@ public class AgentInfo {
     }
 
     /**
-     * Get the agent datacenter.
+     * Get the client datacenter.
      * 
      * @return the datacenter
      */
@@ -310,7 +310,7 @@ public class AgentInfo {
     }
 
     /**
-     * Set the agent datacenter.
+     * Set the client datacenter.
      * 
      * @param datacenter the datacenter
      */
@@ -319,7 +319,7 @@ public class AgentInfo {
     }
 
     /**
-     * Get the agent metadata.
+     * Get the client metadata.
      * 
      * @return the metadata map
      */
@@ -328,7 +328,7 @@ public class AgentInfo {
     }
 
     /**
-     * Set the agent metadata.
+     * Set the client metadata.
      * 
      * @param metadata the metadata map
      */
@@ -347,7 +347,7 @@ public class AgentInfo {
     }
 
     /**
-     * Get the agent endpoint URL.
+     * Get the client endpoint URL.
      * 
      * @return the endpoint URL
      */
@@ -356,10 +356,10 @@ public class AgentInfo {
     }
 
     /**
-     * Check if the agent is currently healthy.
-     * Delegates to {@link AgentStatus#isHealthy()} for consistent classification.
+     * Check if the client is currently healthy.
+     * Delegates to {@link ClientStatus#isHealthy()} for consistent classification.
      *
-     * @return true if the agent is healthy
+     * @return true if the client is healthy
      */
     public boolean isHealthy() {
         return status != null && status.isHealthy();
@@ -372,19 +372,19 @@ public class AgentInfo {
             return true;
         if (o == null || getClass() != o.getClass())
             return false;
-        AgentInfo agentInfo = (AgentInfo) o;
-        return Objects.equals(agentId, agentInfo.agentId);
+        ClientInfo clientInfo = (ClientInfo) o;
+        return Objects.equals(clientId, clientInfo.clientId);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(agentId);
+        return Objects.hash(clientId);
     }
 
     @Override
     public String toString() {
-        return "AgentInfo{" +
-                "agentId='" + agentId + '\'' +
+        return "ClientInfo{" +
+                "clientId='" + clientId + '\'' +
                 ", hostname='" + hostname + '\'' +
                 ", address='" + address + '\'' +
                 ", port=" + port +

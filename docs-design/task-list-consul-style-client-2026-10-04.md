@@ -1,20 +1,20 @@
-# Task List: Consul-Style Client Agent
+# Task List: Consul-Style Client
 
 **Date:** 2026-10-04
 **Status:** Proposed. It needs the `client` package and the new node model and routes of [`task-list-single-pom-and-quorus-removal-2026-10-04.md`](task-list-single-pom-and-quorus-removal-2026-10-04.md). It starts after that list and after the rest of [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md), Steps 5 to 8 (decided 2026-10-05).
-**Last updated:** 2026-10-09 (decision 10: the `controllers` object becomes `servers` in Phase 2. On 2026-10-08, the review with the other task lists: the renamed contract test, the request bodies of decision 5, and the log audit in the rules)
+**Last updated:** 2026-10-09 (the single-POM list's Phase 3A replaced Qraft's two retired words here and everywhere; decision 10 records the configuration names, and decision 3 the path of the local API. On 2026-10-08, the review with the other task lists: the request bodies of decision 5 and the log audit in the rules)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 4.3, 5, 6.2, 7.3, 8, 12.1 and 16
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
 ## 1. Goal
 
-`qraft client` becomes a full client agent in Consul's sense, running on every
+`qraft client` becomes a full client in Consul's sense, running on every
 VM or bare-metal host:
 
-- Applications talk only to their local agent on `localhost`. Through it they
+- Applications talk only to their local client on `localhost`. Through it they
   register their services and checks, report TTL status, and discover other
   services.
-- The agent keeps those registrations in sync with the servers and forwards
+- The client keeps those registrations in sync with the servers and forwards
   discovery reads to them.
 
 Today the client only registers services from its configuration file and
@@ -29,13 +29,14 @@ decision 10 on 2026-10-09. Decisions 5 to 8 follow the Consul pattern.
 1. **Deployment target:** VMs and bare metal, with one client per host.
 2. **Client-to-server transport:** HTTP. The client keeps its classified
    transport, seed rotation, and error envelope.
-3. **Local API scope:** Consul's `/v1/agent/*` endpoints, plus catalog and
+3. **Local API scope:** the endpoints of Consul's agent API, served at
+   `/v1/client/*` (the path was decided 2026-10-09), plus catalog and
    health reads forwarded to the servers. Key/value and sessions are forwarded
    as the servers gain them.
 4. **DNS:** a separate, later task list.
-5. **`/v1/agent/*` belongs to the client.** The server's current
-   `/v1/agent/service/register`, `/v1/agent/service/deregister`, and
-   `/v1/agent/check/observe` endpoints, together with the node routes, become
+5. **`/v1/client/*` belongs to the client.** The server's current
+   `/v1/client/service/register`, `/v1/client/service/deregister`, and
+   `/v1/client/check/observe` endpoints, together with the node routes, become
    the server-side protocol for the client:
    - `PUT /v1/catalog/register` and `PUT /v1/catalog/deregister`, Consul's
      catalog write paths, for nodes and services;
@@ -54,17 +55,17 @@ decision 10 on 2026-10-09. Decisions 5 to 8 follow the Consul pattern.
    same listener.
 7. **Registrations follow Consul's rules.**
    - Services and checks registered through the API are kept in
-     `agent.dataDirectory` and restored at startup.
+     `client.dataDirectory` and restored at startup.
    - At run time, the latest registration or deregistration of an ID wins,
      including for a service defined in the configuration file.
    - At startup, the configuration file's services are registered again and
      take precedence over a kept API registration with the same ID.
 8. **Node identity follows Consul.**
-   - `agent.dataDirectory` is required.
+   - `client.dataDirectory` is required.
    - A node ID (UUID) is generated at the first start and kept in
      `node-id` in that directory. An unreadable file stops startup and is never
      replaced.
-   - `agent.id` becomes `agent.nodeName`, which defaults to the host name.
+   - `client.id` becomes `client.nodeName`, which defaults to the host name.
    - The catalog stays keyed by node name, so the service identity
      `(tenant, namespace, node, serviceId)` does not change. The node ID is
      stored with the node and used to detect conflicts.
@@ -103,16 +104,17 @@ decision 10 on 2026-10-09. Decisions 5 to 8 follow the Consul pattern.
      bind address of Phase 3 instead, as Consul's `client_addr` is set for
      containers. That is documented, not tested here.
 
-10. **The client's `controllers` configuration object becomes `servers`.**
-    Decided 2026-10-09; raised by the review of 2026-10-08.
-    - The rename happens in Phase 2, which already changes the client's
-      configuration contract, with `agent.nodeName` and a required
-      `agent.dataDirectory`.
-    - The old key is refused, with a message that names the new one.
-    - The single-POM list's Phase 3 had renamed the client's endpoint classes
-      to `ServerEndpoints`, `ServerRetryPolicy`, and `ServerContactTracker`.
-      It kept the `controllers` object, because renaming it changes a
-      configuration contract, and no list owned that rename.
+10. **The client's configuration names its two objects `client` and
+    `servers`.** Decided 2026-10-09, and done the same day by the single-POM
+    list's Phase 3A, which replaced Qraft's two retired words everywhere.
+    - This list no longer renames either object. Phase 2 changes only what
+      is inside `client`: `client.nodeName` and a required
+      `client.dataDirectory`.
+    - The old object names are refused as unknown fields, like any other
+      unknown field. They have no message of their own.
+    - Decision 3's local API is served at `/v1/client/*`, and the ACL list's
+      resource for a client's own endpoints is `client`. Both follow from
+      the same decision.
 
 ## 3. Rules
 
@@ -136,12 +138,12 @@ decision 10 on 2026-10-09. Decisions 5 to 8 follow the Consul pattern.
 
 ### Phase 1. Client-to-server protocol
 
-- [ ] Move the server's write endpoints off `/v1/agent/` (decision 5). Keep the
+- [ ] Move the server's write endpoints off `/v1/client/` (decision 5). Keep the
   identity headers, idempotence, error envelope, and `X-Qraft-Index`.
 - [ ] Point `HttpCatalogClient` and the health publisher at the new paths.
   Node registration already uses its new paths, from the single-POM list's
-  Phase 4. Extend `AgentServerContractTest` (`AgentControllerContractTest`
-  until 2026-10-08) to cover every client call against a real server.
+  Phase 4. Extend `ClientServerContractTest` to cover every client call
+  against a real server.
 - [ ] Make sure the server exposes every read the client forwards: catalog
   services, a service, nodes, and service health.
 
@@ -150,17 +152,12 @@ and Docker suites.
 
 ### Phase 2. Data directory and node identity
 
-- [ ] Add a required `agent.dataDirectory` setting, validated before any
-  resource opens. Allow one agent per directory, enforced with a lock.
+- [ ] Add a required `client.dataDirectory` setting, validated before any
+  resource opens. Allow one client per directory, enforced with a lock.
 - [ ] Generate and keep the node ID (decision 8). Share the code with the
   server's `ServerIdentity` through `common`.
-- [ ] Rename `agent.id` to `agent.nodeName`, defaulting to the host name.
+- [ ] Rename `client.id` to `client.nodeName`, defaulting to the host name.
   Update the configuration examples and the Docker configurations.
-- [ ] Rename the `controllers` object to `servers` (decision 10). Refuse
-  `controllers` with a message that names `servers`. Update the
-  configuration examples, the Docker configurations, and
-  `DockerDeploymentContractTest`, which today checks that `controllers` is
-  preserved.
 - [ ] Server side: store the node ID with the node, using a new optional
   protobuf field; older entries load without one.
   - Refuse a held name with `node_name_reserved`.
@@ -176,7 +173,7 @@ and Docker suites.
 - [ ] Add replica-determinism tests for the takeover and rename commands:
   every replica ends with the same nodes, services, and checks.
 - [ ] Record decision 8 in the design: section 7.3, which today says a host
-  name alone is not a sufficient identity, and section 22, which lists agent
+  name alone is not a sufficient identity, and section 22, which lists client
   identity as open and requires a decision record and fixture-based upgrade
   tests for a change to durable identity.
 
@@ -197,11 +194,11 @@ restart scenario passes end to end.
 
 ### Phase 4. Services and checks through the API
 
-- [ ] Services: `PUT /v1/agent/service/register` (optionally with checks),
-  `PUT /v1/agent/service/deregister/{serviceId}`, `GET /v1/agent/services`, and
-  `GET /v1/agent/service/{serviceId}`.
-- [ ] Checks: `PUT /v1/agent/check/register`,
-  `PUT /v1/agent/check/deregister/{checkId}`, and `GET /v1/agent/checks`.
+- [ ] Services: `PUT /v1/client/service/register` (optionally with checks),
+  `PUT /v1/client/service/deregister/{serviceId}`, `GET /v1/client/services`, and
+  `GET /v1/client/service/{serviceId}`.
+- [ ] Checks: `PUT /v1/client/check/register`,
+  `PUT /v1/client/check/deregister/{checkId}`, and `GET /v1/client/checks`.
 - [ ] Feed the reconciler one definition source, file plus API definitions,
   through its existing `Supplier` contract, with the rules of decision 7.
 - [ ] Keep API registrations atomically in the data directory, restore them at
@@ -211,20 +208,20 @@ restart scenario passes end to end.
 
 ### Phase 5. TTL status and maintenance
 
-- [ ] `PUT /v1/agent/check/pass/{checkId}`, `warn`, and `fail` (each with an
-  optional note), and `PUT /v1/agent/check/update/{checkId}`, all through
+- [ ] `PUT /v1/client/check/pass/{checkId}`, `warn`, and `fail` (each with an
+  optional note), and `PUT /v1/client/check/update/{checkId}`, all through
   `LocalStatusReporter`.
-- [ ] Node maintenance with `PUT /v1/agent/maintenance`, and service
-  maintenance with `PUT /v1/agent/service/maintenance/{serviceId}`. Both
+- [ ] Node maintenance with `PUT /v1/client/maintenance`, and service
+  maintenance with `PUT /v1/client/service/maintenance/{serviceId}`. Both
   publish `maintenance` observations and persist across a restart.
 
-### Phase 6. Agent information
+### Phase 6. Client information
 
-- [ ] `GET /v1/agent/self`: node name and ID, version, configuration with
+- [ ] `GET /v1/client/self`: node name and ID, version, configuration with
   secrets redacted, server contact, and readiness conditions.
-- [ ] `GET /v1/agent/members`: nodes and their status from the servers' catalog.
+- [ ] `GET /v1/client/members`: nodes and their status from the servers' catalog.
   Qraft has no gossip pool, so this is a forwarded read.
-- [ ] `PUT /v1/agent/leave`: the existing bounded graceful deregistration,
+- [ ] `PUT /v1/client/leave`: the existing bounded graceful deregistration,
   followed by process exit.
 
 ### Phase 7. Forwarded reads
@@ -240,10 +237,10 @@ restart scenario passes end to end.
 ### Phase 8. Verification and documentation
 
 - [ ] End-to-end scenario 1: an application registers a service and a TTL
-  check through its own agent, reports passing, and is discovered through
-  another host's agent.
+  check through the client on its own host, reports passing, and is discovered through
+  another host's client.
 - [ ] End-to-end scenario 2: the application deregisters cleanly.
-- [ ] End-to-end scenario 3: API registrations survive an agent restart, and
+- [ ] End-to-end scenario 3: API registrations survive a client restart, and
   the local API keeps working across a server leader change.
 - [ ] End-to-end scenario 4: a host rebuilt under the same name re-registers
   only after its old node becomes unreachable. The old node's services are
@@ -260,7 +257,7 @@ restart scenario passes end to end.
   network namespace needs the bind-address setting, and what that exposes
   while the local API has no authentication.
 - [ ] Check that the design's sections 4.3, 5, 6.2, 7.3, 8, 12.1 and 16 were
-  updated in their phases: applications talk to their local agent, node
+  updated in their phases: applications talk to their local client, node
   identity, and the path split.
 - [ ] Update the feature validation (persisted generated node identity is now
   delivered), the Consul plan checklist, and the Docker client example.
@@ -277,4 +274,4 @@ consecutive runs; audits as in the other lists.
   [`task-list-acl-and-tokens-2026-10-05.md`](task-list-acl-and-tokens-2026-10-05.md).
 - Forwarding key/value, sessions, consistency modes, and blocking queries. Each
   is added when the corresponding server feature lands.
-- Response caching in the agent, gossip, and configuration-file reload.
+- Response caching in the client, gossip, and configuration-file reload.

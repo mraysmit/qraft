@@ -31,12 +31,12 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.IntToLongFunction;
 
 /**
- * Publishes local check results to the controller as sequenced observations.
+ * Publishes local check results to the server as sequenced observations.
  *
  * <p>Each check has at most one publication in flight; results that arrive meanwhile are coalesced to
  * the latest. A changed status or output is published immediately, and an unchanged result is
  * republished as a renewal once half the check's TTL has passed since the last acceptance. Sequence
- * numbers are strictly increasing per check and start from the clock, so a restarted agent is not
+ * numbers are strictly increasing per check and start from the clock, so a restarted client is not
  * rejected as stale; a stale answer raises the floor to the server's sequence and republishes.
  * Retries resend the same observation, so the server treats them as idempotent replays.
  *
@@ -129,7 +129,7 @@ public final class HealthPublisher implements CheckResultListener {
 
         /**
          * A renewal is due half the TTL after acceptance. A clock now behind the acceptance has been stepped
-         * back, so the time actually elapsed is unknown; renewing at once keeps the controller's TTL from
+         * back, so the time actually elapsed is unknown; renewing at once keeps the server's TTL from
          * lapsing while this clock catches up.
          */
         private boolean renewalDue() {
@@ -221,7 +221,7 @@ public final class HealthPublisher implements CheckResultListener {
     }
 
     /**
-     * A service or check can be unknown only because this agent's (re)registration has not committed
+     * A service or check can be unknown only because this client's (re)registration has not committed
      * yet, so these rejections are retried rather than dropped.
      */
     private static boolean retriedWhileRegistrationConverges(String code) {

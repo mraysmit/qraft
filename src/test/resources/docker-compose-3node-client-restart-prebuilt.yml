@@ -1,4 +1,4 @@
-# 3-node Raft cluster and one client-mode agent with the restart profile, from the pre-built image
+# 3-node Raft cluster and one client-mode client with the restart profile, from the pre-built image
 # (no Docker build step). Requires qraft-runtime:test image — built by SharedDockerClusterFixture.
 
 services:
@@ -56,14 +56,14 @@ services:
       retries: 5
       start_period: 10s
 
-  agent:
+  client:
     image: qraft-runtime:test
-    hostname: agent
+    hostname: client
     command: ["client", "--config", "/etc/qraft/client.json"]
     ports:
       - "8080"
     volumes:
-      - ../../../docker/config/agent-acceptance/agent-restart.json:/etc/qraft/client.json:ro
+      - ../../../docker/config/client-acceptance/client-restart.json:/etc/qraft/client.json:ro
     networks:
       - raft-cluster
     healthcheck:

@@ -20,8 +20,8 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import dev.mars.qraft.raft.PeerlessTransportFixture;
 import dev.mars.qraft.state.catalog.ServiceKey;
-import dev.mars.qraft.client.QraftAgent;
-import dev.mars.qraft.client.config.AgentConfiguration;
+import dev.mars.qraft.client.QraftClient;
+import dev.mars.qraft.client.config.ClientConfiguration;
 import dev.mars.qraft.client.health.CheckStatus;
 import dev.mars.qraft.client.health.HealthCheckDefinition;
 import dev.mars.qraft.client.health.HttpCheck;
@@ -62,9 +62,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Contract tests in which a real {@link QraftAgent} runs local checks and publishes their observations
- * to a real controller: publication through a failed seed, renewal, failure and recovery with
- * readiness, process-local TTL status, controller restart, and publication stopping before
+ * Contract tests in which a real {@link QraftClient} runs local checks and publishes their observations
+ * to a real server: publication through a failed seed, renewal, failure and recovery with
+ * readiness, process-local TTL status, server restart, and publication stopping before
  * deregistration.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
@@ -72,36 +72,36 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 @Tag("e2e")
-class AgentHealthPublicationTest {
-    private static final String AGENT_ID = "health-agent";
+class ClientHealthPublicationTest {
+    private static final String CLIENT_ID = "health-client";
 
     private final AtomicInteger workloadStatus = new AtomicInteger(200);
     private final List<String> proxiedRequests = new CopyOnWriteArrayList<>();
-    private Controller controller;
+    private Server server;
     private HttpServer workload;
     private HttpServer proxy;
-    private QraftAgent agent;
+    private QraftClient client;
 
     @AfterEach
     void closeResources() throws Exception {
         new CleanupHelper()
-                .run(() -> { if (agent != null) agent.shutdown().get(10, TimeUnit.SECONDS); })
+                .run(() -> { if (client != null) client.shutdown().get(10, TimeUnit.SECONDS); })
                 .run(() -> { if (proxy != null) proxy.stop(0); })
                 .run(() -> { if (workload != null) workload.stop(0); })
-                .run(() -> { if (controller != null) controller.close(); })
+                .run(() -> { if (server != null) server.close(); })
                 .rethrow();
     }
 
     @Test
-    void agentPublishesRenewsAndRecoversRequiredChecksThroughAFailedSeed() throws Exception {
-        controller = Controller.start(0);
-        int controllerPort = controller.server().port();
+    void clientPublishesRenewsAndRecoversRequiredChecksThroughAFailedSeed() throws Exception {
+        server = Server.start(0);
+        int serverPort = server.server().port();
         URI workloadUrl = startWorkload();
-        agent = agent(List.of(refusedEndpoint(), controller.endpoint()), workloadUrl);
+        client = client(List.of(refusedEndpoint(), server.endpoint()), workloadUrl);
 
-        assertTrue(agent.start().get(10, TimeUnit.SECONDS));
+        assertTrue(client.start().get(10, TimeUnit.SECONDS));
         waitUntil(() -> status("http").filter(ServiceHealth.PASSING::equals).isPresent()
-                && agent.healthService().isReady());
+                && client.healthService().isReady());
         assertEquals(ServiceHealth.PASSING, serviceHealth());
 
         long firstSequence = check("http").orElseThrow().observation().sequenceNumber();
@@ -110,41 +110,41 @@ class AgentHealthPublicationTest {
 
         workloadStatus.set(503);
         waitUntil(() -> status("http").filter(ServiceHealth.CRITICAL::equals).isPresent()
-                && !agent.healthService().isReady());
+                && !client.healthService().isReady());
         assertEquals(ServiceHealth.CRITICAL, serviceHealth());
-        assertTrue(agent.healthService().isHealthy(), "a failing required check never affects liveness");
+        assertTrue(client.healthService().isHealthy(), "a failing required check never affects liveness");
 
         workloadStatus.set(200);
         waitUntil(() -> status("http").filter(ServiceHealth.PASSING::equals).isPresent()
-                && agent.healthService().isReady());
+                && client.healthService().isReady());
 
-        assertTrue(agent.statusReporter("web", "app").orElseThrow().report(CheckStatus.WARNING, "cache cold"));
+        assertTrue(client.statusReporter("web", "app").orElseThrow().report(CheckStatus.WARNING, "cache cold"));
         waitUntil(() -> status("app").filter(ServiceHealth.WARNING::equals).isPresent());
         assertEquals("cache cold", check("app").orElseThrow().observation().output());
         assertEquals(ServiceHealth.WARNING, serviceHealth());
-        waitUntil(() -> agent.healthService().isReady()); // an optional warning check keeps the agent ready
-        assertTrue(agent.statusReporter("web", "http").isEmpty());
+        waitUntil(() -> client.healthService().isReady()); // an optional warning check keeps the client ready
+        assertTrue(client.statusReporter("web", "http").isEmpty());
 
-        controller.close();
-        waitUntil(() -> !agent.healthService().isReady());
-        // The agent knows the controller by URL, so the restarted controller must bind the same port.
-        controller = Controller.start(controllerPort);
+        server.close();
+        waitUntil(() -> !client.healthService().isReady());
+        // The client knows the server by URL, so the restarted server must bind the same port.
+        server = Server.start(serverPort);
         waitUntil(() -> status("http").filter(ServiceHealth.PASSING::equals).isPresent()
-                && agent.healthService().isReady());
+                && client.healthService().isReady());
     }
 
     @Test
     void shutdownStopsChecksAndPublicationsBeforeDeregistration() throws Exception {
-        controller = Controller.start(0);
+        server = Server.start(0);
         URI workloadUrl = startWorkload();
-        agent = agent(List.of(startRecordingProxy(controller.endpoint())), workloadUrl);
-        assertTrue(agent.start().get(10, TimeUnit.SECONDS));
+        client = client(List.of(startRecordingProxy(server.endpoint())), workloadUrl);
+        assertTrue(client.start().get(10, TimeUnit.SECONDS));
         waitUntil(() -> status("http").filter(ServiceHealth.PASSING::equals).isPresent());
         waitUntil(() -> proxiedRequests.stream().filter(this::isObservation).count() >= 2);
 
-        assertTrue(agent.shutdown().get(10, TimeUnit.SECONDS));
+        assertTrue(client.shutdown().get(10, TimeUnit.SECONDS));
 
-        int deregistration = proxiedRequests.indexOf("PUT /v1/agent/service/deregister/web");
+        int deregistration = proxiedRequests.indexOf("PUT /v1/client/service/deregister/web");
         int lastObservation = -1;
         for (int index = 0; index < proxiedRequests.size(); index++) {
             if (isObservation(proxiedRequests.get(index))) lastObservation = index;
@@ -152,13 +152,13 @@ class AgentHealthPublicationTest {
         assertTrue(deregistration > 0, proxiedRequests.toString());
         assertTrue(lastObservation < deregistration,
                 "every observation precedes deregistration: " + proxiedRequests);
-        assertTrue(controller.store().getServiceCatalog().instances(ServiceKey.inDefaultScope("web")).isEmpty());
-        assertTrue(controller.store().healthChecks().isEmpty());
-        assertTrue(agent.isTerminated(),
-                "no agent thread or client remains after shutdown, so no request can follow it");
+        assertTrue(server.store().getServiceCatalog().instances(ServiceKey.inDefaultScope("web")).isEmpty());
+        assertTrue(server.store().healthChecks().isEmpty());
+        assertTrue(client.isTerminated(),
+                "no client thread or client remains after shutdown, so no request can follow it");
     }
 
-    private QraftAgent agent(List<URI> controllers, URI workloadUrl) throws Exception {
+    private QraftClient client(List<URI> servers, URI workloadUrl) throws Exception {
         ServiceDefinition web = new ServiceDefinition("web", "web", "127.0.0.1", workloadUrl.getPort(),
                 List.of("health"), Map.of(), true);
         List<HealthCheckDefinition> checks = List.of(
@@ -166,9 +166,9 @@ class AgentHealthPublicationTest {
                 new HttpCheck("web", "http", workloadUrl.resolve("/health"), Duration.ofSeconds(1),
                         Duration.ofSeconds(1), Duration.ofSeconds(5), true),
                 new TtlCheck("web", "app", Duration.ofSeconds(30), false));
-        return new QraftAgent(AgentConfiguration.builder()
-                .agentId(AGENT_ID).hostname(AGENT_ID + "-host").address("127.0.0.1")
-                .agentPort(0).controllerUrls(controllers)
+        return new QraftClient(ClientConfiguration.builder()
+                .clientId(CLIENT_ID).hostname(CLIENT_ID + "-host").address("127.0.0.1")
+                .clientPort(0).serverUrls(servers)
                 .heartbeatInterval(40).requestTimeoutMs(5_000)
                 .registrationRetryMinMs(20).registrationRetryMaxMs(100)
                 .contactFreshnessMs(1_000).shutdownTimeoutMs(3_000)
@@ -185,7 +185,7 @@ class AgentHealthPublicationTest {
         return URI.create("http://127.0.0.1:" + workload.getAddress().getPort());
     }
 
-    /** Forwards every request to the controller and records its method and path in arrival order. */
+    /** Forwards every request to the server and records its method and path in arrival order. */
     private URI startRecordingProxy(URI target) throws IOException {
         HttpClient forwarder = HttpClient.newHttpClient();
         proxy = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
@@ -219,14 +219,14 @@ class AgentHealthPublicationTest {
     }
 
     private boolean isObservation(String request) {
-        return request.equals("PUT /v1/agent/check/observe");
+        return request.equals("PUT /v1/client/check/observe");
     }
 
     private Optional<HealthCheckState> check(String checkId) {
-        Controller current = controller;
+        Server current = server;
         if (current == null) return Optional.empty();
         return current.store().findHealthCheck(new ServiceCheckId(
-                new ServiceInstanceId("default", "default", AGENT_ID, "web"), checkId));
+                new ServiceInstanceId("default", "default", CLIENT_ID, "web"), checkId));
     }
 
     private Optional<ServiceHealth> status(String checkId) {
@@ -234,7 +234,7 @@ class AgentHealthPublicationTest {
     }
 
     private ServiceHealth serviceHealth() {
-        return controller.store().getServiceCatalog().instances(ServiceKey.inDefaultScope("web")).getFirst().health();
+        return server.store().getServiceCatalog().instances(ServiceKey.inDefaultScope("web")).getFirst().health();
     }
 
     private static URI refusedEndpoint() throws IOException {
@@ -250,22 +250,22 @@ class AgentHealthPublicationTest {
         assertTrue(condition.getAsBoolean(), "condition was not met before the deadline");
     }
 
-    /** One single-node controller with its own runtime, so it can be stopped and restarted on a port. */
-    private record Controller(JavaRuntime runtime, RaftNode node, QraftStateStore store, HttpApiServer server)
+    /** One single-node server with its own runtime, so it can be stopped and restarted on a port. */
+    private record Server(JavaRuntime runtime, RaftNode node, QraftStateStore store, HttpApiServer server)
             implements AutoCloseable {
 
-        static Controller start(int port) throws Exception {
+        static Server start(int port) throws Exception {
             JavaRuntime runtime = JavaRuntime.create();
             QraftStateStore store = new QraftStateStore();
-            RaftNode node = RaftNode.builder().runtime(runtime).nodeId("health-controller")
-                    .clusterNodes(Set.of("health-controller")).transport(new PeerlessTransportFixture())
+            RaftNode node = RaftNode.builder().runtime(runtime).nodeId("health-server")
+                    .clusterNodes(Set.of("health-server")).transport(new PeerlessTransportFixture())
                     .stateMachine(store).commandCodec(new ProtobufRaftCommandCodec())
                     .mode(RaftNodeMode.volatileMode()).electionTimeout(25).heartbeatInterval(10_000).build();
             node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
             waitUntil(node::isLeader);
             HttpApiServer server = new HttpApiServer(port, node, store);
             server.start().get(10, TimeUnit.SECONDS);
-            return new Controller(runtime, node, store, server);
+            return new Server(runtime, node, store, server);
         }
 
         URI endpoint() {

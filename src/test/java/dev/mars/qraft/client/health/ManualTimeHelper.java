@@ -26,7 +26,7 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * Test helper providing a controllable clock and scheduler for agent health-check tests.
+ * Test helper providing a controllable clock and scheduler for client health-check tests.
  * Tasks run on the caller's thread only when the test advances time.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd

@@ -18,7 +18,7 @@ package dev.mars.qraft.client.health;
 
 /**
  * Internal input boundary through which the local process supplies status for a TTL check. A report
- * produces a local check result only; publication to the controller is a separate concern.
+ * produces a local check result only; publication to the server is a separate concern.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-26
