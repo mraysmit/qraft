@@ -6,7 +6,7 @@ and the full suites passed on 2026-10-02; its mutation evidence is outstanding
 (Step 4 record). Steps 1 to 3 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
-**Last updated:** 2026-10-09 (Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
+**Last updated:** 2026-10-09 (the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
 **Interrupted by:** [`task-list-single-pom-and-quorus-removal-2026-10-09.md`](task-list-single-pom-and-quorus-removal-2026-10-09.md),
 started 2026-10-04 before the Step 4 close-out gate. The gate's mutation evidence
 is recorded there, as the first task of its Phase 7. Step 5 resumes when that
@@ -809,6 +809,14 @@ intentional errors, and Phase 7 has not yet changed `RaftNode`'s async code.
 Add a mutation of each to this gate's evidence. The full-suite run of
 2026-10-02 no longer describes the source. The run that stands behind the
 mutations is the one that closes the single-POM list's Phase 6.
+
+**Changed by that list's review of Phase 4 (2026-10-09).** A server that does
+not campaign, because it holds no configuration yet or is still a non-voter,
+used to keep the leader it knew for as long as it was cut off, and so reported
+itself ready. `RaftNode` now makes it forget a leader that has been silent for
+an election timeout (`forgetSilentLeader`); the next message from a leader
+makes the leader known again. It was written test first, in
+`RaftNodeServerIdCountingTest`. Add a mutation of it to this gate's evidence.
 
 ### Step 5. Failed-server cleanup
 

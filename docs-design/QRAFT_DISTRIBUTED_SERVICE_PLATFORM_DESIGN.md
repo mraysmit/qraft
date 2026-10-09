@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-10-08 (Phase 3 package ownership and dependency directions in section 1.1)
+**Last updated:** 2026-10-09 (the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
 
 ## 1. Purpose
 
@@ -652,7 +652,9 @@ successful no-op. During graceful shutdown, the client:
 2. Stops local checks and health publications, then waits for in-flight
    publications to finish, and stops new reconciliation.
 3. Attempts bounded deregistration for its known registered services.
-4. Deregisters its node after the service attempts complete.
+4. Deregisters its node after the service attempts complete. The node's
+   deregistration removes any service that an attempt left behind (section
+   12.1.2).
 5. Stops the local HTTP server.
 6. Closes its scheduler and HTTP resources.
 
@@ -728,7 +730,8 @@ leader and its followers hold identical values that expiry can match exactly.
   effective deadline. Reaping removes the node entry and every service instance
   whose node is that node, in every tenant and namespace, together with their
   checks and declared check sets. This removes the services of a crashed client
-  even when they have no checks.
+  even when they have no checks. A node's deregistration removes the same
+  (section 12.1.2).
 - Both phases name the stored last contact, so a heartbeat or re-registration
   committed first makes a stale command a no-op. Reaping applies only to a node
   that is already unreachable.

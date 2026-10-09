@@ -3,7 +3,7 @@
 **Date:** 2026-10-05
 **Status:** Proposed. Section 4's items are recommendations to confirm or change, except the points marked "Decided 2026-10-09", in proposals 11, 12, and 14. No point is open. No code exists.
 **Proposed start:** after [`task-list-consul-style-client-2026-10-09.md`](task-list-consul-style-client-2026-10-09.md) (proposal 15).
-**Last updated:** 2026-10-09 (the file renamed to the date of its last change; four points decided: the authorize call; revoking the management token; Consul's rule for registering a service, which needs `service:write` alone on a registered node; and a client certificate on the server's HTTP listener, for the transport security list)
+**Last updated:** 2026-10-09 (proposal 11 brought in line with the node routes and with what a node's deregistration removes; the file renamed to the date of its last change; four points decided: the authorize call; revoking the management token; Consul's rule for registering a service, which needs `service:write` alone on a registered node; and a client certificate on the server's HTTP listener, for the transport security list)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 7.3, 12, 15, 16 and 22
 **Related:** the client list's decisions 6 and 8; decision 6 of [`task-list-raft-membership-changes-2026-10-09.md`](task-list-raft-membership-changes-2026-10-09.md), the operator token; item 9 of [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md); phase 7 of [`CONSUL_FEATURE_IMPLEMENTATION_PLAN.md`](CONSUL_FEATURE_IMPLEMENTATION_PLAN.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
@@ -239,11 +239,12 @@ so and why.
       health list returns only what the token may read, as Consul filters. A
       request for one named service or node the token may not read gets 403.
 11. **What each operation needs.** The paths are those the client list's
-    decision 5 leaves in place.
+    decision 5 leaves in place. The node routes have been on them since
+    2026-10-09 (design section 12.1.2).
 
     | Operation | Needs |
     |---|---|
-    | Register, renew, or deregister a node | `node:write` on the node name |
+    | Register, renew, or deregister a node | `node:write` on the node name, which `X-Qraft-Node` gives. Since 2026-10-09 a node's deregistration also removes the services and checks registered on it; as in Consul, it needs nothing more for them |
     | Take over a node name (client decision 8) | `node:write` on that name |
     | Rename a node | `node:write` on the old name and on the new |
     | Register or deregister a service | `service:write` on the service name in its scope. A request that also creates or changes the node needs `node:write` on it |
@@ -302,7 +303,9 @@ so and why.
     - **A planted instance** stays until someone deregisters it: the client's
       `ServiceReconciler` deregisters only what it registered itself. Making
       the client remove the services on its node that it did not register is
-      left for later, if it is wanted.
+      left for later, if it is wanted. Since 2026-10-09 a planted instance
+      also goes when its node is deregistered or reaped: both remove every
+      service on the node.
     - **Rejected: two credentials on a synced service write,** the client's
       own token for the node and the registration's for the service. It
       would have tied a registration to a node, at the cost of a second

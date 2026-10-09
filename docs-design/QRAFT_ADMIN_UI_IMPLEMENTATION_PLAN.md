@@ -1,7 +1,7 @@
 # Qraft Administrative UI Implementation Plan
 
 **Status:** Agreed 2026-09-27; open questions 2 to 4 are decided when their increments start
-**Last updated:** 2026-10-05 (the build location and the tenancy owner, after the move to one Maven project; section 4 was brought up to date with scoped reads and the Raft operator endpoints on 2026-10-02)
+**Last updated:** 2026-10-09 (section 4.1: the node list is at `/v1/catalog/nodes`, the node writes are listed, and bare `/health` is gone, after the single-POM list's Phase 4. On 2026-10-05: the build location and the tenancy owner, after the move to one Maven project; section 4 was brought up to date with scoped reads and the Raft operator endpoints on 2026-10-02)
 **Design:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md) (what the interface is) and
 [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections
 12.4, 12.4.1, and 19.6 (how it is packaged and served)
@@ -77,12 +77,13 @@ section 4.1, after reviewing the `peegeeq-management-ui` and
 | `GET /raft/status` | node, server ID, role, term, leader, commit, applied, and last log index, snapshot index, fenced and removed flags, read as one consistent view | Describes only the answering node: no peers, match or next index, lag, or quorum |
 | `GET /v1/operator/raft/configuration` | each configured server: server ID, name, address, voter, leader, as the answering server holds them | No reachability, match or next index, last contact, or lag |
 | `DELETE /v1/operator/raft/peer` | removal of a server, guarded by the operator token and forwarded to the leader | A mutation: not offered by the interface before UI-5 |
-| `GET /health`, `/health/live`, `/health/ready` | node liveness and readiness | None for the status strip |
-| `GET /api/v1/clients` | nodes with status, registration and heartbeat times, and metadata | No owned-service or failing-check counts; no tenant or namespace filter |
+| `GET /health/live`, `/health/ready` | liveness, and readiness with the conditions the server does not meet | None for the status strip |
+| `GET /v1/catalog/nodes` | nodes in name order: name, address, datacenter, region, metadata (the client's version is the entry `qraft.version`), status, and the registration and heartbeat times as ISO-8601 instants; carries `X-Qraft-Index` | No owned-service or failing-check counts. A node belongs to no tenant or namespace, so there is nothing to scope |
 | `GET /v1/catalog/services` | service names with their tags, in the scope of the `X-Qraft-Tenant` and `X-Qraft-Namespace` headers | No health or instance count; one request per service to learn more; no listing of the scopes that exist |
 | `GET /v1/catalog/service/{name}` | instances in the requested scope: identity, address, port, tags, metadata, health, tenant, namespace, datacenter, region, enabled | No registration source or last-change index |
 | `GET /v1/health/service/{name}` (`?passing`) | instances in the requested scope with their checks: status, sequence, observed, accepted, deadline, expired, output, deregistration delay | One service at a time; no cross-service check listing |
 | `PUT /v1/client/service/register`, `/deregister` | replicated service writes, scoped by `X-Qraft-Tenant`, `X-Qraft-Namespace`, and `X-Qraft-Node` headers | Unauthenticated |
+| `PUT /v1/catalog/register`, `/deregister`, `/node/heartbeat` | replicated node writes for the node that `X-Qraft-Node` names; a deregistration removes the node's services and checks too | Unauthenticated. Mutations: not offered by the interface before UI-5 |
 | Response metadata | `X-Qraft-Index` (applied index) on catalog reads; `X-Qraft-Leader-Id` and a structured error envelope (`code`, `message`, `retryable`) on errors | No answering-node header; no consistency mode |
 | gRPC `DistributedStateService` | key/value `Put`, `Get`, `Delete`, `List` | Not reachable from a browser; no HTTP equivalent |
 | OpenTelemetry Prometheus exporter | metrics on a separate port (`prometheusPort`, default 9464) | Not on the API listener; the UI only links to it |

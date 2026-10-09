@@ -40,7 +40,7 @@ Status key:
 |---|---|---|---|
 | Runtime | `qraft server` from one image; file configuration validated before resources open | Done | `QraftRuntimeApplication`, `AppConfig`, `QraftServerLifecycleTest` |
 | Runtime | Drain before shutdown; bounded shutdown | Done | `ShutdownCoordinator`, `RaftNodeShutdownSequencingTest` |
-| Runtime | Readiness that reflects recovery, fencing, draining, and leadership (design 6.1) | Done | `HttpApiServerReadinessTest`; done 2026-09-27 |
+| Runtime | Readiness that reflects recovery, fencing, draining, and leadership (design 6.1) | Done | `HttpApiServerReadinessTest`; done 2026-09-27. Since 2026-10-09 a server that does not campaign loses a silent leader too, and is unready (`RaftNodeServerIdCountingTest`) |
 | Raft | Election, replication, check-quorum, fencing | Done | `RaftNode*Test`, `RaftNodeCheckQuorumTest` |
 | Raft | Durable WAL, snapshots in every role, installation, recovery | Done | `RaftNodeFollowerLogTest`, `DockerDurableRestartTest`, `DockerClientRecoveryTest` |
 | Raft | Replica determinism; follower match index limited to verified entries | Done | `ReplicaDeterminismTest`, `RaftNodeFollowerLogTest` |
@@ -49,6 +49,7 @@ Status key:
 | Catalog | Catalog and health queries with deterministic ordering | Done | `ServiceCatalog` sorts names and instances |
 | Catalog | Registration and modification indexes on instances (design 7.5) | Missing | `ServiceInstance` has no index fields |
 | Catalog | Reads scoped by tenant and namespace | Done | Catalog and health reads honour the scope headers; `HttpApiServerTest`, `ServiceCatalogTest`; done 2026-09-27 |
+| Catalog | Node registry: a Consul-shaped node, written at `PUT /v1/catalog/register`, `/deregister`, and `/node/heartbeat`, and listed at `GET /v1/catalog/nodes` | Done | Done 2026-10-09 (single-POM list, Phase 4). The inherited capabilities, host name, port, and job-system statuses are removed, and what earlier versions wrote still reads. A node's deregistration removes its services. `HttpApiServerTest`, `NodeCodecTest`, `LegacyNodeFixtureTest` |
 | Health | Ordered observations, derived service health, all five states | Done | `HealthCommandStateStoreTest`, `HealthPropagationEndToEndTest` |
 | Health | Leader-owned expiry and automatic deregistration | Done | `LeaderHealthExpiry*Test`, `CrashedClientExpiryEndToEndTest` |
 | Health | Node membership expiry: unreachable, then reaped | Done | `NodeExpiryEvaluatorTest`, `NodeMembershipExpiryStateStoreTest` |
@@ -83,7 +84,7 @@ Status key:
 |---|---|---|
 | `qraft client` from one image; file configuration validated first | Done | `ClientConfiguration`, `QraftRuntimeApplicationTest` |
 | Local liveness and readiness from membership, convergence, required checks, and server contact | Done | `QraftClientTest`, `DockerClientRecoveryTest` |
-| Node registration, heartbeats, capped backoff, seed rotation, preferred endpoint | Done | `RegistrationClientTest`, `HttpCatalogClientTest` |
+| Node registration, heartbeats, capped backoff, seed rotation, preferred endpoint | Done | `RegistrationClientTest`, `HttpCatalogClientTest`. On the catalog's write paths since 2026-10-09 |
 | Single-flight service reconciliation with fingerprints | Done | `ServiceReconcilerTest` |
 | HTTP, TCP (with a warning threshold), and TTL checks; sequenced publication and renewal | Done | `*CheckRunnerTest`, `HealthPublisherTest` |
 | Bounded graceful shutdown: checks, services, then node | Done | `QraftClientTest`, `DockerClientHealthTest` |
@@ -100,7 +101,9 @@ Status key:
   remain. `ClientStatus` still has
   `getJobAssignmentPriority()`, which nothing calls, and the work-scheduling
   states `IDLE`, `ACTIVE`, and `OVERLOADED`. The `ClientSystemInfo` Javadoc
-  describes "capacity planning and job assignment".
+  describes "capacity planning and job assignment". Those classes were removed
+  on 2026-10-09, with the rest of the inherited node model (single-POM list,
+  Phase 4).
 - **The Consul plan's checklist was stale.** Reconciled 2026-09-27. Several
   unchecked items were done:
   - client membership and failure detection;

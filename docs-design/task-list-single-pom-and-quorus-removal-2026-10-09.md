@@ -1,9 +1,9 @@
 # Task List: Single POM and Removal of the Quorus Leftovers
 
 **Date:** 2026-10-04
-**Last updated:** 2026-10-09 (Phase 4 done, with its mutation evidence, and its four open points reviewed with the user; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
+**Last updated:** 2026-10-09 (the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
 **Status:** In progress. This is the current task list. It started on 2026-10-04 at the user's request, before the membership list's Step 4 close-out gate.
-**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it is not committed yet. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. Three decisions of the phase still wait for the user's confirmation. The next coding task is Phase 5. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
+**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it is not committed yet. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. The next coding task is Phase 5. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
 **Last reviewed:** 2026-10-08, against the code at commit `9a4adf0`, with the other four task lists. The status table in section 4 and every item marked "review of 2026-10-08" come from that review. No build was run for it. The logs that the Phase 2A and Phase 3 records cite were written in another working tree and were not available, so their counts were checked for arithmetic only. The earlier review of 2026-10-05 was against `24beac3`; its items keep their date.
 **Order of work:**
 - The membership list's Step 4 close-out gate is the first task of Phase 7 here.
@@ -85,7 +85,7 @@ rules and extracts from that run.
 | 2A. Intentional errors labelled | Done: accepted 2026-10-08; the audit of child JVMs added 2026-10-09 | 9 of 9 | `24beac3` to `26a3570` |
 | 3. Package layout | Done; verified 2026-10-08. One task added by the review: the comparison of test names with the Phase 0 baseline | 10 of 11 | `9a4adf0` |
 | 3A. One word for each mode | Added and done 2026-10-09; verified the same day | 5 of 5 | `5a00975` |
-| 4. Node model and API | Done 2026-10-09, exit met; its four open points reviewed and settled the same day; three decisions wait for confirmation | 7 of 7 | not committed |
+| 4. Node model and API | Done 2026-10-09, exit met; its four open points settled and its decisions confirmed by the user the same day | 7 of 7 | not committed |
 | 5. Configuration and version | Not started | 0 of 6 | |
 | 6. Docker and observability | Not started | 0 of 10 | |
 | 7. Async layer | Not started | 0 of 6 | |
@@ -1216,8 +1216,8 @@ history, and descriptions of Consul's own software.
   design's new section 12.1.2 records the bodies, the answers, and the error
   codes.
 
-  **Decisions made here, on the standing instruction to follow Consul. Each
-  is for the user to confirm or change; nothing is deployed.**
+  **Decisions made here, on the standing instruction to follow Consul.
+  Confirmed by the user on 2026-10-09, as built.**
   - **The identity header names the node.** `X-Qraft-Node` is required on
     the three writes, as it is for a service. A body never names the node.
   - **One registration body for nodes and services:** the node's
@@ -1336,7 +1336,7 @@ history, and descriptions of Consul's own software.
     registered routes by a status and a body are gone with their last users.
   - **Bare `/health` is removed in client mode too.** The client's health
     listener served it as a second name for readiness. One jar has one set of
-    names. Decided here; say if the client should keep it.
+    names. Decided here, and confirmed by the user on 2026-10-09.
   - **A server's health check is now liveness, and the client's is
     readiness.** A server's bare path always answered 200, so the 29 server
     health checks of the nine compose files use `/health/live`, as do the
@@ -1410,11 +1410,20 @@ full suites.
   tests on a fresh image. Both are cited under the route removals above, with
   their log audits: no unflagged error or exception in either.
 
-**Decisions made in this phase that wait for the user's confirmation.** Each
-is recorded where it was made; nothing is deployed, so each can still change.
-1. The bodies and answers of the node routes: design section 12.1.2.
-2. A heartbeat carries no status.
-3. Bare `/health` is removed in client mode too.
+**The phase's three remaining decisions, confirmed by the user on
+2026-10-09.** Each was put with its alternatives, and each stays as built.
+1. **The bodies and answers of the node routes** stay as the design's
+   section 12.1.2 records them: the identity header names the node, and a
+   deregistration that names no service removes the node.
+   - Not chosen: a deregistration that must say what it removes, and a body
+     that names the node as Consul's does.
+   - Accepted with it: since a node's deregistration also removes its
+     services, an empty body sent by mistake removes more than it did.
+     Consul's rule has the same cost.
+2. **A heartbeat carries no status and no time.** Not chosen: an optional
+   status field.
+3. **Bare `/health` stays removed in client mode too.** Not chosen: restoring
+   it there as a second name for readiness.
 
 **The phase's four open points, reviewed with the user on 2026-10-09.** I
 re-read the code behind each before the review. Two were worse than the
@@ -1530,6 +1539,15 @@ both modes.
   favour of the end-to-end suite. Delete the unreferenced `test-heartbeat.json`.
   `start-quick.*`'s `test` action and `docker/README.md` use the other files
   there.
+
+  Since Phase 4 (2026-10-09) these call routes that no longer exist, so each
+  fails until this task is done. `docker/README.md` says so.
+  - `docker/test-data`: `check-clients.*`, `send-heartbeat.*`, and the body
+    in `test-registration.json`, which still has the fields of the old
+    node model;
+  - `start-quick.*`: the `test` action;
+  - the logging demo scripts that the task above deletes;
+  - one Grafana panel, which reads `/api/v1/clients` directly.
 - [ ] Delete `docker/test-data/nginx.conf` (review of 2026-10-05). Nothing
   references it; the load-balancer topology mounts `compose/nginx/nginx.conf`.
 - [ ] Decide whether the nginx load-balancer topology stays, since clients
@@ -1595,6 +1613,29 @@ the removal of `qraft-tenant`. They use the package names of that day.
 - The module wording in `TESTING.md` and `JENKINS.md`, and the jar name in
   `docker/README.md`.
 
+**Done early, 2026-10-09,** at the user's direction, for Phase 4 and for the
+decisions that followed it:
+- The design: the node model in section 7.3, the node routes in the new
+  section 12.1.2, the readiness of a server that does not campaign in section
+  6.1, and what a node's deregistration removes in sections 8.4 and 9.2.
+- The administrative interface's plan, section 4.1, its task list, and one line
+  of the interface design: the task below.
+- The Consul plan: a checklist entry for the node model and the removed
+  routes. Its section 3 now names the packages, with the responsibilities the
+  design's section 1.1 gives them. It still gave the modules of before
+  2026-10-04, two of them under Qraft's retired words.
+- The feature validation: a row for the node registry, and notes on the rows
+  for readiness and for the client's node registration.
+- The ACL list's proposal 11, and the membership list's Step 4 gate.
+- `RAFT_STORAGE_OPERATIONS.md`: node commands and snapshot nodes from before
+  2026-10-09 still decode.
+- `docker/README.md`: its `test` action calls routes that are gone.
+- `TESTING.md` and `PROJECT_STANDARDS.md` section 7 said that an assistant
+  must not run builds itself or open a console. The user changed that on
+  2026-10-09, and both now say what is done: one visible console, reused.
+  `AGENTS.md` still speaks of the VS Code terminal; it is the user's file and
+  was left alone.
+
 What remains for this phase:
 
 - [ ] Bring the documents above up to date with Phases 3 to 7:
@@ -1609,14 +1650,28 @@ What remains for this phase:
   - the log file names of `PROJECT_STANDARDS.md` section 6.2. Done with
     Phase 3: the section names the files by mode, and its note that both
     modes write one log file is gone;
-  - the names and removals of Phases 4 to 7, as each phase ends;
+  - the names and removals of Phases 4 to 7, as each phase ends. Phase 4's
+    are in, as of 2026-10-09: see "Done early" above;
   - the version source, in `OPEN_SOURCE_USAGE.md` if Phase 5 changes it.
 - [ ] Record the removals of Phases 4 to 7 in the feature validation and the
-  Consul plan checklist.
-- [ ] Update the administrative interface's plan and task list for Phase 4:
+  Consul plan checklist. Phase 4's are recorded in both, as of 2026-10-09.
+- [x] Update the administrative interface's plan and task list for Phase 4:
   the plan's section 4.1, the list's read APIs, its reserved path segments,
   and the development proxy lose the routes Phase 4 removes: `/api/v1/clients`,
   `/status`, and bare `/health`.
+
+  Done 2026-10-09, with one difference from the task as written.
+  - The plan's section 4.1 lists `GET /v1/catalog/nodes` in place of
+    `/api/v1/clients`, the two health routes without the bare one, and the
+    node writes.
+  - The list's read APIs name the same routes, and its development proxy no
+    longer forwards `/api`.
+  - **The reserved segments were not reduced.** `AdminUiConfig` still refuses
+    a path under `api` or `status`, and the list now says so. Nothing answers
+    there any more, so the task as written would free both names. They were
+    kept so that the interface cannot be mounted where an API used to answer.
+    This waits for the user's word: freeing them is a two-word change in
+    `AdminUiConfig` and one test.
 - [ ] Update the membership list for its resumption: the class names in its
   Step 5 contract, after Phases 3 and 5. The Phase 3 name,
   `QraftServerService`, was put there on 2026-10-08; `AppConfig` follows

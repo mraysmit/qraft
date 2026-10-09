@@ -1,7 +1,7 @@
 # Qraft Administrative UI and UX Design
 
 **Status:** Draft  
-**Last updated:** 2026-09-25
+**Last updated:** 2026-10-09 (a client row shows the version from the node's metadata; a node has no capabilities any more. Before: 2026-09-25)
 
 ## 1. Purpose
 
@@ -228,7 +228,7 @@ Client rows show:
 - last heartbeat and successful reconciliation;
 - owned services and failing checks;
 - tenant, namespace, datacenter, and region;
-- version and relevant capabilities.
+- version, from the node's metadata.
 
 Node and client detail pages provide Summary, Services, Health Checks,
 Reconciliation, Metadata, Sessions, Raft, Storage, and Events tabs when those

@@ -1,7 +1,7 @@
 # Task List: Embedded Administrative Interface
 
 **Date:** 2026-09-27
-**Last updated:** 2026-10-09 (Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: the log audit added to Step 6)
+**Last updated:** 2026-10-09 (the read APIs, the development proxy, and the reserved segments, after the single-POM list's Phase 4. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: the log audit added to Step 6)
 **Active work:** Paused after Step 1 on 2026-09-27, until the backend features in [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md) are delivered; Step 2 is next when it resumes
 **Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increments UI-0 and UI-1
 **Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 12.4, 12.4.1, 19.6, and 21; [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md), sections 14 and 15
@@ -40,8 +40,9 @@ Updated 2026-09-27.
 - Read APIs that exist today:
   - `/raft/status`: node, role, term, leader, commit, applied, and last log
     index, snapshot index, and the fenced flag, read as one consistent view;
-  - `/health/*`;
-  - `/api/v1/clients`: nodes with status, heartbeat, and metadata;
+  - `/health/live` and `/health/ready`;
+  - `/v1/catalog/nodes`: nodes with status, heartbeat, and metadata. Until
+    2026-10-09 this was `/api/v1/clients`;
   - `/v1/catalog/services`, `/v1/catalog/service/{name}`;
   - `/v1/health/service/{name}` with checks and the `passing` filter.
 - Stage 1 views that need APIs which do not exist yet:
@@ -85,8 +86,9 @@ and corrects the build and security weaknesses the review found.
      Zustand. Data comes through a small typed `fetch` client that validates
      responses with zod. The peegeeq modules carry two overlapping stores,
      used in three files between them, alongside axios.
-   - Vite's development server proxies `/v1`, `/api`, `/raft`, and `/health`
-     to a local server, as peegeeq does for its backend.
+   - Vite's development server proxies `/v1`, `/raft`, and `/health` to a
+     local server, as peegeeq does for its backend. `/api` is not proxied:
+     no route has been served under it since 2026-10-09.
 2. **Build integration.** `frontend-maven-plugin` in the root `pom.xml`, with
    pinned Node and npm versions, as in peegeeq, but correcting what it does
    differently:
@@ -134,7 +136,9 @@ and corrects the build and security weaknesses the review found.
    - an optional development-only `devAssetsDirectory`.
 2. Validate these settings at startup, before any listener opens. Reject:
    - a path that overlaps `/v1/`, `/api/`, `/health`, `/raft/`, metrics, or
-     debugging routes;
+     debugging routes. `/api/` and `/status` are still refused, although the
+     server has served nothing under them since 2026-10-09: the interface
+     cannot be mounted where an API used to answer;
    - a malformed path;
    - a development directory that is missing or has no `index.html`;
    - an ambiguous combination of embedded and external assets.

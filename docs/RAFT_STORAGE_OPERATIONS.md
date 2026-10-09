@@ -231,6 +231,13 @@ is required for these payload defaults; immutable fixture tests cover both legac
 command bytes and snapshot documents. This does not establish whole-node startup
 compatibility: the Raft configuration and snapshot envelope must also be present.
 
+Node commands, and the nodes in a snapshot, written before 2026-10-09 decode
+directly as well. The fields a node no longer has, among them its host name, port,
+and capabilities, are ignored. A removed node status reads as `healthy` or
+`unreachable`, by whether the node was in contact, and an entry that holds the
+removed capabilities update applies nothing. Immutable fixture tests cover these
+too.
+
 A directory that holds Raft state but no cluster configuration, which is any
 directory written before configurations were recorded in the log (2026-09-29),
 refuses to start. A legacy application snapshot without the Raft configuration

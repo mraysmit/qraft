@@ -98,14 +98,15 @@ orchestration readiness.
 ### Core layers
 
 These were Maven modules until 2026-10-04 and are now layers of packages in one
-build. The former module name is given in brackets.
+build. The package is given in brackets; the design's section 1.1 has the full map
+and the dependencies allowed between the layers.
 
-- Shared types (`qraft-core`): shared domain models, configuration, health, and discovery primitives
-- Raft contracts (`qraft-raft-engine`): Raft consensus contracts and replicated command execution
-- Replicated state (`qraft-distributed-state`): replicated key/value and service-catalog state
-- Server (`qraft-controller`): cluster coordination, state ownership, and HTTP and gRPC APIs
-- Client (`qraft-agent`): node identity, service registration, heartbeats, and local checks
-- Entry point (`qraft-runtime`): single executable launcher, `server`/`client` mode selection, shared lifecycle, configuration, logging, metrics, and health wiring
+- Common (`dev.mars.qraft.common`): the shared node model, `ServiceDefinition`, configuration helpers, and deadlines
+- Raft (`dev.mars.qraft.raft`): the consensus implementation, its contracts, transport, and durable storage adapters
+- Replicated state (`dev.mars.qraft.state`): the deterministic state host, replicated commands and codecs, the service catalog, health observations, and key/value state
+- Server (`dev.mars.qraft.server`): server composition and lifecycle, the HTTP and gRPC APIs, telemetry, and background health processing
+- Client (`dev.mars.qraft.client`): node registration, service reconciliation, heartbeats, local checks, and readiness
+- Entry point (`dev.mars.qraft.runtime`): single executable launcher, `server`/`client` mode selection, shared lifecycle, configuration, logging, metrics, and health wiring
 
 Tenant and namespace policy, validation, and lifecycle have no code today:
 `qraft-tenant` was removed on 2026-10-04, and they return as replicated state
@@ -337,6 +338,13 @@ merged into one Maven project on 2026-10-04.
   container crash, partition, and whole-cluster restart tests.
 - [x] Run the complete reactor test suite and review the resulting log.
 - [x] Remove the job-system concepts from the active build.
+- [x] Replace the inherited node model with a Consul-shaped node, and move the node
+  routes to the catalog's write paths (2026-10-09, Phase 4 of
+  [`task-list-single-pom-and-quorus-removal-2026-10-09.md`](task-list-single-pom-and-quorus-removal-2026-10-09.md)).
+  Removed with it: a node's capabilities and the command that replaced them, its
+  host name and port, the job-system statuses, and the routes `/api/v1/clients*`,
+  `/api/v1/info`, `/status`, and bare `/health`. A node's deregistration now
+  removes its services and checks, as in Consul.
 - [x] Make server readiness reflect recovery, fencing, draining, and leadership
   (feature validation item 2).
 - [ ] Complete the key/value store: tenant and namespace scoping, indexes,

@@ -104,6 +104,11 @@ With a server running, `start-quick.ps1 test` uses the JSON payloads and
 PowerShell scripts under `test-data/` to exercise client registration,
 heartbeat, and listing endpoints.
 
+These scripts call `/api/v1/clients*`, which the server stopped serving on
+2026-10-09: the node routes are at `/v1/catalog/*` now, with other request
+bodies. Until the scripts are reworked or deleted, `test` fails. The Docker and
+end-to-end suites cover the same ground (see [TESTING.md](../docs/TESTING.md)).
+
 ```powershell
 .\start-quick.ps1 test
 ```
