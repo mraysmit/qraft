@@ -16,74 +16,60 @@
 
 package dev.mars.qraft.state;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.mars.qraft.common.ClientCapabilities;
-import dev.mars.qraft.common.ClientInfo;
-import dev.mars.qraft.common.ClientNetworkInfo;
-import dev.mars.qraft.common.ClientStatus;
-import dev.mars.qraft.common.ClientSystemInfo;
-import dev.mars.qraft.raft.grpc.ClientCapabilitiesProto;
-import dev.mars.qraft.raft.grpc.ClientCommandProto;
-import dev.mars.qraft.raft.grpc.ClientCommandType;
-import dev.mars.qraft.raft.grpc.ClientInfoProto;
-import dev.mars.qraft.raft.grpc.ClientNetworkInfoProto;
-import dev.mars.qraft.raft.grpc.ClientStatusProto;
-import dev.mars.qraft.raft.grpc.ClientSystemInfoProto;
+import dev.mars.qraft.common.Node;
+import dev.mars.qraft.common.NodeStatus;
+import dev.mars.qraft.raft.grpc.NodeCommandProto;
+import dev.mars.qraft.raft.grpc.NodeCommandType;
+import dev.mars.qraft.raft.grpc.NodeProto;
+import dev.mars.qraft.raft.grpc.NodeStatusProto;
 
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
 import java.util.Optional;
 
 /**
- * Protobuf codec for client-related types: {@link ClientCommand},
- * {@link ClientInfo}, {@link ClientCapabilities}, {@link ClientSystemInfo},
- * {@link ClientNetworkInfo}, and {@link ClientStatus}.
+ * Protobuf codec for the node registry's types: {@link NodeCommand}, {@link Node}, and {@link NodeStatus}.
+ *
+ * <p>It also reads what earlier versions wrote. The fields a node no longer has are skipped by the parser, a
+ * removed status decodes as the status that says whether the node was in contact, and an entry that holds the
+ * removed capabilities update decodes as nothing to apply.
  *
  * <p>Package-private utility class used by {@link ProtobufCommandCodec}.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2025
  */
-final class ClientCodec {
+final class NodeCodec {
 
-    private ClientCodec() {
+    private NodeCodec() {
     }
 
     // ── Command ─────────────────────────────────────────────────
 
-    static ClientCommandProto toProto(ClientCommand cmd) {
-        ClientCommandProto.Builder builder = ClientCommandProto.newBuilder()
-                .setClientId(cmd.clientId())
+    static NodeCommandProto toProto(NodeCommand cmd) {
+        NodeCommandProto.Builder builder = NodeCommandProto.newBuilder()
+                .setName(cmd.name())
                 .setTimestampEpochMs(cmd.timestamp().toEpochMilli());
 
         switch (cmd) {
-            case ClientCommand.Register r -> {
-                builder.setType(ClientCommandType.CLIENT_CMD_REGISTER);
-                builder.setClientInfo(toProto(r.clientInfo()));
+            case NodeCommand.Register r -> {
+                builder.setType(NodeCommandType.NODE_CMD_REGISTER);
+                builder.setNode(toProto(r.node()));
             }
-            case ClientCommand.Deregister ignored -> {
-                builder.setType(ClientCommandType.CLIENT_CMD_DEREGISTER);
+            case NodeCommand.Deregister ignored -> {
+                builder.setType(NodeCommandType.NODE_CMD_DEREGISTER);
             }
-            case ClientCommand.UpdateStatus u -> {
-                builder.setType(ClientCommandType.CLIENT_CMD_UPDATE_STATUS);
+            case NodeCommand.UpdateStatus u -> {
+                builder.setType(NodeCommandType.NODE_CMD_UPDATE_STATUS);
                 builder.setNewStatus(toProto(u.newStatus()));
                 builder.setExpectedStatus(toProto(u.expectedStatus()));
             }
-            case ClientCommand.UpdateCapabilities c -> {
-                builder.setType(ClientCommandType.CLIENT_CMD_UPDATE_CAPABILITIES);
-                builder.setNewCapabilities(toProto(c.newCapabilities()));
-            }
-            case ClientCommand.Expire e -> {
-                builder.setType(ClientCommandType.CLIENT_CMD_EXPIRE);
+            case NodeCommand.Expire e -> {
+                builder.setType(NodeCommandType.NODE_CMD_EXPIRE);
                 builder.setExpectedLastContactEpochMs(e.expectedLastContact().toEpochMilli());
                 builder.setReap(e.reap());
             }
-            case ClientCommand.Heartbeat h -> {
-                builder.setType(ClientCommandType.CLIENT_CMD_HEARTBEAT);
+            case NodeCommand.Heartbeat h -> {
+                builder.setType(NodeCommandType.NODE_CMD_HEARTBEAT);
                 builder.setSequenceNumber(h.sequenceNumber());
                 if (h.registrationId() != null) builder.setRegistrationId(h.registrationId());
                 if (h.status() != null) {
@@ -95,214 +81,83 @@ final class ClientCodec {
         return builder.build();
     }
 
-    static ClientCommand fromProto(ClientCommandProto proto) {
+    /** Decodes a node command, or returns {@code null} for an entry that holds the removed capabilities update. */
+    @SuppressWarnings("deprecation") // the removed command type is named here so that old entries are recognised
+    static NodeCommand fromProto(NodeCommandProto proto) {
         // Decoding must never read the local clock: every replica and every replay must see one value.
         Instant timestamp = Instant.ofEpochMilli(proto.getTimestampEpochMs());
-        ClientStatus newStatus = proto.getNewStatus() != ClientStatusProto.CLIENT_STATUS_UNSPECIFIED
+        NodeStatus newStatus = proto.getNewStatus() != NodeStatusProto.NODE_STATUS_UNSPECIFIED
                 ? fromProto(proto.getNewStatus()) : null;
         return switch (proto.getType()) {
-            case CLIENT_CMD_REGISTER -> new ClientCommand.Register(
-                    proto.getClientId(), fromProto(proto.getClientInfo()), timestamp);
-            case CLIENT_CMD_DEREGISTER -> new ClientCommand.Deregister(
-                    proto.getClientId(), timestamp);
-            case CLIENT_CMD_UPDATE_STATUS -> {
-                yield new ClientCommand.UpdateStatus(
-                        proto.getClientId(), fromProto(proto.getExpectedStatus()), newStatus, timestamp);
-            }
-            case CLIENT_CMD_UPDATE_CAPABILITIES -> new ClientCommand.UpdateCapabilities(
-                    proto.getClientId(), fromProto(proto.getNewCapabilities()), timestamp);
-            case CLIENT_CMD_HEARTBEAT -> new ClientCommand.Heartbeat(
-                    proto.getClientId(), newStatus, timestamp, proto.getSequenceNumber(),
+            case NODE_CMD_REGISTER -> new NodeCommand.Register(
+                    proto.getName(), fromProto(proto.getNode()), timestamp);
+            case NODE_CMD_DEREGISTER -> new NodeCommand.Deregister(
+                    proto.getName(), timestamp);
+            case NODE_CMD_UPDATE_STATUS -> new NodeCommand.UpdateStatus(
+                    proto.getName(), fromProto(proto.getExpectedStatus()), newStatus, timestamp);
+            // Qraft never issued this command, and a node no longer has capabilities: nothing to apply.
+            case NODE_CMD_UPDATE_CAPABILITIES -> null;
+            case NODE_CMD_HEARTBEAT -> new NodeCommand.Heartbeat(
+                    proto.getName(), newStatus, timestamp, proto.getSequenceNumber(),
                     proto.getRegistrationId().isEmpty() ? null : proto.getRegistrationId());
-            case CLIENT_CMD_EXPIRE -> new ClientCommand.Expire(proto.getClientId(),
+            case NODE_CMD_EXPIRE -> new NodeCommand.Expire(proto.getName(),
                     Instant.ofEpochMilli(proto.getExpectedLastContactEpochMs()), proto.getReap(), timestamp);
-            default -> throw new IllegalArgumentException("Unknown ClientCommandType: " + proto.getType());
+            default -> throw new IllegalArgumentException("Unknown NodeCommandType: " + proto.getType());
         };
     }
 
-    private static final ObjectMapper CAPABILITY_JSON = new ObjectMapper();
+    // ── Domain model ────────────────────────────────────────────
 
-    private static String toJson(Object value) {
-        try {
-            return CAPABILITY_JSON.writeValueAsString(value);
-        } catch (JsonProcessingException error) {
-            throw new IllegalArgumentException("Custom capability value is not JSON-serializable", error);
-        }
-    }
-
-    private static Object fromJson(String json) {
-        try {
-            return CAPABILITY_JSON.readValue(json, Object.class);
-        } catch (JsonProcessingException error) {
-            throw new IllegalArgumentException("Malformed custom capability value", error);
-        }
-    }
-
-    // ── Domain models ───────────────────────────────────────────
-
-    private static ClientInfoProto toProto(ClientInfo info) {
-        ClientInfoProto.Builder builder = ClientInfoProto.newBuilder()
-                .setPort(info.getPort());
-        Optional.ofNullable(info.getClientId()).ifPresent(builder::setClientId);
-        Optional.ofNullable(info.getHostname()).ifPresent(builder::setHostname);
-        Optional.ofNullable(info.getAddress()).ifPresent(builder::setAddress);
-        Optional.ofNullable(info.getCapabilities()).ifPresent(c -> builder.setCapabilities(toProto(c)));
-        Optional.ofNullable(info.getStatus()).ifPresent(s -> builder.setStatus(toProto(s)));
-        Optional.ofNullable(info.getRegistrationTime()).ifPresent(t -> builder.setRegistrationTimeEpochMs(t.toEpochMilli()));
-        Optional.ofNullable(info.getLastHeartbeat()).ifPresent(t -> builder.setLastHeartbeatEpochMs(t.toEpochMilli()));
-        Optional.ofNullable(info.getVersion()).ifPresent(builder::setVersion);
-        Optional.ofNullable(info.getRegion()).ifPresent(builder::setRegion);
-        Optional.ofNullable(info.getDatacenter()).ifPresent(builder::setDatacenter);
-        Optional.ofNullable(info.getMetadata()).ifPresent(builder::putAllMetadata);
+    private static NodeProto toProto(Node node) {
+        NodeProto.Builder builder = NodeProto.newBuilder();
+        Optional.ofNullable(node.name()).ifPresent(builder::setName);
+        Optional.ofNullable(node.address()).ifPresent(builder::setAddress);
+        Optional.ofNullable(node.status()).ifPresent(s -> builder.setStatus(toProto(s)));
+        Optional.ofNullable(node.registrationTime()).ifPresent(t -> builder.setRegistrationTimeEpochMs(t.toEpochMilli()));
+        Optional.ofNullable(node.lastHeartbeat()).ifPresent(t -> builder.setLastHeartbeatEpochMs(t.toEpochMilli()));
+        Optional.ofNullable(node.region()).ifPresent(builder::setRegion);
+        Optional.ofNullable(node.datacenter()).ifPresent(builder::setDatacenter);
+        builder.putAllMetadata(node.metadata());
         return builder.build();
     }
 
-    private static ClientInfo fromProto(ClientInfoProto proto) {
-        ClientInfo info = new ClientInfo(
-                proto.getClientId(),
-                proto.hasHostname() ? proto.getHostname() : null,
+    private static Node fromProto(NodeProto proto) {
+        return new Node(
+                proto.getName(),
                 proto.hasAddress() ? proto.getAddress() : null,
-                proto.getPort());
-        if (proto.hasCapabilities()) {
-            info.setCapabilities(fromProto(proto.getCapabilities()));
-        }
-        if (proto.getStatus() != ClientStatusProto.CLIENT_STATUS_UNSPECIFIED) {
-            info.setStatus(fromProto(proto.getStatus()));
-        }
-        // The ClientInfo constructor stamps the local clock; a decoded value must come from the entry only.
-        info.setRegistrationTime(proto.getRegistrationTimeEpochMs() > 0
-                ? Instant.ofEpochMilli(proto.getRegistrationTimeEpochMs()) : null);
-        if (proto.getLastHeartbeatEpochMs() > 0) {
-            info.setLastHeartbeat(Instant.ofEpochMilli(proto.getLastHeartbeatEpochMs()));
-        }
-        info.setVersion(proto.hasVersion() ? proto.getVersion() : null);
-        info.setRegion(proto.hasRegion() ? proto.getRegion() : null);
-        info.setDatacenter(proto.hasDatacenter() ? proto.getDatacenter() : null);
-        if (proto.getMetadataCount() > 0) {
-            info.setMetadata(new HashMap<>(proto.getMetadataMap()));
-        }
-        return info;
-    }
-
-    private static ClientCapabilitiesProto toProto(ClientCapabilities caps) {
-        ClientCapabilitiesProto.Builder builder = ClientCapabilitiesProto.newBuilder()
-                .addAllSupportedServices(caps.getSupportedServices());
-        Optional.ofNullable(caps.getAvailableRegions()).ifPresent(builder::addAllAvailableRegions);
-        Optional.ofNullable(caps.getCustomCapabilities()).ifPresent(cc ->
-                cc.forEach((k, v) -> builder.putCustomCapabilitiesJson(k, toJson(v))));
-        Optional.ofNullable(caps.getSystemInfo()).ifPresent(si -> builder.setSystemInfo(toProto(si)));
-        Optional.ofNullable(caps.getNetworkInfo()).ifPresent(ni -> builder.setNetworkInfo(toProto(ni)));
-        return builder.build();
-    }
-
-    private static ClientCapabilities fromProto(ClientCapabilitiesProto proto) {
-        ClientCapabilities caps = new ClientCapabilities();
-        caps.setSupportedServices(new HashSet<>(proto.getSupportedServicesList()));
-        caps.setAvailableRegions(new HashSet<>(proto.getAvailableRegionsList()));
-        if (proto.getCustomCapabilitiesJsonCount() > 0) {
-            Map<String, Object> values = new HashMap<>();
-            proto.getCustomCapabilitiesJsonMap().forEach((key, json) -> values.put(key, fromJson(json)));
-            caps.setCustomCapabilities(values);
-        } else if (proto.getCustomCapabilitiesCount() > 0) {
-            caps.setCustomCapabilities(new HashMap<>(proto.getCustomCapabilitiesMap()));
-        }
-        if (proto.hasSystemInfo()) {
-            caps.setSystemInfo(fromProto(proto.getSystemInfo()));
-        }
-        if (proto.hasNetworkInfo()) {
-            caps.setNetworkInfo(fromProto(proto.getNetworkInfo()));
-        }
-        return caps;
-    }
-
-    private static ClientSystemInfoProto toProto(ClientSystemInfo info) {
-        ClientSystemInfoProto.Builder builder = ClientSystemInfoProto.newBuilder()
-                .setTotalMemory(info.getTotalMemory())
-                .setAvailableMemory(info.getAvailableMemory())
-                .setTotalDiskSpace(info.getTotalDiskSpace())
-                .setAvailableDiskSpace(info.getAvailableDiskSpace())
-                .setCpuCores(info.getCpuCores())
-                .setCpuUsage(info.getCpuUsage())
-                .setLoadAverage(info.getLoadAverage());
-        Optional.ofNullable(info.getOperatingSystem()).ifPresent(builder::setOperatingSystem);
-        Optional.ofNullable(info.getArchitecture()).ifPresent(builder::setArchitecture);
-        Optional.ofNullable(info.getJavaVersion()).ifPresent(builder::setJavaVersion);
-        return builder.build();
-    }
-
-    private static ClientSystemInfo fromProto(ClientSystemInfoProto proto) {
-        ClientSystemInfo info = new ClientSystemInfo();
-        info.setOperatingSystem(proto.hasOperatingSystem() ? proto.getOperatingSystem() : null);
-        info.setArchitecture(proto.hasArchitecture() ? proto.getArchitecture() : null);
-        info.setJavaVersion(proto.hasJavaVersion() ? proto.getJavaVersion() : null);
-        info.setTotalMemory(proto.getTotalMemory());
-        info.setAvailableMemory(proto.getAvailableMemory());
-        info.setTotalDiskSpace(proto.getTotalDiskSpace());
-        info.setAvailableDiskSpace(proto.getAvailableDiskSpace());
-        info.setCpuCores(proto.getCpuCores());
-        info.setCpuUsage(proto.getCpuUsage());
-        info.setLoadAverage(proto.getLoadAverage());
-        return info;
-    }
-
-    private static ClientNetworkInfoProto toProto(ClientNetworkInfo info) {
-        ClientNetworkInfoProto.Builder builder = ClientNetworkInfoProto.newBuilder()
-                .setBandwidthCapacity(info.getBandwidthCapacity())
-                .setCurrentBandwidthUsage(info.getCurrentBandwidthUsage())
-                .setLatencyMs(info.getLatencyMs())
-                .setPacketLossPercentage(info.getPacketLossPercentage())
-                .setIsNatTraversal(info.isNatTraversal());
-        Optional.ofNullable(info.getPublicIpAddress()).ifPresent(builder::setPublicIpAddress);
-        Optional.ofNullable(info.getPrivateIpAddress()).ifPresent(builder::setPrivateIpAddress);
-        Optional.ofNullable(info.getNetworkInterfaces()).ifPresent(builder::addAllNetworkInterfaces);
-        Optional.ofNullable(info.getConnectionType()).ifPresent(builder::setConnectionType);
-        Optional.ofNullable(info.getFirewallPorts()).ifPresent(builder::addAllFirewallPorts);
-        return builder.build();
-    }
-
-    private static ClientNetworkInfo fromProto(ClientNetworkInfoProto proto) {
-        ClientNetworkInfo info = new ClientNetworkInfo();
-        info.setPublicIpAddress(proto.hasPublicIpAddress() ? proto.getPublicIpAddress() : null);
-        info.setPrivateIpAddress(proto.hasPrivateIpAddress() ? proto.getPrivateIpAddress() : null);
-        info.setNetworkInterfaces(new ArrayList<>(proto.getNetworkInterfacesList()));
-        info.setBandwidthCapacity(proto.getBandwidthCapacity());
-        info.setCurrentBandwidthUsage(proto.getCurrentBandwidthUsage());
-        info.setLatencyMs(proto.getLatencyMs());
-        info.setPacketLossPercentage(proto.getPacketLossPercentage());
-        info.setConnectionType(proto.hasConnectionType() ? proto.getConnectionType() : null);
-        info.setNatTraversal(proto.getIsNatTraversal());
-        info.setFirewallPorts(new ArrayList<>(proto.getFirewallPortsList()));
-        return info;
+                proto.hasDatacenter() ? proto.getDatacenter() : null,
+                proto.hasRegion() ? proto.getRegion() : null,
+                proto.getMetadataMap(),
+                proto.getStatus() != NodeStatusProto.NODE_STATUS_UNSPECIFIED ? fromProto(proto.getStatus()) : null,
+                // A decoded time comes from the entry only, never from the local clock.
+                proto.getRegistrationTimeEpochMs() > 0
+                        ? Instant.ofEpochMilli(proto.getRegistrationTimeEpochMs()) : null,
+                proto.getLastHeartbeatEpochMs() > 0
+                        ? Instant.ofEpochMilli(proto.getLastHeartbeatEpochMs()) : null);
     }
 
     // ── Enums ───────────────────────────────────────────────────
 
-    private static ClientStatusProto toProto(ClientStatus status) {
+    private static NodeStatusProto toProto(NodeStatus status) {
         return switch (status) {
-            case REGISTERING -> ClientStatusProto.CLIENT_STATUS_REGISTERING;
-            case HEALTHY -> ClientStatusProto.CLIENT_STATUS_HEALTHY;
-            case DEGRADED -> ClientStatusProto.CLIENT_STATUS_DEGRADED;
-            case MAINTENANCE -> ClientStatusProto.CLIENT_STATUS_MAINTENANCE;
-            case UNREACHABLE -> ClientStatusProto.CLIENT_STATUS_UNREACHABLE;
-            case FAILED -> ClientStatusProto.CLIENT_STATUS_FAILED;
-            case DEREGISTERED -> ClientStatusProto.CLIENT_STATUS_DEREGISTERED;
+            case REGISTERING -> NodeStatusProto.NODE_STATUS_REGISTERING;
+            case HEALTHY -> NodeStatusProto.NODE_STATUS_HEALTHY;
+            case UNREACHABLE -> NodeStatusProto.NODE_STATUS_UNREACHABLE;
         };
     }
 
-    private static ClientStatus fromProto(ClientStatusProto status) {
+    @SuppressWarnings("deprecation") // the removed statuses are named here so that old entries decode
+    private static NodeStatus fromProto(NodeStatusProto status) {
         return switch (status) {
-            case CLIENT_STATUS_REGISTERING -> ClientStatus.REGISTERING;
-            case CLIENT_STATUS_HEALTHY -> ClientStatus.HEALTHY;
-            // Statuses of the job system: replicated history written earlier may hold them.
-            case CLIENT_STATUS_ACTIVE, CLIENT_STATUS_IDLE -> ClientStatus.HEALTHY;
-            case CLIENT_STATUS_DEGRADED -> ClientStatus.DEGRADED;
-            case CLIENT_STATUS_OVERLOADED -> ClientStatus.DEGRADED;
-            case CLIENT_STATUS_MAINTENANCE -> ClientStatus.MAINTENANCE;
-            case CLIENT_STATUS_DRAINING -> ClientStatus.MAINTENANCE;
-            case CLIENT_STATUS_UNREACHABLE -> ClientStatus.UNREACHABLE;
-            case CLIENT_STATUS_FAILED -> ClientStatus.FAILED;
-            case CLIENT_STATUS_DEREGISTERED -> ClientStatus.DEREGISTERED;
-            default -> throw new IllegalArgumentException("Unknown ClientStatusProto: " + status);
+            case NODE_STATUS_REGISTERING -> NodeStatus.REGISTERING;
+            case NODE_STATUS_HEALTHY -> NodeStatus.HEALTHY;
+            // Statuses Qraft never set, which replicated history written earlier may hold. A node that held
+            // one of these was in contact.
+            case NODE_STATUS_ACTIVE, NODE_STATUS_IDLE, NODE_STATUS_DEGRADED, NODE_STATUS_OVERLOADED,
+                 NODE_STATUS_MAINTENANCE, NODE_STATUS_DRAINING -> NodeStatus.HEALTHY;
+            case NODE_STATUS_UNREACHABLE -> NodeStatus.UNREACHABLE;
+            case NODE_STATUS_FAILED, NODE_STATUS_DEREGISTERED -> NodeStatus.UNREACHABLE;
+            default -> throw new IllegalArgumentException("Unknown NodeStatusProto: " + status);
         };
     }
 }

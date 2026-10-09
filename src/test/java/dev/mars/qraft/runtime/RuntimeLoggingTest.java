@@ -18,6 +18,7 @@ package dev.mars.qraft.runtime;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
+import dev.mars.qraft.client.NodeAnswerHelper;
 import dev.mars.qraft.server.config.AppConfig;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -61,6 +62,7 @@ class RuntimeLoggingTest {
             exchange.sendResponseHeaders(200, response.length);
             try (var output = exchange.getResponseBody()) { output.write(response); }
         });
+        endpoint.createContext("/v1/catalog", NodeAnswerHelper::accept);
         endpoint.start();
         Process child = null;
         try {

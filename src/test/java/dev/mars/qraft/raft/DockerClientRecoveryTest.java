@@ -272,7 +272,7 @@ class DockerClientRecoveryTest {
 
     /** Number of registered nodes, or -1 when the server does not answer. */
     private static int clientCount(String server) {
-        JsonNode clients = DockerHealthApiHelper.get(server + "/api/v1/clients");
+        JsonNode clients = DockerHealthApiHelper.get(server + "/v1/catalog/nodes");
         return clients == null ? -1 : clients.size();
     }
 

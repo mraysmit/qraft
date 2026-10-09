@@ -48,13 +48,12 @@ class ClientConfigurationTest {
     @Test
     void buildsDiscoveryConfiguration() {
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1").hostname("host").address("127.0.0.1")
+                .clientId("client-1").address("127.0.0.1")
                 .clientPort(8081).region("eu").datacenter("dc1")
                 .serverUrl("http://localhost:9000").heartbeatInterval(1000)
                 .requestTimeoutMs(2500).version("2.0").build();
 
         assertEquals("client-1", config.getClientId());
-        assertEquals("host", config.getHostname());
         assertEquals(8081, config.getClientPort());
         assertEquals("eu", config.getRegion());
         assertEquals("dc1", config.getDatacenter());
@@ -93,7 +92,7 @@ class ClientConfigurationTest {
                 {
                   "version": 1,
                   "client": {
-                    "id": "node-a", "hostname": "host-a", "address": "10.0.0.4",
+                    "id": "node-a", "address": "10.0.0.4",
                     "httpPort": 8181, "heartbeatIntervalMs": 4000,
                     "shutdownTimeoutMs": 12000,
                     "datacenter": "dc1", "region": "eu-west", "version": "2.1"
@@ -161,7 +160,6 @@ class ClientConfigurationTest {
         assertEquals(List.of(), config.getServices());
         assertEquals(List.of(), config.getHealthChecks());
         assertEquals("./logs", config.getLoggingDirectory());
-        assertFalse(config.getHostname().isBlank(), "the hostname defaults to the local host's");
         assertFalse(config.getAddress().isBlank(), "the address defaults to the local host's");
     }
 
@@ -282,6 +280,13 @@ class ClientConfigurationTest {
                 {"version":1,"version":1,"client":{"id":"a"},
                  "servers":{"urls":["http://localhost:8080"]}}
                 """));
+        IllegalArgumentException removed = assertThrows(IllegalArgumentException.class,
+                () -> ClientConfiguration.fromJson("""
+                {"version":1,"client":{"id":"a","hostname":"host-a"},
+                 "servers":{"urls":["http://localhost:8080"]}}
+                """));
+        assertEquals("Unknown client setting: hostname", removed.getMessage(),
+                "a node has no host name, so the setting that named one is gone");
     }
 
     @Test

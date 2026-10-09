@@ -16,118 +16,138 @@
 
 package dev.mars.qraft.state;
 
-import dev.mars.qraft.common.ClientCapabilities;
-import dev.mars.qraft.common.ClientInfo;
-import dev.mars.qraft.common.ClientStatus;
-import dev.mars.qraft.raft.grpc.ClientCommandProto;
-import dev.mars.qraft.raft.grpc.ClientStatusProto;
+import dev.mars.qraft.common.Node;
+import dev.mars.qraft.common.NodeStatus;
+import dev.mars.qraft.raft.grpc.NodeCommandProto;
+import dev.mars.qraft.raft.grpc.NodeCommandType;
+import dev.mars.qraft.raft.grpc.NodeStatusProto;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests {@link ClientCodec} round trips for every client command variant, rejection of unspecified
- * types, and typed command factories.
+ * Tests {@link NodeCodec}: round trips of every node command, rejection of an unspecified type, the typed
+ * command factories, and the decoding of the statuses and the command that earlier versions wrote and this
+ * one never does.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-09
- * @version 1.0
+ * @version 2.0
  */
-class ClientCodecTest {
+@SuppressWarnings("deprecation") // removed protocol values are built here to show that old entries still decode
+class NodeCodecTest {
+    private static final Instant TIMESTAMP = Instant.parse("2026-02-03T04:05:06Z");
 
     @Test
-    void roundTripsEveryClientCommandVariant() {
-        Instant timestamp = Instant.parse("2026-02-03T04:05:06Z");
-        ClientCapabilities capabilities = new ClientCapabilities();
-        capabilities.setSupportedServices(Set.of("kv", "health"));
-        capabilities.setAvailableRegions(Set.of("eu-west"));
+    void roundTripsEveryNodeCommandVariant() {
+        Node node = new Node("node-1", "10.0.0.1", "dc-1", "eu-west", Map.of("rack", "r7"),
+                NodeStatus.HEALTHY, TIMESTAMP.minusSeconds(60), TIMESTAMP.minusSeconds(5));
 
-        ClientInfo info = new ClientInfo("client-1", "host", "10.0.0.1", 8080);
-        info.setStatus(ClientStatus.HEALTHY);
-        info.setCapabilities(capabilities);
-        info.setVersion("1.2.3");
-        info.setRegion("eu-west");
-        info.setDatacenter("dc-1");
+        List<NodeCommand> commands = List.of(
+                new NodeCommand.Register("node-1", node, TIMESTAMP),
+                new NodeCommand.Deregister("node-1", TIMESTAMP),
+                new NodeCommand.UpdateStatus("node-1", NodeStatus.REGISTERING, NodeStatus.HEALTHY, TIMESTAMP),
+                new NodeCommand.Heartbeat("node-1", NodeStatus.HEALTHY, TIMESTAMP, 7, "reg-1"),
+                new NodeCommand.Heartbeat("node-1", null, TIMESTAMP),
+                new NodeCommand.Expire("node-1", TIMESTAMP.minusSeconds(5), true, TIMESTAMP));
 
-        List<ClientCommand> commands = List.of(
-                new ClientCommand.Register("client-1", info, timestamp),
-                new ClientCommand.Deregister("client-1", timestamp),
-                new ClientCommand.UpdateStatus("client-1", ClientStatus.HEALTHY, ClientStatus.DEGRADED, timestamp),
-                new ClientCommand.UpdateCapabilities("client-1", capabilities, timestamp),
-                new ClientCommand.Heartbeat("client-1", ClientStatus.DEGRADED, timestamp, 42));
-
-        for (ClientCommand command : commands) {
-            ClientCommand decoded = ClientCodec.fromProto(ClientCodec.toProto(command));
-            assertEquals(command.getClass(), decoded.getClass());
-            assertEquals(command.clientId(), decoded.clientId());
-            assertEquals(timestamp, decoded.timestamp());
+        for (NodeCommand command : commands) {
+            assertEquals(command, NodeCodec.fromProto(NodeCodec.toProto(command)), command.toString());
         }
+    }
 
-        ClientCommand.Register register = (ClientCommand.Register) ClientCodec.fromProto(ClientCodec.toProto(commands.getFirst()));
-        assertEquals("host", register.clientInfo().getHostname());
-        assertEquals(Set.of("kv", "health"), register.clientInfo().getCapabilities().getSupportedServices());
-        assertEquals(ClientStatus.HEALTHY, register.clientInfo().getStatus());
-        ClientCommand.Heartbeat heartbeat = (ClientCommand.Heartbeat)
-                ClientCodec.fromProto(ClientCodec.toProto(commands.getLast()));
-        assertEquals(42, heartbeat.sequenceNumber());
+    @Test
+    void aNodeWithOnlyANameRoundTripsWithItsAbsentFieldsAbsent() {
+        Node bare = Node.of("node-bare", null, null, null, null);
+
+        NodeCommand.Register decoded = assertInstanceOf(NodeCommand.Register.class,
+                NodeCodec.fromProto(NodeCodec.toProto(new NodeCommand.Register("node-bare", bare, TIMESTAMP))));
+
+        assertEquals(bare, decoded.node());
+        assertNull(decoded.node().registrationTime(), "a decoded time never comes from the local clock");
     }
 
     @Test
     void rejectsUnspecifiedCommandType() {
-        ClientCommandProto proto = ClientCommandProto.newBuilder().setClientId("client").build();
-        assertThrows(IllegalArgumentException.class, () -> ClientCodec.fromProto(proto));
+        assertThrows(IllegalArgumentException.class, () -> NodeCodec.fromProto(NodeCommandProto.getDefaultInstance()));
     }
 
     @Test
     void factoriesProduceTypedCommands() {
-        ClientInfo info = new ClientInfo("client", "host", "address", 1);
-        assertInstanceOf(ClientCommand.Register.class, ClientCommand.register(info));
-        assertInstanceOf(ClientCommand.Deregister.class, ClientCommand.deregister("client"));
-        assertInstanceOf(ClientCommand.Heartbeat.class, ClientCommand.heartbeat("client"));
-        assertInstanceOf(ClientCommand.Heartbeat.class, ClientCommand.heartbeat("client", null, null));
+        Node node = Node.of("node-1", "10.0.0.1", null, null, null);
+
+        assertInstanceOf(NodeCommand.Register.class, NodeCommand.register(node));
+        assertEquals("node-1", NodeCommand.register(node, TIMESTAMP).name());
+        assertInstanceOf(NodeCommand.Deregister.class, NodeCommand.deregister("node-1"));
+        assertInstanceOf(NodeCommand.UpdateStatus.class,
+                NodeCommand.updateStatus("node-1", NodeStatus.REGISTERING, NodeStatus.HEALTHY));
+        assertInstanceOf(NodeCommand.Heartbeat.class, NodeCommand.heartbeat("node-1"));
+        assertEquals(new NodeCommand.Heartbeat("node-1", NodeStatus.HEALTHY, TIMESTAMP, 3, "reg-1"),
+                NodeCommand.heartbeat("node-1", NodeStatus.HEALTHY, TIMESTAMP, 3, "reg-1"));
+        assertEquals(new NodeCommand.Expire("node-1", TIMESTAMP, false, TIMESTAMP),
+                NodeCommand.expire("node-1", TIMESTAMP, false, TIMESTAMP));
     }
 
-    /** Statuses inherited from the job system, which replicated history written earlier may still hold. */
-    private static final Map<ClientStatusProto, ClientStatus> LEGACY_STATUSES = Map.of(
-            ClientStatusProto.CLIENT_STATUS_ACTIVE, ClientStatus.HEALTHY,
-            ClientStatusProto.CLIENT_STATUS_IDLE, ClientStatus.HEALTHY,
-            ClientStatusProto.CLIENT_STATUS_OVERLOADED, ClientStatus.DEGRADED,
-            ClientStatusProto.CLIENT_STATUS_DRAINING, ClientStatus.MAINTENANCE);
-
     @Test
-    void legacyStatusesInReplicatedHistoryDecodeToTheirCurrentMeaning() {
-        Instant timestamp = Instant.parse("2026-02-03T04:05:06Z");
-        ClientCommandProto heartbeat = ClientCodec.toProto(
-                new ClientCommand.Heartbeat("client-1", ClientStatus.HEALTHY, timestamp, 1));
-        ClientCommandProto register = ClientCodec.toProto(new ClientCommand.Register("client-1",
-                new ClientInfo("client-1", "host", "10.0.0.1", 8080), timestamp));
+    void removedStatusesInReplicatedHistoryDecodeAsWhetherTheNodeWasInContact() {
+        Map<NodeStatusProto, NodeStatus> removed = Map.of(
+                NodeStatusProto.NODE_STATUS_ACTIVE, NodeStatus.HEALTHY,
+                NodeStatusProto.NODE_STATUS_IDLE, NodeStatus.HEALTHY,
+                NodeStatusProto.NODE_STATUS_DEGRADED, NodeStatus.HEALTHY,
+                NodeStatusProto.NODE_STATUS_OVERLOADED, NodeStatus.HEALTHY,
+                NodeStatusProto.NODE_STATUS_MAINTENANCE, NodeStatus.HEALTHY,
+                NodeStatusProto.NODE_STATUS_DRAINING, NodeStatus.HEALTHY,
+                NodeStatusProto.NODE_STATUS_FAILED, NodeStatus.UNREACHABLE,
+                NodeStatusProto.NODE_STATUS_DEREGISTERED, NodeStatus.UNREACHABLE);
 
-        LEGACY_STATUSES.forEach((legacy, current) -> {
-            ClientCommand.Heartbeat decodedHeartbeat = (ClientCommand.Heartbeat) ClientCodec.fromProto(
-                    heartbeat.toBuilder().setNewStatus(legacy).build());
-            ClientCommand.Register decodedRegister = (ClientCommand.Register) ClientCodec.fromProto(register.toBuilder()
-                    .setClientInfo(register.getClientInfo().toBuilder().setStatus(legacy)).build());
-            assertEquals(current, decodedHeartbeat.status(), legacy.name());
-            assertEquals(current, decodedRegister.clientInfo().getStatus(), legacy.name());
+        removed.forEach((stored, expected) -> {
+            NodeCommand.UpdateStatus decoded = assertInstanceOf(NodeCommand.UpdateStatus.class,
+                    NodeCodec.fromProto(statusUpdate(NodeStatusProto.NODE_STATUS_HEALTHY, stored)));
+            assertEquals(expected, decoded.newStatus(), stored.name());
         });
     }
 
     @Test
-    void noCurrentStatusIsEncodedAsALegacyValue() {
-        Instant timestamp = Instant.parse("2026-02-03T04:05:06Z");
-        for (ClientStatus status : EnumSet.allOf(ClientStatus.class)) {
-            ClientStatusProto encoded = ClientCodec.toProto(
-                    new ClientCommand.Heartbeat("client-1", status, timestamp, 1)).getNewStatus();
-            assertFalse(LEGACY_STATUSES.containsKey(encoded), status + " encodes as " + encoded);
+    void noCurrentStatusIsEncodedAsARemovedValue() {
+        EnumSet<NodeStatusProto> written = EnumSet.noneOf(NodeStatusProto.class);
+        for (NodeStatus status : NodeStatus.values()) {
+            written.add(NodeCodec.toProto(new NodeCommand.UpdateStatus("node-1", status, status, TIMESTAMP))
+                    .getNewStatus());
         }
+
+        assertEquals(EnumSet.of(NodeStatusProto.NODE_STATUS_REGISTERING, NodeStatusProto.NODE_STATUS_HEALTHY,
+                NodeStatusProto.NODE_STATUS_UNREACHABLE), written);
+    }
+
+    @Test
+    void anEntryHoldingTheRemovedCapabilitiesUpdateDecodesToNothing() {
+        NodeCommandProto stored = NodeCommandProto.newBuilder()
+                .setType(NodeCommandType.NODE_CMD_UPDATE_CAPABILITIES)
+                .setName("node-1")
+                .setTimestampEpochMs(TIMESTAMP.toEpochMilli())
+                .build();
+
+        assertNull(NodeCodec.fromProto(stored));
+        assertTrue(new QraftStateStore().apply(null) instanceof dev.mars.qraft.raft.RaftCommandResult.NoOp<?>,
+                "and nothing is what the state store applies for it");
+    }
+
+    private static NodeCommandProto statusUpdate(NodeStatusProto expected, NodeStatusProto next) {
+        return NodeCommandProto.newBuilder()
+                .setType(NodeCommandType.NODE_CMD_UPDATE_STATUS)
+                .setName("node-1")
+                .setTimestampEpochMs(TIMESTAMP.toEpochMilli())
+                .setExpectedStatus(expected)
+                .setNewStatus(next)
+                .build();
     }
 }

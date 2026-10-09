@@ -16,16 +16,15 @@
 
 package dev.mars.qraft.state;
 
+import dev.mars.qraft.common.Node;
+import dev.mars.qraft.common.NodeStatus;
 import dev.mars.qraft.raft.RaftCommand;
-import dev.mars.qraft.common.ClientInfo;
-import dev.mars.qraft.common.ClientStatus;
-import dev.mars.qraft.common.ClientCapabilities;
 
 import java.time.Instant;
 import java.util.Objects;
 
 /**
- * Sealed interface for client lifecycle commands.
+ * Sealed interface for the commands that change the node registry.
  *
  * <p>Each permitted subtype carries only the fields relevant to its operation,
  * eliminating nullable "bag-of-fields" patterns. Pattern matching in
@@ -33,78 +32,81 @@ import java.util.Objects;
  *
  * <h3>Permitted subtypes</h3>
  * <ul>
- *   <li>{@link Register} — register a new client</li>
- *   <li>{@link Deregister} — deregister a client</li>
- *   <li>{@link UpdateStatus} — change client status</li>
- *   <li>{@link UpdateCapabilities} — update client capabilities</li>
- *   <li>{@link Heartbeat} — record a client heartbeat</li>
+ *   <li>{@link Register} — register a node</li>
+ *   <li>{@link Deregister} — deregister a node</li>
+ *   <li>{@link UpdateStatus} — change a node's status</li>
+ *   <li>{@link Heartbeat} — record a node's heartbeat</li>
+ *   <li>{@link Expire} — mark a silent node unreachable, or remove it</li>
  * </ul>
  *
+ * <p>An earlier version also had a command that replaced a node's capabilities. Qraft never issued it, and
+ * the codec skips a log entry that holds one.
+ *
  * @author Mark Andrew Ray-Smith Cityline Ltd
- * @version 2.0
+ * @version 3.0
  * @since 2025-08-26
  */
-public sealed interface ClientCommand extends RaftCommand
-        permits ClientCommand.Register,
-                ClientCommand.Deregister,
-                ClientCommand.UpdateStatus,
-                ClientCommand.UpdateCapabilities,
-                ClientCommand.Heartbeat,
-                ClientCommand.Expire {
+public sealed interface NodeCommand extends RaftCommand
+        permits NodeCommand.Register,
+                NodeCommand.Deregister,
+                NodeCommand.UpdateStatus,
+                NodeCommand.Heartbeat,
+                NodeCommand.Expire {
 
-    /** Common accessor: every subtype carries a client ID. */
-    String clientId();
+    /** Common accessor: every subtype names its node. */
+    String name();
 
     /** Common accessor: every subtype carries a timestamp. */
     Instant timestamp();
 
     /**
-     * Register a new client.
+     * Register a node.
      *
-     * @param clientId   the client identifier
-     * @param clientInfo the full client information
+     * @param name      the node's name
+     * @param node      the node as its client describes it
      * @param timestamp the command timestamp
      */
-    record Register(String clientId, ClientInfo clientInfo, Instant timestamp) implements ClientCommand {
+    record Register(String name, Node node, Instant timestamp) implements NodeCommand {
         private static final long serialVersionUID = 1L;
 
         public Register {
-            Objects.requireNonNull(clientId, "clientId");
-            Objects.requireNonNull(clientInfo, "clientInfo");
+            Objects.requireNonNull(name, "name");
+            Objects.requireNonNull(node, "node");
             Objects.requireNonNull(timestamp, "timestamp");
             timestamp = replicated(timestamp);
         }
     }
 
     /**
-     * Deregister a client.
+     * Deregister a node.
      *
-     * @param clientId   the client identifier
+     * @param name      the node's name
      * @param timestamp the command timestamp
      */
-    record Deregister(String clientId, Instant timestamp) implements ClientCommand {
+    record Deregister(String name, Instant timestamp) implements NodeCommand {
         private static final long serialVersionUID = 1L;
 
         public Deregister {
-            Objects.requireNonNull(clientId, "clientId");
+            Objects.requireNonNull(name, "name");
             Objects.requireNonNull(timestamp, "timestamp");
             timestamp = replicated(timestamp);
         }
     }
 
     /**
-     * Update the status of an existing client.
+     * Update the status of an existing node.
      *
-     * @param clientId        the client identifier
-     * @param expectedStatus the expected current status for CAS validation (null to skip check)
+     * @param name           the node's name
+     * @param expectedStatus the status the node must have for the command to apply
      * @param newStatus      the new status
      * @param timestamp      the command timestamp
      */
-    record UpdateStatus(String clientId, ClientStatus expectedStatus, ClientStatus newStatus, Instant timestamp) implements ClientCommand {
+    record UpdateStatus(String name, NodeStatus expectedStatus, NodeStatus newStatus, Instant timestamp)
+            implements NodeCommand {
         private static final long serialVersionUID = 1L;
 
         public UpdateStatus {
-            Objects.requireNonNull(clientId, "clientId");
+            Objects.requireNonNull(name, "name");
             Objects.requireNonNull(expectedStatus, "expectedStatus");
             Objects.requireNonNull(newStatus, "newStatus");
             Objects.requireNonNull(timestamp, "timestamp");
@@ -113,37 +115,20 @@ public sealed interface ClientCommand extends RaftCommand
     }
 
     /**
-     * Update the capabilities of an existing client.
+     * Record a node's heartbeat.
      *
-     * @param clientId         the client identifier
-     * @param newCapabilities the new capabilities
-     * @param timestamp       the command timestamp
-     */
-    record UpdateCapabilities(String clientId, ClientCapabilities newCapabilities, Instant timestamp) implements ClientCommand {
-        private static final long serialVersionUID = 1L;
-
-        public UpdateCapabilities {
-            Objects.requireNonNull(clientId, "clientId");
-            Objects.requireNonNull(newCapabilities, "newCapabilities");
-            Objects.requireNonNull(timestamp, "timestamp");
-            timestamp = replicated(timestamp);
-        }
-    }
-
-    /**
-     * Record a client heartbeat.
-     *
-     * @param clientId   the client identifier
-     * @param status    optional status update with heartbeat (may be null)
-     * @param timestamp the command timestamp
+     * @param name           the node's name
+     * @param status         optional status update with the heartbeat (may be null)
+     * @param timestamp      the command timestamp
      * @param sequenceNumber sender-local ordering value; zero means unsequenced
+     * @param registrationId the registration attempt the heartbeat belongs to, or null for no check
      */
-    record Heartbeat(String clientId, ClientStatus status, Instant timestamp,
-                     long sequenceNumber, String registrationId) implements ClientCommand {
+    record Heartbeat(String name, NodeStatus status, Instant timestamp,
+                     long sequenceNumber, String registrationId) implements NodeCommand {
         private static final long serialVersionUID = 1L;
 
         public Heartbeat {
-            Objects.requireNonNull(clientId, "clientId");
+            Objects.requireNonNull(name, "name");
             Objects.requireNonNull(timestamp, "timestamp");
             timestamp = replicated(timestamp);
             if (sequenceNumber < 0) throw new IllegalArgumentException("sequenceNumber must not be negative");
@@ -152,12 +137,12 @@ public sealed interface ClientCommand extends RaftCommand
             // status may be null — heartbeat doesn't always carry a status update
         }
 
-        public Heartbeat(String clientId, ClientStatus status, Instant timestamp) {
-            this(clientId, status, timestamp, 0, null);
+        public Heartbeat(String name, NodeStatus status, Instant timestamp) {
+            this(name, status, timestamp, 0, null);
         }
 
-        public Heartbeat(String clientId, ClientStatus status, Instant timestamp, long sequenceNumber) {
-            this(clientId, status, timestamp, sequenceNumber, null);
+        public Heartbeat(String name, NodeStatus status, Instant timestamp, long sequenceNumber) {
+            this(name, status, timestamp, sequenceNumber, null);
         }
     }
 
@@ -168,12 +153,12 @@ public sealed interface ClientCommand extends RaftCommand
      * registration time, still equals {@code expectedLastContact}, so a heartbeat or re-registration
      * committed first turns a stale command into a no-op.
      */
-    record Expire(String clientId, Instant expectedLastContact, boolean reap, Instant timestamp)
-            implements ClientCommand {
+    record Expire(String name, Instant expectedLastContact, boolean reap, Instant timestamp)
+            implements NodeCommand {
         private static final long serialVersionUID = 1L;
 
         public Expire {
-            Objects.requireNonNull(clientId, "clientId");
+            Objects.requireNonNull(name, "name");
             Objects.requireNonNull(expectedLastContact, "expectedLastContact");
             Objects.requireNonNull(timestamp, "timestamp");
             expectedLastContact = replicated(expectedLastContact);
@@ -189,74 +174,60 @@ public sealed interface ClientCommand extends RaftCommand
         return Instant.ofEpochMilli(instant.toEpochMilli());
     }
 
-    // ── Factory methods (preserve existing API) ─────────────────
+    // ── Factory methods ─────────────────────────────────────────
 
-    /**
-     * Create a command to register a new client.
-     */
-    static ClientCommand register(ClientInfo clientInfo) {
-        return register(clientInfo, Instant.now());
+    /** Create a command to register a node. */
+    static NodeCommand register(Node node) {
+        return register(node, Instant.now());
     }
 
     /** Registration stamped with the proposing server's clock, which membership expiry relies on. */
-    static ClientCommand register(ClientInfo clientInfo, Instant timestamp) {
-        return new Register(clientInfo.getClientId(), clientInfo, timestamp);
+    static NodeCommand register(Node node, Instant timestamp) {
+        return new Register(node.name(), node, timestamp);
+    }
+
+    /** Create a command to mark a silent node unreachable, or to remove an unreachable one. */
+    static NodeCommand expire(String name, Instant expectedLastContact, boolean reap, Instant timestamp) {
+        return new Expire(name, expectedLastContact, reap, timestamp);
+    }
+
+    /** Create a command to deregister a node. */
+    static NodeCommand deregister(String name) {
+        return new Deregister(name, Instant.now());
     }
 
     /**
-     * Create a command to deregister a client.
-     */
-    static ClientCommand expire(String clientId, Instant expectedLastContact, boolean reap, Instant timestamp) {
-        return new Expire(clientId, expectedLastContact, reap, timestamp);
-    }
-
-    static ClientCommand deregister(String clientId) {
-        return new Deregister(clientId, Instant.now());
-    }
-
-    /**
-     * Create a command to update a client's status with CAS protection.
+     * Create a command to update a node's status with CAS protection.
      *
-     * @param clientId        the client identifier
-     * @param expectedStatus the expected current status (must match for command to apply)
+     * @param name           the node's name
+     * @param expectedStatus the expected current status (must match for the command to apply)
      * @param newStatus      the new status
      */
-    static ClientCommand updateStatus(String clientId, ClientStatus expectedStatus, ClientStatus newStatus) {
-        return new UpdateStatus(clientId, expectedStatus, newStatus, Instant.now());
+    static NodeCommand updateStatus(String name, NodeStatus expectedStatus, NodeStatus newStatus) {
+        return new UpdateStatus(name, expectedStatus, newStatus, Instant.now());
     }
 
-    /**
-     * Create a command to update a client's capabilities.
-     */
-    static ClientCommand updateCapabilities(String clientId, ClientCapabilities newCapabilities) {
-        return new UpdateCapabilities(clientId, newCapabilities, Instant.now());
+    /** Create a command to record a node's heartbeat. */
+    static NodeCommand heartbeat(String name) {
+        return new Heartbeat(name, null, Instant.now(), 0, null);
     }
 
-    /**
-     * Create a command to record a client heartbeat.
-     */
-    static ClientCommand heartbeat(String clientId) {
-        return new Heartbeat(clientId, null, Instant.now(), 0, null);
-    }
-
-    /**
-     * Create a command to record a client heartbeat with status.
-     */
-    static ClientCommand heartbeat(String clientId, ClientStatus status, Instant timestamp) {
-        return heartbeat(clientId, status, timestamp, 0);
+    /** Create a command to record a node's heartbeat with a status. */
+    static NodeCommand heartbeat(String name, NodeStatus status, Instant timestamp) {
+        return heartbeat(name, status, timestamp, 0);
     }
 
     /**
      * Create a sequenced heartbeat command. Sequence zero means the sender does not
-     * participate in ordering; positive values must increase for each client.
+     * participate in ordering; positive values must increase for each node.
      */
-    static ClientCommand heartbeat(String clientId, ClientStatus status, Instant timestamp, long sequenceNumber) {
-        return heartbeat(clientId, status, timestamp, sequenceNumber, null);
+    static NodeCommand heartbeat(String name, NodeStatus status, Instant timestamp, long sequenceNumber) {
+        return heartbeat(name, status, timestamp, sequenceNumber, null);
     }
 
-    static ClientCommand heartbeat(String clientId, ClientStatus status, Instant timestamp, long sequenceNumber,
-                                  String registrationId) {
-        return new Heartbeat(clientId, status, timestamp != null ? timestamp : Instant.now(), sequenceNumber,
+    static NodeCommand heartbeat(String name, NodeStatus status, Instant timestamp, long sequenceNumber,
+                                 String registrationId) {
+        return new Heartbeat(name, status, timestamp != null ? timestamp : Instant.now(), sequenceNumber,
                 registrationId);
     }
 }

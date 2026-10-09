@@ -18,9 +18,8 @@ package dev.mars.qraft.state;
 
 import dev.mars.qraft.raft.RaftCommandResult;
 import dev.mars.qraft.state.catalog.ServiceKey;
-import dev.mars.qraft.common.ClientCapabilities;
-import dev.mars.qraft.common.ClientInfo;
-import dev.mars.qraft.common.ClientStatus;
+import dev.mars.qraft.common.Node;
+import dev.mars.qraft.common.NodeStatus;
 import dev.mars.qraft.state.distributed.DistributedStateCommand;
 import dev.mars.qraft.state.catalog.ServiceHealth;
 import dev.mars.qraft.state.catalog.ServiceInstance;
@@ -50,41 +49,35 @@ class ServerStateStoreTest {
     void serverStoreAppliesClientAndMetadataLifecycle() {
         QraftStateStore store = new QraftStateStore(Map.of("environment", "test"));
         Instant now = Instant.parse("2026-01-01T00:00:00Z");
-        ClientInfo client = new ClientInfo("client-1", "host", "127.0.0.1", 9000);
-        client.setStatus(ClientStatus.REGISTERING);
+        Node client = Node.of("client-1", "127.0.0.1", null, null, null);
 
         assertInstanceOf(RaftCommandResult.NoOp.class, store.apply(null));
         assertInstanceOf(RaftCommandResult.Success.class,
-                store.apply(new ClientCommand.Register("client-1", client, now)));
-        assertTrue(store.findClient("client-1").isPresent());
+                store.apply(new NodeCommand.Register("client-1", client, now)));
+        assertTrue(store.findNode("client-1").isPresent());
 
-        assertInstanceOf(RaftCommandResult.CasMismatch.class, store.apply(new ClientCommand.UpdateStatus(
-                "client-1", ClientStatus.HEALTHY, ClientStatus.HEALTHY, now)));
-        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new ClientCommand.UpdateStatus(
-                "client-1", ClientStatus.REGISTERING, ClientStatus.HEALTHY, now)));
+        assertInstanceOf(RaftCommandResult.CasMismatch.class, store.apply(new NodeCommand.UpdateStatus(
+                "client-1", NodeStatus.HEALTHY, NodeStatus.HEALTHY, now)));
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new NodeCommand.UpdateStatus(
+                "client-1", NodeStatus.REGISTERING, NodeStatus.HEALTHY, now)));
 
-        ClientCapabilities capabilities = new ClientCapabilities();
-        capabilities.setSupportedServices(java.util.Set.of("kv"));
-        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new ClientCommand.UpdateCapabilities(
-                "client-1", capabilities, now.plusSeconds(1))));
-        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new ClientCommand.Heartbeat(
-                "client-1", ClientStatus.DEGRADED, now.plusSeconds(2))));
-        assertEquals(ClientStatus.DEGRADED, store.findClient("client-1").orElseThrow().getStatus());
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new NodeCommand.Heartbeat(
+                "client-1", NodeStatus.UNREACHABLE, now.plusSeconds(2))));
+        assertEquals(NodeStatus.UNREACHABLE, store.findNode("client-1").orElseThrow().status());
 
-        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new ClientCommand.Heartbeat(
-                "client-1", ClientStatus.HEALTHY, now.plusSeconds(3), 2)));
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new NodeCommand.Heartbeat(
+                "client-1", NodeStatus.HEALTHY, now.plusSeconds(3), 2)));
         byte[] sequencedSnapshot = store.takeSnapshot();
-        assertInstanceOf(RaftCommandResult.CasMismatch.class, store.apply(new ClientCommand.Heartbeat(
-                "client-1", ClientStatus.DEGRADED, now.plusSeconds(2), 1)));
+        assertInstanceOf(RaftCommandResult.CasMismatch.class, store.apply(new NodeCommand.Heartbeat(
+                "client-1", NodeStatus.UNREACHABLE, now.plusSeconds(2), 1)));
         store.restoreSnapshot(sequencedSnapshot);
-        assertInstanceOf(RaftCommandResult.CasMismatch.class, store.apply(new ClientCommand.Heartbeat(
-                "client-1", ClientStatus.DEGRADED, now.plusSeconds(2), 1)));
-        assertEquals(ClientStatus.HEALTHY, store.findClient("client-1").orElseThrow().getStatus());
+        assertInstanceOf(RaftCommandResult.CasMismatch.class, store.apply(new NodeCommand.Heartbeat(
+                "client-1", NodeStatus.UNREACHABLE, now.plusSeconds(2), 1)));
+        assertEquals(NodeStatus.HEALTHY, store.findNode("client-1").orElseThrow().status());
 
-        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(ClientCommand.heartbeat("missing")));
-        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(ClientCommand.updateCapabilities("missing", capabilities)));
-        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(ClientCommand.updateStatus(
-                "missing", ClientStatus.HEALTHY, ClientStatus.HEALTHY)));
+        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(NodeCommand.heartbeat("missing")));
+        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(NodeCommand.updateStatus(
+                "missing", NodeStatus.HEALTHY, NodeStatus.HEALTHY)));
 
         store.apply(command(DistributedStateCommand.put("feature", "enabled")));
         assertEquals("enabled", store.getMetadata("feature"));
@@ -94,17 +87,17 @@ class ServerStateStoreTest {
 
         store.setLastAppliedIndex(21);
         byte[] snapshot = store.takeSnapshot();
-        assertInstanceOf(RaftCommandResult.Success.class, store.apply(ClientCommand.deregister("client-1")));
-        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(ClientCommand.deregister("client-1")));
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(NodeCommand.deregister("client-1")));
+        assertInstanceOf(RaftCommandResult.NotFound.class, store.apply(NodeCommand.deregister("client-1")));
         store.restoreSnapshot(snapshot);
         assertEquals(21, store.getLastAppliedIndex());
-        assertEquals(1, store.getClients().size());
+        assertEquals(1, store.getNodes().size());
         IllegalStateException corrupt = assertThrows(IllegalStateException.class,
                 () -> store.restoreSnapshot(new byte[]{9}));
         assertEquals("Failed to restore server snapshot", corrupt.getMessage());
         assertInstanceOf(IOException.class, corrupt.getCause(), "the unreadable bytes are the cause");
         assertEquals(21, store.getLastAppliedIndex(), "a snapshot that cannot be read changes nothing");
-        assertEquals(1, store.getClients().size());
+        assertEquals(1, store.getNodes().size());
 
         store.reset();
         assertEquals("3.0", store.getMetadata("version"));
@@ -132,26 +125,24 @@ class ServerStateStoreTest {
     @Test
     void lateHeartbeatFromPreviousRegistrationCannotPoisonNewSequenceEpoch() {
         QraftStateStore store = new QraftStateStore();
-        ClientInfo client = new ClientInfo("client-1", "host", "127.0.0.1", 9000);
+        Node client = Node.of("client-1", "127.0.0.1", null, null, null);
         Instant firstRegistration = Instant.parse("2026-09-21T10:00:00Z");
         Instant secondRegistration = firstRegistration.plusSeconds(10);
 
-        client.addMetadata(ClientInfo.REGISTRATION_ID_METADATA_KEY, "first");
-        assertInstanceOf(RaftCommandResult.Success.class,
-                store.apply(new ClientCommand.Register("client-1", client, firstRegistration)));
-        client.addMetadata(ClientInfo.REGISTRATION_ID_METADATA_KEY, "second");
-        assertInstanceOf(RaftCommandResult.Success.class,
-                store.apply(new ClientCommand.Register("client-1", client, secondRegistration)));
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new NodeCommand.Register("client-1",
+                client.withMetadata(Node.REGISTRATION_ID_METADATA_KEY, "first"), firstRegistration)));
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new NodeCommand.Register("client-1",
+                client.withMetadata(Node.REGISTRATION_ID_METADATA_KEY, "second"), secondRegistration)));
 
         assertInstanceOf(RaftCommandResult.CasMismatch.class,
-                store.apply(new ClientCommand.Heartbeat("client-1", ClientStatus.DEGRADED,
+                store.apply(new NodeCommand.Heartbeat("client-1", NodeStatus.UNREACHABLE,
                         firstRegistration.plusSeconds(5), 50, "first")));
         assertInstanceOf(RaftCommandResult.Success.class,
-                store.apply(new ClientCommand.Heartbeat("client-1", ClientStatus.HEALTHY,
+                store.apply(new NodeCommand.Heartbeat("client-1", NodeStatus.HEALTHY,
                         secondRegistration.plusSeconds(1), 1, "second")));
-        assertEquals(ClientStatus.HEALTHY, store.findClient("client-1").orElseThrow().getStatus());
+        assertEquals(NodeStatus.HEALTHY, store.findNode("client-1").orElseThrow().status());
         assertEquals(secondRegistration.plusSeconds(1),
-                store.findClient("client-1").orElseThrow().getLastHeartbeat());
+                store.findNode("client-1").orElseThrow().lastHeartbeat());
     }
 
     @Test

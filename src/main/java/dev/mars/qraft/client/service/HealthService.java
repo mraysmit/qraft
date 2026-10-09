@@ -59,11 +59,6 @@ public final class HealthService {
                 int status = ready ? 200 : 503;
                 respond(exchange, status, ready ? "{\"status\":\"ready\"}" : "{\"status\":\"not_ready\"}");
             });
-            server.createContext("/health", exchange -> {
-                boolean ready = isReady();
-                int status = ready ? 200 : 503;
-                respond(exchange, status, ready ? "{\"status\":\"passing\"}" : "{\"status\":\"starting\"}");
-            });
             server.start();
             running.set(true);
         } catch (IOException e) {

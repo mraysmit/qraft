@@ -21,8 +21,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
-import dev.mars.qraft.common.ClientInfo;
-import dev.mars.qraft.common.ClientStatus;
+import dev.mars.qraft.common.Node;
 import dev.mars.qraft.state.catalog.HealthCheckState;
 import dev.mars.qraft.state.catalog.HealthObservation;
 import dev.mars.qraft.state.catalog.ServiceHealth;
@@ -40,7 +39,7 @@ import dev.mars.qraft.server.ui.AdminUiConfig;
 import dev.mars.qraft.server.ui.AdminUiHandler;
 import dev.mars.qraft.server.ui.UiAssets;
 import dev.mars.qraft.raft.CommandOutcomeUnknownException;
-import dev.mars.qraft.state.ClientCommand;
+import dev.mars.qraft.state.NodeCommand;
 import dev.mars.qraft.state.CatalogCommand;
 import dev.mars.qraft.raft.RaftCommand;
 import dev.mars.qraft.raft.RaftCommandResult;
@@ -55,7 +54,6 @@ import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -154,11 +152,8 @@ public final class HttpApiServer implements AutoCloseable {
         this.server = HttpServer.create(new InetSocketAddress(port), 0);
         this.executor = Executors.newVirtualThreadPerTaskExecutor();
         server.setExecutor(executor);
-        register("/health/live", 200, "{\"status\":\"alive\"}");
-        registerHealth("/health/ready", "ready");
-        registerHealth("/health", "passing");
-        register("/status", 200, "{\"status\":\"running\"}");
-        register("/api/v1/info", 200, "{\"version\":\"1.0.0\",\"httpPort\":" + port + "}");
+        server.createContext("/health/live", requestAware(this::liveness));
+        server.createContext("/health/ready", requestAware(this::readiness));
         if (ui.enabled()) {
             server.createContext(ui.path(), requestAware(new AdminUiHandler(ui.path(),
                     Objects.requireNonNull(assets, "assets are required for an enabled interface"))));
@@ -166,9 +161,10 @@ public final class HttpApiServer implements AutoCloseable {
         server.createContext("/raft/status", requestAware(this::raftStatus));
         server.createContext("/v1/operator/raft/configuration", requestAware(this::raftConfiguration));
         server.createContext("/v1/operator/raft/peer", requestAware(this::removeRaftPeer));
-        server.createContext("/api/v1/clients/register", requestAware(this::registerClient));
-        server.createContext("/api/v1/clients/heartbeat", requestAware(this::heartbeatClient));
-        server.createContext("/api/v1/clients", requestAware(this::clients));
+        server.createContext("/v1/catalog/register", requestAware(this::registerInCatalog));
+        server.createContext("/v1/catalog/deregister", requestAware(this::deregisterFromCatalog));
+        server.createContext("/v1/catalog/node/heartbeat", requestAware(this::heartbeatNode));
+        server.createContext("/v1/catalog/nodes", requestAware(this::listNodes));
         server.createContext("/v1/client/service/register", requestAware(this::registerService));
         server.createContext("/v1/client/service/deregister", requestAware(this::deregisterService));
         server.createContext("/v1/client/check/observe", requestAware(this::observeHealth));
@@ -204,36 +200,28 @@ public final class HttpApiServer implements AutoCloseable {
         executor.shutdown();
     }
 
-    private void register(String path, int status, String body) {
-        server.createContext(path, requestAware(exchange -> {
-            if (draining.get() && !path.startsWith("/health")) {
-                respondError(exchange, 503, "draining", "Server is draining", true);
-                return;
-            }
-            if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
-                respondError(exchange, 405, "method_not_allowed", "Method not allowed", false);
-                return;
-            }
-            respond(exchange, status, body);
-        }));
+    /** Answers that the process is alive, whatever its state: liveness is served while draining too. */
+    private void liveness(HttpExchange exchange) throws IOException {
+        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            respondError(exchange, 405, "method_not_allowed", "Method not allowed", false);
+            return;
+        }
+        respond(exchange, 200, "{\"status\":\"alive\"}");
     }
 
-    private void registerHealth(String path, String healthyStatus) {
-        server.createContext(path, requestAware(exchange -> {
-            if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
-                respondError(exchange, 405, "method_not_allowed", "Method not allowed", false);
-                return;
-            }
-            if ("/health/ready".equals(path)) {
-                List<String> failed = unmetReadinessConditions();
-                if (!failed.isEmpty()) {
-                    respondError(exchange, 503, "not_ready", "Server is not ready: " + String.join(", ", failed),
-                            true, Map.of("conditions", failed));
-                    return;
-                }
-            }
-            respond(exchange, 200, "{\"status\":\"" + healthyStatus + "\"}");
-        }));
+    /** Answers whether this server meets every readiness condition, naming the ones it does not. */
+    private void readiness(HttpExchange exchange) throws IOException {
+        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            respondError(exchange, 405, "method_not_allowed", "Method not allowed", false);
+            return;
+        }
+        List<String> failed = unmetReadinessConditions();
+        if (!failed.isEmpty()) {
+            respondError(exchange, 503, "not_ready", "Server is not ready: " + String.join(", ", failed),
+                    true, Map.of("conditions", failed));
+            return;
+        }
+        respond(exchange, 200, "{\"status\":\"ready\"}");
     }
 
     /**
@@ -429,46 +417,79 @@ public final class HttpApiServer implements AutoCloseable {
         return parameters;
     }
 
-    private void registerClient(HttpExchange exchange) throws IOException {
-        if (!prepareStateRequest(exchange, "POST")) return;
+    /**
+     * Registers what the body describes for the node that {@code X-Qraft-Node} names, after Consul's
+     * {@code PUT /v1/catalog/register}. In this version the body describes the node itself.
+     */
+    private void registerInCatalog(HttpExchange exchange) throws IOException {
+        if (!prepareNodeRequest(exchange, "PUT")) return;
         try {
-            ClientInfo client = objectMapper.readValue(exchange.getRequestBody(), ClientInfo.class);
-            if (client.getClientId() == null || client.getClientId().isBlank()) {
-                throw new IllegalArgumentException("clientId is required");
-            }
-            submit(ClientCommand.register(client, clock.instant()));
-            respondJson(exchange, 201, Map.of("registered", true, "clientId", client.getClientId()));
+            RequestContext context = new HeaderRequestContext(exchange);
+            CatalogRegistrationRequest request = objectMapper.readerFor(CatalogRegistrationRequest.class)
+                    .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                    .readValue(exchange.getRequestBody());
+            if (request == null) throw new IllegalArgumentException("The body must be a JSON object");
+            Node node = request.toNode(context);
+            submit(NodeCommand.register(node, clock.instant()));
+            setAppliedIndex(exchange);
+            respondJson(exchange, 200, nodeAnswer(node.name(), "registered", true));
         } catch (IllegalArgumentException | com.fasterxml.jackson.core.JacksonException e) {
-            respondError(exchange, 400, "invalid_client", safeMessage(e), false);
+            respondError(exchange, 400, "invalid_registration", safeMessage(e), false);
         } catch (CompletionException e) {
             respondUnavailable(exchange, e);
         }
     }
 
-    private void heartbeatClient(HttpExchange exchange) throws IOException {
-        if (!prepareStateRequest(exchange, "POST")) return;
+    /**
+     * Deregisters the node that {@code X-Qraft-Node} names, after Consul's {@code PUT /v1/catalog/deregister}:
+     * a body that names no service removes the node itself. It is idempotent.
+     */
+    private void deregisterFromCatalog(HttpExchange exchange) throws IOException {
+        if (!prepareNodeRequest(exchange, "PUT")) return;
         try {
-            ClientHeartbeat heartbeat = objectMapper.readValue(exchange.getRequestBody(), ClientHeartbeat.class);
-            if (heartbeat.clientId() == null || heartbeat.clientId().isBlank()) {
-                throw new IllegalArgumentException("clientId is required");
+            RequestContext context = new HeaderRequestContext(exchange);
+            com.fasterxml.jackson.databind.JsonNode body = objectMapper.readTree(exchange.getRequestBody());
+            if (body == null || !body.isObject()) {
+                throw new IllegalArgumentException("The body must be a JSON object");
             }
-            ClientStatus status = heartbeat.status() == null || heartbeat.status().isBlank()
-                    ? null : heartbeatStatus(heartbeat.status());
-            // Membership expiry is measured from server receipt time; the client's own timestamp is not trusted.
-            Instant timestamp = clock.instant();
-            RaftCommandResult<?> result = submit(ClientCommand.heartbeat(
-                    heartbeat.clientId(), status, timestamp, heartbeat.sequenceNumber(), heartbeat.registrationId()));
+            if (!body.isEmpty()) {
+                throw new IllegalArgumentException("Unsupported field: " + body.fieldNames().next());
+            }
+            RaftCommandResult<?> result = submit(new NodeCommand.Deregister(context.nodeId(), clock.instant()));
+            setAppliedIndex(exchange);
+            respondJson(exchange, 200, nodeAnswer(context.nodeId(), "deregistered",
+                    result instanceof RaftCommandResult.Success<?>));
+        } catch (IllegalArgumentException | com.fasterxml.jackson.core.JacksonException e) {
+            respondError(exchange, 400, "invalid_deregistration", safeMessage(e), false);
+        } catch (CompletionException e) {
+            respondUnavailable(exchange, e);
+        }
+    }
+
+    /** Records a heartbeat of the node that {@code X-Qraft-Node} names, which makes the node healthy. */
+    private void heartbeatNode(HttpExchange exchange) throws IOException {
+        if (!prepareNodeRequest(exchange, "PUT")) return;
+        try {
+            RequestContext context = new HeaderRequestContext(exchange);
+            NodeHeartbeatRequest heartbeat = objectMapper.readerFor(NodeHeartbeatRequest.class)
+                    .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                    .readValue(exchange.getRequestBody());
+            if (heartbeat == null) throw new IllegalArgumentException("The body must be a JSON object");
+            // Membership expiry is measured from the server's receipt time; a heartbeat carries no time.
+            RaftCommandResult<?> result = submit(NodeCommand.heartbeat(context.nodeId(), null, clock.instant(),
+                    heartbeat.sequenceNumber(), heartbeat.registrationId()));
             if (result instanceof RaftCommandResult.NotFound<?>) {
-                respondError(exchange, 404, "client_not_found", "Client not found", false,
-                        Map.of("clientId", heartbeat.clientId()));
+                respondError(exchange, 404, "node_not_found", "Node is not registered", false,
+                        Map.of("node", context.nodeId()));
                 return;
             }
             if (result instanceof RaftCommandResult.CasMismatch<?>) {
                 respondError(exchange, 409, "stale_heartbeat", "Heartbeat validation failed", false,
-                        Map.of("clientId", heartbeat.clientId(), "sequenceNumber", heartbeat.sequenceNumber()));
+                        Map.of("node", context.nodeId(), "sequenceNumber", heartbeat.sequenceNumber()));
                 return;
             }
-            respondNoContent(exchange);
+            setAppliedIndex(exchange);
+            respondJson(exchange, 200, nodeAnswer(context.nodeId(), "accepted", true));
         } catch (IllegalArgumentException | com.fasterxml.jackson.core.JacksonException e) {
             respondError(exchange, 400, "invalid_heartbeat", safeMessage(e), false);
         } catch (CompletionException e) {
@@ -476,30 +497,31 @@ public final class HttpApiServer implements AutoCloseable {
         }
     }
 
-    private void clients(HttpExchange exchange) throws IOException {
-        String path = exchange.getRequestURI().getPath();
-        if ("/api/v1/clients".equals(path)) {
-            if (!prepareStateRequest(exchange, "GET")) return;
-            respondJson(exchange, 200, stateStore.getClients().values());
-            return;
+    /** Lists the registered nodes in name order, after Consul's {@code GET /v1/catalog/nodes}. */
+    private void listNodes(HttpExchange exchange) throws IOException {
+        if (!prepareNodeRequest(exchange, "GET")) return;
+        setAppliedIndex(exchange);
+        respondJson(exchange, 200, stateStore.getNodes().values().stream().map(NodeEntry::from).toList());
+    }
+
+    /**
+     * Prepares a request to a node route. A node route has no path parameter, so any longer path that the
+     * HTTP server matched by prefix is answered {@code not_found}.
+     */
+    private boolean prepareNodeRequest(HttpExchange exchange, String expectedMethod) throws IOException {
+        if (!exchange.getRequestURI().getPath().equals(exchange.getHttpContext().getPath())) {
+            respondError(exchange, 404, "not_found", "No such resource", false);
+            return false;
         }
-        if (!prepareStateRequest(exchange, "DELETE")) return;
-        String clientId = pathParameter(exchange, "/api/v1/clients/");
-        if (clientId == null) {
-            respondError(exchange, 400, "client_id_required", "Client ID is required", false);
-            return;
-        }
-        try {
-            RaftCommandResult<?> result = submit(ClientCommand.deregister(clientId));
-            if (result instanceof RaftCommandResult.NotFound<?>) {
-                respondError(exchange, 404, "client_not_found", "Client not found", false,
-                        Map.of("clientId", clientId));
-                return;
-            }
-            respondNoContent(exchange);
-        } catch (CompletionException e) {
-            respondUnavailable(exchange, e);
-        }
+        return prepareStateRequest(exchange, expectedMethod);
+    }
+
+    /** The answer of a node write: the node's name, then what happened to it. */
+    private static Map<String, Object> nodeAnswer(String node, String outcome, boolean value) {
+        Map<String, Object> answer = new LinkedHashMap<>();
+        answer.put("node", node);
+        answer.put(outcome, value);
+        return answer;
     }
 
     private void deregisterService(HttpExchange exchange) throws IOException {
@@ -687,11 +709,6 @@ public final class HttpApiServer implements AutoCloseable {
                 .join();
     }
 
-    private static ClientStatus heartbeatStatus(String value) {
-        if ("passing".equalsIgnoreCase(value)) return ClientStatus.HEALTHY;
-        return ClientStatus.fromValue(value);
-    }
-
     private static void respondNoContent(HttpExchange exchange) throws IOException {
         exchange.sendResponseHeaders(204, -1);
         exchange.close();
@@ -762,9 +779,5 @@ public final class HttpApiServer implements AutoCloseable {
 
     private static String safeMessage(Throwable error) {
         return Objects.toString(error.getMessage(), error.getClass().getSimpleName());
-    }
-
-    private record ClientHeartbeat(String clientId, Instant timestamp, long sequenceNumber, String status,
-                                  String registrationId) {
     }
 }

@@ -19,9 +19,8 @@ package dev.mars.qraft.state;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.DeserializationFeature;
-import dev.mars.qraft.common.ClientCapabilities;
-import dev.mars.qraft.common.ClientInfo;
-import dev.mars.qraft.common.ClientStatus;
+import dev.mars.qraft.common.Node;
+import dev.mars.qraft.common.NodeStatus;
 import dev.mars.qraft.raft.RaftCommand;
 import dev.mars.qraft.raft.RaftCommandResult;
 import dev.mars.qraft.raft.RaftLogApplicator;
@@ -45,7 +44,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Replicated server state for clients and generic distributed metadata.
+ * Replicated server state for nodes and generic distributed metadata.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-03-15
@@ -55,7 +54,7 @@ public final class QraftStateStore implements RaftLogApplicator {
     private static final String DEFAULT_VERSION = "3.0";
     /** Entity type reported when an observation names a check its registration does not declare. */
     public static final String HEALTH_CHECK_ENTITY = "HealthCheck";
-    private final Map<String, ClientInfo> clients = new ConcurrentHashMap<>();
+    private final Map<String, Node> nodes = new ConcurrentHashMap<>();
     private final Map<String, Long> heartbeatSequences = new ConcurrentHashMap<>();
     private final Map<String, String> metadata = new ConcurrentHashMap<>();
     private final ServiceCatalog serviceCatalog = new ServiceCatalog();
@@ -67,8 +66,7 @@ public final class QraftStateStore implements RaftLogApplicator {
             .findAndRegisterModules()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
             // Map entries in key order make snapshot bytes reproducible on every replica and JVM.
-            .configure(com.fasterxml.jackson.databind.SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
-            .addMixIn(ClientInfo.class, LegacyClientInfoNames.class);
+            .configure(com.fasterxml.jackson.databind.SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
 
     public QraftStateStore() {
         this(null);
@@ -87,7 +85,7 @@ public final class QraftStateStore implements RaftLogApplicator {
             return new RaftCommandResult.NoOp<>();
         }
         return switch (command) {
-            case ClientCommand clientCommand -> applyClientCommand(clientCommand);
+            case NodeCommand clientCommand -> applyNodeCommand(clientCommand);
             case DistributedStateRaftCommand stateCommand -> applyMetadataCommand(stateCommand.delegate());
             case CatalogCommand catalogCommand -> applyCatalogCommand(catalogCommand);
             default -> throw new IllegalArgumentException("Unsupported server command: "
@@ -215,35 +213,39 @@ public final class QraftStateStore implements RaftLogApplicator {
         return warning ? ServiceHealth.WARNING : ServiceHealth.PASSING;
     }
 
-    private RaftCommandResult<?> applyNodeExpiry(ClientCommand.Expire expire) {
-        ClientInfo current = clients.get(expire.clientId());
+    private RaftCommandResult<?> applyNodeExpiry(NodeCommand.Expire expire) {
+        Node current = nodes.get(expire.name());
         if (current == null || !expire.expectedLastContact().equals(lastContact(current))) {
             return new RaftCommandResult.NoOp<>();
         }
-        boolean unreachable = current.getStatus() == ClientStatus.UNREACHABLE;
+        boolean unreachable = current.status() == NodeStatus.UNREACHABLE;
         if (!expire.reap()) {
             if (unreachable) return new RaftCommandResult.NoOp<>();
-            ClientInfo changed = ClientInfo.copyOf(current);
-            changed.setStatus(ClientStatus.UNREACHABLE);
-            clients.put(expire.clientId(), changed);
+            Node changed = current.withStatus(NodeStatus.UNREACHABLE);
+            nodes.put(expire.name(), changed);
             return new RaftCommandResult.Success<>(changed);
         }
         // Reaping is the second phase: the node must already have been marked unreachable.
         if (!unreachable) return new RaftCommandResult.NoOp<>();
-        clients.remove(expire.clientId());
-        heartbeatSequences.remove(expire.clientId());
+        nodes.remove(expire.name());
+        heartbeatSequences.remove(expire.name());
+        removeServicesOf(expire.name());
+        return new RaftCommandResult.Success<>(current);
+    }
+
+    /** Removes every service instance registered on a node, in every tenant and namespace, with its checks. */
+    private void removeServicesOf(String node) {
         for (ServiceInstance instance : serviceCatalog.instances()) {
-            if (instance.nodeId().equals(expire.clientId())) {
+            if (instance.nodeId().equals(node)) {
                 serviceCatalog.deregister(instance.identity());
                 removeHealthChecks(instance.identity());
             }
         }
-        return new RaftCommandResult.Success<>(current);
     }
 
     /** A node's last contact is its last heartbeat, or its registration time before its first heartbeat. */
-    public static Instant lastContact(ClientInfo client) {
-        return client.getLastHeartbeat() != null ? client.getLastHeartbeat() : client.getRegistrationTime();
+    public static Instant lastContact(Node node) {
+        return node.lastContact();
     }
 
     private void removeHealthChecks(ServiceInstanceId identity) {
@@ -251,75 +253,61 @@ public final class QraftStateStore implements RaftLogApplicator {
         healthChecks.keySet().removeIf(check -> check.serviceInstanceId().equals(identity));
     }
 
-    private RaftCommandResult<?> applyClientCommand(ClientCommand command) {
+    private RaftCommandResult<?> applyNodeCommand(NodeCommand command) {
         return switch (command) {
-            case ClientCommand.Expire expire -> applyNodeExpiry(expire);
-            case ClientCommand.Register register -> {
+            case NodeCommand.Expire expire -> applyNodeExpiry(expire);
+            case NodeCommand.Register register -> {
                 // Lifecycle status and times are server-owned; a registration cannot claim them.
-                ClientInfo registered = detached(register.clientInfo());
-                registered.setStatus(ClientStatus.REGISTERING);
-                registered.setRegistrationTime(register.timestamp());
-                registered.setLastHeartbeat(null);
-                clients.put(register.clientId(), registered);
-                heartbeatSequences.remove(register.clientId());
+                Node registered = register.node().registeredAt(register.timestamp());
+                nodes.put(register.name(), registered);
+                heartbeatSequences.remove(register.name());
                 yield new RaftCommandResult.Success<>(registered);
             }
-            case ClientCommand.Deregister deregister -> {
-                ClientInfo removed = clients.remove(deregister.clientId());
-                heartbeatSequences.remove(deregister.clientId());
-                yield removed == null ? new RaftCommandResult.NotFound<>(deregister.clientId(), "Client")
+            case NodeCommand.Deregister deregister -> {
+                // As in Consul, a node takes what is registered on it with it. That holds without a node entry
+                // too, so that services left under the node's name cannot outlive it.
+                Node removed = nodes.remove(deregister.name());
+                heartbeatSequences.remove(deregister.name());
+                removeServicesOf(deregister.name());
+                yield removed == null ? new RaftCommandResult.NotFound<>(deregister.name(), "Node")
                         : new RaftCommandResult.Success<>(removed);
             }
-            case ClientCommand.UpdateStatus update -> {
-                ClientInfo current = clients.get(update.clientId());
+            case NodeCommand.UpdateStatus update -> {
+                Node current = nodes.get(update.name());
                 if (current == null) {
-                    yield new RaftCommandResult.NotFound<>(update.clientId(), "Client");
+                    yield new RaftCommandResult.NotFound<>(update.name(), "Node");
                 }
-                if (current.getStatus() != update.expectedStatus()) {
+                if (current.status() != update.expectedStatus()) {
                     yield new RaftCommandResult.CasMismatch<>(current);
                 }
-                ClientInfo changed = ClientInfo.copyOf(current);
-                changed.setStatus(update.newStatus());
-                changed.setLastHeartbeat(update.timestamp());
-                clients.put(update.clientId(), changed);
+                Node changed = current.withStatus(update.newStatus()).withLastHeartbeat(update.timestamp());
+                nodes.put(update.name(), changed);
                 yield new RaftCommandResult.Success<>(changed);
             }
-            case ClientCommand.UpdateCapabilities update -> {
-                ClientInfo current = clients.get(update.clientId());
+            case NodeCommand.Heartbeat heartbeat -> {
+                Node current = nodes.get(heartbeat.name());
                 if (current == null) {
-                    yield new RaftCommandResult.NotFound<>(update.clientId(), "Client");
+                    yield new RaftCommandResult.NotFound<>(heartbeat.name(), "Node");
                 }
-                ClientInfo changed = ClientInfo.copyOf(current);
-                changed.setCapabilities(objectMapper.convertValue(update.newCapabilities(), ClientCapabilities.class));
-                changed.setLastHeartbeat(update.timestamp());
-                clients.put(update.clientId(), changed);
-                yield new RaftCommandResult.Success<>(changed);
-            }
-            case ClientCommand.Heartbeat heartbeat -> {
-                ClientInfo current = clients.get(heartbeat.clientId());
-                if (current == null) {
-                    yield new RaftCommandResult.NotFound<>(heartbeat.clientId(), "Client");
-                }
-                String currentRegistrationId = current.getMetadata().get(ClientInfo.REGISTRATION_ID_METADATA_KEY);
+                String currentRegistrationId = current.metadata().get(Node.REGISTRATION_ID_METADATA_KEY);
                 if (heartbeat.registrationId() != null
                         && !heartbeat.registrationId().equals(currentRegistrationId)) {
                     yield new RaftCommandResult.CasMismatch<>(current);
                 }
-                long previousSequence = heartbeatSequences.getOrDefault(heartbeat.clientId(), 0L);
+                long previousSequence = heartbeatSequences.getOrDefault(heartbeat.name(), 0L);
                 if (heartbeat.sequenceNumber() > 0 && heartbeat.sequenceNumber() <= previousSequence) {
                     yield new RaftCommandResult.CasMismatch<>(current);
                 }
-                ClientInfo changed = ClientInfo.copyOf(current);
-                changed.setLastHeartbeat(heartbeat.timestamp());
+                Node changed = current.withLastHeartbeat(heartbeat.timestamp());
                 if (heartbeat.status() != null) {
-                    changed.setStatus(heartbeat.status());
-                } else if (changed.getStatus() == ClientStatus.REGISTERING
-                        || changed.getStatus() == ClientStatus.UNREACHABLE) {
-                    changed.setStatus(ClientStatus.HEALTHY);
+                    changed = changed.withStatus(heartbeat.status());
+                } else if (changed.status() == NodeStatus.REGISTERING
+                        || changed.status() == NodeStatus.UNREACHABLE) {
+                    changed = changed.withStatus(NodeStatus.HEALTHY);
                 }
-                clients.put(heartbeat.clientId(), changed);
+                nodes.put(heartbeat.name(), changed);
                 if (heartbeat.sequenceNumber() > 0) {
-                    heartbeatSequences.put(heartbeat.clientId(), heartbeat.sequenceNumber());
+                    heartbeatSequences.put(heartbeat.name(), heartbeat.sequenceNumber());
                 }
                 yield new RaftCommandResult.Success<>(changed);
             }
@@ -358,7 +346,7 @@ public final class QraftStateStore implements RaftLogApplicator {
                             .thenComparing(declared -> declared.instance().nodeId())
                             .thenComparing(declared -> declared.instance().serviceId()))
                     .toList();
-            return objectMapper.writeValueAsBytes(new Snapshot(Map.copyOf(clients), Map.copyOf(heartbeatSequences),
+            return objectMapper.writeValueAsBytes(new Snapshot(Map.copyOf(nodes), Map.copyOf(heartbeatSequences),
                     Map.copyOf(metadata), serviceCatalog.instances(), orderedHealthChecks, orderedDeclarations,
                     lastAppliedIndex.get()));
         } catch (IOException e) {
@@ -370,8 +358,8 @@ public final class QraftStateStore implements RaftLogApplicator {
     public void restoreSnapshot(byte[] snapshotBytes) {
         try {
             Snapshot snapshot = objectMapper.readValue(snapshotBytes, Snapshot.class);
-            clients.clear();
-            clients.putAll(snapshot.clients());
+            nodes.clear();
+            nodes.putAll(snapshot.nodes());
             heartbeatSequences.clear();
             if (snapshot.heartbeatSequences() != null) {
                 heartbeatSequences.putAll(snapshot.heartbeatSequences());
@@ -406,7 +394,7 @@ public final class QraftStateStore implements RaftLogApplicator {
 
     @Override
     public void reset() {
-        clients.clear();
+        nodes.clear();
         heartbeatSequences.clear();
         metadata.clear();
         metadata.put("version", DEFAULT_VERSION);
@@ -416,24 +404,14 @@ public final class QraftStateStore implements RaftLogApplicator {
         lastAppliedIndex.set(0);
     }
 
-    /** Returns detached copies; changing them cannot change replicated state. */
-    public Map<String, ClientInfo> getClients() {
-        Map<String, ClientInfo> copies = new java.util.TreeMap<>();
-        clients.forEach((clientId, client) -> copies.put(clientId, detached(client)));
-        return java.util.Collections.unmodifiableMap(copies);
+    /** The registered nodes in name order. A node is immutable, so a caller cannot change replicated state. */
+    public Map<String, Node> getNodes() {
+        return java.util.Collections.unmodifiableMap(new java.util.TreeMap<>(nodes));
     }
 
-    /** Returns a detached copy; changing it cannot change replicated state. */
-    public Optional<ClientInfo> findClient(String clientId) {
-        return Optional.ofNullable(clients.get(clientId)).map(this::detached);
-    }
-
-    /**
-     * A deep copy, so replicated state never shares a mutable object with a command, a caller, or an
-     * earlier version of the same client.
-     */
-    private ClientInfo detached(ClientInfo client) {
-        return objectMapper.convertValue(client, ClientInfo.class);
+    /** The node registered under {@code name}, if there is one. */
+    public Optional<Node> findNode(String name) {
+        return Optional.ofNullable(nodes.get(name));
     }
 
     public Optional<String> findMetadata(String key) {
@@ -464,17 +442,12 @@ public final class QraftStateStore implements RaftLogApplicator {
     }
 
     /**
-     * The name a snapshot written before 2026-10-09 gives a registered client's identifier. Unknown properties
-     * are ignored on restore, so without this name such a snapshot would restore with the identifier missing.
-     * It is read and never written.
+     * {@code nodes} is also read under the two names that earlier snapshots use. Unknown properties are ignored
+     * on restore, so without these names such a snapshot would restore with its nodes silently missing. They are
+     * read and never written.
      */
-    abstract static class LegacyClientInfoNames {
-        @JsonAlias("agentId")
-        String clientId;
-    }
-
-    /** {@code clients} is also read under the name that snapshots written before 2026-10-09 use. */
-    private record Snapshot(@JsonAlias("agents") Map<String, ClientInfo> clients, Map<String, Long> heartbeatSequences,
+    private record Snapshot(@JsonAlias({"clients", "agents"}) Map<String, Node> nodes,
+                            Map<String, Long> heartbeatSequences,
                             Map<String, String> metadata,
                             java.util.List<ServiceInstance> services,
                             java.util.List<HealthCheckState> healthChecks,

@@ -6,31 +6,33 @@ option java_outer_classname = "CommandsProto";
 
 package qraft.raft;
 
-// Values 3, 4, 6, and 8 are the job system's statuses. They are never written, and replicated history that
-// holds them decodes as HEALTHY, HEALTHY, DEGRADED, and MAINTENANCE.
-enum ClientStatusProto {
-  CLIENT_STATUS_UNSPECIFIED = 0;
-  CLIENT_STATUS_REGISTERING = 1;
-  CLIENT_STATUS_HEALTHY = 2;
-  CLIENT_STATUS_ACTIVE = 3 [deprecated = true];
-  CLIENT_STATUS_IDLE = 4 [deprecated = true];
-  CLIENT_STATUS_DEGRADED = 5;
-  CLIENT_STATUS_OVERLOADED = 6 [deprecated = true];
-  CLIENT_STATUS_MAINTENANCE = 7;
-  CLIENT_STATUS_DRAINING = 8 [deprecated = true];
-  CLIENT_STATUS_UNREACHABLE = 9;
-  CLIENT_STATUS_FAILED = 10;
-  CLIENT_STATUS_DEREGISTERED = 11;
+// The three statuses Qraft sets are 1, 2, and 9. The others were never set by Qraft: 3, 4, 6, and 8 are the job
+// system's, and 5, 7, 10, and 11 were removed with the node model's reduction. Replicated history that holds one
+// decodes as HEALTHY, except 10 and 11, which decode as UNREACHABLE. None is ever written.
+enum NodeStatusProto {
+  NODE_STATUS_UNSPECIFIED = 0;
+  NODE_STATUS_REGISTERING = 1;
+  NODE_STATUS_HEALTHY = 2;
+  NODE_STATUS_ACTIVE = 3 [deprecated = true];
+  NODE_STATUS_IDLE = 4 [deprecated = true];
+  NODE_STATUS_DEGRADED = 5 [deprecated = true];
+  NODE_STATUS_OVERLOADED = 6 [deprecated = true];
+  NODE_STATUS_MAINTENANCE = 7 [deprecated = true];
+  NODE_STATUS_DRAINING = 8 [deprecated = true];
+  NODE_STATUS_UNREACHABLE = 9;
+  NODE_STATUS_FAILED = 10 [deprecated = true];
+  NODE_STATUS_DEREGISTERED = 11 [deprecated = true];
 }
 
-enum ClientCommandType {
-  CLIENT_CMD_UNSPECIFIED = 0;
-  CLIENT_CMD_REGISTER = 1;
-  CLIENT_CMD_DEREGISTER = 2;
-  CLIENT_CMD_UPDATE_STATUS = 3;
-  CLIENT_CMD_UPDATE_CAPABILITIES = 4;
-  CLIENT_CMD_HEARTBEAT = 5;
-  CLIENT_CMD_EXPIRE = 6;
+// Value 4 was the capabilities update. Qraft never issued it; an entry that holds it is skipped, never written.
+enum NodeCommandType {
+  NODE_CMD_UNSPECIFIED = 0;
+  NODE_CMD_REGISTER = 1;
+  NODE_CMD_DEREGISTER = 2;
+  NODE_CMD_UPDATE_STATUS = 3;
+  NODE_CMD_UPDATE_CAPABILITIES = 4 [deprecated = true];
+  NODE_CMD_HEARTBEAT = 5;
+  NODE_CMD_EXPIRE = 6;
 }
 
 enum SystemMetadataCommandType {
@@ -39,74 +41,38 @@ enum SystemMetadataCommandType {
   SYSTEM_METADATA_CMD_DELETE = 2;
 }
 
-message ClientSystemInfoProto {
-  optional string operating_system = 1;
-  optional string architecture = 2;
-  optional string java_version = 3;
-  int64 total_memory = 4;
-  int64 available_memory = 5;
-  int64 total_disk_space = 6;
-  int64 available_disk_space = 7;
-  int32 cpu_cores = 8;
-  double cpu_usage = 9;
-  double load_average = 10;
-}
-
-message ClientNetworkInfoProto {
-  optional string public_ip_address = 1;
-  optional string private_ip_address = 2;
-  repeated string network_interfaces = 3;
-  int64 bandwidth_capacity = 4;
-  int64 current_bandwidth_usage = 5;
-  double latency_ms = 6;
-  double packet_loss_percentage = 7;
-  optional string connection_type = 8;
-  bool is_nat_traversal = 9;
-  repeated int32 firewall_ports = 10;
-}
-
-message ClientCapabilitiesProto {
-  repeated string supported_services = 1;
-  reserved 2, 3, 4;
-  repeated string available_regions = 5;
-  reserved 6, 7;
-  // Legacy: values rendered as text, which loses their JSON types. Read only when field 11 is empty.
-  map<string, string> custom_capabilities = 8;
-  ClientSystemInfoProto system_info = 9;
-  ClientNetworkInfoProto network_info = 10;
-  // Each value encoded as JSON so numbers, booleans, lists, objects, and null survive replication.
-  map<string, string> custom_capabilities_json = 11;
-}
-
-message ClientInfoProto {
-  string client_id = 1;
-  optional string hostname = 2;
+// Fields 2, 4, 5, and 9 were the host name, the port, the capabilities, and the version. A node no longer has
+// them; entries that hold them still parse, and the values are ignored.
+message NodeProto {
+  string name = 1;
+  reserved 2;
   optional string address = 3;
-  int32 port = 4;
-  ClientCapabilitiesProto capabilities = 5;
-  ClientStatusProto status = 6;
+  reserved 4, 5;
+  NodeStatusProto status = 6;
   int64 registration_time_epoch_ms = 7;
   int64 last_heartbeat_epoch_ms = 8;
-  optional string version = 9;
+  reserved 9;
   optional string region = 10;
   optional string datacenter = 11;
   map<string, string> metadata = 12;
+  reserved "client_id", "hostname", "port", "capabilities", "version";
 }
 
-message ClientCommandProto {
-  ClientCommandType type = 1;
-  string client_id = 2;
-  ClientInfoProto client_info = 3;
-  ClientStatusProto new_status = 4;
-  ClientCapabilitiesProto new_capabilities = 5;
+// Field 5 held the new capabilities of the removed capabilities update.
+message NodeCommandProto {
+  NodeCommandType type = 1;
+  string name = 2;
+  NodeProto node = 3;
+  NodeStatusProto new_status = 4;
+  reserved 5;
   int64 timestamp_epoch_ms = 6;
-  ClientStatusProto expected_status = 7;
+  NodeStatusProto expected_status = 7;
   int64 sequence_number = 8;
   string registration_id = 9;
   int64 expected_last_contact_epoch_ms = 10;
   bool reap = 11;
+  reserved "client_id", "client_info", "new_capabilities";
 }
-
 message SystemMetadataCommandProto {
   SystemMetadataCommandType type = 1;
   string key = 2;
@@ -194,7 +160,7 @@ message RaftConfigurationProto {
 
 message RaftCommandMessage {
   oneof command {
-    ClientCommandProto client_command = 1;
+    NodeCommandProto node_command = 1;
     SystemMetadataCommandProto system_metadata_command = 2;
     CatalogCommandProto catalog_command = 3;
     RaftConfigurationProto configuration = 4;

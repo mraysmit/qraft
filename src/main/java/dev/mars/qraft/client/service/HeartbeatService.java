@@ -16,9 +16,6 @@
 
 package dev.mars.qraft.client.service;
 
-import dev.mars.qraft.client.config.ClientConfiguration;
-
-import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -30,18 +27,15 @@ import java.util.concurrent.atomic.AtomicLong;
  * @version 1.0
  */
 public final class HeartbeatService {
-    private final ClientConfiguration config;
     private final RegistrationClient registrationClient;
     private final AtomicLong sequence = new AtomicLong();
 
-    public HeartbeatService(ClientConfiguration config, RegistrationClient registrationClient) {
-        this.config = config;
+    public HeartbeatService(RegistrationClient registrationClient) {
         this.registrationClient = registrationClient;
     }
 
     public CompletableFuture<Boolean> sendHeartbeat() {
         if (!registrationClient.isRegistered()) return CompletableFuture.completedFuture(false);
-        return registrationClient.heartbeat(config.getClientId(), Instant.now(),
-                sequence.incrementAndGet(), "passing");
+        return registrationClient.heartbeat(sequence.incrementAndGet());
     }
 }

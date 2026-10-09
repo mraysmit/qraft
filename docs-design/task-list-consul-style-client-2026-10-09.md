@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-04
 **Status:** Proposed. It needs the `client` package and the new node model and routes of [`task-list-single-pom-and-quorus-removal-2026-10-09.md`](task-list-single-pom-and-quorus-removal-2026-10-09.md). It starts after that list and after the rest of [`task-list-raft-membership-changes-2026-10-09.md`](task-list-raft-membership-changes-2026-10-09.md), Steps 5 to 8 (decided 2026-10-05).
-**Last updated:** 2026-10-09 (the file renamed to the date of its last change; the single-POM list's Phase 3A replaced Qraft's two retired words here and everywhere; decision 10 records the configuration names, and decision 3 the path of the local API. On 2026-10-08, the review with the other task lists: the request bodies of decision 5 and the log audit in the rules)
+**Last updated:** 2026-10-09 (decisions 5 and 8: what a node's deregistration removes, and the `client.hostname` setting; the file renamed to the date of its last change; the single-POM list's Phase 3A replaced Qraft's two retired words here and everywhere; decision 10 records the configuration names, and decision 3 the path of the local API. On 2026-10-08, the review with the other task lists: the request bodies of decision 5 and the log audit in the rules)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 4.3, 5, 6.2, 7.3, 8, 12.1 and 16
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
@@ -48,6 +48,14 @@ decision 10 on 2026-10-09. Decisions 5 to 8 follow the Consul pattern.
    fixes the request bodies of the two catalog write paths for nodes and
    services together, so that Phase 1 here adds services without changing
    what a node sends (noted 2026-10-08).
+
+   Done there on 2026-10-09, with two things that Phase 1 here builds on:
+   - The bodies of the two catalog write paths are in the design's section
+     12.1.2. A registration describes the node under `node`; a service is
+     added beside it under `service`. A deregistration that names no service
+     removes the node.
+   - **A node's deregistration removes its services and checks** in the same
+     replicated step, as in Consul (decided by the user on 2026-10-09).
 6. **The local API binds to `127.0.0.1` by default,** like Consul's
    `client_addr`. It has no authentication until
    [`task-list-acl-and-tokens-2026-10-09.md`](task-list-acl-and-tokens-2026-10-09.md),
@@ -66,6 +74,8 @@ decision 10 on 2026-10-09. Decisions 5 to 8 follow the Consul pattern.
      `node-id` in that directory. An unreadable file stops startup and is never
      replaced.
    - `client.id` becomes `client.nodeName`, which defaults to the host name.
+     That is the machine's host name. The `client.hostname` setting was
+     removed on 2026-10-09, in the single-POM list.
    - The catalog stays keyed by node name, so the service identity
      `(tenant, namespace, node, serviceId)` does not change. The node ID is
      stored with the node and used to detect conflicts.

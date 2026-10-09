@@ -93,12 +93,12 @@ final class DockerHealthApiHelper {
         return entries == null ? -1 : entries.size();
     }
 
-    /** The client's node entry from {@code /api/v1/clients}, or {@code null}. */
+    /** The client's node entry from {@code /v1/catalog/nodes}, or {@code null}. */
     static JsonNode clientNode(String server) {
-        JsonNode clients = get(server + "/api/v1/clients");
+        JsonNode clients = get(server + "/v1/catalog/nodes");
         if (clients == null) return null;
         for (JsonNode client : clients) {
-            if (CLIENT_ID.equals(client.path("clientId").asText())) return client;
+            if (CLIENT_ID.equals(client.path("name").asText())) return client;
         }
         return null;
     }

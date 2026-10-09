@@ -16,9 +16,9 @@
 
 package dev.mars.qraft.server.health;
 
-import dev.mars.qraft.common.ClientInfo;
-import dev.mars.qraft.common.ClientStatus;
-import dev.mars.qraft.state.ClientCommand;
+import dev.mars.qraft.common.Node;
+import dev.mars.qraft.common.NodeStatus;
+import dev.mars.qraft.state.NodeCommand;
 import dev.mars.qraft.state.QraftStateStore;
 
 import java.time.DateTimeException;
@@ -47,26 +47,26 @@ import java.util.Optional;
  */
 public final class NodeExpiryEvaluator {
 
-    public NodeExpiryPlan plan(Collection<ClientInfo> nodes, Instant now, Instant leaderSince, NodeExpiryPolicy policy) {
+    public NodeExpiryPlan plan(Collection<Node> nodes, Instant now, Instant leaderSince, NodeExpiryPolicy policy) {
         Objects.requireNonNull(nodes, "nodes");
         Objects.requireNonNull(now, "now");
         Objects.requireNonNull(leaderSince, "leaderSince");
         Objects.requireNonNull(policy, "policy");
-        List<ClientCommand.Expire> due = new ArrayList<>();
+        List<NodeCommand.Expire> due = new ArrayList<>();
         Instant nextDue = null;
-        List<ClientInfo> ordered = nodes.stream().sorted(Comparator.comparing(ClientInfo::getClientId)).toList();
-        for (ClientInfo node : ordered) {
+        List<Node> ordered = nodes.stream().sorted(Comparator.comparing(Node::name)).toList();
+        for (Node node : ordered) {
             Instant lastContact = QraftStateStore.lastContact(node);
             if (lastContact == null) continue;
             Instant effectiveDeadline = later(plus(lastContact, policy.ttl()), plus(leaderSince, policy.ttl()));
-            boolean reap = node.getStatus() == ClientStatus.UNREACHABLE;
+            boolean reap = node.status() == NodeStatus.UNREACHABLE;
             if (reap && policy.reapAfter().isZero()) continue;
             Instant dueAt = reap ? plus(effectiveDeadline, policy.reapAfter()) : effectiveDeadline;
             if (dueAt.equals(Instant.MAX)) continue;
             if (now.isBefore(dueAt)) {
                 if (nextDue == null || dueAt.isBefore(nextDue)) nextDue = dueAt;
             } else {
-                due.add((ClientCommand.Expire) ClientCommand.expire(node.getClientId(), lastContact, reap, now));
+                due.add((NodeCommand.Expire) NodeCommand.expire(node.name(), lastContact, reap, now));
             }
         }
         return new NodeExpiryPlan(due, Optional.ofNullable(nextDue));

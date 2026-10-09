@@ -92,7 +92,7 @@ class ClientEndToEndTest {
 
         assertTrue(client.shutdown().get(10, TimeUnit.SECONDS));
         waitUntil(() -> servers.store(0).getServiceCatalog().instances().isEmpty()
-                && servers.store(0).findClient("client-a").isEmpty());
+                && servers.store(0).findNode("client-a").isEmpty());
     }
 
     @Test
@@ -147,7 +147,7 @@ class ClientEndToEndTest {
     private QraftClient client(String id, List<URI> endpoints,
                              List<ServiceDefinition> services, long freshnessMs) throws Exception {
         QraftClient client = new QraftClient(ClientConfiguration.builder()
-                .clientId(id).hostname(id + "-host").address("127.0.0.1")
+                .clientId(id).address("127.0.0.1")
                 .clientPort(0).serverUrls(endpoints)
                 .heartbeatInterval(40).requestTimeoutMs(5_000)
                 .registrationRetryMinMs(20).registrationRetryMaxMs(100)

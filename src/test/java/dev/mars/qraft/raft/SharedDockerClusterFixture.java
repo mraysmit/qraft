@@ -91,9 +91,9 @@ public final class SharedDockerClusterFixture {
             logger.info("Starting shared 3-node cluster...");
             threeNodeCluster = new ComposeContainer(
                     new File("src/test/resources/docker-compose-3node-prebuilt.yml"))
-                    .withExposedService("server1", 8080, Wait.forHttp("/health").forStatusCode(200))
-                    .withExposedService("server2", 8080, Wait.forHttp("/health").forStatusCode(200))
-                    .withExposedService("server3", 8080, Wait.forHttp("/health").forStatusCode(200))
+                    .withExposedService("server1", 8080, Wait.forHttp("/health/live").forStatusCode(200))
+                    .withExposedService("server2", 8080, Wait.forHttp("/health/live").forStatusCode(200))
+                    .withExposedService("server3", 8080, Wait.forHttp("/health/live").forStatusCode(200))
                     .withStartupTimeout(Duration.ofSeconds(90));
 
             threeNodeCluster.start();
@@ -108,9 +108,9 @@ public final class SharedDockerClusterFixture {
         ensureImageBuilt();
         ComposeContainer cluster = new ComposeContainer(
                 new File("src/test/resources/docker-compose-3node-prebuilt.yml"))
-                .withExposedService("server1", 8080, Wait.forHttp("/health").forStatusCode(200))
-                .withExposedService("server2", 8080, Wait.forHttp("/health").forStatusCode(200))
-                .withExposedService("server3", 8080, Wait.forHttp("/health").forStatusCode(200))
+                .withExposedService("server1", 8080, Wait.forHttp("/health/live").forStatusCode(200))
+                .withExposedService("server2", 8080, Wait.forHttp("/health/live").forStatusCode(200))
+                .withExposedService("server3", 8080, Wait.forHttp("/health/live").forStatusCode(200))
                 .withStartupTimeout(Duration.ofSeconds(90));
         cluster.start();
         registerCluster(cluster, List.of("server1", "server2", "server3"));
@@ -137,9 +137,9 @@ public final class SharedDockerClusterFixture {
     private static ComposeContainer startIsolatedThreeNodeClusterWithClient(String composeFile) {
         ensureImageBuilt();
         ComposeContainer cluster = new ComposeContainer(new File("src/test/resources/" + composeFile))
-                .withExposedService("server1", 8080, Wait.forHttp("/health").forStatusCode(200))
-                .withExposedService("server2", 8080, Wait.forHttp("/health").forStatusCode(200))
-                .withExposedService("server3", 8080, Wait.forHttp("/health").forStatusCode(200))
+                .withExposedService("server1", 8080, Wait.forHttp("/health/live").forStatusCode(200))
+                .withExposedService("server2", 8080, Wait.forHttp("/health/live").forStatusCode(200))
+                .withExposedService("server3", 8080, Wait.forHttp("/health/live").forStatusCode(200))
                 .withExposedService("client", 8080, Wait.forHttp("/health/live").forStatusCode(200))
                 .withStartupTimeout(Duration.ofSeconds(90));
         cluster.start();

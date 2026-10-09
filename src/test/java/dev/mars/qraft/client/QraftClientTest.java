@@ -19,10 +19,13 @@ package dev.mars.qraft.client;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import dev.mars.qraft.client.catalog.ServerRetryPolicy;
 import dev.mars.qraft.client.config.ClientConfiguration;
 import dev.mars.qraft.client.service.RegistrationClient;
+import dev.mars.qraft.common.Node;
 import dev.mars.qraft.common.ServiceDefinition;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -73,21 +76,20 @@ class QraftClientTest {
     }
 
     @Test
-    void aClientOnPortZeroRegistersThePortItActuallyBound() throws Exception {
+    void aClientRegistersItsNodeWithItsVersionInTheMetadata() throws Exception {
         AtomicReference<String> registration = new AtomicReference<>();
+        AtomicReference<String> identity = new AtomicReference<>();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/clients/register", exchange -> {
+        server.createContext(NodeAnswerHelper.REGISTER, exchange -> {
             registration.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
-            exchange.sendResponseHeaders(201, -1);
-            exchange.close();
+            identity.set(exchange.getRequestMethod() + " as " + exchange.getRequestHeaders().getFirst("X-Qraft-Node"));
+            NodeAnswerHelper.answer(exchange, 200, "registered", true);
         });
-        server.createContext("/api/v1/clients/client-1", exchange -> {
-            exchange.sendResponseHeaders(204, -1);
-            exchange.close();
-        });
+        server.createContext(NodeAnswerHelper.DEREGISTER, NodeAnswerHelper::accept);
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1").hostname("host").address("127.0.0.1").clientPort(0)
+                .clientId("client-1").address("127.0.0.1").clientPort(0)
+                .datacenter("dc-1").region("eu-west").version("1.2.3")
                 .serverUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000)
                 .build();
@@ -95,11 +97,21 @@ class QraftClientTest {
 
         try {
             assertTrue(client.start().get(10, TimeUnit.SECONDS));
-            int bound = client.healthService().port();
-            assertTrue(bound > 0);
-            assertEquals(bound, new com.fasterxml.jackson.databind.ObjectMapper()
-                    .readTree(registration.get()).path("port").intValue(),
-                    "the server must be told the port the client can actually be reached on");
+            assertTrue(client.healthService().port() > 0, "port zero binds a port the client is reached on");
+
+            assertEquals("PUT as client-1", identity.get(), "the identity header names the node");
+            JsonNode body = new ObjectMapper().readTree(registration.get());
+            assertEquals(List.of("node"), fieldNames(body));
+            JsonNode node = body.path("node");
+            assertEquals(List.of("address", "datacenter", "region", "metadata"), fieldNames(node),
+                    "a client sends no name, host name, port, status, or time for its node");
+            assertEquals("127.0.0.1", node.path("address").asText());
+            assertEquals("dc-1", node.path("datacenter").asText());
+            assertEquals("eu-west", node.path("region").asText());
+            assertEquals(Set.of(Node.VERSION_METADATA_KEY, Node.REGISTRATION_ID_METADATA_KEY),
+                    Set.copyOf(fieldNames(node.path("metadata"))));
+            assertEquals("1.2.3", node.path("metadata").path(Node.VERSION_METADATA_KEY).asText(),
+                    "the client's version travels in the node's metadata");
         } finally {
             client.shutdown().get(10, TimeUnit.SECONDS);
         }
@@ -108,19 +120,16 @@ class QraftClientTest {
     @Test
     void startsAndShutsDownAgainstServer() throws Exception {
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/clients/register", exchange -> {
-            exchange.sendResponseHeaders(201, -1);
-            exchange.close();
+        server.createContext(NodeAnswerHelper.REGISTER, exchange -> {
+            NodeAnswerHelper.answer(exchange, 200, "registered", true);
         });
-        server.createContext("/api/v1/clients/client-1", exchange -> {
-            exchange.sendResponseHeaders(204, -1);
-            exchange.close();
+        server.createContext(NodeAnswerHelper.DEREGISTER, exchange -> {
+            NodeAnswerHelper.answer(exchange, 200, "deregistered", true);
         });
         server.start();
 
         ClientConfiguration config = ClientConfiguration.builder()
                 .clientId("client-1")
-                .hostname("host")
                 .address("127.0.0.1")
                 .clientPort(0)
                 .serverUrl("http://localhost:" + server.getAddress().getPort())
@@ -139,14 +148,13 @@ class QraftClientTest {
     @Test
     void remainsLiveButUnreadyWhenInitialRegistrationFails() throws Exception {
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/clients/register", exchange -> {
+        server.createContext(NodeAnswerHelper.REGISTER, exchange -> {
             exchange.sendResponseHeaders(503, -1);
             exchange.close();
         });
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
                 .clientId("client-1")
-                .hostname("host")
                 .address("127.0.0.1")
                 .clientPort(0)
                 .serverUrl("http://localhost:" + server.getAddress().getPort())
@@ -167,20 +175,19 @@ class QraftClientTest {
     void rejectedNodeRegistrationIsLoggedAndNeverRetried() throws Exception {
         AtomicInteger registrations = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/clients/register", exchange -> {
+        server.createContext(NodeAnswerHelper.REGISTER, exchange -> {
             registrations.incrementAndGet();
-            byte[] body = ("{\"code\":\"invalid_client\",\"message\":\"bad address\","
+            byte[] body = ("{\"code\":\"invalid_registration\",\"message\":\"bad address\","
                     + "\"retryable\":false}").getBytes(StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(400, body.length);
             try (var output = exchange.getResponseBody()) { output.write(body); }
         });
-        server.createContext("/api/v1/clients/client-1", exchange -> {
-            exchange.sendResponseHeaders(404, -1);
-            exchange.close();
+        server.createContext(NodeAnswerHelper.DEREGISTER, exchange -> {
+            NodeAnswerHelper.answer(exchange, 200, "deregistered", false);
         });
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1").hostname("host").address("127.0.0.1")
+                .clientId("client-1").address("127.0.0.1")
                 .clientPort(0).serverUrl("http://localhost:" + server.getAddress().getPort())
                 .build();
         QraftClient client = manuallyTimedClient(config);
@@ -195,7 +202,7 @@ class QraftClientTest {
             assertEquals(1, registrations.get());
             assertEquals(1, appender.list.stream().filter(event ->
                     event.getFormattedMessage().contains("clientId=client-1")
-                            && event.getFormattedMessage().contains("invalid_client")
+                            && event.getFormattedMessage().contains("invalid_registration")
                             && event.getFormattedMessage().contains("bad address")).count());
         } finally {
             logger.detachAppender(appender);
@@ -208,24 +215,19 @@ class QraftClientTest {
         AtomicInteger registrations = new AtomicInteger();
         AtomicInteger heartbeats = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/clients/register", exchange -> {
-            int status = registrations.incrementAndGet() == 1 ? 503 : 201;
-            exchange.sendResponseHeaders(status, -1);
-            exchange.close();
+        server.createContext(NodeAnswerHelper.REGISTER, exchange -> {
+            NodeAnswerHelper.answer(exchange, registrations.incrementAndGet() == 1 ? 503 : 200, "registered", true);
         });
-        server.createContext("/api/v1/clients/heartbeat", exchange -> {
+        server.createContext(NodeAnswerHelper.HEARTBEAT, exchange -> {
             heartbeats.incrementAndGet();
-            exchange.sendResponseHeaders(204, -1);
-            exchange.close();
+            NodeAnswerHelper.answer(exchange, 200, "accepted", true);
         });
-        server.createContext("/api/v1/clients/client-1", exchange -> {
-            exchange.sendResponseHeaders(204, -1);
-            exchange.close();
+        server.createContext(NodeAnswerHelper.DEREGISTER, exchange -> {
+            NodeAnswerHelper.answer(exchange, 200, "deregistered", true);
         });
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
                 .clientId("client-1")
-                .hostname("host")
                 .address("127.0.0.1")
                 .clientPort(0)
                 .serverUrl("http://localhost:" + server.getAddress().getPort())
@@ -254,7 +256,7 @@ class QraftClientTest {
     @Test
     void checksOfADisabledServiceAreNeverRun() throws Exception {
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1").hostname("host").address("127.0.0.1").clientPort(0)
+                .clientId("client-1").address("127.0.0.1").clientPort(0)
                 .serverUrl("http://localhost:1")
                 .services(List.of(
                         new ServiceDefinition("web", "web", "127.0.0.1", 8080, List.of(), Map.of(), true),
@@ -278,23 +280,18 @@ class QraftClientTest {
         AtomicInteger registrations = new AtomicInteger();
         AtomicInteger heartbeats = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/clients/register", exchange -> {
-            int status = registrations.incrementAndGet() <= 3 ? 503 : 201;
-            exchange.sendResponseHeaders(status, -1);
-            exchange.close();
+        server.createContext(NodeAnswerHelper.REGISTER, exchange -> {
+            NodeAnswerHelper.answer(exchange, registrations.incrementAndGet() <= 3 ? 503 : 200, "registered", true);
         });
-        server.createContext("/api/v1/clients/heartbeat", exchange -> {
-            int status = heartbeats.incrementAndGet() == 1 ? 404 : 204;
-            exchange.sendResponseHeaders(status, -1);
-            exchange.close();
+        server.createContext(NodeAnswerHelper.HEARTBEAT, exchange -> {
+            NodeAnswerHelper.answer(exchange, heartbeats.incrementAndGet() == 1 ? 404 : 200, "accepted", true);
         });
-        server.createContext("/api/v1/clients/client-1", exchange -> {
-            exchange.sendResponseHeaders(204, -1);
-            exchange.close();
+        server.createContext(NodeAnswerHelper.DEREGISTER, exchange -> {
+            NodeAnswerHelper.answer(exchange, 200, "deregistered", true);
         });
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1").hostname("host").address("127.0.0.1")
+                .clientId("client-1").address("127.0.0.1")
                 .clientPort(0).serverUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000)
                 .build();
@@ -327,14 +324,14 @@ class QraftClientTest {
     void shutdownCancelsAPendingRegistrationRetry() throws Exception {
         AtomicInteger registrations = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/clients/register", exchange -> {
+        server.createContext(NodeAnswerHelper.REGISTER, exchange -> {
             registrations.incrementAndGet();
             exchange.sendResponseHeaders(503, -1);
             exchange.close();
         });
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1").hostname("host").address("127.0.0.1")
+                .clientId("client-1").address("127.0.0.1")
                 .clientPort(0).serverUrl("http://localhost:" + server.getAddress().getPort())
                 .build();
         QraftClient client = manuallyTimedClient(config);
@@ -361,24 +358,19 @@ class QraftClientTest {
         AtomicInteger registrations = new AtomicInteger();
         AtomicInteger heartbeats = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/clients/register", exchange -> {
+        server.createContext(NodeAnswerHelper.REGISTER, exchange -> {
             registrations.incrementAndGet();
-            exchange.sendResponseHeaders(201, -1);
-            exchange.close();
+            NodeAnswerHelper.answer(exchange, 200, "registered", true);
         });
-        server.createContext("/api/v1/clients/heartbeat", exchange -> {
-            int status = heartbeats.incrementAndGet() == 1 ? 404 : 204;
-            exchange.sendResponseHeaders(status, -1);
-            exchange.close();
+        server.createContext(NodeAnswerHelper.HEARTBEAT, exchange -> {
+            NodeAnswerHelper.answer(exchange, heartbeats.incrementAndGet() == 1 ? 404 : 200, "accepted", true);
         });
-        server.createContext("/api/v1/clients/client-1", exchange -> {
-            exchange.sendResponseHeaders(204, -1);
-            exchange.close();
+        server.createContext(NodeAnswerHelper.DEREGISTER, exchange -> {
+            NodeAnswerHelper.answer(exchange, 200, "deregistered", true);
         });
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
                 .clientId("client-1")
-                .hostname("host")
                 .address("127.0.0.1")
                 .clientPort(0)
                 .serverUrl("http://localhost:" + server.getAddress().getPort())
@@ -412,9 +404,8 @@ class QraftClientTest {
     void startsServiceReconciliationAfterNodeRegistration() throws Exception {
         AtomicInteger serviceRegistrations = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/clients/register", exchange -> {
-            exchange.sendResponseHeaders(201, -1);
-            exchange.close();
+        server.createContext(NodeAnswerHelper.REGISTER, exchange -> {
+            NodeAnswerHelper.answer(exchange, 200, "registered", true);
         });
         server.createContext("/v1/client/service/register", exchange -> {
             serviceRegistrations.incrementAndGet();
@@ -423,14 +414,12 @@ class QraftClientTest {
             exchange.sendResponseHeaders(200, body.length);
             try (var output = exchange.getResponseBody()) { output.write(body); }
         });
-        server.createContext("/api/v1/clients/client-1", exchange -> {
-            exchange.sendResponseHeaders(204, -1);
-            exchange.close();
+        server.createContext(NodeAnswerHelper.DEREGISTER, exchange -> {
+            NodeAnswerHelper.answer(exchange, 200, "deregistered", true);
         });
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
                 .clientId("client-1")
-                .hostname("host")
                 .address("127.0.0.1")
                 .clientPort(0)
                 .serverUrl("http://localhost:" + server.getAddress().getPort())
@@ -458,9 +447,8 @@ class QraftClientTest {
     void remainsLiveButUnreadyWhenAnEnabledServiceIsRejected() throws Exception {
         AtomicInteger serviceRegistrations = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/clients/register", exchange -> {
-            exchange.sendResponseHeaders(201, -1);
-            exchange.close();
+        server.createContext(NodeAnswerHelper.REGISTER, exchange -> {
+            NodeAnswerHelper.answer(exchange, 200, "registered", true);
         });
         server.createContext("/v1/client/service/register", exchange -> {
             serviceRegistrations.incrementAndGet();
@@ -469,13 +457,12 @@ class QraftClientTest {
             exchange.sendResponseHeaders(400, body.length);
             try (var output = exchange.getResponseBody()) { output.write(body); }
         });
-        server.createContext("/api/v1/clients/client-1", exchange -> {
-            exchange.sendResponseHeaders(204, -1);
-            exchange.close();
+        server.createContext(NodeAnswerHelper.DEREGISTER, exchange -> {
+            NodeAnswerHelper.answer(exchange, 200, "deregistered", true);
         });
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1").hostname("host").address("127.0.0.1")
+                .clientId("client-1").address("127.0.0.1")
                 .clientPort(0).serverUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000)
                 .services(List.of(new ServiceDefinition("web", "web", "127.0.0.1", 8080,
@@ -500,17 +487,15 @@ class QraftClientTest {
     @Test
     void remainsLiveWhenServerContactBecomesStale() throws Exception {
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/clients/register", exchange -> {
-            exchange.sendResponseHeaders(201, -1);
-            exchange.close();
+        server.createContext(NodeAnswerHelper.REGISTER, exchange -> {
+            NodeAnswerHelper.answer(exchange, 200, "registered", true);
         });
-        server.createContext("/api/v1/clients/client-1", exchange -> {
-            exchange.sendResponseHeaders(204, -1);
-            exchange.close();
+        server.createContext(NodeAnswerHelper.DEREGISTER, exchange -> {
+            NodeAnswerHelper.answer(exchange, 200, "deregistered", true);
         });
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1").hostname("host").address("127.0.0.1")
+                .clientId("client-1").address("127.0.0.1")
                 .clientPort(0).serverUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000).contactFreshnessMs(1_000)
                 .build();
@@ -537,9 +522,8 @@ class QraftClientTest {
         CountDownLatch servicesStarted = new CountDownLatch(1);
         CountDownLatch releaseServices = new CountDownLatch(1);
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/clients/register", exchange -> {
-            exchange.sendResponseHeaders(201, -1);
-            exchange.close();
+        server.createContext(NodeAnswerHelper.REGISTER, exchange -> {
+            NodeAnswerHelper.answer(exchange, 200, "registered", true);
         });
         server.createContext("/v1/client/service/register", exchange -> {
             String id = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8)
@@ -564,10 +548,9 @@ class QraftClientTest {
                 Thread.currentThread().interrupt();
             }
         });
-        server.createContext("/api/v1/clients/client-1", exchange -> {
+        server.createContext(NodeAnswerHelper.DEREGISTER, exchange -> {
             events.add("node");
-            exchange.sendResponseHeaders(204, -1);
-            exchange.close();
+            NodeAnswerHelper.answer(exchange, 200, "deregistered", true);
         });
         server.start();
         // The test releases deregistration itself, so the deadline must never be what ends shutdown.
@@ -597,9 +580,8 @@ class QraftClientTest {
     void unreachableServerCannotExtendShutdownPastDeadlineAndLogsOnce() throws Exception {
         CountDownLatch releaseDeregistration = new CountDownLatch(1);
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/clients/register", exchange -> {
-            exchange.sendResponseHeaders(201, -1);
-            exchange.close();
+        server.createContext(NodeAnswerHelper.REGISTER, exchange -> {
+            NodeAnswerHelper.answer(exchange, 200, "registered", true);
         });
         server.createContext("/v1/client/service/register", exchange -> {
             byte[] body = "{\"serviceId\":\"web\",\"registered\":true}"
@@ -644,7 +626,7 @@ class QraftClientTest {
 
     private ClientConfiguration clientConfigWithServices(long shutdownTimeoutMs) throws Exception {
         return ClientConfiguration.builder()
-                .clientId("client-1").hostname("host").address("127.0.0.1")
+                .clientId("client-1").address("127.0.0.1")
                 .clientPort(0).serverUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000).requestTimeoutMs(10_000)
                 .shutdownTimeoutMs(shutdownTimeoutMs)
@@ -660,6 +642,12 @@ class QraftClientTest {
             Thread.onSpinWait();
         }
         assertEquals(count, client.serviceReconciler().registeredCount());
+    }
+
+    private static List<String> fieldNames(JsonNode object) {
+        List<String> names = new java.util.ArrayList<>();
+        object.fieldNames().forEachRemaining(names::add);
+        return names;
     }
 
     /** A retry window longer than any delay the retry policy of {@link #manuallyTimedClient} produces. */

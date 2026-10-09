@@ -19,97 +19,71 @@ package dev.mars.qraft.common;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
-import java.util.Arrays;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * Tests {@link ClientStatus}: its values and categories, strict parsing of API input, lenient reading of
- * replicated JSON written while the job system's statuses existed, and the absence of those statuses.
+ * Tests {@link NodeStatus}: the three statuses Qraft sets, strict parsing of API input, and the reading of the
+ * removed statuses that replicated JSON written by earlier versions may hold.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
- * @since 2026-03-15
- * @version 2.0
+ * @since 2026-10-09
+ * @version 1.0
  */
-class ClientStatusTest {
+class NodeStatusTest {
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     @Test
-    void theStatusesAreTheNodeLifecycle() {
-        assertEquals(List.of(ClientStatus.REGISTERING, ClientStatus.HEALTHY, ClientStatus.DEGRADED,
-                ClientStatus.MAINTENANCE, ClientStatus.UNREACHABLE, ClientStatus.FAILED, ClientStatus.DEREGISTERED),
-                List.of(ClientStatus.values()));
-        for (ClientStatus status : ClientStatus.values()) {
-            assertEquals(status.name().toLowerCase(Locale.ROOT), status.getValue());
-            assertEquals(status.getValue(), status.toString());
-            assertFalse(status.getDescription().isBlank());
-        }
+    void theStatusesAreTheThreeQraftSets() {
+        assertEquals(List.of(NodeStatus.REGISTERING, NodeStatus.HEALTHY, NodeStatus.UNREACHABLE),
+                List.of(NodeStatus.values()));
+        assertEquals(List.of("registering", "healthy", "unreachable"),
+                List.of(NodeStatus.values()).stream().map(NodeStatus::getValue).toList());
     }
 
     @Test
-    void onlyHealthyAndDegradedNodesAreOperational() {
-        Set<ClientStatus> operational = Arrays.stream(ClientStatus.values()).filter(ClientStatus::isOperational)
-                .collect(Collectors.toSet());
-
-        assertEquals(Set.of(ClientStatus.HEALTHY, ClientStatus.DEGRADED), operational);
-    }
-
-    @Test
-    void categoriesPartitionTheStatuses() {
-        assertEquals(Set.of(ClientStatus.HEALTHY), matching(ClientStatus::isHealthy));
-        assertEquals(Set.of(ClientStatus.DEGRADED, ClientStatus.UNREACHABLE, ClientStatus.FAILED),
-                matching(ClientStatus::isProblematic));
-        assertEquals(Set.of(ClientStatus.REGISTERING, ClientStatus.MAINTENANCE), matching(ClientStatus::isTransitional));
-        assertEquals(Set.of(ClientStatus.DEREGISTERED), matching(ClientStatus::isTerminal));
-        assertFalse(ClientStatus.FAILED.isTerminal(), "a failed node can still be deregistered");
+    void aStatusIsWrittenAsItsValue() throws Exception {
+        assertEquals("\"unreachable\"", JSON.writeValueAsString(NodeStatus.UNREACHABLE));
+        assertEquals("healthy", NodeStatus.HEALTHY.toString());
     }
 
     @Test
     void apiInputIsParsedStrictlyAndCaseInsensitively() {
-        assertEquals(ClientStatus.HEALTHY, ClientStatus.fromValue("healthy"));
-        assertEquals(ClientStatus.HEALTHY, ClientStatus.fromValue("HEALTHY"));
-        assertEquals(ClientStatus.MAINTENANCE, ClientStatus.fromValue("Maintenance"));
-        assertThrows(IllegalArgumentException.class, () -> ClientStatus.fromValue("invalid-status"));
-        assertThrows(IllegalArgumentException.class, () -> ClientStatus.fromValue(null));
-    }
+        assertEquals(NodeStatus.HEALTHY, NodeStatus.fromValue("healthy"));
+        assertEquals(NodeStatus.UNREACHABLE, NodeStatus.fromValue("UnReachable"));
 
-    @Test
-    void theJobSystemsWorkSchedulingStatusesAreGone() {
-        Set<String> names = Arrays.stream(ClientStatus.values()).map(Enum::name).collect(Collectors.toSet());
-        for (String legacy : List.of("ACTIVE", "IDLE", "OVERLOADED", "DRAINING")) {
-            assertFalse(names.contains(legacy), legacy);
-            assertThrows(IllegalArgumentException.class,
-                    () -> ClientStatus.fromValue(legacy.toLowerCase(Locale.ROOT)),
-                    "an API caller can no longer send " + legacy);
+        assertThrows(IllegalArgumentException.class, () -> NodeStatus.fromValue(null));
+        assertThrows(IllegalArgumentException.class, () -> NodeStatus.fromValue("unknown"));
+        for (String removed : List.of("active", "idle", "degraded", "overloaded", "maintenance", "draining",
+                "failed", "deregistered")) {
+            assertThrows(IllegalArgumentException.class, () -> NodeStatus.fromValue(removed), removed);
         }
     }
 
     @Test
-    void replicatedJsonWrittenWithTheJobSystemsStatusesReadsAsTheirCurrentMeaning() throws Exception {
-        ObjectMapper json = new ObjectMapper();
-        Map<String, ClientStatus> legacy = Map.of(
-                "active", ClientStatus.HEALTHY,
-                "idle", ClientStatus.HEALTHY,
-                "overloaded", ClientStatus.DEGRADED,
-                "draining", ClientStatus.MAINTENANCE);
+    void replicatedJsonHoldingARemovedStatusReadsAsWhetherTheNodeWasInContact() throws Exception {
+        Map<String, NodeStatus> stored = Map.ofEntries(
+                Map.entry("registering", NodeStatus.REGISTERING),
+                Map.entry("healthy", NodeStatus.HEALTHY),
+                Map.entry("unreachable", NodeStatus.UNREACHABLE),
+                Map.entry("active", NodeStatus.HEALTHY),
+                Map.entry("idle", NodeStatus.HEALTHY),
+                Map.entry("degraded", NodeStatus.HEALTHY),
+                Map.entry("overloaded", NodeStatus.HEALTHY),
+                Map.entry("maintenance", NodeStatus.HEALTHY),
+                Map.entry("draining", NodeStatus.HEALTHY),
+                Map.entry("failed", NodeStatus.UNREACHABLE),
+                Map.entry("deregistered", NodeStatus.UNREACHABLE));
 
-        legacy.forEach((stored, current) -> {
-            assertEquals(current, ClientStatus.fromStoredValue(stored), stored);
-            assertEquals(current, ClientStatus.fromStoredValue(stored.toUpperCase(Locale.ROOT)), stored);
-        });
-        assertEquals(ClientStatus.DEGRADED, json.readValue("\"overloaded\"", ClientStatus.class));
-        assertEquals(ClientStatus.UNREACHABLE, json.readValue("\"unreachable\"", ClientStatus.class));
-        assertEquals("\"healthy\"", json.writeValueAsString(ClientStatus.HEALTHY), "a current value is written");
-        assertThrows(IllegalArgumentException.class, () -> ClientStatus.fromStoredValue("unknown"));
-    }
-
-    private static Set<ClientStatus> matching(java.util.function.Predicate<ClientStatus> predicate) {
-        return Arrays.stream(ClientStatus.values()).filter(predicate).collect(Collectors.toSet());
+        for (var entry : stored.entrySet()) {
+            assertEquals(entry.getValue(), JSON.readValue('"' + entry.getKey() + '"', NodeStatus.class),
+                    entry.getKey());
+            assertEquals(entry.getValue(), NodeStatus.fromStoredValue(entry.getKey().toUpperCase()),
+                    "stored values read whatever their case: " + entry.getKey());
+        }
+        assertThrows(IllegalArgumentException.class, () -> NodeStatus.fromStoredValue("unknown"));
     }
 }

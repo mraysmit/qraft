@@ -16,11 +16,8 @@
 
 package dev.mars.qraft.state;
 
-import dev.mars.qraft.common.ClientCapabilities;
-import dev.mars.qraft.common.ClientInfo;
-import dev.mars.qraft.common.ClientNetworkInfo;
-import dev.mars.qraft.common.ClientStatus;
-import dev.mars.qraft.common.ClientSystemInfo;
+import dev.mars.qraft.common.Node;
+import dev.mars.qraft.common.NodeStatus;
 import dev.mars.qraft.raft.RaftCommandResult;
 import org.junit.jupiter.api.Test;
 
@@ -29,7 +26,6 @@ import java.io.InputStream;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.HexFormat;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -37,17 +33,19 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests that the legacy node fixtures decode and restore with exact fields, and that their bytes stay unchanged.
- * The fixtures freeze the node commands and a snapshot holding nodes as the code wrote them on 2026-10-09, before
- * the node model was reduced: every node command, the capabilities command, the job system's statuses, and a
- * snapshot with a fully described node.
+ * Tests that the legacy node fixtures still decode and restore, and that their bytes stay unchanged. The
+ * fixtures hold the node commands and a snapshot of nodes as the code wrote them on 2026-10-09, when a node
+ * also had a host name, a port, a version, and capabilities, when a command could replace the capabilities,
+ * and when there were more statuses. The manifest beside the fixtures lists what each one holds.
+ *
+ * <p>What a node no longer has is ignored. A removed status reads as the status that says whether the node
+ * was in contact. An entry that holds the capabilities update applies nothing.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-10-09
- * @version 1.0
+ * @version 2.0
  */
 class LegacyNodeFixtureTest {
     private static final String FIXTURE_ROOT = "/fixtures/node/";
@@ -57,6 +55,13 @@ class LegacyNodeFixtureTest {
     static final String REGISTRATION_ID = "reg-1";
     static final long HEARTBEAT_SEQUENCE = 7;
     static final long SNAPSHOT_INDEX = 9;
+    /** The fully described node of the fixtures, as far as a node is still described. */
+    private static final Node RICH = new Node("node-rich", "192.0.2.21", "dc-1", "eu-west",
+            Map.of("rack", "r7", Node.REGISTRATION_ID_METADATA_KEY, REGISTRATION_ID),
+            NodeStatus.HEALTHY, REGISTERED, CONTACTED);
+    /** The node of the fixtures that was written with a name, a status, and a registration time only. */
+    private static final Node MINIMAL = new Node("node-minimal", null, null, null, Map.of(),
+            NodeStatus.REGISTERING, REGISTERED, null);
     private static final Map<String, String> SHA_256 = Map.ofEntries(
             Map.entry("node-register-rich.bin", "09c7072673ccde332f74977a2e21b0a2062fdb877aeccb6e55197c80486fc870"),
             Map.entry("node-register-minimal.bin", "f2608b63decac97d09e8b976505fb51f0d8431b79bd5214323fdb731b9b794dd"),
@@ -76,63 +81,55 @@ class LegacyNodeFixtureTest {
     private final ProtobufRaftCommandCodec codec = new ProtobufRaftCommandCodec();
 
     @Test
-    void decodesARichNodeRegistrationWithEveryField() throws Exception {
-        ClientCommand.Register register = assertInstanceOf(ClientCommand.Register.class,
+    void decodesARichNodeRegistrationWithoutTheFieldsANodeNoLongerHas() throws Exception {
+        NodeCommand.Register register = assertInstanceOf(NodeCommand.Register.class,
                 codec.deserialize(fixture("node-register-rich.bin")));
 
-        assertEquals("node-rich", register.clientId());
+        assertEquals("node-rich", register.name());
         assertEquals(COMMANDED, register.timestamp());
-        ClientInfo node = register.clientInfo();
-        assertRichNode(node);
-        assertEquals(ClientStatus.HEALTHY, node.getStatus());
-        assertEquals(REGISTERED, node.getRegistrationTime());
-        assertEquals(CONTACTED, node.getLastHeartbeat());
+        assertEquals(RICH, register.node(),
+                "the host name, the port, the version, and the capabilities in the entry are ignored");
     }
 
     @Test
     void decodesAMinimalNodeRegistrationWithItsAbsentFieldsAbsent() throws Exception {
-        ClientCommand.Register register = assertInstanceOf(ClientCommand.Register.class,
+        NodeCommand.Register register = assertInstanceOf(NodeCommand.Register.class,
                 codec.deserialize(fixture("node-register-minimal.bin")));
 
-        assertEquals("node-minimal", register.clientId());
+        assertEquals("node-minimal", register.name());
         assertEquals(COMMANDED, register.timestamp());
-        assertMinimalNode(register.clientInfo());
-        assertEquals(ClientStatus.REGISTERING, register.clientInfo().getStatus());
-        assertEquals(REGISTERED, register.clientInfo().getRegistrationTime());
+        assertEquals(MINIMAL, register.node());
     }
 
     @Test
     void decodesTheOtherNodeCommandsWithExactFields() throws Exception {
-        assertEquals(new ClientCommand.Deregister("node-rich", COMMANDED),
+        assertEquals(new NodeCommand.Deregister("node-rich", COMMANDED),
                 codec.deserialize(fixture("node-deregister.bin")));
-        assertEquals(new ClientCommand.UpdateStatus("node-rich", ClientStatus.HEALTHY, ClientStatus.DEGRADED,
-                COMMANDED), codec.deserialize(fixture("node-update-status.bin")));
-        assertEquals(new ClientCommand.Heartbeat("node-rich", ClientStatus.HEALTHY, CONTACTED, HEARTBEAT_SEQUENCE,
+        assertEquals(new NodeCommand.UpdateStatus("node-rich", NodeStatus.HEALTHY, NodeStatus.HEALTHY,
+                COMMANDED), codec.deserialize(fixture("node-update-status.bin")),
+                "the removed degraded status decodes as healthy: the node was in contact");
+        assertEquals(new NodeCommand.Heartbeat("node-rich", NodeStatus.HEALTHY, CONTACTED, HEARTBEAT_SEQUENCE,
                 REGISTRATION_ID), codec.deserialize(fixture("node-heartbeat.bin")));
-        assertEquals(new ClientCommand.Heartbeat("node-minimal", null, CONTACTED),
+        assertEquals(new NodeCommand.Heartbeat("node-minimal", null, CONTACTED),
                 codec.deserialize(fixture("node-heartbeat-plain.bin")));
-        assertEquals(new ClientCommand.Expire("node-rich", CONTACTED, true, COMMANDED),
+        assertEquals(new NodeCommand.Expire("node-rich", CONTACTED, true, COMMANDED),
                 codec.deserialize(fixture("node-expire.bin")));
     }
 
     @Test
-    void decodesACapabilitiesUpdateWithEveryField() throws Exception {
-        ClientCommand.UpdateCapabilities update = assertInstanceOf(ClientCommand.UpdateCapabilities.class,
-                codec.deserialize(fixture("node-update-capabilities.bin")));
-
-        assertEquals("node-rich", update.clientId());
-        assertEquals(COMMANDED, update.timestamp());
-        assertRichCapabilities(update.newCapabilities());
+    void anEntryHoldingTheRemovedCapabilitiesUpdateIsSkipped() throws Exception {
+        assertNull(codec.deserialize(fixture("node-update-capabilities.bin")),
+                "Qraft never issued a capabilities update, so an entry that holds one applies nothing");
     }
 
     @Test
     void decodesTheJobSystemsStatusesAsTheStatusesQraftSets() throws Exception {
-        assertEquals(new ClientCommand.UpdateStatus("node-job", ClientStatus.HEALTHY, ClientStatus.HEALTHY,
+        assertEquals(new NodeCommand.UpdateStatus("node-job", NodeStatus.HEALTHY, NodeStatus.HEALTHY,
                 COMMANDED), codec.deserialize(fixture("node-update-status-job-a.bin")),
                 "the job system's active and idle statuses decode as healthy");
-        assertEquals(new ClientCommand.UpdateStatus("node-job", ClientStatus.DEGRADED, ClientStatus.MAINTENANCE,
+        assertEquals(new NodeCommand.UpdateStatus("node-job", NodeStatus.HEALTHY, NodeStatus.HEALTHY,
                 COMMANDED), codec.deserialize(fixture("node-update-status-job-b.bin")),
-                "the job system's overloaded and draining statuses decode as degraded and maintenance");
+                "the job system's overloaded and draining statuses decode as healthy too");
     }
 
     @Test
@@ -142,21 +139,16 @@ class LegacyNodeFixtureTest {
         store.restoreSnapshot(fixture("node-snapshot.json"));
 
         assertEquals(SNAPSHOT_INDEX, store.getLastAppliedIndex());
-        assertEquals(Set.of("node-rich", "node-minimal"), store.getClients().keySet());
-        ClientInfo rich = store.findClient("node-rich").orElseThrow();
-        assertRichNode(rich);
-        assertEquals(ClientStatus.HEALTHY, rich.getStatus(), "the heartbeat made the registering node healthy");
-        assertEquals(REGISTERED, rich.getRegistrationTime());
-        assertEquals(CONTACTED, rich.getLastHeartbeat());
-        ClientInfo minimal = store.findClient("node-minimal").orElseThrow();
-        assertMinimalNode(minimal);
-        assertEquals(ClientStatus.REGISTERING, minimal.getStatus());
-        assertEquals(REGISTERED, minimal.getRegistrationTime());
+        assertEquals(Set.of("node-rich", "node-minimal"), store.getNodes().keySet(),
+                "the snapshot's nodes are read under the key they had when it was written");
+        assertEquals(RICH, store.findNode("node-rich").orElseThrow(),
+                "the heartbeat made the registering node healthy");
+        assertEquals(MINIMAL, store.findNode("node-minimal").orElseThrow());
 
         // The snapshot carries the heartbeat sequence: the same sequence is stale, the next one is accepted.
-        assertInstanceOf(RaftCommandResult.CasMismatch.class, store.apply(new ClientCommand.Heartbeat(
+        assertInstanceOf(RaftCommandResult.CasMismatch.class, store.apply(new NodeCommand.Heartbeat(
                 "node-rich", null, COMMANDED, HEARTBEAT_SEQUENCE, REGISTRATION_ID)));
-        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new ClientCommand.Heartbeat(
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(new NodeCommand.Heartbeat(
                 "node-rich", null, COMMANDED, HEARTBEAT_SEQUENCE + 1, REGISTRATION_ID)));
     }
 
@@ -169,119 +161,6 @@ class LegacyNodeFixtureTest {
                     MessageDigest.getInstance("SHA-256").digest(bytes));
             assertEquals(expected.getValue(), actual, expected.getKey());
         }
-    }
-
-    // ── The values the fixtures were written from ──────────────────────────────────────────────────────
-
-    static ClientInfo richNode() {
-        ClientInfo node = new ClientInfo("node-rich", "rich-host", "192.0.2.21", 8501);
-        node.setStatus(ClientStatus.HEALTHY);
-        node.setRegistrationTime(REGISTERED);
-        node.setLastHeartbeat(CONTACTED);
-        node.setVersion("3.1.0");
-        node.setRegion("eu-west");
-        node.setDatacenter("dc-1");
-        node.addMetadata("rack", "r7");
-        node.addMetadata(ClientInfo.REGISTRATION_ID_METADATA_KEY, REGISTRATION_ID);
-        node.setCapabilities(richCapabilities());
-        return node;
-    }
-
-    static ClientInfo minimalNode() {
-        ClientInfo node = new ClientInfo("node-minimal", null, null, 0);
-        node.setRegistrationTime(REGISTERED);
-        return node;
-    }
-
-    static ClientCapabilities richCapabilities() {
-        ClientSystemInfo system = new ClientSystemInfo();
-        system.setOperatingSystem("Linux");
-        system.setArchitecture("amd64");
-        system.setJavaVersion("27");
-        system.setTotalMemory(17_179_869_184L);
-        system.setAvailableMemory(8_589_934_592L);
-        system.setTotalDiskSpace(500_000_000_000L);
-        system.setAvailableDiskSpace(250_000_000_000L);
-        system.setCpuCores(8);
-        system.setCpuUsage(0.25);
-        system.setLoadAverage(1.5);
-        ClientNetworkInfo network = new ClientNetworkInfo();
-        network.setPublicIpAddress("203.0.113.21");
-        network.setPrivateIpAddress("192.0.2.21");
-        network.setNetworkInterfaces(List.of("eth0", "lo"));
-        network.setBandwidthCapacity(1_000_000_000L);
-        network.setCurrentBandwidthUsage(250_000_000L);
-        network.setLatencyMs(2.5);
-        network.setPacketLossPercentage(0.01);
-        network.setConnectionType("ethernet");
-        network.setNatTraversal(true);
-        network.setFirewallPorts(List.of(8501, 8502));
-        ClientCapabilities capabilities = new ClientCapabilities();
-        capabilities.addSupportedService("http");
-        capabilities.addSupportedService("grpc");
-        capabilities.addAvailableRegion("eu-west");
-        capabilities.addAvailableRegion("eu-north");
-        capabilities.addCustomCapability("tier", "gold");
-        capabilities.addCustomCapability("slots", 4);
-        capabilities.addCustomCapability("spot", false);
-        capabilities.setSystemInfo(system);
-        capabilities.setNetworkInfo(network);
-        return capabilities;
-    }
-
-    private static void assertRichNode(ClientInfo node) {
-        assertEquals("node-rich", node.getClientId());
-        assertEquals("rich-host", node.getHostname());
-        assertEquals("192.0.2.21", node.getAddress());
-        assertEquals(8501, node.getPort());
-        assertEquals("3.1.0", node.getVersion());
-        assertEquals("eu-west", node.getRegion());
-        assertEquals("dc-1", node.getDatacenter());
-        assertEquals(Map.of("rack", "r7", ClientInfo.REGISTRATION_ID_METADATA_KEY, REGISTRATION_ID),
-                node.getMetadata());
-        assertRichCapabilities(node.getCapabilities());
-    }
-
-    private static void assertMinimalNode(ClientInfo node) {
-        assertEquals("node-minimal", node.getClientId());
-        assertNull(node.getHostname());
-        assertNull(node.getAddress());
-        assertEquals(0, node.getPort());
-        assertNull(node.getCapabilities());
-        assertNull(node.getLastHeartbeat());
-        assertNull(node.getVersion());
-        assertNull(node.getRegion());
-        assertNull(node.getDatacenter());
-        assertEquals(Map.of(), node.getMetadata());
-    }
-
-    private static void assertRichCapabilities(ClientCapabilities capabilities) {
-        assertNotNull(capabilities, "the node's capabilities");
-        assertEquals(Set.of("http", "grpc"), capabilities.getSupportedServices());
-        assertEquals(Set.of("eu-west", "eu-north"), capabilities.getAvailableRegions());
-        assertEquals(Map.of("tier", "gold", "slots", 4, "spot", false), capabilities.getCustomCapabilities());
-        ClientSystemInfo system = capabilities.getSystemInfo();
-        assertEquals("Linux", system.getOperatingSystem());
-        assertEquals("amd64", system.getArchitecture());
-        assertEquals("27", system.getJavaVersion());
-        assertEquals(17_179_869_184L, system.getTotalMemory());
-        assertEquals(8_589_934_592L, system.getAvailableMemory());
-        assertEquals(500_000_000_000L, system.getTotalDiskSpace());
-        assertEquals(250_000_000_000L, system.getAvailableDiskSpace());
-        assertEquals(8, system.getCpuCores());
-        assertEquals(0.25, system.getCpuUsage());
-        assertEquals(1.5, system.getLoadAverage());
-        ClientNetworkInfo network = capabilities.getNetworkInfo();
-        assertEquals("203.0.113.21", network.getPublicIpAddress());
-        assertEquals("192.0.2.21", network.getPrivateIpAddress());
-        assertEquals(List.of("eth0", "lo"), network.getNetworkInterfaces());
-        assertEquals(1_000_000_000L, network.getBandwidthCapacity());
-        assertEquals(250_000_000L, network.getCurrentBandwidthUsage());
-        assertEquals(2.5, network.getLatencyMs());
-        assertEquals(0.01, network.getPacketLossPercentage());
-        assertEquals("ethernet", network.getConnectionType());
-        assertTrue(network.isNatTraversal());
-        assertEquals(List.of(8501, 8502), network.getFirewallPorts());
     }
 
     private static byte[] fixture(String name) throws IOException {

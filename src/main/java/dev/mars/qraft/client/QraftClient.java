@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.client;
 
-import dev.mars.qraft.common.ClientInfo;
+import dev.mars.qraft.common.Node;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.mars.qraft.client.catalog.ServerContactTracker;
@@ -127,7 +127,7 @@ public final class QraftClient implements AutoCloseable {
                 config.getDatacenter(), config.getRegion(), Duration.ofMillis(config.getRequestTimeoutMs()),
                 contactTracker);
         this.registrationClient = new RegistrationClient(serverClient);
-        this.heartbeatService = new HeartbeatService(config, registrationClient);
+        this.heartbeatService = new HeartbeatService(registrationClient);
         this.serviceReconciler = new ServiceReconciler(serverClient, config::getServices, clock);
         List<HealthCheckDefinition> checks = enabledServiceChecks(config);
         RequiredCheckReadiness checkReadiness = new RequiredCheckReadiness(checks);
@@ -149,12 +149,9 @@ public final class QraftClient implements AutoCloseable {
             return CompletableFuture.completedFuture(registrationClient.isRegistered());
         }
         healthService.start();
-        // The server records the port the health endpoint actually bound, not a configured 0.
-        ClientInfo client = new ClientInfo(config.getClientId(), config.getHostname(), config.getAddress(),
-                healthService.port());
-        client.setVersion(config.getVersion());
-        client.setRegion(config.getRegion());
-        client.setDatacenter(config.getDatacenter());
+        // A node is a name, an address, and where it is; the client's version travels in its metadata.
+        Node client = Node.of(config.getClientId(), config.getAddress(), config.getDatacenter(), config.getRegion(),
+                java.util.Map.of(Node.VERSION_METADATA_KEY, config.getVersion()));
         return registrationClient.register(client).thenApply(registered -> {
             if (registered) activateHeartbeat(client);
             else if (registrationClient.shouldRetryRegistration()) scheduleRegistrationRetry(client);
@@ -162,7 +159,7 @@ public final class QraftClient implements AutoCloseable {
         });
     }
 
-    private void scheduleRegistrationRetry(ClientInfo client) {
+    private void scheduleRegistrationRetry(Node client) {
         if (!running.get() || registrationClient.isRegistered()) return;
         if (!registrationRetryScheduled.compareAndSet(false, true)) return;
         try {
@@ -189,7 +186,7 @@ public final class QraftClient implements AutoCloseable {
         return config.getHealthChecks().stream().filter(check -> enabled.contains(check.serviceId())).toList();
     }
 
-    private void activateHeartbeat(ClientInfo client) {
+    private void activateHeartbeat(Node client) {
         if (!running.get()) return;
         registrationRetryNumber.set(0);
         serviceReconciler.trigger();
@@ -201,7 +198,7 @@ public final class QraftClient implements AutoCloseable {
         }
     }
 
-    private void schedulePeriodicWork(ClientInfo client) {
+    private void schedulePeriodicWork(Node client) {
         if (reconciliationScheduled.compareAndSet(false, true)) {
             scheduler.scheduleAtFixedRate(() -> {
                         if (running.get()) serviceReconciler.trigger();
@@ -235,7 +232,7 @@ public final class QraftClient implements AutoCloseable {
 
         CompletableFuture<Boolean> graceful = serviceShutdown.thenCompose(services -> {
             CompletableFuture<Boolean> nodeShutdown =
-                    registrationClient.beginShutdownAndDeregister(config.getClientId());
+                    registrationClient.beginShutdownAndDeregister();
             return nodeShutdown.handle((nodeRemoved, failure) ->
                     services.complete() && failure == null && Boolean.TRUE.equals(nodeRemoved));
         });

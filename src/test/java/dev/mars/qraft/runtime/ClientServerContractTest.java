@@ -20,7 +20,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import dev.mars.qraft.raft.PeerlessTransportFixture;
-import dev.mars.qraft.common.ClientStatus;
+import dev.mars.qraft.common.NodeStatus;
 import dev.mars.qraft.client.QraftClient;
 import dev.mars.qraft.client.catalog.CatalogOutcome;
 import dev.mars.qraft.client.catalog.HttpCatalogClient;
@@ -131,7 +131,6 @@ class ClientServerContractTest {
         QraftStateStore store = startServer();
         ClientConfiguration configuration = ClientConfiguration.builder()
                 .clientId("contract-client")
-                .hostname("contract-host")
                 .address("127.0.0.1")
                 .clientPort(0)
                 .serverUrl("http://localhost:" + server.port())
@@ -142,16 +141,16 @@ class ClientServerContractTest {
 
         assertTrue(client.start().get(10, TimeUnit.SECONDS),
                 () -> "the real client rejected the server response; replicated state="
-                        + store.findClient("contract-client"));
+                        + store.findNode("contract-client"));
         assertTrue(client.healthService().isReady());
-        waitUntil(() -> store.findClient("contract-client")
-                .filter(info -> info.getStatus() == ClientStatus.HEALTHY && info.getLastHeartbeat() != null)
+        waitUntil(() -> store.findNode("contract-client")
+                .filter(info -> info.status() == NodeStatus.HEALTHY && info.lastHeartbeat() != null)
                 .isPresent());
 
         assertTrue(client.shutdown().get(10, TimeUnit.SECONDS));
-        waitUntil(() -> store.findClient("contract-client").isEmpty());
+        waitUntil(() -> store.findNode("contract-client").isEmpty());
         assertFalse(client.isRunning());
-        assertEquals(0, store.getClients().size());
+        assertEquals(0, store.getNodes().size());
     }
 
     private QraftStateStore startServer() throws Exception {

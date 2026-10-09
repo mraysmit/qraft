@@ -172,10 +172,10 @@ class UnifiedRuntimeEndToEndTest {
     }
 
     private boolean clientPresent(URI server, String clientId) {
-        JsonNode response = getJson(server.resolve("/api/v1/clients"));
+        JsonNode response = getJson(server.resolve("/v1/catalog/nodes"));
         if (response == null || !response.isArray()) return false;
         for (JsonNode client : response) {
-            if (clientId.equals(client.path("clientId").asText())) return true;
+            if (clientId.equals(client.path("name").asText())) return true;
         }
         return false;
     }
@@ -244,7 +244,6 @@ class UnifiedRuntimeEndToEndTest {
                   "version": 1,
                   "client": {
                     "id": "runtime-client",
-                    "hostname": "runtime-client",
                     "address": "127.0.0.1",
                     "httpPort": %d,
                     "heartbeatIntervalMs": 40,

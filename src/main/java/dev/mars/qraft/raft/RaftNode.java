@@ -1602,21 +1602,25 @@ public class RaftNode {
     private Future<ElectionDecision> prepareAndPersistElection(long timerGeneration) {
         if (!running || state == State.LEADER
                 || timerGeneration != electionTimerGeneration) {
-            return Future.succeededFuture(new ElectionDecision(false, currentTerm));
+            return Future.succeededFuture(new ElectionDecision(false, false, currentTerm));
         }
         if (!isVoter()) {
             logger.debug("Not campaigning: this server is not a voter in its configuration");
-            return Future.succeededFuture(new ElectionDecision(false, currentTerm));
+            return Future.succeededFuture(new ElectionDecision(false, true, currentTerm));
         }
 
         long electionTerm = currentTerm + 1;
         logger.info("Preparing election for node {} at term {}", nodeId, electionTerm);
         return persistMetadata(electionTerm, Optional.of(nodeId))
-                .map(ignored -> new ElectionDecision(true, electionTerm));
+                .map(ignored -> new ElectionDecision(true, false, electionTerm));
     }
 
     private Void applyElection(ElectionDecision decision) {
-        if (!decision.start() || !running) return null;
+        if (!running) return null;
+        if (!decision.start()) {
+            if (decision.leaderSilent()) forgetSilentLeader();
+            return null;
+        }
 
         state = State.CANDIDATE;
         currentLeaderId = null;
@@ -1630,7 +1634,24 @@ public class RaftNode {
         return null;
     }
 
-    private record ElectionDecision(boolean start, long term) {}
+    /**
+     * Forgets the leader of a server that does not campaign. Its election timer fired, so the leader has been
+     * silent for a whole election timeout. A campaigning server forgets its leader by becoming a candidate; one
+     * that does not would otherwise report that leader, and so report itself ready, for as long as it stayed cut
+     * off. The next message from a leader makes the leader known again.
+     */
+    private void forgetSilentLeader() {
+        if (state != State.FOLLOWER || currentLeaderId == null) return;
+        logger.info("Leader {} has been silent for an election timeout; this server does not campaign and now"
+                + " knows no leader", currentLeaderId);
+        currentLeaderId = null;
+    }
+
+    /**
+     * What an election timeout leads to: an election at {@code term}, or none. {@code leaderSilent} is true
+     * when no election starts because this server does not campaign, which leaves it without a known leader.
+     */
+    private record ElectionDecision(boolean start, boolean leaderSilent, long term) {}
 
     private void requestVotes() {
         long term = currentTerm;

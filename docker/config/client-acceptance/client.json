@@ -2,7 +2,6 @@
   "version": 1,
   "client": {
     "id": "docker-client",
-    "hostname": "docker-client",
     "address": "client",
     "httpPort": 8080,
     "heartbeatIntervalMs": 1000,

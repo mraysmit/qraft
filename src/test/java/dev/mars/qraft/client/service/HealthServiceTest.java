@@ -67,12 +67,12 @@ class HealthServiceTest {
 
             assertEquals(200, get(client, port, "/health/live"));
             assertEquals(503, get(client, port, "/health/ready"));
-            assertEquals(503, get(client, port, "/health"));
+            assertEquals(404, get(client, port, "/health"), "the bare path is removed");
 
             ready.set(true);
 
             assertEquals(200, get(client, port, "/health/ready"));
-            assertEquals(200, get(client, port, "/health"));
+            assertEquals(404, get(client, port, "/health"));
         } finally {
             health.shutdown();
         }

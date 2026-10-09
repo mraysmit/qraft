@@ -95,7 +95,7 @@ Server HTTP endpoints are exposed on ports 8080 or 8081-8085, depending
 on the selected topology. Check a running endpoint with:
 
 ```powershell
-Invoke-RestMethod http://localhost:8080/health
+Invoke-RestMethod http://localhost:8080/health/ready
 ```
 
 ## Client API checks

@@ -158,11 +158,11 @@ class CrashedClientExpiryEndToEndTest {
     /** Status of the crashing client in the node registry, or {@code null} once it is gone. */
     private String nodeStatus(URI serverUri) {
         try {
-            HttpResponse<String> response = http.send(HttpRequest.newBuilder(serverUri.resolve("/api/v1/clients"))
+            HttpResponse<String> response = http.send(HttpRequest.newBuilder(serverUri.resolve("/v1/catalog/nodes"))
                     .timeout(Duration.ofSeconds(5)).GET().build(), HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() != 200) return "unavailable";
             for (JsonNode client : JSON.readTree(response.body())) {
-                if ("crashing-client".equals(client.path("clientId").asText())) return client.path("status").asText().toUpperCase(java.util.Locale.ROOT);
+                if ("crashing-client".equals(client.path("name").asText())) return client.path("status").asText().toUpperCase(java.util.Locale.ROOT);
             }
             return null;
         } catch (Exception unavailable) {

@@ -17,7 +17,8 @@
 package dev.mars.qraft.client.service;
 
 import com.sun.net.httpserver.HttpServer;
-import dev.mars.qraft.common.ClientInfo;
+import dev.mars.qraft.common.Node;
+import dev.mars.qraft.client.NodeAnswerHelper;
 import dev.mars.qraft.client.catalog.HttpCatalogClient;
 import dev.mars.qraft.client.config.ClientConfiguration;
 import org.junit.jupiter.api.AfterEach;
@@ -57,14 +58,10 @@ class HeartbeatServiceTest {
     void publishesHeartbeatAfterRegistration() throws Exception {
         AtomicInteger heartbeats = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/clients/register", exchange -> {
-            exchange.sendResponseHeaders(201, -1);
-            exchange.close();
-        });
-        server.createContext("/api/v1/clients/heartbeat", exchange -> {
+        server.createContext(NodeAnswerHelper.REGISTER, NodeAnswerHelper::accept);
+        server.createContext(NodeAnswerHelper.HEARTBEAT, exchange -> {
             heartbeats.incrementAndGet();
-            exchange.sendResponseHeaders(204, -1);
-            exchange.close();
+            NodeAnswerHelper.accept(exchange);
         });
         server.start();
 
@@ -72,10 +69,10 @@ class HeartbeatServiceTest {
                 .clientId("client-1").serverUrl("http://localhost:" + server.getAddress().getPort())
                 .requestTimeoutMs(1000).build();
         RegistrationClient registration = registration(config);
-        ClientInfo client = new ClientInfo("client-1", "host", "127.0.0.1", 8080);
+        Node client = Node.of("client-1", "127.0.0.1", null, null, null);
         assertTrue(registration.register(client).join());
 
-        HeartbeatService heartbeat = new HeartbeatService(config, registration);
+        HeartbeatService heartbeat = new HeartbeatService(registration);
         assertTrue(heartbeat.sendHeartbeat().join());
         assertTrue(heartbeats.get() == 1);
     }
@@ -84,17 +81,16 @@ class HeartbeatServiceTest {
     void doesNotPublishBeforeRegistration() throws Exception {
         AtomicInteger heartbeats = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext("/api/v1/clients/heartbeat", exchange -> {
+        server.createContext(NodeAnswerHelper.HEARTBEAT, exchange -> {
             heartbeats.incrementAndGet();
-            exchange.sendResponseHeaders(204, -1);
-            exchange.close();
+            NodeAnswerHelper.accept(exchange);
         });
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
                 .clientId("client-1").serverUrl("http://localhost:" + server.getAddress().getPort()).build();
         RegistrationClient registration = registration(config);
 
-        assertFalse(new HeartbeatService(config, registration).sendHeartbeat().join());
+        assertFalse(new HeartbeatService(registration).sendHeartbeat().join());
         assertEquals(0, heartbeats.get(), "an unregistered client sends nothing, though the server would accept it");
     }
 

@@ -16,15 +16,12 @@
 
 package dev.mars.qraft.client.service;
 
-import dev.mars.qraft.common.ClientInfo;
+import dev.mars.qraft.common.Node;
 import dev.mars.qraft.client.catalog.CatalogOutcome;
 import dev.mars.qraft.client.catalog.HttpCatalogClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.time.Instant;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -52,17 +49,17 @@ public final class RegistrationClient {
         this.serverClient = Objects.requireNonNull(serverClient, "serverClient");
     }
 
-    public synchronized CompletableFuture<Boolean> register(ClientInfo client) {
+    public synchronized CompletableFuture<Boolean> register(Node client) {
         if (!acceptingRegistrations) return CompletableFuture.completedFuture(false);
         String attemptId = UUID.randomUUID().toString();
-        client.addMetadata(ClientInfo.REGISTRATION_ID_METADATA_KEY, attemptId);
+        Node attempt = client.withMetadata(Node.REGISTRATION_ID_METADATA_KEY, attemptId);
         registrationId.set(attemptId);
-        registrationInFlight = serverClient.registerClient(client)
+        registrationInFlight = serverClient.registerNode(attempt)
                 .thenApply(outcome -> {
                     registrationRetryable.set(outcome instanceof CatalogOutcome.Retryable);
                     if (outcome instanceof CatalogOutcome.Rejected rejected) {
                         LOGGER.warn("Client registration rejected: clientId={}, code={}, message={}",
-                                client.getClientId(), rejected.code(), rejected.message());
+                                client.name(), rejected.code(), rejected.message());
                     }
                     return outcome instanceof CatalogOutcome.Success;
                 })
@@ -70,19 +67,13 @@ public final class RegistrationClient {
         return registrationInFlight;
     }
 
-    public CompletableFuture<Boolean> heartbeat(String clientId, Instant timestamp,
-                                                long sequenceNumber, String status) {
+    /** Sends a heartbeat of this client's node, as part of its current registration. */
+    public CompletableFuture<Boolean> heartbeat(long sequenceNumber) {
         if (!registered.get()) return CompletableFuture.completedFuture(false);
-        Map<String, Object> heartbeat = new LinkedHashMap<>();
-        heartbeat.put("clientId", clientId);
-        heartbeat.put("timestamp", timestamp.toString());
-        heartbeat.put("sequenceNumber", sequenceNumber);
-        heartbeat.put("status", status);
         String heartbeatRegistrationId = registrationId.get();
-        if (heartbeatRegistrationId != null) heartbeat.put("registrationId", heartbeatRegistrationId);
-        return serverClient.heartbeatClient(heartbeat).thenApply(outcome -> {
+        return serverClient.heartbeatNode(sequenceNumber, heartbeatRegistrationId).thenApply(outcome -> {
             if (outcome instanceof CatalogOutcome.Rejected rejected
-                    && ("client_not_found".equals(rejected.code()) || "http_404".equals(rejected.code()))) {
+                    && ("node_not_found".equals(rejected.code()) || "http_404".equals(rejected.code()))) {
                 recordOutcome(heartbeatRegistrationId, false);
                 return false;
             }
@@ -90,8 +81,8 @@ public final class RegistrationClient {
         });
     }
 
-    public CompletableFuture<Boolean> deregister(String clientId) {
-        return serverClient.deregisterClient(clientId)
+    public CompletableFuture<Boolean> deregister() {
+        return serverClient.deregisterNode()
                 .thenApply(CatalogOutcome.Success.class::isInstance)
                 .whenComplete((success, error) -> {
                     if (Boolean.TRUE.equals(success)) registered.set(false);
@@ -99,11 +90,11 @@ public final class RegistrationClient {
     }
 
     /** Stops new registrations, waits for an active attempt, then always removes the node. */
-    public synchronized CompletableFuture<Boolean> beginShutdownAndDeregister(String clientId) {
+    public synchronized CompletableFuture<Boolean> beginShutdownAndDeregister() {
         if (shutdown != null) return shutdown;
         acceptingRegistrations = false;
         shutdown = registrationInFlight.handle((ignored, failure) -> null)
-                .thenCompose(ignored -> deregister(clientId));
+                .thenCompose(ignored -> deregister());
         return shutdown;
     }
 

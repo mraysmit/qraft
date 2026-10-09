@@ -1,9 +1,9 @@
 # Task List: Single POM and Removal of the Quorus Leftovers
 
 **Date:** 2026-10-04
-**Last updated:** 2026-10-09 (Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
+**Last updated:** 2026-10-09 (Phase 4 done, with its mutation evidence, and its four open points reviewed with the user; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
 **Status:** In progress. This is the current task list. It started on 2026-10-04 at the user's request, before the membership list's Step 4 close-out gate.
-**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09; it is not committed yet. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4's first item, the legacy node fixtures, was done on 2026-10-09. The next coding task is Phase 4's second item: replace the node model with a Consul-shaped node. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
+**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it is not committed yet. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. Three decisions of the phase still wait for the user's confirmation. The next coding task is Phase 5. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
 **Last reviewed:** 2026-10-08, against the code at commit `9a4adf0`, with the other four task lists. The status table in section 4 and every item marked "review of 2026-10-08" come from that review. No build was run for it. The logs that the Phase 2A and Phase 3 records cite were written in another working tree and were not available, so their counts were checked for arithmetic only. The earlier review of 2026-10-05 was against `24beac3`; its items keep their date.
 **Order of work:**
 - The membership list's Step 4 close-out gate is the first task of Phase 7 here.
@@ -84,8 +84,8 @@ rules and extracts from that run.
 | 2. Single POM | Done; verified against the code | 7 of 7 | `04dddeb` |
 | 2A. Intentional errors labelled | Done: accepted 2026-10-08; the audit of child JVMs added 2026-10-09 | 9 of 9 | `24beac3` to `26a3570` |
 | 3. Package layout | Done; verified 2026-10-08. One task added by the review: the comparison of test names with the Phase 0 baseline | 10 of 11 | `9a4adf0` |
-| 3A. One word for each mode | Added and done 2026-10-09; verified the same day | 5 of 5 | not committed |
-| 4. Node model and API | Started 2026-10-09: the legacy node fixtures are written | 1 of 7 | not committed |
+| 3A. One word for each mode | Added and done 2026-10-09; verified the same day | 5 of 5 | `5a00975` |
+| 4. Node model and API | Done 2026-10-09, exit met; its four open points reviewed and settled the same day; three decisions wait for confirmation | 7 of 7 | not committed |
 | 5. Configuration and version | Not started | 0 of 6 | |
 | 6. Docker and observability | Not started | 0 of 10 | |
 | 7. Async layer | Not started | 0 of 6 | |
@@ -1083,18 +1083,120 @@ history, and descriptions of Consul's own software.
     one flagged, and no unflagged error or exception.
   - The seven tests passed at once, as tests of existing behaviour do. Their
     mutation evidence belongs to this phase's exit.
-- [ ] Replace `ClientInfo`, `ClientCapabilities`, `ClientSystemInfo`, and
+- [x] Replace `ClientInfo`, `ClientCapabilities`, `ClientSystemInfo`, and
   `ClientNetworkInfo` with a Consul-shaped node: name, address, datacenter,
   region, metadata, status, and server-stamped times. The client list
   (decision 8) adds the generated node ID. The Quorus fleet fields
   are removed: CPU, memory, disk, bandwidth, packet loss, NAT, connection
   type, and supported services.
-- [ ] Remove the `UpdateCapabilities` command. Reserve the removed protobuf
+- [x] Remove the `UpdateCapabilities` command. Reserve the removed protobuf
   numbers and messages, and add fixtures for old WAL entries and snapshots
   (decision 4).
-- [ ] Reduce node status to the states Qraft sets, and drop the job-system
+- [x] Reduce node status to the states Qraft sets, and drop the job-system
   status mapping if the fixtures allow.
-- [ ] Move node registration, heartbeat, deregistration, and listing from
+
+  The three items above were done together on 2026-10-09, because they are
+  one model.
+
+  **Decided 2026-10-09, by the user: a node has no host name and no port,
+  and the client's version travels in the node's metadata.** A Consul node
+  has a name and an address; a port belongs to a service. The version is the
+  metadata entry `qraft.version`, next to `qraft.registrationId`.
+
+  What changed:
+  - `Node` is an immutable record of eight fields: `name`, `address`,
+    `datacenter`, `region`, `metadata`, `status`, `registrationTime`, and
+    `lastHeartbeat`. Its metadata is never null, is kept in key order, and
+    cannot be changed. It replaces `ClientInfo`. `ClientCapabilities`,
+    `ClientSystemInfo`, `ClientNetworkInfo`, and their three test classes
+    are deleted.
+  - `NodeStatus` has the three statuses Qraft sets: `registering`,
+    `healthy`, and `unreachable`. It replaces `ClientStatus`. API input is
+    parsed strictly: a removed status is refused.
+  - `NodeCommand` and `NodeCodec` replace `ClientCommand` and `ClientCodec`.
+    The capabilities update is gone from both.
+  - `commands.proto`: in the node message, numbers 2, 4, 5, and 9 and the
+    names `client_id`, `hostname`, `port`, `capabilities`, and `version` are
+    reserved; in the node command, number 5 and the names `client_id`,
+    `client_info`, and `new_capabilities`. The messages for capabilities,
+    system information, and network information are deleted. The envelope
+    keeps field number 1 for a node command.
+  - `QraftStateStore` holds `nodes` and writes that key in a snapshot.
+
+  How the old formats still read (decision 4):
+  - **The job-system status mapping stays, for reading only.** The fixtures
+    did not allow dropping it: they hold `active`, `idle`, `degraded`,
+    `overloaded`, and `draining`. The six statuses that meant the node was in
+    contact read as `healthy`; `failed` and `deregistered` read as
+    `unreachable`. Their protobuf values stay in the enum, marked deprecated,
+    and nothing writes them.
+  - A WAL entry that holds the capabilities update decodes to nothing, and
+    the state store applies nothing for it. Its command type stays in the
+    enum, marked deprecated.
+  - A snapshot's nodes are read under `nodes`, `clients`, or the key from
+    before Phase 3A. A node's name is read under `name`, `clientId`, or the
+    key from before Phase 3A. The removed fields are ignored.
+
+  Left for later, on purpose:
+  - **The HTTP paths and bodies are unchanged here.** The node routes are
+    still `/api/v1/clients*`, the registration answers with `clientId`, and
+    the heartbeat body is keyed by `clientId`. The next item moves them. Two
+    things did change on the wire, because the node did: a registration is
+    a node's eight fields, and an entry of the node list has `name` where it
+    had `clientId`.
+  - **The `client.hostname` setting is still read and validated, and no
+    longer reaches the node.** It is a leftover. The client list's decision 8
+    renames `client.id` to `client.nodeName`, which defaults to the host
+    name; the setting goes then, in that list's Phase 2. **Removed on
+    2026-10-09 instead, on the user's decision:** see the review at the end
+    of this phase.
+  - A heartbeat could still carry a status, and the store sets whichever of
+    the three it carries. The next item decided it: the new heartbeat body
+    has no status.
+
+  **Red before green.** The fixture tests were first rewritten to expect the
+  new behaviour against the old code: three failed, as predicted, on the
+  removed status, the job system's statuses, and the capabilities update
+  (`logs/qraft-phase4-model-red-2026-10-09_16-55-11-358.log`).
+
+  **A test race found and fixed on the way.**
+  `HttpApiServerTest.fencedNodeFailsReadinessWhileLivenessRemainsAvailable`
+  failed once on an unflagged error, "Failed to persist command to WAL: Raft
+  transition sequencer is fenced"
+  (`logs/qraft-phase4-model-green-2026-10-09_17-09-55-160.log`).
+  - Cause: the test's storage fails every append after the bootstrap
+    configuration. The node's first such append is the leadership no-op of
+    its first term, and that failure fences the node. The test then
+    submitted a command of its own and took that command to be the fencing
+    event. When the command was queued before the fence, it failed with the
+    injected fault as its cause and was flagged. When it arrived after the
+    fence, 3 ms later in the failing run, it was refused with no cause, and
+    nothing flagged it.
+  - Production is consistent: in both orders the node is fenced and the
+    command fails. Only the test depended on the order.
+  - Fix: the test submits no command. It waits for the fence that the
+    no-op's failure causes. The run logs one flagged error and no other.
+  - Noted, not changed: a command refused by an already fenced node is
+    logged without the reason the node was fenced, because
+    `RaftTransitionSequencer` does not keep that reason. It is a question for
+    Phase 7, which touches `RaftNode`. **Decided 2026-10-09:** it is a task
+    of Phase 7 now.
+
+  Verified 2026-10-09.
+  - `mvn install` passed: 880 tests, every coverage gate met
+    (`logs/qraft-tests-2026-10-09_17-12-39-374.log`). The 880 are the 891
+    before, less the 25 tests of the five deleted model classes and the 5
+    of `ClientCodecTest`, plus `NodeTest` 8, `NodeStatusTest` 4, and
+    `NodeCodecTest` 7. No other class changed its count. Its Maven output
+    holds 128 flagged ERROR headers, and its 142 retained files hold no
+    unflagged error or exception.
+  - The Docker, end-to-end, and slow suites passed on a fresh image: 32
+    tests (`logs/qraft-tests-2026-10-09_17-14-59-263.log`). Its 79 retained
+    files, 64 of them Docker archives, hold 129 flagged ERROR headers and no
+    unflagged error or exception.
+  - The mutation evidence for the codec and the fixture guards belongs to
+    this phase's exit.
+- [x] Move node registration, heartbeat, deregistration, and listing from
   `/api/v1/clients*` to Consul-aligned `/v1/` routes with the standard error
   envelope and identity headers (for example `GET /v1/catalog/nodes`). Use the
   paths of the client list's decision 5, so the node routes move only once.
@@ -1107,13 +1209,281 @@ history, and descriptions of Consul's own software.
   its Phase 1 adds the services. A body designed here for a node alone would
   change there: the node routes would keep their paths and still change
   twice. Record the bodies in the design's section 12.1.
-- [ ] Remove `/api/v1/info`, `/status`, and bare `/health`. Compose
+
+  Done 2026-10-09. The four routes are `PUT /v1/catalog/register`,
+  `PUT /v1/catalog/deregister`, `PUT /v1/catalog/node/heartbeat`, and
+  `GET /v1/catalog/nodes`. The old four are removed in the same change. The
+  design's new section 12.1.2 records the bodies, the answers, and the error
+  codes.
+
+  **Decisions made here, on the standing instruction to follow Consul. Each
+  is for the user to confirm or change; nothing is deployed.**
+  - **The identity header names the node.** `X-Qraft-Node` is required on
+    the three writes, as it is for a service. A body never names the node.
+  - **One registration body for nodes and services:** the node's
+    description under the key `node`. The client list's Phase 1 adds a
+    service beside it under the key `service`, so a node sends the same body
+    then. Until then `node` is required and `service` is refused.
+  - **Deregistration follows Consul's rule:** a body that names no service
+    removes the node itself, so a node sends `{}`. A service will be removed
+    with `{"serviceId": "..."}`; until then any field is refused. When that
+    field arrives it must hold a non-blank string, so that a missing value
+    cannot remove the node instead.
+  - **A heartbeat carries no status and no time.** Its body is an optional
+    `sequenceNumber` and an optional `registrationId`. It makes the node
+    healthy, and the server's clock gives the time. With three statuses, a
+    client had nothing else to report.
+  - **Unknown fields are refused** on all three writes, as on the service
+    routes. A registration cannot carry a name, a status, or a time.
+  - **Every answer is JSON.** A write answers 200 with the node's name and
+    `registered`, `accepted`, or `deregistered`. Deregistration is
+    idempotent: an absent node answers 200 with `deregistered: false`, where
+    the old route answered 404. The key is `node`, not `nodeId`, because the
+    client list gives a node a generated ID.
+  - **The client accepts a success only when the answer names the node and
+    carries the outcome.** Before, any 2xx status registered the node, so an
+    answer from some other HTTP service would have. A malformed success is
+    now the retryable `invalid_response`, as it is for a service.
+  - **The node list writes each time as an ISO-8601 instant**, like the
+    other answers. The old list wrote the mapper's default, a number of
+    seconds. The list has its own answer type, `NodeEntry`.
+  - **A node route takes no path parameter.** A longer path answers 404
+    `not_found`.
+  - The error codes are `invalid_registration`, `invalid_deregistration`,
+    `invalid_heartbeat`, `node_not_found`, and `stale_heartbeat`. They
+    replace `invalid_client`, `client_id_required`, and `client_not_found`.
+
+  Not changed, and noted for the client list's Phase 1:
+  - **Deregistering a node removes the node's entry only.** Consul removes
+    the node's services and checks with it. A Qraft client deregisters its
+    services first, and expiry reaps what a crashed client leaves. Whether
+    the command should remove them is to decide when services share the
+    path. **Changed on 2026-10-09, on the user's decision:** see the review
+    at the end of this phase.
+  - The service and check writes are still at `/v1/client/*`.
+
+  What changed in the code:
+  - `HttpApiServer` serves the four routes. `CatalogRegistrationRequest`,
+    `NodeHeartbeatRequest`, and `NodeEntry` are new.
+  - `HttpCatalogClient` has `registerNode`, `heartbeatNode`, and
+    `deregisterNode`, and refuses to register a node of another name than
+    the one it speaks for. `RegistrationClient` and `HeartbeatService` lost
+    the parameters that only repeated the node's name.
+  - `NodeAnswerHelper` answers the node routes for the tests that stand a
+    plain HTTP server in for a Qraft server.
+
+  **Red before green.**
+  - The server tests were rewritten first. Ten of `HttpApiServerTest`'s 41
+    failed, as predicted: nine on the absent routes and one on the old ones
+    still being there
+    (`logs/qraft-phase4-routes-red-2026-10-09_17-28-17-601.log`).
+  - The time format had its own red run: one failure, a number where an
+    instant was expected
+    (`logs/qraft-phase4-node-times-red-2026-10-09_17-48-20-704.log`).
+  - One expectation of mine was wrong and was corrected, not the code. A
+    path that only begins with a route's name, such as
+    `/v1/catalog/registers`, reaches no route: the JDK's HTTP server matches
+    a context by whole path segments and answers that 404 itself
+    (`logs/qraft-tests-2026-10-09_17-33-28-726.log`).
+
+  **A second test race found and fixed on the way.**
+  `DockerRunningPartitionTest.aPartitionedFollowerCampaignsButNeverLeadsWhileTheMajorityServes`
+  timed out once, after 60 s (`logs/qraft-tests-2026-10-09_17-37-40-723.log`).
+  - Cause, from the three containers' archived logs: the test cut the
+    follower off less than a second after the first election. The follower
+    was ready, because it knew its leader, and did not yet hold the
+    cluster's configuration. A server without a configuration does not
+    campaign, so its term never rose. It logged "Cluster bootstrap: WAITING"
+    for the whole partition and established its configuration only after
+    the network was restored.
+  - Production is consistent. A server that does not know the membership
+    cannot campaign, and an entry that no follower holds was never
+    committed. No data and no committed state is at risk.
+  - Fix: before it cuts a server off, the test waits until every server
+    lists all three in `GET /v1/operator/raft/configuration`. The class ran
+    in 21 s afterwards.
+  - Noted, not changed: `/health/ready` answers 200 for a server that knows
+    a leader and holds no configuration yet. Whether such a server is ready
+    is a question for the membership list. **This note understated the
+    problem, which was fixed on 2026-10-09:** see the review at the end of
+    this phase.
+
+  Verified 2026-10-09.
+  - `mvn install` passed: 884 tests, every coverage gate met
+    (`logs/qraft-tests-2026-10-09_17-48-58-794.log`). The 884 are the 880
+    before, plus two in `HttpApiServerTest` and two in
+    `RegistrationClientTest`. Its Maven output holds 130 flagged ERROR
+    headers, and its 150 retained files hold no unflagged error or
+    exception.
+  - The Docker, end-to-end, and slow suites passed on a fresh image: 32
+    tests (`logs/qraft-tests-2026-10-09_17-50-49-051.log`). Its 79 retained
+    files, 64 of them Docker archives, hold 84 flagged ERROR headers and no
+    unflagged error or exception.
+  - A word search of `src/` finds the old paths only in
+    `HttpApiServerTest.theRemovedNodeRoutesAreGone`, which asserts that they
+    answer 404.
+
+  Still naming the old node routes, each under its own later item:
+  - `docker/test-data`, `docker/scripts`, `start-quick.*`, and a Grafana
+    panel: Phase 6.
+  - the administrative interface's plan and task list: Phase 8.
+- [x] Remove `/api/v1/info`, `/status`, and bare `/health`. Compose
   healthchecks and the documentation use `/health/live` or `/health/ready`.
-- [ ] Delete the old client DTO tests. Add node codec, replica-determinism, and
+
+  Done 2026-10-09.
+  - The server no longer serves the three routes. `/health/live` and
+    `/health/ready` each have their own handler; the two helpers that
+    registered routes by a status and a body are gone with their last users.
+  - **Bare `/health` is removed in client mode too.** The client's health
+    listener served it as a second name for readiness. One jar has one set of
+    names. Decided here; say if the client should keep it.
+  - **A server's health check is now liveness, and the client's is
+    readiness.** A server's bare path always answered 200, so the 29 server
+    health checks of the nine compose files use `/health/live`, as do the
+    nine Testcontainers wait strategies. The client's bare path answered its
+    readiness, so the one client health check uses `/health/ready`.
+    A server's check must stay liveness: a server is unready until its
+    cluster has a leader, so a readiness check would mark every server of a
+    starting cluster unhealthy and hold back whatever waits on
+    `service_healthy`.
+  - `DockerRaftClusterTest.everyServerReportsPassingHealth` is now
+    `everyServerReportsThatItIsAlive`.
+  - `AdminUiConfig` still reserves the segments `api` and `status`. Nothing
+    is served under them now. They stay reserved so that the interface cannot
+    be mounted where an API used to answer; the interface's plan and list are
+    updated in Phase 8.
+
+  **Red before green.** The two tests were changed first and failed as
+  predicted, one in each mode, on bare `/health` answering 200 and 503
+  (`logs/qraft-phase4-remove-routes-red-2026-10-09_17-59-09-874.log`).
+
+  Verified 2026-10-09.
+  - `mvn install` passed: 884 tests, every coverage gate met
+    (`logs/qraft-tests-2026-10-09_18-00-16-690.log`). Its Maven output holds
+    129 flagged ERROR headers, and its 149 retained files hold no unflagged
+    error or exception.
+  - The Docker, end-to-end, and slow suites passed on a fresh image, started
+    by the new health checks: 32 tests
+    (`logs/qraft-tests-2026-10-09_18-02-02-077.log`). Its 79 retained files,
+    64 of them Docker archives, hold 105 flagged ERROR headers and no
+    unflagged error or exception.
+- [x] Delete the old client DTO tests. Add node codec, replica-determinism, and
   legacy-fixture tests.
+
+  Done 2026-10-09, with the model.
+  - Deleted: `ClientCapabilitiesTest`, `ClientSystemInfoTest`,
+    `ClientNetworkInfoTest`, `ClientInfoTest`, `ClientStatusTest`, and
+    `ClientCodecTest`, 30 tests.
+  - Node codec: `NodeCodecTest`, 7 tests, with `NodeTest`, 8, and
+    `NodeStatusTest`, 4, for the JSON side.
+  - Replica determinism: `ReplicaDeterminismTest`, 9 tests, rewritten for an
+    immutable node.
+  - Legacy fixtures: `LegacyNodeFixtureTest`, 7 tests, and
+    `LegacyCatalogFixtureTest`, 3.
 
 **Exit:** Red before green with mutations for the codec and fixture guards;
 full suites.
+
+**Exit met 2026-10-09.**
+- Red before green: four red runs, each failing exactly as predicted. They
+  are cited under the items above: the model (3 failures), the routes (10),
+  the time format (1), and the removed routes (2).
+- Mutations: 15 mutants of the node codec, the node's JSON reading, the
+  snapshot reading, the stored status, and one fixture's bytes. **All 15
+  were killed, each by the tests named beforehand**
+  (`logs/qraft-phase4-mutants-2026-10-09_18-08-47-532.log`).
+  - They ran one at a time in an isolated copy, never in the working tree.
+    The copy passed before the first mutant and after the last: 42 tests.
+  - Eight are in the codec: a removed status decoded the wrong way, in each
+    direction; the capabilities update refused instead of skipped; an absent
+    address and an absent time decoded as values; the metadata, a
+    heartbeat's registration identifier, and an expiry's reap flag dropped.
+  - Six are in the reading of stored JSON: each of the two older names of a
+    node's name and of a snapshot's nodes no longer read; an unknown field
+    refused; a removed status refused.
+  - One changes a single byte of a fixture, which the digest guard caught.
+  - The fixtures alone kill 11 of the 15. Two need `NodeCodecTest`, because
+    no fixture holds `failed` or `deregistered`, the two statuses Qraft never
+    wrote; one needs `NodeTest`; one needs the round-trip tests.
+- Full suites: the last runs of the phase are `mvn install`, 884 tests with
+  every coverage gate met, and the Docker, end-to-end, and slow suites, 32
+  tests on a fresh image. Both are cited under the route removals above, with
+  their log audits: no unflagged error or exception in either.
+
+**Decisions made in this phase that wait for the user's confirmation.** Each
+is recorded where it was made; nothing is deployed, so each can still change.
+1. The bodies and answers of the node routes: design section 12.1.2.
+2. A heartbeat carries no status.
+3. Bare `/health` is removed in client mode too.
+
+**The phase's four open points, reviewed with the user on 2026-10-09.** I
+re-read the code behind each before the review. Two were worse than the
+notes above said, and the red run below showed both.
+
+1. **A node's deregistration removes its services and checks. Decided: yes,
+   now.**
+   - Before, it removed the node's entry only. The notes above said that the
+     client covers this by deregistering its services first. It did not
+     fully: at shutdown the client deregisters the node even when a service
+     deregistration failed. The node was then gone, its services stayed, and
+     nothing reaped them, because expiry works from node entries.
+   - Now `NodeCommand.Deregister` removes every service registered on the
+     node, in every tenant and namespace, with its checks, in the same
+     replicated step. It uses the removal that reaping already did.
+   - It does so when the node has no entry too, so that services left under
+     a node's name can be removed. The result still says whether a node
+     entry existed.
+   - An old log that holds a deregistration replays with the new meaning.
+     Nothing is deployed, so no log exists that this could change.
+2. **A server that does not campaign forgets a silent leader. Decided: yes,
+   now.**
+   - Before, only a campaign made a server forget its leader. A server that
+     holds no configuration yet, or that has joined and is not yet a voter,
+     does not campaign. Cut off from its leader, it kept reporting that
+     leader, so `/health/ready` kept answering 200. The design's section 6.1
+     says such a server is unready.
+   - Now, when the election timer fires and the server does not campaign, it
+     forgets the leader and reports `no_leader`. The next message from a
+     leader makes the leader known again. It logs the loss once, at INFO.
+   - Not added: a readiness condition for a server without a configuration.
+     Such a server in contact with its leader is ready, as a follower that
+     is behind is.
+   - This change to `RaftNode` comes before the membership list's Step 4
+     gate. That gate's mutation evidence is taken against the source that
+     includes it.
+3. **A fenced server says once why it is fenced. Decided: yes, in Phase 7.**
+   It is a task there now. The refusals stay as they are.
+4. **The `client.hostname` setting is removed. Decided: now.**
+   - Nothing used its value since the node lost its host name. The planned
+     `client.nodeName` defaults to the machine's host name, not to a setting.
+   - A configuration file that still sets it is refused: "Unknown client
+     setting: hostname". The three Docker configuration files and the
+     generated ones of two tests no longer set it.
+
+**Red before green.** Five new assertions failed before any production
+change, as predicted, in four classes: two on the services a deregistered
+node left, in the state store and over HTTP; one more on services under a
+name without a node entry; one on the leader still being known; one on the
+setting being accepted
+(`logs/qraft-decisions-red-2026-10-09_18-28-25-003.log`).
+
+Verified 2026-10-09.
+- `mvn install` passed: 888 tests, every coverage gate met
+  (`logs/qraft-tests-2026-10-09_18-30-09-463.log`). The 888 are the 884
+  before, plus two in `NodeMembershipExpiryStateStoreTest`, one in
+  `HttpApiServerTest`, and one in `RaftNodeServerIdCountingTest`. Its Maven
+  output holds 128 flagged ERROR headers, and its 149 retained files hold no
+  unflagged error or exception.
+- The Docker, end-to-end, and slow suites passed on a fresh image, with the
+  changed client configuration files: 32 tests
+  (`logs/qraft-tests-2026-10-09_18-32-00-701.log`). Its 79 retained files,
+  64 of them Docker archives, hold 105 flagged ERROR headers and no unflagged
+  error or exception.
+- A word search of `src/` and `docker/config` finds `hostname` as a setting
+  only in the test that asserts it is refused. The legacy fixtures and the
+  test of JSON written by earlier versions keep the old field, as they must.
+- No mutation run was made for these three changes. The red run is the
+  evidence that each test detects its change being absent.
 
 ### Phase 5. Configuration and version
 
@@ -1194,6 +1564,17 @@ start command work.
   They include every hand-written transport and Raft fixture. Decide then
   whether this phase moves to its own list, as decision 5 allows.
 - [ ] Run the changed concurrency tests five times consecutively.
+- [ ] Have a fenced server say once why it is fenced (decided 2026-10-09, in
+  the review of Phase 4's open points).
+  - Today nothing announces a fence. The failing operation logs its own
+    error, `RaftTransitionSequencer` logs nothing and does not keep the
+    cause, later refusals say only "is fenced", and `/raft/status` shows
+    `fenced: true` with no reason.
+  - Log one error that names the cause when the node becomes fenced, and add
+    the reason to `/raft/status`.
+  - Leave the refusals as they are. Attaching the cause to each one would
+    repeat the stack trace on every refused write and heartbeat, and would
+    change how six test classes' declared errors are labelled.
 
 **Exit:** Full suites on a fresh image; no wrapper future types remain;
 `PROJECT_STANDARDS.md` section 2.1 audit passes.

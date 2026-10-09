@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.common;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
@@ -27,165 +27,121 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNotSame;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * Tests {@link ClientInfo}: a new client's defaults, its endpoint, identity by client ID alone, the copy the state
- * store takes before changing a client, metadata handling, the fields {@code toString} names, and a JSON round
- * trip of every field.
+ * Tests {@link Node}: what a client describes and what the servers record, its metadata, its JSON, and that
+ * JSON written by earlier versions still reads with the removed fields ignored.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
- * @since 2026-03-15
- * @version 2.0
+ * @since 2026-10-09
+ * @version 1.0
  */
-class ClientInfoTest {
-    private static final Instant REGISTERED = Instant.parse("2026-01-01T00:00:00Z");
-    private static final Instant HEARTBEAT = Instant.parse("2026-01-01T00:00:05Z");
+class NodeTest {
+    private static final ObjectMapper JSON = new ObjectMapper().findAndRegisterModules();
+    private static final Instant REGISTERED = Instant.parse("2026-10-09T08:00:00Z");
+    private static final Instant CONTACTED = Instant.parse("2026-10-09T08:00:30Z");
 
     @Test
-    void aNewClientIsRegisteringWithEmptyMetadataAndItsCreationTime() {
-        Instant before = Instant.now();
-        ClientInfo client = new ClientInfo("client-001", "host1.example.com", "192.168.1.100", 8080);
-        Instant after = Instant.now();
+    void aNodeAsAClientDescribesItHasNoStatusAndNoTimes() {
+        Node node = Node.of("web-01", "10.0.0.5", "dc-1", "eu-west", Map.of("rack", "r7"));
 
-        assertEquals(ClientStatus.REGISTERING, client.getStatus());
-        assertTrue(client.getMetadata().isEmpty());
-        assertFalse(client.getRegistrationTime().isBefore(before), "registered no earlier than its creation");
-        assertFalse(client.getRegistrationTime().isAfter(after), "registered no later than its creation");
-        assertEquals("client-001", client.getClientId());
-        assertEquals("host1.example.com", client.getHostname());
-        assertEquals("192.168.1.100", client.getAddress());
-        assertEquals(8080, client.getPort());
-    }
-
-    @Test
-    void theEndpointIsAnHttpUrlOfTheAddressAndPort() {
-        assertEquals("http://192.168.1.100:8080",
-                new ClientInfo("client-001", "host1", "192.168.1.100", 8080).getEndpoint());
+        assertEquals("web-01", node.name());
+        assertEquals("10.0.0.5", node.address());
+        assertEquals("dc-1", node.datacenter());
+        assertEquals("eu-west", node.region());
+        assertEquals(Map.of("rack", "r7"), node.metadata());
+        assertNull(node.status());
+        assertNull(node.registrationTime());
+        assertNull(node.lastHeartbeat());
     }
 
     @Test
-    void clientsAreEqualExactlyWhenTheirIdsAre() {
-        ClientInfo client = new ClientInfo("client-001", "host1", "192.168.1.1", 8080);
-        ClientInfo sameIdElsewhere = new ClientInfo("client-001", "host2", "192.168.1.2", 9090);
-        sameIdElsewhere.setStatus(ClientStatus.FAILED);
-        ClientInfo otherIdSameHost = new ClientInfo("client-002", "host1", "192.168.1.1", 8080);
+    void metadataIsNeverNullIsInKeyOrderAndCannotBeChanged() {
+        assertEquals(Map.of(), Node.of("web-01", null, null, null, null).metadata());
 
-        assertEquals(client, sameIdElsewhere, "only the ID identifies a client");
-        assertEquals(client.hashCode(), sameIdElsewhere.hashCode());
-        assertNotEquals(client, otherIdSameHost);
-        assertNotEquals(client, null);
-        assertNotEquals(client, "client-001");
+        Map<String, String> given = new HashMap<>(Map.of("zone", "b", "rack", "r7"));
+        Node node = Node.of("web-01", null, null, null, given);
+        given.put("later", "ignored");
+
+        assertEquals(List.of("rack", "zone"), List.copyOf(node.metadata().keySet()),
+                "a later change to the caller's map does not reach the node, and the keys are in order");
+        assertThrows(UnsupportedOperationException.class, () -> node.metadata().put("k", "v"));
     }
 
     @Test
-    void aCopyHasEveryFieldAndItsOwnMetadata() {
-        ClientInfo source = fullyPopulated();
+    void addingMetadataLeavesTheOriginalNodeAsItWas() {
+        Node node = Node.of("web-01", "10.0.0.5", "dc-1", "eu-west", Map.of("rack", "r7"));
 
-        ClientInfo copy = ClientInfo.copyOf(source);
+        Node changed = node.withMetadata(Node.VERSION_METADATA_KEY, "1.0.0");
 
-        assertNotSame(source, copy);
-        assertFullyPopulated(copy);
-        assertSame(source.getCapabilities(), copy.getCapabilities());
-        copy.addMetadata("changed", "in-copy");
-        source.addMetadata("changed-too", "in-source");
-        assertEquals(Map.of("tier", "premium", "changed-too", "in-source"), source.getMetadata(),
-                "changing the copy's metadata leaves the source alone");
-        assertEquals(Map.of("tier", "premium", "changed", "in-copy"), copy.getMetadata(),
-                "changing the source's metadata leaves the copy alone");
+        assertEquals(Map.of("rack", "r7"), node.metadata());
+        assertEquals(Map.of("rack", "r7", "qraft.version", "1.0.0"), changed.metadata());
+        assertEquals(node.name(), changed.name());
+        assertEquals(node.address(), changed.address());
     }
 
     @Test
-    void metadataAccumulatesByKeyAndIsNeverNull() {
-        ClientInfo client = new ClientInfo();
+    void aRegistrationIsRecordedAsRegisteringAtItsTimeWithNoHeartbeat() {
+        Node claimed = new Node("web-01", "10.0.0.5", "dc-1", "eu-west", Map.of(),
+                NodeStatus.HEALTHY, CONTACTED, CONTACTED);
 
-        client.addMetadata("environment", "production");
-        client.addMetadata("tier", "premium");
-        client.addMetadata("tier", "standard");
-        assertEquals(Map.of("environment", "production", "tier", "standard"), client.getMetadata());
+        Node recorded = claimed.registeredAt(REGISTERED);
 
-        client.setMetadata(null);
-        assertTrue(client.getMetadata().isEmpty(), "clearing metadata leaves an empty map");
-        client.addMetadata("after", "clearing");
-        assertEquals(Map.of("after", "clearing"), client.getMetadata());
+        assertEquals(NodeStatus.REGISTERING, recorded.status(), "a registration cannot claim a status");
+        assertEquals(REGISTERED, recorded.registrationTime(), "a registration cannot claim its time");
+        assertNull(recorded.lastHeartbeat(), "a registration cannot claim a heartbeat");
+        assertEquals("10.0.0.5", recorded.address());
     }
 
     @Test
-    void toStringNamesTheIdentifyingFieldsWithTheirValues() {
-        String text = fullyPopulated().toString();
+    void theLastContactIsTheLastHeartbeatOrElseTheRegistrationTime() {
+        Node registered = Node.of("web-01", null, null, null, null).registeredAt(REGISTERED);
 
-        for (String expected : List.of("clientId='client-001'", "hostname='host1'", "address='192.168.1.1'",
-                "port=8080", "status=" + ClientStatus.HEALTHY, "version='1.2.3'", "region='us-west-2'", "datacenter='dc1'")) {
-            assertTrue(text.contains(expected), expected + " in " + text);
-        }
+        assertEquals(REGISTERED, registered.lastContact());
+        assertEquals(CONTACTED, registered.withLastHeartbeat(CONTACTED).lastContact());
+        assertEquals(NodeStatus.HEALTHY, registered.withStatus(NodeStatus.HEALTHY).status());
     }
 
     @Test
-    void aJsonRoundTripKeepsEveryField() throws Exception {
-        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules()
-                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-        ClientInfo source = fullyPopulated();
+    void nodesAreEqualExactlyWhenEveryFieldIs() {
+        Node node = Node.of("web-01", "10.0.0.5", "dc-1", "eu-west", Map.of("rack", "r7"));
 
-        ClientInfo read = mapper.readValue(mapper.writeValueAsString(source), ClientInfo.class);
-
-        assertFullyPopulated(read);
-        assertEquals(Set.of("transfer"), read.getCapabilities().getSupportedServices());
+        assertEquals(node, Node.of("web-01", "10.0.0.5", "dc-1", "eu-west", Map.of("rack", "r7")));
+        assertNotEquals(node, Node.of("web-01", "10.0.0.6", "dc-1", "eu-west", Map.of("rack", "r7")));
+        assertNotEquals(node, node.withStatus(NodeStatus.HEALTHY));
     }
 
     @Test
-    void onlyAHealthyNodeIsHealthy() {
-        ClientInfo clientInfo = new ClientInfo();
+    void jsonHoldsExactlyTheEightFieldsOfANodeAndReadsBack() throws Exception {
+        Node node = new Node("web-01", "10.0.0.5", "dc-1", "eu-west", Map.of("rack", "r7"),
+                NodeStatus.HEALTHY, REGISTERED, CONTACTED);
 
-        clientInfo.setStatus(ClientStatus.HEALTHY);
-        assertTrue(clientInfo.isHealthy());
+        JsonNode json = JSON.readTree(JSON.writeValueAsString(node));
+        Set<String> fields = new java.util.TreeSet<>();
+        json.fieldNames().forEachRemaining(fields::add);
 
-        for (ClientStatus status : List.of(ClientStatus.DEGRADED, ClientStatus.MAINTENANCE,
-                ClientStatus.UNREACHABLE, ClientStatus.FAILED)) {
-            clientInfo.setStatus(status);
-            assertFalse(clientInfo.isHealthy(), status.toString());
-        }
+        assertEquals(Set.of("name", "address", "datacenter", "region", "metadata", "status",
+                "registrationTime", "lastHeartbeat"), fields);
+        assertEquals("healthy", json.get("status").asText());
+        assertEquals(node, JSON.readValue(JSON.writeValueAsString(node), Node.class));
     }
 
     @Test
-    void aClientHasNoWorkAvailabilityProperty() throws Exception {
-        String json = new ObjectMapper().findAndRegisterModules()
-                .writeValueAsString(new ClientInfo("client-1", "host", "10.0.0.1", 8080));
+    void jsonWrittenByEarlierVersionsReadsWithItsRemovedFieldsIgnored() throws Exception {
+        String stored = """
+                {"healthy":true,"endpoint":"http://192.0.2.10:8500","%s":"node-legacy","hostname":"legacy-host",
+                 "address":"192.0.2.10","port":8500,"capabilities":{"supportedServices":["http"]},"status":"active",
+                 "registrationTime":1790064000.000000000,"lastHeartbeat":null,"version":"2.9.0",
+                 "region":"eu-west","datacenter":"dc-legacy","metadata":{"rack":"r1"}}
+                """;
+        Node expected = new Node("node-legacy", "192.0.2.10", "dc-legacy", "eu-west", Map.of("rack", "r1"),
+                NodeStatus.HEALTHY, Instant.ofEpochSecond(1_790_064_000L), null);
 
-        assertFalse(json.contains("\"available\""), "the job system's availability for work is gone: " + json);
-    }
-
-    /** A client with every field set to a value that differs from its default. */
-    private static ClientInfo fullyPopulated() {
-        ClientCapabilities capabilities = new ClientCapabilities();
-        capabilities.setSupportedServices(Set.of("transfer"));
-        ClientInfo client = new ClientInfo("client-001", "host1", "192.168.1.1", 8080);
-        client.setCapabilities(capabilities);
-        client.setStatus(ClientStatus.HEALTHY);
-        client.setRegistrationTime(REGISTERED);
-        client.setLastHeartbeat(HEARTBEAT);
-        client.setVersion("1.2.3");
-        client.setRegion("us-west-2");
-        client.setDatacenter("dc1");
-        client.setMetadata(new HashMap<>(Map.of("tier", "premium")));
-        return client;
-    }
-
-    /** Checks each field against the literal {@link #fullyPopulated()} sets, so a setter that drops its value fails. */
-    private static void assertFullyPopulated(ClientInfo actual) {
-        assertEquals("client-001", actual.getClientId());
-        assertEquals("host1", actual.getHostname());
-        assertEquals("192.168.1.1", actual.getAddress());
-        assertEquals(8080, actual.getPort());
-        assertEquals(ClientStatus.HEALTHY, actual.getStatus());
-        assertEquals(REGISTERED, actual.getRegistrationTime());
-        assertEquals(HEARTBEAT, actual.getLastHeartbeat());
-        assertEquals("1.2.3", actual.getVersion());
-        assertEquals("us-west-2", actual.getRegion());
-        assertEquals("dc1", actual.getDatacenter());
-        assertEquals(Map.of("tier", "premium"), actual.getMetadata());
+        // The node's name under each of the two names it had before.
+        assertEquals(expected, JSON.readValue(stored.formatted("clientId"), Node.class));
+        assertEquals(expected, JSON.readValue(stored.formatted("agentId"), Node.class));
     }
 }

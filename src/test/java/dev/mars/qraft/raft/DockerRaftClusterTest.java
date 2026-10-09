@@ -72,7 +72,7 @@ public class DockerRaftClusterTest {
     void setUp(TestInfo testInfo) {
         logger.info("Starting test: " + testInfo.getDisplayName());
         nodeEndpoints = SharedDockerClusterFixture.getNodeEndpoints(environment, 3);
-        // Testcontainers already verified /health returns 200 for all nodes
+        // Testcontainers already verified /health/live returns 200 for all nodes
         logger.info("All nodes are healthy and ready for testing");
     }
 
@@ -82,7 +82,7 @@ public class DockerRaftClusterTest {
     }
 
     @Test
-    void everyServerReportsPassingHealth() {
+    void everyServerReportsThatItIsAlive() {
         // Verify all nodes are running and healthy
         for (int i = 0; i < nodeEndpoints.size(); i++) {
             final int nodeIndex = i;
@@ -90,7 +90,7 @@ public class DockerRaftClusterTest {
 
             assertDoesNotThrow(() -> {
                 HttpRequest request = HttpRequest.newBuilder()
-                        .uri(URI.create(endpoint + "/health"))
+                        .uri(URI.create(endpoint + "/health/live"))
                         .timeout(Duration.ofSeconds(5))
                         .build();
 
@@ -98,7 +98,7 @@ public class DockerRaftClusterTest {
                 assertEquals(200, response.statusCode());
 
                 JsonNode healthData = objectMapper.readTree(response.body());
-                assertEquals("passing", healthData.get("status").asText());
+                assertEquals("alive", healthData.get("status").asText());
 
                 logger.info("Node " + (nodeIndex + 1) + " health check passed");
             });

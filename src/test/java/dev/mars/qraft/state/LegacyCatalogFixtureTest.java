@@ -17,7 +17,8 @@
 package dev.mars.qraft.state;
 
 import dev.mars.qraft.state.catalog.ServiceKey;
-import dev.mars.qraft.common.ClientStatus;
+import dev.mars.qraft.common.Node;
+import dev.mars.qraft.common.NodeStatus;
 import dev.mars.qraft.state.catalog.ServiceHealth;
 import dev.mars.qraft.state.catalog.ServiceInstance;
 import org.junit.jupiter.api.Test;
@@ -25,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.MessageDigest;
+import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -89,16 +91,11 @@ class LegacyCatalogFixtureTest {
                         List.of("green"), Map.of("zone", "b"), ServiceHealth.WARNING)),
                 store.getServiceCatalog().instances(ServiceKey.inDefaultScope("web")));
 
-        var client = store.findClient("agent-legacy").orElseThrow();
-        assertEquals("legacy-host", client.getHostname());
-        assertEquals("192.0.2.10", client.getAddress());
-        assertEquals(8500, client.getPort());
-        assertEquals(ClientStatus.HEALTHY, client.getStatus(),
-                "a snapshot written with the job system's active status restores as healthy");
-        assertEquals("2.9.0", client.getVersion());
-        assertEquals("eu-west", client.getRegion());
-        assertEquals("dc-legacy", client.getDatacenter());
-        assertEquals(Map.of("rack", "r1"), client.getMetadata());
+        assertEquals(new Node("agent-legacy", "192.0.2.10", "dc-legacy", "eu-west", Map.of("rack", "r1"),
+                        NodeStatus.HEALTHY, Instant.ofEpochSecond(1_790_064_000L), null),
+                store.findNode("agent-legacy").orElseThrow(),
+                "the job system's active status restores as healthy, and the host name, the port, the version,"
+                        + " and the capabilities of the snapshot are ignored");
 
         byte[] migrated = store.takeSnapshot();
         assertArrayEquals(migrated, store.takeSnapshot(),

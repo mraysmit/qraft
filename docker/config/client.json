@@ -2,7 +2,6 @@
   "version": 1,
   "client": {
     "id": "client-example",
-    "hostname": "client-example",
     "address": "client-example",
     "httpPort": 8080,
     "heartbeatIntervalMs": 5000,

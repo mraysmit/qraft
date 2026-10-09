@@ -151,6 +151,10 @@ class DockerRunningPartitionTest {
 
     private static int awaitSingleLeader() {
         await().atMost(Duration.ofSeconds(90)).until(() -> endpoints.stream().allMatch(DockerRunningPartitionTest::ready));
+        // A server is ready once it knows its leader, which can be before it holds the cluster's configuration.
+        // Only a server that holds the configuration campaigns when it is cut off, so wait for it everywhere.
+        await().atMost(Duration.ofSeconds(60))
+                .until(() -> endpoints.stream().allMatch(DockerRunningPartitionTest::configured));
         await().atMost(Duration.ofSeconds(60)).until(() -> leaders(endpoints) == 1);
         for (int index = 0; index < endpoints.size(); index++) {
             if (isLeader(endpoints.get(index))) return index;
@@ -188,6 +192,17 @@ class DockerRunningPartitionTest {
     private static boolean ready(String endpoint) {
         try {
             return get(endpoint + "/health/ready").statusCode() == 200;
+        } catch (Exception unreachable) {
+            return false;
+        }
+    }
+
+    /** True when the server at {@code endpoint} holds a configuration that names every server of the cluster. */
+    private static boolean configured(String endpoint) {
+        try {
+            HttpResponse<String> response = get(endpoint + "/v1/operator/raft/configuration");
+            return response.statusCode() == 200
+                    && JSON.readTree(response.body()).path("servers").size() == endpoints.size();
         } catch (Exception unreachable) {
             return false;
         }

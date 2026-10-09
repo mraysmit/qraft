@@ -6,9 +6,9 @@
 #
 # Access Points:
 #   - Grafana:       http://localhost:3000 (admin/admin)
-#   - Server 1:  http://localhost:8081/health
-#   - Server 2:  http://localhost:8082/health
-#   - Server 3:  http://localhost:8083/health
+#   - Server 1:  http://localhost:8081/health/ready
+#   - Server 2:  http://localhost:8082/health/ready
+#   - Server 3:  http://localhost:8083/health/ready
 #   - Prometheus:    http://localhost:9090
 
 services:
@@ -158,7 +158,7 @@ services:
       otel-collector:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -188,7 +188,7 @@ services:
       server1:
         condition: service_started
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -220,7 +220,7 @@ services:
       server2:
         condition: service_started
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
       interval: 10s
       timeout: 5s
       retries: 5

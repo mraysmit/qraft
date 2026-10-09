@@ -38,9 +38,8 @@ import dev.mars.qraft.server.ui.AdminUiConfig;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.raft.RaftCommand;
 import dev.mars.qraft.raft.RaftCommandResult;
-import dev.mars.qraft.state.DistributedStateRaftCommand;
-import dev.mars.qraft.common.ClientStatus;
-import dev.mars.qraft.state.distributed.DistributedStateCommand;
+import dev.mars.qraft.common.Node;
+import dev.mars.qraft.common.NodeStatus;
 import dev.mars.qraft.testing.fault.InjectedFaultFixture;
 import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import dev.mars.raftlog.storage.RaftStorage;
@@ -59,6 +58,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -102,31 +102,32 @@ class HttpApiServerTest {
     }
 
     @Test
-    void exposesHealthStatusAndInfoEndpoints() throws Exception {
+    void exposesLivenessAndReadinessAndNoOtherStatusRoute() throws Exception {
         server = new HttpApiServer(0);
         server.start().join();
         HttpClient client = HttpClient.newHttpClient();
 
         HttpResponse<String> live = request(client, "/health/live", "GET");
         HttpResponse<String> ready = request(client, "/health/ready", "GET");
-        HttpResponse<String> status = request(client, "/status", "GET");
-        HttpResponse<String> info = request(client, "/api/v1/info", "GET");
 
         assertEquals(200, live.statusCode());
         assertEquals(200, ready.statusCode());
-        assertEquals(200, status.statusCode());
-        assertEquals(200, info.statusCode());
         assertTrue(live.body().contains("alive"));
-        assertTrue(info.body().contains("version"));
+        assertTrue(ready.body().contains("ready"));
+        for (String removed : List.of("/health", "/status", "/api/v1/info")) {
+            assertEquals(404, request(client, removed, "GET").statusCode(), removed + " is removed");
+        }
     }
 
     @Test
     void rejectsUnsupportedMethods() throws Exception {
         server = new HttpApiServer(0);
         server.start().join();
-        HttpResponse<String> response = request(HttpClient.newHttpClient(), "/health/live", "POST");
-        assertEquals(405, response.statusCode());
-        assertErrorEnvelope(response, "method_not_allowed", false);
+        for (String path : List.of("/health/live", "/health/ready")) {
+            HttpResponse<String> response = request(HttpClient.newHttpClient(), path, "POST");
+            assertEquals(405, response.statusCode(), path);
+            assertErrorEnvelope(response, "method_not_allowed", false);
+        }
     }
 
     @Test
@@ -416,54 +417,158 @@ class HttpApiServerTest {
     }
 
     @Test
-    void registersHeartbeatsAndDeregistersClientsThroughRaft() throws Exception {
+    void registersHeartbeatsListsAndDeregistersANodeThroughRaft() throws Exception {
         QraftStateStore store = startSingleNode();
         server = new HttpApiServer(0, node, store);
         server.start().join();
         HttpClient client = HttpClient.newHttpClient();
-        String registration = """
-                {"clientId":"client-1","hostname":"host-1","address":"127.0.0.1","port":8080,
-                 "version":"1.0.0","region":"eu-west","datacenter":"dc-1"}
-                """;
-        String heartbeat = """
-                {"clientId":"client-1","timestamp":"2026-09-21T10:15:30Z",
-                 "sequenceNumber":1,"status":"passing"}
-                """;
 
-        HttpResponse<String> registered = request(client, "/api/v1/clients/register", "POST", registration);
-        HttpResponse<String> heartbeatAccepted = request(client, "/api/v1/clients/heartbeat", "POST", heartbeat);
-        HttpResponse<String> clients = request(client, "/api/v1/clients", "GET");
+        HttpResponse<String> registered = registerNode(client);
+        HttpResponse<String> heartbeatAccepted = heartbeat(client, "{\"sequenceNumber\":1}");
+        HttpResponse<String> nodes = request(client, "/v1/catalog/nodes", "GET");
 
-        assertEquals(201, registered.statusCode());
-        assertEquals(204, heartbeatAccepted.statusCode());
-        assertTrue(clients.body().contains("client-1"));
-        assertEquals(ClientStatus.HEALTHY,
-                store.findClient("client-1").orElseThrow().getStatus());
+        assertEquals(200, registered.statusCode(), registered.body());
+        assertEquals(tree("{\"node\":\"client-1\",\"registered\":true}"), tree(registered.body()));
+        assertEquals(200, heartbeatAccepted.statusCode(), heartbeatAccepted.body());
+        assertEquals(tree("{\"node\":\"client-1\",\"accepted\":true}"), tree(heartbeatAccepted.body()));
+        Node stored = store.findNode("client-1").orElseThrow();
+        assertEquals(new Node("client-1", "127.0.0.1", "dc-1", "eu-west", Map.of("qraft.version", "1.0.0"),
+                NodeStatus.HEALTHY, stored.registrationTime(), stored.lastHeartbeat()), stored,
+                "the name comes from the identity header, and the rest from the body");
+        assertNotNull(stored.registrationTime());
+        assertNotNull(stored.lastHeartbeat());
 
-        HttpResponse<String> deregistered = request(client, "/api/v1/clients/client-1", "DELETE");
-        assertEquals(204, deregistered.statusCode());
-        assertTrue(store.findClient("client-1").isEmpty());
+        assertEquals(200, nodes.statusCode(), nodes.body());
+        assertEquals(Long.toString(store.getLastAppliedIndex()),
+                nodes.headers().firstValue("X-Qraft-Index").orElseThrow());
+        JsonNode listed = tree(nodes.body());
+        assertEquals(1, listed.size());
+        List<String> fields = new ArrayList<>();
+        listed.get(0).fieldNames().forEachRemaining(fields::add);
+        assertEquals(List.of("name", "address", "datacenter", "region", "metadata", "status",
+                "registrationTime", "lastHeartbeat"), fields);
+        assertEquals("client-1", listed.get(0).path("name").textValue());
+        assertEquals("healthy", listed.get(0).path("status").textValue());
+        assertEquals(stored.registrationTime().toString(), listed.get(0).path("registrationTime").textValue(),
+                "a time is an ISO-8601 instant, as in every other answer");
+        assertEquals(stored.lastHeartbeat().toString(), listed.get(0).path("lastHeartbeat").textValue());
+
+        HttpResponse<String> deregistered = request(client, "/v1/catalog/deregister", "PUT", "{}", NODE);
+        assertEquals(200, deregistered.statusCode(), deregistered.body());
+        assertEquals(tree("{\"node\":\"client-1\",\"deregistered\":true}"), tree(deregistered.body()));
+        assertTrue(store.findNode("client-1").isEmpty());
+
+        HttpResponse<String> again = request(client, "/v1/catalog/deregister", "PUT", "{}", NODE);
+        assertEquals(200, again.statusCode(), "deregistration is idempotent");
+        assertEquals(tree("{\"node\":\"client-1\",\"deregistered\":false}"), tree(again.body()));
     }
 
     @Test
-    void clientRoutesAnswerEveryRejectionWithTheStructuredEnvelope() throws Exception {
+    void deregisteringANodeRemovesItsServices() throws Exception {
+        QraftStateStore store = startClientApi();
+        HttpClient client = HttpClient.newHttpClient();
+        assertEquals(200, registerNode(client).statusCode());
+        assertEquals(200, request(client, "/v1/client/service/register", "PUT", """
+                {"serviceId":"web","serviceName":"frontend","address":"127.0.0.1","port":8080}
+                """, NODE).statusCode());
+        assertEquals(1, store.getServiceCatalog().instances().size());
+
+        assertEquals(200, request(client, "/v1/catalog/deregister", "PUT", "{}", NODE).statusCode());
+
+        assertTrue(store.getServiceCatalog().instances().isEmpty(),
+                "a body that names no service removes the node and everything registered on it");
+        assertEquals(tree("[]"), tree(request(client, "/v1/catalog/service/frontend", "GET").body()));
+    }
+
+    @Test
+    void theNodeListIsInNameOrder() throws Exception {
+        startClientApi();
+        HttpClient client = HttpClient.newHttpClient();
+        for (String name : List.of("node-c", "node-a", "node-b")) {
+            assertEquals(200, request(client, "/v1/catalog/register", "PUT", "{\"node\":{}}",
+                    Map.of("X-Qraft-Node", name)).statusCode());
+        }
+
+        JsonNode listed = tree(request(client, "/v1/catalog/nodes", "GET").body());
+
+        assertEquals(List.of("node-a", "node-b", "node-c"),
+                List.of(listed.get(0).path("name").textValue(), listed.get(1).path("name").textValue(),
+                        listed.get(2).path("name").textValue()));
+        assertEquals("registering", listed.get(0).path("status").textValue());
+        assertTrue(listed.get(0).path("address").isNull(), "a node registered with a name only has no address");
+        assertTrue(listed.get(0).path("lastHeartbeat").isNull(), "and no heartbeat before its first one");
+        assertEquals(tree("{}"), listed.get(0).path("metadata"));
+    }
+
+    @Test
+    void nodeRoutesAnswerEveryRejectionWithTheStructuredEnvelope() throws Exception {
         QraftStateStore store = startClientApi();
         HttpClient client = HttpClient.newHttpClient();
 
-        assertRejected(request(client, "/api/v1/clients/register", "GET"), 405, "method_not_allowed", null);
-        assertRejected(request(client, "/api/v1/clients/register", "POST", "{"), 400, "invalid_client", null);
-        assertRejected(request(client, "/api/v1/clients/register", "POST", "{\"clientId\":\" \"}"),
-                400, "invalid_client", "clientId is required");
-        assertRejected(request(client, "/api/v1/clients/heartbeat", "POST",
-                "{\"clientId\":\"client-1\",\"status\":\"not-a-status\"}"), 400, "invalid_heartbeat", null);
-        assertRejected(request(client, "/api/v1/clients/heartbeat", "POST",
-                "{\"clientId\":\"client-1\",\"timestamp\":\"yesterday\"}"), 400, "invalid_heartbeat", null);
-        assertRejected(request(client, "/api/v1/clients/heartbeat", "POST", "{\"clientId\":\"\"}"),
-                400, "invalid_heartbeat", "clientId is required");
-        for (String missingId : List.of("/api/v1/clients/", "/api/v1/clients/a/b")) {
-            assertRejected(request(client, missingId, "DELETE"), 400, "client_id_required", null);
+        assertRejected(request(client, "/v1/catalog/register", "POST", nodeRegistration(), NODE),
+                405, "method_not_allowed", null);
+        assertRejected(request(client, "/v1/catalog/node/heartbeat", "POST", "{}", NODE),
+                405, "method_not_allowed", null);
+        assertRejected(request(client, "/v1/catalog/deregister", "DELETE", null, NODE),
+                405, "method_not_allowed", null);
+        assertRejected(request(client, "/v1/catalog/nodes", "PUT", "{}", NODE), 405, "method_not_allowed", null);
+
+        // The node is named by the identity header, and the three headers follow the rules of a service's.
+        assertRejected(request(client, "/v1/catalog/register", "PUT", nodeRegistration()),
+                400, "invalid_registration", "X-Qraft-Node is required");
+        assertRejected(request(client, "/v1/catalog/register", "PUT", nodeRegistration(),
+                Map.of("X-Qraft-Node", "client-1", "X-Qraft-Tenant", " ")),
+                400, "invalid_registration", "X-Qraft-Tenant must not be blank");
+        assertRejected(request(client, "/v1/catalog/node/heartbeat", "PUT", "{}"),
+                400, "invalid_heartbeat", "X-Qraft-Node is required");
+        assertRejected(request(client, "/v1/catalog/deregister", "PUT", "{}"),
+                400, "invalid_deregistration", "X-Qraft-Node is required");
+
+        // A registration describes a node and nothing else, and cannot set what the servers own.
+        for (String body : List.of("{", "null", "[]", "{}", "{\"node\":null}", "{\"node\":{\"name\":\"other\"}}",
+                "{\"node\":{\"status\":\"healthy\"}}", "{\"node\":{\"registrationTime\":\"2026-01-01T00:00:00Z\"}}",
+                "{\"node\":{\"port\":8080}}", "{\"node\":{},\"service\":{}}", "{\"node\":{\"metadata\":[]}}")) {
+            assertRejected(request(client, "/v1/catalog/register", "PUT", body, NODE),
+                    400, "invalid_registration", null);
         }
-        assertTrue(store.getClients().isEmpty(), "no rejected request registers a client");
+        assertRejected(request(client, "/v1/catalog/register", "PUT", "{}", NODE),
+                400, "invalid_registration", "node is required");
+
+        // A heartbeat carries a sequence number and a registration identifier, and nothing else.
+        for (String body : List.of("{", "null", "[]", "{\"sequenceNumber\":-1}", "{\"sequenceNumber\":\"x\"}",
+                "{\"status\":\"healthy\"}", "{\"timestamp\":\"2026-09-21T10:15:30Z\"}",
+                "{\"clientId\":\"client-1\"}")) {
+            assertRejected(heartbeat(client, body), 400, "invalid_heartbeat", null);
+        }
+
+        // Without a service the node itself is deregistered; a service is not deregistered here yet.
+        for (String body : List.of("{", "null", "[]", "{\"serviceId\":\"web\"}", "{\"node\":\"client-1\"}")) {
+            assertRejected(request(client, "/v1/catalog/deregister", "PUT", body, NODE),
+                    400, "invalid_deregistration", null);
+        }
+
+        // A node route takes no path parameter. A path that only begins with a route's name is no route at all,
+        // and the HTTP server itself answers it.
+        for (String path : List.of("/v1/catalog/register/x", "/v1/catalog/deregister/client-1",
+                "/v1/catalog/node/heartbeat/x", "/v1/catalog/nodes/x")) {
+            assertRejected(request(client, path, "PUT", "{}", NODE), 404, "not_found", null);
+        }
+        assertEquals(404, request(client, "/v1/catalog/registers", "PUT", "{}", NODE).statusCode());
+        assertTrue(store.getNodes().isEmpty(), "no rejected request registers a node");
+    }
+
+    @Test
+    void theRemovedNodeRoutesAreGone() throws Exception {
+        QraftStateStore store = startClientApi();
+        HttpClient client = HttpClient.newHttpClient();
+
+        assertEquals(404, request(client, "/api/v1/clients", "GET").statusCode());
+        assertEquals(404, request(client, "/api/v1/clients/register", "POST",
+                "{\"name\":\"client-1\"}").statusCode());
+        assertEquals(404, request(client, "/api/v1/clients/heartbeat", "POST",
+                "{\"clientId\":\"client-1\"}").statusCode());
+        assertEquals(404, request(client, "/api/v1/clients/client-1", "DELETE").statusCode());
+        assertTrue(store.getNodes().isEmpty());
     }
 
     /** Asserts the status and the non-retryable envelope, and that the message names {@code reason} when given. */
@@ -475,36 +580,38 @@ class HttpApiServerTest {
     }
 
     @Test
-    void rejectsTheJobSystemsLegacyStatusesInHeartbeats() throws Exception {
+    void aHeartbeatCannotSetAStatus() throws Exception {
         QraftStateStore store = startClientApi();
         HttpClient client = HttpClient.newHttpClient();
-        assertEquals(201, request(client, "/api/v1/clients/register", "POST", clientRegistration()).statusCode());
+        assertEquals(200, registerNode(client).statusCode());
 
-        for (String legacy : List.of("active", "idle", "overloaded", "draining")) {
-            assertEquals(400, request(client, "/api/v1/clients/heartbeat", "POST",
-                    "{\"clientId\":\"client-1\",\"status\":\"" + legacy + "\"}").statusCode(), legacy);
+        for (String status : List.of("healthy", "unreachable", "registering", "passing", "active")) {
+            assertRejected(heartbeat(client, "{\"status\":\"" + status + "\"}"), 400, "invalid_heartbeat", "status");
         }
-        assertEquals(ClientStatus.REGISTERING, store.findClient("client-1").orElseThrow().getStatus(),
+        assertEquals(NodeStatus.REGISTERING, store.findNode("client-1").orElseThrow().status(),
                 "a rejected heartbeat changes nothing");
     }
 
     @Test
-    void reportsMissingClientsAndAcceptsOptionalHeartbeatFields() throws Exception {
+    void reportsAMissingNodeAndAcceptsAHeartbeatWithoutASequence() throws Exception {
         QraftStateStore store = startClientApi();
         HttpClient client = HttpClient.newHttpClient();
+        Map<String, String> unknown = Map.of("X-Qraft-Node", "unknown");
 
-        for (HttpResponse<String> missing : List.of(
-                request(client, "/api/v1/clients/heartbeat", "POST", "{\"clientId\":\"unknown\",\"sequenceNumber\":1}"),
-                request(client, "/api/v1/clients/unknown", "DELETE"))) {
-            assertEquals(404, missing.statusCode(), missing.body());
-            assertEquals("unknown", assertErrorEnvelope(missing, "client_not_found", false).path("clientId").textValue(),
-                    "the envelope names the missing client");
-        }
+        HttpResponse<String> missing = request(client, "/v1/catalog/node/heartbeat", "PUT",
+                "{\"sequenceNumber\":1}", unknown);
+        assertEquals(404, missing.statusCode(), missing.body());
+        assertEquals("unknown", assertErrorEnvelope(missing, "node_not_found", false).path("node").textValue(),
+                "the envelope names the missing node");
+        HttpResponse<String> absent = request(client, "/v1/catalog/deregister", "PUT", "{}", unknown);
+        assertEquals(200, absent.statusCode(), absent.body());
+        assertEquals(tree("{\"node\":\"unknown\",\"deregistered\":false}"), tree(absent.body()));
 
-        assertEquals(201, request(client, "/api/v1/clients/register", "POST", clientRegistration()).statusCode());
-        assertEquals(204, request(client, "/api/v1/clients/heartbeat", "POST",
-                "{\"clientId\":\"client-1\",\"sequenceNumber\":1}").statusCode());
-        assertEquals(ClientStatus.HEALTHY, store.findClient("client-1").orElseThrow().getStatus());
+        assertEquals(200, registerNode(client).statusCode());
+        assertEquals(NodeStatus.REGISTERING, store.findNode("client-1").orElseThrow().status());
+        assertEquals(200, heartbeat(client, "{}").statusCode());
+        assertEquals(NodeStatus.HEALTHY, store.findNode("client-1").orElseThrow().status(),
+                "a heartbeat makes a registering node healthy");
     }
 
     @Test
@@ -512,8 +619,7 @@ class HttpApiServerTest {
         startClientApi();
         server.enterDrainMode().get(10, TimeUnit.SECONDS);
 
-        HttpResponse<String> draining = request(HttpClient.newHttpClient(), "/api/v1/clients/register", "POST",
-                clientRegistration());
+        HttpResponse<String> draining = registerNode(HttpClient.newHttpClient());
 
         assertEquals(503, draining.statusCode());
         assertErrorEnvelope(draining, "draining", true);
@@ -594,22 +700,22 @@ class HttpApiServerTest {
     void rejectsAnOutOfOrderHeartbeatWithoutMovingClientStateBackward() throws Exception {
         QraftStateStore store = startClientApi();
         HttpClient client = HttpClient.newHttpClient();
-        assertEquals(201, request(client, "/api/v1/clients/register", "POST", clientRegistration()).statusCode());
-        assertEquals(204, request(client, "/api/v1/clients/heartbeat", "POST", """
-                {"clientId":"client-1","timestamp":"2026-09-21T10:15:30Z",
-                 "sequenceNumber":2,"status":"passing"}
-                """).statusCode());
-        java.time.Instant acceptedHeartbeat = store.findClient("client-1").orElseThrow().getLastHeartbeat();
+        assertEquals(200, registerNode(client).statusCode());
+        assertEquals(200, heartbeat(client, "{\"sequenceNumber\":2}").statusCode());
+        java.time.Instant acceptedHeartbeat = store.findNode("client-1").orElseThrow().lastHeartbeat();
 
-        HttpResponse<String> stale = request(client, "/api/v1/clients/heartbeat", "POST", """
-                {"clientId":"client-1","timestamp":"2026-09-21T10:14:30Z",
-                 "sequenceNumber":1,"status":"degraded"}
-                """);
+        HttpResponse<String> stale = heartbeat(client, "{\"sequenceNumber\":1}");
+        HttpResponse<String> otherRegistration = heartbeat(client,
+                "{\"sequenceNumber\":3,\"registrationId\":\"another-registration\"}");
 
         assertEquals(409, stale.statusCode(), "a stale heartbeat sequence must be rejected");
-        assertErrorEnvelope(stale, "stale_heartbeat", false);
-        assertEquals(acceptedHeartbeat, store.findClient("client-1").orElseThrow().getLastHeartbeat());
-        assertEquals(ClientStatus.HEALTHY, store.findClient("client-1").orElseThrow().getStatus());
+        JsonNode envelope = assertErrorEnvelope(stale, "stale_heartbeat", false);
+        assertEquals("client-1", envelope.path("node").textValue());
+        assertEquals(1, envelope.path("sequenceNumber").longValue());
+        assertEquals(409, otherRegistration.statusCode(), "a heartbeat of another registration must be rejected");
+        assertErrorEnvelope(otherRegistration, "stale_heartbeat", false);
+        assertEquals(acceptedHeartbeat, store.findNode("client-1").orElseThrow().lastHeartbeat());
+        assertEquals(NodeStatus.HEALTHY, store.findNode("client-1").orElseThrow().status());
     }
 
     @Test
@@ -656,8 +762,7 @@ class HttpApiServerTest {
 
         HttpResponse<String> response = request(HttpClient.newHttpClient(),
                 "/v1/client/service/register", "PUT", registration, Map.of("X-Qraft-Node", "node-1"));
-        HttpResponse<String> clientResponse = request(HttpClient.newHttpClient(),
-                "/api/v1/clients/register", "POST", clientRegistration());
+        HttpResponse<String> clientResponse = registerNode(HttpClient.newHttpClient());
 
         assertEquals(503, response.statusCode());
         assertErrorEnvelope(response, "leader_unavailable", true);
@@ -790,17 +895,12 @@ class HttpApiServerTest {
                 .snapshotEnabled(false).electionTimeout(25).heartbeatInterval(10_000)
                 .build();
         node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        // The node's first append after its bootstrap configuration is the leadership no-op of its first term.
+        // The storage reports that append as failed, and that failure is the event that fences the node. The
+        // test submits no command of its own: one would either queue behind the no-op or arrive after the
+        // fence, and the two fail with different errors.
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (!node.isLeader() && System.nanoTime() < deadline) Thread.onSpinWait();
-        assertTrue(node.isLeader());
-
-        try {
-            node.submitCommand(new DistributedStateRaftCommand(
-                            DistributedStateCommand.put("fence", "node")))
-                    .toCompletionStage().toCompletableFuture().join();
-        } catch (java.util.concurrent.CompletionException expected) {
-            // The failed transition is the event that fences the node.
-        }
+        while (!node.isFenced() && System.nanoTime() < deadline) Thread.onSpinWait();
         assertTrue(node.isFenced());
 
         server = new HttpApiServer(0, node, store);
@@ -1149,21 +1249,19 @@ class HttpApiServerTest {
     }
 
     @Test
-    void membershipTimesAreStampedWithTheServerClockNotTheClientClock() throws Exception {
+    void membershipTimesAreStampedWithTheServerClock() throws Exception {
         MutableClockHelper clock = new MutableClockHelper(Instant.parse("2026-09-26T10:00:00Z"));
         QraftStateStore store = startHealthApi(clock);
         HttpClient client = HttpClient.newHttpClient();
 
-        assertEquals(201, request(client, "/api/v1/clients/register", "POST", clientRegistration()).statusCode());
+        assertEquals(200, registerNode(client).statusCode());
         assertEquals(Instant.parse("2026-09-26T10:00:00Z"),
-                store.findClient("client-1").orElseThrow().getRegistrationTime());
+                store.findNode("client-1").orElseThrow().registrationTime());
 
         clock.advance(Duration.ofSeconds(5));
-        assertEquals(204, request(client, "/api/v1/clients/heartbeat", "POST", """
-                {"clientId":"client-1","timestamp":"2000-01-01T00:00:00Z","sequenceNumber":1,"status":"passing"}
-                """).statusCode());
-        assertEquals(Instant.parse("2026-09-26T10:00:05Z"), store.findClient("client-1").orElseThrow().getLastHeartbeat(),
-                "a client clock that is wrong cannot move its own membership deadline");
+        assertEquals(200, heartbeat(client, "{\"sequenceNumber\":1}").statusCode());
+        assertEquals(Instant.parse("2026-09-26T10:00:05Z"), store.findNode("client-1").orElseThrow().lastHeartbeat(),
+                "a heartbeat carries no time of its own: the server's receipt time is the node's last contact");
     }
 
     private QraftStateStore startHealthApi(Clock clock) throws Exception {
@@ -1392,11 +1490,26 @@ class HttpApiServerTest {
         return store;
     }
 
-    private static String clientRegistration() {
+    /** The identity header of the node these tests register. */
+    private static final Map<String, String> NODE = Map.of("X-Qraft-Node", "client-1");
+
+    private static String nodeRegistration() {
         return """
-                {"clientId":"client-1","hostname":"host-1","address":"127.0.0.1","port":8080,
-                 "version":"1.0.0","region":"eu-west","datacenter":"dc-1"}
+                {"node":{"address":"127.0.0.1","datacenter":"dc-1","region":"eu-west",
+                         "metadata":{"qraft.version":"1.0.0"}}}
                 """;
+    }
+
+    private HttpResponse<String> registerNode(HttpClient client) throws Exception {
+        return request(client, "/v1/catalog/register", "PUT", nodeRegistration(), NODE);
+    }
+
+    private HttpResponse<String> heartbeat(HttpClient client, String body) throws Exception {
+        return request(client, "/v1/catalog/node/heartbeat", "PUT", body, NODE);
+    }
+
+    private static JsonNode tree(String json) throws Exception {
+        return new ObjectMapper().readTree(json);
     }
 
     private HttpResponse<String> request(HttpClient client, String path, String method) throws Exception {

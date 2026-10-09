@@ -18,7 +18,7 @@ package dev.mars.qraft.client.catalog;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.mars.qraft.common.ClientInfo;
+import dev.mars.qraft.common.Node;
 import dev.mars.qraft.client.health.CheckObservation;
 import dev.mars.qraft.client.health.ObservationClient;
 import dev.mars.qraft.client.health.ObservationOutcome;
@@ -329,34 +329,47 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         return new ObservationOutcome.Retryable(failure.code(), failure.message(), failure.leaderId());
     }
 
-    public CompletableFuture<CatalogOutcome> registerClient(ClientInfo client) {
-        Objects.requireNonNull(client, "client");
+    /**
+     * Registers the node this client speaks for. The identity header names the node, and the body describes it:
+     * the status and the times of a node are the servers' to set, so they are not sent.
+     */
+    public CompletableFuture<CatalogOutcome> registerNode(Node node) {
+        Objects.requireNonNull(node, "node");
+        if (!nodeId.equals(node.name())) {
+            throw new IllegalArgumentException("This client speaks for node " + nodeId + ", not " + node.name());
+        }
+        Map<String, Object> description = new LinkedHashMap<>();
+        description.put("address", node.address());
+        description.put("datacenter", node.datacenter());
+        description.put("region", node.region());
+        description.put("metadata", node.metadata());
+        return nodeWrite("/v1/catalog/register", Map.of("node", description), NodeOperation.REGISTER);
+    }
+
+    /** Sends a heartbeat of the node this client speaks for, as part of the registration it names. */
+    public CompletableFuture<CatalogOutcome> heartbeatNode(long sequenceNumber, String registrationId) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("sequenceNumber", sequenceNumber);
+        if (registrationId != null) body.put("registrationId", registrationId);
+        return nodeWrite("/v1/catalog/node/heartbeat", body, NodeOperation.HEARTBEAT);
+    }
+
+    /** Deregisters the node this client speaks for: a body that names no service removes the node itself. */
+    public CompletableFuture<CatalogOutcome> deregisterNode() {
+        return nodeWrite("/v1/catalog/deregister", Map.of(), NodeOperation.DEREGISTER);
+    }
+
+    private CompletableFuture<CatalogOutcome> nodeWrite(String path, Map<String, Object> body,
+                                                        NodeOperation operation) {
         try {
-            String body = objectMapper.writeValueAsString(client);
-            return acrossSeeds(endpoint -> send(nodeRequest(endpoint, "/api/v1/clients/register", "POST", body),
-                    response -> classifyNode(response, NodeOperation.REGISTER, client.getClientId())));
+            String json = objectMapper.writeValueAsString(body);
+            return acrossSeeds(endpoint -> send(
+                    request(endpoint, path).header("Content-Type", "application/json")
+                            .PUT(HttpRequest.BodyPublishers.ofString(json)).build(),
+                    response -> classifyNode(response, operation)));
         } catch (IOException error) {
             return CompletableFuture.completedFuture(retryable("request_encoding", error));
         }
-    }
-
-    public CompletableFuture<CatalogOutcome> heartbeatClient(Map<String, Object> heartbeat) {
-        Objects.requireNonNull(heartbeat, "heartbeat");
-        String clientId = required("clientId", Objects.toString(heartbeat.get("clientId"), null));
-        try {
-            String body = objectMapper.writeValueAsString(heartbeat);
-            return acrossSeeds(endpoint -> send(nodeRequest(endpoint, "/api/v1/clients/heartbeat", "POST", body),
-                    response -> classifyNode(response, NodeOperation.HEARTBEAT, clientId)));
-        } catch (IOException error) {
-            return CompletableFuture.completedFuture(retryable("request_encoding", error));
-        }
-    }
-
-    public CompletableFuture<CatalogOutcome> deregisterClient(String clientId) {
-        String id = required("clientId", clientId);
-        return acrossSeeds(endpoint -> send(
-                nodeRequest(endpoint, "/api/v1/clients/" + encode(id), "DELETE", null),
-                response -> classifyNode(response, NodeOperation.DEREGISTER, id)));
     }
 
     private CompletableFuture<CatalogOutcome> acrossSeeds(
@@ -383,13 +396,6 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
             }
             return attempt(cycle, index + 1, operation);
         });
-    }
-
-    private HttpRequest nodeRequest(URI endpoint, String path, String method, String body) {
-        HttpRequest.Builder builder = request(endpoint, path);
-        if (body == null) return builder.method(method, HttpRequest.BodyPublishers.noBody()).build();
-        return builder.header("Content-Type", "application/json")
-                .method(method, HttpRequest.BodyPublishers.ofString(body)).build();
     }
 
     private HttpRequest.Builder request(URI server, String path) {
@@ -423,10 +429,17 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         return classifyError(response);
     }
 
-    private CatalogOutcome classifyNode(HttpResponse<String> response, NodeOperation operation, String clientId) {
-        int status = response.statusCode();
-        if (operation.accepts(status)) return new CatalogOutcome.Success(clientId, status != 404);
-        return classifyError(response);
+    /** A node write succeeded only if the answer names the node and says what happened to it. */
+    private CatalogOutcome classifyNode(HttpResponse<String> response, NodeOperation operation) {
+        if (!isSuccess(response.statusCode())) return classifyError(response);
+        JsonNode parsed = parseObject(response.body());
+        String node = parsed == null ? null : textOrNull(parsed.path("node"));
+        JsonNode changed = parsed == null ? null : parsed.path(operation.resultField);
+        if (node == null || changed == null || !changed.isBoolean()) {
+            return new CatalogOutcome.Retryable(
+                    "invalid_response", "Server returned a malformed success response", null);
+        }
+        return new CatalogOutcome.Success(node, changed.booleanValue());
     }
 
     private CatalogOutcome classifyError(HttpResponse<String> response) {
@@ -527,13 +540,8 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
     }
 
     private enum NodeOperation {
-        REGISTER, HEARTBEAT, DEREGISTER;
-        boolean accepts(int status) {
-            return switch (this) {
-                case REGISTER -> status == 200 || status == 201;
-                case HEARTBEAT -> status == 200 || status == 204;
-                case DEREGISTER -> status == 200 || status == 204 || status == 404;
-            };
-        }
+        REGISTER("registered"), HEARTBEAT("accepted"), DEREGISTER("deregistered");
+        private final String resultField;
+        NodeOperation(String resultField) { this.resultField = resultField; }
     }
 }

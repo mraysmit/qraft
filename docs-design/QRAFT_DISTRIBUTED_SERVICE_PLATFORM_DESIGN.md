@@ -341,9 +341,9 @@ Client mode currently owns:
 - `HealthPublisher`, which publishes check results as sequenced observations
   through the shared server client.
 
-The client registers its node identity through the server's
-`/api/v1/clients/register`, `/api/v1/clients/heartbeat`, and
-`DELETE /api/v1/clients/{clientId}` endpoints. A failed initial registration
+The client registers its node through the server's
+`PUT /v1/catalog/register`, `PUT /v1/catalog/node/heartbeat`, and
+`PUT /v1/catalog/deregister` endpoints (section 12.1.2). A failed initial registration
 keeps the local health server live and unready and retries in the background;
 readiness is derived continuously from lifecycle state, accepted node
 registration, convergence of every enabled local service definition, required
@@ -482,6 +482,10 @@ Raft state cannot be read), `fenced`, or else `recovering`, `removed` (its
 removal from the Raft configuration has committed), and `no_leader`. The
 conditions are read as one consistent view on the Raft state loop. A candidate,
 or a server cut off from the majority, is unready until it rejoins a leader.
+That holds for a server that does not campaign, because it holds no
+configuration yet or is not yet a voter: when its election timer fires it
+forgets the silent leader, and reports `no_leader` until it hears from a leader
+again.
 Readiness does not yet depend on read consistency, because consistency modes do
 not exist yet. `/health/live` is unaffected by every condition.
 
@@ -522,12 +526,25 @@ the client represents. One node can host multiple service instances.
 generated ID must be persisted locally; a hostname alone is not a sufficient
 identity in environments where names can be reused.
 
-Client state includes:
+A node in the replicated registry has the shape of a Consul node, together with
+the status and the times that the servers record for it:
+
+- `name`: the node's name, which is its key in the registry.
+- `address`, `datacenter`, and `region`.
+- `metadata`: free-form text entries. The client's version is the entry
+  `qraft.version`, and the identifier of the node's current registration is
+  the entry `qraft.registrationId`.
+- `status`: `registering`, `healthy`, or `unreachable`. Only the servers set it.
+- `registrationTime` and `lastHeartbeat`: stamped by the receiving server. The
+  node's last contact is its last heartbeat, or its registration time before
+  the first one.
+
+A node has no host name and no port: a port belongs to a service instance.
+The generated node ID is added by the client task list.
+
+Client state also includes:
 
 - Tenant and namespace context.
-- Node ID, hostname, address, datacenter, and region.
-- Client version and metadata.
-- Last accepted contact and lifecycle status.
 - Locally configured service definitions and health checks.
 
 ### 7.4 Service definition
@@ -699,8 +716,7 @@ client that is still alive re-registers the instance through reconciliation.
 The same leader-only component expires silent nodes under a server-wide policy:
 `server.health.nodeTtlMs` (default 90000) and `server.health.nodeReapAfterMs`
 (default 259200000, 72 hours, Consul's reconnect window; 0 never reaps). Node registration and heartbeat times are
-stamped with the receiving server's clock; the timestamp a client sends is
-ignored. All replicated client command times are stored in milliseconds, so the
+stamped with the receiving server's clock; a client sends no time of its own. All replicated client command times are stored in milliseconds, so the
 leader and its followers hold identical values that expiry can match exactly.
 
 - A node's last contact is its last heartbeat, or its registration time before
@@ -759,6 +775,10 @@ Initial HTTP endpoints are:
 PUT /v1/client/service/register
 PUT /v1/client/service/deregister/{serviceId}
 PUT /v1/client/check/observe
+PUT /v1/catalog/register
+PUT /v1/catalog/deregister
+PUT /v1/catalog/node/heartbeat
+GET /v1/catalog/nodes
 GET /v1/catalog/services
 GET /v1/catalog/service/{serviceName}
 GET /v1/health/service/{serviceName}
@@ -917,6 +937,105 @@ registration with its replicated checks ordered by check ID:
 health is `PASSING`; `passing=false` is the unfiltered default. Any other query
 parameter or value returns `invalid_query`. Health reads never mutate the catalog.
 `GET /v1/catalog/service/{serviceName}` continues to return bare registrations.
+
+#### 12.1.2 Nodes
+
+A client registers, renews, and removes its node on the catalog's write paths,
+which are named after Consul's. The node is named by `X-Qraft-Node`, as the
+node of a service is; a body never names it. The tenant and namespace headers
+are read by the same rules, although a node belongs to no tenant or namespace.
+A node route takes no path parameter: a longer path answers 404 `not_found`.
+
+**One body for nodes and services.** `PUT /v1/catalog/register` and
+`PUT /v1/catalog/deregister` serve nodes now, and services once the client
+task list moves them there. Their bodies are fixed here for both, so that
+adding services changes nothing that a node sends. A registration is:
+
+```json
+{
+  "node": {
+    "address": "10.0.0.5",
+    "datacenter": "dc-1",
+    "region": "eu-west",
+    "metadata": {"qraft.version": "1.0.0", "qraft.registrationId": "..."}
+  }
+}
+```
+
+- `node` describes the node. Each of its fields is optional, and `metadata`
+  defaults to none. It cannot carry the node's name, its status, or its times.
+- A service will be registered under a second key, `service`, beside `node`,
+  holding the body of today's service registration. Until then `node` is
+  required and `service` is refused.
+- Unknown fields are rejected with `invalid_registration`, at both levels.
+
+A registration replaces the node's description, makes the node `registering`,
+and stamps its registration time. It answers 200:
+
+```json
+{"node": "web-01", "registered": true}
+```
+
+Deregistration follows Consul's rule: a body that names no service removes the
+node itself. For a node the body is the empty object, `{}`.
+
+- A service will be removed with `{"serviceId": "web"}`. Until then any field
+  is refused with `invalid_deregistration`. When the field arrives it must hold
+  a non-blank string, so that a missing value cannot remove the node instead.
+- It is idempotent, and answers 200 with
+  `{"node":"web-01","deregistered":false}` when the node is already absent.
+- As in Consul, it removes the node's entry and every service and check
+  registered on the node, in every tenant and namespace, in the same
+  replicated step (decided 2026-10-09). A client still deregisters its
+  services first; if one of those attempts fails, the node's deregistration
+  leaves nothing behind.
+- Services registered under the name of a node that has no entry are removed
+  too. The answer is still `deregistered: false`, because it reports the
+  node's entry.
+
+A heartbeat is sent to `PUT /v1/catalog/node/heartbeat`:
+
+```json
+{"sequenceNumber": 7, "registrationId": "..."}
+```
+
+- Both fields are optional. A positive `sequenceNumber` must be greater than
+  the last one accepted for the node; zero or absent is unsequenced. A
+  `registrationId` must be the `qraft.registrationId` the node was registered
+  with.
+- A heartbeat carries no status and no time. It makes a `registering` or an
+  `unreachable` node `healthy`, and the receiving server's clock gives the
+  node's last contact. Unknown fields are rejected with `invalid_heartbeat`.
+- It answers 200 with `{"node":"web-01","accepted":true}`.
+- A node that is not registered answers 404 `node_not_found` with `node`, and
+  the client registers again.
+- An older sequence, or a heartbeat of another registration, answers 409
+  `stale_heartbeat` with `node` and `sequenceNumber`, and state is unchanged.
+
+`GET /v1/catalog/nodes` returns every node in name order and carries
+`X-Qraft-Index`:
+
+```json
+[
+  {
+    "name": "web-01",
+    "address": "10.0.0.5",
+    "datacenter": "dc-1",
+    "region": "eu-west",
+    "metadata": {"qraft.version": "1.0.0", "qraft.registrationId": "..."},
+    "status": "healthy",
+    "registrationTime": "2026-09-26T10:00:00Z",
+    "lastHeartbeat": "2026-09-26T10:00:05Z"
+  }
+]
+```
+
+`lastHeartbeat` is `null` before the first heartbeat.
+
+The client accepts a 2xx answer of a node write as a success only when it
+names the node and carries the outcome field. Anything else is the retryable
+`invalid_response`, as it is for a service, so that an answer some other HTTP
+service could give never registers a node.
 
 ### 12.2 Error envelope
 
@@ -1152,16 +1271,21 @@ enforce that:
   without a time decodes to the epoch, not to the replaying node's clock.
 - **Clients do not own server state.** Registration status, registration time,
   heartbeat time, and observation receipt time come from the receiving server.
-  Client-supplied values for these are ignored, although an observation's
-  `observedAt` is kept for display.
+  The node routes refuse a body that carries them, and the state machine sets
+  them again whatever a command holds. An observation's `observedAt` is kept
+  for display.
 - **Lossless encoding.** Nullable strings use protobuf `optional` fields, so null
-  and the empty string stay distinct. Custom capability values are encoded as
-  JSON, so numbers, booleans, lists, objects, and null keep their types. Older
-  entries fall back to the legacy text map. Null and empty lists are treated as
-  the same.
-- **No shared mutable state.** The state machine stores deep copies of command
-  objects. Readers receive detached copies of clients and a read-only catalog
-  view, so nothing outside a committed command can change replicated state.
+  and the empty string stay distinct. Null and empty lists are treated as the
+  same.
+- **Removed formats stay readable.** The fields a node no longer has are
+  `reserved` in the protocol and ignored in a snapshot. A removed node status
+  reads as `healthy` or `unreachable`, by whether the node was in contact. An
+  entry holding the removed capabilities update applies nothing. Fixtures
+  written by the earlier code prove each case.
+- **No shared mutable state.** A node is an immutable value, and the state
+  machine copies what a command's collections hold. Readers receive those
+  values and a read-only catalog view, so nothing outside a committed command
+  can change replicated state.
 - **Reproducible snapshots.** Snapshot JSON writes map entries in key order, so
   replicas and JVMs produce identical bytes for identical state.
 

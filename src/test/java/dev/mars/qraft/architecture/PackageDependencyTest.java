@@ -155,7 +155,7 @@ class PackageDependencyTest {
 
     @Test
     void classifiesNestedTypesAndRequiresAPackageBoundary() {
-        assertEquals(Optional.of(Layer.COMMON), layerOf("dev.mars.qraft.common.ClientInfo$Builder"));
+        assertEquals(Optional.of(Layer.COMMON), layerOf("dev.mars.qraft.common.Node$Builder"));
         assertEquals(Optional.of(Layer.RAFT), layerOf("dev.mars.qraft.raft.storage.Store"));
         assertEquals(Optional.of(Layer.STATE), layerOf("dev.mars.qraft.state.catalog.ServiceCatalog$Snapshot"));
         for (String root : List.of("common", "client", "server", "raft", "state", "runtime")) {

@@ -19,28 +19,29 @@ package dev.mars.qraft.state;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.mars.qraft.state.catalog.ServiceKey;
-import dev.mars.qraft.common.ClientCapabilities;
-import dev.mars.qraft.common.ClientInfo;
-import dev.mars.qraft.common.ClientStatus;
+import dev.mars.qraft.common.Node;
+import dev.mars.qraft.common.NodeStatus;
 import dev.mars.qraft.state.catalog.HealthObservation;
 import dev.mars.qraft.state.catalog.ServiceCheckId;
 import dev.mars.qraft.state.catalog.ServiceHealth;
 import dev.mars.qraft.state.catalog.ServiceInstance;
 import dev.mars.qraft.raft.RaftCommand;
-import dev.mars.qraft.raft.grpc.ClientCommandProto;
-import dev.mars.qraft.raft.grpc.ClientCommandType;
+import dev.mars.qraft.raft.grpc.NodeCommandProto;
+import dev.mars.qraft.raft.grpc.NodeCommandType;
 import dev.mars.qraft.state.distributed.DistributedStateCommand;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Tests that replicated state depends only on the committed log: a command decoded from the log, or
@@ -74,38 +75,33 @@ class ReplicaDeterminismTest {
 
     @Test
     void registrationDataSurvivesTheLogWithoutCorruption() throws Exception {
-        ClientInfo original = clientFromRequest();
-        ClientInfo bare = new ClientInfo("client-2", null, "", 0);
-        bare.setRegistrationTime(null);
+        Node original = nodeFromRequest();
+        Node bare = Node.of("client-2", "", null, null, null);
 
-        ClientInfo decoded = ((ClientCommand.Register) codec.deserialize(
-                codec.serialize(ClientCommand.register(original, NANOS)))).clientInfo();
-        ClientInfo decodedBare = ((ClientCommand.Register) codec.deserialize(
-                codec.serialize(ClientCommand.register(bare, NANOS)))).clientInfo();
+        Node decoded = ((NodeCommand.Register) codec.deserialize(
+                codec.serialize(NodeCommand.register(original, NANOS)))).node();
+        Node decodedBare = ((NodeCommand.Register) codec.deserialize(
+                codec.serialize(NodeCommand.register(bare, NANOS)))).node();
 
-        assertEquals(original.getCapabilities().getCustomCapabilities(),
-                decoded.getCapabilities().getCustomCapabilities(), "typed capability values keep their types");
-        assertEquals("", decoded.getHostname(), "an empty string stays empty");
-        assertEquals("", decoded.getVersion());
-        assertNull(decoded.getRegion(), "an absent string stays absent");
-        assertNull(decoded.getCapabilities().getSystemInfo().getArchitecture());
-        assertNull(decoded.getCapabilities().getNetworkInfo().getPublicIpAddress());
-        assertEquals(original.getMetadata(), decoded.getMetadata());
-        assertNull(decodedBare.getHostname());
-        assertEquals("", decodedBare.getAddress());
-        assertNull(decodedBare.getRegistrationTime(), "decoding must not invent a time from the local clock");
+        assertEquals(original, decoded);
+        assertEquals("", decoded.metadata().get("empty"), "an empty string stays empty");
+        assertNull(decoded.region(), "an absent string stays absent");
+        assertEquals(bare, decodedBare);
+        assertEquals("", decodedBare.address());
+        assertNull(decodedBare.datacenter());
+        assertNull(decodedBare.registrationTime(), "decoding must not invent a time from the local clock");
     }
 
     @Test
     void decodingAnEntryDoesNotDependOnWhenItIsDecoded() throws Exception {
         byte[] withoutTimestamp = dev.mars.qraft.raft.grpc.RaftCommandMessage.newBuilder()
-                .setClientCommand(ClientCommandProto.newBuilder().setType(ClientCommandType.CLIENT_CMD_DEREGISTER)
-                        .setClientId("client-1"))
+                .setNodeCommand(NodeCommandProto.newBuilder().setType(NodeCommandType.NODE_CMD_DEREGISTER)
+                        .setName("client-1"))
                 .build().toByteArray();
 
-        ClientCommand first = (ClientCommand) codec.deserialize(withoutTimestamp);
+        NodeCommand first = (NodeCommand) codec.deserialize(withoutTimestamp);
         Thread.sleep(5);
-        ClientCommand second = (ClientCommand) codec.deserialize(withoutTimestamp);
+        NodeCommand second = (NodeCommand) codec.deserialize(withoutTimestamp);
 
         assertEquals(first, second, "replaying an entry must not read the replaying node's clock");
         assertEquals(Instant.EPOCH, first.timestamp());
@@ -115,10 +111,10 @@ class ReplicaDeterminismTest {
     void snapshotsAreByteForByteReproducibleAndRoundTripExactly() throws Exception {
         QraftStateStore store = new QraftStateStore();
         List<RaftCommand> log = new ArrayList<>(edgeCaseLog());
-        // Twenty clients and metadata keys in reverse order: the store holds them in maps whose iteration
+        // Twenty nodes and metadata keys in reverse order: the store holds them in maps whose iteration
         // order is randomised per JVM, so only an explicitly ordered writer produces sorted keys.
         for (char suffix = 't'; suffix >= 'a'; suffix--) {
-            log.add(ClientCommand.register(new ClientInfo("order-" + suffix, "host", "10.0.0.2", 8080), NANOS));
+            log.add(NodeCommand.register(Node.of("order-" + suffix, "10.0.0.2", null, null, null), NANOS));
             log.add(new DistributedStateRaftCommand(DistributedStateCommand.put("order-" + suffix, "v")));
         }
         log.forEach(command -> store.apply(codec.deserialize(codec.serialize(command))));
@@ -128,7 +124,7 @@ class ReplicaDeterminismTest {
         restored.restoreSnapshot(snapshot);
 
         assertEquals(new String(snapshot, StandardCharsets.UTF_8), snapshotText(restored));
-        for (String map : List.of("clients", "metadata")) {
+        for (String map : List.of("nodes", "metadata")) {
             JsonNode entries = JSON.readTree(snapshot).get(map);
             List<String> order = new ArrayList<>();
             entries.fieldNames().forEachRemaining(order::add);
@@ -138,19 +134,21 @@ class ReplicaDeterminismTest {
     }
 
     @Test
-    void readersReceiveCopiesThatCannotChangeReplicatedState() throws Exception {
+    void readersCannotChangeReplicatedState() throws Exception {
         QraftStateStore store = new QraftStateStore();
-        store.apply(ClientCommand.register(clientFromRequest(), NANOS));
+        store.apply(NodeCommand.register(nodeFromRequest(), NANOS));
         String before = snapshotText(store);
 
-        ClientInfo found = store.findClient("client-1").orElseThrow();
-        found.setStatus(ClientStatus.FAILED);
-        found.getMetadata().put("injected", "yes");
-        found.getCapabilities().getSupportedServices().add("injected");
-        ClientInfo listed = store.getClients().get("client-1");
-        listed.setRegion("injected");
+        Node found = store.findNode("client-1").orElseThrow();
+        assertThrows(UnsupportedOperationException.class, () -> found.metadata().put("injected", "yes"));
+        assertThrows(UnsupportedOperationException.class, () -> store.getNodes().put("injected", found));
+        assertThrows(UnsupportedOperationException.class, () -> store.getNodes().remove("client-1"));
+        // A changed node is another value: the one the store holds stays as it was.
+        assertEquals(NodeStatus.UNREACHABLE, found.withStatus(NodeStatus.UNREACHABLE).status());
+        assertEquals("yes", found.withMetadata("injected", "yes").metadata().get("injected"));
 
         assertEquals(before, snapshotText(store));
+        assertEquals(found, store.findNode("client-1").orElseThrow());
     }
 
     @Test
@@ -172,16 +170,11 @@ class ReplicaDeterminismTest {
     @Test
     void commandObjectsAreNotAliasedIntoReplicatedState() throws Exception {
         QraftStateStore store = new QraftStateStore();
-        ClientInfo registered = clientFromRequest();
-        store.apply(ClientCommand.register(registered, NANOS));
-        ClientCapabilities capabilities = new ClientCapabilities();
-        capabilities.setSupportedServices(new java.util.HashSet<>(Set.of("kv")));
-        store.apply(ClientCommand.updateCapabilities("client-1", capabilities));
+        Map<String, String> metadata = new HashMap<>(Map.of("rack", "r7"));
+        store.apply(NodeCommand.register(Node.of("client-1", "10.0.0.1", "dc-1", null, metadata), NANOS));
         String before = snapshotText(store);
 
-        registered.getCapabilities().getSupportedServices().add("mutated");
-        registered.getMetadata().put("mutated", "yes");
-        capabilities.getSupportedServices().add("mutated");
+        metadata.put("mutated", "yes");
 
         assertEquals(before, snapshotText(store), "a retained command object must not share state with the store");
     }
@@ -190,17 +183,17 @@ class ReplicaDeterminismTest {
     void registrationCannotClaimServerOwnedLifecycleStateOrTimes() throws Exception {
         QraftStateStore store = new QraftStateStore();
 
-        store.apply(ClientCommand.register(clientFromRequest(), NANOS));
+        store.apply(NodeCommand.register(nodeFromRequest(), NANOS));
 
-        ClientInfo stored = store.findClient("client-1").orElseThrow();
-        assertEquals(ClientStatus.REGISTERING, stored.getStatus(), "the client claimed UNREACHABLE");
-        assertEquals(Instant.parse("2026-09-26T12:00:00.123Z"), stored.getRegistrationTime());
-        assertNull(stored.getLastHeartbeat(), "the client claimed a heartbeat time");
+        Node stored = store.findNode("client-1").orElseThrow();
+        assertEquals(NodeStatus.REGISTERING, stored.status(), "the client claimed UNREACHABLE");
+        assertEquals(Instant.parse("2026-09-26T12:00:00.123Z"), stored.registrationTime());
+        assertNull(stored.lastHeartbeat(), "the client claimed a heartbeat time");
     }
 
     @Test
     void aBlankRegistrationIdMeansNoRegistrationCheckOnEveryReplica() {
-        ClientCommand.Heartbeat heartbeat = (ClientCommand.Heartbeat) ClientCommand.heartbeat(
+        NodeCommand.Heartbeat heartbeat = (NodeCommand.Heartbeat) NodeCommand.heartbeat(
                 "client-1", null, NANOS, 1, " ");
 
         assertNull(heartbeat.registrationId());
@@ -209,12 +202,10 @@ class ReplicaDeterminismTest {
     /** Commands with the edge values that reach the log from real requests. */
     private List<RaftCommand> edgeCaseLog() throws Exception {
         List<RaftCommand> log = new ArrayList<>();
-        log.add(ClientCommand.register(clientFromRequest(), NANOS));
-        log.add(ClientCommand.heartbeat("client-1", null, NANOS.plusSeconds(1), 1, ""));
-        log.add(ClientCommand.heartbeat("client-1", ClientStatus.DEGRADED, NANOS.plusSeconds(2), 2, null));
-        ClientInfo bare = new ClientInfo("client-2", null, null, 0);
-        bare.setMetadata(null);
-        log.add(ClientCommand.register(bare, NANOS));
+        log.add(NodeCommand.register(nodeFromRequest(), NANOS));
+        log.add(NodeCommand.heartbeat("client-1", null, NANOS.plusSeconds(1), 1, ""));
+        log.add(NodeCommand.heartbeat("client-1", NodeStatus.UNREACHABLE, NANOS.plusSeconds(2), 2, null));
+        log.add(NodeCommand.register(Node.of("client-2", null, null, null, null), NANOS));
         ServiceInstance web = new ServiceInstance("web", "web", "client-1", "127.0.0.1", 8080,
                 List.of("b", "a"), Map.of("zone", "a", "tier", ""), ServiceHealth.UNKNOWN,
                 "tenant-a", "default", "", "eu-west", false);
@@ -223,28 +214,21 @@ class ReplicaDeterminismTest {
                 ServiceHealth.WARNING, 3, NANOS, 30_000, false, "", 60_000), NANOS));
         log.add(CatalogCommand.expire(new ServiceCheckId(web.identity(), "ttl"), 3,
                 Instant.parse("2026-09-26T12:00:30.123Z"), false));
-        log.add(ClientCommand.expire("client-2", NANOS, false, NANOS));
+        log.add(NodeCommand.expire("client-2", NANOS, false, NANOS));
         log.add(new DistributedStateRaftCommand(DistributedStateCommand.put("key", "")));
         log.add(new DistributedStateRaftCommand(DistributedStateCommand.put("other", "value")));
         log.add(new DistributedStateRaftCommand(DistributedStateCommand.delete("other")));
         return log;
     }
 
-    /** A client registration as the HTTP API deserializes it from a client's request body. */
-    private static ClientInfo clientFromRequest() throws Exception {
+    /** A node as the HTTP API reads it from a registration, claiming a status and times it does not own. */
+    private static Node nodeFromRequest() throws Exception {
         return JSON.readValue("""
-                {"clientId":"client-1","hostname":"","address":"10.0.0.1","port":8080,
+                {"name":"client-1","address":"10.0.0.1","region":null,"datacenter":"dc-1",
                  "status":"unreachable","registrationTime":"2000-01-01T00:00:00Z",
-                 "lastHeartbeat":"2000-01-01T00:00:01Z","version":"","region":null,"datacenter":"dc-1",
-                 "metadata":{"qraft.registrationId":"reg-1","empty":""},
-                 "capabilities":{
-                   "supportedServices":["kv","health"],"availableRegions":[],
-                   "customCapabilities":{"slots":5,"gpu":true,"tier":"gold","ratio":0.5,
-                                         "labels":["a","b"],"nothing":null},
-                   "systemInfo":{"operatingSystem":"linux","cpuCores":4,"cpuUsage":12.5},
-                   "networkInfo":{"privateIpAddress":"10.0.0.1","firewallPorts":[80,443],
-                                  "networkInterfaces":null}}}
-                """, ClientInfo.class);
+                 "lastHeartbeat":"2000-01-01T00:00:01Z",
+                 "metadata":{"qraft.registrationId":"reg-1","qraft.version":"1.0.0","empty":""}}
+                """, Node.class);
     }
 
     private static String snapshotText(QraftStateStore store) {

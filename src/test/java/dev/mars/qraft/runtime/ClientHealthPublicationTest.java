@@ -167,7 +167,7 @@ class ClientHealthPublicationTest {
                         Duration.ofSeconds(1), Duration.ofSeconds(5), true),
                 new TtlCheck("web", "app", Duration.ofSeconds(30), false));
         return new QraftClient(ClientConfiguration.builder()
-                .clientId(CLIENT_ID).hostname(CLIENT_ID + "-host").address("127.0.0.1")
+                .clientId(CLIENT_ID).address("127.0.0.1")
                 .clientPort(0).serverUrls(servers)
                 .heartbeatInterval(40).requestTimeoutMs(5_000)
                 .registrationRetryMinMs(20).registrationRetryMaxMs(100)

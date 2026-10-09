@@ -86,7 +86,7 @@ other core platform concepts.
 The tenancy work, when it returns as replicated state, owns tenant and namespace
 lifecycle events, policy-assignment events, and quota state changes.
 
-### Server (`qraft-controller`)
+### Server (`dev.mars.qraft.server`)
 
 Owns concrete event production and local delivery:
 
@@ -347,8 +347,8 @@ GET /v1/system/events/stream?after=<cursor>
 ```
 
 These use the `/v1/` prefix shared by the catalog and other target APIs. The
-server's older `/api/v1/` client and info routes are not a pattern for new
-endpoints.
+server's older `/api/v1/` routes were removed on 2026-10-09; the node routes
+are at `/v1/catalog/` now.
 
 The bounded query should be implemented before live streaming. Both interfaces
 should support filters for category, severity, node, tenant, namespace, term,

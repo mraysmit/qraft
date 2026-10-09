@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.raft;
 
+import dev.mars.qraft.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
@@ -38,6 +39,8 @@ import java.util.function.BooleanSupplier;
 import static dev.mars.qraft.raft.ManualRaftClusterFixture.await;
 import static dev.mars.qraft.raft.ManualRaftClusterFixture.serverIdOf;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -246,6 +249,33 @@ class RaftNodeServerIdCountingTest {
         assertEquals(RaftNode.State.FOLLOWER, unconfigured.getState());
         assertEquals(0, unconfigured.getCurrentTerm());
         assertEquals(List.of(), unconfiguredTransport.votes, "no vote was requested");
+    }
+
+    @Test
+    void aServerThatDoesNotCampaignForgetsALeaderThatHasGoneSilent() throws Exception {
+        HeldRaftTransportFixture unconfiguredTransport = new HeldRaftTransportFixture();
+        RaftNode unconfigured = cluster.add(cluster.unconfiguredBuilder("d", Set.of("d", "e", "f"),
+                unconfiguredTransport, new QraftStateStore(), RaftNodeMode.volatileMode()));
+        await(unconfigured.start());
+        await(unconfigured.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
+                .setTerm(1).setLeaderId("e").setLeaderServerId(serverIdOf("e")).build()));
+        assertTrue(await(unconfigured.status()).knowsLeader(), "a heartbeat tells the server who leads");
+
+        cluster.timers(unconfigured).fireElectionTimeout();
+        await(unconfigured.handleVoteRequest(VoteRequest.newBuilder()
+                .setTerm(0).setCandidateId("probe").setCandidateServerId("probe").build()));
+
+        RaftStatus status = await(unconfigured.status());
+        assertEquals(RaftNode.State.FOLLOWER, status.state());
+        assertEquals(1, status.term(), "it does not campaign");
+        assertEquals(List.of(), unconfiguredTransport.votes, "no vote was requested");
+        assertFalse(status.knowsLeader(),
+                "a leader that has been silent for an election timeout is not known any more, so the server is unready");
+        assertNull(unconfigured.getLeaderId());
+
+        await(unconfigured.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
+                .setTerm(1).setLeaderId("e").setLeaderServerId(serverIdOf("e")).build()));
+        assertTrue(await(unconfigured.status()).knowsLeader(), "the next heartbeat makes the leader known again");
     }
 
     private void elect() throws Exception {

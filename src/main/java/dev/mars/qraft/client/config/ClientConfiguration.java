@@ -56,7 +56,6 @@ public final class ClientConfiguration {
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build();
 
     private final String clientId;
-    private final String hostname;
     private final String address;
     private final int clientPort;
     private final String region;
@@ -77,7 +76,6 @@ public final class ClientConfiguration {
 
     private ClientConfiguration(Builder builder) {
         clientId = builder.clientId.trim();
-        hostname = builder.hostname.trim();
         address = builder.address.trim();
         clientPort = builder.clientPort;
         region = builder.region.trim();
@@ -133,19 +131,17 @@ public final class ClientConfiguration {
         JsonNode servers = requiredObject(root, "servers");
         JsonNode catalog = optionalObject(root, "catalog");
         JsonNode logging = optionalObject(root, "logging");
-        rejectUnknown(client, "client", "id", "hostname", "address", "httpPort",
+        rejectUnknown(client, "client", "id", "address", "httpPort",
                 "heartbeatIntervalMs", "shutdownTimeoutMs", "datacenter", "region", "version");
         rejectUnknown(servers, "servers", "urls", "requestTimeoutMs");
         rejectUnknown(catalog, "catalog", "tenant", "namespace", "registrationRetryMinMs",
                 "registrationRetryMaxMs", "contactFreshnessMs", "services");
         rejectUnknown(logging, "logging", "directory");
-        HostIdentity local = localIdentity();
         List<HealthCheckDefinition> healthChecks = new ArrayList<>();
         List<ServiceDefinition> services = parseServices(catalog.get("services"), healthChecks);
         return builder()
                 .clientId(requiredText(client, "id"))
-                .hostname(optionalText(client, "hostname", local.hostname()))
-                .address(optionalText(client, "address", local.address()))
+                .address(optionalText(client, "address", localAddress()))
                 .clientPort(optionalInt(client, "httpPort", 8080))
                 .heartbeatInterval(optionalLong(client, "heartbeatIntervalMs", 30_000))
                 .shutdownTimeoutMs(optionalLong(client, "shutdownTimeoutMs", 30_000))
@@ -396,18 +392,16 @@ public final class ClientConfiguration {
         });
     }
 
-    private static HostIdentity localIdentity() {
+    private static String localAddress() {
         try {
-            InetAddress local = InetAddress.getLocalHost();
-            return new HostIdentity(local.getHostName(), local.getHostAddress());
+            return InetAddress.getLocalHost().getHostAddress();
         } catch (UnknownHostException error) {
-            return new HostIdentity("unknown", "127.0.0.1");
+            return "127.0.0.1";
         }
     }
 
     public static Builder builder() { return new Builder(); }
     public String getClientId() { return clientId; }
-    public String getHostname() { return hostname; }
     public String getAddress() { return address; }
     public int getClientPort() { return clientPort; }
     public String getRegion() { return region; }
@@ -429,7 +423,6 @@ public final class ClientConfiguration {
 
     public static final class Builder {
         private String clientId;
-        private String hostname = "unknown";
         private String address = "127.0.0.1";
         private int clientPort = 8080;
         private String region = "default";
@@ -449,7 +442,6 @@ public final class ClientConfiguration {
         private String version = "1.0.0";
 
         public Builder clientId(String value) { clientId = value; return this; }
-        public Builder hostname(String value) { hostname = value; return this; }
         public Builder address(String value) { address = value; return this; }
         public Builder clientPort(int value) { clientPort = value; return this; }
         public Builder region(String value) { region = value; return this; }
@@ -473,7 +465,6 @@ public final class ClientConfiguration {
 
         public ClientConfiguration build() {
             requireNonBlank("client.id", clientId);
-            requireNonBlank("client.hostname", hostname);
             requireNonBlank("client.address", address);
             requireNonBlank("client.region", region);
             requireNonBlank("client.datacenter", datacenter);
@@ -518,6 +509,4 @@ public final class ClientConfiguration {
             if (value == null || value.isBlank()) throw new IllegalArgumentException(field + " is required");
         }
     }
-
-    private record HostIdentity(String hostname, String address) { }
 }
