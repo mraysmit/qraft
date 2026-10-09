@@ -17,6 +17,7 @@
 package dev.mars.qraft.raft;
 
 import dev.mars.qraft.testing.fault.InjectedFaultFixture;
+import dev.mars.qraft.testing.fault.SubprocessOutputAuditHelper;
 
 import com.google.protobuf.ByteString;
 import dev.mars.qraft.raft.grpc.AppendEntriesRequest;
@@ -443,8 +444,9 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
             throw new AssertionError("installed-snapshot crash writer did not reach "
                     + checkpoint + ":\n" + Files.readString(outputFile, StandardCharsets.UTF_8));
         }
-        return new ProcessResult(process.exitValue(),
-                Files.readString(outputFile, StandardCharsets.UTF_8));
+        String output = Files.readString(outputFile, StandardCharsets.UTF_8);
+        SubprocessOutputAuditHelper.requireNoErrors("installed-snapshot-crash-writer", output);
+        return new ProcessResult(process.exitValue(), output);
     }
 
     private FileRaftStorage wal() {

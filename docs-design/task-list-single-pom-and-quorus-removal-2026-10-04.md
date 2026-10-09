@@ -524,17 +524,79 @@ conversion task is done. This phase is committed in parts, unlike the others.
     checkpoint, and the client of `CrashedAgentExpiryEndToEndTest` is killed,
     so neither returns through the audit.
 
-  In progress (2026-10-08). `SubprocessOutputAuditHelper.requireNoErrors`
+  In progress (2026-10-09). `SubprocessOutputAuditHelper.requireNoErrors`
   gives the parent test the check. It fails the calling test for an ERROR
   line, a Logback status error, or an uncaught exception in a finished
-  child's console output. A child that has to log an error on purpose gets
-  declared entries when the first one exists; none does today.
-  - Written: `SubprocessOutputAuditHelperTest`, 7 tests, against an empty
-    method. Expected RED: 6 of the 7 fail. Not yet run.
-  - After RED: the audit itself; calls from the three crash-writer tests and
-    from `CrashedAgentExpiryEndToEndTest`; the "Helper subprocesses" section
-    of `docs/TESTING.md`; and a mutation in the isolated copy, showing that a
-    crash writer which logs an ERROR fails its test.
+  child's console output, and quotes each error with its stack trace. A child
+  that has to log an error on purpose gets declared entries when the first
+  one exists; none does today.
+  - RED, 2026-10-09. `SubprocessOutputAuditHelperTest` against an empty
+    method ran 7 tests with 6 failures, each "Expected
+    java.lang.AssertionError to be thrown, but nothing was thrown"
+    (`logs/qraft-subprocess-audit-red-2026-10-09_10-55-15-256.log`). The
+    seventh, that ordinary output passes, guards against an audit that is
+    too strict. The run's application log is empty.
+  - Written after RED:
+    - the audit;
+    - an eighth test, that an error keeps its stack trace. It has not been
+      seen to fail;
+    - the calls from the three crash-writer tests, when their writer exits,
+      and from `CrashedAgentExpiryEndToEndTest`, in its teardown;
+    - `docs/TESTING.md`, "Helper subprocesses".
+  - GREEN, 2026-10-09. The five classes ran 31 tests with no failures
+    (`logs/qraft-subprocess-audit-green-2026-10-09_11-07-33-634.log`). The
+    Surefire reports agree: 8, 7, 7, 7, and 2. The run wrote ten logs, and
+    all ten were read:
+    - the Maven capture and the application log
+      `qraft-maven-tests-2026-10-09_11-07-42.log` each hold five flagged
+      ERROR headers with seven exception headers under them, and no
+      unflagged error or exception;
+    - the six crash writers' own logs hold INFO lines only;
+    - the two killed clients' own logs are empty. A healthy client logs
+      nothing: its six logging statements are warnings on failure paths.
+  - `mvn install`, 2026-10-09: 884 tests with 1 failure, in a test this
+    change does not touch (`logs/qraft-tests-2026-10-09_11-19-14-080.log`).
+    The run's 19 retained files hold no unflagged error apart from that
+    test's report.
+    - **Failure.**
+      `GrpcRaftIntegrationTest#aNewElectionAfterTheLeaderStopsAdvancesTheTerm`:
+      `RAFT_PEER_UNREACHABLE` "was declared at least 1 time(s) but occurred
+      0 time(s)".
+    - **Cause.** The test declared the error and did not wait for it. The
+      requests to the stopped node1 fail asynchronously. The test ran first
+      in its class, in a cold JVM. Its assertions held within 7 ms of node2
+      becoming leader, and teardown stopped node2 3 ms later, before either
+      failure had been reported. Stopping node2 discarded them.
+    - **Production.** No race there: a stopped node drops the replies to its
+      outstanding requests by design.
+    - **Fix, in the test.** It declares node1 alone, and waits for "Failed to
+      retrieve vote from node1" before it ends. The vote request's callback
+      logs that error whatever node2 has become, so a test that ended before
+      it could also have had it logged during the next test.
+    - **Same pattern.** `aMajorityKeepsCommittingAfterAFollowerStops` also
+      declared its error without waiting. It passed because the failure
+      arrived 1 ms after node3 stopped. It now declares node3 alone and
+      waits. The join test, which Phase 3 made wait, now uses the same
+      `RaftNodeLogFixture` and `awaitError`; its condition is unchanged.
+    - **Not reviewed.** The other declarations of this error run on the
+      in-memory transport with manual timers. They passed in this run, and
+      were not read one by one for the same pattern.
+  - Verified, 2026-10-09:
+    - `GrpcRaftIntegrationTest` passed five consecutive runs, each in a new
+      JVM, 10 of 10 every time
+      (`logs/qraft-grpc-repeat-2026-10-09_11-34-47-259.log`);
+    - `mvn install` then passed: 884 tests, no failures, every coverage gate
+      met (`logs/qraft-tests-2026-10-09_11-36-38-210.log`). The 884 are
+      Phase 3's 876 and the 8 of `SubprocessOutputAuditHelperTest`;
+    - the two runs wrote 26 files. All were read: 295 ERROR headers, every
+      one flagged, and no unflagged error or uncaught exception.
+
+    The Docker, end-to-end, and slow suites were not run: the change is in
+    test code only. `CrashedAgentExpiryEndToEndTest`, the one tagged class
+    it touches, ran in the GREEN run above.
+  - Still to do: mutations in the isolated copy. They are a crash writer and
+    a client that log an ERROR, which must fail their tests, and an audit
+    that drops stack traces, which must fail the eighth test.
 - [x] After each suite, check its log file: every ERROR line carries a label.
   This also covers anything logged after the last test class closed, which no
   window sees.
@@ -798,7 +860,9 @@ come first.
   task above lists class names, log file names, and the telemetry service
   name. Not listed, and found in the code:
   - the client configuration's `controllers` object, which is a configuration
-    contract, so renaming it changes behaviour;
+    contract, so renaming it changes behaviour. It was kept here. The client
+    list's decision 10 renames it to `servers`, in its Phase 2 (decided
+    2026-10-09);
   - thread names: `qraft-controller-raft` and `qraft-controller-release`;
   - client classes: `ControllerEndpoints`, `ControllerRetryPolicy`, and
     `ControllerContactTracker`;

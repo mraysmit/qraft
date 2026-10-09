@@ -26,8 +26,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Tests the audit a parent test runs over the console output of a helper JVM that has halted or been killed:
  * ordinary output passes; an ERROR line, a Logback status error, or an uncaught exception fails the calling test,
- * and the failure names the helper JVM, the running test, and each offending line. The cases pass text to the
- * audit and log nothing themselves.
+ * and the failure names the helper JVM, the running test, and each error with its stack trace. The cases pass
+ * text to the audit and log nothing themselves.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-10-08
@@ -74,6 +74,24 @@ class SubprocessOutputAuditHelperTest {
         assertTrue(failure.getMessage().contains("2 error"), failure.getMessage());
         assertTrue(failure.getMessage().contains(ERROR), failure.getMessage());
         assertTrue(failure.getMessage().contains(second), failure.getMessage());
+    }
+
+    @Test
+    void anErrorKeepsItsStackTraceAndNothingElse() {
+        String exception = "java.io.IOException: disk full";
+        String frame = "\tat dev.mars.raftlog.storage.FileRaftStorage.sync(FileRaftStorage.java:412)";
+        String cause = "Caused by: java.nio.channels.ClosedChannelException: null";
+        String later = "12:00:00.008 [main] INFO  dev.mars.raftlog.storage.FileRaftStorage - WAL closed";
+
+        AssertionError failure = assertThrows(AssertionError.class,
+                () -> SubprocessOutputAuditHelper.requireNoErrors("crash-writer",
+                        lines(INFO, ERROR, exception, frame, cause, later)));
+
+        assertTrue(failure.getMessage().contains("1 error"), failure.getMessage());
+        assertTrue(failure.getMessage().contains(exception), failure.getMessage());
+        assertTrue(failure.getMessage().contains(frame), failure.getMessage());
+        assertTrue(failure.getMessage().contains(cause), failure.getMessage());
+        assertFalse(failure.getMessage().contains(later), failure.getMessage());
     }
 
     @Test

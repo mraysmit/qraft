@@ -272,7 +272,8 @@ dev.mars.qraft.testing.fault.InjectedFaultFixture: node stop failed before retur
 
 ### Helper subprocesses
 
-A separate JVM must establish its own scope with `IntentionalErrorsHelper.inSubprocess`. Its body must
+A separate JVM must establish its own scope with `IntentionalErrorsHelper.inSubprocess`, unless it never
+returns (see the end of this section). Its body must
 return through the audit before calling `System.exit`; otherwise its errors and expectation counts would
 go unchecked. `DirectoryLockProcessFixture` receives the calling test's name and an `owner` or `contender`
 role. Only the contender declares exactly one `WAL_DIRECTORY_ALREADY_LOCKED` error. The parent test checks
@@ -284,6 +285,15 @@ Source: `logs/qraft-maven-tests-2026-10-08_13-13-09.log`, line 3:
 ```text
 2026-10-08 13:13:09.328 [wal-executor] ERROR *** INTENTIONAL ERROR: WAL_DIRECTORY_ALREADY_LOCKED, caused by RaftStorageProcessLockTest#secondJvmCannotOpenDirectoryWhileOwnerRemainsHealthy/contender *** dev.mars.raftlog.storage.FileRaftStorage - Cannot acquire exclusive lock at C:\Users\markr\AppData\Local\Temp\junit-709376945766950860\raft.lock: another process holds the lock
 ```
+
+A helper JVM that never returns cannot audit itself: a crash writer halts at its checkpoint, and
+`CrashedAgentExpiryEndToEndTest` kills its client. Its parent test audits it instead. Once the JVM has ended,
+the test passes its complete console output to `SubprocessOutputAuditHelper.requireNoErrors`. An ERROR line,
+a Logback status error, or an uncaught exception in that output fails the calling test, and the failure
+quotes each error with its stack trace. These JVMs declare no intentional error, so a flag does not excuse
+one. The three crash-writer recovery tests call it when their writer exits, and
+`CrashedAgentExpiryEndToEndTest` calls it in its teardown. Such a JVM also writes its own
+`logs/qraft-maven-tests-<timestamp>.log`, which the review of retained logs covers.
 
 ### Docker archives and uncaught exceptions
 

@@ -18,6 +18,7 @@ package dev.mars.qraft.runtime;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.mars.qraft.testing.fault.SubprocessOutputAuditHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -28,6 +29,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -72,6 +74,12 @@ class CrashedAgentExpiryEndToEndTest {
             }
         }
         http.close();
+        // The killed client never returns through an audit of its own, so its console output is audited here.
+        Path clientOutput = temporaryDirectory.resolve("client.out");
+        if (client != null && Files.exists(clientOutput)) {
+            SubprocessOutputAuditHelper.requireNoErrors("client",
+                    new String(Files.readAllBytes(clientOutput), StandardCharsets.UTF_8));
+        }
     }
 
     @Test

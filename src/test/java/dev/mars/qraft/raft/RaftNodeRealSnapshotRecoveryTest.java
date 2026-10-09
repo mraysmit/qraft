@@ -25,6 +25,7 @@ import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.state.distributed.DistributedStateCommand;
 import dev.mars.qraft.raft.api.SnapshotStore;
+import dev.mars.qraft.testing.fault.SubprocessOutputAuditHelper;
 import dev.mars.raftlog.storage.FileRaftStorage;
 import dev.mars.raftlog.storage.RaftStorage;
 import dev.mars.raftlog.storage.RaftStorageConfig;
@@ -248,8 +249,9 @@ class RaftNodeRealSnapshotRecoveryTest {
             throw new AssertionError("snapshot crash writer did not reach " + checkpoint + ":\n"
                     + Files.readString(outputFile, StandardCharsets.UTF_8));
         }
-        return new ProcessResult(process.exitValue(),
-                Files.readString(outputFile, StandardCharsets.UTF_8));
+        String output = Files.readString(outputFile, StandardCharsets.UTF_8);
+        SubprocessOutputAuditHelper.requireNoErrors("snapshot-crash-writer", output);
+        return new ProcessResult(process.exitValue(), output);
     }
 
     private FileRaftStorage wal() {

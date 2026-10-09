@@ -58,6 +58,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * races another process for a port. Elections happen only when a test fires a chosen node's timeout
  * through {@link ManualRaftTimersHelper}, so who leads, and in which term, is decided by the test.
  *
+ * <p>An RPC to a stopped member fails asynchronously. A test that stops a member, or adds one that is not
+ * there, declares that member's unreachable error and waits for it before it ends.
+ *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @version 2.0
  * @since 2026-01-08
@@ -133,39 +136,49 @@ class GrpcRaftIntegrationTest {
 
     @Test
     void aMajorityKeepsCommittingAfterAFollowerStops() throws Exception {
-        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE,
+                "node3");
         List<Member> cluster = startCluster("node1", "node2", "node3");
         Member leader = elect(cluster.get(0));
-        cluster.get(2).stop();
-        members.remove(cluster.get(2));
+        try (RaftNodeLogFixture log = new RaftNodeLogFixture()) {
+            cluster.get(2).stop();
+            members.remove(cluster.get(2));
 
-        RaftCommandResult<?> result = submit(leader, "after-stop", "two-of-three");
+            RaftCommandResult<?> result = submit(leader, "after-stop", "two-of-three");
 
-        assertInstanceOf(RaftCommandResult.Success.class, result, "two of three members are a majority");
-        leader.timers().firePeriodic(HEARTBEAT_MS);
-        awaitTrue(() -> "two-of-three".equals(cluster.get(1).state().getMetadata("after-stop")),
-                "the remaining follower applies it");
+            assertInstanceOf(RaftCommandResult.Success.class, result, "two of three members are a majority");
+            leader.timers().firePeriodic(HEARTBEAT_MS);
+            awaitTrue(() -> "two-of-three".equals(cluster.get(1).state().getMetadata("after-stop")),
+                    "the remaining follower applies it");
+            awaitError(log, leader, "Raft peer node3 became unreachable during AppendEntries");
+        }
     }
 
     @Test
     void aNewElectionAfterTheLeaderStopsAdvancesTheTerm() throws Exception {
-        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
+        IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE,
+                "node1");
         List<Member> cluster = startCluster("node1", "node2", "node3");
         Member first = elect(cluster.get(0));
         submit(first, "before", "failover");
-        first.stop();
-        members.remove(first);
+        try (RaftNodeLogFixture log = new RaftNodeLogFixture()) {
+            first.stop();
+            members.remove(first);
 
-        Member second = elect(cluster.get(1));
+            Member second = elect(cluster.get(1));
 
-        assertEquals(2, second.node().getCurrentTerm(), "a new leader is elected in a later term");
-        Member follower = cluster.get(2);
-        awaitTrue(() -> "node2".equals(follower.node().getLeaderId()) && follower.node().getCurrentTerm() == 2,
-                "node3 follows the new leader in its term");
-        // node2 held the entry but never heard it was committed; as leader it commits it together with the
-        // no-op of its own term (Raft section 5.4.2), once node3 acknowledges.
-        awaitTrue(() -> "failover".equals(second.state().getMetadata("before")),
-                "a committed entry survives the change of leader");
+            assertEquals(2, second.node().getCurrentTerm(), "a new leader is elected in a later term");
+            Member follower = cluster.get(2);
+            awaitTrue(() -> "node2".equals(follower.node().getLeaderId()) && follower.node().getCurrentTerm() == 2,
+                    "node3 follows the new leader in its term");
+            // node2 held the entry but never heard it was committed; as leader it commits it together with the
+            // no-op of its own term (Raft section 5.4.2), once node3 acknowledges.
+            awaitTrue(() -> "failover".equals(second.state().getMetadata("before")),
+                    "a committed entry survives the change of leader");
+            // The failed vote request is logged by the transport's callback whatever node2 has become by then,
+            // so the test must not end before it: it would otherwise be logged during a later test.
+            awaitError(log, second, "Failed to retrieve vote from node1");
+        }
     }
 
     @Test
@@ -230,12 +243,7 @@ class GrpcRaftIntegrationTest {
         leader.timers().firePeriodic(HEARTBEAT_MS);
         awaitTrue(() -> "node1".equals(cluster.get(1).node().getLeaderId()), "node2 knows the leader");
 
-        Logger logger = (Logger) LoggerFactory.getLogger(RaftNode.class);
-        ListAppender<ILoggingEvent> learnerFailureCapture = new ListAppender<>();
-        learnerFailureCapture.list = new CopyOnWriteArrayList<>();
-        learnerFailureCapture.start();
-        logger.addAppender(learnerFailureCapture);
-        try {
+        try (RaftNodeLogFixture log = new RaftNodeLogFixture()) {
             MembershipResponse answer = cluster.get(2).transport().join("node2", JoinRequest.newBuilder()
                     .setServerId("joining-id").setName("node4").setAddress("localhost:1").build())
                     .toCompletionStage().toCompletableFuture().get(15, TimeUnit.SECONDS);
@@ -246,16 +254,7 @@ class GrpcRaftIntegrationTest {
 
             // Joining commits before the unreachable learner's asynchronous RPC necessarily fails.
             // Complete that deliberate fault before teardown, keeping the required error declaration.
-            awaitTrue(() -> {
-                leader.timers().firePeriodic(HEARTBEAT_MS);
-                return learnerFailureCapture.list.stream().anyMatch(event -> event.getLevel() == Level.ERROR
-                            && event.getFormattedMessage().equals(
-                                    "Raft peer node4 became unreachable during AppendEntries"));
-            },
-                    "the deliberately unreachable learner is contacted and reports its flagged failure");
-        } finally {
-            logger.detachAppender(learnerFailureCapture);
-            learnerFailureCapture.stop();
+            awaitError(log, leader, "Raft peer node4 became unreachable during AppendEntries");
         }
     }
 
@@ -364,5 +363,46 @@ class GrpcRaftIntegrationTest {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!condition.getAsBoolean() && System.nanoTime() < deadline) Thread.sleep(5);
         assertTrue(condition.getAsBoolean(), description);
+    }
+
+    /**
+     * Waits until a node has logged the ERROR {@code message}, which is the unreachable-peer error the test
+     * declares, sending {@code leader}'s heartbeats meanwhile. An RPC to a member that is stopped or was never
+     * there fails asynchronously, and the assertions before this call can all hold before it does. Without the
+     * wait, teardown could stop the leader first, and the declared error would never be logged.
+     */
+    private static void awaitError(RaftNodeLogFixture log, Member leader, String message)
+            throws InterruptedException {
+        awaitTrue(() -> {
+            leader.timers().firePeriodic(HEARTBEAT_MS);
+            return log.sawError(message);
+        }, "a node logs the error \"" + message + "\"");
+    }
+
+    /**
+     * Test log fixture that records what {@link RaftNode} logs while it is open. A test opens it before it stops
+     * a member, so the failure that follows cannot be missed, and passes it to {@link #awaitError}.
+     */
+    private static final class RaftNodeLogFixture implements AutoCloseable {
+        private final Logger logger = (Logger) LoggerFactory.getLogger(RaftNode.class);
+        private final ListAppender<ILoggingEvent> events = new ListAppender<>();
+
+        RaftNodeLogFixture() {
+            events.list = new CopyOnWriteArrayList<>();
+            events.start();
+            logger.addAppender(events);
+        }
+
+        /** Whether a node has logged exactly {@code message} at ERROR since this fixture was opened. */
+        boolean sawError(String message) {
+            return events.list.stream().anyMatch(event -> event.getLevel() == Level.ERROR
+                    && event.getFormattedMessage().equals(message));
+        }
+
+        @Override
+        public void close() {
+            logger.detachAppender(events);
+            events.stop();
+        }
     }
 }

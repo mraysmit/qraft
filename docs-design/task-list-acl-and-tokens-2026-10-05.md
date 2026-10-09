@@ -1,9 +1,9 @@
 # Task List: ACLs and Tokens
 
 **Date:** 2026-10-05
-**Status:** Proposed. Nothing in section 4 is decided: each item is a recommendation to confirm or change. No code exists.
+**Status:** Proposed. Section 4's items are recommendations to confirm or change, except the two points marked "Decided 2026-10-09", in proposals 11 and 12. One point in proposal 11 is marked open. No code exists.
 **Proposed start:** after [`task-list-consul-style-client-2026-10-04.md`](task-list-consul-style-client-2026-10-04.md) (proposal 15).
-**Last updated:** 2026-10-08 (review with the other task lists: three open points, on registering a service under proposal 11, on the authorize call, and on revoking the management token; the default exit rule and the log audit in the rules)
+**Last updated:** 2026-10-09 (two points decided: the authorize call, and revoking the management token. Still open: who holds `node:write` when an application registers a service, with what the code shows for each option)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 7.3, 12, 15, 16 and 22
 **Related:** the client list's decisions 6 and 8; decision 6 of [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md), the operator token; item 9 of [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md); phase 7 of [`CONSUL_FEATURE_IMPLEMENTATION_PLAN.md`](CONSUL_FEATURE_IMPLEMENTATION_PLAN.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
@@ -127,6 +127,10 @@ Recalled, and not found in the pages read. Verify each before relying on it:
 - A registration under a name held by another node ID is refused unless the
   holder's gossip health is failing. This is the rule the client list's
   decision 8 follows.
+- A Consul agent removes from the catalog a service on its node that it does
+  not know. The anti-entropy page, read on 2026-10-09, says only that the
+  Consul agent's view is authoritative and that differences are settled in
+  its favour.
 
 Sources:
 - [ACL tokens](https://developer.hashicorp.com/consul/docs/secure/acl/token)
@@ -137,6 +141,7 @@ Sources:
 - [ACL HTTP API](https://developer.hashicorp.com/consul/api-docs/acl) and
   [token endpoints](https://developer.hashicorp.com/consul/api-docs/acl/tokens)
 - [Consul `catalog_endpoint.go`](https://github.com/hashicorp/consul/blob/main/agent/consul/catalog_endpoint.go)
+- [Anti-entropy](https://developer.hashicorp.com/consul/docs/architecture/anti-entropy)
 
 ## 4. Proposed decisions
 
@@ -250,12 +255,17 @@ so and why.
     Not covered: the Raft port, which stays trusted until transport security
     (proposal 14), and the Prometheus port.
 
-    The row for `token/self` and `authorize` was added by the review of
-    2026-10-08. Proposal 13 introduces `POST /v1/acl/authorize` without
-    saying what it needs. Under "The ACL API" row, an agent holding only a
-    node identity could not call it. The agent sends the caller's token as
-    the presenting token, and a request without one is answered for the
-    anonymous token.
+    **Decided 2026-10-09: `POST /v1/acl/authorize` answers only for the token
+    that presents it,** as `GET /v1/acl/token/self` does, and needs no grant.
+    - A process in client mode sends the caller's token as the presenting
+      token. A request without one is answered for the anonymous token.
+    - It cannot be used to ask about another token.
+    - The alternative, `acl:read` with the token named in the body, was
+      rejected: every client's own token would need `acl:read`, which also
+      reads every token's metadata.
+
+    The review of 2026-10-08 added the row: proposal 13 introduces the call
+    without saying what it needs.
 
     **Open, found by the review of 2026-10-08: who holds `node:write` when an
     application registers a service.** As written, the table cannot hold
@@ -266,23 +276,45 @@ so and why.
     - a service registered through the local API is synced under the token it
       was registered with (proposal 13).
 
-    So an application that holds a service identity is refused. There are two
-    ways out:
-    - **A. Two credentials on a synced service write.** The agent sends its
+    So an application that holds a service identity is refused. The ways out:
+    - **A. Two credentials on a synced service write.** The client sends its
       own token and the registration's token. The server takes `node:write`
-      from the agent's and `service:write` from the registration's. A caller
-      that talks to a server directly needs both grants on its one token.
-      This keeps Phase 7's guard, that a token for node A cannot register a
-      service on node B. It costs a second header on the client's protocol.
+      from the client's own and `service:write` from the registration's. A
+      caller that talks to a server directly needs both grants on its one
+      token.
+      - It keeps Phase 7's guard, that a token for node A cannot register a
+        service on node B, and section 1's "for its own node only".
+      - It costs a second header on the client's protocol, and a departure
+        from Consul. To be consistent it covers every service-scoped write
+        the client syncs: registering, deregistering, and a service's check
+        observations, which the table above lets through on `service:write`
+        alone.
     - **B. Consul's rule** (section 3). `node:write` is needed only to create
       or change the node; a service on an existing, unchanged node needs
       `service:write` alone. It needs one token and no new header. It drops
       that Phase 7 guard: a holder of `service:write` on a name can add an
       instance of it on any registered node.
+    - **C. Consul's rule, with the client authoritative for its node.** As B,
+      and the client also deregisters the services on its node that it did
+      not register. A planted instance then lasts until the client on that
+      node next reconciles. It is new client behaviour, and it does nothing
+      for a node with no process running in client mode.
+
+    Two differences from Consul weigh on B (checked in the code on
+    2026-10-09):
+    - The server's HTTP API listens on every interface (`HttpApiServer`),
+      where Consul's binds to `127.0.0.1` by default. Under B, a stolen
+      service token works from anywhere that reaches a server.
+    - The client's `ServiceReconciler` deregisters only what it registered
+      itself. It never removes another caller's service from its node, so
+      under B a planted instance stays until someone deregisters it. Consul
+      treats its own agent's view of its node as authoritative when it syncs.
 
     Recommended: A, because section 1 promises that a client registers "for
-    its own node only". Decide before Phase 4. The row, proposal 13, Phase 6,
-    and Phase 7 follow the choice.
+    its own node only", and because of those two differences. B is the
+    simpler design, and the right one if that promise is not worth a second
+    credential; section 1 and Phase 7 then change. Decide before Phase 4.
+    The row, proposal 13, Phase 6, and Phase 7 follow the choice.
 
 ### Configuration and bootstrap
 
@@ -302,14 +334,19 @@ so and why.
       secrets are mounted files, and it is also the recovery path: when every
       management secret is lost, put a new one in the file and restart the
       leader.
-    - **Open, found by the review of 2026-10-08: revoking that token.** A
-      leader installs the file's secret whenever no token has its hash. So a
-      management token deleted through the API returns at the next leadership
-      change while any server's file still holds its secret, and servers
-      with different files each install their own. Recommended: require the
-      same file on every server, and document the order for revoking, which
-      is to replace the secret in every server's file first and then delete
-      the old token. Phase 3 has a task for it.
+    - **Decided 2026-10-09: revoking that token.** Every server mounts the
+      same file. To revoke the token, replace the secret in every server's
+      file first, and then delete the old token.
+      - A leader installs the file's secret whenever no token has its hash.
+        So a token deleted first returns at the next leadership change,
+        while any server's file still holds its secret. Servers with
+        different files each install their own.
+      - This is how Consul's `initial_management` token behaves, and it adds
+        no replicated state.
+      - The alternative, recording the hash of a deleted management token so
+        that no file can install it again, was rejected: it departs from
+        Consul and adds a set to the ACL state and its snapshot.
+      - Phase 3 tests the rule, and Phase 9 puts the order in the runbook.
     - With ACLs enabled, `server.operator.token` is refused as a conflicting
       setting, and `operator:write` replaces it. With ACLs disabled it guards
       removal as it does today.
@@ -419,9 +456,9 @@ check.
 - [ ] The leader installs the management token when it gains leadership and
   none with that hash exists. Installing twice changes nothing.
 - [ ] Log the effective settings without the secret.
-- [ ] Settle and test how the management token is revoked (proposal 12, open
-  point of 2026-10-08): a deleted token is installed again while a server's
-  file still holds its secret, and is not once every file holds a new one.
+- [ ] Test how the management token is revoked (proposal 12, decided
+  2026-10-09): a deleted token is installed again while a server's file
+  still holds its secret, and is not once every file holds a new one.
 
 **Exit:** Lifecycle tests on real storage: a restarted cluster keeps its
 tokens, and a new secret in the file is installed at the next leadership.
@@ -498,7 +535,9 @@ one, and none.
 - [ ] Update the design's sections 7.3, 12, 15, 16 and 22, the feature
   validation, and the Consul plan's phase 7 checklist.
 - [ ] Add to `RAFT_STORAGE_OPERATIONS.md`: backups hold token hashes, not
-  secrets, and the procedure for a lost management secret.
+  secrets; the procedure for a lost management secret; and the order for
+  revoking the management token (proposal 12): every server's file first,
+  then the old token.
 - [ ] Decide whether `server.acl.enabled` defaults to `true`, and whether
   `server.operator.token` is removed.
 

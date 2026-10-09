@@ -26,6 +26,7 @@ import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.state.distributed.DistributedStateCommand;
 import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
+import dev.mars.qraft.testing.fault.SubprocessOutputAuditHelper;
 import dev.mars.raftlog.storage.FileRaftStorage;
 import dev.mars.raftlog.storage.RaftStorage;
 import dev.mars.raftlog.storage.RaftStorageConfig;
@@ -326,6 +327,7 @@ class RaftNodeRealStorageRecoveryTest {
                     + Files.readString(outputFile, StandardCharsets.UTF_8));
         }
         String output = Files.readString(outputFile, StandardCharsets.UTF_8);
+        SubprocessOutputAuditHelper.requireNoErrors("crash-writer", output);
         return new ProcessResult(process.exitValue(), output);
     }
 

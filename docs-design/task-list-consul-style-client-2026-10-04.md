@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-04
 **Status:** Proposed. It needs the `client` package and the new node model and routes of [`task-list-single-pom-and-quorus-removal-2026-10-04.md`](task-list-single-pom-and-quorus-removal-2026-10-04.md). It starts after that list and after the rest of [`task-list-raft-membership-changes-2026-09-29.md`](task-list-raft-membership-changes-2026-09-29.md), Steps 5 to 8 (decided 2026-10-05).
-**Last updated:** 2026-10-08 (review with the other task lists: the renamed contract test, the request bodies of decision 5, the open question on the `controllers` object, and the log audit in the rules)
+**Last updated:** 2026-10-09 (decision 10: the `controllers` object becomes `servers` in Phase 2. On 2026-10-08, the review with the other task lists: the renamed contract test, the request bodies of decision 5, and the log audit in the rules)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 4.3, 5, 6.2, 7.3, 8, 12.1 and 16
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
@@ -23,8 +23,8 @@ readiness.
 
 ## 2. Decisions
 
-Decisions 1 to 8 were made 2026-10-04, and decision 9 on 2026-10-05.
-Decisions 5 to 8 follow the Consul pattern.
+Decisions 1 to 8 were made 2026-10-04, decision 9 on 2026-10-05, and
+decision 10 on 2026-10-09. Decisions 5 to 8 follow the Consul pattern.
 
 1. **Deployment target:** VMs and bare metal, with one client per host.
 2. **Client-to-server transport:** HTTP. The client keeps its classified
@@ -103,18 +103,16 @@ Decisions 5 to 8 follow the Consul pattern.
      bind address of Phase 3 instead, as Consul's `client_addr` is set for
      containers. That is documented, not tested here.
 
-**Open, raised by the review of 2026-10-08: the client's `controllers`
-configuration object.**
-- The single-POM list's Phase 3 renamed the client's endpoint classes to
-  `ServerEndpoints`, `ServerRetryPolicy`, and `ServerContactTracker`. It kept
-  the `controllers` object in the client's JSON, because renaming it changes
-  a configuration contract.
-- No list owns that rename.
-- Phase 2 here already changes the contract, with `agent.nodeName` and a
-  required `agent.dataDirectory`.
-- Recommended: rename `controllers` to `servers` in Phase 2, in the same
-  change, and refuse the old key with a message that names the new one.
-  Decide before Phase 2 starts.
+10. **The client's `controllers` configuration object becomes `servers`.**
+    Decided 2026-10-09; raised by the review of 2026-10-08.
+    - The rename happens in Phase 2, which already changes the client's
+      configuration contract, with `agent.nodeName` and a required
+      `agent.dataDirectory`.
+    - The old key is refused, with a message that names the new one.
+    - The single-POM list's Phase 3 had renamed the client's endpoint classes
+      to `ServerEndpoints`, `ServerRetryPolicy`, and `ServerContactTracker`.
+      It kept the `controllers` object, because renaming it changes a
+      configuration contract, and no list owned that rename.
 
 ## 3. Rules
 
@@ -158,6 +156,11 @@ and Docker suites.
   server's `ServerIdentity` through `common`.
 - [ ] Rename `agent.id` to `agent.nodeName`, defaulting to the host name.
   Update the configuration examples and the Docker configurations.
+- [ ] Rename the `controllers` object to `servers` (decision 10). Refuse
+  `controllers` with a message that names `servers`. Update the
+  configuration examples, the Docker configurations, and
+  `DockerDeploymentContractTest`, which today checks that `controllers` is
+  preserved.
 - [ ] Server side: store the node ID with the node, using a new optional
   protobuf field; older entries load without one.
   - Refuse a held name with `node_name_reserved`.
