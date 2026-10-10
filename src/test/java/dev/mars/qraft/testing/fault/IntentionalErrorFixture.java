@@ -227,6 +227,11 @@ public enum IntentionalErrorFixture {
         return kind;
     }
 
+    /** The level an intentional error is logged at, or {@code null} for an injected failure. */
+    Level level() {
+        return level;
+    }
+
     /**
      * Whether {@code event} is this intentional error: the same logger and level, and a formatted message that the
      * pattern matches completely. Always false for an injected failure, which is recognised by its exception.

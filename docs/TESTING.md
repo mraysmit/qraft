@@ -298,7 +298,7 @@ one. The three crash-writer recovery tests call it when their writer exits, and
 ### Docker archives and uncaught exceptions
 
 Docker test classes declare their expected errors with `@ExpectedDockerErrorsHelper`. At class teardown,
-`DockerLogExtensionHelper` audits captured output against those declarations. Matching ERROR entries are
+`DockerLogExtensionHelper` audits captured output against those declarations. Matching entries are
 flagged in `logs/docker/<TestClass>/`, retaining their original timestamps and stack traces. Recognised
 ERROR messages are also replayed into the main test log with class-level attribution. The replay's
 timestamp and `[main]` thread describe the audit reprinting the message, rather than the original event.
@@ -313,6 +313,21 @@ between the original error and the rethrow do not prevent the match. Compose and
 on uncaught headers are preserved and audited. A missing matching error, different
 directory or cause, undeclared exception, or malformed uncaught-exception header fails the audit and is
 archived without an intentional flag. The recognised rethrow is not replayed as a second ERROR event.
+
+An event below ERROR that carries a stack trace is a third audit check. A definition names its own
+level, so a class can declare such an event. The audit then flags it like a declared ERROR and replays
+it into the main test log at its own level. Any other event below ERROR that is followed by stack-trace
+lines fails the audit and is archived without a flag. An event below ERROR without a stack trace is not
+checked.
+
+The one definition of this kind is `RAFT_PEER_NAME_UNRESOLVED`. A server whose peer the test has killed
+or disconnected can no longer resolve that peer's name, and gRPC reports each failed lookup as a WARN
+whose message holds the lookup's stack trace. The definition names the gRPC logger, the WARN level, and
+the whole first line, with the same host in the channel, the description, and the exception. Every
+Docker class that declares `RAFT_PEER_UNREACHABLE` declares it too, and a test checks that.
+
+Docker merges stderr into stdout, so an event can land inside an uncaught exception's trace. Frames that
+follow an uncaught exception therefore belong to that exception, which has its own check above.
 
 Source: `logs/docker/DockerDurableRestartTest/lock-contender.log`, lines 82 and 95-97. These are nonadjacent
 extracts; intervening cleanup messages and the first error's trace are omitted:
@@ -337,7 +352,8 @@ each test class. The Logback check records undeclared ERROR events and events ca
 exception at any level. Problems logged outside a scope are also checked when a class closes. The extension
 fails the test or class for those problems or unmet expected counts, even if its normal assertions passed.
 It also refuses a test runtime without the required started logging check attached to the root logger.
-Docker auditing separately rejects undeclared or unparseable ERROR entries and unmatched uncaught exceptions.
+Docker auditing separately rejects undeclared or unparseable ERROR entries, unmatched uncaught exceptions,
+and undeclared events below ERROR that carry a stack trace.
 
 Review the captured Maven output, application logs, subprocess logs, and Docker archives. Check that error
 headers carry the expected flag and identify the responsible test, and that their messages and traces

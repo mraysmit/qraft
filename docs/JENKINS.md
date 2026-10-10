@@ -105,6 +105,12 @@ Phase 6 of the single-POM task list. It took 8 minutes 28 seconds, with a PeeGee
   recorded in Phase 6 of the task list.
 - The recovery test that timed out in build 2 passed in 12.1 seconds with its new client profile.
 
+[Build 7](http://192.168.137.32:8080/job/Qraft/7/), of the same day on commit `cbb93f4`, failed, as
+intended: it is the red run of the fix for those warnings. The commit holds the new definition and seven
+new tests of the Docker log audit, without the change to the audit. `DockerLogCaptureTest` ran 27 tests
+with the 5 predicted failures. The default suite ran 906 tests with those 5 failures, and Jenkins skipped
+the end-to-end and Docker stages. It took 1 minute 23 seconds.
+
 No build ran between 2026-10-04 and 2026-10-10. In that time the `agent` directive of the
 `Jenkinsfile` had been renamed by mistake, which Jenkins would have refused; it was restored in
 `ce5890d` before build 4.

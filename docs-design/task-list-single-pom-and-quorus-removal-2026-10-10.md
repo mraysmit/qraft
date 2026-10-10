@@ -1889,9 +1889,18 @@ question was not open.
     any other event below ERROR that carries a stack trace;
   - the five Docker classes that kill or disconnect a server declare the
     definition, as they already declare `RAFT_PEER_UNREACHABLE`.
-- State: the definition and seven tests are written in
-  `DockerLogCaptureTest`. Five of them fail until the audit and the
-  declarations change; that red run has not been made yet.
+- Red: Jenkins build 7, on `cbb93f4`, which holds the definition and the
+  seven new tests without the audit change. `DockerLogCaptureTest` ran 27
+  tests with 5 failures and no error: the five predicted. The default suite
+  ran 906 tests with those 5 failures, and the two later stages were
+  skipped. The two new tests that passed guard the change from going too
+  far: an event below ERROR without a stack trace is no problem, and an
+  event that Docker merges into an uncaught exception's trace is not
+  charged with its frames.
+- Green: the audit change and the five declarations are written, with the
+  rule in `docs/TESTING.md`. Not built yet. Before any build, a line-for-line
+  port of the changed audit was run over the container logs of builds 4 to
+  6: it flags all 15, 10, and 10 warnings and reports no other problem.
 
 ### Phase 7. Replace the Vert.x-shaped async layer
 

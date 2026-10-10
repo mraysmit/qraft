@@ -62,7 +62,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 @Tag("docker")
-@ExpectedDockerErrorsHelper(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE)
+@ExpectedDockerErrorsHelper({
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE,
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_NAME_UNRESOLVED
+})
 @Execution(ExecutionMode.SAME_THREAD)
 @Timeout(value = 10, unit = TimeUnit.MINUTES)
 class DockerRunningPartitionTest {

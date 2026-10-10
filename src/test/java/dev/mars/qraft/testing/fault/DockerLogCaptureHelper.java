@@ -49,6 +49,8 @@ public final class DockerLogCaptureHelper {
     private static final Pattern ERROR_TOKEN = Pattern.compile("(?:^|[|\\s-])ERROR(?:[|:\\s-]|$)");
     private static final Pattern UNCAUGHT_EXCEPTION = Pattern.compile(
             "(?:^|\\s)Exception in thread \"[^\"]+\" (?<exception>.+)$");
+    private static final Pattern STACK_TRACE_LINE = Pattern.compile(
+            "^(?:\\S+ \\| )?(?:\\s+at \\S+\\(.*\\)|Caused by: \\S.*|\\s+\\.\\.\\. \\d+ (?:more|common frames omitted))$");
     private static final Map<String, String> PREVIOUS_OUTPUT = new HashMap<>();
     private static final Map<String, List<ExternalError>> PREVIOUS_ERRORS = new HashMap<>();
 
@@ -135,7 +137,9 @@ public final class DockerLogCaptureHelper {
                 }
                 PREVIOUS_ERRORS.putAll(history);
                 observed.forEach(IntentionalErrorsHelper::expect);
-                recognised.forEach(event -> LoggerFactory.getLogger(event.logger()).error(event.message()));
+                recognised.forEach(event -> LoggerFactory.getLogger(event.logger())
+                        .atLevel(org.slf4j.event.Level.valueOf(event.error().level().toString()))
+                        .log(event.message()));
             } catch (IOException error) {
                 problems.add("could not archive Docker logs for " + owner + ": " + error.getMessage());
             } finally {
@@ -154,19 +158,27 @@ public final class DockerLogCaptureHelper {
         return audit(output, expected, null);
     }
 
-    /** Labels declared errors and their matching uncaught rethrows; other lines and stack traces are preserved. */
+    /**
+     * Labels declared errors, at the level each is declared at, and their matching uncaught rethrows; other lines
+     * and stack traces are preserved. An undeclared ERROR event is a problem, and so is an undeclared event below
+     * ERROR that carries a stack trace.
+     */
     static Audit audit(String output, Set<IntentionalErrorFixture> expected, String classOwner) {
         return audit(output, expected, classOwner, List.of());
     }
 
     private static Audit audit(String output, Set<IntentionalErrorFixture> expected, String classOwner,
                                List<ExternalError> previous) {
+        String[] rawLines = output.split("(?<=\\n)", -1);
+        String[] lines = new String[rawLines.length];
+        for (int index = 0; index < rawLines.length; index++) {
+            lines[index] = ANSI.matcher(rawLines[index]).replaceAll("").stripTrailing();
+        }
         List<ExternalError> recognised = new ArrayList<>();
-        // Docker can merge stderr ahead of stdout. Discover matching ERROR events before auditing rethrows.
-        for (String rawLine : output.split("(?<=\\n)", -1)) {
-            String line = ANSI.matcher(rawLine).replaceAll("").stripTrailing();
+        // Docker can merge stderr ahead of stdout. Discover matching events before auditing rethrows.
+        for (String line : lines) {
             Matcher event = EVENT.matcher(line);
-            if (!event.matches() || !"ERROR".equals(event.group("level"))) continue;
+            if (!event.matches()) continue;
             IntentionalErrorFixture match = matchDeclaredError(event, expected);
             if (match != null) {
                 recognised.add(new ExternalError(match, event.group("logger"), event.group("message"), line));
@@ -176,16 +188,24 @@ public final class DockerLogCaptureHelper {
         previous.stream().filter(error -> expected.contains(error.error())).forEach(rethrowCandidates::add);
         List<String> problems = new ArrayList<>();
         StringBuilder archived = new StringBuilder();
-        for (String rawLine : output.split("(?<=\\n)", -1)) {
-            String line = ANSI.matcher(rawLine).replaceAll("").stripTrailing();
+        // Docker merges stderr into stdout, so an event can land inside an uncaught exception's trace. Frames
+        // after an uncaught exception therefore belong to it, and it is audited on its own below.
+        boolean afterUncaughtException = false;
+        for (int index = 0; index < rawLines.length; index++) {
+            String rawLine = rawLines[index];
+            String line = lines[index];
             Matcher event = EVENT.matcher(line);
             if (event.matches()) {
-                if ("ERROR".equals(event.group("level"))) {
-                    IntentionalErrorFixture match = matchDeclaredError(event, expected);
-                    if (match == null) problems.add("undeclared container " + line);
-                    else rawLine = labelLine(rawLine, event.start("logger"), match, classOwner);
+                IntentionalErrorFixture match = matchDeclaredError(event, expected);
+                if (match != null) {
+                    rawLine = labelLine(rawLine, event.start("logger"), match, classOwner);
+                } else if ("ERROR".equals(event.group("level"))) {
+                    problems.add("undeclared container " + line);
+                } else if (!afterUncaughtException && carriesStackTrace(lines, index)) {
+                    problems.add("undeclared container event with a stack trace: " + line);
                 }
             } else if (line.contains("Exception in thread")) {
+                afterUncaughtException = true;
                 Matcher uncaught = UNCAUGHT_EXCEPTION.matcher(line);
                 if (!uncaught.find()) {
                     problems.add("unparseable container uncaught exception: " + line);
@@ -205,10 +225,21 @@ public final class DockerLogCaptureHelper {
         return new Audit(List.copyOf(recognised), List.copyOf(problems), archived.toString());
     }
 
+    /** The declared error with this event's logger, level, and message, or {@code null}. */
     private static IntentionalErrorFixture matchDeclaredError(Matcher event, Set<IntentionalErrorFixture> expected) {
+        Level level = Level.toLevel(event.group("level"));
         return expected.stream()
-                .filter(error -> error.matches(event.group("logger"), Level.ERROR, event.group("message")))
+                .filter(error -> error.matches(event.group("logger"), level, event.group("message")))
                 .findFirst().orElse(null);
+    }
+
+    /** Whether a stack-trace line follows the event at {@code index} before the next event or uncaught exception. */
+    private static boolean carriesStackTrace(String[] lines, int index) {
+        for (int next = index + 1; next < lines.length; next++) {
+            if (EVENT.matcher(lines[next]).matches() || lines[next].contains("Exception in thread")) return false;
+            if (STACK_TRACE_LINE.matcher(lines[next]).matches()) return true;
+        }
+        return false;
     }
 
     private static String labelLine(String rawLine, int offset, IntentionalErrorFixture error, String classOwner) {

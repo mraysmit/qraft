@@ -57,7 +57,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 @Tag("docker")
-@ExpectedDockerErrorsHelper(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE)
+@ExpectedDockerErrorsHelper({
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE,
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_NAME_UNRESOLVED
+})
 // Each test starts its own cluster and then waits on bounded conditions; the method budget exceeds their sum,
 // so a failure reports the condition that was not met rather than the module's default method timeout.
 @Timeout(value = 10, unit = TimeUnit.MINUTES)
