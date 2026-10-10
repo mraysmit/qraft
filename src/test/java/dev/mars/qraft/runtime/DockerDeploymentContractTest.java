@@ -177,6 +177,12 @@ class DockerDeploymentContractTest {
             for (String removed : List.of("docker-compose-server-first", "docker-compose-loki", "test-data")) {
                 assertFalse(content.contains(removed), script + " must not use the removed " + removed);
             }
+            assertFalse(content.contains("prune"), script + " must not prune Docker volumes or networks:"
+                    + " a prune also removes those of every other project on the machine");
+            if (script.contains("start-quick")) {
+                assertTrue(content.contains("down -v") || content.contains("down_services -v"),
+                        script + ": clean removes the data volumes of Qraft's own compose files");
+            }
             for (String line : content.lines().filter(text -> text.contains("docker-compose-")).toList()) {
                 Matcher file = Pattern.compile("docker-compose-[a-z0-9-]+\\.yml").matcher(line);
                 while (file.find()) {

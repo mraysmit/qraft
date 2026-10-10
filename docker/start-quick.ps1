@@ -20,7 +20,7 @@ function Show-Help {
     Write-Host "Actions:" -ForegroundColor Yellow
     Write-Host "  cluster [3node|5node|network-test]  - Start Qraft cluster" -ForegroundColor White
     Write-Host "  stop                                - Stop all services" -ForegroundColor White
-    Write-Host "  clean                               - Clean up containers and volumes" -ForegroundColor White
+    Write-Host "  clean                               - Remove Qraft's containers and data volumes" -ForegroundColor White
     Write-Host "  status                              - Show service status" -ForegroundColor White
     Write-Host "  help                                - Show this help" -ForegroundColor White
     Write-Host ""
@@ -28,6 +28,8 @@ function Show-Help {
     Write-Host "  .\start-quick.ps1 cluster           # Start 3-node cluster" -ForegroundColor Gray
     Write-Host "  .\start-quick.ps1 cluster 5node     # Start 5-node cluster" -ForegroundColor Gray
     Write-Host "  .\start-quick.ps1 status            # Check service status" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "The cluster types share their data volumes: run clean before starting another type." -ForegroundColor Yellow
 }
 
 function Start-Cluster {
@@ -75,19 +77,14 @@ function Stop-Services {
 }
 
 function Clean-Environment {
-    Write-Host "Cleaning up Docker environment..." -ForegroundColor Yellow
-    
-    # Stop services first
-    Stop-Services
-    
-    # Remove volumes
-    Write-Host "Removing volumes..." -ForegroundColor Cyan
-    docker volume prune -f
-    
-    # Remove unused networks
-    Write-Host "Removing unused networks..." -ForegroundColor Cyan
-    docker network prune -f
-    
+    Write-Host "Removing Qraft's containers, networks, and data volumes..." -ForegroundColor Yellow
+
+    # Only what these compose files define. Other projects' volumes and networks are left alone.
+    docker compose -f compose/docker-compose-single-server.yml down -v 2>$null
+    docker compose -f compose/docker-compose-cluster.yml down -v 2>$null
+    docker compose -f compose/docker-compose-5node.yml down -v 2>$null
+    docker compose -f compose/docker-compose-network-test.yml down -v 2>$null
+
     Write-Host "Environment cleaned." -ForegroundColor Green
 }
 
