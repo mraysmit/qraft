@@ -3,7 +3,7 @@
 **Date:** 2026-10-04
 **Last updated:** 2026-10-10 (Phase 6 applied, and verified by Jenkins build 6 except for its start commands and its dashboard: three unused log stacks, the load balancer, the demo scripts, and the hand-test data deleted, the start scripts reduced, and the kept observability stack corrected; then the recovery test that timed out on Jenkins given its own client profile. Phase 5 done and its exit met: the version source, then the configuration without a default document, as typed records, with one shared parsing helper; each verified on Jenkins; three third-party keywords that Phase 3A's sweep had renamed are restored; the file renamed to the date of its last change. On 2026-10-09: the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
 **Status:** In progress. This is the current task list. It started on 2026-10-04 at the user's request, before the membership list's Step 4 close-out gate.
-**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 was done and its exit met on 2026-10-10: Jenkins build 4 verified its version source and build 5 the rest. Phase 6 was applied on 2026-10-10; Jenkins build 6 verified it on `d0275a7`. Its exit is open for what no build can show: the start commands run by hand, and a look at the corrected dashboard on a running stack. Build 8 then failed on the recovery test and showed its cause, a kill during the follower's first snapshot; the fix to the tests waits for a build. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
+**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 was done and its exit met on 2026-10-10: Jenkins build 4 verified its version source and build 5 the rest. Phase 6 was applied on 2026-10-10; Jenkins build 6 verified it on `d0275a7`. Its exit is open for what no build can show: the start commands run by hand, and a look at the corrected dashboard on a running stack. Build 8 then failed on the recovery test and showed its cause, a kill during the follower's first snapshot; build 9 passed with the fix, on `122d739`. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
 **Last reviewed:** 2026-10-08, against the code at commit `9a4adf0`, with the other four task lists. The status table in section 4 and every item marked "review of 2026-10-08" come from that review. No build was run for it. The logs that the Phase 2A and Phase 3 records cite were written in another working tree and were not available, so their counts were checked for arithmetic only. The earlier review of 2026-10-05 was against `24beac3`; its items keep their date.
 **Order of work:**
 - The membership list's Step 4 close-out gate is the first task of Phase 7 here.
@@ -87,7 +87,7 @@ rules and extracts from that run.
 | 3A. One word for each mode | Added and done 2026-10-09; verified the same day | 5 of 5 | `5a00975` |
 | 4. Node model and API | Done 2026-10-09, exit met; its four open points settled and its decisions confirmed by the user the same day | 7 of 7 | `e4bf00d` to `a6e7930` |
 | 5. Configuration and version | Done 2026-10-10, exit met | 6 of 6 | `693449e`, `c123ee9`, `12d365c`, `d4e1af8` |
-| 6. Docker and observability | Applied 2026-10-10, with the load balancer removed and the recovery test given its own client profile, both at the user's decision; verified by Jenkins build 6. The exit is open for the start commands run by hand and a look at the corrected dashboard. The gRPC warnings the audit found are flagged since build 8. Build 8 failed on the recovery test and showed its cause, a kill during the follower's first snapshot; the fix to the tests waits for a build | 10 of 12 | `ce5890d`, `22a46a9`, `85bb120`, `d0275a7`, `cbb93f4`, `362b507`; the test fix not committed |
+| 6. Docker and observability | Applied 2026-10-10, with the load balancer removed and the recovery test given its own client profile, both at the user's decision; verified by Jenkins build 6. The exit is open for the start commands run by hand and a look at the corrected dashboard. The gRPC warnings the audit found are flagged since build 8. Build 8 showed the cause of the recovery test's timeout, a kill during the follower's first snapshot; build 9 passed with the fix and with no unflagged error or stack trace | 11 of 12 | `ce5890d`, `22a46a9`, `85bb120`, `d0275a7`, `cbb93f4`, `362b507`, `122d739` |
 | 7. Async layer | Not started | 0 of 6 | |
 | 8. Documentation and close-out | Started early for Phases 1 and 2; Phase 3's names done with Phase 3; the documents of Phases 4 and 5 done as each ended | 2 of 6 | |
 
@@ -1720,7 +1720,7 @@ can show: the start commands run by hand, and a look at the dashboard.
   not reach an image; with Docker's legacy builder it would still have been
   sent to the daemon with the build context. `.dockerignore` now excludes it
   (`ce5890d`).
-- [ ] Find the cause of the one Docker failure on Jenkins (added 2026-10-05):
+- [x] Find the cause of the one Docker failure on Jenkins (added 2026-10-05):
   `DockerClientRecoveryTest.aKilledFollowerInstallsTheLeadersSnapshotAndThenHoldsTheLeadersHealthState`
   timed out after 90 seconds in build 2 of 2026-10-04 (`docs/JENKINS.md`),
   while the Phase 2 run on the development machine passed 30 of 30. An
@@ -1810,7 +1810,7 @@ can show: the start commands run by hand, and a look at the dashboard.
     108.1 now. It kept no container logs, so this is not proven for build 2,
     but nothing tells the two failures apart.
 
-  Fix, applied 2026-10-10, not built yet.
+  Fix, applied 2026-10-10 (`122d739`).
   `DockerHealthApiHelper.awaitFirstSnapshotOnEveryServer` waits until every
   server has published its first snapshot, and writes filler entries through
   the leader while one has not. A server reports a snapshot index above zero
@@ -1825,7 +1825,13 @@ can show: the start commands run by hand, and a look at the dashboard.
     failed yet.
 
   No red run can be forced for a race of this kind. Build 8 is the evidence.
-  The task stays open until a build has passed with the fix.
+
+  Closed 2026-10-10. Jenkins build 9, on `122d739`, passed with the fix: this
+  test in 13.0 seconds, the three of `DockerDurableRestartTest` in 3.4,
+  24.8, and 13.8 seconds, and no server refused to start anywhere in its
+  logs. One pass does not show that a race is gone: the test had passed in
+  builds 4, 5, and 6 without the fix. What shows it is the order the tests
+  now keep: no server is killed before its first snapshot is published.
 
   The client profile stays. The limit it removes was real, though it was not
   what failed.
@@ -1834,6 +1840,52 @@ can show: the start commands run by hand, and a look at the dashboard.
   writes its first snapshot stays down until someone rebuilds it from its
   peers. Its log is still whole at that moment, because the log is compacted
   only after the snapshot is published. That is the documented design.
+
+  **The window itself, tested 2026-10-10 at the user's request** ("The race
+  condition is worrying"), and written up in
+  [`docs/TEST-RESULTS.md`](../docs/TEST-RESULTS.md). `RaftNodeRealSnapshotRecoveryTest` has seven new
+  tests, named `firstSnapshotCrash...`. Each halts a helper JVM at one point
+  of a node's first snapshot, with real storage, and restarts the node on
+  what is left. That is a kill at that exact point, every time. Every point
+  is covered:
+
+  | The kill lands | Left on disk | On restart |
+  |---|---|---|
+  | before the temporary file is created | the whole log | starts by itself, from the log |
+  | after the temporary file is written | temporary file, whole log | **refuses to start** |
+  | after the temporary file is forced to disk | temporary file, whole log | **refuses to start** |
+  | after the file is renamed into place | snapshot, whole log | starts by itself, from the snapshot |
+  | after the directory is forced | snapshot, whole log | starts by itself, from the snapshot |
+  | before the log is compacted | snapshot, whole log | starts by itself, from the snapshot |
+  | after the log is compacted | snapshot, log suffix | starts by itself, from the snapshot |
+
+  - In both refusing cases the tests also show that nothing is lost: the log
+    still holds all five entries, and once the temporary file is moved out
+    of the storage directory the node starts from the log alone and holds
+    its whole state.
+  - Six of the seven tests that were there before cover the same points for
+    a node that already has a published snapshot. It starts by itself at
+    every one and removes the stale temporary file. The seventh already
+    tested the refusal after the forced write.
+  - So the exposure is one window: from the creation of `snapshot.dat.tmp`
+    to its rename, during the first snapshot a node ever writes. In build 8
+    that snapshot was 1830 bytes.
+  - Not covered by a test of its own: a follower killed while it writes a
+    first snapshot that it is installing from the leader. It goes through
+    the same store, so the same refusal is to be expected.
+  - Run locally at the user's request, in the one visible console:
+    `logs/qraft-tests-2026-10-10_15-33-10-939.log`. 25 tests passed, none
+    failed: 14 in this class, 4 in `FileSnapshotStoreTest`, 7 in
+    `RaftNodeInstalledSnapshotRealRecoveryTest`. The 8 log files the run
+    wrote hold 4 flagged ERROR events and no error or stack trace without a
+    flag. The new tests passed at their first run; they describe what the
+    server already does, so there was no red state to see.
+  - What the tests suggest, for the user to decide: the refusal protects
+    nothing in this case. All servers reach the snapshot threshold at about
+    the same time, so one power loss in that moment could leave several
+    refusing at once, with every log whole. A server could set the
+    temporary file aside and start from its log whenever the log has no
+    compacted prefix, and keep refusing when it has one.
 - [ ] Make the kept stack ask only for what a server publishes (added
   2026-10-10; applied the same day, not yet seen working). Removing the
   client panels showed that more of the stack pointed at nothing.
@@ -1896,11 +1948,17 @@ this phase:
 Jenkins build 8, on `362b507`, failed in its Docker stage. Its 906 default
 tests and 10 end-to-end tests passed. In the Docker stage one test timed
 out and its class failed its log audit, both from the cause recorded under
-the recovery-test task above; the other 24 tests passed. The fix waits for
-a build.
+the recovery-test task above; the other 24 tests passed.
+
+Jenkins build 9, on `122d739`, which holds everything of this phase, passed:
+- Default build: 906 tests, every coverage gate met. End-to-end: 10. Docker
+  and slow: 25. Jenkins published 941 results, none failed or skipped.
+- The console and the 103 archived log files were read, except two binary
+  Raft logs. They hold 710 flagged ERROR events, counting copies, and one
+  flagged uncaught exception. No ERROR event, no uncaught exception, and no
+  stack trace is without a flag.
 
 Still needed:
-- a build that passes with the fix to the tests that kill a server;
 - each remaining command run once by hand: `start.ps1` with `cluster`,
   `multinode`, `status`, and `stop`; `start-quick.ps1 cluster` with `3node`,
   `5node`, and `network-test`, then `status`, `stop`, and `clean`; and
@@ -1963,6 +2021,9 @@ question was not open.
   That failure showed the rule for uncaught exceptions at work. Docker had
   merged an INFO event into the trace of the follower's uncaught exception,
   and the audit did not charge that event with the frames.
+- Build 9 confirms it on a passing run: 5 of these warnings, all in
+  `DockerDurableRestartTest`, all flagged. Every stack-trace line in every
+  log of the build belongs to a flagged event.
 
 ### Phase 7. Replace the Vert.x-shaped async layer
 

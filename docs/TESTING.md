@@ -208,6 +208,7 @@ equivalents.
 - Test results: `target/surefire-reports/`. One XML and one text file per class, with the time
   each class took.
 - Coverage: `target/site/jacoco/index.html`, written by `mvn install`.
+- What an investigation with tests found, and what it did not: [TEST-RESULTS.md](TEST-RESULTS.md).
 
 ## Intentional error flags and log auditing
 

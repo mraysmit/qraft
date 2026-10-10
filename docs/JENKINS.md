@@ -121,7 +121,19 @@ run of that fix, and failed for another reason. It took 9 minutes 55 seconds.
   again, it logged "Refusing startup because unpublished first snapshot /app/data/snapshot.dat.tmp has
   no published /app/data/snapshot.dat" and ended. `docs/RAFT_STORAGE_OPERATIONS.md` documents that
   refusal, so the defect is the test's: it must not kill a server before its first snapshot is published.
-  The fix is recorded in Phase 6 of the task list.
+  The fix is recorded in Phase 6 of the task list, and [TEST-RESULTS.md](TEST-RESULTS.md) describes the
+  window and the tests of it.
+
+[Build 9](http://192.168.137.32:8080/job/Qraft/9/), of the same day on commit `122d739`, passed with
+that fix. It took 7 minutes 45 seconds.
+- Default build: 906 tests, every coverage gate met. End-to-end: 10. Docker and slow: 25.
+- Jenkins published 941 results, none failed or skipped, and archived 816 files.
+- The console and the 103 archived log files hold 710 flagged ERROR events, counting copies, and one
+  flagged uncaught exception. No ERROR event, no uncaught exception, and no stack trace is without a
+  flag. The 5 gRPC name-resolution warnings of this run are all flagged.
+- The recovery test passed in 13.0 seconds, and no server refused to start. One pass does not show
+  that a race is gone; the order the tests now keep does: none kills a server before its first snapshot
+  is published.
 
 No build ran between 2026-10-04 and 2026-10-10. In that time the `agent` directive of the
 `Jenkinsfile` had been renamed by mistake, which Jenkins would have refused; it was restored in

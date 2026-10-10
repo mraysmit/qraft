@@ -54,6 +54,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * using a separate-JVM crash writer with real {@link FileRaftStorage} and {@link
  * FileSnapshotStore}.
  *
+ * <p>The {@code firstSnapshot} tests cover a node that has no published snapshot yet, at every point where
+ * a kill can land while it publishes its first. Before the temporary file exists and after publication the
+ * node restarts by itself. Between the two, startup is fenced; those tests also show that nothing is lost.
+ *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-14
  * @version 1.0
@@ -64,6 +68,10 @@ class RaftNodeRealSnapshotRecoveryTest {
 
     @TempDir
     Path directory;
+
+    /** Where a test puts a fenced first snapshot's temporary file, outside the storage directory. */
+    @TempDir
+    Path evidence;
 
     private JavaRuntime runtime;
     private RaftNode node;
@@ -111,6 +119,42 @@ class RaftNodeRealSnapshotRecoveryTest {
     }
 
     @Test
+    void firstSnapshotCrashBeforeTemporaryCreationRestartsFromTheWholeLog() throws Exception {
+        verifyFirstSnapshotRecovery("BEFORE_TEMPORARY_CREATE", 0, List.of(1L, 2L, 3L, 4L, 5L));
+    }
+
+    @Test
+    void firstSnapshotCrashAfterTemporaryWriteFencesStartupAndLosesNothing() throws Exception {
+        verifyFirstSnapshotFenceLosesNothing("AFTER_TEMPORARY_WRITE");
+    }
+
+    @Test
+    void firstSnapshotCrashAfterTemporaryForceFencesStartupAndLosesNothing() throws Exception {
+        verifyFirstSnapshotFenceLosesNothing("AFTER_TEMPORARY_FORCE");
+    }
+
+    @Test
+    void firstSnapshotCrashAfterAtomicPublicationRestartsFromTheSnapshot() throws Exception {
+        verifyFirstSnapshotRecovery("AFTER_ATOMIC_PUBLICATION", 4, List.of(1L, 2L, 3L, 4L, 5L));
+    }
+
+    @Test
+    void firstSnapshotCrashAfterDirectoryForceRestartsFromTheSnapshot() throws Exception {
+        verifyFirstSnapshotRecovery("AFTER_DIRECTORY_FORCE", 4, List.of(1L, 2L, 3L, 4L, 5L));
+    }
+
+    @Test
+    void firstSnapshotCrashBeforeCompactionRestartsFromTheSnapshotWithTheUntrimmedLog() throws Exception {
+        verifyFirstSnapshotRecovery(SnapshotStoreCrashWriterFixture.AFTER_PUBLICATION_BEFORE_COMPACTION,
+                4, List.of(1L, 2L, 3L, 4L, 5L));
+    }
+
+    @Test
+    void firstSnapshotCrashAfterCompactionRestartsFromTheSnapshotAndTheLogSuffix() throws Exception {
+        verifyFirstSnapshotRecovery(SnapshotStoreCrashWriterFixture.AFTER_PREFIX_COMPACTION, 4, List.of(5L));
+    }
+
+    @Test
     void restartAfterAtomicPublicationUsesNewSnapshotWithUntrimmedWal() throws Exception {
         verifyRecovery("AFTER_ATOMIC_PUBLICATION", 4, List.of(1L, 2L, 3L, 4L, 5L));
     }
@@ -144,6 +188,56 @@ class RaftNodeRealSnapshotRecoveryTest {
         assertFalse(Files.exists(directory.resolve("snapshot.dat.tmp")),
                 "recovery must remove a non-authoritative temporary snapshot");
 
+        assertWalHolds(expectedWalIndexes);
+        startNodeAndAssertWholeState(expectedSnapshotIndex);
+    }
+
+    /**
+     * Seeds a WAL with no snapshot, halts the crash writer at {@code checkpoint} while it publishes the node's
+     * first snapshot, and restarts the node on what the crash left.
+     */
+    private void verifyFirstSnapshotRecovery(
+            String checkpoint,
+            long expectedSnapshotIndex,
+            List<Long> expectedWalIndexes) throws Exception {
+        seedWal();
+        ProcessResult crash = runCrashWriter(checkpoint, replacementSnapshot());
+        assertEquals(SnapshotStoreCrashWriterFixture.HALT_EXIT_CODE, crash.exitCode(), crash.output());
+
+        assertFalse(Files.exists(directory.resolve("snapshot.dat.tmp")),
+                "no temporary file is left at " + checkpoint);
+        assertEquals(expectedSnapshotIndex > 0, Files.exists(directory.resolve("snapshot.dat")),
+                "whether the first snapshot is published at " + checkpoint);
+        assertWalHolds(expectedWalIndexes);
+        startNodeAndAssertWholeState(expectedSnapshotIndex);
+    }
+
+    /**
+     * Halts the crash writer at {@code checkpoint}, after the first snapshot's temporary file exists and before
+     * it is published. Startup is fenced, and the node has lost nothing: the log is compacted only after a
+     * snapshot is published, so it still holds every entry, and the node starts from it alone, with its whole
+     * state, once the temporary file is out of the storage directory.
+     */
+    private void verifyFirstSnapshotFenceLosesNothing(String checkpoint) throws Exception {
+        seedWal();
+        ProcessResult crash = runCrashWriter(checkpoint, replacementSnapshot());
+        assertEquals(SnapshotStoreCrashWriterFixture.HALT_EXIT_CODE, crash.exitCode(), crash.output());
+
+        Path temporary = directory.resolve("snapshot.dat.tmp");
+        assertTrue(Files.exists(temporary), "the crash at " + checkpoint + " leaves the temporary file");
+        assertFalse(Files.exists(directory.resolve("snapshot.dat")));
+        CompletionException failure = assertThrows(CompletionException.class,
+                () -> await(RaftStorageFactory.createDurable(directory, true)));
+        assertTrue(failure.getCause().getMessage().contains("unpublished first snapshot"),
+                messageChain(failure));
+        assertTrue(Files.exists(temporary), "the fence preserves the temporary file");
+
+        assertWalHolds(List.of(1L, 2L, 3L, 4L, 5L));
+        Files.move(temporary, evidence.resolve("snapshot.dat.tmp"));
+        startNodeAndAssertWholeState(0);
+    }
+
+    private void assertWalHolds(List<Long> expectedWalIndexes) throws Exception {
         try (FileRaftStorage reopened = wal()) {
             reopened.open(directory).get(10, TimeUnit.SECONDS);
             assertEquals(new RaftStorage.PersistentMeta(3, Optional.of("node-1")),
@@ -152,7 +246,10 @@ class RaftNodeRealSnapshotRecoveryTest {
             assertEquals(expectedWalIndexes,
                     entries.stream().map(RaftStorage.LogEntryData::index).toList());
         }
+    }
 
+    /** Starts the node on the storage directory and checks that it holds everything the log ever held. */
+    private void startNodeAndAssertWholeState(long expectedSnapshotIndex) throws Exception {
         RaftStorageFactory.DurableStorage durable = await(
                 RaftStorageFactory.createDurable(directory, true));
         runtime = JavaRuntime.create();
