@@ -25,6 +25,9 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.awaitility.Awaitility.await;
 
 /**
  * Test helper that reads Raft, node, and health state through container HTTP APIs for Docker client tests.
@@ -37,6 +40,8 @@ import java.util.List;
  */
 final class DockerHealthApiHelper {
     static final String CLIENT_ID = "docker-client";
+    /** Keeps the fillers of {@link #awaitFirstSnapshotOnEveryServer} apart from those a test numbers from one. */
+    private static final int FIRST_SNAPSHOT_FILLER_BASE = 20_000;
 
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final HttpClient HTTP = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
@@ -138,6 +143,23 @@ final class DockerHealthApiHelper {
         } catch (Exception unreachable) {
             return -1;
         }
+    }
+
+    /**
+     * Waits until every server has published its first snapshot, writing filler entries through the leader for
+     * as long as one has not. A test that kills a server and starts it again calls this first: a server killed
+     * while it writes its first snapshot leaves {@code snapshot.dat.tmp} with no {@code snapshot.dat}, and
+     * refuses to start on that by design (see {@code docs/RAFT_STORAGE_OPERATIONS.md}). Once a snapshot is
+     * published, a later crash leaves at worst a stale temporary file, which startup removes.
+     */
+    static void awaitFirstSnapshotOnEveryServer(List<String> servers) {
+        AtomicInteger fillers = new AtomicInteger(FIRST_SNAPSHOT_FILLER_BASE);
+        await().atMost(Duration.ofSeconds(60)).until(() -> {
+            if (servers.stream().allMatch(server -> snapshotLastIndex(server) > 0)) return true;
+            int leader = leaderIndex(servers);
+            if (leader >= 0) registerFiller(servers.get(leader), fillers.incrementAndGet());
+            return false;
+        });
     }
 
     /** Index of the only reachable server reporting itself leader, or -1 while there is not exactly one. */

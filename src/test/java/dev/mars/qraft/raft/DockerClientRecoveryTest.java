@@ -35,6 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static dev.mars.qraft.raft.DockerHealthApiHelper.clientNode;
 import static dev.mars.qraft.raft.DockerHealthApiHelper.anyCheckExpired;
+import static dev.mars.qraft.raft.DockerHealthApiHelper.awaitFirstSnapshotOnEveryServer;
 import static dev.mars.qraft.raft.DockerHealthApiHelper.check;
 import static dev.mars.qraft.raft.DockerHealthApiHelper.httpSequence;
 import static dev.mars.qraft.raft.DockerHealthApiHelper.instanceCount;
@@ -156,6 +157,8 @@ class DockerClientRecoveryTest {
             List<String> servers = SharedDockerClusterFixture.getNodeEndpoints(cluster, 3);
             await().atMost(Duration.ofSeconds(60)).until(() -> leaderIndex(servers) >= 0
                     && servers.stream().allMatch(DockerHealthApiHelper::passingWithBothChecks));
+            // A follower killed while it writes its first snapshot refuses to start again, by design.
+            awaitFirstSnapshotOnEveryServer(servers);
             int leaderIndex = leaderIndex(servers);
             String leader = servers.get(leaderIndex);
             int followerIndex = (leaderIndex + 1) % servers.size();

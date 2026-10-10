@@ -71,12 +71,11 @@ timed out after 90 seconds while waiting for the restarted follower to install a
 snapshot state. This is a test/product integration result rather than a Jenkins configuration failure.
 Finding its cause is a task in Phase 6 of
 [the single-POM task list](../docs-design/task-list-single-pom-and-quorus-removal-2026-10-10.md).
-It was analysed on 2026-10-10. This build archived no container logs, so the cause cannot be proven.
-The likeliest one is a deadline the test does not state: the leader removes the frozen client's service
-45 seconds after its last renewal, and after that the test's 90-second wait cannot succeed. The test
-now has its own client profile, `client-long-ttl.json`, under which nothing the frozen client registered
-expires or is removed while the test can run. That was applied on 2026-10-10, and the test passed with it
-in build 6. The task list has the reasoning.
+It was analysed on 2026-10-10. This build archived no container logs, so its cause cannot be proven
+from it. Build 8 failed the same way with the logs kept: the test had killed the follower while it wrote
+its first snapshot, and a server refuses to start on an unpublished first snapshot, by design. An earlier
+explanation, a deadline hidden in the client profile, was not the cause. That limit was real, and the
+test keeps the client profile that removes it, `client-long-ttl.json`. The task list has the reasoning.
 
 [Build 4](http://192.168.137.32:8080/job/Qraft/4/), of 2026-10-10 on commit `ce5890d`, is the first
 complete pass of the pipeline on this server. It took 7 minutes 18 seconds.
@@ -110,6 +109,19 @@ intended: it is the red run of the fix for those warnings. The commit holds the 
 new tests of the Docker log audit, without the change to the audit. `DockerLogCaptureTest` ran 27 tests
 with the 5 predicted failures. The default suite ran 906 tests with those 5 failures, and Jenkins skipped
 the end-to-end and Docker stages. It took 1 minute 23 seconds.
+
+[Build 8](http://192.168.137.32:8080/job/Qraft/8/), of the same day on commit `362b507`, is the green
+run of that fix, and failed for another reason. It took 9 minutes 55 seconds.
+- Default build: 906 tests passed, the 27 of `DockerLogCaptureTest` among them. End-to-end: 10 passed.
+- The container logs hold 17 gRPC name-resolution warnings, every one flagged, none without a flag.
+- Docker stage: `DockerClientRecoveryTest.aKilledFollowerInstallsTheLeadersSnapshotAndThenHoldsTheLeadersHealthState`
+  timed out after 90 seconds, as in build 2, and its class failed its log audit on two undeclared
+  errors. The other 24 tests passed. Jenkins published 942 results, 2 of them failed.
+- The follower's log gives the cause. The test killed it while it wrote its first snapshot. Started
+  again, it logged "Refusing startup because unpublished first snapshot /app/data/snapshot.dat.tmp has
+  no published /app/data/snapshot.dat" and ended. `docs/RAFT_STORAGE_OPERATIONS.md` documents that
+  refusal, so the defect is the test's: it must not kill a server before its first snapshot is published.
+  The fix is recorded in Phase 6 of the task list.
 
 No build ran between 2026-10-04 and 2026-10-10. In that time the `agent` directive of the
 `Jenkinsfile` had been renamed by mistake, which Jenkins would have refused; it was restored in

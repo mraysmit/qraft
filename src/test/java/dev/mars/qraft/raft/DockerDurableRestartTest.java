@@ -162,6 +162,8 @@ class DockerDurableRestartTest {
     void killedFollowerReplaysMissedCommitAfterRestart() throws Exception {
         List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(CLUSTER, 3);
         await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
+        // A server killed while it writes its first snapshot refuses to start again, by design.
+        DockerHealthApiHelper.awaitFirstSnapshotOnEveryServer(endpoints);
         int leaderIndex = leaderIndex(endpoints);
         int followerIndex = (leaderIndex + 1) % endpoints.size();
         String followerService = "server" + (followerIndex + 1);
@@ -191,6 +193,8 @@ class DockerDurableRestartTest {
     void killedLeaderIsReplacedAndRejoinsWithCompleteCatalog() throws Exception {
         List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(CLUSTER, 3);
         await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
+        // A server killed while it writes its first snapshot refuses to start again, by design.
+        DockerHealthApiHelper.awaitFirstSnapshotOnEveryServer(endpoints);
         int oldLeaderIndex = leaderIndex(endpoints);
         String oldLeaderService = "server" + (oldLeaderIndex + 1);
         String serviceName = "leader-rejoin-" + System.nanoTime();
@@ -218,6 +222,8 @@ class DockerDurableRestartTest {
     void retryAfterLeaderCrashConvergesToOneCatalogInstance() throws Exception {
         List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(CLUSTER, 3);
         await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
+        // A server killed while it writes its first snapshot refuses to start again, by design.
+        DockerHealthApiHelper.awaitFirstSnapshotOnEveryServer(endpoints);
         int oldLeaderIndex = leaderIndex(endpoints);
         String oldLeaderService = "server" + (oldLeaderIndex + 1);
         String serviceName = "crash-retry-" + System.nanoTime();

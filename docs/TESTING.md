@@ -433,6 +433,10 @@ message patterns and severity; all nine durable-restart cases and their log audi
 - **No Mockito.** Use real objects, or small hand-written fakes such as `HeldRaftTransportFixture`.
 - **No flaky tests.** A test that fails only sometimes is a defect. Find the race, check whether production
   code has it too, and make the test deterministic.
+- **A Docker test that kills a server and starts it again waits for first snapshots first.** A server
+  killed while it writes its first snapshot refuses to start, as
+  [RAFT_STORAGE_OPERATIONS.md](RAFT_STORAGE_OPERATIONS.md) describes. Call
+  `DockerHealthApiHelper.awaitFirstSnapshotOnEveryServer` before the kill.
 - **Raft timing uses manual timers** (`ManualRaftClusterFixture`, `ManualRaftTimersHelper`). A test fires an election or
   heartbeat itself, and doesn't wait for one on the clock.
 - **Real-time waits are rare and bounded.** They belong only to the runtime end-to-end tests and the
