@@ -143,6 +143,18 @@ the first run on Jenkins of the seven tests that kill a server at each point of 
 - The console and the 104 archived log files hold 610 flagged ERROR events, counting copies, and one
   flagged uncaught exception. No ERROR event, no uncaught exception, and no stack trace is without a flag.
 
+[Build 11](http://192.168.137.32:8080/job/Qraft/11/), of the same day on commit `f2119d3`, passed. It is
+the first run on Jenkins of the change to recovery: an interrupted first snapshot is set aside and no
+longer stops a server, and a log compacted further than the published snapshot reaches is refused
+([TEST-RESULTS.md](TEST-RESULTS.md)). It took 9 minutes 1 second.
+- Default build: 921 tests, every coverage gate met. End-to-end: 10. Docker and slow: 25.
+- Jenkins published 956 results, none failed or skipped, and archived 827 files.
+- The console and the 113 archived log files hold 887 flagged ERROR events, counting copies, and one
+  flagged uncaught exception. No ERROR event, no uncaught exception, and no stack trace is without a flag.
+- No container met either new path: none set a snapshot aside and none refused to recover. The Docker
+  tests wait for first snapshots before they kill a server, so that is as intended. Both paths ran in the
+  default build's tests, which place the kill exactly.
+
 No build ran between 2026-10-04 and 2026-10-10. In that time the `agent` directive of the
 `Jenkinsfile` had been renamed by mistake, which Jenkins would have refused; it was restored in
 `ce5890d` before build 4.

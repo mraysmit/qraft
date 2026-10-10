@@ -335,4 +335,6 @@ The change, on top of commit `aa0d876`:
   `logs/qraft-tests-2026-10-10_16-50-57-326.log`.
 - Mutation, in an isolated copy of the repository: `logs/qraft-mutation-recovery-2026-10-10_16-43-41-441.log`
   and `logs/qraft-mutation-recovery-2026-10-10_16-49-12-840.log`. The unchanged copy passed its 33 tests before and after.
-- Jenkins has not run the change yet.
+- Jenkins ran the change the same day, in build 11 on commit `f2119d3`: 956 results, none failed, every
+  coverage gate met, and no error or stack trace without a flag in its 113 log files. The 19, 6, and 8
+  tests of the three classes passed on Linux.
