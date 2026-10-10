@@ -1,9 +1,9 @@
 # Task List: Single POM and Removal of the Quorus Leftovers
 
 **Date:** 2026-10-04
-**Last updated:** 2026-10-10 (Phase 5: the version source, done and verified on Jenkins; three third-party keywords that Phase 3A's sweep had renamed are restored; the file renamed to the date of its last change. On 2026-10-09: the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
+**Last updated:** 2026-10-10 (Phase 5 done and its exit met: the version source, then the configuration without a default document, as typed records, with one shared parsing helper; each verified on Jenkins; three third-party keywords that Phase 3A's sweep had renamed are restored; the file renamed to the date of its last change. On 2026-10-09: the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
 **Status:** In progress. This is the current task list. It started on 2026-10-04 at the user's request, before the membership list's Step 4 close-out gate.
-**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 started on 2026-10-09 with its version source, tasks 4 to 6, which Jenkins build 4 verified on 2026-10-10. The next coding task is the rest of Phase 5: the static default configuration, the typed records, and the shared parsing helper. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
+**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 was done and its exit met on 2026-10-10: Jenkins build 4 verified its version source and build 5 the rest. The next coding task is Phase 6. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
 **Last reviewed:** 2026-10-08, against the code at commit `9a4adf0`, with the other four task lists. The status table in section 4 and every item marked "review of 2026-10-08" come from that review. No build was run for it. The logs that the Phase 2A and Phase 3 records cite were written in another working tree and were not available, so their counts were checked for arithmetic only. The earlier review of 2026-10-05 was against `24beac3`; its items keep their date.
 **Order of work:**
 - The membership list's Step 4 close-out gate is the first task of Phase 7 here.
@@ -86,10 +86,10 @@ rules and extracts from that run.
 | 3. Package layout | Done; verified 2026-10-08. One task added by the review: the comparison of test names with the Phase 0 baseline | 10 of 11 | `9a4adf0` |
 | 3A. One word for each mode | Added and done 2026-10-09; verified the same day | 5 of 5 | `5a00975` |
 | 4. Node model and API | Done 2026-10-09, exit met; its four open points settled and its decisions confirmed by the user the same day | 7 of 7 | `e4bf00d` to `a6e7930` |
-| 5. Configuration and version | Started 2026-10-09: the version source is done and verified | 3 of 6 | `693449e`, `c123ee9` |
+| 5. Configuration and version | Done 2026-10-10, exit met | 6 of 6 | `693449e`, `c123ee9`, `12d365c`, `d4e1af8` |
 | 6. Docker and observability | One task added and done on 2026-10-10; the rest not started | 1 of 11 | `ce5890d` |
 | 7. Async layer | Not started | 0 of 6 | |
-| 8. Documentation and close-out | Started early for Phases 1 and 2; Phase 3's names done with Phase 3 | 0 of 6 | |
+| 8. Documentation and close-out | Started early for Phases 1 and 2; Phase 3's names done with Phase 3; the documents of Phases 4 and 5 done as each ended | 2 of 6 | |
 
 ### Phase 0. Baseline
 
@@ -1510,14 +1510,63 @@ Verified 2026-10-09.
 
 ### Phase 5. Configuration and version
 
-- [ ] Remove `AppConfig`'s static default instance and its classpath defaults
+- [x] Remove `AppConfig`'s static default instance and its classpath defaults
   file `qraft-server.json` (moved from Phase 1).
-- [ ] Replace `AppConfig`'s flattened string map with typed records parsed
+- [x] Replace `AppConfig`'s flattened string map with typed records parsed
   directly from the JSON document. The map holds `qraft.*` keys, with cluster
   nodes re-encoded as `name=host:port,...`. Keep identical validation errors
   and JSON paths.
-- [ ] Have server and client configuration share one JSON parsing and
+- [x] Have server and client configuration share one JSON parsing and
   validation helper where they duplicate it.
+
+  The three tasks above were done together on 2026-10-10.
+
+  What changed:
+  - **No default document and no process-wide configuration.**
+    `AppConfig.get()`, both `install` methods, and the classpath file
+    `qraft-server.json` are gone. `QraftServerApplication` reads the
+    document, validates it, and hands the configuration to
+    `QraftServerService` and to `TelemetryConfig`. Two tests no longer
+    restore a process-wide configuration, because there is none.
+  - **Typed settings.** `AppConfig` holds records that follow the
+    document's own structure. The getters and every validation message are
+    as they were. The untyped getters by `qraft.*` key are gone; their one
+    caller, the shutdown timeouts, has two typed getters.
+  - **The cluster's members are a map.** `getClusterMembers()` gives each
+    member's name with its Raft address, in the document's order, and
+    `QraftServerService` uses it in place of parsing a `name=host:port,...`
+    string. `getClusterNodes()` stays as the form for display.
+  - **`JsonSettings`, in `common.config`,** holds what both modes
+    duplicated: reading the document, the format version, and the checks
+    of objects, numbers, booleans, and unknown settings.
+    `ClientConfiguration` lost its copies. Reading a text setting stays in
+    each class, because a server allows a blank value where the setting may
+    be empty and a client never does.
+
+  One difference in behaviour: a member's name in `server.raft.nodes` is
+  trimmed when it is read. Before, it was trimmed where it was used.
+
+  **No red run.** Tasks 2 and 3 are refactors and task 1 is a removal, so
+  the existing configuration tests are the check, as this phase's exit
+  says. Three of them had to change, because they tested what was removed:
+  `AppConfigCoverageTest` lost its two tests of how the classpath defaults
+  were packaged and loaded, and its test of the default document now reads a
+  document with no settings. New tests cover what is new: the member map,
+  the shutdown settings, and `JsonSettingsTest`, with the exact message of
+  each refusal.
+
+  Verified 2026-10-10, on Jenkins:
+  [build 5](http://192.168.137.32:8080/job/Qraft/5/), of `d4e1af8`.
+  - Default build: 898 tests, every coverage gate met. The 898 are the 892
+    before, less the 2 removed, plus 1 in `AppConfigCoverageTest` and 7 in
+    `JsonSettingsTest`.
+  - End-to-end: 10 tests. Docker and slow: 25. Jenkins published 933
+    results, none failed or skipped.
+  - Its 101 archived log files, 64 of them Docker archives, hold 496 flagged
+    ERROR headers and no unflagged error or exception.
+  - No local run was made.
+
+  Commits: `12d365c` and `d4e1af8`.
 - [x] Report the version from the build manifest instead of the `2.0-ext`
   default and the `applicationVersion` setting.
 - [x] Put a version in the manifest, and decide what it is (review of
@@ -1589,6 +1638,12 @@ Verified 2026-10-09.
 **Exit:** The existing configuration tests pass unchanged, apart from those
 of the two removed version settings, plus tests for the version source in
 both modes.
+
+**Exit met 2026-10-10,** with one qualification. The configuration tests
+pass, and the version source has tests in both modes, from the class path and
+from the packaged jar. Three tests beyond those of the version settings
+changed, and they are named above: each tested the default document or the
+process-wide instance that task 1 removes.
 
 ### Phase 6. Docker and observability
 
@@ -1754,10 +1809,14 @@ What remains for this phase:
     kept so that the interface cannot be mounted where an API used to answer.
     This waits for the user's word: freeing them is a two-word change in
     `AdminUiConfig` and one test.
-- [ ] Update the membership list for its resumption: the class names in its
+- [x] Update the membership list for its resumption: the class names in its
   Step 5 contract, after Phases 3 and 5. The Phase 3 name,
   `QraftServerService`, was put there on 2026-10-08; `AppConfig` follows
   Phase 5.
+
+  Done 2026-10-10. `AppConfig` kept its name. The membership list's Step 5
+  now says what it became: records that follow the document, and a
+  configuration that `QraftServerService` is given.
 - [ ] Run the final audits:
   - prohibited frameworks;
   - environment-variable configuration;

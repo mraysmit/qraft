@@ -6,7 +6,7 @@ and the full suites passed on 2026-10-02; its mutation evidence is outstanding
 (Step 4 record). Steps 1 to 3 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
-**Last updated:** 2026-10-10 (renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
+**Last updated:** 2026-10-10 (Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
 **Interrupted by:** [`task-list-single-pom-and-quorus-removal-2026-10-10.md`](task-list-single-pom-and-quorus-removal-2026-10-10.md),
 started 2026-10-04 before the Step 4 close-out gate. The gate's mutation evidence
 is recorded there, as the first task of its Phase 7. Step 5 resumes when that
@@ -825,9 +825,13 @@ the document review on 2026-10-03. Current server JSON rejects these new setting
 the promotion settings still exist only on `RaftNode.Builder`.
 
 `QraftServerService` is the class that wires these settings. The single-POM
-list's Phase 5 replaces `AppConfig`'s flattened map with typed records. This step
-resumes after that list, so wire the settings through whatever `AppConfig`
-has become.
+list's Phase 5 was done on 2026-10-10, and this is what it left:
+- `AppConfig` holds its settings as records that follow the document's
+  structure. A new group of settings is a record of its own, read in
+  `fromJson` and given a getter for each value.
+- The shared checks of a document are in `common.config.JsonSettings`.
+- There is no process-wide configuration. `QraftServerService` is given its
+  `AppConfig`, so the new settings reach it through that object.
 
 #### Configuration contract
 

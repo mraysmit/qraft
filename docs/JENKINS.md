@@ -80,6 +80,10 @@ complete pass of the pipeline on this server. It took 7 minutes 18 seconds.
 - The recovery test that timed out in build 2 passed. Its cause is still not known, so its task in
   Phase 6 stays open: one pass does not explain an intermittent failure.
 
+[Build 5](http://192.168.137.32:8080/job/Qraft/5/), of the same day on commit `d4e1af8`, passed as
+well: 898 default tests, 10 end-to-end, and 25 Docker and slow, 933 results in all, with no unflagged
+error in its archived logs.
+
 No build ran between 2026-10-04 and 2026-10-10. In that time the `agent` directive of the
 `Jenkinsfile` had been renamed by mistake, which Jenkins would have refused; it was restored in
 `ce5890d` before build 4.
