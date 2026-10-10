@@ -52,8 +52,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
- * Docker tests of recovery with a client-mode client container that uses the restart profile: 15-second
- * check TTLs, a 30-second deregistration delay, and 5-second server contact freshness.
+ * Docker tests of recovery with a client-mode client container. All but the snapshot test use the restart
+ * profile: 15-second check TTLs, a 30-second deregistration delay, and 5-second server contact freshness.
  *
  * <p>All three server containers are killed for longer than the check TTL while the client runs. The client
  * stays live and becomes unready. It is then frozen with {@code docker pause}, so everything the restarted
@@ -65,7 +65,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * <p>A killed follower misses committed health state and then installs the leader's snapshot. With the client
  * frozen and filler entries written until the leader's snapshot covers every health observation and passes
  * the follower's log, the restarted follower can learn the checks only from the installed snapshot, and it
- * must then hold exactly the leader's health state.
+ * must then hold exactly the leader's health state. This test uses the long-TTL profile instead: a 10-minute
+ * check TTL and no deregistration delay. Under the restart profile the leader removes the frozen client's
+ * service 45 seconds after its last renewal, and from then on has no entry for the follower to match, so the
+ * wait for the follower could fail on a limit it does not state.
  *
  * <p>A crashed client that starts again registers the same node and service identities: no server ever
  * shows its instance removed or duplicated, and its sequence numbers continue above the pre-crash values. A
@@ -146,7 +149,7 @@ class DockerClientRecoveryTest {
 
     @Test
     void aKilledFollowerInstallsTheLeadersSnapshotAndThenHoldsTheLeadersHealthState() throws Exception {
-        ComposeContainer cluster = SharedDockerClusterFixture.startIsolatedThreeNodeClusterWithRestartClient();
+        ComposeContainer cluster = SharedDockerClusterFixture.startIsolatedThreeNodeClusterWithLongTtlClient();
         boolean clientPaused = false;
         try {
             List<String> servers = SharedDockerClusterFixture.getNodeEndpoints(cluster, 3);

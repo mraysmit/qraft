@@ -18,6 +18,7 @@ package dev.mars.qraft.runtime;
 
 import dev.mars.qraft.client.config.ClientConfiguration;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -50,7 +51,8 @@ class DockerDeploymentContractTest {
     private static final List<String> PREBUILT_COMPOSE_FILES = List.of(
             "src/test/resources/docker-compose-3node-prebuilt.yml",
             "src/test/resources/docker-compose-3node-client-prebuilt.yml",
-            "src/test/resources/docker-compose-3node-client-restart-prebuilt.yml");
+            "src/test/resources/docker-compose-3node-client-restart-prebuilt.yml",
+            "src/test/resources/docker-compose-3node-client-long-ttl-prebuilt.yml");
 
     @Test
     void serverDeploymentsBuildTheUnifiedRuntimeInServerMode() throws IOException {
@@ -253,7 +255,8 @@ class DockerDeploymentContractTest {
         Path root = Path.of("").toAbsolutePath();
         Map<String, String> composeByProfile = Map.of(
                 "client.json", "docker-compose-3node-client-prebuilt.yml",
-                "client-restart.json", "docker-compose-3node-client-restart-prebuilt.yml");
+                "client-restart.json", "docker-compose-3node-client-restart-prebuilt.yml",
+                "client-long-ttl.json", "docker-compose-3node-client-long-ttl-prebuilt.yml");
         for (Map.Entry<String, String> profile : composeByProfile.entrySet()) {
             ClientConfiguration configuration = ClientConfiguration.fromFile(
                     root.resolve("docker/config/client-acceptance/" + profile.getKey()));
@@ -280,6 +283,23 @@ class DockerDeploymentContractTest {
                 check.deregisterAfter().compareTo(java.time.Duration.ofSeconds(30)) >= 0));
         assertTrue(restart.getContactFreshnessMs() <= 5_000,
                 "an outage becomes visible as unreadiness well before the checks' TTL");
+    }
+
+    @Test
+    void theLongTtlProfileLetsNothingLapseBeforeTheRecoveryTestsOwnTimeLimit() throws ClassNotFoundException {
+        Path root = Path.of("").toAbsolutePath();
+        ClientConfiguration longTtl = ClientConfiguration.fromFile(
+                root.resolve("docker/config/client-acceptance/client-long-ttl.json"));
+        Timeout limit = Class.forName("dev.mars.qraft.raft.DockerClientRecoveryTest", false,
+                getClass().getClassLoader()).getAnnotation(Timeout.class);
+        java.time.Duration testLimit = java.time.Duration.of(limit.value(), limit.unit().toChronoUnit());
+
+        for (var check : longTtl.getHealthChecks()) {
+            assertTrue(check.ttl().compareTo(testLimit) >= 0, check.checkId()
+                    + ": a frozen client's check must not expire while a test that froze it can still run");
+            assertTrue(check.deregisterAfter().isZero(), check.checkId()
+                    + ": a frozen client's service must never be removed, or a wait for it can no longer succeed");
+        }
     }
 
     @Test

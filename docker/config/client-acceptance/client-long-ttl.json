@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "client": {
+    "id": "docker-client",
+    "address": "client",
+    "httpPort": 8080,
+    "heartbeatIntervalMs": 1000,
+    "shutdownTimeoutMs": 8000
+  },
+  "servers": {
+    "urls": ["http://server1:8080", "http://server2:8080", "http://server3:8080"],
+    "requestTimeoutMs": 3000
+  },
+  "catalog": {
+    "registrationRetryMinMs": 100,
+    "registrationRetryMaxMs": 1000,
+    "contactFreshnessMs": 5000,
+    "services": [
+      {
+        "id": "web",
+        "name": "web",
+        "address": "client",
+        "port": 8080,
+        "checks": [
+          {"id": "http", "type": "http", "url": "http://127.0.0.1:8080/health/live",
+           "intervalMs": 1000, "timeoutMs": 1000, "ttlMs": 600000},
+          {"id": "tcp", "type": "tcp", "address": "127.0.0.1",
+           "intervalMs": 1000, "timeoutMs": 1000, "ttlMs": 600000}
+        ]
+      }
+    ]
+  },
+  "logging": {
+    "directory": "/app/logs"
+  }
+}

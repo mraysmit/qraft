@@ -134,6 +134,15 @@ public final class SharedDockerClusterFixture {
         return startIsolatedThreeNodeClusterWithClient("docker-compose-3node-client-restart-prebuilt.yml");
     }
 
+    /**
+     * Starts a disposable three-node cluster with one client-mode {@code client} container using the long-TTL
+     * profile: a 10-minute check TTL and no deregistration delay, so nothing a frozen client registered
+     * expires or is removed before the test's own time limit.
+     */
+    public static ComposeContainer startIsolatedThreeNodeClusterWithLongTtlClient() {
+        return startIsolatedThreeNodeClusterWithClient("docker-compose-3node-client-long-ttl-prebuilt.yml");
+    }
+
     private static ComposeContainer startIsolatedThreeNodeClusterWithClient(String composeFile) {
         ensureImageBuilt();
         ComposeContainer cluster = new ComposeContainer(new File("src/test/resources/" + composeFile))

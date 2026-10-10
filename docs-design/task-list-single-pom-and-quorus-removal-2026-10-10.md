@@ -1,9 +1,9 @@
 # Task List: Single POM and Removal of the Quorus Leftovers
 
 **Date:** 2026-10-04
-**Last updated:** 2026-10-10 (Phase 6 applied and waiting for its builds: three unused log stacks, the load balancer, the demo scripts, and the hand-test data deleted, the start scripts reduced, and the kept observability stack corrected. Phase 5 done and its exit met: the version source, then the configuration without a default document, as typed records, with one shared parsing helper; each verified on Jenkins; three third-party keywords that Phase 3A's sweep had renamed are restored; the file renamed to the date of its last change. On 2026-10-09: the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
+**Last updated:** 2026-10-10 (Phase 6 applied and waiting for its builds: three unused log stacks, the load balancer, the demo scripts, and the hand-test data deleted, the start scripts reduced, and the kept observability stack corrected; then the recovery test that timed out on Jenkins given its own client profile. Phase 5 done and its exit met: the version source, then the configuration without a default document, as typed records, with one shared parsing helper; each verified on Jenkins; three third-party keywords that Phase 3A's sweep had renamed are restored; the file renamed to the date of its last change. On 2026-10-09: the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
 **Status:** In progress. This is the current task list. It started on 2026-10-04 at the user's request, before the membership list's Step 4 close-out gate.
-**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 was done and its exit met on 2026-10-10: Jenkins build 4 verified its version source and build 5 the rest. Phase 6 was applied on 2026-10-10; no build has run on it, so its exit is open, and two of its tasks are open: the cause of the Jenkins timeout, and a look at the corrected dashboard on a running stack. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
+**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 was done and its exit met on 2026-10-10: Jenkins build 4 verified its version source and build 5 the rest. Phase 6 was applied on 2026-10-10; no build has run on it, so its exit is open, and two of its tasks are open: a Docker run of the recovery test with its new client profile, and a look at the corrected dashboard on a running stack. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
 **Last reviewed:** 2026-10-08, against the code at commit `9a4adf0`, with the other four task lists. The status table in section 4 and every item marked "review of 2026-10-08" come from that review. No build was run for it. The logs that the Phase 2A and Phase 3 records cite were written in another working tree and were not available, so their counts were checked for arithmetic only. The earlier review of 2026-10-05 was against `24beac3`; its items keep their date.
 **Order of work:**
 - The membership list's Step 4 close-out gate is the first task of Phase 7 here.
@@ -87,7 +87,7 @@ rules and extracts from that run.
 | 3A. One word for each mode | Added and done 2026-10-09; verified the same day | 5 of 5 | `5a00975` |
 | 4. Node model and API | Done 2026-10-09, exit met; its four open points settled and its decisions confirmed by the user the same day | 7 of 7 | `e4bf00d` to `a6e7930` |
 | 5. Configuration and version | Done 2026-10-10, exit met | 6 of 6 | `693449e`, `c123ee9`, `12d365c`, `d4e1af8` |
-| 6. Docker and observability | Applied 2026-10-10, with the load balancer removed at the user's decision; no build run yet, so the exit is open. Open: the cause of the Jenkins timeout, and a look at the corrected dashboard | 10 of 12 | `ce5890d`; the rest not committed |
+| 6. Docker and observability | Applied 2026-10-10, with the load balancer removed and the recovery test given its own client profile, both at the user's decision; no build run yet, so the exit is open. Open: a Docker run with the new profile, and a look at the corrected dashboard | 10 of 12 | `ce5890d`, `22a46a9`, `85bb120`; the client profile not committed |
 | 7. Async layer | Not started | 0 of 6 | |
 | 8. Documentation and close-out | Started early for Phases 1 and 2; Phase 3's names done with Phase 3; the documents of Phases 4 and 5 done as each ended | 2 of 6 | |
 
@@ -1752,11 +1752,37 @@ run.
   - Not explained: why the follower needed more than those 29 seconds in
     build 2.
 
-  Open, for the user to decide: whether to give this test a client profile
-  that does not remove the service while the client is frozen, so that the
-  stated 90 seconds are the only limit. The wait, the class's 10-minute
-  limit, and the pipeline's 60-minute limit all stay, so the test still
-  cannot hang.
+  Decided by the user on 2026-10-10: give the test its own client profile.
+  Applied the same day, not yet run.
+  - `docker/config/client-acceptance/client-long-ttl.json` is the restart
+    profile with a `ttlMs` of 600000 on both checks and no
+    `deregisterAfterMs`. Its compose file is
+    `docker-compose-3node-client-long-ttl-prebuilt.yml`, and
+    `SharedDockerClusterFixture.startIsolatedThreeNodeClusterWithLongTtlClient()`
+    starts it.
+  - Only the snapshot test uses it. The other three tests of the class keep
+    the restart profile: its short TTL and its deregistration delay are what
+    they test.
+  - With it, nothing the frozen client registered expires or is removed
+    while the test can still run. The leader's entry for `web` stays as it
+    was at the freeze, so the follower can only have it from the snapshot, and the
+    stated waits are the only limits. They all stay, with the class's
+    10-minute limit and the pipeline's 60-minute limit, so the test cannot
+    hang.
+  - `DockerDeploymentContractTest` has a new test,
+    `theLongTtlProfileLetsNothingLapseBeforeTheRecoveryTestsOwnTimeLimit`:
+    each check's TTL is at least the time limit that
+    `DockerClientRecoveryTest` declares, read from its annotation, and no
+    check has a deregistration delay. The profile is also in the two lists
+    of client profiles that the class already checked.
+  - Its red state was not run. By reading, it fails without the profile
+    file, and it fails on the restart profile's values.
+
+  This removes the limit the test did not state. It does not explain what
+  slowed the follower in build 2. If that happens again, the test fails on
+  its stated 90-second wait, and the container logs, which the pipeline has
+  archived since build 4, will show why. The task stays open until the
+  Docker suite has passed with the new profile.
 - [ ] Make the kept stack ask only for what a server publishes (added
   2026-10-10; applied the same day, not yet seen working). Removing the
   client panels showed that more of the stack pointed at nothing.

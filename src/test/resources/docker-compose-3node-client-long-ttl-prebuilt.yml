@@ -1,0 +1,83 @@
+# 3-node Raft cluster and one client-mode client with the long-TTL profile, from the pre-built image
+# (no Docker build step). Requires qraft-runtime:test image — built by SharedDockerClusterFixture.
+
+services:
+  server1:
+    image: qraft-runtime:test
+    hostname: server1
+    command: ["server", "--config", "/etc/qraft/server.json"]
+    ports:
+      - "8080"
+    volumes:
+      - ../../../docker/config/three-node-acceptance/server1.json:/etc/qraft/server.json:ro
+      - server1-data:/app/data
+    networks:
+      - raft-cluster
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  server2:
+    image: qraft-runtime:test
+    hostname: server2
+    command: ["server", "--config", "/etc/qraft/server.json"]
+    ports:
+      - "8080"
+    volumes:
+      - ../../../docker/config/three-node-acceptance/server2.json:/etc/qraft/server.json:ro
+      - server2-data:/app/data
+    networks:
+      - raft-cluster
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  server3:
+    image: qraft-runtime:test
+    hostname: server3
+    command: ["server", "--config", "/etc/qraft/server.json"]
+    ports:
+      - "8080"
+    volumes:
+      - ../../../docker/config/three-node-acceptance/server3.json:/etc/qraft/server.json:ro
+      - server3-data:/app/data
+    networks:
+      - raft-cluster
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  client:
+    image: qraft-runtime:test
+    hostname: client
+    command: ["client", "--config", "/etc/qraft/client.json"]
+    ports:
+      - "8080"
+    volumes:
+      - ../../../docker/config/client-acceptance/client-long-ttl.json:/etc/qraft/client.json:ro
+    networks:
+      - raft-cluster
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+networks:
+  raft-cluster:
+    driver: bridge
+
+volumes:
+  server1-data:
+  server2-data:
+  server3-data:
