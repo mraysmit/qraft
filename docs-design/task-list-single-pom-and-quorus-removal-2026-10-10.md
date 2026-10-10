@@ -1,9 +1,9 @@
 # Task List: Single POM and Removal of the Quorus Leftovers
 
 **Date:** 2026-10-04
-**Last updated:** 2026-10-10 (Phase 6 applied and waiting for its builds: three unused log stacks, the load balancer, the demo scripts, and the hand-test data deleted, the start scripts reduced, and the kept observability stack corrected; then the recovery test that timed out on Jenkins given its own client profile. Phase 5 done and its exit met: the version source, then the configuration without a default document, as typed records, with one shared parsing helper; each verified on Jenkins; three third-party keywords that Phase 3A's sweep had renamed are restored; the file renamed to the date of its last change. On 2026-10-09: the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
+**Last updated:** 2026-10-10 (Phase 6 applied, and verified by Jenkins build 6 except for its start commands and its dashboard: three unused log stacks, the load balancer, the demo scripts, and the hand-test data deleted, the start scripts reduced, and the kept observability stack corrected; then the recovery test that timed out on Jenkins given its own client profile. Phase 5 done and its exit met: the version source, then the configuration without a default document, as typed records, with one shared parsing helper; each verified on Jenkins; three third-party keywords that Phase 3A's sweep had renamed are restored; the file renamed to the date of its last change. On 2026-10-09: the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
 **Status:** In progress. This is the current task list. It started on 2026-10-04 at the user's request, before the membership list's Step 4 close-out gate.
-**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 was done and its exit met on 2026-10-10: Jenkins build 4 verified its version source and build 5 the rest. Phase 6 was applied on 2026-10-10; no build has run on it, so its exit is open, and two of its tasks are open: a Docker run of the recovery test with its new client profile, and a look at the corrected dashboard on a running stack. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
+**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 was done and its exit met on 2026-10-10: Jenkins build 4 verified its version source and build 5 the rest. Phase 6 was applied on 2026-10-10; Jenkins build 6 verified it on `d0275a7`. Its exit is open for what no build can show: the start commands run by hand, and a look at the corrected dashboard on a running stack. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
 **Last reviewed:** 2026-10-08, against the code at commit `9a4adf0`, with the other four task lists. The status table in section 4 and every item marked "review of 2026-10-08" come from that review. No build was run for it. The logs that the Phase 2A and Phase 3 records cite were written in another working tree and were not available, so their counts were checked for arithmetic only. The earlier review of 2026-10-05 was against `24beac3`; its items keep their date.
 **Order of work:**
 - The membership list's Step 4 close-out gate is the first task of Phase 7 here.
@@ -87,7 +87,7 @@ rules and extracts from that run.
 | 3A. One word for each mode | Added and done 2026-10-09; verified the same day | 5 of 5 | `5a00975` |
 | 4. Node model and API | Done 2026-10-09, exit met; its four open points settled and its decisions confirmed by the user the same day | 7 of 7 | `e4bf00d` to `a6e7930` |
 | 5. Configuration and version | Done 2026-10-10, exit met | 6 of 6 | `693449e`, `c123ee9`, `12d365c`, `d4e1af8` |
-| 6. Docker and observability | Applied 2026-10-10, with the load balancer removed and the recovery test given its own client profile, both at the user's decision; no build run yet, so the exit is open. Open: a Docker run with the new profile, and a look at the corrected dashboard | 10 of 12 | `ce5890d`, `22a46a9`, `85bb120`; the client profile not committed |
+| 6. Docker and observability | Applied 2026-10-10, with the load balancer removed and the recovery test given its own client profile, both at the user's decision; verified by Jenkins build 6. The exit is open for the start commands run by hand and a look at the corrected dashboard. Unflagged errors found by the audit are being remedied: gRPC warnings with a stack trace in container logs | 11 of 12 | `ce5890d`, `22a46a9`, `85bb120`, `d0275a7` |
 | 7. Async layer | Not started | 0 of 6 | |
 | 8. Documentation and close-out | Started early for Phases 1 and 2; Phase 3's names done with Phase 3; the documents of Phases 4 and 5 done as each ended | 2 of 6 | |
 
@@ -1647,10 +1647,9 @@ process-wide instance that task 1 removes.
 
 ### Phase 6. Docker and observability
 
-Applied on 2026-10-10. **No build has been run on it.** The deletions were
-checked by search, and the changed test by the editor's compiler. The exit at
-the end of this phase is open until the builds and the start commands have
-run.
+Applied on 2026-10-10 and verified the same day by Jenkins build 6, on
+`d0275a7`. The exit at the end of this phase is still open for what no build
+can show: the start commands run by hand, and a look at the dashboard.
 
 - [x] Keep one observability stack: OpenTelemetry Collector, Tempo,
   Prometheus, Loki, and Grafana.
@@ -1721,7 +1720,7 @@ run.
   not reach an image; with Docker's legacy builder it would still have been
   sent to the daemon with the build context. `.dockerignore` now excludes it
   (`ce5890d`).
-- [ ] Find the cause of the one Docker failure on Jenkins (added 2026-10-05):
+- [x] Find the cause of the one Docker failure on Jenkins (added 2026-10-05):
   `DockerClientRecoveryTest.aKilledFollowerInstallsTheLeadersSnapshotAndThenHoldsTheLeadersHealthState`
   timed out after 90 seconds in build 2 of 2026-10-04 (`docs/JENKINS.md`),
   while the Phase 2 run on the development machine passed 30 of 30. An
@@ -1753,7 +1752,7 @@ run.
     build 2.
 
   Decided by the user on 2026-10-10: give the test its own client profile.
-  Applied the same day, not yet run.
+  Applied the same day.
   - `docker/config/client-acceptance/client-long-ttl.json` is the restart
     profile with a `ttlMs` of 600000 on both checks and no
     `deregisterAfterMs`. Its compose file is
@@ -1781,8 +1780,16 @@ run.
   This removes the limit the test did not state. It does not explain what
   slowed the follower in build 2. If that happens again, the test fails on
   its stated 90-second wait, and the container logs, which the pipeline has
-  archived since build 4, will show why. The task stays open until the
-  Docker suite has passed with the new profile.
+  archived since build 4, will show why.
+
+  Closed 2026-10-10, without proof of the cause in build 2, which can no
+  longer be had. Jenkins build 6 ran the test with the new profile: it
+  passed in 12.1 seconds, and the four tests of its class in 72 seconds. A
+  run that short would have passed under the restart profile too. So the
+  build shows that the test works with the new profile. That the unstated
+  limit is gone rests on the profile's values, which the new contract test
+  checks, and it passed. No log line names the profile, because the logs
+  do not print a check's TTL.
 - [ ] Make the kept stack ask only for what a server publishes (added
   2026-10-10; applied the same day, not yet seen working). Removing the
   client panels showed that more of the stack pointed at nothing.
@@ -1829,15 +1836,62 @@ job.
 **Exit:** `DockerDeploymentContractTest`, the Docker suite, and each remaining
 start command work.
 
-**Not met yet (2026-10-10).** It needs:
-- the default build, which runs `DockerDeploymentContractTest`;
-- the end-to-end, Docker, and slow suites, because compose files changed;
-- the retained logs of both read for unflagged errors;
+**Partly met (2026-10-10).** Jenkins build 6, on `d0275a7`, which holds all of
+this phase:
+- Default build: 899 tests, every coverage gate met.
+  `DockerDeploymentContractTest` passed its 16 tests there. It was the
+  first run of this phase's new assertions; their red state was never run.
+- End-to-end: 10 tests. Docker and slow: 25. One of them validates every
+  compose file under `docker/compose` with `docker compose config`.
+- Jenkins published 934 results, none failed or skipped.
+- The console and the 104 archived log files were read, except two binary
+  Raft logs. They hold 691 flagged ERROR events, counting copies, and one
+  flagged uncaught exception. No ERROR event and no uncaught exception is
+  without a flag.
+
+Still needed:
 - each remaining command run once by hand: `start.ps1` with `cluster`,
   `multinode`, `status`, and `stop`; `start-quick.ps1 cluster` with `3node`,
   `5node`, and `network-test`, then `status`, `stop`, and `clean`; and
   `start-observability.ps1`, with `-Status` and `-Down`. The `.sh` scripts
-  need a POSIX shell.
+  need a POSIX shell;
+- the look at the dashboard, in the last task above.
+
+**Unflagged errors found by the audit of build 6 (2026-10-10), being
+remedied.** Ten WARN events in the container logs carry a stack trace and no
+flag. The user's word the same day: an error is flagged or it is fixed, as
+the logging policy already says. I had asked whether a WARN counts; that
+question was not open.
+- Each is gRPC's `ManagedChannelImpl` reporting "Failed to resolve name" for
+  a peer, with a trace that ends in `java.net.UnknownHostException`. Nine
+  are in `DockerDurableRestartTest` and one in `DockerClientTopologyTest`.
+- Builds 4 and 5 hold 15 and 10 of the same kind, all in
+  `DockerDurableRestartTest`. Their records say "no unflagged error". That
+  was true of ERROR events and uncaught exceptions, which is all those
+  audits looked for. Every other stack trace in the logs of builds 4 to 6
+  belongs to a flagged event.
+- Cause: the test. Each warning names a peer that the same server reports
+  as unreachable within milliseconds, under `RAFT_PEER_UNREACHABLE`, already
+  flagged for the same class. The class has killed that peer's container or
+  disconnected it from the network, so Docker no longer resolves its name,
+  and gRPC logs each failed lookup. The warnings stop when the peer is
+  reachable again. How many there are depends on when gRPC looks the name
+  up again, which is why one class showed none in two builds and one in the
+  third.
+- Why nothing caught them: the Docker audit checks ERROR events and
+  uncaught exceptions only. The trace is text inside the message, not an
+  exception attached to the event.
+- Remedy, test first:
+  - a definition for exactly this event, `RAFT_PEER_NAME_UNRESOLVED`: the
+    logger, the WARN level, and the whole first line, with the same host in
+    all three places;
+  - the Docker audit flags a declared event at its own level, and reports
+    any other event below ERROR that carries a stack trace;
+  - the five Docker classes that kill or disconnect a server declare the
+    definition, as they already declare `RAFT_PEER_UNREACHABLE`.
+- State: the definition and seven tests are written in
+  `DockerLogCaptureTest`. Five of them fail until the audit and the
+  declarations change; that red run has not been made yet.
 
 ### Phase 7. Replace the Vert.x-shaped async layer
 

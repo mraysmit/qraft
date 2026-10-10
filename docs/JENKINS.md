@@ -75,8 +75,8 @@ It was analysed on 2026-10-10. This build archived no container logs, so the cau
 The likeliest one is a deadline the test does not state: the leader removes the frozen client's service
 45 seconds after its last renewal, and after that the test's 90-second wait cannot succeed. The test
 now has its own client profile, `client-long-ttl.json`, under which nothing the frozen client registered
-expires or is removed while the test can run. That was applied on 2026-10-10 and has not been run yet.
-The task list has the reasoning.
+expires or is removed while the test can run. That was applied on 2026-10-10, and the test passed with it
+in build 6. The task list has the reasoning.
 
 [Build 4](http://192.168.137.32:8080/job/Qraft/4/), of 2026-10-10 on commit `ce5890d`, is the first
 complete pass of the pipeline on this server. It took 7 minutes 18 seconds.
@@ -89,6 +89,21 @@ complete pass of the pipeline on this server. It took 7 minutes 18 seconds.
 [Build 5](http://192.168.137.32:8080/job/Qraft/5/), of the same day on commit `d4e1af8`, passed as
 well: 898 default tests, 10 end-to-end, and 25 Docker and slow, 933 results in all, with no unflagged
 error in its archived logs.
+
+[Build 6](http://192.168.137.32:8080/job/Qraft/6/), of the same day on commit `d0275a7`, verified
+Phase 6 of the single-POM task list. It took 8 minutes 28 seconds, with a PeeGeeQ build running beside it.
+- Default build: 899 tests, every coverage gate met. End-to-end: 10. Docker and slow: 25.
+- Jenkins published 934 results, none failed or skipped, and archived 817 files.
+- The console and the 104 archived log files hold 691 flagged ERROR events, counting copies, and one
+  flagged uncaught exception. No ERROR event and no uncaught exception is without a flag.
+- Ten WARN events in the container logs carry a stack trace and no flag: gRPC reporting that it could
+  not resolve a peer's name. Nine are in `DockerDurableRestartTest`, one in `DockerClientTopologyTest`.
+  Builds 4 and 5 hold 15 and 10 of the same kind, which their records above do not mention: those audits
+  looked for ERROR events and uncaught exceptions only. These are unflagged errors under the logging
+  policy. Each comes from a server looking up a peer that its test has killed or disconnected. The
+  remedy, a definition for the event and a Docker audit that checks stack traces below ERROR, is
+  recorded in Phase 6 of the task list.
+- The recovery test that timed out in build 2 passed in 12.1 seconds with its new client profile.
 
 No build ran between 2026-10-04 and 2026-10-10. In that time the `agent` directive of the
 `Jenkinsfile` had been renamed by mistake, which Jenkins would have refused; it was restored in

@@ -117,6 +117,15 @@ public enum IntentionalErrorFixture {
     RAFT_PEER_UNREACHABLE("dev.mars.qraft.raft.RaftNode", Level.ERROR,
             "(?:Raft peer \\S+ became unreachable during AppendEntries|Failed to retrieve vote from \\S+)"),
 
+    /**
+     * A stopped or disconnected Docker peer's name no longer resolves. gRPC reports each failed lookup as a
+     * warning whose message holds the lookup's stack trace.
+     */
+    RAFT_PEER_NAME_UNRESOLVED("io.grpc.internal.ManagedChannelImpl", Level.WARN,
+            "\\[Channel<\\d+>: \\((?<host>[^:)]+):\\d+\\)] Failed to resolve name\\."
+                    + " status=Status\\{code=UNAVAILABLE, description=Unable to resolve host \\k<host>,"
+                    + " cause=java\\.lang\\.RuntimeException: java\\.net\\.UnknownHostException: \\k<host>(?:: .+)?"),
+
     /** A stopped Docker peer interrupts an in-progress snapshot transfer or its completion callback. */
     RAFT_SNAPSHOT_TRANSFER_INTERRUPTED("dev.mars.qraft.raft.RaftNode", Level.ERROR,
             "(?:Failed to send InstallSnapshot chunk \\d+/\\d+ to \\S+: UNAVAILABLE:"

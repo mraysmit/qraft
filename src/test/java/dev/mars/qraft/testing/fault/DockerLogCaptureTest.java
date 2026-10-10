@@ -16,8 +16,13 @@
 
 package dev.mars.qraft.testing.fault;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.LoggerFactory;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -36,6 +41,15 @@ class DockerLogCaptureTest {
     private static final String UNCAUGHT_LOCK_FAILURE = "Exception in thread \"main\" "
             + "java.util.concurrent.CompletionException: dev.mars.raftlog.storage.FileRaftStorage$StorageException: "
             + LOCK_FAILURE;
+    private static final String UNRESOLVED_PEER = "2026-10-10 06:03:32.783 [grpc-default-executor-2] WARN  "
+            + "io.grpc.internal.ManagedChannelImpl - [Channel<10>: (server3:9080)] Failed to resolve name. "
+            + "status=Status{code=UNAVAILABLE, description=Unable to resolve host server3, "
+            + "cause=java.lang.RuntimeException: java.net.UnknownHostException: server3: Try again";
+    private static final String LOOKUP_TRACE =
+            "\n\tat io.grpc.internal.DnsNameResolver.resolveAddresses(DnsNameResolver.java:224)"
+            + "\nCaused by: java.net.UnknownHostException: server3: Try again"
+            + "\n\tat java.base/java.net.Inet6AddressImpl.lookupAllHostAddr(Native Method)"
+            + "\n\t... 5 more\n}\n";
 
     @TempDir
     Path directory;
@@ -315,6 +329,136 @@ class DockerLogCaptureTest {
 
         assertEquals(5, audit.recognised().size());
         assertTrue(audit.problems().isEmpty());
+    }
+
+    @Test
+    void aDeclaredWarningThatCarriesAStackTraceIsFlaggedWithItsTracePreserved() {
+        String cached = UNRESOLVED_PEER.replace(": Try again", "");
+        String info = "2026-10-10 06:03:33.000 [main] INFO  example.Container - still serving\n";
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(
+                UNRESOLVED_PEER + LOOKUP_TRACE + info + cached + LOOKUP_TRACE,
+                Set.of(IntentionalErrorFixture.RAFT_PEER_NAME_UNRESOLVED), "DockerClass");
+
+        String label = "*** INTENTIONAL ERROR: RAFT_PEER_NAME_UNRESOLVED, caused by DockerClass *** ";
+        assertEquals(java.util.List.of(), audit.problems());
+        assertEquals(2, audit.recognised().size());
+        assertEquals(UNRESOLVED_PEER.replace("WARN  ", "WARN  " + label) + LOOKUP_TRACE + info
+                + cached.replace("WARN  ", "WARN  " + label) + LOOKUP_TRACE, audit.archivedOutput());
+    }
+
+    @Test
+    void anUndeclaredEventBelowErrorThatCarriesAStackTraceIsAProblem() {
+        for (String level : java.util.List.of("WARN ", "INFO ", "DEBUG")) {
+            String line = "2026-10-10 06:03:32.783 [worker] " + level + " example.Container - lookup failed";
+            String output = line + "\njava.net.UnknownHostException: server3\n\tat example.Trace.call(Trace.java:1)\n";
+            DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(output, Set.of(), "DockerClass");
+            assertEquals(java.util.List.of("undeclared container event with a stack trace: " + line),
+                    audit.problems());
+            assertEquals(output, audit.archivedOutput());
+            assertTrue(audit.recognised().isEmpty());
+        }
+        DockerLogCaptureHelper.Audit undeclared = DockerLogCaptureHelper.audit(UNRESOLVED_PEER + LOOKUP_TRACE,
+                Set.of(IntentionalErrorFixture.RAFT_PEER_UNREACHABLE), "DockerClass");
+        assertEquals(java.util.List.of("undeclared container event with a stack trace: " + UNRESOLVED_PEER),
+                undeclared.problems());
+        assertEquals(UNRESOLVED_PEER + LOOKUP_TRACE, undeclared.archivedOutput());
+    }
+
+    @Test
+    void anEventBelowErrorWithoutAStackTraceIsNotAProblem() {
+        String output = """
+                2026-10-10 06:03:32.000 [qraft-state-loop] ERROR dev.mars.qraft.raft.RaftNode [n1] - Raft peer n2 became unreachable during AppendEntries
+                java.net.ConnectException: connection refused
+                \tat example.Trace.call(Trace.java:1)
+                2026-10-10 06:03:32.500 [main] WARN  example.Container - retrying at the next interval
+                2026-10-10 06:03:33.000 [main] INFO  example.Container - recovered at index 12 (term 3)
+                """;
+
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(
+                output, Set.of(IntentionalErrorFixture.RAFT_PEER_UNREACHABLE));
+
+        assertEquals(java.util.List.of(), audit.problems());
+        assertEquals(1, audit.recognised().size());
+    }
+
+    @Test
+    void framesAfterAnUncaughtExceptionBelongToItEvenWhenDockerMergesAnEventIntoItsTrace() {
+        String cleanup = "2026-10-06 14:00:01.000 [main] INFO  "
+                + "dev.mars.qraft.server.QraftServerService - QraftServerService stopped successfully (immediate)";
+        String output = SERVER_LOCK_ERROR + "\n" + UNCAUGHT_LOCK_FAILURE
+                + "\n\tat java.base/java.util.concurrent.CompletableFuture.encodeThrowable(Unknown Source)\n"
+                + cleanup
+                + "\nCaused by: dev.mars.raftlog.storage.FileRaftStorage$StorageException: " + LOCK_FAILURE
+                + "\n\tat dev.mars.raftlog.storage.FileRaftStorage.acquireExclusiveLock(FileRaftStorage.java:1879)\n";
+
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(output,
+                Set.of(IntentionalErrorFixture.SERVER_STORAGE_ALREADY_LOCKED), "DockerClass");
+
+        assertEquals(java.util.List.of(), audit.problems());
+    }
+
+    @Test
+    void theUnresolvedPeerWarningHasANarrowSignature() {
+        Set<IntentionalErrorFixture> expected = Set.of(IntentionalErrorFixture.RAFT_PEER_NAME_UNRESOLVED);
+        for (String line : java.util.List.of(
+                UNRESOLVED_PEER.replace("UnknownHostException: server3", "UnknownHostException: server1"),
+                UNRESOLVED_PEER.replace("Unable to resolve host server3", "Unable to resolve host server1"),
+                UNRESOLVED_PEER.replace("code=UNAVAILABLE", "code=INTERNAL"),
+                UNRESOLVED_PEER.replace("java.net.UnknownHostException", "java.lang.IllegalStateException"),
+                UNRESOLVED_PEER.replace("Failed to resolve name", "Failed to update the load balancer"),
+                UNRESOLVED_PEER.replace("io.grpc.internal.ManagedChannelImpl", "io.grpc.internal.OtherChannel"))) {
+            DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(
+                    line + LOOKUP_TRACE, expected, "DockerClass");
+            assertEquals(java.util.List.of("undeclared container event with a stack trace: " + line),
+                    audit.problems());
+            assertEquals(line + LOOKUP_TRACE, audit.archivedOutput());
+        }
+        String atErrorLevel = UNRESOLVED_PEER.replace("WARN  ", "ERROR ");
+        assertEquals(java.util.List.of("undeclared container " + atErrorLevel),
+                DockerLogCaptureHelper.audit(atErrorLevel + LOOKUP_TRACE, expected, "DockerClass").problems());
+    }
+
+    @Test
+    void classCaptureArchivesADeclaredWarningWithItsFlagAndReprintsItAtItsOwnLevel() throws Exception {
+        Logger grpc = (Logger) LoggerFactory.getLogger("io.grpc.internal.ManagedChannelImpl");
+        ListAppender<ILoggingEvent> reprinted = new ListAppender<>();
+        reprinted.start();
+        grpc.addAppender(reprinted);
+        try {
+            DockerLogCaptureHelper.beginClass("UnresolvedPeerDockerClass",
+                    Set.of(IntentionalErrorFixture.RAFT_PEER_NAME_UNRESOLVED));
+            DockerLogCaptureHelper.capture("unresolved-peer-container", "server1", UNRESOLVED_PEER + LOOKUP_TRACE);
+            assertEquals(java.util.List.of(), DockerLogCaptureHelper.finishClass(directory));
+        } finally {
+            grpc.detachAppender(reprinted);
+        }
+
+        assertEquals(UNRESOLVED_PEER.replace("WARN  ", "WARN  *** INTENTIONAL ERROR: RAFT_PEER_NAME_UNRESOLVED, "
+                        + "caused by UnresolvedPeerDockerClass *** ") + LOOKUP_TRACE,
+                Files.readString(directory.resolve("UnresolvedPeerDockerClass/server1.log")));
+        assertEquals(java.util.List.of(Level.WARN), reprinted.list.stream().map(ILoggingEvent::getLevel).toList());
+    }
+
+    @Test
+    void everyDockerClassThatMakesAPeerUnreachableDeclaresThatItsNameMayNotResolve() throws Exception {
+        int checked = 0;
+        try (var sources = Files.list(Path.of("src/test/java/dev/mars/qraft/raft"))) {
+            for (Path source : sources.filter(path ->
+                    path.getFileName().toString().matches("Docker\\w+Test\\.java")).toList()) {
+                Class<?> type = Class.forName("dev.mars.qraft.raft."
+                        + source.getFileName().toString().replace(".java", ""), false, getClass().getClassLoader());
+                ExpectedDockerErrorsHelper declared = type.getAnnotation(ExpectedDockerErrorsHelper.class);
+                if (declared == null
+                        || !Set.of(declared.value()).contains(IntentionalErrorFixture.RAFT_PEER_UNREACHABLE)) {
+                    continue;
+                }
+                assertTrue(Set.of(declared.value()).contains(IntentionalErrorFixture.RAFT_PEER_NAME_UNRESOLVED),
+                        type.getSimpleName() + " stops or disconnects a server, so a surviving server may fail to"
+                                + " resolve that server's name");
+                checked++;
+            }
+        }
+        assertTrue(checked > 0, "no Docker class that makes a peer unreachable was found");
     }
 
     @Test
