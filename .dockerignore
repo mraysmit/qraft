@@ -12,6 +12,9 @@ target/*
 # Version control
 .git/
 
+# Local credentials: never part of a build context
+.env/
+
 # IDE / editor state
 .idea/
 .history/
