@@ -10,13 +10,12 @@ services:
     hostname: server1
     command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
-      - "8081:8080"
+      - "${PUBLISHED_PORT:-8081}:8080"
     networks:
       - raft-cluster-5
     volumes:
       - ../config/five-node/server1.json:/etc/qraft/server.json:ro
       - server1-data:/app/data
-      - ../../logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
       interval: 10s
@@ -33,13 +32,12 @@ services:
     hostname: server2
     command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
-      - "8082:8080"
+      - "${PUBLISHED_PORT:-8082}:8080"
     networks:
       - raft-cluster-5
     volumes:
       - ../config/five-node/server2.json:/etc/qraft/server.json:ro
       - server2-data:/app/data
-      - ../../logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
       interval: 10s
@@ -56,13 +54,12 @@ services:
     hostname: server3
     command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
-      - "8083:8080"
+      - "${PUBLISHED_PORT:-8083}:8080"
     networks:
       - raft-cluster-5
     volumes:
       - ../config/five-node/server3.json:/etc/qraft/server.json:ro
       - server3-data:/app/data
-      - ../../logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
       interval: 10s
@@ -79,13 +76,12 @@ services:
     hostname: server4
     command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
-      - "8084:8080"
+      - "${PUBLISHED_PORT:-8084}:8080"
     networks:
       - raft-cluster-5
     volumes:
       - ../config/five-node/server4.json:/etc/qraft/server.json:ro
       - server4-data:/app/data
-      - ../../logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
       interval: 10s
@@ -102,13 +98,12 @@ services:
     hostname: server5
     command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
-      - "8085:8080"
+      - "${PUBLISHED_PORT:-8085}:8080"
     networks:
       - raft-cluster-5
     volumes:
       - ../config/five-node/server5.json:/etc/qraft/server.json:ro
       - server5-data:/app/data
-      - ../../logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
       interval: 10s
@@ -120,9 +115,6 @@ services:
 networks:
   raft-cluster-5:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.21.0.0/16
 
 volumes:
   server1-data:

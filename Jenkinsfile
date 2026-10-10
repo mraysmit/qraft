@@ -101,8 +101,13 @@ fi
 
         stage('Docker cluster tests') {
             steps {
-                catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
-                    sh '''#!/usr/bin/env bash
+                // These tests create and remove Docker networks, which changes the network
+                // interfaces of the host. A browser test of another job on this node then loses
+                // its page load. The PeeGeeQ UI stage holds the same lock, so each waits for the
+                // other. The step needs the Lockable Resources plugin.
+                lock('host-network-interfaces') {
+                    catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
+                        sh '''#!/usr/bin/env bash
 set -uo pipefail
 rm -rf -- target/surefire-reports
 mvn -B -Dstyle.color=never -Dmaven.repo.local="$WORKSPACE@repository" test \
@@ -110,6 +115,7 @@ mvn -B -Dstyle.color=never -Dmaven.repo.local="$WORKSPACE@repository" test \
     | tee "logs/qraft-docker-$(date -u +%Y-%m-%d_%H-%M-%S)-$BUILD_NUMBER.log"
 exit "${PIPESTATUS[0]}"
 '''
+                    }
                 }
             }
             post {

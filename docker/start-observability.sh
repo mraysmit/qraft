@@ -6,11 +6,13 @@ COMPOSE_FILE="$SCRIPT_DIR/compose/docker-compose-observability.yml"
 action=${1:-up}
 
 case "$action" in
-  --down|down) docker compose -f "$COMPOSE_FILE" down -v; exit 0 ;;
+  # down keeps the data volumes; clean removes them, and only those this compose file defines.
+  --down|down) docker compose -f "$COMPOSE_FILE" down; exit 0 ;;
+  --clean|clean) docker compose -f "$COMPOSE_FILE" down -v; exit 0 ;;
   --logs|logs) docker compose -f "$COMPOSE_FILE" logs -f; exit 0 ;;
   --status|status) docker compose -f "$COMPOSE_FILE" ps; exit 0 ;;
   up) ;;
-  *) echo "Usage: ./start-observability.sh [up|down|logs|status]" >&2; exit 2 ;;
+  *) echo "Usage: ./start-observability.sh [up|down|clean|logs|status]" >&2; exit 2 ;;
 esac
 
 docker info >/dev/null 2>&1 || { echo "Docker is not running." >&2; exit 1; }

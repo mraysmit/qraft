@@ -17,7 +17,8 @@ The job loads its pipeline from the repository's default branch using the follow
 The pipeline checks out the same SCM revision that supplied its Jenkinsfile. It needs an online Linux
 x64 node labelled `linux`, Bash, Git, curl, Maven 3.9 or newer, and access to a running Docker engine
 with Docker Compose. The Jenkins controller's built-in node carries both its existing `peegeeq-linux`
-label and the `linux` label used by Qraft. No Jenkins plugin installation is needed.
+label and the `linux` label used by Qraft. The pipeline needs the Lockable Resources plugin for the
+`lock` step of its Docker stage. The plugin was installed on this server on 2026-10-10.
 
 The first build downloads SapMachine JDK 27 from its official GitHub release and verifies its pinned
 SHA-256 checksum. The JDK is cached in `<workspace>@tools/sapmachine-jdk-27`; Maven dependencies are
@@ -36,6 +37,14 @@ Every Maven command uses the job's Maven repository cache, streams combined outp
 console and a timestamped file under `logs/`, and preserves Maven's exit status through `tee`.
 Builds and suites run sequentially. A failed default build stops the dependent suites; an end-to-end
 failure still allows Docker tests to run. The build timeout is one hour.
+
+The Docker stage holds the Jenkins lock `host-network-interfaces` while it runs. Its tests create and
+remove Docker networks, which changes the network interfaces of the host. A browser cancels a page load
+when that happens, and the PeeGeeQ job runs browser tests on the same node. On 2026-10-10, builds 6 and
+11 ran beside PeeGeeQ builds 18 and 19, and 7 PeeGeeQ browser test attempts failed on a blank page
+within seconds of this stage's network changes. The PeeGeeQ UI stage holds the same lock, so each stage
+waits for the other. A Qraft build can wait at its Docker stage for the length of that UI stage, about
+38 minutes in a full PeeGeeQ run, and the wait counts against the one-hour timeout.
 
 JUnit results appear under **Test Result**. Build artifacts contain the logs, complete Surefire reports
 under `reports/default`, `reports/e2e`, and `reports/docker`, and the default build's JaCoCo reports under

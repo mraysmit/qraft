@@ -22,10 +22,10 @@ services:
     volumes:
       - ./otel-collector-cluster-config.yaml:/etc/otel-collector-config.yaml:ro
     ports:
-      - "4317:4317"
-      - "4318:4318"
-      - "8888:8888"
-      - "13133:13133"
+      - "${PUBLISHED_PORT:-4317}:4317"
+      - "${PUBLISHED_PORT:-4318}:4318"
+      - "${PUBLISHED_PORT:-8888}:8888"
+      - "${PUBLISHED_PORT:-13133}:13133"
     networks:
       - observability
     # No health check: this image holds no shell and no wget or curl, so one could never pass.
@@ -42,8 +42,8 @@ services:
       - ./tempo-config.yaml:/etc/tempo/tempo.yaml:ro
       - tempo-data:/tmp/tempo
     ports:
-      - "3200:3200"
-      - "9095:9095"
+      - "${PUBLISHED_PORT:-3200}:3200"
+      - "${PUBLISHED_PORT:-9095}:9095"
     networks:
       - observability
     healthcheck:
@@ -68,7 +68,7 @@ services:
       - ./prometheus-cluster.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     ports:
-      - "9090:9090"
+      - "${PUBLISHED_PORT:-9090}:9090"
     networks:
       - observability
     healthcheck:
@@ -89,7 +89,7 @@ services:
       - ./loki-config.yaml:/etc/loki/loki.yaml:ro
       - loki-data:/loki
     ports:
-      - "3100:3100"
+      - "${PUBLISHED_PORT:-3100}:3100"
     networks:
       - observability
     healthcheck:
@@ -116,7 +116,7 @@ services:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana
     ports:
-      - "3000:3000"
+      - "${PUBLISHED_PORT:-3000}:3000"
     depends_on:
       prometheus:
         condition: service_healthy
@@ -146,8 +146,8 @@ services:
     volumes:
       - ../config/three-node-observability/server1.json:/etc/qraft/server.json:ro
     ports:
-      - "8081:8080"
-      - "9464:9464"
+      - "${PUBLISHED_PORT:-8081}:8080"
+      - "${PUBLISHED_PORT:-9464}:9464"
     networks:
       - observability
     depends_on:
@@ -174,8 +174,8 @@ services:
     volumes:
       - ../config/three-node-observability/server2.json:/etc/qraft/server.json:ro
     ports:
-      - "8082:8080"
-      - "9465:9464"
+      - "${PUBLISHED_PORT:-8082}:8080"
+      - "${PUBLISHED_PORT:-9465}:9464"
     networks:
       - observability
     depends_on:
@@ -204,8 +204,8 @@ services:
     volumes:
       - ../config/three-node-observability/server3.json:/etc/qraft/server.json:ro
     ports:
-      - "8083:8080"
-      - "9466:9464"
+      - "${PUBLISHED_PORT:-8083}:8080"
+      - "${PUBLISHED_PORT:-9466}:9464"
     networks:
       - observability
     depends_on:

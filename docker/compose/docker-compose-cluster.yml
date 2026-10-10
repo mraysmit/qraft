@@ -10,14 +10,12 @@ services:
     hostname: server1
     command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
-      - "8081:8080"
+      - "${PUBLISHED_PORT:-8081}:8080"
     networks:
-      qraft-cluster:
-        ipv4_address: 172.20.0.11
+      - qraft-cluster
     volumes:
       - ../config/three-node/server1.json:/etc/qraft/server.json:ro
       - server1-data:/app/data
-      - ../../logs:/app/logs
     logging:
       driver: "json-file"
       options:
@@ -39,14 +37,12 @@ services:
     hostname: server2
     command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
-      - "8082:8080"
+      - "${PUBLISHED_PORT:-8082}:8080"
     networks:
-      qraft-cluster:
-        ipv4_address: 172.20.0.12
+      - qraft-cluster
     volumes:
       - ../config/three-node/server2.json:/etc/qraft/server.json:ro
       - server2-data:/app/data
-      - ../../logs:/app/logs
     logging:
       driver: "json-file"
       options:
@@ -70,14 +66,12 @@ services:
     hostname: server3
     command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
-      - "8083:8080"
+      - "${PUBLISHED_PORT:-8083}:8080"
     networks:
-      qraft-cluster:
-        ipv4_address: 172.20.0.13
+      - qraft-cluster
     volumes:
       - ../config/three-node/server3.json:/etc/qraft/server.json:ro
       - server3-data:/app/data
-      - ../../logs:/app/logs
     logging:
       driver: "json-file"
       options:
@@ -97,9 +91,6 @@ services:
 networks:
   qraft-cluster:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
 
 volumes:
   server1-data:

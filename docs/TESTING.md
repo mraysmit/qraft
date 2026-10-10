@@ -41,7 +41,9 @@ in the published CI branch:
 
 The suites run sequentially, and concurrent Qraft builds are disabled. An end-to-end failure still
 allows the Docker suite to run, while a failed default build stops the dependent suites. Maven's exit
-code is preserved through `tee`, and the build has a one-hour timeout.
+code is preserved through `tee`, and the build has a one-hour timeout. The Docker suite holds a Jenkins
+lock that it shares with the PeeGeeQ job's browser tests, so a build can wait at that stage; see
+[JENKINS.md](JENKINS.md#suites-and-results).
 
 Jenkins publishes the JUnit results and archives `logs/`, separate `reports/default`, `reports/e2e`,
 and `reports/docker` directories, and the default suite's JaCoCo HTML/XML reports under `coverage/`.
@@ -180,19 +182,27 @@ There are two ways onto Docker, and they build differently.
 ```
 
 Only one cluster runs at a time: they share container names, so stop one before starting another.
-Each `cluster` or `multinode` command first runs `docker/build-runtime.ps1`, which packages the runtime
-jar again with `package -DskipTests`, then starts the containers with
+Each `cluster` or `multinode` command first runs `docker/build-runtime.ps1`. It packages the runtime
+jar with `package -DskipTests` when the POM or a production source is newer than the jar, and does
+nothing when the jar is current. The command then starts the containers with
 `docker compose ... up -d` and returns. Follow a cluster's logs with
 `docker compose -f compose/<file>.yml logs -f`. `start.sh` and `start-quick.sh` are the shell
 equivalents.
+
+`DockerStartCommandsTest`, in the Docker suite, runs every one of these commands and those of
+`start-observability`: the shell scripts on Linux, and so on Jenkins, and the PowerShell scripts on
+Windows. It runs them in a Compose project of its own, `qraft-start-commands`, with
+`PUBLISHED_PORT=0`, so it publishes on free host ports and removes only its own containers and
+volumes. It fails while a cluster started by hand is running, because the container names are
+taken.
 
 **The whole process for a runtime change:**
 
 1. `mvn install`, which runs the default suite and the coverage gates, and packages the runtime jar.
 2. `mvn test "-Dgroups=docker,e2e" "-Dtest.excludedGroups="`, the
    end-to-end and Docker suites, which build their own image from that jar.
-3. Optional: `docker\start.ps1 multinode`, to watch a hand-started cluster. It repackages the jar first,
-   which is redundant straight after step 1 but harmless.
+3. Optional: `docker\start.ps1 multinode`, to watch a hand-started cluster. Straight after step 1 the
+   jar is current, so it starts the containers without packaging again.
 
 ## Making runs faster
 

@@ -87,11 +87,6 @@
             "cellOptions": { "type": "color-text" },
             "inspect": false
           },
-          "mappings": [
-            { "options": { "0": { "color": "#3274D9", "index": 0, "text": "FOLLOWER" } }, "type": "value" },
-            { "options": { "1": { "color": "#FF9830", "index": 1, "text": "CANDIDATE" } }, "type": "value" },
-            { "options": { "2": { "color": "#73BF69", "index": 2, "text": "★ LEADER" } }, "type": "value" }
-          ],
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -121,7 +116,12 @@
           {
             "matcher": { "id": "byName", "options": "State" },
             "properties": [
-              { "id": "custom.width", "value": 110 }
+              { "id": "custom.width", "value": 110 },
+              { "id": "mappings", "value": [
+                { "options": { "0": { "color": "#3274D9", "index": 0, "text": "FOLLOWER" } }, "type": "value" },
+                { "options": { "1": { "color": "#FF9830", "index": 1, "text": "CANDIDATE" } }, "type": "value" },
+                { "options": { "2": { "color": "#73BF69", "index": 2, "text": "★ LEADER" } }, "type": "value" }
+              ] }
             ]
           },
           {
@@ -201,6 +201,7 @@
               "otel_scope_name": true, "otel_scope_name 1": true, "otel_scope_name 2": true, "otel_scope_name 3": true, "otel_scope_name 4": true,
               "deployment 1": true, "deployment 2": true, "deployment 3": true, "deployment 4": true,
               "service 1": true, "service 2": true, "service 3": true, "service 4": true,
+              "service": true, "job": true,
               "job 1": true, "job 2": true, "job 3": true, "job 4": true,
               "node 2": true, "node 3": true, "node 4": true
             },

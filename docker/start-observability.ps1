@@ -3,6 +3,7 @@
 
 param(
     [switch]$Down,
+    [switch]$Clean,
     [switch]$Logs,
     [switch]$Status
 )
@@ -10,7 +11,14 @@ param(
 $ComposeFile = "$PSScriptRoot\compose\docker-compose-observability.yml"
 
 if ($Down) {
-    Write-Host "Stopping observability stack..." -ForegroundColor Yellow
+    Write-Host "Stopping observability stack. Its data volumes are kept..." -ForegroundColor Yellow
+    docker compose -f $ComposeFile down
+    exit 0
+}
+
+if ($Clean) {
+    Write-Host "Removing the observability stack and its data volumes..." -ForegroundColor Yellow
+    # Only what this compose file defines. Other projects' volumes are left alone.
     docker compose -f $ComposeFile down -v
     exit 0
 }
@@ -96,7 +104,8 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Commands:" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  Stop stack:      .\start-observability.ps1 -Down" -ForegroundColor Gray
+Write-Host "  Stop stack:      .\start-observability.ps1 -Down     (keeps the data)" -ForegroundColor Gray
+Write-Host "  Remove data:     .\start-observability.ps1 -Clean" -ForegroundColor Gray
 Write-Host "  View logs:       .\start-observability.ps1 -Logs" -ForegroundColor Gray
 Write-Host "  Check status:    .\start-observability.ps1 -Status" -ForegroundColor Gray
 Write-Host ""

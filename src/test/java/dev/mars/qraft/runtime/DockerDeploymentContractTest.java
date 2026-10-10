@@ -217,6 +217,48 @@ class DockerDeploymentContractTest {
     }
 
     @Test
+    void stoppingTheObservabilityStackKeepsItsDataAndOnlyCleanRemovesIt() throws IOException {
+        Path root = Path.of("").toAbsolutePath();
+        for (String script : List.of("docker/start-observability.ps1", "docker/start-observability.sh")) {
+            String content = Files.readString(root.resolve(script)).replace("\r\n", "\n");
+            assertFalse(content.contains("prune"), script + " must not prune Docker volumes or networks");
+            assertEquals(1, occurrences(content, "down -v"), script + ": one action removes the data volumes");
+            Matcher clean = Pattern.compile("(?s)(?:if \\(\\$Clean\\) \\{|--clean\\|clean\\)).*?down -v").matcher(content);
+            assertTrue(clean.find(), script + ": that action is clean");
+            assertFalse(clean.group().contains("exit 0"), script + ": no other action reaches the removal");
+            assertTrue(Pattern.compile("(?:if \\(\\$Down\\) \\{[^}]*|--down\\|down\\) [^\\n]*)down[\\n;]")
+                    .matcher(content).find(), script + ": down stops the stack and keeps its volumes");
+        }
+    }
+
+    @Test
+    void handStartedStacksPublishOverridablePortsAndClaimNoFixedAddressOrSharedLogDirectory() throws IOException {
+        Path root = Path.of("").toAbsolutePath();
+        try (var paths = Files.list(root.resolve("docker/compose"))) {
+            for (Path compose : paths.filter(path -> path.getFileName().toString().startsWith("docker-compose-"))
+                    .toList()) {
+                String content = Files.readString(compose);
+                assertFalse(Pattern.compile("(?m)^\\s+- \"\\d+:\\d+\"").matcher(content).find(), compose
+                        + ": a fixed host port stops the stack wherever that port is taken;"
+                        + " publish \"${PUBLISHED_PORT:-<port>}:<port>\"");
+                assertFalse(content.contains("subnet:") || content.contains("ipv4_address:"), compose
+                        + ": a fixed subnet stops the stack wherever Docker has already given that range away");
+                assertFalse(content.contains("/app/logs"), compose
+                        + ": servers that share one host log directory write the same log file");
+            }
+        }
+    }
+
+    @Test
+    void grafanaFindsEveryProvisioningDirectoryItReadsAtStart() {
+        Path provisioning = Path.of("docker/compose/grafana/provisioning").toAbsolutePath();
+        for (String directory : List.of("alerting", "dashboards", "datasources", "notifiers", "plugins")) {
+            assertTrue(Files.isDirectory(provisioning.resolve(directory)), directory
+                    + ": Grafana logs an error at start for a provisioning directory that does not exist");
+        }
+    }
+
+    @Test
     void dockerIntegrationTestsRequireTheHostBuiltRuntimeJar() throws IOException {
         Path root = Path.of("").toAbsolutePath();
         String sharedCluster = Files.readString(root.resolve(
@@ -385,10 +427,18 @@ class DockerDeploymentContractTest {
             assertFalse(json.contains("controller"), configuration.toString());
         }
         for (String artifact : List.of("src/test/resources/docker-compose-3node-prebuilt.yml",
-                "docker/compose/prometheus-cluster.yml", "docker/compose/otel-collector-cluster-config.yaml")) {
+                "docker/compose/prometheus-cluster.yml")) {
             String content = Files.readString(root.resolve(artifact));
             assertTrue(content.contains("server1"), artifact);
             assertFalse(content.contains("controller"), artifact);
+        }
+        for (String collector : List.of("docker/compose/otel-collector-cluster-config.yaml",
+                "docker/compose/otel-collector-config.yaml")) {
+            String content = Files.readString(root.resolve(collector));
+            assertFalse(content.contains("controller"), collector);
+            assertFalse(content.contains("scrape_configs") || content.contains(", prometheus]"), collector
+                    + ": Prometheus scrapes the servers itself, so a collector that scrapes them too stores"
+                    + " every server's metrics twice");
         }
         String dashboard = Files.readString(root.resolve(
                 "docker/compose/grafana/provisioning/dashboards/json/qraft-server.json"));
@@ -404,6 +454,13 @@ class DockerDeploymentContractTest {
                     prometheus + ": a server publishes its metrics on its telemetry port, not its HTTP port");
         }
         assertFalse(dashboard.contains("controller"));
+        for (var panel : new com.fasterxml.jackson.databind.ObjectMapper().readTree(dashboard).path("panels")) {
+            if (panel.path("type").asText().equals("table")) {
+                assertTrue(panel.path("fieldConfig").path("defaults").path("mappings").isEmpty(),
+                        panel.path("title").asText() + ": a value mapping in a table's defaults renames the values"
+                                + " of every column, so a term of 1 reads CANDIDATE. Map the one column in an override");
+            }
+        }
         ClientConfiguration client = ClientConfiguration.fromFile(root.resolve("docker/config/client.json"));
         assertTrue(client.getServerUrls().stream().allMatch(url -> url.getHost().startsWith("server")));
     }

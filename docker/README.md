@@ -80,8 +80,9 @@ property, `config/client.json` relative to the working directory, and finally
 
 Compose packages the runtime JAR built on the host; it does not run Maven inside
 Docker. The `start.ps1`, `start.sh`, `start-quick.ps1`, and `start-quick.sh`
-helpers run the local build automatically before starting a cluster. To build
-the artifact without starting Docker, run either helper:
+helpers run the local build before starting a cluster, when the POM or a
+production source is newer than `target/qraft.jar`. To build the artifact
+without starting Docker, run either helper:
 
 ```powershell
 .\build-runtime.ps1
@@ -98,6 +99,14 @@ on the selected topology. Check a running endpoint with:
 Invoke-RestMethod http://localhost:8080/health/ready
 ```
 
+Every compose file publishes a port as `${PUBLISHED_PORT:-<port>}`. Leave the
+variable unset for the ports named here. Set it to `0` and Docker chooses a free
+host port for each one, which `docker port <container>` then shows; the Docker
+suite starts the stacks that way. Compose reads the variable; Qraft does not.
+
+A server writes its log files inside its container, under `/app/logs`, and to
+its console: read them with `docker logs <container>`.
+
 ## Observability
 
 There is one observability stack: OpenTelemetry Collector, Tempo, Prometheus,
@@ -106,13 +115,15 @@ Loki, and Grafana:
 ```powershell
 .\start-observability.ps1
 .\start-observability.ps1 -Status
-.\start-observability.ps1 -Down
+.\start-observability.ps1 -Down     # stops the stack and keeps its data
+.\start-observability.ps1 -Clean    # stops it and removes its data volumes
 ```
 
 ```sh
 sh ./start-observability.sh
 sh ./start-observability.sh status
 sh ./start-observability.sh down
+sh ./start-observability.sh clean
 ```
 
 Default local endpoints:

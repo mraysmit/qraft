@@ -10,14 +10,12 @@ services:
     hostname: server1
     command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
-      - "8081:8080"
+      - "${PUBLISHED_PORT:-8081}:8080"
     networks:
-      raft-cluster:
-        ipv4_address: 172.20.0.10
+      - raft-cluster
     volumes:
       - ../config/five-node/server1.json:/etc/qraft/server.json:ro
       - server1-data:/app/data
-      - ../../logs:/app/logs
     cap_add:
       - NET_ADMIN  # Required for network manipulation (tc, iptables)
     healthcheck:
@@ -36,14 +34,12 @@ services:
     hostname: server2
     command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
-      - "8082:8080"
+      - "${PUBLISHED_PORT:-8082}:8080"
     networks:
-      raft-cluster:
-        ipv4_address: 172.20.0.11
+      - raft-cluster
     volumes:
       - ../config/five-node/server2.json:/etc/qraft/server.json:ro
       - server2-data:/app/data
-      - ../../logs:/app/logs
     cap_add:
       - NET_ADMIN
     healthcheck:
@@ -62,14 +58,12 @@ services:
     hostname: server3
     command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
-      - "8083:8080"
+      - "${PUBLISHED_PORT:-8083}:8080"
     networks:
-      raft-cluster:
-        ipv4_address: 172.20.0.12
+      - raft-cluster
     volumes:
       - ../config/five-node/server3.json:/etc/qraft/server.json:ro
       - server3-data:/app/data
-      - ../../logs:/app/logs
     cap_add:
       - NET_ADMIN
     healthcheck:
@@ -88,14 +82,12 @@ services:
     hostname: server4
     command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
-      - "8084:8080"
+      - "${PUBLISHED_PORT:-8084}:8080"
     networks:
-      raft-cluster:
-        ipv4_address: 172.20.0.13
+      - raft-cluster
     volumes:
       - ../config/five-node/server4.json:/etc/qraft/server.json:ro
       - server4-data:/app/data
-      - ../../logs:/app/logs
     cap_add:
       - NET_ADMIN
     healthcheck:
@@ -114,14 +106,12 @@ services:
     hostname: server5
     command: ["server", "--config", "/etc/qraft/server.json"]
     ports:
-      - "8085:8080"
+      - "${PUBLISHED_PORT:-8085}:8080"
     networks:
-      raft-cluster:
-        ipv4_address: 172.20.0.14
+      - raft-cluster
     volumes:
       - ../config/five-node/server5.json:/etc/qraft/server.json:ro
       - server5-data:/app/data
-      - ../../logs:/app/logs
     cap_add:
       - NET_ADMIN
     healthcheck:
@@ -138,12 +128,9 @@ services:
     container_name: qraft-network-monitor
     hostname: network-monitor
     networks:
-      raft-cluster:
-        ipv4_address: 172.20.0.100
-      raft-partition-a:
-        ipv4_address: 172.21.0.100
-      raft-partition-b:
-        ipv4_address: 172.22.0.100
+      - raft-cluster
+      - raft-partition-a
+      - raft-partition-b
     cap_add:
       - NET_ADMIN
       - SYS_ADMIN
@@ -157,11 +144,6 @@ networks:
   # Primary cluster network
   raft-cluster:
     driver: bridge
-    ipam:
-      driver: default
-      config:
-        - subnet: 172.20.0.0/16
-          gateway: 172.20.0.1
     driver_opts:
       com.docker.network.bridge.name: raft-cluster-br
       com.docker.network.bridge.enable_icc: "true"
@@ -171,11 +153,6 @@ networks:
   # Partition network A (for split-brain testing)
   raft-partition-a:
     driver: bridge
-    ipam:
-      driver: default
-      config:
-        - subnet: 172.21.0.0/16
-          gateway: 172.21.0.1
     driver_opts:
       com.docker.network.bridge.name: raft-partition-a-br
       com.docker.network.bridge.enable_icc: "true"
@@ -183,11 +160,6 @@ networks:
   # Partition network B (for complex partition scenarios)
   raft-partition-b:
     driver: bridge
-    ipam:
-      driver: default
-      config:
-        - subnet: 172.22.0.0/16
-          gateway: 172.22.0.1
     driver_opts:
       com.docker.network.bridge.name: raft-partition-b-br
       com.docker.network.bridge.enable_icc: "true"
