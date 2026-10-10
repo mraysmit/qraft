@@ -61,6 +61,9 @@ import static dev.mars.qraft.raft.RaftAwaitHelper.await;
  */
 public final class InstalledSnapshotCrashWriterFixture {
     public static final int HALT_EXIT_CODE = 93;
+    /** Halts once the installed snapshot's temporary file is durable, before it is published. */
+    public static final String BEFORE_INSTALLED_SNAPSHOT_PUBLICATION =
+            "BEFORE_INSTALLED_SNAPSHOT_PUBLICATION";
     public static final String AFTER_INSTALLED_SNAPSHOT_PUBLICATION =
             "AFTER_INSTALLED_SNAPSHOT_PUBLICATION";
     public static final String DURING_SHUTDOWN_AFTER_PREFIX_COMPACTION =
@@ -96,6 +99,10 @@ public final class InstalledSnapshotCrashWriterFixture {
                 : null;
         RaftStorage wal = gatedWal == null ? realWal : gatedWal;
         FileSnapshotStore snapshots = new FileSnapshotStore(reached -> {
+            if (BEFORE_INSTALLED_SNAPSHOT_PUBLICATION.equals(checkpoint)
+                    && reached == FileSnapshotStore.PersistenceCheckpoint.AFTER_TEMPORARY_FORCE) {
+                Runtime.getRuntime().halt(HALT_EXIT_CODE);
+            }
             if ((AFTER_INSTALLED_SNAPSHOT_PUBLICATION.equals(checkpoint)
                     || AFTER_DIVERGENT_SNAPSHOT_PUBLICATION.equals(checkpoint))
                     && reached == FileSnapshotStore.PersistenceCheckpoint.AFTER_DIRECTORY_FORCE) {

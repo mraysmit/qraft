@@ -147,10 +147,10 @@ final class DockerHealthApiHelper {
 
     /**
      * Waits until every server has published its first snapshot, writing filler entries through the leader for
-     * as long as one has not. A test that kills a server and starts it again calls this first: a server killed
-     * while it writes its first snapshot leaves {@code snapshot.dat.tmp} with no {@code snapshot.dat}, and
-     * refuses to start on that by design (see {@code docs/RAFT_STORAGE_OPERATIONS.md}). Once a snapshot is
-     * published, a later crash leaves at worst a stale temporary file, which startup removes.
+     * as long as one has not. A test that kills a server and starts it again calls this first. A server killed
+     * while it writes its first snapshot restarts from its log, and one killed later restarts from its
+     * snapshot; waiting keeps every run on the second path, so the test does not take one or the other by
+     * timing. The first path has its own tests, in {@code RaftNodeRealSnapshotRecoveryTest}.
      */
     static void awaitFirstSnapshotOnEveryServer(List<String> servers) {
         AtomicInteger fillers = new AtomicInteger(FIRST_SNAPSHOT_FILLER_BASE);

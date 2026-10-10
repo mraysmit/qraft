@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-10-09 (the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
+**Last updated:** 2026-10-10 (recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
 
 ## 1. Purpose
 
@@ -1479,7 +1479,7 @@ Failure behavior is deliberate:
   ignore replayed entries at or below the snapshot boundary.
 - Compaction failure leaves memory untrimmed and may fence the WAL.
 - A successful compaction must never be paired with an absent or volatile
-  snapshot.
+  snapshot. Recovery checks for this pairing and refuses it (section 14.5).
 - Installing a snapshot from a leader uses the same publish-before-compact order
   before changing the follower's in-memory state.
 
@@ -1514,6 +1514,30 @@ The WAL holds the physical log, while Qraft owns the logical snapshot boundary.
 After prefix compaction, the first replayed entry may have an index greater than
 one. Recovery validates continuity relative to the snapshot boundary rather than
 assuming that every WAL begins at index one.
+
+**An interrupted first snapshot, and a missing one.** Changed on 2026-10-10;
+[`TEST-RESULTS.md`](../docs/TEST-RESULTS.md) has the evidence.
+
+- A temporary snapshot file with no published snapshot is what a kill leaves
+  between the creation of that file and its rename, during the first snapshot
+  a server ever writes or installs. The WAL is complete at that moment, by the
+  order of section 14.4. `FileSnapshotStore.open` moves the file to
+  `snapshot.dat.interrupted`, keeps one such file as evidence, and the server
+  starts from its WAL. Until this change it refused to start.
+- Recovery enforces the rule of section 14.4 that a successful compaction is
+  never paired with an absent snapshot. After the WAL is replayed, it compares
+  the index the WAL is compacted through with the index the published
+  snapshot reaches. If the WAL is ahead, a published snapshot is missing or
+  has been replaced by an older one, and the entries between are gone.
+  Recovery then fails, the node is fenced, and the server stays live and
+  unready, as it does for a corrupt WAL. Until this change a server of a
+  larger cluster in that state started empty, with its term and vote kept,
+  and a server with an older snapshot started with the entries between
+  missing.
+- The compaction index comes from RaftLog's file storage. RaftLog's storage
+  interface does not expose it yet, so `RaftPersistence` tests for the class.
+  Another implementation reports none and is not checked. Adding the method
+  to the interface is a change to RaftLog.
 
 Restart recovery assumes the server's last durable state. An offline copy that
 predates later participation cannot replace that state under the same voter ID:
@@ -2078,6 +2102,12 @@ Evidence as of 2026-09-27, except where a row gives a later date:
   [`task-list-acl-and-tokens-2026-10-10.md`](task-list-acl-and-tokens-2026-10-10.md).
   Until it is built, any caller can claim any node name and node ID.
 - How long legacy command and snapshot readers remain supported.
+
+Resolved on 2026-10-10: a server recovers by itself from a kill during its
+first snapshot, and recovery refuses a WAL that is compacted further than the
+published snapshot reaches. Section 14.5 states both.
+[`TEST-RESULTS.md`](../docs/TEST-RESULTS.md) has the tests, what other Raft
+implementations do, and the opinion recorded before the decision.
 
 Resolved on 2026-10-04, recorded here on 2026-10-05: how a node's identity is
 made and kept, which was half of the open item "how client identity is

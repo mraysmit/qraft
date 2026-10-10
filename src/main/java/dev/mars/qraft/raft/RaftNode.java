@@ -761,7 +761,21 @@ public class RaftNode {
 
                 return toFuture(persistence.replayLog());
             });
-        Future<Void> recovered = composeOnStateLoop(replay, entries -> {
+        Future<ReplayedLog> replayedLog = composeOnStateLoop(replay, entries ->
+                toFuture(persistence.compactionBoundary())
+                        .map(compactedThrough -> new ReplayedLog(entries, compactedThrough)));
+        Future<Void> recovered = composeOnStateLoop(replayedLog, fromWal -> {
+                List<LogEntryData> entries = fromWal.entries();
+                // A snapshot is published before the WAL is compacted up to it, so a WAL compacted further
+                // than the published snapshot reaches means that snapshot is missing or was replaced by an
+                // older one. The entries in between are gone, and this node may have acknowledged them.
+                if (fromWal.compactedThrough() > snapshotLastIndex) {
+                    return Future.failedFuture(new IllegalStateException("Node " + nodeId
+                            + " cannot recover: its log is compacted through index " + fromWal.compactedThrough()
+                            + " but its published snapshot reaches only index " + snapshotLastIndex
+                            + "; a published snapshot is missing or older than the log. Preserve the storage"
+                            + " directory for diagnosis and restore this node from its peers"));
+                }
                 if (snapshotLastIndex > 0 && conflictsWithSnapshotBoundary(entries)) {
                     return discardInterruptedInstallationSuffix(entries.size());
                 }
@@ -826,6 +840,9 @@ public class RaftNode {
                 logger.error("Recovery failed: {}", err.getMessage(), err);
             });
     }
+
+    /** What the WAL replayed, and the index it has been compacted through, 0 if it never was. */
+    private record ReplayedLog(List<LogEntryData> entries, long compactedThrough) {}
 
     /**
      * Whether the WAL holds an entry at the snapshot boundary whose term differs from the

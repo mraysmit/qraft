@@ -32,8 +32,11 @@ The directory is one consistency unit:
   snapshot and its Raft boundary.
 - `snapshot.dat.tmp` is a temporary snapshot publication file. A temporary file
   beside an existing `snapshot.dat` is stale and is removed on startup. A
-  temporary file with no published snapshot is preserved as crash evidence and
-  fences startup.
+  temporary file with no published snapshot is what a crash leaves while a
+  server writes its first snapshot. Startup moves it to
+  `snapshot.dat.interrupted`, and the server starts from its WAL.
+- `snapshot.dat.interrupted`, when present, is such an unpublished first
+  snapshot, kept as evidence. Nothing reads it, and at most one is kept.
 - The RaftLog implementation may create lock state in the same directory. Treat
   every file in the directory as implementation-owned; do not edit individual
   files.
@@ -101,6 +104,10 @@ fenced process deliberately stays observable but stops participating safely:
 - Logs identify the affected path and the underlying cause. WAL corruption
   diagnostics include `raft.log` and a byte position; directory-lock failures
   name the directory and indicate that another process may hold it.
+- A server whose WAL is compacted further than its published snapshot reaches
+  is fenced at startup. Its log names both indexes: "cannot recover: its log
+  is compacted through index N but its published snapshot reaches only index
+  M". A published snapshot is missing, or has been replaced by an older one.
 
 Do not repeatedly restart a fenced node and do not modify or truncate the WAL.
 The process does not unfence in place. Recovery uses the unchanged last durable
@@ -124,9 +131,19 @@ storage and stop this procedure. The lost-quorum limitation under "Restoring
 storage without rolling back a voter" applies; wiping another node can destroy
 the remaining recovery evidence.
 
-An unpublished first `snapshot.dat.tmp` is handled the same way. Preserve it for
-diagnosis and rebuild the replica from healthy peers. Do not rename it to
-`snapshot.dat` manually.
+A server fenced because its WAL is compacted further than its published
+snapshot reaches is handled the same way. The entries between the two indexes
+are gone from that server, and it may have acknowledged them, so rebuild the
+replica from healthy peers. Do not copy a `snapshot.dat` into the directory
+from a backup or from another server.
+
+An unpublished first snapshot does not stop a server. Until 2026-10-10 it did;
+[TEST-RESULTS.md](TEST-RESULTS.md) has the reasons for the change and its tests.
+A server that is killed while it writes the first snapshot of its life finds
+`snapshot.dat.tmp` and no `snapshot.dat` when it starts again. Its WAL is still
+complete then. It logs a warning, keeps the file as `snapshot.dat.interrupted`,
+and starts from the WAL. No action is needed. Do not rename either file to
+`snapshot.dat`.
 
 ## Replace a server that lost its storage
 

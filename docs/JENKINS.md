@@ -73,7 +73,7 @@ Finding its cause is a task in Phase 6 of
 [the single-POM task list](../docs-design/task-list-single-pom-and-quorus-removal-2026-10-10.md).
 It was analysed on 2026-10-10. This build archived no container logs, so its cause cannot be proven
 from it. Build 8 failed the same way with the logs kept: the test had killed the follower while it wrote
-its first snapshot, and a server refuses to start on an unpublished first snapshot, by design. An earlier
+its first snapshot, and a server then refused to start on an unpublished first snapshot, by design. An earlier
 explanation, a deadline hidden in the client profile, was not the cause. That limit was real, and the
 test keeps the client profile that removes it, `client-long-ttl.json`. The task list has the reasoning.
 
@@ -134,6 +134,14 @@ that fix. It took 7 minutes 45 seconds.
 - The recovery test passed in 13.0 seconds, and no server refused to start. One pass does not show
   that a race is gone; the order the tests now keep does: none kills a server before its first snapshot
   is published.
+
+[Build 10](http://192.168.137.32:8080/job/Qraft/10/), of the same day on commit `aa0d876`, passed. It is
+the first run on Jenkins of the seven tests that kill a server at each point of its first snapshot
+([TEST-RESULTS.md](TEST-RESULTS.md)). It took 8 minutes 29 seconds.
+- Default build: 913 tests, every coverage gate met. End-to-end: 10. Docker and slow: 25.
+- Jenkins published 948 results, none failed or skipped, and archived 817 files.
+- The console and the 104 archived log files hold 610 flagged ERROR events, counting copies, and one
+  flagged uncaught exception. No ERROR event, no uncaught exception, and no stack trace is without a flag.
 
 No build ran between 2026-10-04 and 2026-10-10. In that time the `agent` directive of the
 `Jenkinsfile` had been renamed by mistake, which Jenkins would have refused; it was restored in

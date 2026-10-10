@@ -89,6 +89,43 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
                 List.of(1L, 2L, 3L, 4L, 5L), 2, true);
     }
 
+    /**
+     * The follower has no snapshot of its own and is killed while it writes the one it is installing, before
+     * that snapshot is published. Nothing of the installation has taken effect, so the follower restarts from
+     * its WAL alone, as it was before the installation began, and keeps the unpublished file aside.
+     */
+    @Test
+    void crashBeforePublishingAFirstInstalledSnapshotRestartsFromTheWalAndKeepsTheFile() throws Exception {
+        seedWal();
+        ProcessResult crash = runCrashWriter(
+                InstalledSnapshotCrashWriterFixture.BEFORE_INSTALLED_SNAPSHOT_PUBLICATION);
+        assertEquals(InstalledSnapshotCrashWriterFixture.HALT_EXIT_CODE, crash.exitCode(), crash.output());
+        Path temporary = directory.resolve("snapshot.dat.tmp");
+        assertTrue(Files.exists(temporary));
+        assertFalse(Files.exists(directory.resolve("snapshot.dat")));
+        byte[] unpublished = Files.readAllBytes(temporary);
+
+        QraftStateStore state = new QraftStateStore();
+        node = follower(state);
+        await(node.start());
+
+        assertTrue(node.isRunning());
+        assertEquals(3, node.getCurrentTerm());
+        assertEquals(0, node.getSnapshotLastIndex());
+        assertEquals(5, node.getLastLogIndex());
+        assertNull(state.getMetadata("key-1"),
+                "nothing past the bootstrap entry is applied before a leader commits it");
+        AppendEntriesResponse committed = await(node.handleAppendEntriesRequest(commitRecoveredEntry()));
+        assertTrue(committed.getSuccess(), "the recovered log matches its leader's: " + committed);
+        awaitApplied(5);
+        assertEquals("one", state.getMetadata("key-1"));
+        assertEquals("four", state.getMetadata("key-4"));
+        assertFalse(Files.exists(temporary));
+        assertFalse(Files.exists(directory.resolve("snapshot.dat")));
+        org.junit.jupiter.api.Assertions.assertArrayEquals(unpublished,
+                Files.readAllBytes(directory.resolve("snapshot.dat.interrupted")));
+    }
+
     @Test
     void restartWhileShutdownDrainsCompactedInstallationUsesExactSuffix() throws Exception {
         verifyRecovery(InstalledSnapshotCrashWriterFixture.DURING_SHUTDOWN_AFTER_PREFIX_COMPACTION,

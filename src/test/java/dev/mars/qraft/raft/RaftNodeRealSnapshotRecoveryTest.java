@@ -25,6 +25,8 @@ import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.state.distributed.DistributedStateCommand;
 import dev.mars.qraft.raft.api.SnapshotStore;
+import dev.mars.qraft.testing.fault.IntentionalErrorFixture;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import dev.mars.qraft.testing.fault.SubprocessOutputAuditHelper;
 import dev.mars.raftlog.storage.FileRaftStorage;
 import dev.mars.raftlog.storage.RaftStorage;
@@ -55,8 +57,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * FileSnapshotStore}.
  *
  * <p>The {@code firstSnapshot} tests cover a node that has no published snapshot yet, at every point where
- * a kill can land while it publishes its first. Before the temporary file exists and after publication the
- * node restarts by itself. Between the two, startup is fenced; those tests also show that nothing is lost.
+ * a kill can land while it publishes its first. The node restarts by itself at every one. Between the
+ * creation of the temporary file and its publication it restarts from its log, and keeps the unpublished
+ * file aside.
+ *
+ * <p>The last tests cover the state that recovery must refuse: a log compacted further than the published
+ * snapshot reaches, which means a published snapshot is missing or has been replaced by an older one.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-14
@@ -68,10 +74,6 @@ class RaftNodeRealSnapshotRecoveryTest {
 
     @TempDir
     Path directory;
-
-    /** Where a test puts a fenced first snapshot's temporary file, outside the storage directory. */
-    @TempDir
-    Path evidence;
 
     private JavaRuntime runtime;
     private RaftNode node;
@@ -100,37 +102,18 @@ class RaftNodeRealSnapshotRecoveryTest {
     }
 
     @Test
-    void restartWithUnpublishedFirstSnapshotFencesAndPreservesTemporary() throws Exception {
-        seedWal();
-        SnapshotStore.SnapshotData replacement = replacementSnapshot();
-        String checkpoint = "AFTER_TEMPORARY_FORCE";
-        ProcessResult crash = runCrashWriter(checkpoint, replacement);
-        assertEquals(SnapshotStoreCrashWriterFixture.HALT_EXIT_CODE, crash.exitCode(), crash.output());
-
-        assertTrue(Files.exists(directory.resolve("snapshot.dat.tmp")));
-        assertFalse(Files.exists(directory.resolve("snapshot.dat")));
-        byte[] evidence = Files.readAllBytes(directory.resolve("snapshot.dat.tmp"));
-        CompletionException failure = assertThrows(CompletionException.class,
-                () -> await(RaftStorageFactory.createDurable(directory, true)));
-        assertTrue(failure.getCause().getMessage().contains("unpublished first snapshot"));
-        assertTrue(Files.exists(directory.resolve("snapshot.dat.tmp")));
-        org.junit.jupiter.api.Assertions.assertArrayEquals(
-                evidence, Files.readAllBytes(directory.resolve("snapshot.dat.tmp")));
-    }
-
-    @Test
     void firstSnapshotCrashBeforeTemporaryCreationRestartsFromTheWholeLog() throws Exception {
         verifyFirstSnapshotRecovery("BEFORE_TEMPORARY_CREATE", 0, List.of(1L, 2L, 3L, 4L, 5L));
     }
 
     @Test
-    void firstSnapshotCrashAfterTemporaryWriteFencesStartupAndLosesNothing() throws Exception {
-        verifyFirstSnapshotFenceLosesNothing("AFTER_TEMPORARY_WRITE");
+    void firstSnapshotCrashAfterTemporaryWriteRestartsFromTheLogAndKeepsTheFile() throws Exception {
+        verifyInterruptedFirstSnapshotIsSetAside("AFTER_TEMPORARY_WRITE");
     }
 
     @Test
-    void firstSnapshotCrashAfterTemporaryForceFencesStartupAndLosesNothing() throws Exception {
-        verifyFirstSnapshotFenceLosesNothing("AFTER_TEMPORARY_FORCE");
+    void firstSnapshotCrashAfterTemporaryForceRestartsFromTheLogAndKeepsTheFile() throws Exception {
+        verifyInterruptedFirstSnapshotIsSetAside("AFTER_TEMPORARY_FORCE");
     }
 
     @Test
@@ -170,6 +153,67 @@ class RaftNodeRealSnapshotRecoveryTest {
         verifyRecovery(SnapshotStoreCrashWriterFixture.AFTER_PREFIX_COMPACTION, 4, List.of(5L));
     }
 
+    @Test
+    void aCompactedLogWithNoSnapshotRefusesToRecoverWhileEntriesAreLeft() throws Exception {
+        seedStorage();
+        compactWalThrough(3);
+        Files.delete(directory.resolve("snapshot.dat"));
+
+        assertRecoveryRefused(3, 0);
+    }
+
+    @Test
+    void aCompactedLogWithNoSnapshotRefusesToRecoverWhenNoEntriesAreLeft() throws Exception {
+        seedStorage();
+        compactWalThrough(5);
+        Files.delete(directory.resolve("snapshot.dat"));
+
+        assertRecoveryRefused(5, 0);
+    }
+
+    /**
+     * A server of a larger cluster does not write a first entry by itself, so nothing else would stop it:
+     * without the check it starts empty and keeps its vote, with everything it had acknowledged gone.
+     */
+    @Test
+    void aServerOfALargerClusterWithACompactedLogAndNoSnapshotRefusesToRecover() throws Exception {
+        seedStorage();
+        compactWalThrough(5);
+        Files.delete(directory.resolve("snapshot.dat"));
+
+        assertRecoveryRefused(Set.of("node-1", "node-2"), 5, 0);
+    }
+
+    @Test
+    void aCompactedLogWithOnlyAnUnpublishedSnapshotRefusesToRecoverAndKeepsTheFile() throws Exception {
+        seedStorage();
+        compactWalThrough(5);
+        Files.move(directory.resolve("snapshot.dat"), directory.resolve("snapshot.dat.tmp"));
+        byte[] unpublished = Files.readAllBytes(directory.resolve("snapshot.dat.tmp"));
+
+        assertRecoveryRefused(5, 0);
+
+        assertFalse(Files.exists(directory.resolve("snapshot.dat.tmp")));
+        org.junit.jupiter.api.Assertions.assertArrayEquals(
+                unpublished, Files.readAllBytes(directory.resolve("snapshot.dat.interrupted")));
+    }
+
+    @Test
+    void aSnapshotOlderThanTheLogsCompactionRefusesToRecoverWhileEntriesAreLeft() throws Exception {
+        seedStorage();
+        compactWalThrough(4);
+
+        assertRecoveryRefused(4, 3);
+    }
+
+    @Test
+    void aSnapshotOlderThanTheLogsCompactionRefusesToRecoverWhenNoEntriesAreLeft() throws Exception {
+        seedStorage();
+        compactWalThrough(5);
+
+        assertRecoveryRefused(5, 3);
+    }
+
     private void verifyRecovery(
             String checkpoint,
             long expectedSnapshotIndex,
@@ -187,6 +231,8 @@ class RaftNodeRealSnapshotRecoveryTest {
         }
         assertFalse(Files.exists(directory.resolve("snapshot.dat.tmp")),
                 "recovery must remove a non-authoritative temporary snapshot");
+        assertFalse(Files.exists(directory.resolve("snapshot.dat.interrupted")),
+                "a stale temporary file beside a published snapshot is removed, not kept");
 
         assertWalHolds(expectedWalIndexes);
         startNodeAndAssertWholeState(expectedSnapshotIndex);
@@ -214,11 +260,10 @@ class RaftNodeRealSnapshotRecoveryTest {
 
     /**
      * Halts the crash writer at {@code checkpoint}, after the first snapshot's temporary file exists and before
-     * it is published. Startup is fenced, and the node has lost nothing: the log is compacted only after a
-     * snapshot is published, so it still holds every entry, and the node starts from it alone, with its whole
-     * state, once the temporary file is out of the storage directory.
+     * it is published. The log is compacted only after a snapshot is published, so it still holds every entry:
+     * the node starts from it alone, with its whole state, and keeps the unpublished file aside, unchanged.
      */
-    private void verifyFirstSnapshotFenceLosesNothing(String checkpoint) throws Exception {
+    private void verifyInterruptedFirstSnapshotIsSetAside(String checkpoint) throws Exception {
         seedWal();
         ProcessResult crash = runCrashWriter(checkpoint, replacementSnapshot());
         assertEquals(SnapshotStoreCrashWriterFixture.HALT_EXIT_CODE, crash.exitCode(), crash.output());
@@ -226,15 +271,44 @@ class RaftNodeRealSnapshotRecoveryTest {
         Path temporary = directory.resolve("snapshot.dat.tmp");
         assertTrue(Files.exists(temporary), "the crash at " + checkpoint + " leaves the temporary file");
         assertFalse(Files.exists(directory.resolve("snapshot.dat")));
-        CompletionException failure = assertThrows(CompletionException.class,
-                () -> await(RaftStorageFactory.createDurable(directory, true)));
-        assertTrue(failure.getCause().getMessage().contains("unpublished first snapshot"),
-                messageChain(failure));
-        assertTrue(Files.exists(temporary), "the fence preserves the temporary file");
-
+        byte[] unpublished = Files.readAllBytes(temporary);
         assertWalHolds(List.of(1L, 2L, 3L, 4L, 5L));
-        Files.move(temporary, evidence.resolve("snapshot.dat.tmp"));
+
         startNodeAndAssertWholeState(0);
+
+        assertFalse(Files.exists(temporary), "start-up sets the unpublished snapshot aside");
+        assertFalse(Files.exists(directory.resolve("snapshot.dat")), "and never publishes it");
+        org.junit.jupiter.api.Assertions.assertArrayEquals(
+                unpublished, Files.readAllBytes(directory.resolve("snapshot.dat.interrupted")));
+    }
+
+    /** Compacts the seeded WAL through {@code index}, as a snapshot at that index would have. */
+    private void compactWalThrough(long index) throws Exception {
+        try (FileRaftStorage wal = wal()) {
+            wal.open(directory).get(10, TimeUnit.SECONDS);
+            wal.truncatePrefix(index).get(10, TimeUnit.SECONDS);
+        }
+    }
+
+    /**
+     * Starts the node on the storage directory and checks that recovery refuses, naming how far the log is
+     * compacted and how far the published snapshot reaches. The node is then fenced, not running.
+     */
+    private void assertRecoveryRefused(long compactedThrough, long snapshotIndex) throws Exception {
+        assertRecoveryRefused(MEMBERS, compactedThrough, snapshotIndex);
+    }
+
+    private void assertRecoveryRefused(Set<String> members, long compactedThrough, long snapshotIndex)
+            throws Exception {
+        IntentionalErrorsHelper.expect(IntentionalErrorFixture.RAFT_RECOVERY_SNAPSHOT_MISSING);
+        node = durableNode(new QraftStateStore(), members);
+
+        CompletionException failure = assertThrows(CompletionException.class, () -> await(node.start()));
+
+        assertTrue(messageChain(failure).contains("its log is compacted through index " + compactedThrough
+                + " but its published snapshot reaches only index " + snapshotIndex), messageChain(failure));
+        assertFalse(node.isRunning());
+        assertTrue(node.isFenced(), "a node that refused to recover reports itself fenced");
     }
 
     private void assertWalHolds(List<Long> expectedWalIndexes) throws Exception {
@@ -250,23 +324,8 @@ class RaftNodeRealSnapshotRecoveryTest {
 
     /** Starts the node on the storage directory and checks that it holds everything the log ever held. */
     private void startNodeAndAssertWholeState(long expectedSnapshotIndex) throws Exception {
-        RaftStorageFactory.DurableStorage durable = await(
-                RaftStorageFactory.createDurable(directory, true));
-        runtime = JavaRuntime.create();
         QraftStateStore state = new QraftStateStore();
-        node = RaftNode.builder()
-                .runtime(runtime)
-                .nodeId("node-1")
-                .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
-                .clusterNodes(MEMBERS)
-                .transport(new PeerlessTransportFixture())
-                .stateMachine(state)
-                .commandCodec(CODEC)
-                .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
-                .snapshotEnabled(false)
-                .electionTimeout(10_000)
-                .heartbeatInterval(10_000)
-                .build();
+        node = durableNode(state, MEMBERS);
         await(node.start());
 
         assertTrue(node.isRunning());
@@ -277,6 +336,26 @@ class RaftNodeRealSnapshotRecoveryTest {
         assertEquals("two", state.getMetadata("key-2"));
         assertEquals("three", state.getMetadata("key-3"));
         assertEquals("four", state.getMetadata("key-4"));
+    }
+
+    /** The node on the storage directory, opened as the server opens it, and not yet started. */
+    private RaftNode durableNode(QraftStateStore state, Set<String> members) {
+        RaftStorageFactory.DurableStorage durable = await(
+                RaftStorageFactory.createDurable(directory, true));
+        runtime = JavaRuntime.create();
+        return RaftNode.builder()
+                .runtime(runtime)
+                .nodeId("node-1")
+                .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
+                .clusterNodes(members)
+                .transport(new PeerlessTransportFixture())
+                .stateMachine(state)
+                .commandCodec(CODEC)
+                .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
+                .snapshotEnabled(false)
+                .electionTimeout(10_000)
+                .heartbeatInterval(10_000)
+                .build();
     }
 
     private SnapshotStore.SnapshotData seedStorage() throws Exception {

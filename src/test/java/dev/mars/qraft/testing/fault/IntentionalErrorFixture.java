@@ -108,6 +108,13 @@ public enum IntentionalErrorFixture {
                     + " the data predates configurations in the log and is not upgraded; start it on an empty"
                     + " data directory"),
 
+    /** Recovery refuses a log that is compacted further than the published snapshot reaches. */
+    RAFT_RECOVERY_SNAPSHOT_MISSING("dev.mars.qraft.raft.RaftNode", Level.ERROR,
+            "(?:Recovery failed|Failed to recover Raft state from storage): Node \\S+ cannot recover: its log is"
+                    + " compacted through index \\d+ but its published snapshot reaches only index \\d+;"
+                    + " a published snapshot is missing or older than the log\\. Preserve the storage directory"
+                    + " for diagnosis and restore this node from its peers"),
+
     /** A follower refuses an append that would overwrite an entry it has already committed. */
     COMMITTED_ENTRY_REPLACEMENT("dev.mars.qraft.raft.RaftNode", Level.ERROR,
             "Refusing AppendEntries from leader \\S+: it would replace the committed entry at index \\d+"

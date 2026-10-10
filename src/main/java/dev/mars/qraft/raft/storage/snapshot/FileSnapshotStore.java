@@ -19,6 +19,8 @@ package dev.mars.qraft.raft.storage.snapshot;
 import dev.mars.qraft.raft.api.SnapshotStore;
 import dev.mars.qraft.raft.api.SnapshotStore.PublicationOutcome;
 import dev.mars.qraft.raft.api.SnapshotStore.SnapshotPublicationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -56,6 +58,8 @@ public final class FileSnapshotStore implements SnapshotStore {
     private static final int CRC_SIZE = Integer.BYTES;
     private static final String SNAPSHOT_FILE = "snapshot.dat";
     private static final String TEMP_FILE = "snapshot.dat.tmp";
+    private static final String INTERRUPTED_FILE = "snapshot.dat.interrupted";
+    private static final Logger logger = LoggerFactory.getLogger(FileSnapshotStore.class);
 
     private final PersistenceObserver persistenceObserver;
     private final ExecutorService executor = Executors.newSingleThreadExecutor(
@@ -82,16 +86,31 @@ public final class FileSnapshotStore implements SnapshotStore {
             Files.createDirectories(this.directory);
             Path temporary = this.directory.resolve(TEMP_FILE);
             if (Files.exists(temporary)) {
-                Path published = this.directory.resolve(SNAPSHOT_FILE);
-                if (!Files.exists(published)) {
-                    throw new IOException("Refusing startup because unpublished first snapshot "
-                            + temporary + " has no published " + published
-                            + "; preserve the file for diagnosis and restore this node from its peers");
+                if (Files.exists(this.directory.resolve(SNAPSHOT_FILE))) {
+                    Files.delete(temporary);
+                } else {
+                    setAsideInterruptedFirstSnapshot(temporary);
                 }
-                Files.delete(temporary);
             }
             opened = true;
         });
+    }
+
+    /**
+     * A temporary file with no published snapshot is what a crash leaves while the first snapshot is being
+     * written. It was never published, and the log is compacted only after a publication, so the log is still
+     * whole and nothing depends on the file. It is kept as evidence under a name that is never read, in place
+     * of any kept before, and the store opens without a snapshot. Recovery refuses separately when it finds a
+     * log compacted further than the published snapshot reaches.
+     */
+    private void setAsideInterruptedFirstSnapshot(Path temporary) throws IOException {
+        Path interrupted = directory.resolve(INTERRUPTED_FILE);
+        Files.move(temporary, interrupted,
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING);
+        forceDirectory(directory);
+        logger.warn("Found unpublished first snapshot {} with no published snapshot: kept as {}, and starting"
+                + " without a snapshot", temporary, interrupted);
     }
 
     @Override

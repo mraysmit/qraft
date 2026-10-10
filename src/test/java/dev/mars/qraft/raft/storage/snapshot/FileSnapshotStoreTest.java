@@ -30,13 +30,14 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests for {@link FileSnapshotStore} persistence across reopen, publication outcomes on failure
- * before or after the atomic move, and fencing on an unpublished first snapshot.
+ * before or after the atomic move, and setting an unpublished first snapshot aside.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-12
@@ -105,20 +106,56 @@ class FileSnapshotStoreTest {
     }
 
     @Test
-    void unpublishedFirstSnapshotTemporaryFileFencesOpenAndIsPreserved() throws Exception {
+    void unpublishedFirstSnapshotTemporaryFileIsSetAsideAndTheStoreOpensEmpty() throws Exception {
         Path temporary = directory.resolve("snapshot.dat.tmp");
         byte[] evidence = "incomplete-first-snapshot".getBytes(StandardCharsets.UTF_8);
         Files.write(temporary, evidence);
 
         try (FileSnapshotStore store = new FileSnapshotStore()) {
-            ExecutionException failure = assertThrows(ExecutionException.class,
-                    () -> store.open(directory).get(10, TimeUnit.SECONDS));
-            String diagnostic = failure.getCause().getMessage();
-            assertTrue(diagnostic.contains(temporary.toString()), diagnostic);
-            assertTrue(diagnostic.contains("unpublished first snapshot"), diagnostic);
+            store.open(directory).get(10, TimeUnit.SECONDS);
+            assertTrue(store.loadLatest().get(10, TimeUnit.SECONDS).isEmpty(),
+                    "an unpublished snapshot is never loaded");
         }
-        assertArrayEquals(evidence, Files.readAllBytes(temporary),
-                "startup fencing must preserve the temporary file for diagnosis");
+        assertFalse(Files.exists(temporary));
+        assertFalse(Files.exists(directory.resolve("snapshot.dat")));
+        assertArrayEquals(evidence, Files.readAllBytes(directory.resolve("snapshot.dat.interrupted")),
+                "the unpublished snapshot is kept, unchanged, for diagnosis");
+    }
+
+    @Test
+    void aSecondInterruptedFirstSnapshotReplacesTheOneSetAsideBefore() throws Exception {
+        Path setAside = directory.resolve("snapshot.dat.interrupted");
+        Files.write(setAside, "earlier".getBytes(StandardCharsets.UTF_8));
+        Files.write(directory.resolve("snapshot.dat.tmp"), "later".getBytes(StandardCharsets.UTF_8));
+
+        try (FileSnapshotStore store = new FileSnapshotStore()) {
+            store.open(directory).get(10, TimeUnit.SECONDS);
+        }
+
+        assertArrayEquals("later".getBytes(StandardCharsets.UTF_8), Files.readAllBytes(setAside));
+        try (var files = Files.list(directory)) {
+            assertEquals(java.util.List.of("snapshot.dat.interrupted"),
+                    files.map(file -> file.getFileName().toString()).toList(),
+                    "one file is kept aside, however often a first snapshot is interrupted");
+        }
+    }
+
+    @Test
+    void aSnapshotSetAsideIsNeverLoadedAndLeavesLaterSnapshotsAlone() throws Exception {
+        Path setAside = directory.resolve("snapshot.dat.interrupted");
+        byte[] evidence = "incomplete-first-snapshot".getBytes(StandardCharsets.UTF_8);
+        Files.write(setAside, evidence);
+
+        try (FileSnapshotStore store = new FileSnapshotStore()) {
+            store.open(directory).get(10, TimeUnit.SECONDS);
+            assertTrue(store.loadLatest().get(10, TimeUnit.SECONDS).isEmpty());
+            store.saveAtomically(snapshot()).get(10, TimeUnit.SECONDS);
+        }
+        try (FileSnapshotStore reopened = new FileSnapshotStore()) {
+            reopened.open(directory).get(10, TimeUnit.SECONDS);
+            assertEquals(1, reopened.loadLatest().get(10, TimeUnit.SECONDS).orElseThrow().lastIncludedIndex());
+        }
+        assertArrayEquals(evidence, Files.readAllBytes(setAside));
     }
 
     private static SnapshotData snapshot() {

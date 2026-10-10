@@ -87,7 +87,7 @@ rules and extracts from that run.
 | 3A. One word for each mode | Added and done 2026-10-09; verified the same day | 5 of 5 | `5a00975` |
 | 4. Node model and API | Done 2026-10-09, exit met; its four open points settled and its decisions confirmed by the user the same day | 7 of 7 | `e4bf00d` to `a6e7930` |
 | 5. Configuration and version | Done 2026-10-10, exit met | 6 of 6 | `693449e`, `c123ee9`, `12d365c`, `d4e1af8` |
-| 6. Docker and observability | Applied 2026-10-10, with the load balancer removed and the recovery test given its own client profile, both at the user's decision; verified by Jenkins build 6. The exit is open for the start commands run by hand and a look at the corrected dashboard. The gRPC warnings the audit found are flagged since build 8. Build 8 showed the cause of the recovery test's timeout, a kill during the follower's first snapshot; build 9 passed with the fix and with no unflagged error or stack trace | 11 of 12 | `ce5890d`, `22a46a9`, `85bb120`, `d0275a7`, `cbb93f4`, `362b507`, `122d739` |
+| 6. Docker and observability | Applied 2026-10-10, with the load balancer removed and the recovery test given its own client profile, both at the user's decision; verified by Jenkins build 6. The exit is open for the start commands run by hand and a look at the corrected dashboard. The gRPC warnings the audit found are flagged since build 8. Build 8 showed the cause of the recovery test's timeout, a kill during the follower's first snapshot; build 9 passed with the fix and with no unflagged error or stack trace. The server was then changed so that a kill in that window is survivable and a log compacted past its snapshot is refused; green locally, not yet on Jenkins | 11 of 13 | `ce5890d`, `22a46a9`, `85bb120`, `d0275a7`, `cbb93f4`, `362b507`, `122d739`, `aa0d876`; the recovery change not committed |
 | 7. Async layer | Not started | 0 of 6 | |
 | 8. Documentation and close-out | Started early for Phases 1 and 2; Phase 3's names done with Phase 3; the documents of Phases 4 and 5 done as each ended | 2 of 6 | |
 
@@ -1886,6 +1886,42 @@ can show: the start commands run by hand, and a look at the dashboard.
     refusing at once, with every log whole. A server could set the
     temporary file aside and start from its log whenever the log has no
     compacted prefix, and keep refusing when it has one.
+  - Described in full on 2026-10-10, at the user's request, with an opinion
+    and with what five other Raft implementations do: `docs/TEST-RESULTS.md`,
+    sections 14.5 and 22 of the design document, and a note in
+    `docs/RAFT_STORAGE_OPERATIONS.md`. Reading the code for it showed a
+    second gap: recovery never compares the log's compaction with the
+    snapshot.
+  - **Decided and built 2026-10-10** ("ok proceed with the planned
+    remediations"). The snapshot store sets an unpublished first snapshot
+    aside as `snapshot.dat.interrupted` and the server starts from its log.
+    Recovery refuses a log compacted further than the published snapshot
+    reaches, and the server then stays live and unready.
+    - Red, on the unchanged server: 33 tests, 11 not passing. Two of them
+      showed a silent loss: a server of a larger cluster with a compacted
+      log and no snapshot started empty, with its term and vote kept, and a
+      server with an older snapshot started with the entries between
+      missing. A cluster of one server did not start empty, as I had read
+      from the code: the log library refuses its first write.
+    - Green: those 33 and 27 more from the nearest classes, none failed,
+      and no error or stack trace without a flag in the logs.
+    - Mutation, in an isolated copy: nine deliberate defects, all killed.
+      A tenth survived and is equivalent, an option the JDK ignores.
+    - The check in `RaftNode` went in ahead of the membership list's Step 4
+      gate, at the user's word. The gate's evidence is then recorded
+      against the source with this change in it.
+    - The runs were local, in the one visible console. The user had allowed
+      that for the tests of this race, to save time. Jenkins has not run
+      the change yet.
+    - `docs/TEST-RESULTS.md` has the whole account; the runbook, the design
+      document, and the testing rule are brought in line.
+- [ ] Read the log's compaction boundary through RaftLog's interface (added
+  2026-10-10). `RaftPersistence.compactionBoundary` tests for the class
+  `FileRaftStorage`, because `raftlog-core` 1.4.1 has `compactionBoundary()`
+  on that class and not on the `RaftStorage` interface. Add the method to
+  the interface in a release of `raftlog-core`, move Qraft to that release,
+  and remove the test of the class. Until then another storage
+  implementation is not checked.
 - [ ] Make the kept stack ask only for what a server publishes (added
   2026-10-10; applied the same day, not yet seen working). Removing the
   client panels showed that more of the stack pointed at nothing.

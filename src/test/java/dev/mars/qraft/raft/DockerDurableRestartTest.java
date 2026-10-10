@@ -162,7 +162,7 @@ class DockerDurableRestartTest {
     void killedFollowerReplaysMissedCommitAfterRestart() throws Exception {
         List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(CLUSTER, 3);
         await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
-        // A server killed while it writes its first snapshot refuses to start again, by design.
+        // A server killed while it writes its first snapshot would restart from its log instead.
         DockerHealthApiHelper.awaitFirstSnapshotOnEveryServer(endpoints);
         int leaderIndex = leaderIndex(endpoints);
         int followerIndex = (leaderIndex + 1) % endpoints.size();
@@ -193,7 +193,7 @@ class DockerDurableRestartTest {
     void killedLeaderIsReplacedAndRejoinsWithCompleteCatalog() throws Exception {
         List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(CLUSTER, 3);
         await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
-        // A server killed while it writes its first snapshot refuses to start again, by design.
+        // A server killed while it writes its first snapshot would restart from its log instead.
         DockerHealthApiHelper.awaitFirstSnapshotOnEveryServer(endpoints);
         int oldLeaderIndex = leaderIndex(endpoints);
         String oldLeaderService = "server" + (oldLeaderIndex + 1);
@@ -222,7 +222,7 @@ class DockerDurableRestartTest {
     void retryAfterLeaderCrashConvergesToOneCatalogInstance() throws Exception {
         List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(CLUSTER, 3);
         await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
-        // A server killed while it writes its first snapshot refuses to start again, by design.
+        // A server killed while it writes its first snapshot would restart from its log instead.
         DockerHealthApiHelper.awaitFirstSnapshotOnEveryServer(endpoints);
         int oldLeaderIndex = leaderIndex(endpoints);
         String oldLeaderService = "server" + (oldLeaderIndex + 1);
