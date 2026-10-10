@@ -60,7 +60,8 @@ public class QraftServerApplication {
         System.setProperty("qraft.log.mode", "server");
         System.setProperty("qraft.log.dir", config.getLoggingDirectory());
         Logging.LOGGER.info("Qraft {} starting in server mode", QraftVersion.current());
-        AppConfig.install(config);
+        config.validate();
+        config.logConfiguration();
         T resource = resourceFactory.apply(config);
         try {
             starter.apply(resource).join();
@@ -114,11 +115,11 @@ public class QraftServerApplication {
             System.setProperty("qraft.log.dir", config.getLoggingDirectory());
             configureJulToSlf4jBridge();
             Logging.LOGGER.info("Initializing Qraft Server with OpenTelemetry (Java 27 runtime)...");
-            AutoCloseable telemetry = TelemetryConfig.configure();
+            AutoCloseable telemetry = TelemetryConfig.configure(config);
             JavaRuntime runtime = null;
             try {
                 runtime = JavaRuntime.create();
-                QraftServerService server = new QraftServerService(runtime);
+                QraftServerService server = new QraftServerService(runtime, config);
                 if (config.isTelemetryEnabled()) {
                     Logging.LOGGER.info("OpenTelemetry tracing enabled - OTLP endpoint: {}, Prometheus metrics port: {}",
                             config.getRedactedOtlpEndpoint(), TelemetryConfig.getPrometheusPort());

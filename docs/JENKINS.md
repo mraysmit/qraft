@@ -70,8 +70,23 @@ recovery case remained red:
 timed out after 90 seconds while waiting for the restarted follower to install and expose the leader's
 snapshot state. This is a test/product integration result rather than a Jenkins configuration failure.
 Finding its cause is a task in Phase 6 of
-[the single-POM task list](../docs-design/task-list-single-pom-and-quorus-removal-2026-10-09.md).
-Until it is found, the complete pipeline has not passed on this server.
+[the single-POM task list](../docs-design/task-list-single-pom-and-quorus-removal-2026-10-10.md).
+
+[Build 4](http://192.168.137.32:8080/job/Qraft/4/), of 2026-10-10 on commit `ce5890d`, is the first
+complete pass of the pipeline on this server. It took 7 minutes 18 seconds.
+- Default build: 892 tests, every coverage gate met. End-to-end: 10. Docker and slow: 25.
+- Jenkins published 927 results, none failed or skipped, and archived 801 files.
+- The 101 archived log files hold no unflagged error.
+- The recovery test that timed out in build 2 passed. Its cause is still not known, so its task in
+  Phase 6 stays open: one pass does not explain an intermittent failure.
+
+No build ran between 2026-10-04 and 2026-10-10. In that time the `agent` directive of the
+`Jenkinsfile` had been renamed by mistake, which Jenkins would have refused; it was restored in
+`ce5890d` before build 4.
+
+An assistant starts this job only when the user asks for that build (see
+[TESTING.md](TESTING.md#run-builds-in-a-visible-terminal-through-tee-object)). It reads the token from
+`.env/jenkins-api-token.txt` and never writes its value anywhere.
 
 ## Historical: the memory fault, 2026-10-03
 

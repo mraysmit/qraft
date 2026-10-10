@@ -41,11 +41,7 @@ public class TelemetryConfig {
     private static int configuredPrometheusPort;
     private static String configuredOtlpEndpoint;
 
-    public static AutoCloseable configure() {
-        return configure(AppConfig.get());
-    }
-
-    static AutoCloseable configure(AppConfig config) {
+    public static AutoCloseable configure(AppConfig config) {
         if (!config.isTelemetryEnabled()) {
             logger.info("Telemetry is disabled");
             return () -> { };

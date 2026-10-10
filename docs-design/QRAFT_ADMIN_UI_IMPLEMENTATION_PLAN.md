@@ -44,7 +44,7 @@ rest of the platform is. This plan changes only when scope or ordering changes.
 ## 3. Technology baseline
 
 The stack was agreed in
-[`task-list-embedded-admin-interface-2026-10-09.md`](task-list-embedded-admin-interface-2026-10-09.md),
+[`task-list-embedded-admin-interface-2026-10-10.md`](task-list-embedded-admin-interface-2026-10-10.md),
 section 4.1, after reviewing the `peegeeq-management-ui` and
 `peegeeq-utilities-ui` modules:
 
@@ -181,7 +181,7 @@ The shared frontend pieces also land here:
 No backend prerequisites.
 
 UI-0 and UI-1 together are the scope of
-[`task-list-embedded-admin-interface-2026-10-09.md`](task-list-embedded-admin-interface-2026-10-09.md).
+[`task-list-embedded-admin-interface-2026-10-10.md`](task-list-embedded-admin-interface-2026-10-10.md).
 
 ### UI-2 Scoped discovery
 
@@ -326,7 +326,7 @@ contracts exist.
 1. **Default state before authentication.** Decided 2026-09-27. The read-only
    interface is enabled by default before UI-5, with a startup warning that it
    is unauthenticated
-   ([`task-list-embedded-admin-interface-2026-10-09.md`](task-list-embedded-admin-interface-2026-10-09.md),
+   ([`task-list-embedded-admin-interface-2026-10-10.md`](task-list-embedded-admin-interface-2026-10-10.md),
    decision 4).
 2. **Source of scope options.** Until replicated tenants exist (UI-6), should
    the scope selector list only the scopes present in the catalog, or should

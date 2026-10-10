@@ -265,7 +265,7 @@ Server mode currently owns:
     Every new leader appends a no-op so an idle cluster can commit an entry
     in that leader's term before changing membership.
   - Steps 5 to 8 of
-    [`task-list-raft-membership-changes-2026-10-09.md`](task-list-raft-membership-changes-2026-10-09.md)
+    [`task-list-raft-membership-changes-2026-10-10.md`](task-list-raft-membership-changes-2026-10-10.md)
     cover automatic removal of failed servers, further disruptive-server
     validation, recovery from lost quorum, and container scenarios.
     Step 5's configuration and removal limits are a planned contract, not
@@ -1910,7 +1910,7 @@ not expose the administrative routes.
 
 Current progress, the active tranche's detailed steps, and the backlog are
 tracked in the current dated task list in `docs-design/`
-([`task-list-raft-membership-changes-2026-10-09.md`](task-list-raft-membership-changes-2026-10-09.md);
+([`task-list-raft-membership-changes-2026-10-10.md`](task-list-raft-membership-changes-2026-10-10.md);
 its predecessor, [`task-list-test-suite-remediation-2026-09-27.md`](../docs/archive/task-list-test-suite-remediation-2026-09-27.md),
 was archived on 2026-10-02 with its packaged-artifact test carried forward; the
 administrative interface list is paused, see [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md)).
@@ -2075,14 +2075,14 @@ Evidence as of 2026-09-27, except where a row gives a later date:
   primary client behavior.
 - Whether the server can trust a caller's claim to a node. Proposed 2026-10-05,
   not yet decided: ACL tokens on Consul's model, in
-  [`task-list-acl-and-tokens-2026-10-09.md`](task-list-acl-and-tokens-2026-10-09.md).
+  [`task-list-acl-and-tokens-2026-10-10.md`](task-list-acl-and-tokens-2026-10-10.md).
   Until it is built, any caller can claim any node name and node ID.
 - How long legacy command and snapshot readers remain supported.
 
 Resolved on 2026-10-04, recorded here on 2026-10-05: how a node's identity is
 made and kept, which was half of the open item "how client identity is
 established". It is decision 8 of
-[`task-list-consul-style-client-2026-10-09.md`](task-list-consul-style-client-2026-10-09.md)
+[`task-list-consul-style-client-2026-10-10.md`](task-list-consul-style-client-2026-10-10.md)
 and is not yet built; section 7.3 changes when it is. It follows Consul: a node
 ID generated at first start and kept in the client's data directory, a node name
 that defaults to the host name, a catalog keyed by name, and a registration

@@ -1,16 +1,16 @@
 # Task List: Single POM and Removal of the Quorus Leftovers
 
 **Date:** 2026-10-04
-**Last updated:** 2026-10-09 (the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
+**Last updated:** 2026-10-10 (Phase 5: the version source, done and verified on Jenkins; three third-party keywords that Phase 3A's sweep had renamed are restored; the file renamed to the date of its last change. On 2026-10-09: the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
 **Status:** In progress. This is the current task list. It started on 2026-10-04 at the user's request, before the membership list's Step 4 close-out gate.
-**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. The next coding task is Phase 5. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
+**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 started on 2026-10-09 with its version source, tasks 4 to 6, which Jenkins build 4 verified on 2026-10-10. The next coding task is the rest of Phase 5: the static default configuration, the typed records, and the shared parsing helper. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
 **Last reviewed:** 2026-10-08, against the code at commit `9a4adf0`, with the other four task lists. The status table in section 4 and every item marked "review of 2026-10-08" come from that review. No build was run for it. The logs that the Phase 2A and Phase 3 records cite were written in another working tree and were not available, so their counts were checked for arithmetic only. The earlier review of 2026-10-05 was against `24beac3`; its items keep their date.
 **Order of work:**
 - The membership list's Step 4 close-out gate is the first task of Phase 7 here.
 - After this list, the membership list resumes at its Step 5, on the new layout, and runs to its end.
-- [`task-list-consul-style-client-2026-10-09.md`](task-list-consul-style-client-2026-10-09.md) follows the membership list. Decided 2026-10-05.
+- [`task-list-consul-style-client-2026-10-10.md`](task-list-consul-style-client-2026-10-10.md) follows the membership list. Decided 2026-10-05.
 
-**Related:** [`task-list-raft-membership-changes-2026-10-09.md`](task-list-raft-membership-changes-2026-10-09.md) (interrupted by this list), [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md)
+**Related:** [`task-list-raft-membership-changes-2026-10-10.md`](task-list-raft-membership-changes-2026-10-10.md) (interrupted by this list), [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md), section 2.4: inherited components must not remain without a clear role
 
 ## 1. Goal
@@ -23,7 +23,7 @@ runtime layer, or its unused tooling.
 
 1. **Client mode stays and becomes a full Consul-style client.** Decided
    2026-10-04, for VMs and bare metal. That work is
-   [`task-list-consul-style-client-2026-10-09.md`](task-list-consul-style-client-2026-10-09.md).
+   [`task-list-consul-style-client-2026-10-10.md`](task-list-consul-style-client-2026-10-10.md).
    This list removes only the client's Quorus-era node model.
 2. **One POM, one artifact.** The root `pom.xml` is the only POM and builds
    `target/qraft.jar`. Module boundaries become package boundaries, enforced by
@@ -86,8 +86,8 @@ rules and extracts from that run.
 | 3. Package layout | Done; verified 2026-10-08. One task added by the review: the comparison of test names with the Phase 0 baseline | 10 of 11 | `9a4adf0` |
 | 3A. One word for each mode | Added and done 2026-10-09; verified the same day | 5 of 5 | `5a00975` |
 | 4. Node model and API | Done 2026-10-09, exit met; its four open points settled and its decisions confirmed by the user the same day | 7 of 7 | `e4bf00d` to `a6e7930` |
-| 5. Configuration and version | Not started | 0 of 6 | |
-| 6. Docker and observability | Not started | 0 of 10 | |
+| 5. Configuration and version | Started 2026-10-09: the version source is done and verified | 3 of 6 | `693449e`, `c123ee9` |
+| 6. Docker and observability | One task added and done on 2026-10-10; the rest not started | 1 of 11 | `ce5890d` |
 | 7. Async layer | Not started | 0 of 6 | |
 | 8. Documentation and close-out | Started early for Phases 1 and 2; Phase 3's names done with Phase 3 | 0 of 6 | |
 
@@ -1017,6 +1017,20 @@ names changed.
   fixture, in `LegacyCatalogFixtureTest`;
 - the 15 lines above, in tests that assert an old name is absent.
 
+**Corrected 2026-10-10: the sweep had also renamed three words that belong
+to other tools.** The search above looked for what the sweep had missed, not
+for what it should have left alone.
+- The `agent { label 'linux' }` directive of the `Jenkinsfile` had become
+  `client { ... }`. Jenkins cannot read a pipeline without that section, so
+  the job could not have run. No build was started between the sweep and
+  2026-10-10, which is why nothing showed it.
+- nginx's `$http_user_agent` had become `$http_user_client` in
+  `docker/compose/nginx/nginx.conf` and `docker/test-data/nginx.conf`. nginx
+  still starts with it, and logs "-" where the user agent belongs.
+- All three were restored (`ce5890d`). The lines the sweep changed in every
+  file that is not Java or Markdown were then read again: these are the only
+  three of their kind.
+
 The fixtures under `src/test/resources/fixtures/catalog/` were not touched.
 In the documents the words remain only in dated records, `docs/archive/`,
 the log extracts of `TESTING.md`, former module and class names given as
@@ -1504,17 +1518,73 @@ Verified 2026-10-09.
   and JSON paths.
 - [ ] Have server and client configuration share one JSON parsing and
   validation helper where they duplicate it.
-- [ ] Report the version from the build manifest instead of the `2.0-ext`
+- [x] Report the version from the build manifest instead of the `2.0-ext`
   default and the `applicationVersion` setting.
-- [ ] Put a version in the manifest, and decide what it is (review of
+- [x] Put a version in the manifest, and decide what it is (review of
   2026-10-05). The executable jar's manifest has none today: the shade step
   sets only the main class. The POM's version is `1.0-SNAPSHOT`, while the
   server reports `2.0-ext`. Add the implementation entries to the manifest,
   and choose the POM version that Qraft reports.
-- [ ] Do the same for the client (review of 2026-10-05). `client.version` in
+- [x] Do the same for the client (review of 2026-10-05). `client.version` in
   the client configuration is the same kind of setting as
   `applicationVersion`, and the Docker example sets it to `1.0.0`. The client
   reports the manifest's version too, and the setting is removed.
+
+  The three tasks above were done together on 2026-10-09 and verified on
+  2026-10-10.
+
+  **Decided 2026-10-09, by the user: the POM's version is the only source,
+  and Qraft reports it as it stands.** That is `1.0-SNAPSHOT` today. A
+  release changes one number.
+
+  What changed:
+  - The build writes `Implementation-Title` and `Implementation-Version`
+    into the manifest of the executable jar. `QraftVersion` reads the
+    version back. A process that does not run from the jar, as a test run
+    does not, reports `development`.
+  - `server.applicationVersion` and `client.version` are refused as unknown
+    settings. The Docker example and the tests no longer set them, and
+    `2.0-ext` is gone.
+  - Each mode logs one line when it starts: "Qraft <version> starting in
+    <mode> mode". That is where a server reports its version. A client also
+    puts it in its node's metadata, as `qraft.version`.
+
+  **Found and fixed on the way: a server put its configured version into
+  the replicated state.** `QraftServerService` seeded the state machine with
+  the key `version`, taken from `applicationVersion`. Two servers with
+  different settings therefore started from different state, and with the
+  version coming from the build, two builds in one cluster would have too.
+  - Nothing read the entry. The seeding is removed, with the constructor of
+    `QraftStateStore` that allowed it: replicated state now starts the same
+    on every server.
+  - The store's own initial entry, `version` = `3.0`, stays. On a new
+    cluster the key/value service now answers `3.0` for that key, where it
+    answered the configured version.
+
+  **Red before green.** Eleven assertions failed before any production
+  change, as predicted: the stub of `QraftVersion` (3), each setting still
+  accepted (2), the client still registering `1.0.0` (1), neither mode
+  naming its version at start-up, from the class path and from the jar
+  (4), and the jar's manifest without a version (1). The user ran it
+  (`logs/qraft-phase5-version-red-2026-10-09_21-55-10-814.log`).
+
+  Verified 2026-10-10, on Jenkins, at the user's request:
+  [build 4](http://192.168.137.32:8080/job/Qraft/4/), of `ce5890d`.
+  - Default build: 892 tests, every coverage gate met. The 892 are the 888
+    before, plus 3 in `QraftVersionTest` and 1 in `AppConfigValidationTest`.
+  - End-to-end: 10 tests. Docker and slow: 25. The 35 are the 32 before,
+    plus three in `RuntimeLoggingTest` that take Qraft's classes from the
+    packaged jar: its manifest carries the POM's version, and each mode
+    reports it.
+  - Jenkins published 927 results, none failed or skipped.
+  - Its 101 archived log files, 64 of them Docker archives, hold 550 flagged
+    ERROR headers and no unflagged error or exception.
+  - In the containers both modes logged `1.0-SNAPSHOT`; from the class path
+    both logged `development`.
+  - No local run was made for the green state. The class files on the
+    development machine are whatever the user's last build left.
+
+  Commits: the red state as `693449e`, the change as `c123ee9`.
 
 **Exit:** The existing configuration tests pass unchanged, apart from those
 of the two removed version settings, plus tests for the version source in
@@ -1553,12 +1623,24 @@ both modes.
 - [ ] Decide whether the nginx load-balancer topology stays, since clients
   rotate through their seeds themselves. Reduce `start.*` and `start-quick.*`
   to the remaining topologies.
+- [x] Keep the local credentials folder out of Docker build contexts (added
+  and done 2026-10-10, at the user's direction). `.env/` holds the Jenkins
+  API token. Git ignored it and it was never committed, but `.dockerignore`
+  did not name it, and most compose files build from the repository root.
+  The Dockerfile copies only the jar and the entrypoint, so the token could
+  not reach an image; with Docker's legacy builder it would still have been
+  sent to the daemon with the build context. `.dockerignore` now excludes it
+  (`ce5890d`).
 - [ ] Find the cause of the one Docker failure on Jenkins (added 2026-10-05):
   `DockerClientRecoveryTest.aKilledFollowerInstallsTheLeadersSnapshotAndThenHoldsTheLeadersHealthState`
   timed out after 90 seconds in build 2 of 2026-10-04 (`docs/JENKINS.md`),
   while the Phase 2 run on the development machine passed 30 of 30. An
   intermittent or machine-dependent failure is a defect
   (`PROJECT_STANDARDS.md` section 4.4).
+
+  Noted 2026-10-10: the test passed in Jenkins build 4, the first complete
+  pass of the pipeline on that server. One pass does not give the cause of
+  the timeout in build 2, so this task stays open.
 
 **Exit:** `DockerDeploymentContractTest`, the Docker suite, and each remaining
 start command work.

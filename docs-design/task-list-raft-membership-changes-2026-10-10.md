@@ -6,15 +6,15 @@ and the full suites passed on 2026-10-02; its mutation evidence is outstanding
 (Step 4 record). Steps 1 to 3 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
-**Last updated:** 2026-10-09 (the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
-**Interrupted by:** [`task-list-single-pom-and-quorus-removal-2026-10-09.md`](task-list-single-pom-and-quorus-removal-2026-10-09.md),
+**Last updated:** 2026-10-10 (renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
+**Interrupted by:** [`task-list-single-pom-and-quorus-removal-2026-10-10.md`](task-list-single-pom-and-quorus-removal-2026-10-10.md),
 started 2026-10-04 before the Step 4 close-out gate. The gate's mutation evidence
 is recorded there, as the first task of its Phase 7. Step 5 resumes when that
 list is archived, and this list then runs to its end before the Consul-style
 client list starts (decided 2026-10-05).
 **Predecessor:** [`task-list-test-suite-remediation-2026-09-27.md`](../docs/archive/task-list-test-suite-remediation-2026-09-27.md),
 archived 2026-10-02. Its packaged-artifact test waits for the admin interface.
-**Paused:** [`task-list-embedded-admin-interface-2026-10-09.md`](task-list-embedded-admin-interface-2026-10-09.md), after its Step 1
+**Paused:** [`task-list-embedded-admin-interface-2026-10-10.md`](task-list-embedded-admin-interface-2026-10-10.md), after its Step 1
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), principle 8 (section 3), sections 4.2, 14.4, 14.5 and 16
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
@@ -796,7 +796,7 @@ unchanged final source/dependency state covered by the existing full-suite
 evidence. Passing ordinary suites alone does not close the outstanding gate.
 
 **Scheduled (2026-10-05).** This gate is the first task of Phase 7 in
-[`task-list-single-pom-and-quorus-removal-2026-10-09.md`](task-list-single-pom-and-quorus-removal-2026-10-09.md).
+[`task-list-single-pom-and-quorus-removal-2026-10-10.md`](task-list-single-pom-and-quorus-removal-2026-10-10.md).
 By then the source has its final packages and its tests declare their
 intentional errors, and Phase 7 has not yet changed `RaftNode`'s async code.
 

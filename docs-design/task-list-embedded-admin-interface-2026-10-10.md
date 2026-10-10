@@ -1,7 +1,7 @@
 # Task List: Embedded Administrative Interface
 
 **Date:** 2026-09-27
-**Last updated:** 2026-10-09 (the read APIs, the development proxy, and the reserved segments, after the single-POM list's Phase 4. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: the log audit added to Step 6)
+**Last updated:** 2026-10-10 (renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: the read APIs, the development proxy, and the reserved segments, after the single-POM list's Phase 4. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: the log audit added to Step 6)
 **Active work:** Paused after Step 1 on 2026-09-27, until the backend features in [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md) are delivered; Step 2 is next when it resumes
 **Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increments UI-0 and UI-1
 **Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 12.4, 12.4.1, 19.6, and 21; [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md), sections 14 and 15
@@ -9,7 +9,7 @@
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
 This list is paused; the current task list is
-[`task-list-single-pom-and-quorus-removal-2026-10-09.md`](task-list-single-pom-and-quorus-removal-2026-10-09.md).
+[`task-list-single-pom-and-quorus-removal-2026-10-10.md`](task-list-single-pom-and-quorus-removal-2026-10-10.md).
 When this list's work is complete, add a completion summary and move this file
 to `docs/archive/`.
 

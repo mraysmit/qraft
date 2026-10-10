@@ -2,10 +2,10 @@
 
 **Date:** 2026-10-05
 **Status:** Proposed. Section 4's items are recommendations to confirm or change, except the points marked "Decided 2026-10-09", in proposals 11, 12, and 14. No point is open. No code exists.
-**Proposed start:** after [`task-list-consul-style-client-2026-10-09.md`](task-list-consul-style-client-2026-10-09.md) (proposal 15).
-**Last updated:** 2026-10-09 (proposal 11 brought in line with the node routes and with what a node's deregistration removes; the file renamed to the date of its last change; four points decided: the authorize call; revoking the management token; Consul's rule for registering a service, which needs `service:write` alone on a registered node; and a client certificate on the server's HTTP listener, for the transport security list)
+**Proposed start:** after [`task-list-consul-style-client-2026-10-10.md`](task-list-consul-style-client-2026-10-10.md) (proposal 15).
+**Last updated:** 2026-10-10 (renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: proposal 11 brought in line with the node routes and with what a node's deregistration removes; the file renamed to the date of its last change; four points decided: the authorize call; revoking the management token; Consul's rule for registering a service, which needs `service:write` alone on a registered node; and a client certificate on the server's HTTP listener, for the transport security list)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 7.3, 12, 15, 16 and 22
-**Related:** the client list's decisions 6 and 8; decision 6 of [`task-list-raft-membership-changes-2026-10-09.md`](task-list-raft-membership-changes-2026-10-09.md), the operator token; item 9 of [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md); phase 7 of [`CONSUL_FEATURE_IMPLEMENTATION_PLAN.md`](CONSUL_FEATURE_IMPLEMENTATION_PLAN.md)
+**Related:** the client list's decisions 6 and 8; decision 6 of [`task-list-raft-membership-changes-2026-10-10.md`](task-list-raft-membership-changes-2026-10-10.md), the operator token; item 9 of [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md); phase 7 of [`CONSUL_FEATURE_IMPLEMENTATION_PLAN.md`](CONSUL_FEATURE_IMPLEMENTATION_PLAN.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
 ## 1. Goal

@@ -18,7 +18,6 @@ package dev.mars.qraft.runtime;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.mars.qraft.server.config.AppConfig;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -57,7 +56,6 @@ class UnifiedRuntimeEndToEndTest {
     Path temporaryDirectory;
 
     private final List<RuntimeLifecycle> lifecycles = new ArrayList<>();
-    private final AppConfig previousConfiguration = AppConfig.get();
     private final String previousLogDirectory = System.getProperty("qraft.log.dir");
     private final String previousLogMode = System.getProperty("qraft.log.mode");
     private final HttpClient http = HttpClient.newBuilder()
@@ -73,7 +71,6 @@ class UnifiedRuntimeEndToEndTest {
             }
         }
         http.close();
-        AppConfig.install(previousConfiguration);
         restoreProperty("qraft.log.dir", previousLogDirectory);
         restoreProperty("qraft.log.mode", previousLogMode);
     }

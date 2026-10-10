@@ -16,77 +16,81 @@
 
 package dev.mars.qraft.server.config;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.json.JsonMapper;
-import dev.mars.qraft.common.config.ConfigurationPlaceholders;
+import dev.mars.qraft.common.config.JsonSettings;
 import dev.mars.qraft.server.ui.AdminUiConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.StringJoiner;
 
+import static dev.mars.qraft.common.config.JsonSettings.optionalBoolean;
+import static dev.mars.qraft.common.config.JsonSettings.optionalInt;
+import static dev.mars.qraft.common.config.JsonSettings.optionalLong;
+import static dev.mars.qraft.common.config.JsonSettings.optionalObject;
+import static dev.mars.qraft.common.config.JsonSettings.rejectUnknown;
+import static dev.mars.qraft.common.config.JsonSettings.requiredObject;
+
 /**
- * Immutable server configuration loaded exclusively from a versioned JSON document.
+ * Immutable server configuration, read from a versioned JSON document and from nothing else. There is no
+ * default document and no process-wide instance: whoever starts a server reads its document and passes the
+ * configuration on.
+ *
+ * <p>The settings are held as records that follow the document's own structure.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-03-15
- * @version 1.0
+ * @version 2.0
  */
 public final class AppConfig {
     /** Loading and parsing configuration must not initialize Logback before its directory is selected. */
     private static final class Logging {
         private static final Logger LOGGER = LoggerFactory.getLogger(AppConfig.class);
     }
-    private static final ObjectMapper JSON = JsonMapper.builder()
-            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build();
-    private static final String DEFAULT_RESOURCE = "qraft-server.json";
     /** An unreachable node is reaped with its services after 72 hours, the reconnect window Consul uses. */
     private static final long DEFAULT_NODE_REAP_AFTER_MS = 72L * 60 * 60 * 1000;
     private static final int MIN_OPERATOR_TOKEN_LENGTH = 16;
-    private static volatile AppConfig instance = loadDefault();
 
-    private final Map<String, Object> values;
+    private final Settings settings;
     private volatile String resolvedNodeId;
 
-    private AppConfig(Map<String, Object> values) {
-        this.values = Map.copyOf(values);
+    private AppConfig(Settings settings) {
+        this.settings = settings;
     }
 
-    /** Retained for package-level resource-contract tests. */
-    AppConfig(ClassLoader resourceLoader) {
-        this(parseResource(resourceLoader));
-    }
+    /** The {@code server} object of the document, with {@code logging.directory} beside it. */
+    private record Settings(String id, Http http, int apiGrpcPort, Raft raft, String operatorToken,
+                            Telemetry telemetry, Shutdown shutdown, Health health, AdminUiConfig ui,
+                            String loggingDirectory) { }
 
-    public static AppConfig get() { return instance; }
+    private record Http(String host, int port) { }
 
-    public static AppConfig install(Path path) {
-        return install(fromFile(path));
-    }
+    /** {@code nodes} maps each listed member's name to its Raft address, in the document's order. */
+    private record Raft(int port, Map<String, String> nodes, long electionTimeoutMs, long heartbeatIntervalMs,
+                        Storage storage, Snapshot snapshot, long logHardLimit, Io io) { }
 
-    /**
-     * Validates {@code config} and makes it the process-wide configuration. A caller that installs a
-     * configuration temporarily, such as a test that launches a server, reinstalls the one it replaced.
-     */
-    public static AppConfig install(AppConfig config) {
-        config.validate();
-        instance = config;
-        config.logConfiguration();
-        return config;
-    }
+    private record Storage(String type, String path, boolean fsync) { }
+
+    private record Snapshot(boolean enabled, long threshold, long checkIntervalMs) { }
+
+    private record Io(int poolSize, int queueSize) { }
+
+    private record Telemetry(boolean enabled, String otlpEndpoint, int prometheusPort, String serviceName) { }
+
+    private record Shutdown(long drainTimeoutMs, long timeoutMs) { }
+
+    private record Health(long expiryIntervalMs, long nodeTtlMs, long nodeReapAfterMs) { }
 
     public static AppConfig fromFile(Path path) {
         if (path == null) throw new IllegalArgumentException("configuration path is required");
@@ -98,19 +102,9 @@ public final class AppConfig {
     }
 
     public static AppConfig fromJson(String document) {
-        final JsonNode root;
-        try {
-            root = JSON.readTree(document);
-        } catch (JsonProcessingException error) {
-            throw new IllegalArgumentException("Server configuration is not valid JSON", error);
-        }
-        if (root == null || !root.isObject()) {
-            throw new IllegalArgumentException("Server configuration must be a JSON object");
-        }
-        ConfigurationPlaceholders.reject(root);
+        JsonNode root = JsonSettings.readDocument(document, "Server");
         rejectUnknown(root, "root", "version", "server", "logging");
-        int version = requiredInt(root, "version");
-        if (version != 1) throw new IllegalArgumentException("Unsupported configuration version: " + version);
+        JsonSettings.requireFormatVersion(root);
 
         JsonNode server = requiredObject(root, "server");
         JsonNode http = optionalObject(server, "http");
@@ -140,54 +134,47 @@ public final class AppConfig {
         rejectUnknown(operator, "server.operator", "token");
         rejectUnknown(logging, "logging", "directory");
 
-        Map<String, Object> values = new LinkedHashMap<>();
-        values.put("qraft.node.id", optionalText(server, "id", ""));
-        values.put("qraft.http.host", optionalText(http, "host", "0.0.0.0"));
-        values.put("qraft.http.port", optionalInt(http, "port", 8080));
-        values.put("qraft.api.grpc.port", optionalInt(server, "apiGrpcPort", 10080));
-        values.put("qraft.raft.port", optionalInt(raft, "port", 9080));
-        values.put("qraft.cluster.nodes", parseNodes(raft.get("nodes")));
-        values.put("qraft.raft.election-timeout-ms", optionalLong(raft, "electionTimeoutMs", 5000));
-        values.put("qraft.raft.heartbeat-interval-ms", optionalLong(raft, "heartbeatIntervalMs", 1000));
-        values.put("qraft.raft.storage.type", optionalText(storage, "type", "raftlog"));
-        values.put("qraft.raft.storage.path", optionalText(storage, "path", ""));
-        values.put("qraft.raft.storage.fsync", optionalBoolean(storage, "fsync", true));
-        values.put("qraft.raft.snapshot.enabled", optionalBoolean(snapshot, "enabled", true));
-        values.put("qraft.raft.snapshot.threshold", optionalLong(snapshot, "threshold", 10_000));
-        values.put("qraft.raft.snapshot.check-interval-ms",
-                optionalLong(snapshot, "checkIntervalMs", 60_000));
-        values.put("qraft.raft.log.hard-limit", optionalLong(raft, "logHardLimit", 100_000));
-        values.put("qraft.operator.token", optionalText(operator, "token", ""));
-        values.put("qraft.raft.io.pool-size", optionalInt(io, "poolSize", 10));
-        values.put("qraft.raft.io.queue-size", optionalInt(io, "queueSize", 1000));
-        values.put("qraft.telemetry.enabled", optionalBoolean(telemetry, "enabled", true));
-        values.put("qraft.telemetry.otlp.endpoint",
-                optionalText(telemetry, "otlpEndpoint", "http://localhost:4317"));
-        values.put("qraft.telemetry.prometheus.port", optionalInt(telemetry, "prometheusPort", 9464));
-        values.put("qraft.telemetry.service.name",
+        // The settings are read in one fixed order, so that a document with several faults always reports
+        // the same one first.
+        String id = optionalText(server, "id", "");
+        Http httpSettings = new Http(optionalText(http, "host", "0.0.0.0"), optionalInt(http, "port", 8080));
+        int apiGrpcPort = optionalInt(server, "apiGrpcPort", 10080);
+        int raftPort = optionalInt(raft, "port", 9080);
+        Map<String, String> nodes = parseNodes(raft.get("nodes"));
+        long electionTimeoutMs = optionalLong(raft, "electionTimeoutMs", 5000);
+        long heartbeatIntervalMs = optionalLong(raft, "heartbeatIntervalMs", 1000);
+        Storage storageSettings = new Storage(optionalText(storage, "type", "raftlog"),
+                optionalText(storage, "path", ""), optionalBoolean(storage, "fsync", true));
+        Snapshot snapshotSettings = new Snapshot(optionalBoolean(snapshot, "enabled", true),
+                optionalLong(snapshot, "threshold", 10_000), optionalLong(snapshot, "checkIntervalMs", 60_000));
+        long logHardLimit = optionalLong(raft, "logHardLimit", 100_000);
+        String operatorToken = optionalText(operator, "token", "");
+        Io ioSettings = new Io(optionalInt(io, "poolSize", 10), optionalInt(io, "queueSize", 1000));
+        Telemetry telemetrySettings = new Telemetry(optionalBoolean(telemetry, "enabled", true),
+                optionalText(telemetry, "otlpEndpoint", "http://localhost:4317"),
+                optionalInt(telemetry, "prometheusPort", 9464),
                 optionalText(telemetry, "serviceName", "qraft-server"));
-        values.put("qraft.shutdown.drain.timeout.ms", optionalLong(shutdown, "drainTimeoutMs", 5000));
-        values.put("qraft.shutdown.timeout.ms", optionalLong(shutdown, "timeoutMs", 30_000));
+        Shutdown shutdownSettings = new Shutdown(optionalLong(shutdown, "drainTimeoutMs", 5000),
+                optionalLong(shutdown, "timeoutMs", 30_000));
         long expiryIntervalMs = optionalLong(health, "expiryIntervalMs", 1_000);
         if (expiryIntervalMs < 1) throw new IllegalArgumentException("server.health.expiryIntervalMs must be positive");
-        values.put("qraft.health.expiry-interval-ms", expiryIntervalMs);
         long nodeTtlMs = optionalLong(health, "nodeTtlMs", 90_000);
         if (nodeTtlMs < 1) throw new IllegalArgumentException("server.health.nodeTtlMs must be positive");
         long nodeReapAfterMs = optionalLong(health, "nodeReapAfterMs", DEFAULT_NODE_REAP_AFTER_MS);
         if (nodeReapAfterMs < 0) throw new IllegalArgumentException("server.health.nodeReapAfterMs must not be negative");
-        values.put("qraft.health.node-ttl-ms", nodeTtlMs);
-        values.put("qraft.health.node-reap-after-ms", nodeReapAfterMs);
         AdminUiConfig adminUi = parseAdminUi(ui);
-        values.put("qraft.ui.enabled", adminUi.enabled());
-        values.put("qraft.ui.path", adminUi.path());
-        values.put("qraft.ui.dev-assets-directory", adminUi.devAssetsDirectory().map(Path::toString).orElse(""));
-        values.put("qraft.logging.directory", optionalText(logging, "directory", "./logs"));
-        return new AppConfig(values);
+        String loggingDirectory = optionalText(logging, "directory", "./logs");
+
+        return new AppConfig(new Settings(id, httpSettings, apiGrpcPort,
+                new Raft(raftPort, nodes, electionTimeoutMs, heartbeatIntervalMs, storageSettings, snapshotSettings,
+                        logHardLimit, ioSettings),
+                operatorToken, telemetrySettings, shutdownSettings,
+                new Health(expiryIntervalMs, nodeTtlMs, nodeReapAfterMs), adminUi, loggingDirectory));
     }
 
     public synchronized String getNodeId() {
         if (resolvedNodeId != null) return resolvedNodeId;
-        String nodeId = getString("qraft.node.id", "");
+        String nodeId = settings.id();
         if (nodeId.isBlank()) {
             if (isMultiNodeCluster()) {
                 throw new IllegalStateException("server.id is required for a multi-node cluster");
@@ -200,8 +187,7 @@ public final class AppConfig {
     }
 
     private boolean isMultiNodeCluster() {
-        String nodes = getString("qraft.cluster.nodes", "");
-        return !nodes.isEmpty() && nodes.contains(",");
+        return settings.raft().nodes().size() > 1;
     }
 
     private String deriveNodeIdFromHostname() {
@@ -212,40 +198,47 @@ public final class AppConfig {
         }
     }
 
-    public int getHttpPort() { return getInt("qraft.http.port", 8080); }
-    public String getHttpHost() { return getString("qraft.http.host", "0.0.0.0"); }
-    public int getRaftPort() { return getInt("qraft.raft.port", 9080); }
-    public int getApiGrpcPort() { return getInt("qraft.api.grpc.port", 10080); }
-    public long getElectionTimeoutMs() { return getLong("qraft.raft.election-timeout-ms", 5000); }
-    public long getHeartbeatIntervalMs() { return getLong("qraft.raft.heartbeat-interval-ms", 1000); }
+    public int getHttpPort() { return settings.http().port(); }
+    public String getHttpHost() { return settings.http().host(); }
+    public int getRaftPort() { return settings.raft().port(); }
+    public int getApiGrpcPort() { return settings.apiGrpcPort(); }
+    public long getElectionTimeoutMs() { return settings.raft().electionTimeoutMs(); }
+    public long getHeartbeatIntervalMs() { return settings.raft().heartbeatIntervalMs(); }
 
-    public String getClusterNodes() {
-        String nodes = getString("qraft.cluster.nodes", "");
-        return nodes.isEmpty() ? getNodeId() + "=localhost:" + getRaftPort() : nodes;
+    /**
+     * The cluster's members: each name with its Raft address, in the document's order. A document that lists
+     * none describes a cluster of this server alone, at {@code localhost} and its own Raft port.
+     */
+    public Map<String, String> getClusterMembers() {
+        Map<String, String> nodes = settings.raft().nodes();
+        return nodes.isEmpty() ? Map.of(getNodeId(), "localhost:" + getRaftPort()) : nodes;
     }
 
-    public String getRaftStorageType() { return getString("qraft.raft.storage.type", "raftlog"); }
+    /** The cluster's members in the form {@code name=address,name=address}, for display. */
+    public String getClusterNodes() {
+        StringJoiner joined = new StringJoiner(",");
+        getClusterMembers().forEach((name, address) -> joined.add(name + "=" + address));
+        return joined.toString();
+    }
+
+    public String getRaftStorageType() { return settings.raft().storage().type(); }
     public String getRaftStoragePath() {
-        String path = getString("qraft.raft.storage.path", "");
+        String path = settings.raft().storage().path();
         return path.isBlank() ? "./data/raft/" + getNodeId() : path;
     }
-    public boolean getRaftStorageFsync() { return getBoolean("qraft.raft.storage.fsync", true); }
-    public boolean isSnapshotEnabled() { return getBoolean("qraft.raft.snapshot.enabled", true); }
-    public long getSnapshotThreshold() { return getLong("qraft.raft.snapshot.threshold", 10_000); }
-    public long getSnapshotCheckIntervalMs() {
-        return getLong("qraft.raft.snapshot.check-interval-ms", 60_000);
-    }
-    public long getLogHardLimit() { return getLong("qraft.raft.log.hard-limit", 100_000); }
+    public boolean getRaftStorageFsync() { return settings.raft().storage().fsync(); }
+    public boolean isSnapshotEnabled() { return settings.raft().snapshot().enabled(); }
+    public long getSnapshotThreshold() { return settings.raft().snapshot().threshold(); }
+    public long getSnapshotCheckIntervalMs() { return settings.raft().snapshot().checkIntervalMs(); }
+    public long getLogHardLimit() { return settings.raft().logHardLimit(); }
     /** How often the leader evaluates health-check deadlines, unless a check falls due sooner. */
-    public long getHealthExpiryIntervalMs() { return getLong("qraft.health.expiry-interval-ms", 1_000); }
+    public long getHealthExpiryIntervalMs() { return settings.health().expiryIntervalMs(); }
     /** How long a node may go without a heartbeat before the leader marks it unreachable. */
-    public long getNodeTtlMs() { return getLong("qraft.health.node-ttl-ms", 90_000); }
+    public long getNodeTtlMs() { return settings.health().nodeTtlMs(); }
     /** How long an unreachable node is kept before it and its services are reaped; zero never reaps. */
-    public long getNodeReapAfterMs() { return getLong("qraft.health.node-reap-after-ms", DEFAULT_NODE_REAP_AFTER_MS); }
-    public boolean isTelemetryEnabled() { return getBoolean("qraft.telemetry.enabled", true); }
-    public String getOtlpEndpoint() {
-        return getString("qraft.telemetry.otlp.endpoint", "http://localhost:4317");
-    }
+    public long getNodeReapAfterMs() { return settings.health().nodeReapAfterMs(); }
+    public boolean isTelemetryEnabled() { return settings.telemetry().enabled(); }
+    public String getOtlpEndpoint() { return settings.telemetry().otlpEndpoint(); }
     public String getRedactedOtlpEndpoint() {
         try {
             URI endpoint = URI.create(getOtlpEndpoint());
@@ -255,28 +248,26 @@ public final class AppConfig {
             return "<invalid endpoint>";
         }
     }
-    public int getPrometheusPort() { return getInt("qraft.telemetry.prometheus.port", 9464); }
-    public String getServiceName() {
-        return getString("qraft.telemetry.service.name", "qraft-server");
-    }
+    public int getPrometheusPort() { return settings.telemetry().prometheusPort(); }
+    public String getServiceName() { return settings.telemetry().serviceName(); }
     /**
      * The token a Raft operator's removal of a server must carry (see {@code MembershipService}); empty when
      * none is configured, and then every removal is refused. Never logged.
      */
     public Optional<String> getOperatorToken() {
-        String token = getString("qraft.operator.token", "");
+        String token = settings.operatorToken();
         return token.isBlank() ? Optional.empty() : Optional.of(token);
     }
 
-    public int getRaftIoPoolSize() { return getInt("qraft.raft.io.pool-size", 10); }
-    public int getRaftIoQueueSize() { return getInt("qraft.raft.io.queue-size", 1000); }
-    public String getLoggingDirectory() { return getString("qraft.logging.directory", "./logs"); }
+    public int getRaftIoPoolSize() { return settings.raft().io().poolSize(); }
+    public int getRaftIoQueueSize() { return settings.raft().io().queueSize(); }
+    /** How long a stopping server drains the requests it already has. */
+    public long getShutdownDrainTimeoutMs() { return settings.shutdown().drainTimeoutMs(); }
+    /** How long a stopping server may take in all. */
+    public long getShutdownTimeoutMs() { return settings.shutdown().timeoutMs(); }
+    public String getLoggingDirectory() { return settings.loggingDirectory(); }
     /** The validated {@code server.ui} settings; parsing already rejected any invalid combination. */
-    public AdminUiConfig getAdminUi() {
-        String directory = getString("qraft.ui.dev-assets-directory", "");
-        return new AdminUiConfig(getBoolean("qraft.ui.enabled", true), getString("qraft.ui.path", AdminUiConfig.DEFAULT_PATH),
-                directory.isEmpty() ? Optional.empty() : Optional.of(Path.of(directory)));
-    }
+    public AdminUiConfig getAdminUi() { return settings.ui(); }
 
     /** Validates {@code server.ui} while the file is parsed, before any listener or file is opened. */
     private static AdminUiConfig parseAdminUi(JsonNode ui) {
@@ -287,23 +278,6 @@ public final class AppConfig {
         return new AdminUiConfig(optionalBoolean(ui, "enabled", true),
                 optionalText(ui, "path", AdminUiConfig.DEFAULT_PATH),
                 directory == null ? Optional.empty() : Optional.of(Path.of(directory.textValue().trim())));
-    }
-
-    public String getString(String key, String defaultValue) {
-        Object value = values.get(key);
-        return value == null ? defaultValue : value.toString();
-    }
-    public int getInt(String key, int defaultValue) {
-        Object value = values.get(key);
-        return value == null ? defaultValue : ((Number) value).intValue();
-    }
-    public long getLong(String key, long defaultValue) {
-        Object value = values.get(key);
-        return value == null ? defaultValue : ((Number) value).longValue();
-    }
-    public boolean getBoolean(String key, boolean defaultValue) {
-        Object value = values.get(key);
-        return value == null ? defaultValue : (Boolean) value;
     }
 
     public void validate() {
@@ -342,6 +316,14 @@ public final class AppConfig {
         getNodeId();
     }
 
+    /** Logs the settings an operator looks for first. Call it once the log directory has been selected. */
+    public void logConfiguration() {
+        Logging.LOGGER.info("Server configuration: nodeId={}, http={}:{}, raftPort={}, apiGrpcPort={}, "
+                        + "clusterNodes={}, storagePath={}, telemetryEnabled={}",
+                getNodeId(), getHttpHost(), getHttpPort(), getRaftPort(), getApiGrpcPort(),
+                getClusterNodes(), getRaftStoragePath(), isTelemetryEnabled());
+    }
+
     /** A port this server listens on: 0 asks the system for any free port. */
     private static void validateListeningPort(String name, int port) {
         if (port < 0 || port > 65_535) {
@@ -356,11 +338,7 @@ public final class AppConfig {
 
     private boolean hasPeers() {
         String self = getNodeId();
-        for (String entry : getClusterNodes().split(",")) {
-            String member = entry.split("=", 2)[0].trim();
-            if (!member.isEmpty() && !member.equals(self)) return true;
-        }
-        return false;
+        return getClusterMembers().keySet().stream().anyMatch(member -> !member.equals(self));
     }
 
     private static void validatePort(String name, int port) {
@@ -369,10 +347,11 @@ public final class AppConfig {
         }
     }
 
-    private static String parseNodes(JsonNode nodes) {
-        if (nodes == null || nodes.isNull()) return "";
+    /** Reads {@code server.raft.nodes}: each member's name, trimmed, with its address, in the document's order. */
+    private static Map<String, String> parseNodes(JsonNode nodes) {
+        if (nodes == null || nodes.isNull()) return Map.of();
         if (!nodes.isObject()) throw new IllegalArgumentException("server.raft.nodes must be an object");
-        StringJoiner result = new StringJoiner(",");
+        Map<String, String> result = new LinkedHashMap<>();
         Iterator<Map.Entry<String, JsonNode>> fields = nodes.fields();
         while (fields.hasNext()) {
             Map.Entry<String, JsonNode> entry = fields.next();
@@ -380,22 +359,12 @@ public final class AppConfig {
                     || entry.getValue().textValue().isBlank()) {
                 throw new IllegalArgumentException("server.raft.nodes must map non-blank IDs to addresses");
             }
-            result.add(entry.getKey() + "=" + entry.getValue().textValue().trim());
+            result.put(entry.getKey().trim(), entry.getValue().textValue().trim());
         }
-        return result.toString();
+        return Collections.unmodifiableMap(result);
     }
 
-    private static JsonNode requiredObject(JsonNode parent, String field) {
-        JsonNode value = parent.get(field);
-        if (value == null || !value.isObject()) throw new IllegalArgumentException(field + " must be an object");
-        return value;
-    }
-    private static JsonNode optionalObject(JsonNode parent, String field) {
-        JsonNode value = parent.get(field);
-        if (value == null || value.isNull()) return JSON.createObjectNode();
-        if (!value.isObject()) throw new IllegalArgumentException(field + " must be an object");
-        return value;
-    }
+    /** A text setting of the server. A blank value is refused unless the setting may be left empty. */
     private static String optionalText(JsonNode parent, String field, String fallback) {
         JsonNode value = parent.get(field);
         if (value == null || value.isNull()) return fallback;
@@ -403,60 +372,5 @@ public final class AppConfig {
             throw new IllegalArgumentException(field + " must be a string");
         }
         return value.textValue().trim();
-    }
-    private static int requiredInt(JsonNode parent, String field) {
-        JsonNode value = parent.get(field);
-        if (value == null || !value.isIntegralNumber() || !value.canConvertToInt()) {
-            throw new IllegalArgumentException(field + " must be an integer");
-        }
-        return value.intValue();
-    }
-    private static int optionalInt(JsonNode parent, String field, int fallback) {
-        return parent.has(field) ? requiredInt(parent, field) : fallback;
-    }
-    private static long optionalLong(JsonNode parent, String field, long fallback) {
-        JsonNode value = parent.get(field);
-        if (value == null) return fallback;
-        if (!value.isIntegralNumber() || !value.canConvertToLong()) {
-            throw new IllegalArgumentException(field + " must be an integer");
-        }
-        return value.longValue();
-    }
-    private static boolean optionalBoolean(JsonNode parent, String field, boolean fallback) {
-        JsonNode value = parent.get(field);
-        if (value == null) return fallback;
-        if (!value.isBoolean()) throw new IllegalArgumentException(field + " must be a boolean");
-        return value.booleanValue();
-    }
-
-    private static void rejectUnknown(JsonNode object, String location, String... allowedNames) {
-        java.util.Set<String> allowed = java.util.Set.of(allowedNames);
-        object.fieldNames().forEachRemaining(name -> {
-            if (!allowed.contains(name)) {
-                throw new IllegalArgumentException("Unknown " + location + " setting: " + name);
-            }
-        });
-    }
-
-    private static AppConfig loadDefault() {
-        return new AppConfig(AppConfig.class.getClassLoader());
-    }
-    private static Map<String, Object> parseResource(ClassLoader loader) {
-        if (loader == null) throw new IllegalArgumentException("resourceLoader is required");
-        try (InputStream input = loader.getResourceAsStream(DEFAULT_RESOURCE)) {
-            if (input == null) throw new IllegalStateException("Required configuration resource "
-                    + DEFAULT_RESOURCE + " was not found");
-            return fromJson(new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)).values;
-        } catch (IOException | IllegalArgumentException error) {
-            throw new IllegalStateException("Could not read required configuration resource "
-                    + DEFAULT_RESOURCE, error);
-        }
-    }
-
-    private void logConfiguration() {
-        Logging.LOGGER.info("Server configuration: nodeId={}, http={}:{}, raftPort={}, apiGrpcPort={}, "
-                        + "clusterNodes={}, storagePath={}, telemetryEnabled={}",
-                getNodeId(), getHttpHost(), getHttpPort(), getRaftPort(), getApiGrpcPort(),
-                getClusterNodes(), getRaftStoragePath(), isTelemetryEnabled());
     }
 }

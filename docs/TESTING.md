@@ -52,8 +52,8 @@ The job uses **Pipeline script from SCM**, **Git**, branch `*/main`, and script 
 Builds are started manually; no recurring trigger is configured. See [JENKINS.md](JENKINS.md) for the
 job configuration, Linux fixture requirements, and run results. The memory corruption found in the
 Jenkins VM on 2026-10-03 is resolved: the job was recreated on the current server on
-2026-10-04, and JENKINS.md keeps the investigation as a historical record. One Docker test is still
-red on the current server (JENKINS.md, "Current server setup").
+2026-10-04, and JENKINS.md keeps the investigation as a historical record. The complete pipeline
+first passed on the current server in build 4, on 2026-10-10 (JENKINS.md, "Current server setup").
 
 ## Run builds in a visible terminal, through `Tee-Object`
 

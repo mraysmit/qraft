@@ -72,6 +72,7 @@ public class QraftServerService {
     private static final long BOOTSTRAP_RETRY_MS = 1_000;
 
     private final JavaRuntime runtime;
+    private final AppConfig config;
 
     private RaftTransport transport;
     private Optional<RaftNode> raftNode = Optional.empty();
@@ -84,8 +85,10 @@ public class QraftServerService {
     private Optional<ShutdownCoordinator> shutdownCoordinator = Optional.empty();
     private volatile Optional<Long> bootstrapTimer = Optional.empty();
 
-    public QraftServerService(JavaRuntime runtime) {
+    /** A server that runs on {@code runtime} with the configuration it is given; it reads no other. */
+    public QraftServerService(JavaRuntime runtime, AppConfig config) {
         this.runtime = runtime;
+        this.config = java.util.Objects.requireNonNull(config, "config");
     }
 
     public Future<Void> start() {
@@ -98,30 +101,17 @@ public class QraftServerService {
         logger.info("Starting QraftServerService...");
 
         try {
-            // 1. Load configuration
-            AppConfig config = AppConfig.get();
+            // 1. The configuration this server was started with
             String nodeId = config.getNodeId();
 
             int raftPort = config.getRaftPort();
             int apiGrpcPort = config.getApiGrpcPort();
-            String clusterNodesEnv = config.getClusterNodes();
 
-            // 2. Parse cluster configuration
-            Map<String, String> peerAddresses = new HashMap<>();
-            Map<String, String> listedAddresses = new HashMap<>();
-            Set<String> clusterNodeIds = new HashSet<>();
-            for (String entry : clusterNodesEnv.split(",")) {
-                String[] parts = entry.trim().split("=");
-                if (parts.length == 2) {
-                    String peerNodeId = parts[0].trim();
-                    String peerAddress = parts[1].trim();
-                    clusterNodeIds.add(peerNodeId);
-                    listedAddresses.put(peerNodeId, peerAddress);
-                    if (!peerNodeId.equals(nodeId)) {
-                        peerAddresses.put(peerNodeId, peerAddress);
-                    }
-                }
-            }
+            // 2. The cluster's members, and among them this server's peers
+            Map<String, String> listedAddresses = new HashMap<>(config.getClusterMembers());
+            Set<String> clusterNodeIds = new HashSet<>(listedAddresses.keySet());
+            Map<String, String> peerAddresses = new HashMap<>(listedAddresses);
+            peerAddresses.remove(nodeId);
             logger.info("Cluster configuration: nodeId={}, peers={}", nodeId, peerAddresses);
 
             // 3. Setup Raft Transport (gRPC)
@@ -146,7 +136,7 @@ public class QraftServerService {
             RaftStorageFactory.createDurable(storagePath, fsyncEnabled)
                 .onSuccess(storage -> {
                     this.raftStorage = storage;
-                    continueStartup(startPromise, config, nodeId, raftPort, apiGrpcPort, clusterNodeIds,
+                    continueStartup(startPromise, nodeId, raftPort, apiGrpcPort, clusterNodeIds,
                             listedAddresses);
                 })
                 .onFailure(err -> {
@@ -162,7 +152,7 @@ public class QraftServerService {
     /**
      * Continues the startup sequence after storage is initialized.
      */
-    private void continueStartup(Promise<Void> startPromise, AppConfig config,
+    private void continueStartup(Promise<Void> startPromise,
                                  String nodeId, int raftPort, int apiGrpcPort,
                                  Set<String> clusterNodeIds, Map<String, String> listedAddresses) {
         try {
@@ -308,9 +298,8 @@ public class QraftServerService {
     }
 
     private void setupShutdownCoordinator() {
-        AppConfig config = AppConfig.get();
-        long drainTimeoutMs = config.getLong("qraft.shutdown.drain.timeout.ms", 5000L);
-        long shutdownTimeoutMs = config.getLong("qraft.shutdown.timeout.ms", 30000L);
+        long drainTimeoutMs = config.getShutdownDrainTimeoutMs();
+        long shutdownTimeoutMs = config.getShutdownTimeoutMs();
         
         ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime, drainTimeoutMs, shutdownTimeoutMs);
         this.shutdownCoordinator = Optional.of(coordinator);

@@ -18,19 +18,12 @@ package dev.mars.qraft.server.config;
 
 import org.junit.jupiter.api.Test;
 
-import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -43,16 +36,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 class AppConfigCoverageTest {
-    @Test
-    void packagesTheJsonDefaultsUsedByEmbeddedTests() throws Exception {
-        ClassLoader loader = AppConfig.class.getClassLoader();
-        try (InputStream current = loader.getResourceAsStream("qraft-server.json")) {
-            assertNotNull(current);
-        }
-        assertFalse(Files.exists(Path.of(AppConfig.class.getProtectionDomain()
-                .getCodeSource().getLocation().toURI()).resolve("qraft-server.properties")));
-    }
-
     @Test
     void parsesACompleteVersionedServerDocument() {
         AppConfig config = AppConfig.fromJson("""
@@ -82,6 +65,10 @@ class AppConfigCoverageTest {
         assertEquals(9180, config.getRaftPort());
         assertEquals(10180, config.getApiGrpcPort());
         assertEquals("server-a=server-a:9180,server-b=server-b:9180", config.getClusterNodes());
+        assertEquals(List.of(Map.entry("server-a", "server-a:9180"), Map.entry("server-b", "server-b:9180")),
+                List.copyOf(config.getClusterMembers().entrySet()), "the members keep the document's order");
+        assertEquals(1500, config.getShutdownDrainTimeoutMs());
+        assertEquals(5000, config.getShutdownTimeoutMs());
         assertEquals(3200, config.getElectionTimeoutMs());
         assertEquals(450, config.getHeartbeatIntervalMs());
         assertEquals("/data/a", config.getRaftStoragePath());
@@ -151,35 +138,26 @@ class AppConfigCoverageTest {
     }
 
     @Test
-    void defaultDocumentIsValidAndUsesNodeSpecificStorage() {
-        AppConfig config = AppConfig.get();
+    void aDocumentWithNoSettingsIsValidAndDescribesAClusterOfThisServerAlone() {
+        AppConfig config = AppConfig.fromJson("{\"version\":1,\"server\":{}}");
+
         assertDoesNotThrow(config::validate);
         assertEquals("./data/raft/" + config.getNodeId(), config.getRaftStoragePath());
+        assertEquals(Map.of(config.getNodeId(), "localhost:9080"), config.getClusterMembers());
+        assertEquals(config.getNodeId() + "=localhost:9080", config.getClusterNodes());
+        assertEquals(5_000, config.getShutdownDrainTimeoutMs());
+        assertEquals(30_000, config.getShutdownTimeoutMs());
     }
 
     @Test
-    void refusesMissingUnreadableAndMalformedPackagedConfiguration() {
-        ClassLoader missing = new ClassLoader(null) {
-            @Override public InputStream getResourceAsStream(String name) { return null; }
-        };
-        assertTrue(assertThrows(IllegalStateException.class, () -> new AppConfig(missing))
-                .getMessage().contains("qraft-server.json"));
+    void memberNamesAndAddressesAreTrimmed() {
+        AppConfig config = AppConfig.fromJson("""
+                {"version":1,"server":{"id":"a","raft":{"nodes":{" a ":" host-a:9080 ","b":"host-b:9080"}}}}
+                """);
 
-        ClassLoader unreadable = new ClassLoader(null) {
-            @Override public InputStream getResourceAsStream(String name) {
-                return new InputStream() {
-                    @Override public int read() throws IOException { throw new IOException("broken"); }
-                };
-            }
-        };
-        assertThrows(IllegalStateException.class, () -> new AppConfig(unreadable));
-
-        ClassLoader malformed = new ClassLoader(null) {
-            @Override public InputStream getResourceAsStream(String name) {
-                return new ByteArrayInputStream("not-json".getBytes(StandardCharsets.UTF_8));
-            }
-        };
-        assertThrows(IllegalStateException.class, () -> new AppConfig(malformed));
+        assertEquals(List.of("a", "b"), List.copyOf(config.getClusterMembers().keySet()));
+        assertEquals("a=host-a:9080,b=host-b:9080", config.getClusterNodes());
+        assertDoesNotThrow(config::validate);
     }
 
     @Test

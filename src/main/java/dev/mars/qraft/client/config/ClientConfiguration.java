@@ -16,17 +16,14 @@
 
 package dev.mars.qraft.client.config;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import dev.mars.qraft.client.health.HealthCheckDefinition;
 import dev.mars.qraft.client.health.HttpCheck;
 import dev.mars.qraft.client.health.TcpCheck;
 import dev.mars.qraft.client.health.TtlCheck;
 import dev.mars.qraft.common.ServiceDefinition;
-import dev.mars.qraft.common.config.ConfigurationPlaceholders;
+import dev.mars.qraft.common.config.JsonSettings;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -44,6 +41,14 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
+import static dev.mars.qraft.common.config.JsonSettings.optionalBoolean;
+import static dev.mars.qraft.common.config.JsonSettings.optionalInt;
+import static dev.mars.qraft.common.config.JsonSettings.optionalLong;
+import static dev.mars.qraft.common.config.JsonSettings.optionalObject;
+import static dev.mars.qraft.common.config.JsonSettings.rejectUnknown;
+import static dev.mars.qraft.common.config.JsonSettings.requiredInt;
+import static dev.mars.qraft.common.config.JsonSettings.requiredObject;
+
 /**
  * Immutable, file-backed configuration for a Qraft discovery client.
  *
@@ -52,8 +57,6 @@ import java.util.Set;
  * @version 1.0
  */
 public final class ClientConfiguration {
-    private static final ObjectMapper JSON = JsonMapper.builder()
-            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build();
 
     private final String clientId;
     private final String address;
@@ -109,21 +112,9 @@ public final class ClientConfiguration {
 
     /** Parses an injected document without consulting process-global configuration. */
     public static ClientConfiguration fromJson(String document) {
-        final JsonNode root;
-        try {
-            root = JSON.readTree(document);
-        } catch (JsonProcessingException error) {
-            throw new IllegalArgumentException("Client configuration is not valid JSON", error);
-        }
-        if (root == null || !root.isObject()) {
-            throw new IllegalArgumentException("Client configuration must be a JSON object");
-        }
-        ConfigurationPlaceholders.reject(root);
+        JsonNode root = JsonSettings.readDocument(document, "Client");
         rejectUnknown(root, "root", "version", "client", "servers", "catalog", "logging");
-        int formatVersion = requiredInt(root, "version");
-        if (formatVersion != 1) {
-            throw new IllegalArgumentException("Unsupported configuration version: " + formatVersion);
-        }
+        JsonSettings.requireFormatVersion(root);
 
         JsonNode client = requiredObject(root, "client");
         JsonNode servers = requiredObject(root, "servers");
@@ -322,19 +313,6 @@ public final class ClientConfiguration {
         return values;
     }
 
-    private static JsonNode requiredObject(JsonNode parent, String field) {
-        JsonNode value = parent.get(field);
-        if (value == null || !value.isObject()) throw new IllegalArgumentException(field + " must be an object");
-        return value;
-    }
-
-    private static JsonNode optionalObject(JsonNode parent, String field) {
-        JsonNode value = parent.get(field);
-        if (value == null || value.isNull()) return JSON.createObjectNode();
-        if (!value.isObject()) throw new IllegalArgumentException(field + " must be an object");
-        return value;
-    }
-
     private static String requiredText(JsonNode parent, String field) {
         JsonNode value = parent.get(field);
         if (value == null || !value.isTextual() || value.textValue().isBlank()) {
@@ -350,43 +328,6 @@ public final class ClientConfiguration {
             throw new IllegalArgumentException(field + " must be a non-blank string");
         }
         return value.textValue().trim();
-    }
-
-    private static int requiredInt(JsonNode parent, String field) {
-        JsonNode value = parent.get(field);
-        if (value == null || !value.isIntegralNumber() || !value.canConvertToInt()) {
-            throw new IllegalArgumentException(field + " must be an integer");
-        }
-        return value.intValue();
-    }
-
-    private static int optionalInt(JsonNode parent, String field, int fallback) {
-        return parent.has(field) ? requiredInt(parent, field) : fallback;
-    }
-
-    private static long optionalLong(JsonNode parent, String field, long fallback) {
-        JsonNode value = parent.get(field);
-        if (value == null) return fallback;
-        if (!value.isIntegralNumber() || !value.canConvertToLong()) {
-            throw new IllegalArgumentException(field + " must be an integer");
-        }
-        return value.longValue();
-    }
-
-    private static boolean optionalBoolean(JsonNode parent, String field, boolean fallback) {
-        JsonNode value = parent.get(field);
-        if (value == null) return fallback;
-        if (!value.isBoolean()) throw new IllegalArgumentException(field + " must be a boolean");
-        return value.booleanValue();
-    }
-
-    private static void rejectUnknown(JsonNode object, String location, String... allowedNames) {
-        Set<String> allowed = Set.of(allowedNames);
-        object.fieldNames().forEachRemaining(name -> {
-            if (!allowed.contains(name)) {
-                throw new IllegalArgumentException("Unknown " + location + " setting: " + name);
-            }
-        });
     }
 
     private static String localAddress() {
@@ -442,7 +383,7 @@ public final class ClientConfiguration {
         public Builder region(String value) { region = value; return this; }
         public Builder datacenter(String value) { datacenter = value; return this; }
         public Builder serverUrl(String value) {
-            return serverUrls(parseServerUrls(JSON.createArrayNode().add(value)));
+            return serverUrls(parseServerUrls(JsonNodeFactory.instance.arrayNode().add(value)));
         }
         public Builder serverUrls(List<URI> value) { serverUrls = normalizeServerUrls(value); return this; }
         public Builder heartbeatInterval(long value) { heartbeatInterval = value; return this; }

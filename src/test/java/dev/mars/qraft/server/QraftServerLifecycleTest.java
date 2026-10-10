@@ -16,7 +16,6 @@
 
 package dev.mars.qraft.server;
 
-import dev.mars.qraft.server.config.AppConfig;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -55,16 +54,12 @@ class QraftServerLifecycleTest {
     private final String previousLogDirectory = System.getProperty("qraft.log.dir");
     private final String previousLogMode = System.getProperty("qraft.log.mode");
 
-    /** {@code launch} installs its configuration process-wide; later tests must see the one found here. */
-    private final AppConfig previousConfiguration = AppConfig.get();
-
     @AfterEach
     void restoreProcessWideState() {
         if (previousLogDirectory == null) System.clearProperty("qraft.log.dir");
         else System.setProperty("qraft.log.dir", previousLogDirectory);
         if (previousLogMode == null) System.clearProperty("qraft.log.mode");
         else System.setProperty("qraft.log.mode", previousLogMode);
-        AppConfig.install(previousConfiguration);
     }
 
     @Test
