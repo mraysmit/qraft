@@ -15,7 +15,7 @@ down_services() {
 
 case "$action" in
   cluster)
-    "$SCRIPT_DIR/build-runtime.sh"
+    sh "$SCRIPT_DIR/build-runtime.sh"
     case "$cluster_type" in
       3node) file=compose/docker-compose-cluster.yml ;;
       5node) file=compose/docker-compose-5node.yml ;;

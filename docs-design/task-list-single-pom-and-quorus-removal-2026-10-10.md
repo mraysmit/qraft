@@ -2178,6 +2178,43 @@ three error lines, and Grafana logs none now.
 Not yet shown, and for the next Jenkins build to show: the shell scripts,
 which only Linux runs, and everything above on the Jenkins server.
 
+**Jenkins build 14, on `0f6c497`, failed in its Docker stage: six of the
+seven tests of `DockerStartCommandsTest`.** Its 925 default tests passed
+with every coverage gate met, its 10 end-to-end tests passed, and the
+other 26 tests of the Docker stage passed: 961 passed and 6 failed. Outside
+the new class, its 121 archived log files hold no ERROR event, no uncaught
+exception, and no stack trace without a flag. The six failures have two
+causes, and both are defects the test was written to find.
+
+- **The shell start scripts could not start anything on Linux** (five
+  tests). `start.sh` and `start-quick.sh` called `build-runtime.sh` as a
+  program, and the file is not executable in the repository: "Permission
+  denied", exit code 126. On Windows, Git Bash runs any script, which is why
+  the check by hand earlier that day passed. Both scripts now run it with
+  `sh`, as `docker/README.md` tells the reader to run the scripts
+  themselves. `DockerDeploymentContractTest` asserts it.
+- **Tempo logged an error at start** (one test, the three-server
+  observability stack): `msg="error tailing WAL" err="failed to find
+  segment for index"`.
+  - Cause, from Tempo's archived log: Tempo creates the write-ahead log of
+    its metrics generator when the first span arrives, and starts the
+    watcher that forwards it to Prometheus 0.2 ms later, before the log has
+    a segment. The watcher logs the error once, tries again, and logs "Done
+    replaying WAL" 15 seconds later.
+  - It is in Tempo 2.3.1, not in a file of Qraft's. It needs a span, so the
+    stack without servers never shows it; the local run with servers did
+    not show it either, so it depends on timing.
+  - Remedy: the test accepts exactly this line, and only when "Done
+    replaying WAL" follows it in the same log. Any other error line of
+    Tempo, or this one without the recovery, still fails the test.
+  - Not chosen: removing the metrics generator. Grafana's Tempo datasource
+    uses its metrics for the service map. This is for the user to confirm.
+- The test of `start-observability.sh` passed: up, status, down keeping the
+  four volumes, and clean removing them, with no error line in the five
+  containers' logs. That is the Grafana fix, shown on Jenkins.
+
+The two fixes are in the working tree and wait for the next build.
+
 **Unflagged errors found by the audit of build 6 (2026-10-10), remedied in
 build 8.** Ten WARN events in the container logs carry a stack trace and no
 flag. The user's word the same day: an error is flagged or it is fixed, as

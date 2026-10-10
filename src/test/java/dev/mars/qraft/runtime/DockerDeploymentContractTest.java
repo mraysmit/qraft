@@ -191,8 +191,10 @@ class DockerDeploymentContractTest {
                 }
             }
         }
-        assertTrue(Files.readString(root.resolve("docker/start.sh"))
-                .contains("build-runtime.sh"));
+        for (String script : List.of("docker/start.sh", "docker/start-quick.sh")) {
+            assertTrue(Files.readString(root.resolve(script)).contains("sh \"$SCRIPT_DIR/build-runtime.sh\""),
+                    script + " must run the build helper through sh: the file is not executable in the repository");
+        }
         assertTrue(Files.readString(root.resolve("docker/start-quick.ps1"))
                 .contains("build-runtime.ps1"));
         assertTrue(Files.readString(root.resolve("docker/start-quick.sh"))

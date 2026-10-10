@@ -80,6 +80,14 @@ class DockerStartCommandsTest {
             PROJECT + "_loki-data", PROJECT + "_prometheus-data", PROJECT + "_tempo-data");
     /** An error line of Grafana, Loki, Tempo, or Prometheus, or of the collector. */
     private static final Pattern THIRD_PARTY_ERROR = Pattern.compile("\\blevel=error\\b|\\terror\\t");
+    /**
+     * Tempo 2.3.1 starts the watcher of its metrics generator's write-ahead log with the first span it
+     * receives, a fraction of a millisecond after it creates that log and before the log has a segment. The
+     * watcher reports this once, tries again, and reports "Done replaying WAL". Only this line is accepted,
+     * and only when that report follows.
+     */
+    private static final Pattern TEMPO_WAL_NOT_YET_WRITTEN = Pattern.compile(
+            "component=remote level=error .* msg=\"error tailing WAL\" err=\"failed to find segment for index\"$");
     private static final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
     @AfterAll
@@ -232,8 +240,13 @@ class DockerStartCommandsTest {
 
     private static void assertNoThirdPartyError() throws Exception {
         for (String container : OBSERVABILITY_CONTAINERS) {
-            List<String> errors = run(Duration.ofSeconds(30), "docker", "logs", container).lines()
-                    .filter(line -> THIRD_PARTY_ERROR.matcher(line).find()).toList();
+            List<String> errors = new ArrayList<>(run(Duration.ofSeconds(30), "docker", "logs", container).lines()
+                    .filter(line -> THIRD_PARTY_ERROR.matcher(line).find()).toList());
+            if (errors.removeIf(line -> TEMPO_WAL_NOT_YET_WRITTEN.matcher(line).find())) {
+                await().atMost(Duration.ofSeconds(120)).pollInterval(Duration.ofSeconds(2)).ignoreExceptions()
+                        .until(() -> run(Duration.ofSeconds(30), "docker", "logs", container)
+                                .contains("msg=\"Done replaying WAL\""));
+            }
             assertEquals(List.of(), errors, container + " logged an error");
         }
     }
