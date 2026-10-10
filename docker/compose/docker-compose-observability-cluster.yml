@@ -28,11 +28,7 @@ services:
       - "13133:13133"
     networks:
       - observability
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:13133/"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    # No health check: this image holds no shell and no wget or curl, so one could never pass.
     restart: unless-stopped
 
   # ==========================================================
@@ -156,7 +152,7 @@ services:
       - observability
     depends_on:
       otel-collector:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
       interval: 10s
@@ -184,7 +180,7 @@ services:
       - observability
     depends_on:
       otel-collector:
-        condition: service_healthy
+        condition: service_started
       server1:
         condition: service_started
     healthcheck:
@@ -214,7 +210,7 @@ services:
       - observability
     depends_on:
       otel-collector:
-        condition: service_healthy
+        condition: service_started
       server1:
         condition: service_started
       server2:

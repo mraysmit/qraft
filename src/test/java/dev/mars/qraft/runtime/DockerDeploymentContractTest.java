@@ -200,6 +200,23 @@ class DockerDeploymentContractTest {
     }
 
     @Test
+    void nothingWaitsForTheCollectorToReportItselfHealthy() throws IOException {
+        Path root = Path.of("").toAbsolutePath();
+        for (String relativePath : List.of("docker/compose/docker-compose-observability.yml",
+                "docker/compose/docker-compose-observability-cluster.yml")) {
+            String compose = Files.readString(root.resolve(relativePath)).replace("\r\n", "\n");
+            int start = compose.indexOf("\n  otel-collector:\n");
+            assertTrue(start >= 0, relativePath + " defines the collector");
+            Matcher nextService = Pattern.compile("\n  [a-z0-9-]+:\n").matcher(compose);
+            int end = nextService.find(start + 1) ? nextService.start() : compose.length();
+            assertFalse(compose.substring(start, end).contains("healthcheck:"), relativePath
+                    + ": the collector image holds no shell, wget, or curl, so a health check in it never passes");
+            assertFalse(Pattern.compile("otel-collector:\\s+condition: service_healthy").matcher(compose).find(),
+                    relativePath + ": a service that waits for the collector to be healthy is never started");
+        }
+    }
+
+    @Test
     void dockerIntegrationTestsRequireTheHostBuiltRuntimeJar() throws IOException {
         Path root = Path.of("").toAbsolutePath();
         String sharedCluster = Files.readString(root.resolve(

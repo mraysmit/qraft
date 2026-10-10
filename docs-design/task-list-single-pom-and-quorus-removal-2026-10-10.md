@@ -2005,6 +2005,67 @@ Still needed:
   need a POSIX shell;
 - the look at the dashboard, in the last task above.
 
+**The start commands, checked locally on 2026-10-10, and what that check cost.**
+The exit's last two points were checked by a script I wrote for the purpose
+and ran on the development machine. It was a mistake in two ways, recorded
+here as it happened.
+
+- The script is not in the repository and cannot run on Jenkins. It is
+  PowerShell, it drives the Windows start scripts, and the stacks publish
+  fixed host ports, of which 8080 is Jenkins itself on that server. So the
+  start scripts still have no check that Jenkins runs, beyond the reading of
+  their text in `DockerDeploymentContractTest`.
+- **It deleted four Docker volumes that were there before it ran.** It called
+  `start-observability.ps1 -Down`, which is `docker compose down -v`. Gone:
+  `compose_grafana-data`, `compose_prometheus-data`, `compose_loki-data`, and
+  `compose_tempo-data`, with whatever earlier runs of the observability stack
+  had stored. They cannot be brought back. I had looked for existing volumes
+  by the name "qraft"; Compose names them after the directory, `compose_*`.
+  The provisioned dashboard and datasources are files in the repository and
+  are not affected. Nothing of any other project was touched.
+
+What the check found, and what was changed for it:
+
+- `start-quick.*`'s `clean` action ran `docker volume prune` and `docker
+  network prune`, which act on every project on the machine. It was not run.
+  It now takes down only Qraft's own cluster compose files, with their
+  volumes (`29fe503`). `DockerDeploymentContractTest` forbids a prune in the
+  four scripts.
+- `docker-compose-observability-cluster.yml` could never start its servers.
+  The collector's health check called `wget`, which that image does not
+  hold, so the collector was unhealthy for ever and the three servers, which
+  waited for it to be healthy, were never started. The check is removed from
+  both observability compose files, the servers wait for the collector to be
+  started, and `DockerDeploymentContractTest` has a test for both. Not built
+  on Jenkins yet.
+- A help text I had added to `start-quick.*` said to run `clean` before
+  starting another cluster type. The check showed that is not needed: five
+  servers started on a three-server cluster's volumes, with one leader and
+  no error. The text now says only that the types share their data.
+
+What it showed, in `logs/qraft-start-commands-2026-10-10_17-31-19-480.log`,
+a local file: 45 checks passed and 3 failed.
+
+- Passed: `start.ps1` and `start.sh` with `cluster`, `multinode`, `status`,
+  and `stop`; `start-quick.ps1` with `cluster 3node`, `5node`, and
+  `network-test`, `status`, `stop`, and `clean`; `start-quick.sh` with
+  `cluster 5node`, `status`, `stop`, and `clean`; `start-observability.ps1`
+  and `.sh`, with status and down. Every server answered ready, and each
+  cluster had one leader. The shell scripts ran under Git for Windows.
+- Passed: the three-server observability stack, after the fix above.
+  Prometheus scraped all three servers. The node query of the dashboard's
+  panel "Raft Cluster Network" returned the three servers with their roles,
+  and its edge query returned the calls from the leader to each follower.
+  That is the evidence for the last task above. The picture itself was not
+  looked at.
+- Failed, three times the same: Grafana logs three error lines when it
+  starts, because the provisioning directories `plugins`, `notifiers`, and
+  `alerting` do not exist. Open. An error in a log is fixed or flagged.
+
+Open after this: the three Grafana errors; whether `-Down` should go on
+deleting the observability data; and a check of the start scripts that
+Jenkins runs.
+
 **Unflagged errors found by the audit of build 6 (2026-10-10), remedied in
 build 8.** Ten WARN events in the container logs carry a stack trace and no
 flag. The user's word the same day: an error is flagged or it is fixed, as

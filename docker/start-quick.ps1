@@ -29,7 +29,7 @@ function Show-Help {
     Write-Host "  .\start-quick.ps1 cluster 5node     # Start 5-node cluster" -ForegroundColor Gray
     Write-Host "  .\start-quick.ps1 status            # Check service status" -ForegroundColor Gray
     Write-Host ""
-    Write-Host "The cluster types share their data volumes: run clean before starting another type." -ForegroundColor Yellow
+    Write-Host "The cluster types share their data volumes: a cluster starts with the data of the one before. clean removes it." -ForegroundColor Yellow
 }
 
 function Start-Cluster {

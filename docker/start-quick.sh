@@ -33,6 +33,6 @@ case "$action" in
     ;;
   *)
     echo "Usage: ./start-quick.sh {cluster [3node|5node|network-test]|stop|clean|status}"
-    echo "The cluster types share their data volumes: run clean before starting another type."
+    echo "The cluster types share their data volumes: a cluster starts with the data of the one before. clean removes it."
     ;;
 esac
