@@ -85,13 +85,12 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Configure Qraft to send telemetry:" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  Set environment variables:" -ForegroundColor White
-Write-Host "    OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317" -ForegroundColor Gray
-Write-Host "    OTEL_METRICS_EXPORTER=otlp" -ForegroundColor Gray
-Write-Host "    OTEL_TRACES_EXPORTER=otlp" -ForegroundColor Gray
+Write-Host "  Set these in each server's configuration file:" -ForegroundColor White
+Write-Host "    server.telemetry.enabled        true" -ForegroundColor Gray
+Write-Host "    server.telemetry.otlpEndpoint   http://localhost:4317" -ForegroundColor Gray
 Write-Host ""
-Write-Host "  Or for Java tests:" -ForegroundColor White
-Write-Host "    -Dotel.exporter.otlp.endpoint=http://localhost:4317" -ForegroundColor Gray
+Write-Host "  Prometheus scrapes server.telemetry.prometheusPort on this machine:" -ForegroundColor White
+Write-Host "    9464 for one server, 9471 to 9473 for three" -ForegroundColor Gray
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Commands:" -ForegroundColor Cyan

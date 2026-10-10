@@ -59,14 +59,3 @@ datasources:
           matcherRegex: '"traceId":"([a-f0-9]+)"'
           name: TraceID
           url: '$${__value.raw}'
-
-  # Infinity - For flexible data visualization (Node Graph, etc.)
-  - name: Infinity
-    type: yesoreyeram-infinity-datasource
-    uid: infinity
-    access: proxy
-    editable: true
-    jsonData:
-      allowedHosts:
-        - prometheus:9090
-        - localhost:9090

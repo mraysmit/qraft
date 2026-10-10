@@ -171,17 +171,16 @@ There are two ways onto Docker, and they build differently.
 **2. A cluster you start by hand**, to try something out or watch it run. Run these from `docker/`:
 
 ```powershell
-.\start.ps1 cluster                # one server:                   http://localhost:8080
-.\start.ps1 servers            # three servers, load balancer: http://localhost:8080 (8081-8083 direct)
-.\start-quick.ps1 cluster 3node    # three servers: http://localhost:8081-8083 (compose/docker-compose-cluster.yml)
+.\start.ps1 cluster                # one server with a client: http://localhost:8080
+.\start.ps1 multinode              # three servers: http://localhost:8081-8083 (compose/docker-compose-cluster.yml)
+.\start-quick.ps1 cluster 3node    # the same three servers
 .\start-quick.ps1 cluster 5node    # five servers:  http://localhost:8081-8085 (compose/docker-compose-5node.yml)
 .\start.ps1 status                 # the running Qraft containers
 .\start.ps1 stop                   # stop every cluster either script started
 ```
 
 Only one cluster runs at a time: they share container names, so stop one before starting another.
-`start-quick.ps1 test` sends to `http://localhost:8080`, so it needs `start.ps1 cluster` or `servers`.
-Each `cluster` or `servers` command first runs `docker/build-runtime.ps1`, which packages the runtime
+Each `cluster` or `multinode` command first runs `docker/build-runtime.ps1`, which packages the runtime
 jar again with `package -DskipTests`, then starts the containers with
 `docker compose ... up -d` and returns. Follow a cluster's logs with
 `docker compose -f compose/<file>.yml logs -f`. `start.sh` and `start-quick.sh` are the shell
@@ -192,7 +191,7 @@ equivalents.
 1. `mvn install`, which runs the default suite and the coverage gates, and packages the runtime jar.
 2. `mvn test "-Dgroups=docker,e2e" "-Dtest.excludedGroups="`, the
    end-to-end and Docker suites, which build their own image from that jar.
-3. Optional: `docker\start.ps1 servers`, to watch a hand-started cluster. It repackages the jar first,
+3. Optional: `docker\start.ps1 multinode`, to watch a hand-started cluster. It repackages the jar first,
    which is redundant straight after step 1 but harmless.
 
 ## Making runs faster

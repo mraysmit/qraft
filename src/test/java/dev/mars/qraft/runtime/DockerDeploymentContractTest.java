@@ -24,6 +24,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -41,7 +43,6 @@ class DockerDeploymentContractTest {
     private static final List<String> BUILD_COMPOSE_FILES = List.of(
             "docker/compose/docker-compose-5node.yml",
             "docker/compose/docker-compose-cluster.yml",
-            "docker/compose/docker-compose-server-first.yml",
             "docker/compose/docker-compose-network-test.yml",
             "docker/compose/docker-compose-observability-cluster.yml",
             "docker/compose/docker-compose-single-server.yml",
@@ -162,8 +163,26 @@ class DockerDeploymentContractTest {
 
         assertTrue(Files.readString(root.resolve("docker/start.ps1"))
                 .contains("build-runtime.ps1"));
-        assertTrue(Files.readString(root.resolve("docker/start.ps1")).contains("\"servers\" {"),
-                "the PowerShell dispatcher must accept the servers command its help documents");
+        for (String command : List.of("cluster", "multinode", "stop", "status")) {
+            assertTrue(Files.readString(root.resolve("docker/start.ps1")).contains("\"" + command + "\" {"),
+                    "the PowerShell dispatcher must accept the " + command + " command its help documents");
+            assertTrue(Files.readString(root.resolve("docker/start.sh")).contains("  " + command + ")"),
+                    "the shell dispatcher must accept the " + command + " command");
+        }
+        for (String script : List.of("docker/start.ps1", "docker/start.sh", "docker/start-quick.ps1",
+                "docker/start-quick.sh")) {
+            String content = Files.readString(root.resolve(script));
+            for (String removed : List.of("docker-compose-server-first", "docker-compose-loki", "test-data")) {
+                assertFalse(content.contains(removed), script + " must not use the removed " + removed);
+            }
+            for (String line : content.lines().filter(text -> text.contains("docker-compose-")).toList()) {
+                Matcher file = Pattern.compile("docker-compose-[a-z0-9-]+\\.yml").matcher(line);
+                while (file.find()) {
+                    assertTrue(Files.exists(root.resolve("docker/compose/" + file.group())),
+                            script + " names a compose file that does not exist: " + file.group());
+                }
+            }
+        }
         assertTrue(Files.readString(root.resolve("docker/start.sh"))
                 .contains("build-runtime.sh"));
         assertTrue(Files.readString(root.resolve("docker/start-quick.ps1"))
@@ -314,7 +333,6 @@ class DockerDeploymentContractTest {
     void deploymentServiceDnsConfigurationsAndTelemetryUseServerNames() throws IOException {
         Path root = Path.of("").toAbsolutePath();
         assertTrue(Files.exists(root.resolve("docker/compose/docker-compose-single-server.yml")));
-        assertTrue(Files.exists(root.resolve("docker/compose/docker-compose-server-first.yml")));
         for (String profile : List.of("three-node", "five-node", "three-node-acceptance",
                 "five-node-acceptance", "three-node-observability")) {
             Path configuration = root.resolve("docker/config/" + profile + "/server1.json");
@@ -331,7 +349,17 @@ class DockerDeploymentContractTest {
         }
         String dashboard = Files.readString(root.resolve(
                 "docker/compose/grafana/provisioning/dashboards/json/qraft-server.json"));
-        assertTrue(dashboard.contains("qraft-servers-compose"));
+        assertTrue(dashboard.contains("service=\\\"qraft-server\\\""),
+                "the dashboard must select servers by the service label");
+        assertFalse(dashboard.contains("job="), "the two Prometheus configurations name their scrape jobs "
+                + "differently, so a panel that filters on a job is empty under one of them");
+        for (String prometheus : List.of("docker/compose/prometheus-cluster.yml",
+                "docker/compose/prometheus-observability.yml")) {
+            String scrapes = Files.readString(root.resolve(prometheus));
+            assertTrue(scrapes.contains("service: 'qraft-server'"), prometheus);
+            assertFalse(scrapes.contains(":8080"),
+                    prometheus + ": a server publishes its metrics on its telemetry port, not its HTTP port");
+        }
         assertFalse(dashboard.contains("controller"));
         ClientConfiguration client = ClientConfiguration.fromFile(root.resolve("docker/config/client.json"));
         assertTrue(client.getServerUrls().stream().allMatch(url -> url.getHost().startsWith("server")));

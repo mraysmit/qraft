@@ -11,9 +11,9 @@
 #   - Loki:           http://localhost:3100
 #   - OTel Collector: receives OTLP gRPC on 4317, HTTP on 4318
 #
-# For Qraft Integration Tests:
-#   - Configure OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
-#   - Prometheus scrapes :9464 (server), :9465 (client)
+# For Qraft servers run on this machine:
+#   - Set server.telemetry.otlpEndpoint to http://localhost:4317 in each server's configuration
+#   - Prometheus scrapes server.telemetry.prometheusPort: 9464 for one server, 9471 to 9473 for three
 
 services:
   # ==========================================================
@@ -121,8 +121,6 @@ services:
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
       # Feature toggles for Tempo integration
       - GF_FEATURE_TOGGLES_ENABLE=traceqlEditor
-      # Install useful plugins
-      - GF_INSTALL_PLUGINS=marcusolsson-dynamictext-panel,marcusolsson-treemap-panel,volkovlabs-echarts-panel,yesoreyeram-infinity-datasource
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana

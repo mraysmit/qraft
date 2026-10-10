@@ -7,7 +7,7 @@ action=${1:-help}
 cluster_type=${2:-3node}
 
 stop_services() {
-  for file in docker-compose-single-server.yml docker-compose-server-first.yml docker-compose-cluster.yml docker-compose-5node.yml docker-compose-network-test.yml docker-compose-loki.yml; do
+  for file in docker-compose-single-server.yml docker-compose-cluster.yml docker-compose-5node.yml docker-compose-network-test.yml; do
     docker compose -f "compose/$file" down >/dev/null 2>&1 || true
   done
 }
@@ -23,13 +23,6 @@ case "$action" in
     esac
     docker compose -f "$file" up -d
     ;;
-  logging) docker compose -f compose/docker-compose-loki.yml up -d ;;
-  test)
-    curl --fail-with-body -sS -H 'Content-Type: application/json' \
-      --data-binary @test-data/test-registration.json http://localhost:8080/api/v1/clients/register
-    "$SCRIPT_DIR/test-data/send-heartbeat.sh" 1
-    "$SCRIPT_DIR/test-data/check-clients.sh"
-    ;;
   stop) stop_services ;;
   clean)
     stop_services
@@ -42,7 +35,6 @@ case "$action" in
     docker volume ls --filter name=qraft --format 'table {{.Name}}\t{{.Driver}}'
     ;;
   *)
-    echo "Usage: ./start-quick.sh {cluster [3node|5node|network-test]|logging|test|stop|clean|status}"
-    echo "test sends to http://localhost:8080, which ./start.sh cluster or servers serves"
+    echo "Usage: ./start-quick.sh {cluster [3node|5node|network-test]|stop|clean|status}"
     ;;
 esac

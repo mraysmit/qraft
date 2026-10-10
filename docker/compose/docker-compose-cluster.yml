@@ -18,9 +18,6 @@ services:
       - ../config/three-node/server1.json:/etc/qraft/server.json:ro
       - server1-data:/app/data
       - ../../logs:/app/logs
-    labels:
-      - "logging=promtail"
-      - "service=qraft-server1"
     logging:
       driver: "json-file"
       options:
@@ -50,9 +47,6 @@ services:
       - ../config/three-node/server2.json:/etc/qraft/server.json:ro
       - server2-data:/app/data
       - ../../logs:/app/logs
-    labels:
-      - "logging=promtail"
-      - "service=qraft-server2"
     logging:
       driver: "json-file"
       options:
@@ -84,9 +78,6 @@ services:
       - ../config/three-node/server3.json:/etc/qraft/server.json:ro
       - server3-data:/app/data
       - ../../logs:/app/logs
-    labels:
-      - "logging=promtail"
-      - "service=qraft-server3"
     logging:
       driver: "json-file"
       options:

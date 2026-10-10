@@ -9,8 +9,8 @@ Run commands from this directory. The helper script exposes the maintained
 development entry points:
 
 ```powershell
-.\start.ps1 cluster       # single-server development environment
-.\start.ps1 servers   # three servers behind a load balancer
+.\start.ps1 cluster       # one server with a client, for development
+.\start.ps1 multinode     # three servers
 .\start.ps1 status
 .\start.ps1 stop
 ```
@@ -19,13 +19,13 @@ POSIX shell equivalents are provided for Linux, macOS, and WSL:
 
 ```sh
 sh ./start.sh cluster
-sh ./start.sh servers
+sh ./start.sh multinode
 sh ./start.sh status
 sh ./start.sh stop
 ```
 
-The compose directory also contains dedicated three-node, five-node, and
-network-partition configurations used for distributed testing. These require
+`start-quick.ps1 cluster [3node|5node|network-test]` and its shell equivalent
+start the three-server, five-server, and network-partition clusters. These require
 the unified `qraft-runtime` image. Qraft does not use environment variables for
 runtime configuration. Compose mounts a versioned JSON file for each process and
 starts servers with `server --config /etc/qraft/server.json`. The client image uses
@@ -98,29 +98,10 @@ on the selected topology. Check a running endpoint with:
 Invoke-RestMethod http://localhost:8080/health/ready
 ```
 
-## Client API checks
-
-With a server running, `start-quick.ps1 test` uses the JSON payloads and
-PowerShell scripts under `test-data/` to exercise client registration,
-heartbeat, and listing endpoints.
-
-These scripts call `/api/v1/clients*`, which the server stopped serving on
-2026-10-09: the node routes are at `/v1/catalog/*` now, with other request
-bodies. Until the scripts are reworked or deleted, `test` fails. The Docker and
-end-to-end suites cover the same ground (see [TESTING.md](../docs/TESTING.md)).
-
-```powershell
-.\start-quick.ps1 test
-```
-
-```sh
-sh ./start-quick.sh test
-```
-
 ## Observability
 
-The maintained observability stack contains OpenTelemetry Collector, Tempo,
-Prometheus, Loki, and Grafana:
+There is one observability stack: OpenTelemetry Collector, Tempo, Prometheus,
+Loki, and Grafana:
 
 ```powershell
 .\start-observability.ps1
@@ -146,6 +127,15 @@ Default local endpoints:
 | OTLP HTTP | localhost:4318 |
 
 The default Grafana development credentials are `admin` / `admin`.
+
+The scripts start the stack alone, for servers run on this machine. A second
+compose file starts the same stack with three servers that report to it. Both
+use the same container names and ports, so stop one before starting the other:
+
+```powershell
+.\build-runtime.ps1
+docker compose -f compose/docker-compose-observability-cluster.yml up -d
+```
 
 ## Persistent state
 

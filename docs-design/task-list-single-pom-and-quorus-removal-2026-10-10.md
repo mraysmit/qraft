@@ -1,9 +1,9 @@
 # Task List: Single POM and Removal of the Quorus Leftovers
 
 **Date:** 2026-10-04
-**Last updated:** 2026-10-10 (Phase 5 done and its exit met: the version source, then the configuration without a default document, as typed records, with one shared parsing helper; each verified on Jenkins; three third-party keywords that Phase 3A's sweep had renamed are restored; the file renamed to the date of its last change. On 2026-10-09: the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
+**Last updated:** 2026-10-10 (Phase 6 applied and waiting for its builds: three unused log stacks, the load balancer, the demo scripts, and the hand-test data deleted, the start scripts reduced, and the kept observability stack corrected. Phase 5 done and its exit met: the version source, then the configuration without a default document, as typed records, with one shared parsing helper; each verified on Jenkins; three third-party keywords that Phase 3A's sweep had renamed are restored; the file renamed to the date of its last change. On 2026-10-09: the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
 **Status:** In progress. This is the current task list. It started on 2026-10-04 at the user's request, before the membership list's Step 4 close-out gate.
-**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 was done and its exit met on 2026-10-10: Jenkins build 4 verified its version source and build 5 the rest. The next coding task is Phase 6. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
+**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 was done and its exit met on 2026-10-10: Jenkins build 4 verified its version source and build 5 the rest. Phase 6 was applied on 2026-10-10; no build has run on it, so its exit is open, and two of its tasks are open: the cause of the Jenkins timeout, and a look at the corrected dashboard on a running stack. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
 **Last reviewed:** 2026-10-08, against the code at commit `9a4adf0`, with the other four task lists. The status table in section 4 and every item marked "review of 2026-10-08" come from that review. No build was run for it. The logs that the Phase 2A and Phase 3 records cite were written in another working tree and were not available, so their counts were checked for arithmetic only. The earlier review of 2026-10-05 was against `24beac3`; its items keep their date.
 **Order of work:**
 - The membership list's Step 4 close-out gate is the first task of Phase 7 here.
@@ -87,7 +87,7 @@ rules and extracts from that run.
 | 3A. One word for each mode | Added and done 2026-10-09; verified the same day | 5 of 5 | `5a00975` |
 | 4. Node model and API | Done 2026-10-09, exit met; its four open points settled and its decisions confirmed by the user the same day | 7 of 7 | `e4bf00d` to `a6e7930` |
 | 5. Configuration and version | Done 2026-10-10, exit met | 6 of 6 | `693449e`, `c123ee9`, `12d365c`, `d4e1af8` |
-| 6. Docker and observability | One task added and done on 2026-10-10; the rest not started | 1 of 11 | `ce5890d` |
+| 6. Docker and observability | Applied 2026-10-10, with the load balancer removed at the user's decision; no build run yet, so the exit is open. Open: the cause of the Jenkins timeout, and a look at the corrected dashboard | 10 of 12 | `ce5890d`; the rest not committed |
 | 7. Async layer | Not started | 0 of 6 | |
 | 8. Documentation and close-out | Started early for Phases 1 and 2; Phase 3's names done with Phase 3; the documents of Phases 4 and 5 done as each ended | 2 of 6 | |
 
@@ -1647,37 +1647,72 @@ process-wide instance that task 1 removes.
 
 ### Phase 6. Docker and observability
 
-- [ ] Keep one observability stack: OpenTelemetry Collector, Tempo,
-  Prometheus, Loki, and Grafana.
-- [ ] Delete the unreferenced ELK and Fluentd compose files.
-- [ ] Delete the Promtail stack: `docker/logging/`, `docker-compose-loki.yml`,
-  and the Promtail labels in the cluster compose files.
-- [ ] Remove the start scripts' use of `docker-compose-loki.yml` in the same
-  change (review of 2026-10-05). `start.ps1`, `start.sh`, `start-quick.ps1`,
-  and `start-quick.sh` all start or stop it, so deleting the file alone
-  breaks them, whatever the nginx decision below.
-- [ ] Delete the four logging demo scripts (`.ps1` and `.sh`): demo-logging,
-  log-extraction-demo, setup-logging, and simple-log-demo.
-- [ ] Remove the Grafana panels built on `qraft_clients`, a metric the server
-  never emits.
-- [ ] Rework `docker/test-data` to use the Phase 4 node routes, or delete it in
-  favour of the end-to-end suite. Delete the unreferenced `test-heartbeat.json`.
-  `start-quick.*`'s `test` action and `docker/README.md` use the other files
-  there.
+Applied on 2026-10-10. **No build has been run on it.** The deletions were
+checked by search, and the changed test by the editor's compiler. The exit at
+the end of this phase is open until the builds and the start commands have
+run.
 
-  Since Phase 4 (2026-10-09) these call routes that no longer exist, so each
-  fails until this task is done. `docker/README.md` says so.
-  - `docker/test-data`: `check-clients.*`, `send-heartbeat.*`, and the body
-    in `test-registration.json`, which still has the fields of the old
-    node model;
-  - `start-quick.*`: the `test` action;
-  - the logging demo scripts that the task above deletes;
-  - one Grafana panel, which reads `/api/v1/clients` directly.
-- [ ] Delete `docker/test-data/nginx.conf` (review of 2026-10-05). Nothing
-  references it; the load-balancer topology mounts `compose/nginx/nginx.conf`.
-- [ ] Decide whether the nginx load-balancer topology stays, since clients
+- [x] Keep one observability stack: OpenTelemetry Collector, Tempo,
+  Prometheus, Loki, and Grafana.
+
+  Done 2026-10-10. The stack is in two compose files, which share one Grafana
+  provisioning directory:
+  - `docker-compose-observability.yml`, which `start-observability.*` starts
+    beside servers run on the machine;
+  - `docker-compose-observability-cluster.yml`, the same stack with three
+    servers, started by hand with `docker compose`.
+
+  The next two tasks delete the other three stacks. What the kept stack still
+  asked of things that cannot answer is the last task of this phase.
+- [x] Delete the unreferenced ELK and Fluentd compose files. Done 2026-10-10:
+  `docker-compose-elk.yml` and `docker-compose-fluentd.yml`.
+- [x] Delete the Promtail stack: `docker/logging/`, `docker-compose-loki.yml`,
+  and the Promtail labels in the cluster compose files. Done 2026-10-10: the
+  five files of `docker/logging/`, the compose file, and the three `labels:`
+  blocks of `docker-compose-cluster.yml`. The only other file with those
+  labels was the load-balancer topology, deleted below.
+- [x] Remove the start scripts' use of `docker-compose-loki.yml` in the same
+  change (review of 2026-10-05). Done 2026-10-10: the `logging` action is
+  gone from `start.ps1`, `start.sh`, `start-quick.ps1`, and `start-quick.sh`,
+  and none of them stops the file any more.
+- [x] Delete the four logging demo scripts (`.ps1` and `.sh`): demo-logging,
+  log-extraction-demo, setup-logging, and simple-log-demo. Done 2026-10-10:
+  the eight files were all of `docker/scripts/`.
+- [x] Remove the Grafana panels built on `qraft_clients`, a metric the server
+  never emits. Done 2026-10-10: the row "Clients and Topology" and its six
+  panels, ids 120 to 126, the last seven of the dashboard. Five queried
+  `qraft_clients`; the sixth read `/api/v1/clients`, a route removed in
+  Phase 4. The dashboard has 15 panels now. This task changed nothing else
+  in the file.
+- [x] Rework `docker/test-data` to use the Phase 4 node routes, or delete it in
+  favour of the end-to-end suite. Done 2026-10-10: deleted. The end-to-end
+  and Docker suites cover registration, heartbeat, and listing on the real
+  routes. With it went the `test` action of `start-quick.*` and the section
+  "Client API checks" of `docker/README.md`.
+- [x] Delete `docker/test-data/nginx.conf` (review of 2026-10-05). Done
+  2026-10-10, with its directory.
+- [x] Decide whether the nginx load-balancer topology stays, since clients
   rotate through their seeds themselves. Reduce `start.*` and `start-quick.*`
   to the remaining topologies.
+
+  Decided by the user on 2026-10-10: remove it. `docker-compose-server-first.yml`
+  and `compose/nginx/nginx.conf` are deleted, with the `servers` action of
+  `start.*`. What the scripts offer now:
+  - `start.*`: `cluster` (one server with a client), `multinode` (three
+    servers), `stop`, `status`;
+  - `start-quick.*`: `cluster [3node|5node|network-test]`, `stop`, `clean`,
+    `status`;
+  - `start-observability.*`: unchanged.
+
+  `DockerDeploymentContractTest` checked one action of one script. It now
+  checks that both `start` scripts have all four actions, that none of the
+  four scripts names a removed file, and that every compose file a script
+  names exists. `docker/README.md` and `docs/TESTING.md` name the remaining
+  commands.
+
+  Found and removed with it: `docker/compose/.env`. It held only comments
+  about a Maven repository path for a build inside Docker. The image has
+  long been built from the jar made on the host.
 - [x] Keep the local credentials folder out of Docker build contexts (added
   and done 2026-10-10, at the user's direction). `.env/` holds the Jenkins
   API token. Git ignored it and it was never committed, but `.dockerignore`
@@ -1697,8 +1732,86 @@ process-wide instance that task 1 removes.
   pass of the pipeline on that server. One pass does not give the cause of
   the timeout in build 2, so this task stays open.
 
+  Analysed 2026-10-10. The cause cannot be proven: build 2 archived no
+  container logs, and the failure did not return in builds 4 and 5. The
+  likeliest cause is a deadline the test does not state.
+  - The test freezes the client, makes the leader take a snapshot, restarts
+    the follower, and then waits up to 90 seconds for the follower to hold
+    the leader's entry for the service `web`.
+  - The client's profile for this test,
+    `docker/config/client-acceptance/client-restart.json`, gives the checks
+    a `ttlMs` of 15000 and the HTTP check a `deregisterAfterMs` of 30000. So
+    the leader removes `web` 45 seconds after the frozen client's last
+    renewal. From then on the leader has no entry to compare, and the wait
+    cannot succeed however long it lasts.
+  - In build 2 the test took 105.8 seconds, so everything before the
+    90-second wait took about 16 seconds, and at least 29 of the 45 seconds
+    were left when the wait began. In builds 4 and 5 the whole test takes
+    about 10 seconds, and the follower installs the snapshot within a second
+    of its restart.
+  - Not explained: why the follower needed more than those 29 seconds in
+    build 2.
+
+  Open, for the user to decide: whether to give this test a client profile
+  that does not remove the service while the client is frozen, so that the
+  stated 90 seconds are the only limit. The wait, the class's 10-minute
+  limit, and the pipeline's 60-minute limit all stay, so the test still
+  cannot hang.
+- [ ] Make the kept stack ask only for what a server publishes (added
+  2026-10-10; applied the same day, not yet seen working). Removing the
+  client panels showed that more of the stack pointed at nothing.
+  - The dashboard's first panel, the graph "Raft Cluster Network", chose its
+    nodes and edges by the scrape job `qraft-servers-compose`. Only
+    `prometheus-observability.yml` had that job. It scraped `server1:8080`
+    to `server3:8080`: no compose file puts a server on that stack's
+    network, and a server has no metrics route on its HTTP port. The stack
+    that does run three servers uses `prometheus-cluster.yml`, whose jobs
+    are `qraft-server1` to `qraft-server3`. So the panel was empty in every
+    topology. It now chooses by `service="qraft-server"`, the label both
+    Prometheus files give every server.
+  - Three scrape jobs of `prometheus-observability.yml` could reach nothing
+    and are removed: `qraft-servers-compose`, above; `qraft-server-docker`,
+    which looked up the name `server`, a container on another network; and
+    `qraft-client-host`, since client mode publishes no metrics. The jobs
+    for servers run on the machine stay.
+  - The Infinity datasource lost its only panel, and the three panel plugins
+    have none. The datasource and the plugin download are removed.
+    `docker-compose-observability-cluster.yml` never installed them, so the
+    two files now set Grafana up alike, and Grafana downloads nothing when
+    it first starts.
+  - `start-observability.ps1` and the header of
+    `docker-compose-observability.yml` told the reader to set
+    `OTEL_EXPORTER_OTLP_ENDPOINT`. Qraft reads no environment variable.
+    Both now name `server.telemetry.otlpEndpoint`.
+  - `DockerDeploymentContractTest` required the dashboard to name the dead
+    job. It now requires the `service` label, no filter on a job, and no
+    scrape of port 8080.
+
+  Still to do: start `docker-compose-observability-cluster.yml` and see the
+  graph show three servers and the calls between them. No test can show
+  that.
+
+Phase 6 deleted 26 files. A search of the repository outside `docs/archive/`
+finds the removed names only in this list and in the one assertion that
+keeps them out of the scripts.
+
+The new assertions were written with the change. Their red state was not
+run, because no build was run. By reading, each fails on the previous files:
+the scripts named `docker-compose-loki.yml`, and the dashboard filtered on a
+job.
+
 **Exit:** `DockerDeploymentContractTest`, the Docker suite, and each remaining
 start command work.
+
+**Not met yet (2026-10-10).** It needs:
+- the default build, which runs `DockerDeploymentContractTest`;
+- the end-to-end, Docker, and slow suites, because compose files changed;
+- the retained logs of both read for unflagged errors;
+- each remaining command run once by hand: `start.ps1` with `cluster`,
+  `multinode`, `status`, and `stop`; `start-quick.ps1 cluster` with `3node`,
+  `5node`, and `network-test`, then `status`, `stop`, and `clean`; and
+  `start-observability.ps1`, with `-Status` and `-Down`. The `.sh` scripts
+  need a POSIX shell.
 
 ### Phase 7. Replace the Vert.x-shaped async layer
 

@@ -3,7 +3,7 @@
 
 param(
     [Parameter(Position=0)]
-    [ValidateSet("cluster", "logging", "test", "stop", "clean", "status", "help")]
+    [ValidateSet("cluster", "stop", "clean", "status", "help")]
     [string]$Action = "help",
     
     [Parameter(Position=1)]
@@ -19,9 +19,6 @@ function Show-Help {
     Write-Host ""
     Write-Host "Actions:" -ForegroundColor Yellow
     Write-Host "  cluster [3node|5node|network-test]  - Start Qraft cluster" -ForegroundColor White
-    Write-Host "  logging                             - Start log aggregation stack" -ForegroundColor White
-    Write-Host "  test                                - Run test scenarios against http://localhost:8080," -ForegroundColor White
-    Write-Host "                                        which .\start.ps1 cluster or servers serves" -ForegroundColor White
     Write-Host "  stop                                - Stop all services" -ForegroundColor White
     Write-Host "  clean                               - Clean up containers and volumes" -ForegroundColor White
     Write-Host "  status                              - Show service status" -ForegroundColor White
@@ -30,8 +27,6 @@ function Show-Help {
     Write-Host "Examples:" -ForegroundColor Yellow
     Write-Host "  .\start-quick.ps1 cluster           # Start 3-node cluster" -ForegroundColor Gray
     Write-Host "  .\start-quick.ps1 cluster 5node     # Start 5-node cluster" -ForegroundColor Gray
-    Write-Host "  .\start-quick.ps1 logging           # Start log aggregation" -ForegroundColor Gray
-    Write-Host "  .\start-quick.ps1 test              # Run test scenarios" -ForegroundColor Gray
     Write-Host "  .\start-quick.ps1 status            # Check service status" -ForegroundColor Gray
 }
 
@@ -67,53 +62,14 @@ function Start-Cluster {
     }
 }
 
-function Start-Logging {
-    Write-Host "Starting log aggregation stack..." -ForegroundColor Green
-    docker compose -f compose/docker-compose-loki.yml up -d
-    
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "Log aggregation started successfully!" -ForegroundColor Green
-        Write-Host ""
-        Write-Host "Services available at:" -ForegroundColor Yellow
-        Write-Host "  - Grafana: http://localhost:3000 (admin/admin)" -ForegroundColor White
-        Write-Host "  - Loki API: http://localhost:3100" -ForegroundColor White
-        Write-Host "  - Prometheus: http://localhost:9090" -ForegroundColor White
-    } else {
-        Write-Host "Failed to start logging stack!" -ForegroundColor Red
-    }
-}
-
-function Run-Tests {
-    Write-Host "Running test scenarios..." -ForegroundColor Green
-    
-    # Register test client
-    Write-Host "Registering test client..." -ForegroundColor Cyan
-    try {
-        $response = Invoke-RestMethod -Uri "http://localhost:8080/api/v1/clients/register" -Method POST -Body (Get-Content test-data/test-registration.json -Raw) -ContentType "application/json"
-        Write-Host "✓ Client registered: $($response.clientId)" -ForegroundColor Green
-    } catch {
-        Write-Host "⚠ Registration failed (may already exist)" -ForegroundColor Yellow
-    }
-    
-    # Send test heartbeats
-    Write-Host "Sending test heartbeats..." -ForegroundColor Cyan
-    & "test-data/send-heartbeat.ps1" -SequenceNumber 1
-    
-    # Check client status
-    Write-Host "Checking client status..." -ForegroundColor Cyan
-    & "test-data/check-clients.ps1"
-}
-
 function Stop-Services {
     Write-Host "Stopping all Qraft services..." -ForegroundColor Yellow
     
     # Stop all possible compose configurations
     docker compose -f compose/docker-compose-single-server.yml down 2>$null
-    docker compose -f compose/docker-compose-server-first.yml down 2>$null
     docker compose -f compose/docker-compose-cluster.yml down 2>$null
     docker compose -f compose/docker-compose-5node.yml down 2>$null
     docker compose -f compose/docker-compose-network-test.yml down 2>$null
-    docker compose -f compose/docker-compose-loki.yml down 2>$null
     
     Write-Host "All services stopped." -ForegroundColor Green
 }
@@ -160,8 +116,6 @@ function Show-Status {
 # Main execution
 switch ($Action) {
     "cluster" { Start-Cluster $ClusterType }
-    "logging" { Start-Logging }
-    "test" { Run-Tests }
     "stop" { Stop-Services }
     "clean" { Clean-Environment }
     "status" { Show-Status }

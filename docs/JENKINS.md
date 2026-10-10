@@ -71,6 +71,10 @@ timed out after 90 seconds while waiting for the restarted follower to install a
 snapshot state. This is a test/product integration result rather than a Jenkins configuration failure.
 Finding its cause is a task in Phase 6 of
 [the single-POM task list](../docs-design/task-list-single-pom-and-quorus-removal-2026-10-10.md).
+It was analysed on 2026-10-10. This build archived no container logs, so the cause cannot be proven.
+The likeliest one is a deadline the test does not state: the leader removes the frozen client's service
+45 seconds after its last renewal, and after that the test's 90-second wait cannot succeed. The task
+list has the reasoning and the decision that is still open.
 
 [Build 4](http://192.168.137.32:8080/job/Qraft/4/), of 2026-10-10 on commit `ce5890d`, is the first
 complete pass of the pipeline on this server. It took 7 minutes 18 seconds.
