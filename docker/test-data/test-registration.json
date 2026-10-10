@@ -1,9 +1,0 @@
-{
-  "clientId": "test-client-002",
-  "hostname": "test-host",
-  "address": "192.168.1.100",
-  "port": 8081,
-  "version": "2.0.0",
-  "region": "us-east-1",
-  "datacenter": "dc1"
-}
