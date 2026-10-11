@@ -1958,6 +1958,75 @@ can show: the start commands run by hand, and a look at the dashboard.
     interface's default of 0, as they reported 0 before, so recovery still
     compares nothing for them.
   - `docs/TEST-RESULTS.md` says where the boundary now comes from.
+
+  **Jenkins build 18, on `fac3696`, failed in its default stage on one test
+  that this change does not touch.** 924 tests passed and 1 failed; the two
+  later stages did not run. The build downloaded `raftlog-core` 1.5.0 and
+  compiled against it. Its 25 log files hold 279 flagged ERROR events and
+  no ERROR event or uncaught exception without a flag.
+  - **Failure.**
+    `GrpcRaftServerTest#requestVoteWithAnAlreadyExpiredDeadlineFailsWithDeadlineExceeded`:
+    an unflagged WARN with a stack trace, Netty's "Failed to initialize a
+    channel", caused by `IllegalReferenceCountException: refCnt: 0`.
+  - **Cause, in the test.** The test ran first in its class. Its one call
+    has a deadline that has already passed, so the call fails at once, but
+    it still makes the channel start connecting. Teardown then stopped the
+    server while the server was accepting that connection. gRPC's Netty
+    server releases its shared resources when it shuts down, and a
+    connection accepted just before is initialised just after: the log
+    shows "gRPC Raft server stopped" 2 ms before the warning. Every other
+    test of the class completes a call first, so its connection is long
+    established when teardown comes.
+  - **Fix.** `startServerAndConnect` waits until the channel is ready. No
+    test of the class can now end with a connection half made.
+  - **Production, noted and not changed.** The window is in gRPC's Netty
+    server, not in Qraft: a peer that connects in the instant a server stops
+    can make that server log this warning with its stack trace. The
+    connection is closed and nothing else follows. Qraft cannot close the
+    window from outside the library. For the user to decide whether it
+    needs more than this note.
+  - No red run can be forced for a race of this kind. Build 18 is the
+    evidence.
+
+  **The window itself, tested 2026-10-11 at the user's request** ("add a
+  tests that proves that A peer that connects in the instant a server stops
+  can make that server log this warning; the connection is simply closed").
+  `GrpcRaftServerTest` has two new tests, against Qraft's own
+  `GrpcRaftServer`.
+  - **The window is narrower than the note above says.** Read from the
+    library's code, gRPC 1.68.1: when the listening socket is closed, the
+    server first releases its shared resources and then marks itself
+    terminated. A worker thread that prepares an accepted connection
+    checks that mark first. So only a connection prepared between those two
+    steps meets released resources; one prepared later is closed quietly.
+  - `aConnectionPreparedInTheInstantTheServerStopsIsClosedWithOneWarning`
+    holds the server between the two steps and lets the connection be
+    prepared there. The server logs the warning once, with
+    `IllegalReferenceCountException`; the peer reads the end of its stream;
+    the stop completes; a server started afterwards answers a request.
+  - `aConnectionPreparedAfterTheServerHasStoppedIsClosedWithoutAWarning`
+    lets the same connection be prepared after the stop has completed. The
+    peer reads the end of its stream and nothing is logged.
+  - How the order is forced, with no sleep and no chance: the test holds
+    every worker thread of gRPC's shared pool while a plain socket
+    connects, so the accepted connection waits. For the first test it also
+    holds the monitor the server needs to hand its threads back, which the
+    server asks for after it has released its resources, and it recognises
+    the held server by the method its thread waits in. It reaches the pool
+    and the monitor by reflection: three names inside gRPC. A change of
+    those names in a later gRPC makes the tests fail, not pass.
+  - The warning has its own definition,
+    `GRPC_CONNECTION_ACCEPTED_AS_SERVER_STOPS`, declared by the first test
+    alone and expected exactly once.
+  - Run locally, as a small check in the one visible console:
+    `GrpcRaftServerTest` five times, each in a new JVM, 30 of 30 every time
+    (`logs/qraft-grpc-server-repeat-2026-10-11_16-43-41-309.log`). Each run
+    logged the warning once, flagged, and its application log holds no
+    ERROR event without a flag. The tests passed at their first run: they
+    describe what the library already does, so there was no red state.
+  - What it means for production is unchanged: the warning can appear on a
+    server that is stopping, it costs one refused connection, and Qraft
+    cannot prevent it from outside the library.
 - [x] Make the kept stack ask only for what a server publishes (added
   2026-10-10; applied the same day; seen working the same evening, see
   "The dashboard, looked at" below). Removing the

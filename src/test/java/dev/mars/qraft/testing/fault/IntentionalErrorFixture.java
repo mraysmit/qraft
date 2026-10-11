@@ -133,6 +133,14 @@ public enum IntentionalErrorFixture {
                     + " status=Status\\{code=UNAVAILABLE, description=Unable to resolve host \\k<host>,"
                     + " cause=java\\.lang\\.RuntimeException: java\\.net\\.UnknownHostException: \\k<host>(?:: .+)?"),
 
+    /**
+     * A test has a gRPC server prepare an accepted connection in the instant it stops: after it has released
+     * its shared resources and before it has marked itself terminated. Netty closes the connection with this
+     * warning.
+     */
+    GRPC_CONNECTION_ACCEPTED_AS_SERVER_STOPS("io.netty.channel.ChannelInitializer", Level.WARN,
+            "Failed to initialize a channel\\. Closing: \\[id: 0x[0-9a-f]+, L:\\S+ [-!] R:\\S+]"),
+
     /** A stopped Docker peer interrupts an in-progress snapshot transfer or its completion callback. */
     RAFT_SNAPSHOT_TRANSFER_INTERRUPTED("dev.mars.qraft.raft.RaftNode", Level.ERROR,
             "(?:Failed to send InstallSnapshot chunk \\d+/\\d+ to \\S+: UNAVAILABLE:"

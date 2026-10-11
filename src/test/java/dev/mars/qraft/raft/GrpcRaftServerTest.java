@@ -135,10 +135,26 @@ class GrpcRaftServerTest {
         channel = ManagedChannelBuilder.forAddress("localhost", grpcServer.port())
                 .usePlaintext()
                 .build();
+        // Connect now, not with the first call. A test that ends without a completed call would otherwise stop
+        // the server while it is still accepting the connection: gRPC's Netty server has released its shared
+        // resources by then, and Netty logs the accepted channel as one it failed to initialise.
+        CompletableFuture<Void> connected = new CompletableFuture<>();
+        completeWhenReady(channel, connected);
+        connected.get(10, TimeUnit.SECONDS);
         // The deadline is fixed now, not per call, so it must outlast any test using this stub.
         blockingStub = RaftServiceGrpc.newBlockingStub(channel)
                 .withDeadlineAfter(30, TimeUnit.SECONDS);
         asyncStub = RaftServiceGrpc.newStub(channel);
+    }
+
+    /** Starts the channel's connection and completes {@code connected} once the channel is ready. */
+    private static void completeWhenReady(ManagedChannel channel, CompletableFuture<Void> connected) {
+        io.grpc.ConnectivityState state = channel.getState(true);
+        if (state == io.grpc.ConnectivityState.READY) {
+            connected.complete(null);
+        } else {
+            channel.notifyWhenStateChanged(state, () -> completeWhenReady(channel, connected));
+        }
     }
 
     // ========== SERVER LIFECYCLE TESTS ==========
@@ -241,6 +257,175 @@ class GrpcRaftServerTest {
             ch.awaitTermination(10, TimeUnit.SECONDS);
 
             server.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        }
+    }
+
+    /**
+     * The window is inside gRPC's Netty server, which Qraft's server is. Its acceptor thread hands an accepted
+     * connection to a worker thread. When the server stops and its listening socket is closed, it first
+     * releases its shared resources and then marks itself terminated. A connection that a worker thread
+     * prepares between those two steps finds the resources released: Netty logs a warning and closes it.
+     *
+     * <p>The test holds the server at exactly that point, so the order is the same on every run. It holds
+     * every worker thread while a peer connects, and it holds the monitor that the server needs to hand its
+     * threads back, which the server asks for after it has released its resources. It reaches gRPC's shared
+     * worker threads and that monitor by reflection, and recognises the held server by the method it waits
+     * in: a change in gRPC makes the test fail, not pass.</p>
+     */
+    @Test
+    @DisplayName("A connection prepared in the instant the server stops is closed, with one warning")
+    void aConnectionPreparedInTheInstantTheServerStopsIsClosedWithOneWarning() throws Exception {
+        dev.mars.qraft.testing.fault.IntentionalErrorsHelper.expect(
+                dev.mars.qraft.testing.fault.IntentionalErrorFixture.GRPC_CONNECTION_ACCEPTED_AS_SERVER_STOPS, 1);
+        grpcServer = new GrpcRaftServer(runtime, 0, raftNode);
+        grpcServer.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        java.lang.reflect.Field holder = io.grpc.internal.SharedResourceHolder.class.getDeclaredField("holder");
+        holder.setAccessible(true);
+        Object handBackMonitor = holder.get(null);
+
+        try (HeldWorkerThreads workers = new HeldWorkerThreads();
+             NettyWarnings warnings = new NettyWarnings();
+             java.net.Socket peer = new java.net.Socket()) {
+            // A peer connects. The server accepts it and hands it to a worker thread, where it waits.
+            peer.connect(new java.net.InetSocketAddress("localhost", grpcServer.port()), 10_000);
+            workers.awaitOneConnectionWaiting();
+
+            CompletableFuture<Void> stopped;
+            synchronized (handBackMonitor) {
+                // The server stops. It releases its resources, and waits here to hand its threads back.
+                stopped = grpcServer.stop().toCompletionStage().toCompletableFuture();
+                org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(10))
+                        .until(() -> Thread.getAllStackTraces().entrySet().stream().anyMatch(thread ->
+                                thread.getKey().getState() == Thread.State.BLOCKED
+                                        && java.util.Arrays.stream(thread.getValue()).anyMatch(frame ->
+                                        frame.getClassName().equals("io.grpc.internal.SharedResourceHolder")
+                                                && frame.getMethodName().equals("releaseInternal"))));
+                assertFalse(stopped.isDone(), "the server has not finished stopping");
+                assertEquals(List.of(), warnings.events(), "nothing is logged while the connection waits");
+
+                // In that instant the worker thread prepares the connection.
+                workers.release();
+                org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(10))
+                        .until(() -> !warnings.events().isEmpty());
+            }
+            stopped.get(10, TimeUnit.SECONDS);
+
+            var warning = warnings.events().getFirst();
+            assertEquals(ch.qos.logback.classic.Level.WARN, warning.getLevel());
+            assertTrue(warning.getFormattedMessage().startsWith("Failed to initialize a channel. Closing:"),
+                    warning.getFormattedMessage());
+            assertEquals("io.netty.util.IllegalReferenceCountException", warning.getThrowableProxy().getClassName());
+
+            // The connection is simply closed: the peer reads the end of the stream, and nothing else follows.
+            peer.setSoTimeout(10_000);
+            assertEquals(-1, peer.getInputStream().read(), "the peer's connection is closed");
+            assertEquals(1, warnings.events().size(), "the warning is logged once");
+        }
+
+        // The worker threads are unharmed: a server started afterwards answers.
+        startServerAndConnect();
+        assertTrue(blockingStub.requestVote(vote(1, "candidate1")).getVoteGranted());
+    }
+
+    @Test
+    @DisplayName("A connection prepared after the server has stopped is closed without a warning")
+    void aConnectionPreparedAfterTheServerHasStoppedIsClosedWithoutAWarning() throws Exception {
+        grpcServer = new GrpcRaftServer(runtime, 0, raftNode);
+        grpcServer.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+
+        try (HeldWorkerThreads workers = new HeldWorkerThreads();
+             NettyWarnings warnings = new NettyWarnings();
+             java.net.Socket peer = new java.net.Socket()) {
+            peer.connect(new java.net.InetSocketAddress("localhost", grpcServer.port()), 10_000);
+            workers.awaitOneConnectionWaiting();
+
+            // The server stops completely while the accepted connection still waits for its worker thread.
+            grpcServer.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            assertThrows(IllegalStateException.class, grpcServer::port, "the server has stopped");
+            workers.release();
+
+            // The server knows it has terminated, and closes the connection without touching its resources.
+            peer.setSoTimeout(10_000);
+            assertEquals(-1, peer.getInputStream().read(), "the peer's connection is closed");
+            assertEquals(List.of(), warnings.events(), "a server that has terminated logs nothing for it");
+        }
+    }
+
+    /**
+     * Test fixture that holds every worker thread of gRPC's servers that were built without threads of their
+     * own, as Qraft's server is, until {@link #release()}. A connection accepted meanwhile waits for its thread.
+     */
+    private static final class HeldWorkerThreads implements AutoCloseable {
+        private final io.grpc.internal.SharedResourceHolder.Resource<io.netty.channel.EventLoopGroup> resource;
+        private final io.netty.channel.EventLoopGroup group;
+        private final List<io.netty.util.concurrent.SingleThreadEventExecutor> threads = new ArrayList<>();
+        private final CountDownLatch release = new CountDownLatch(1);
+
+        @SuppressWarnings("unchecked")
+        HeldWorkerThreads() throws Exception {
+            java.lang.reflect.Field shared = Class.forName("io.grpc.netty.Utils")
+                    .getDeclaredField("DEFAULT_WORKER_EVENT_LOOP_GROUP");
+            shared.setAccessible(true);
+            resource = (io.grpc.internal.SharedResourceHolder.Resource<io.netty.channel.EventLoopGroup>)
+                    shared.get(null);
+            group = io.grpc.internal.SharedResourceHolder.get(resource);
+            group.forEach(thread -> threads.add((io.netty.util.concurrent.SingleThreadEventExecutor) thread));
+            CountDownLatch held = new CountDownLatch(threads.size());
+            for (var thread : threads) {
+                thread.execute(() -> {
+                    held.countDown();
+                    try {
+                        // Bounded, so that a failed test cannot leave the threads held.
+                        release.await(30, TimeUnit.SECONDS);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
+            }
+            assertTrue(held.await(10, TimeUnit.SECONDS), "every worker thread is held");
+            assertEquals(0, waiting(), "no worker thread has other work waiting");
+        }
+
+        /** Waits until the server has accepted one connection and handed it to a held worker thread. */
+        void awaitOneConnectionWaiting() {
+            org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(10)).until(() -> waiting() == 1);
+        }
+
+        private int waiting() {
+            return threads.stream().mapToInt(io.netty.util.concurrent.SingleThreadEventExecutor::pendingTasks).sum();
+        }
+
+        void release() {
+            release.countDown();
+        }
+
+        @Override
+        public void close() {
+            release.countDown();
+            io.grpc.internal.SharedResourceHolder.release(resource, group);
+        }
+    }
+
+    /** Test log fixture that records what Netty logs about a channel it failed to initialise while it is open. */
+    private static final class NettyWarnings implements AutoCloseable {
+        private final ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
+                org.slf4j.LoggerFactory.getLogger("io.netty.channel.ChannelInitializer");
+        private final ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+
+        NettyWarnings() {
+            appender.list = new java.util.concurrent.CopyOnWriteArrayList<>();
+            appender.start();
+            logger.addAppender(appender);
+        }
+
+        List<ch.qos.logback.classic.spi.ILoggingEvent> events() {
+            return appender.list;
+        }
+
+        @Override
+        public void close() {
+            logger.detachAppender(appender);
         }
     }
 
