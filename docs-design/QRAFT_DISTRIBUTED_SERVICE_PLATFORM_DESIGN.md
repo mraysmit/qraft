@@ -1561,7 +1561,7 @@ separate persisted, committed, and applied indexes.
 ### 14.7 Version alignment
 
 Qraft must pin a RaftLog version whose published interface and behavior match
-Qraft's use of it. The root POM pins `raftlog.version` (currently 1.4.1), and
+Qraft's use of it. The root POM pins `raftlog.version` (currently 1.5.0), and
 `RaftLogStorageIntegrationTest` exercises the real library.
 
 Every upgrade requires contract tests against the real `FileRaftStorage` for:

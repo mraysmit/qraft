@@ -370,6 +370,9 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
         @Override public java.util.concurrent.CompletableFuture<Void> truncatePrefix(long toIndex) {
             return delegate.truncatePrefix(toIndex);
         }
+        @Override public java.util.concurrent.CompletableFuture<Long> compactionBoundary() {
+            return delegate.compactionBoundary();
+        }
         @Override public java.util.concurrent.CompletableFuture<Void> sync() {
             return java.util.concurrent.CompletableFuture.failedFuture(
                     new java.io.IOException("Simulated recovery sync failure",

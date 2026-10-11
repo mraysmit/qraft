@@ -7,7 +7,7 @@ and the full suites passed on 2026-10-02; its mutation evidence is outstanding
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
 **Last updated:** 2026-10-10 (Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
-**Interrupted by:** [`task-list-single-pom-and-quorus-removal-2026-10-10.md`](task-list-single-pom-and-quorus-removal-2026-10-10.md),
+**Interrupted by:** [`task-list-single-pom-and-quorus-removal-2026-10-11.md`](task-list-single-pom-and-quorus-removal-2026-10-11.md),
 started 2026-10-04 before the Step 4 close-out gate. The gate's mutation evidence
 is recorded there, as the first task of its Phase 7. Step 5 resumes when that
 list is archived, and this list then runs to its end before the Consul-style
@@ -796,7 +796,7 @@ unchanged final source/dependency state covered by the existing full-suite
 evidence. Passing ordinary suites alone does not close the outstanding gate.
 
 **Scheduled (2026-10-05).** This gate is the first task of Phase 7 in
-[`task-list-single-pom-and-quorus-removal-2026-10-10.md`](task-list-single-pom-and-quorus-removal-2026-10-10.md).
+[`task-list-single-pom-and-quorus-removal-2026-10-11.md`](task-list-single-pom-and-quorus-removal-2026-10-11.md).
 By then the source has its final packages and its tests declare their
 intentional errors, and Phase 7 has not yet changed `RaftNode`'s async code.
 

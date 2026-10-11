@@ -41,9 +41,7 @@ in the published CI branch:
 
 The suites run sequentially, and concurrent Qraft builds are disabled. An end-to-end failure still
 allows the Docker suite to run, while a failed default build stops the dependent suites. Maven's exit
-code is preserved through `tee`, and the build has a one-hour timeout. The Docker suite holds a Jenkins
-lock that it shares with the PeeGeeQ job's browser tests, so a build can wait at that stage; see
-[JENKINS.md](JENKINS.md#suites-and-results).
+code is preserved through `tee`, and the build has a one-hour timeout.
 
 Jenkins publishes the JUnit results and archives `logs/`, separate `reports/default`, `reports/e2e`,
 and `reports/docker` directories, and the default suite's JaCoCo HTML/XML reports under `coverage/`.

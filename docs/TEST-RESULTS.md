@@ -190,10 +190,10 @@ nothing about a snapshot.
 
 How the two open points were settled:
 
-- **Where B comes from.** From `compactionBoundary()` of `FileRaftStorage`, through a test of the class in
-  one method, `RaftPersistence.compactionBoundary`. Another storage implementation reports 0 and is not
-  checked. The cleaner route, the method on the `RaftStorage` interface, needs a release of `raftlog-core`,
-  and is a task of its own in the task list.
+- **Where B comes from.** From `compactionBoundary()` of the `RaftStorage` interface, which `raftlog-core`
+  has had since 1.5.0. `FileRaftStorage` reports the boundary it recorded. The interface's default answers
+  0, for a storage that never compacts. Until 2026-10-11 Qraft read it through a test of the class
+  `FileRaftStorage`, because the interface of 1.4.1 did not have the method.
 - **`RaftNode`.** The check is one comparison in `recoverFromStorage`. It went in ahead of the membership
   list's Step 4 gate, at the owner's word to proceed.
 

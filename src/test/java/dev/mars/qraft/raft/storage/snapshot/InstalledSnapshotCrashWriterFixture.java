@@ -205,6 +205,7 @@ public final class InstalledSnapshotCrashWriterFixture {
                 return neverRelease;
             });
         }
+        @Override public CompletableFuture<Long> compactionBoundary() { return delegate.compactionBoundary(); }
         @Override public CompletableFuture<Void> sync() { return delegate.sync(); }
         @Override public CompletableFuture<List<LogEntryData>> replayLog() { return delegate.replayLog(); }
         @Override public void close() { delegate.close(); }

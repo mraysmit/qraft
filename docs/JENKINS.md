@@ -17,8 +17,7 @@ The job loads its pipeline from the repository's default branch using the follow
 The pipeline checks out the same SCM revision that supplied its Jenkinsfile. It needs an online Linux
 x64 node labelled `linux`, Bash, Git, curl, Maven 3.9 or newer, and access to a running Docker engine
 with Docker Compose. The Jenkins controller's built-in node carries both its existing `peegeeq-linux`
-label and the `linux` label used by Qraft. The pipeline needs the Lockable Resources plugin for the
-`lock` step of its Docker stage. The plugin was installed on this server on 2026-10-10.
+label and the `linux` label used by Qraft. No Jenkins plugin installation is needed.
 
 The first build downloads SapMachine JDK 27 from its official GitHub release and verifies its pinned
 SHA-256 checksum. The JDK is cached in `<workspace>@tools/sapmachine-jdk-27`; Maven dependencies are
@@ -38,13 +37,13 @@ console and a timestamped file under `logs/`, and preserves Maven's exit status 
 Builds and suites run sequentially. A failed default build stops the dependent suites; an end-to-end
 failure still allows Docker tests to run. The build timeout is one hour.
 
-The Docker stage holds the Jenkins lock `host-network-interfaces` while it runs. Its tests create and
-remove Docker networks, which changes the network interfaces of the host. A browser cancels a page load
-when that happens, and the PeeGeeQ job runs browser tests on the same node. On 2026-10-10, builds 6 and
-11 ran beside PeeGeeQ builds 18 and 19, and 7 PeeGeeQ browser test attempts failed on a blank page
-within seconds of this stage's network changes. The PeeGeeQ UI stage holds the same lock, so each stage
-waits for the other. A Qraft build can wait at its Docker stage for the length of that UI stage, about
-38 minutes in a full PeeGeeQ run, and the wait counts against the one-hour timeout.
+The Docker stage's tests create and remove Docker networks, which changes the network interfaces of
+the host. A browser on the host cancels a page load when that happens. On 2026-10-10, builds 6 and 11
+ran beside PeeGeeQ builds 18 and 19, and 7 PeeGeeQ browser test attempts failed on a blank page within
+seconds of this stage's network changes. For some hours that day this stage held a Jenkins lock shared
+with the PeeGeeQ browser tests (builds 12 to 17). The lock is removed: the PeeGeeQ job now runs its
+browser tests in a container, which has its own network interfaces, and build 17 ran beside PeeGeeQ
+build 28 with no lost page load. A job that runs a browser directly on this node is still affected.
 
 JUnit results appear under **Test Result**. Build artifacts contain the logs, complete Surefire reports
 under `reports/default`, `reports/e2e`, and `reports/docker`, and the default build's JaCoCo reports under
@@ -79,7 +78,7 @@ recovery case remained red:
 timed out after 90 seconds while waiting for the restarted follower to install and expose the leader's
 snapshot state. This is a test/product integration result rather than a Jenkins configuration failure.
 Finding its cause is a task in Phase 6 of
-[the single-POM task list](../docs-design/task-list-single-pom-and-quorus-removal-2026-10-10.md).
+[the single-POM task list](../docs-design/task-list-single-pom-and-quorus-removal-2026-10-11.md).
 It was analysed on 2026-10-10. This build archived no container logs, so its cause cannot be proven
 from it. Build 8 failed the same way with the logs kept: the test had killed the follower while it wrote
 its first snapshot, and a server then refused to start on an unpublished first snapshot, by design. An earlier

@@ -70,7 +70,7 @@ complete license inventory of the shaded runtime.
 
 | Maven coordinates | Version | Declared license metadata |
 |---|---|---|
-| `io.github.mraysmit:raftlog-core` | 1.4.1 | Apache License 2.0 |
+| `io.github.mraysmit:raftlog-core` | 1.5.0 | Apache License 2.0 |
 | `com.fasterxml.jackson.core:jackson-databind` | 2.19.4 | Apache License 2.0 |
 | `com.fasterxml.jackson.datatype:jackson-datatype-jsr310` | 2.19.4 | Apache License 2.0 |
 | `io.grpc:grpc-protobuf`, `io.grpc:grpc-stub`, `io.grpc:grpc-netty` | 1.68.1 | Apache License 2.0 |

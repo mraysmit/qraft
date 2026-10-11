@@ -18,7 +18,6 @@ package dev.mars.qraft.raft;
 
 import dev.mars.qraft.raft.api.SnapshotStore;
 import dev.mars.qraft.raft.api.SnapshotStore.SnapshotData;
-import dev.mars.raftlog.storage.FileRaftStorage;
 import dev.mars.raftlog.storage.RaftStorage;
 import dev.mars.raftlog.storage.RaftStorage.LogEntryData;
 
@@ -60,13 +59,11 @@ final class RaftPersistence {
 
     /**
      * The index the WAL has been compacted through, or 0 if it never was, once the WAL has been replayed.
-     * RaftLog's file storage records it, but its storage interface does not expose it yet, hence the test of
-     * the class. Any other implementation reports 0, and recovery then has nothing to compare.
+     * A storage that compacts must report it: the interface's default answers 0, and recovery then has
+     * nothing to compare.
      */
     CompletableFuture<Long> compactionBoundary() {
-        return wal.orElseThrow() instanceof FileRaftStorage fileStorage
-                ? fileStorage.compactionBoundary()
-                : CompletableFuture.completedFuture(0L);
+        return wal.orElseThrow().compactionBoundary();
     }
 
     CompletableFuture<Optional<SnapshotData>> loadLatestSnapshot() {
