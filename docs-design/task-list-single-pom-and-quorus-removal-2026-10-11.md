@@ -2463,8 +2463,34 @@ question was not open.
   - **What it runs:** no list of tests. PIT chooses each mutant's tests
     from coverage, without the `docker`, `slow`, and `e2e` groups.
   - **Also set:** the default mutators; `toString`, `equals`, and
-    `hashCode` excluded; four threads; history, so that a repeated run
-    redoes only what changed; a timeout factor of 1.5 and constant of 4000.
+    `hashCode` excluded; four threads; a timeout factor of 1.5 and constant
+    of 4000.
+  - **Jenkins build 21, on `e3cf808`, the ordinary build with the PIT
+    profile in the POM, passed:** 927 default tests, 10 end-to-end, 32
+    Docker and slow, 969 results, none failed. It registered the
+    parameter.
+  - **The first dry run, Jenkins build 22, failed in 22 seconds on the
+    configuration,** before PIT collected any coverage: "History has been
+    enabled but no history plugin has been installed/activated."
+    `withHistory`, which the guidance's example sets, needs a separate
+    history plugin in PIT 1.30.0 that the open-source release does not
+    include. It is removed from the profile, so every run is a whole run.
+    PIT did start under JDK 27 and read its configuration before that.
+  - **A dry run without it, locally, as a small check in the one visible
+    console, passed** (`logs/qraft-pit-2026-10-11_20-11-02-782.log`). It
+    was run locally to find any further configuration error before
+    another push; the dry run that counts is the one on Jenkins.
+    - PIT 1.30.0 reads the Java 27 classes and works with the suite's
+      check of unflagged errors: the coverage pass ran the default suite in
+      58 seconds, and its logs hold no ERROR event without a flag.
+    - It found the three classes and no fourth: `RaftNode` with 1,017
+      mutants, its eight nested classes with 80 between them,
+      `ClusterBootstrap` with 51, and `MembershipService` with 39.
+      `RaftNodeMode` is not among them.
+    - 1,187 mutants in all. The tests cover 1,957 of the 2,131 lines of
+      the mutated classes, 92%.
+    - It runs no test against a mutant, so it says nothing yet about
+      killed or surviving mutants, or about how long the full run takes.
   - **No thresholds yet.** The first runs establish the baseline.
   - **On Jenkins:** the `Jenkinsfile` has a parameter, `MUTATION_TESTING`,
     with the values `off`, `dry-run`, and `run`. With the last two the job

@@ -295,8 +295,10 @@ test, and so is killed. That is meant: in Qraft, "no error without a flag" is pa
 observes.
 
 The rest of the configuration: `toString`, `equals`, and `hashCode` are not mutated; the mutators are
-PIT's defaults; four threads work at once; `withHistory` lets a repeated run redo only what changed;
-and a test on a mutant may take 1.5 times its normal time plus 4 seconds before PIT ends it.
+PIT's defaults; four threads work at once; and a test on a mutant may take 1.5 times its normal time
+plus 4 seconds before PIT ends it. `withHistory`, which would let a repeated run redo only what changed,
+is not set: PIT 1.30.0 refuses it without a separate history plugin, which the open-source release does
+not include. Every run is therefore a whole run.
 
 ### Running it
 

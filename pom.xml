@@ -476,7 +476,9 @@
                             </jvmArgs>
 
                             <threads>4</threads>
-                            <withHistory>true</withHistory>
+                            <!-- No withHistory: PIT 1.30.0 refuses it without a separate history plugin,
+                                 which the open-source release does not include. -->
+
 
                             <outputFormats>
                                 <param>HTML</param>
