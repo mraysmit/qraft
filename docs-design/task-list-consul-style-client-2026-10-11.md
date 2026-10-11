@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-04
 **Status:** Proposed. It needs the `client` package and the new node model and routes of [`task-list-single-pom-and-quorus-removal-2026-10-11.md`](task-list-single-pom-and-quorus-removal-2026-10-11.md). It starts after that list and after the rest of [`task-list-raft-membership-changes-2026-10-11.md`](task-list-raft-membership-changes-2026-10-11.md), Steps 5 to 8 (decided 2026-10-05).
-**Last updated:** 2026-10-11 (renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: decisions 5 and 8: what a node's deregistration removes, and the `client.hostname` setting; the file renamed to the date of its last change; the single-POM list's Phase 3A replaced Qraft's two retired words here and everywhere; decision 10 records the configuration names, and decision 3 the path of the local API. On 2026-10-08, the review with the other task lists: the request bodies of decision 5 and the log audit in the rules)
+**Last updated:** 2026-10-11 (the rule that guards need mutation evidence removed at the owner's decision, from the rules and from one exit; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: decisions 5 and 8: what a node's deregistration removes, and the `client.hostname` setting; the file renamed to the date of its last change; the single-POM list's Phase 3A replaced Qraft's two retired words here and everywhere; decision 10 records the configuration names, and decision 3 the path of the local API. On 2026-10-08, the review with the other task lists: the request bodies of decision 5 and the log audit in the rules)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 4.3, 5, 6.2, 7.3, 8, 12.1 and 16
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
@@ -128,8 +128,8 @@ decision 10 on 2026-10-09. Decisions 5 to 8 follow the Consul pattern.
 
 ## 3. Rules
 
-- Red before green; mutation evidence for the safety guards; no Mockito;
-  deterministic tests with injected clocks.
+- Red before green; no Mockito; deterministic tests with injected clocks.
+  (The rule that safety guards need recorded mutations was removed by the owner on 2026-10-11, from every task list.)
 - Client HTTP behaviour is tested against real JDK HTTP servers on both sides.
 - Each phase ends with `mvn install`. Phases that change the runtime also run
   the end-to-end suite and the Docker suite on a fresh image.
@@ -187,9 +187,9 @@ and Docker suites.
   identity as open and requires a decision record and fixture-based upgrade
   tests for a change to durable identity.
 
-**Exit:** Red before green, with mutations of the conflict, takeover, and
-rename guards, including a takeover that leaves the old node's services in
-place and a rename that leaves them under the old name. A wiped-directory
+**Exit:** Red before green, with tests of the conflict, takeover, and
+rename guards, including a takeover that must not leave the old node's
+services in place and a rename that must not leave them under the old name. A wiped-directory
 restart scenario passes end to end.
 
 ### Phase 3. Local API listener

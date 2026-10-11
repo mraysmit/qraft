@@ -5,15 +5,15 @@ pipeline {
         disableConcurrentBuilds()
         skipDefaultCheckout(true)
         timestamps()
-        // The three suites keep one hour between them, through the limits on their stages. The limit here
-        // is for a PIT run, which takes longer.
-        timeout(time: 240, unit: 'MINUTES')
+        timeout(time: 60, unit: 'MINUTES')
         buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '10'))
     }
 
     parameters {
         choice(name: 'MUTATION_TESTING', choices: ['off', 'dry-run', 'run'],
-               description: 'off runs the three suites. dry-run and run start PIT mutation testing instead of them: dry-run collects coverage and generates the mutants without running tests against them; run does the whole analysis.')
+               description: 'off runs the three suites. dry-run and run start PIT mutation testing of one batch instead of them: dry-run collects coverage and generates the mutants of the batch without running tests against them; run analyses the batch.')
+        choice(name: 'MUTATION_BATCH', choices: ['01', '02', '03', '04', '05'],
+               description: 'The batch of at most ten mutants that PIT works on: the POM profile pit-batch-<number> (docs/TESTING.md).')
     }
 
     environment {
@@ -53,23 +53,33 @@ docker compose version
             }
         }
 
+        // PIT is on ice since 2026-10-11, at the owner's decision (docs/TESTING.md): leave MUTATION_TESTING
+        // at off. The stage stays so that nothing has to be rebuilt if it is taken up again.
         stage('PIT mutation testing') {
             // Instead of the suites, not beside them. PIT changes the compiled classes in memory, in its
             // own JVMs: no source file and no class file in this workspace is changed. The POM's profile
-            // mutation-testing configures it.
+            // mutation-testing configures it, and the profile of the chosen batch selects at most ten
+            // mutants.
             when { expression { (params.MUTATION_TESTING ?: 'off') != 'off' } }
-            options { timeout(time: 230, unit: 'MINUTES') }
+            // A batch is at most ten mutants. One that makes a test hang costs most of a minute, and the others far less,
+            // so a batch that runs longer than this has gone wrong and is stopped.
+            options { timeout(time: 20, unit: 'MINUTES') }
             steps {
                 sh '''#!/usr/bin/env bash
 set -uo pipefail
+batch="${MUTATION_BATCH:-01}"
+if [[ ! "$batch" =~ ^[0-9][0-9]$ ]]; then
+    echo "MUTATION_BATCH must be a two-digit batch number: $batch" >&2
+    exit 2
+fi
 dry_run=()
 if [[ "${MUTATION_TESTING:-off}" == dry-run ]]; then
     dry_run=(-Dpit.dryRun=true)
 fi
 mkdir -p logs
-mvn -B -Dstyle.color=never -Dmaven.repo.local="$WORKSPACE@repository" -Pmutation-testing "${dry_run[@]}" \
+mvn -B -Dstyle.color=never -Dmaven.repo.local="$WORKSPACE@repository" "-Pmutation-testing,pit-batch-$batch" "${dry_run[@]}" \
     clean test-compile org.pitest:pitest-maven:mutationCoverage 2>&1 \
-    | tee "logs/qraft-pit-$(date -u +%Y-%m-%d_%H-%M-%S)-$BUILD_NUMBER.log"
+    | tee "logs/qraft-pit-batch-$batch-$(date -u +%Y-%m-%d_%H-%M-%S)-$BUILD_NUMBER.log"
 exit "${PIPESTATUS[0]}"
 '''
             }
@@ -88,7 +98,6 @@ fi
 
         stage('Default tests and coverage gates') {
             when { expression { (params.MUTATION_TESTING ?: 'off') == 'off' } }
-            options { timeout(time: 25, unit: 'MINUTES') }
             steps {
                 sh '''#!/usr/bin/env bash
 set -uo pipefail
@@ -117,7 +126,6 @@ fi
 
         stage('End-to-end tests') {
             when { expression { (params.MUTATION_TESTING ?: 'off') == 'off' } }
-            options { timeout(time: 10, unit: 'MINUTES') }
             steps {
                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                     sh '''#!/usr/bin/env bash
@@ -145,7 +153,6 @@ fi
 
         stage('Docker cluster tests') {
             when { expression { (params.MUTATION_TESTING ?: 'off') == 'off' } }
-            options { timeout(time: 25, unit: 'MINUTES') }
             steps {
                 catchError(buildResult: 'FAILURE', stageResult: 'FAILURE') {
                     sh '''#!/usr/bin/env bash

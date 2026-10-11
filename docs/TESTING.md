@@ -209,6 +209,11 @@ A passing suite shows that the code works. It does not show that the tests would
 check were lost: the suite passes just as well when no test reaches the check. Mutation testing asks
 that question. [PIT](https://pitest.org) is the tool.
 
+**On ice since 2026-10-11, at the owner's decision.** PIT is configured and has passed its dry runs,
+but no mutant has been run against a test, and none is to be until the owner asks. The owner sees no
+value in it for now: Qraft's test coverage is high, and its tests are written test-first. Do not run
+it, extend it, or propose it. What follows describes the configuration as it was left.
+
 In Qraft, PIT is a targeted audit of the Raft-membership implementation. It is not a mutation test of
 the whole application.
 
@@ -216,13 +221,13 @@ At a glance:
 
 | | |
 |---|---|
-| Maven profile | `mutation-testing`, in `pom.xml` |
-| Command | `mvn -Pmutation-testing test-compile org.pitest:pitest-maven:mutationCoverage` |
+| Maven profiles | `mutation-testing`, with one batch profile, `pit-batch-01` to `pit-batch-05`, in `pom.xml` |
+| Command | `mvn "-Pmutation-testing,pit-batch-01" test-compile org.pitest:pitest-maven:mutationCoverage` |
 | Dry run | the same command with `"-Dpit.dryRun=true"` |
-| On Jenkins | the `Qraft` job with the parameter `MUTATION_TESTING` set to `dry-run` or `run` |
-| Classes mutated | `RaftNode`, `MembershipService`, and `ClusterBootstrap`, in `dev.mars.qraft.raft` |
+| On Jenkins | the `Qraft` job with `MUTATION_TESTING` set to `dry-run` or `run`, and `MUTATION_BATCH` set to the batch |
+| Class mutated | `MembershipService`, in `dev.mars.qraft.raft`: 39 mutants, in five batches of at most ten |
 | Report | `target/pit-reports/index.html`; on Jenkins, `reports/pit/` in the build's artifacts |
-| Part of a normal build | No. Nothing runs it unless the profile and the goal are named |
+| Part of a normal build | No. Nothing runs it unless the profiles and the goal are named |
 
 ### What PIT does
 
@@ -278,57 +283,80 @@ Mutation testing is too expensive for a normal build, so PIT has a Maven profile
 `mutation-testing`, in `pom.xml`, and is bound to no phase. The profile's `<configuration>` holds
 everything.
 
-It mutates three classes of `dev.mars.qraft.raft`, each with its nested classes, such as
-`RaftNode.Builder`: `RaftNode`, `MembershipService`, and `ClusterBootstrap`. That scope is the mutation
-evidence the membership list's Step 4 gate asks for before its Step 5. It does not mutate Raft storage
-and snapshots, the gRPC transport, replicated state, the server's HTTP API, the client, or the runtime.
+**PIT runs one batch of at most ten mutants at a time.** A run of unknown length is not started: the
+smallest batch is run and measured first, and the next step is estimated from that measurement, not
+guessed.
+
+It mutates one class, `MembershipService`, which has 39 mutants. PIT can leave methods out, but it
+cannot name the methods to keep, and it cannot be told to take ten mutants and then the next ten. So a
+batch is the class without the methods of the other batches, and where one method has more than ten
+mutants, with one kind of mutation. Each batch is a profile that names the methods it leaves out and
+its mutators:
+
+| Batch | Profile | What it mutates | Mutants |
+|---|---|---|---:|
+| 01 | `pit-batch-01` | `join`, its two lambdas, the constructor, and `response` | 9 |
+| 02 | `pit-batch-02` | `forward`, its lambda, and `outcome` | 7 |
+| 03 | `pit-batch-03` | the lambdas of `outcome` and of `remove` | 10 |
+| 04 | `pit-batch-04` | `remove`: its conditions reversed | 7 |
+| 05 | `pit-batch-05` | `remove`: its return values replaced | 6 |
+
+The sizes are from a dry run of each batch on 2026-10-11. A batch's fixed cost is the coverage pass,
+about one minute, which runs the whole default suite once. A mutant that a test fails on at once costs
+far less than a second. One that makes a test hang costs most of a minute, until PIT's timeout ends it.
+
+**`RaftNode` is not mutated.** On 2026-10-11 it was run whole with two other classes, 1,187 mutants,
+and aborted after two hours with no report. A mutant that removes a step from Raft code often makes a
+test wait for something that never comes, not fail, and PIT ended 160 such mutants in those two hours.
+At that rate the run takes days. It is not to be proposed again as a whole.
+
+PIT also does not mutate `ClusterBootstrap`, Raft storage and snapshots, the gRPC transport, replicated
+state, the server's HTTP API, the client, or the runtime.
 
 There is no `targetTests`: PIT makes a coverage pass and finds which tests reach each mutant.
-`excludedGroups` keeps out the `docker`, `slow`, and `e2e` tests. PIT may run one test hundreds of
-times, so tests that start containers or wait out real time would make a run too long. What is left is
-the default suite: the Raft tests on manual timers, the in-process cluster tests, the tests on real
-storage, the gRPC tests on local ports, and the focused membership, election, replication, and recovery
-tests.
+`excludedGroups` keeps out the `docker`, `slow`, and `e2e` tests. PIT may run one test many times, so
+tests that start containers or wait out real time would make a run too long. What is left is the
+default suite.
 
 The check of intentional errors stays on. A mutant that makes a test log an undeclared error fails that
 test, and so is killed. That is meant: in Qraft, "no error without a flag" is part of what a test
 observes.
 
-The rest of the configuration: `toString`, `equals`, and `hashCode` are not mutated; the mutators are
-PIT's defaults; four threads work at once; and a test on a mutant may take 1.5 times its normal time
-plus 4 seconds before PIT ends it. `withHistory`, which would let a repeated run redo only what changed,
-is not set: PIT 1.30.0 refuses it without a separate history plugin, which the open-source release does
-not include. Every run is therefore a whole run.
+The rest of the configuration: `toString`, `equals`, and `hashCode` are never mutated; four threads
+work at once; and a test on a mutant may take 1.5 times its normal time plus 4 seconds before PIT ends
+it. `withHistory` is not set: PIT 1.30.0 refuses it without a separate history plugin, which the
+open-source release does not include.
 
 ### Running it
 
-A PIT run goes to Jenkins: start the `Qraft` job with the parameter `MUTATION_TESTING` set to `dry-run`
-or `run`. The job then runs PIT instead of the three suites and archives the report under
-`reports/pit/`. The stage has a limit of 230 minutes: `RaftNode` alone has about 3,900 lines, and many
-test classes exercise it.
+A PIT run goes to Jenkins: start the `Qraft` job with `MUTATION_TESTING` set to `dry-run` or `run` and
+`MUTATION_BATCH` set to the batch, `01` to `05`. The job then runs PIT on that batch instead of the
+three suites and archives the report under `reports/pit/`. The stage has a limit of 20 minutes: a batch
+that runs longer has gone wrong and is stopped.
 
 The commands it runs are these. Run by hand, they follow the rule above: in a terminal you can watch,
 through `Tee-Object`, with `$LASTEXITCODE` checked at once.
 
-A dry run compiles the code, discovers the tests, collects coverage, and generates the mutants. It does
-not run tests against them. It shows that the configuration works:
+A dry run compiles the code, discovers the tests, collects coverage, and generates the batch's mutants.
+It does not run tests against them. It shows that the configuration works and how many mutants the
+batch holds:
 
 ```powershell
-mvn -B "-Dstyle.color=never" -Pmutation-testing "-Dpit.dryRun=true" test-compile org.pitest:pitest-maven:mutationCoverage 2>&1 | Tee-Object -FilePath ".\logs\qraft-pit-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
+mvn -B "-Dstyle.color=never" "-Pmutation-testing,pit-batch-01" "-Dpit.dryRun=true" test-compile org.pitest:pitest-maven:mutationCoverage 2>&1 | Tee-Object -FilePath ".\logs\qraft-pit-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
 $qraftBuildExitCode = $LASTEXITCODE
 ```
 
-The full analysis:
+The analysis of the batch:
 
 ```powershell
-mvn -B "-Dstyle.color=never" -Pmutation-testing test-compile org.pitest:pitest-maven:mutationCoverage 2>&1 | Tee-Object -FilePath ".\logs\qraft-pit-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
+mvn -B "-Dstyle.color=never" "-Pmutation-testing,pit-batch-01" test-compile org.pitest:pitest-maven:mutationCoverage 2>&1 | Tee-Object -FilePath ".\logs\qraft-pit-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
 $qraftBuildExitCode = $LASTEXITCODE
 ```
 
 ### The report, and what fails a run
 
 PIT writes `target/pit-reports/index.html` and `target/pit-reports/mutations.xml`. The HTML report
-opens on `RaftNode`, `MembershipService`, or `ClusterBootstrap` and shows, for each mutated line, the
+opens on `MembershipService` and shows, for each mutated line of the batch, the
 mutation PIT applied, whether it was killed and by which test, and whether it survived or had no
 coverage. The XML file is for a program, and is what Jenkins archives beside it.
 
@@ -336,15 +364,13 @@ No threshold is set, so a surviving mutant does not fail a run, and neither does
 still fails on an error in PIT's configuration, on a test that fails or crashes in the coverage pass,
 and on an error while PIT runs.
 
-The order of work for a first analysis:
+The order of work:
 
-1. Run the dry run on Jenkins.
-2. Confirm that the three classes and the tests expected for them are found.
-3. Run the full analysis.
-4. Review each surviving and each uncovered safety check.
-5. Record which survivors are real gaps, which are equivalent mutants, and which change nothing that
-   matters.
-6. Decide from that evidence whether a threshold would be useful.
+1. Run batch 01 on Jenkins and measure it.
+2. Review its surviving and uncovered mutants, and record for each whether it is a real gap, an
+   equivalent mutant, or a change that does not matter.
+3. Only then run the next batch, with its time estimated from the batches before.
+
 ## Making runs faster
 
 - Name only the classes you need (`-Dtest`) while you work, and keep `mvn install` for

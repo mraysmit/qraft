@@ -420,11 +420,19 @@
     </build>
 
     <profiles>
-        <!-- PIT mutation testing (docs/TESTING.md). It is too expensive for a normal build, so it has a
-             profile of its own and is bound to no phase. Run it with
-             mvn -Pmutation-testing test-compile org.pitest:pitest-maven:mutationCoverage -->
+        <!-- PIT mutation testing (docs/TESTING.md). ON ICE since 2026-10-11, at the owner's decision: do not
+             run it, extend it, or propose it. It is too expensive for a normal build, so it has a
+             profile of its own and is bound to no phase. It runs one batch of at most ten mutants at a
+             time: name the batch's profile beside this one.
+             mvn -Pmutation-testing,pit-batch-01 test-compile org.pitest:pitest-maven:mutationCoverage -->
         <profile>
             <id>mutation-testing</id>
+
+            <properties>
+                <!-- Without a batch profile, batch 01. -->
+                <pit.excludedMethods>toString,equals,hashCode,remove,lambda$remove$*,forward,lambda$forward$*,outcome,lambda$outcome$*</pit.excludedMethods>
+                <pit.mutators>DEFAULTS</pit.mutators>
+            </properties>
 
             <build>
                 <plugins>
@@ -442,22 +450,16 @@
                         </dependencies>
 
                         <configuration>
-                            <!-- Raft membership: the three classes the membership list's Step 4 gate asks
-                                 about. A trailing * takes a class's nested classes with it. RaftNode is
-                                 named with its nested classes separately, because RaftNode* would also
-                                 take RaftNodeMode, a fourth class. -->
+                            <!-- One class: MembershipService, 39 mutants, in the five batches below. A
+                                 trailing * takes a class's nested classes with it. -->
                             <targetClasses>
-                                <param>dev.mars.qraft.raft.RaftNode</param>
-                                <param>dev.mars.qraft.raft.RaftNode$*</param>
                                 <param>dev.mars.qraft.raft.MembershipService*</param>
-                                <param>dev.mars.qraft.raft.ClusterBootstrap*</param>
                             </targetClasses>
 
-                            <excludedMethods>
-                                <param>toString</param>
-                                <param>equals</param>
-                                <param>hashCode</param>
-                            </excludedMethods>
+                            <!-- PIT can leave methods out but cannot name the ones to keep, so a batch is
+                                 the class without the methods of the other batches. -->
+                            <excludedMethods>${pit.excludedMethods}</excludedMethods>
+                            <mutators>${pit.mutators}</mutators>
 
                             <!-- No targetTests: PIT chooses each mutant's tests from coverage. The suites
                                  the default build excludes need Docker or wait out real time, so they are
@@ -479,13 +481,12 @@
                             <!-- No withHistory: PIT 1.30.0 refuses it without a separate history plugin,
                                  which the open-source release does not include. -->
 
-
                             <outputFormats>
                                 <param>HTML</param>
                                 <param>XML</param>
                             </outputFormats>
 
-                            <!-- No thresholds yet: the first runs establish the baseline. -->
+                            <!-- No thresholds: a surviving mutant is reviewed, not counted. -->
 
                             <timeoutFactor>1.5</timeoutFactor>
                             <timeoutConstant>4000</timeoutConstant>
@@ -493,6 +494,49 @@
                     </plugin>
                 </plugins>
             </build>
+        </profile>
+
+        <!-- The batches of MembershipService's 39 mutants, each of at most ten (docs/TESTING.md has the
+             table). A batch names the methods it leaves out, and its mutators. -->
+        <profile>
+            <!-- join, its two lambdas, the constructor, and response: 9 mutants -->
+            <id>pit-batch-01</id>
+            <properties>
+                <pit.excludedMethods>toString,equals,hashCode,remove,lambda$remove$*,forward,lambda$forward$*,outcome,lambda$outcome$*</pit.excludedMethods>
+                <pit.mutators>DEFAULTS</pit.mutators>
+            </properties>
+        </profile>
+        <profile>
+            <!-- forward, its lambda, and outcome: 7 mutants -->
+            <id>pit-batch-02</id>
+            <properties>
+                <pit.excludedMethods>toString,equals,hashCode,&lt;init&gt;,join,lambda$join$*,response,remove,lambda$remove$*,lambda$outcome$*</pit.excludedMethods>
+                <pit.mutators>DEFAULTS</pit.mutators>
+            </properties>
+        </profile>
+        <profile>
+            <!-- the lambdas of outcome and of remove: 10 mutants -->
+            <id>pit-batch-03</id>
+            <properties>
+                <pit.excludedMethods>toString,equals,hashCode,&lt;init&gt;,join,lambda$join$*,response,remove,forward,lambda$forward$*,outcome</pit.excludedMethods>
+                <pit.mutators>DEFAULTS</pit.mutators>
+            </properties>
+        </profile>
+        <profile>
+            <!-- remove, its conditions: 7 mutants -->
+            <id>pit-batch-04</id>
+            <properties>
+                <pit.excludedMethods>toString,equals,hashCode,&lt;init&gt;,join,lambda$join$*,response,lambda$remove$*,forward,lambda$forward$*,outcome,lambda$outcome$*</pit.excludedMethods>
+                <pit.mutators>NEGATE_CONDITIONALS</pit.mutators>
+            </properties>
+        </profile>
+        <profile>
+            <!-- remove, its return values: 6 mutants -->
+            <id>pit-batch-05</id>
+            <properties>
+                <pit.excludedMethods>toString,equals,hashCode,&lt;init&gt;,join,lambda$join$*,response,lambda$remove$*,forward,lambda$forward$*,outcome,lambda$outcome$*</pit.excludedMethods>
+                <pit.mutators>NULL_RETURNS</pit.mutators>
+            </properties>
         </profile>
     </profiles>
 

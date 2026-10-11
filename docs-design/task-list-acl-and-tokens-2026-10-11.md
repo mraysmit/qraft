@@ -3,7 +3,7 @@
 **Date:** 2026-10-05
 **Status:** Proposed. Section 4's items are recommendations to confirm or change, except the points marked "Decided 2026-10-09", in proposals 11, 12, and 14. No point is open. No code exists.
 **Proposed start:** after [`task-list-consul-style-client-2026-10-11.md`](task-list-consul-style-client-2026-10-11.md) (proposal 15).
-**Last updated:** 2026-10-11 (renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: proposal 11 brought in line with the node routes and with what a node's deregistration removes; the file renamed to the date of its last change; four points decided: the authorize call; revoking the management token; Consul's rule for registering a service, which needs `service:write` alone on a registered node; and a client certificate on the server's HTTP listener, for the transport security list)
+**Last updated:** 2026-10-11 (the rule that guards need recorded mutations removed at the owner's decision, from the rules and from four exits; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: proposal 11 brought in line with the node routes and with what a node's deregistration removes; the file renamed to the date of its last change; four points decided: the authorize call; revoking the management token; Consul's rule for registering a service, which needs `service:write` alone on a registered node; and a client certificate on the server's HTTP listener, for the transport security list)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 7.3, 12, 15, 16 and 22
 **Related:** the client list's decisions 6 and 8; decision 6 of [`task-list-raft-membership-changes-2026-10-11.md`](task-list-raft-membership-changes-2026-10-11.md), the operator token; item 9 of [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md); phase 7 of [`CONSUL_FEATURE_IMPLEMENTATION_PLAN.md`](CONSUL_FEATURE_IMPLEMENTATION_PLAN.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
@@ -397,8 +397,8 @@ so and why.
 
 ## 5. Rules
 
-- Red before green. Every authorization guard has a recorded mutation: with
-  the guard removed, a named test fails.
+- Red before green. (The rule that safety guards need recorded mutations was removed by the owner on 2026-10-11, from every task list. It stood here for every
+  authorization guard.)
 - Deterministic tests, with injected clocks for expiry. No Mockito.
 - HTTP behaviour is tested against real JDK HTTP servers, on both sides for
   the client.
@@ -436,8 +436,8 @@ so and why.
 - [ ] Refuse the deletion of a policy that a token still links to, or define
   that the link is dropped. Decide which before coding.
 
-**Exit:** Codec, determinism, and legacy-fixture tests. A mutation that
-stores the secret instead of its hash fails a test.
+**Exit:** Codec, determinism, and legacy-fixture tests. A test shows that the
+store holds the secret's hash and not the secret.
 
 ### Phase 2. The authorizer
 
@@ -447,7 +447,7 @@ stores the secret instead of its hash fails a test.
   prefix, `deny` against allow, the scope match and its wildcard, and both
   identity templates.
 
-**Exit:** A recorded mutation for each precedence rule and for the scope
+**Exit:** A test, red before green, for each precedence rule and for the scope
 check.
 
 ### Phase 3. Configuration and the management token
@@ -478,7 +478,7 @@ tokens, and a new secret in the file is installed at the next leadership.
 - [ ] Require a token on the gRPC `DistributedStateService`.
 - [ ] Leave `/health/live` and `/health/ready` open, and prove it.
 
-**Exit:** One test per row of proposal 11's table, each with its mutation.
+**Exit:** One test per row of proposal 11's table, each red before green.
 With ACLs disabled, every existing test passes unchanged.
 
 ### Phase 5. The ACL API and commands
@@ -516,7 +516,7 @@ sufficient token, an insufficient one, and none.
 - [ ] A takeover and a rename succeed with the right token, under the rules of
   the client list's decision 8.
 
-**Exit:** Recorded mutations for each of these guards. This phase closes the
+**Exit:** A test, red before green, for each of these guards. This phase closes the
 "can the server trust the claim" half of design section 22.
 
 ### Phase 8. Expiry and revocation

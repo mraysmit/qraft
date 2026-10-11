@@ -1,9 +1,9 @@
 # Task List: Single POM and Removal of the Quorus Leftovers
 
 **Date:** 2026-10-04
-**Last updated:** 2026-10-11 (reviewed at the user's request, with three stale passages corrected, and the review's four questions answered: Phase 3's last task dropped, and the gRPC warning added to the operations runbook; Qraft moved to `raftlog-core` 1.5.0 and the test of the storage class removed, verified by Jenkins build 19 with two tests of gRPC's shutdown window: Phase 6 is done; the other documents brought up to date with Phase 6, in Phase 8, and the other four task lists renamed with their links; the file renamed to the date of its last change. On 2026-10-10: in the evening, Phase 6's open points closed and verified by Jenkins build 15: a Docker test runs every start command, the dashboard looked at and corrected, the Grafana errors fixed, `-Down` keeps the observability data, and RaftLog's interface given the compaction boundary, which waits for a release. Before that: Phase 6 applied, and verified by Jenkins build 6 except for its start commands and its dashboard: three unused log stacks, the load balancer, the demo scripts, and the hand-test data deleted, the start scripts reduced, and the kept observability stack corrected; then the recovery test that timed out on Jenkins given its own client profile. Phase 5 done and its exit met: the version source, then the configuration without a default document, as typed records, with one shared parsing helper; each verified on Jenkins; three third-party keywords that Phase 3A's sweep had renamed are restored; the file renamed to the date of its last change. On 2026-10-09: the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
+**Last updated:** 2026-10-11 (PIT mutation testing tried for Phase 7's first task and put on ice by the owner; the mutation rule then removed by the owner from every task list, and that first task, the membership list's Step 4 gate, closed; reviewed at the user's request, with three stale passages corrected, and the review's four questions answered: Phase 3's last task dropped, and the gRPC warning added to the operations runbook; Qraft moved to `raftlog-core` 1.5.0 and the test of the storage class removed, verified by Jenkins build 19 with two tests of gRPC's shutdown window: Phase 6 is done; the other documents brought up to date with Phase 6, in Phase 8, and the other four task lists renamed with their links; the file renamed to the date of its last change. On 2026-10-10: in the evening, Phase 6's open points closed and verified by Jenkins build 15: a Docker test runs every start command, the dashboard looked at and corrected, the Grafana errors fixed, `-Down` keeps the observability data, and RaftLog's interface given the compaction boundary, which waits for a release. Before that: Phase 6 applied, and verified by Jenkins build 6 except for its start commands and its dashboard: three unused log stacks, the load balancer, the demo scripts, and the hand-test data deleted, the start scripts reduced, and the kept observability stack corrected; then the recovery test that timed out on Jenkins given its own client profile. Phase 5 done and its exit met: the version source, then the configuration without a default document, as typed records, with one shared parsing helper; each verified on Jenkins; three third-party keywords that Phase 3A's sweep had renamed are restored; the file renamed to the date of its last change. On 2026-10-09: the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
 **Status:** In progress. This is the current task list. It started on 2026-10-04 at the user's request, before the membership list's Step 4 close-out gate.
-**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 was done and its exit met on 2026-10-10: Jenkins build 4 verified its version source and build 5 the rest. Phase 6 was applied on 2026-10-10; Jenkins build 6 verified it on `d0275a7`. Build 8 then failed on the recovery test and showed its cause, a kill during the follower's first snapshot; build 9 passed with the fix, on `122d739`. Its exit was open for the start commands run by hand and a look at the corrected dashboard on a running stack. Both were done on the evening of 2026-10-10, and Jenkins build 15 verified them on `da87cb3`: its exit was met for all but its one open task. That task was done on 2026-10-11 with `raftlog-core` 1.5.0, and Jenkins build 19 verified it on `f9b3403`: Phase 6 is done. **Next: Phase 7, whose first task is the membership list's Step 4 gate.** Four tasks of Phase 8 are also open. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
+**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 was done and its exit met on 2026-10-10: Jenkins build 4 verified its version source and build 5 the rest. Phase 6 was applied on 2026-10-10; Jenkins build 6 verified it on `d0275a7`. Build 8 then failed on the recovery test and showed its cause, a kill during the follower's first snapshot; build 9 passed with the fix, on `122d739`. Its exit was open for the start commands run by hand and a look at the corrected dashboard on a running stack. Both were done on the evening of 2026-10-10, and Jenkins build 15 verified them on `da87cb3`: its exit was met for all but its one open task. That task was done on 2026-10-11 with `raftlog-core` 1.5.0, and Jenkins build 19 verified it on `f9b3403`: Phase 6 is done. **Next: Phase 7's second task.** Its first, the membership list's Step 4 gate, was closed on 2026-10-11: the gate had waited on mutation evidence, PIT was tried for it and put on ice by the owner, and the owner then removed the mutation rule from every task list. Six tasks of Phase 7 and four of Phase 8 are open. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
 **Last reviewed:** 2026-10-11, against the code at commit `f9b3403`, this list alone: see "Review of 2026-10-11" at the head of section 4. Before that: 2026-10-08, against the code at commit `9a4adf0`, with the other four task lists. The status table in section 4 and every item marked "review of 2026-10-08" come from that review. No build was run for it. The logs that the Phase 2A and Phase 3 records cite were written in another working tree and were not available, so their counts were checked for arithmetic only. The earlier review of 2026-10-05 was against `24beac3`; its items keep their date.
 **Order of work:**
 - The membership list's Step 4 close-out gate is the first task of Phase 7 here.
@@ -57,8 +57,10 @@ runtime layer, or its unused tooling.
 - Phase 2A changes the test harness. It changes production code only to fix
   what its inventory finds: an ERROR no test intends, or a failure logged
   without its exception. Each such change is made test first.
-- Phases 4 to 7 change behaviour: red before green, with recorded mutations for
-  safety guards.
+- Phases 4 to 7 change behaviour: red before green. (The rule that safety guards need recorded mutations was removed by the owner on 2026-10-11, from every task list.
+  Until then this rule also asked for recorded mutations of safety guards.
+  Phases 2A and 4 and the recovery change of 2026-10-10 recorded them, made by
+  hand in an isolated copy.)
 - Each phase ends with `mvn install`; phases touching the runtime, Docker, or
   async code also run the end-to-end suite and the Docker suite on a fresh image.
 - Until Phase 2A is complete, a log review is a comparison with the previous
@@ -89,7 +91,7 @@ rules and extracts from that run.
 | 4. Node model and API | Done 2026-10-09, exit met; its four open points settled and its decisions confirmed by the user the same day | 7 of 7 | `e4bf00d` to `a6e7930` |
 | 5. Configuration and version | Done 2026-10-10, exit met | 6 of 6 | `693449e`, `c123ee9`, `12d365c`, `d4e1af8` |
 | 6. Docker and observability | Applied 2026-10-10, with the load balancer removed and the recovery test given its own client profile, both at the user's decision; verified by Jenkins build 6. The exit is open for the start commands run by hand and a look at the corrected dashboard. The gRPC warnings the audit found are flagged since build 8. Build 8 showed the cause of the recovery test's timeout, a kill during the follower's first snapshot; build 9 passed with the fix and with no unflagged error or stack trace. The server was then changed so that a kill in that window is survivable and a log compacted past its snapshot is refused; build 11 passed with that change. On the evening of 2026-10-10 the start commands got a test that Jenkins runs, the dashboard was looked at and corrected, the Grafana errors were fixed, and `-Down` keeps the observability data; build 14 failed on two defects the new test found, and build 15 passed with their fixes. The compaction-boundary task was done on 2026-10-11 with `raftlog-core` 1.5.0; build 18 failed on a teardown race in a gRPC test, and build 19 passed with its fix. Done, exit met | 13 of 13 | `ce5890d`, `22a46a9`, `85bb120`, `d0275a7`, `cbb93f4`, `362b507`, `122d739`, `aa0d876`, `f2119d3`, `29fe503`, `10de474`, `0f6c497`, `da87cb3`, `fac3696`, `f9b3403` |
-| 7. Async layer | Not started | 0 of 7 | |
+| 7. Async layer | Its first task, the membership list's Step 4 gate, closed on 2026-10-11 without mutation evidence: the owner put PIT on ice and removed the mutation rule that day. No code of this phase is changed yet | 1 of 7 | |
 | 8. Documentation and close-out | Started early for Phases 1 and 2; Phase 3's names done with Phase 3; the documents of Phases 4, 5, and 6 done as each ended | 2 of 6 | |
 
 **Review of 2026-10-11,** at the user's request, of this list alone, against
@@ -2447,7 +2449,7 @@ question was not open.
 
 ### Phase 7. Replace the Vert.x-shaped async layer
 
-- [ ] Before any change in this phase, close the membership list's Step 4
+- [x] Before any change in this phase, close the membership list's Step 4
   gate: record its mutation evidence against the source as Phase 6 left it,
   under the rules of that list's "Step 4 close-out gate". The tests it
   validates are then the regression net for the changes to `RaftNode` below.
@@ -2491,6 +2493,57 @@ question was not open.
       the mutated classes, 92%.
     - It runs no test against a mutant, so it says nothing yet about
       killed or surviving mutants, or about how long the full run takes.
+  - **The dry run on Jenkins, build 23, on `03bea0f`, passed** in 75
+    seconds, with the same result: the three classes, 1,187 mutants, 92%
+    line coverage, and no ERROR event without a flag in its 25 log files.
+  - **The full analysis, Jenkins build 24, was aborted after two hours,
+    at the user's word, with no report.** In those two hours PIT ended 160
+    mutants that had made a test hang, one about every 44 seconds without
+    slowing, and it prints no count of the mutants it has finished. The
+    user judged that the whole run would take days. I had started it
+    without any basis for how long it would take, and had said two to four
+    hours. PIT over the whole of `RaftNode` is not affordable as
+    configured: a mutant that removes a step from Raft code often makes a
+    test wait, not fail, and each wait costs most of a minute.
+  - **The user's correction, the same evening:** "the initial approach you
+    took was totally wrong. You should have started with the very smallest
+    possible coverage and expanded from there." I then proposed one class
+    of 39 mutants as the first step and still listed `RaftNode` as a third.
+    The user: "still too large we need to have batches of 10 mutants", and
+    asked why `RaftNode` was still being proposed when it is known to take
+    days.
+  - **Batches of at most ten, and `RaftNode` not at all.** PIT mutates one
+    class, `MembershipService`, 39 mutants, in five batches. PIT can leave
+    methods out but cannot name the ones to keep, so a batch is a POM
+    profile, `pit-batch-01` to `pit-batch-05`, that names the methods it
+    leaves out and its mutators. A dry run of each, locally as a small
+    check in the one visible console, gave the sizes as planned: 9, 7, 10,
+    7, and 6 (`logs/qraft-pit-batches-dry-run-2026-10-11_22-34-09-550.log`).
+    Each dry run took about one minute, which is the coverage pass.
+  - **On Jenkins** the job takes the batch as a second parameter,
+    `MUTATION_BATCH`, and stops a batch after 20 minutes. The build's limit
+    is one hour again; the limits I had put on the three suite stages for
+    the long run are removed.
+  - **Not proposed:** `RaftNode`, and `ClusterBootstrap` until the batches
+    of `MembershipService` are run and reviewed. A batch is run and
+    measured, and its survivors reviewed, before the next.
+  - **PIT put on ice by the user, 2026-10-11:** "let put this whole pit
+    thing on ice and leave it until much later. I see zero value at the
+    moment ... The test coverage in QRaft is excellent which makes me
+    wonder why pit in needed at all." No batch was run. The profile, the
+    batch profiles, and the pipeline's two parameters stay as they are,
+    dormant: no build runs them. `docs/TESTING.md` says at the head of its
+    PIT section that it is on ice and is not to be run, extended, or
+    proposed.
+  - **The mutation rule removed, and this task closed, 2026-10-11.** The
+    user: "remove the mutation rule entirely". It is removed from the rules
+    of this list, the membership list, the ACL list, and the client list,
+    and from the exits in those lists that asked for mutations. The
+    membership list's Step 4 gate, which had waited on that evidence alone,
+    is closed there. No mutation evidence was produced for it. What stands
+    behind the tests that the rest of this phase relies on is the suites:
+    Jenkins build 21, on `e3cf808`, with 969 results and none failed.
+  - **The gate is still open.**
   - **No thresholds yet.** The first runs establish the baseline.
   - **On Jenkins:** the `Jenkinsfile` has a parameter, `MUTATION_TESTING`,
     with the values `off`, `dry-run`, and `run`. With the last two the job

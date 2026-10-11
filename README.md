@@ -48,7 +48,7 @@ mvn clean install
 ```
 
 See [docs/TESTING.md](docs/TESTING.md) for the test suites, running a single test class, and the Docker suite.
-Mutation testing with PIT has the Maven profile `mutation-testing`; see
+Mutation testing with PIT is configured but on ice since 2026-10-11, at the owner's decision: see
 [its section there](docs/TESTING.md#mutation-testing-with-pit).
 
 ## Local Cluster and Observability

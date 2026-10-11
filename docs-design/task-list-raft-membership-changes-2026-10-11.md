@@ -1,15 +1,16 @@
 # Task List: Raft Membership Changes
 
 **Date:** 2026-09-29
-**Active work:** Step 4, joining, and operator list and remove. It is built,
-and the full suites passed on 2026-10-02; its mutation evidence is outstanding
-(Step 4 record). Steps 1 to 3 were done
+**Active work:** None here until the single-POM list is archived. Step 4, joining,
+and operator list and remove, is built, and its close-out gate was closed on
+2026-10-11, when the owner removed the mutation rule that the gate had waited
+on. Step 5 is next. Steps 1 to 3 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
-**Last updated:** 2026-10-11 (the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
+**Last updated:** 2026-10-11 (the mutation rule removed at the owner's decision, from the rules and from the exits of Steps 5 to 8; the Step 4 gate, which had waited on it, closed, after PIT was tried for it and put on ice; the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
 **Interrupted by:** [`task-list-single-pom-and-quorus-removal-2026-10-11.md`](task-list-single-pom-and-quorus-removal-2026-10-11.md),
-started 2026-10-04 before the Step 4 close-out gate. The gate's mutation evidence
-is recorded there, as the first task of its Phase 7. Step 5 resumes when that
+started 2026-10-04 before the Step 4 close-out gate. The gate was closed on
+2026-10-11, as the first task of that list's Phase 7. Step 5 resumes when that
 list is archived, and this list then runs to its end before the Consul-style
 client list starts (decided 2026-10-05).
 **Predecessor:** [`task-list-test-suite-remediation-2026-09-27.md`](../docs/archive/task-list-test-suite-remediation-2026-09-27.md),
@@ -175,9 +176,10 @@ Sources:
 
 ## 4. Rules
 
-- Red before green. A test for existing behaviour that passes at once is shown
-  to fail against a mutation that removes the behaviour, and the mutation is
-  recorded. Mutations run only in the isolated copy.
+- Red before green. (The rule that safety guards need recorded mutations was removed by the owner on 2026-10-11, from every task list. Until then a test for
+  existing behaviour that passed at once was shown to fail against a mutation
+  that removed the behaviour, made by hand in an isolated copy; the records of
+  Steps 1 to 3 below hold those.)
 - Deterministic tests only (`PROJECT_STANDARDS.md`, section 4.4). Raft tests run
   on manual timers. Mockito is prohibited.
 - Every safety rule is tested at the unit level on `RaftNode`, and again in
@@ -818,6 +820,33 @@ an election timeout (`forgetSilentLeader`); the next message from a leader
 makes the leader known again. It was written test first, in
 `RaftNodeServerIdCountingTest`. Add a mutation of it to this gate's evidence.
 
+**Attempted with PIT, and PIT put on ice (2026-10-11).** The single-POM list's
+Phase 7 has the whole record. In short:
+- PIT was configured for `RaftNode`, `MembershipService`, and
+  `ClusterBootstrap`. Its dry runs passed: 1,187 mutants, and the default
+  suite covers 92% of the lines of those classes.
+- The full analysis was aborted after two hours with no report. A mutant that
+  removes a step from Raft code often makes a test wait, not fail, and the run
+  would have taken days.
+- PIT was then cut down to `MembershipService` alone, 39 mutants in five
+  batches of at most ten. No batch was run.
+- The owner put PIT on ice that evening: "I see zero value at the moment ...
+  The test coverage in QRaft is excellent which makes me wonder why pit in
+  needed at all."
+
+**Closed 2026-10-11, at the owner's decision.** The owner removed the mutation
+rule entirely that evening, from every task list, so this gate asks for
+nothing that is still required:
+- its mutation evidence is no longer a requirement, and none was produced;
+- its other condition, re-running the changed concurrency tests and the three
+  suites if production or test code changes, does not apply: the gate changed
+  no code.
+
+What stands behind Step 4 is what its records above describe: the tests
+written with it, red before green where a defect was fixed, and the suites
+that have passed on the source since, the last of them Jenkins build 21 on
+`e3cf808`, with 969 results and none failed. Step 5 may start once the
+single-POM list is archived, as "Interrupted by" at the head of this list says.
 ### Step 5. Failed-server cleanup
 
 **Status: Planned; not implemented.** The contract below was specified during
@@ -917,8 +946,8 @@ environment overrides. Record the effective settings without secrets.
   that cannot evict a member and a three-voter cluster held at the default
   minimum. Real-WAL reopen confirms the committed configuration, not a local
   failure marker, determines voters after restart.
-- New behavior is red before green; safety guards have recorded mutation
-  evidence. Changed concurrency tests pass five consecutive focused runs;
+- New behavior is red before green. Changed concurrency tests pass five
+  consecutive focused runs;
   `mvn install` and the fresh-image Docker suite pass. The real replacement
   and cleanup scenarios remain mandatory in Step 8 before the list closes.
 
@@ -926,8 +955,8 @@ environment overrides. Record the effective settings without secrets.
 
 Leader stickiness was built on 2026-10-02 (see "Review remediation" under
 Step 4), with unit tests for a removed server and for the contact-expiry
-boundary. Still open: the test of a server rejoining after a partition, the
-container scenarios, and mutation evidence.
+boundary. Still open: the test of a server rejoining after a partition, and the
+container scenarios.
 
 Leader stickiness is the selected protection (thesis section 4.2.3). Do not add
 a second election protocol merely to close this validation step.
@@ -936,8 +965,7 @@ a second election protocol merely to close this validation step.
 heal a partition containing a higher-term, stale-log server. They prove a
 working leader and its followers keep their term during the contact lease,
 the exact expiry boundary permits voting, an isolated leader steps down via
-check-quorum, and genuine failover and catch-up still complete. Record mutations
-of both the leader and follower guards, lease expiry, and check-quorum behavior.
+check-quorum, and genuine failover and catch-up still complete.
 Run changed concurrency tests five consecutive times and pass `mvn install`.
 Step 8 must repeat disruption and partition healing over real transport in
 containers before the list closes.
@@ -980,7 +1008,7 @@ explicitly implements and tests it.
 - If whole-cluster backup restore is delivered, its own scenario uses backups
   that predate later participation and proves the recovered history and voter
   isolation. Otherwise both the design and runbook keep that feature open.
-- Safety guards have mutation evidence, focused concurrency tests pass five
+- Focused concurrency tests pass five
   consecutive runs, and the full default, end-to-end, and fresh-image Docker
   suites pass. Publish executable operator commands and their observed results
   in the runbook only after the procedure passes these gates.
@@ -999,8 +1027,7 @@ explicitly implements and tests it.
 | Lost-quorum recovery | Step 7's offline procedure and retained-state checks; excluded voters cannot reappear as the old cluster |
 
 **Exit gate.** Every scenario above passes three consecutive runs against a
-fresh image from the final runtime JAR. Each safety assertion is shown able to
-fail against a recorded targeted mutation in the isolated copy. Default,
+fresh image from the final runtime JAR. Default,
 end-to-end, and Docker suites pass on the same final source/dependency state;
 retain timestamped logs using `docs/TESTING.md`. Complete the prohibited-framework,
 environment-configuration, timeout-API, source-header, and `git diff --check`
@@ -1046,8 +1073,7 @@ which has the whole record.
   method it already had. Nothing Qraft called has changed.
 - **What Qraft does with it.** `RaftPersistence.compactionBoundary` calls the
   interface; its test of the class `FileRaftStorage` is gone. This is in the
-  `raft` package and not in `RaftNode`, so the source that the Step 4 gate's
-  mutation evidence is taken against changes in that one method.
+  `raft` package and not in `RaftNode`.
 - **Verified.** Jenkins build 19, on `f9b3403`: 927 default tests with every
   coverage gate met, 10 end-to-end, 32 Docker and slow, and no ERROR event or
   uncaught exception without a flag in its 141 log files. The real-storage

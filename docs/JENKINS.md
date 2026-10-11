@@ -32,14 +32,16 @@ sets its own Java environment without changing other jobs' Java installations.
 3. **Docker cluster tests:** `mvn -B -Dstyle.color=never test '-Dgroups=docker|slow' -Dtest.excludedGroups=`.
    Including `slow` also covers that group if tests are tagged with it later.
 
-The job has one parameter, `MUTATION_TESTING`, which is `off` by default. Set to `dry-run` or `run`, the
-job runs PIT mutation testing instead of the three suites
-([TESTING.md](TESTING.md#mutation-testing-with-pit)), through the POM's profile `mutation-testing`, and
-archives PIT's report under `reports/pit/`. `dry-run` collects coverage and generates the mutants
-without running tests against them. A build with `off` runs the suites as before.
+The job has two parameters, both for PIT mutation testing, which is on ice since 2026-10-11 at the
+owner's decision: leave them at their defaults. `MUTATION_TESTING` is `off` by default. Set to `dry-run` or `run`, the job
+runs PIT mutation testing instead of the three suites
+([TESTING.md](TESTING.md#mutation-testing-with-pit)), on one batch of at most ten mutants, and archives
+PIT's report under `reports/pit/`. `MUTATION_BATCH` names the batch, `01` to `05`: the POM profile
+`pit-batch-<number>`. `dry-run` collects coverage and generates the batch's mutants without running
+tests against them. A build with `off` runs the suites as before.
 
-Each suite's stage has its own time limit, 25, 10, and 25 minutes, one hour between them as before. The
-build's overall limit is four hours, for a PIT run.
+The build's limit is one hour. The PIT stage has its own limit of 20 minutes: a batch that runs longer
+has gone wrong and is stopped.
 
 Every Maven command uses the job's Maven repository cache, streams combined output to the Jenkins
 console and a timestamped file under `logs/`, and preserves Maven's exit status through `tee`.
@@ -214,6 +216,26 @@ after the instant a gRPC server stops. It took 10 minutes 34 seconds.
 - Jenkins published 969 results, none failed or skipped.
 - The 141 archived log files hold 377 flagged ERROR events, counting copies. No ERROR event and no
   uncaught exception is without a flag. The gRPC warning that the new test causes is flagged.
+
+[Build 20](http://192.168.137.32:8080/job/Qraft/20/), of the same day on commit `3579736`, was started
+by the owner and passed: 969 results, none failed.
+
+[Build 21](http://192.168.137.32:8080/job/Qraft/21/), of the same day on commit `e3cf808`, passed. It is
+the ordinary build of the commit that added the PIT profile to the POM and the mutation stage to the
+pipeline: 927 default tests, 10 end-to-end, 32 Docker and slow, 969 results, none failed. Its 141
+archived log files hold 539 flagged ERROR events and no ERROR event or uncaught exception without a
+flag.
+
+Builds 22 to 24 were PIT runs, with the three suites skipped. PIT has been on ice since that evening
+([TESTING.md](TESTING.md#mutation-testing-with-pit)).
+- [Build 22](http://192.168.137.32:8080/job/Qraft/22/), a dry run on `e3cf808`, failed in 22 seconds on
+  PIT's configuration: `withHistory` needs a history plugin that the open-source release does not
+  include. It was removed.
+- [Build 23](http://192.168.137.32:8080/job/Qraft/23/), a dry run on `03bea0f`, passed in 75 seconds:
+  1,187 mutants in three classes, and no ERROR event without a flag in its 25 log files.
+- [Build 24](http://192.168.137.32:8080/job/Qraft/24/), the full analysis of those 1,187 mutants, was
+  aborted after two hours with no report. PIT had ended 160 mutants that made a test hang, at a steady
+  one every 44 seconds, and the whole run would have taken days.
 
 No build ran between 2026-10-04 and 2026-10-10. In that time the `agent` directive of the
 `Jenkinsfile` had been renamed by mistake, which Jenkins would have refused; it was restored in
