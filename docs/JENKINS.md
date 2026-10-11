@@ -32,10 +32,19 @@ sets its own Java environment without changing other jobs' Java installations.
 3. **Docker cluster tests:** `mvn -B -Dstyle.color=never test '-Dgroups=docker|slow' -Dtest.excludedGroups=`.
    Including `slow` also covers that group if tests are tagged with it later.
 
+The job has one parameter, `MUTATION_TESTING`, which is `off` by default. Set to `dry-run` or `run`, the
+job runs PIT mutation testing instead of the three suites
+([TESTING.md](TESTING.md#mutation-testing-with-pit)), through the POM's profile `mutation-testing`, and
+archives PIT's report under `reports/pit/`. `dry-run` collects coverage and generates the mutants
+without running tests against them. A build with `off` runs the suites as before.
+
+Each suite's stage has its own time limit, 25, 10, and 25 minutes, one hour between them as before. The
+build's overall limit is four hours, for a PIT run.
+
 Every Maven command uses the job's Maven repository cache, streams combined output to the Jenkins
 console and a timestamped file under `logs/`, and preserves Maven's exit status through `tee`.
 Builds and suites run sequentially. A failed default build stops the dependent suites; an end-to-end
-failure still allows Docker tests to run. The build timeout is one hour.
+failure still allows Docker tests to run.
 
 The Docker stage's tests create and remove Docker networks, which changes the network interfaces of
 the host. A browser on the host cancels a page load when that happens. On 2026-10-10, builds 6 and 11

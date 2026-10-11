@@ -203,6 +203,146 @@ taken.
 3. Optional: `docker\start.ps1 multinode`, to watch a hand-started cluster. Straight after step 1 the
    jar is current, so it starts the containers without packaging again.
 
+## Mutation testing with PIT
+
+A passing suite shows that the code works. It does not show that the tests would notice if a safety
+check were lost: the suite passes just as well when no test reaches the check. Mutation testing asks
+that question. [PIT](https://pitest.org) is the tool.
+
+In Qraft, PIT is a targeted audit of the Raft-membership implementation. It is not a mutation test of
+the whole application.
+
+At a glance:
+
+| | |
+|---|---|
+| Maven profile | `mutation-testing`, in `pom.xml` |
+| Command | `mvn -Pmutation-testing test-compile org.pitest:pitest-maven:mutationCoverage` |
+| Dry run | the same command with `"-Dpit.dryRun=true"` |
+| On Jenkins | the `Qraft` job with the parameter `MUTATION_TESTING` set to `dry-run` or `run` |
+| Classes mutated | `RaftNode`, `MembershipService`, and `ClusterBootstrap`, in `dev.mars.qraft.raft` |
+| Report | `target/pit-reports/index.html`; on Jenkins, `reports/pit/` in the build's artifacts |
+| Part of a normal build | No. Nothing runs it unless the profile and the goal are named |
+
+### What PIT does
+
+```text
+Compile Qraft and its tests
+        ↓
+Run the eligible JUnit tests for coverage
+        ↓
+Generate mutations in three Raft classes
+        ↓
+Select the tests that cover each changed instruction
+        ↓
+Run those tests against each mutant
+        ↓
+Write HTML and XML reports
+```
+
+A **mutant** is the compiled production code with one small change. Suppose `RaftNode` holds a check
+like this:
+
+```java
+if (!configuration.isVoter(serverId)) {
+    return;
+}
+```
+
+PIT may generate the mutant in which the condition is reversed:
+
+```java
+if (configuration.isVoter(serverId)) {
+    return;
+}
+```
+
+PIT makes the change in memory, in a worker JVM. The source and the compiled files on disk are not
+modified, and no copy of the code is kept. It runs the tests that execute that instruction, the fastest
+first, and gives the mutant one of these results:
+
+- `KILLED`: a test failed. The tests tell the correct rule from the mutated one.
+- `SURVIVED`: every covering test passed. The suite does not tell the two apart.
+- `NO_COVERAGE`: no test executed the instruction.
+- `TIMED_OUT`: the mutant made a test run past its time limit, as an endless loop does. PIT ends it.
+
+**PIT is a diagnostic, not a score to reach.** Good tests kill most mutants, and that result is the
+evidence that they are good. A surviving mutant is a prompt to look at that line, not an instruction to
+write a test. Some survivors are equivalent, which means the change makes no difference that anything
+could observe, and some guard nothing that matters. Each survivor is read and judged, and the judgement
+is recorded.
+
+### What is mutated, and with which tests
+
+Mutation testing is too expensive for a normal build, so PIT has a Maven profile of its own,
+`mutation-testing`, in `pom.xml`, and is bound to no phase. The profile's `<configuration>` holds
+everything.
+
+It mutates three classes of `dev.mars.qraft.raft`, each with its nested classes, such as
+`RaftNode.Builder`: `RaftNode`, `MembershipService`, and `ClusterBootstrap`. That scope is the mutation
+evidence the membership list's Step 4 gate asks for before its Step 5. It does not mutate Raft storage
+and snapshots, the gRPC transport, replicated state, the server's HTTP API, the client, or the runtime.
+
+There is no `targetTests`: PIT makes a coverage pass and finds which tests reach each mutant.
+`excludedGroups` keeps out the `docker`, `slow`, and `e2e` tests. PIT may run one test hundreds of
+times, so tests that start containers or wait out real time would make a run too long. What is left is
+the default suite: the Raft tests on manual timers, the in-process cluster tests, the tests on real
+storage, the gRPC tests on local ports, and the focused membership, election, replication, and recovery
+tests.
+
+The check of intentional errors stays on. A mutant that makes a test log an undeclared error fails that
+test, and so is killed. That is meant: in Qraft, "no error without a flag" is part of what a test
+observes.
+
+The rest of the configuration: `toString`, `equals`, and `hashCode` are not mutated; the mutators are
+PIT's defaults; four threads work at once; `withHistory` lets a repeated run redo only what changed;
+and a test on a mutant may take 1.5 times its normal time plus 4 seconds before PIT ends it.
+
+### Running it
+
+A PIT run goes to Jenkins: start the `Qraft` job with the parameter `MUTATION_TESTING` set to `dry-run`
+or `run`. The job then runs PIT instead of the three suites and archives the report under
+`reports/pit/`. The stage has a limit of 230 minutes: `RaftNode` alone has about 3,900 lines, and many
+test classes exercise it.
+
+The commands it runs are these. Run by hand, they follow the rule above: in a terminal you can watch,
+through `Tee-Object`, with `$LASTEXITCODE` checked at once.
+
+A dry run compiles the code, discovers the tests, collects coverage, and generates the mutants. It does
+not run tests against them. It shows that the configuration works:
+
+```powershell
+mvn -B "-Dstyle.color=never" -Pmutation-testing "-Dpit.dryRun=true" test-compile org.pitest:pitest-maven:mutationCoverage 2>&1 | Tee-Object -FilePath ".\logs\qraft-pit-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
+$qraftBuildExitCode = $LASTEXITCODE
+```
+
+The full analysis:
+
+```powershell
+mvn -B "-Dstyle.color=never" -Pmutation-testing test-compile org.pitest:pitest-maven:mutationCoverage 2>&1 | Tee-Object -FilePath ".\logs\qraft-pit-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
+$qraftBuildExitCode = $LASTEXITCODE
+```
+
+### The report, and what fails a run
+
+PIT writes `target/pit-reports/index.html` and `target/pit-reports/mutations.xml`. The HTML report
+opens on `RaftNode`, `MembershipService`, or `ClusterBootstrap` and shows, for each mutated line, the
+mutation PIT applied, whether it was killed and by which test, and whether it survived or had no
+coverage. The XML file is for a program, and is what Jenkins archives beside it.
+
+No threshold is set, so a surviving mutant does not fail a run, and neither does a low score. A run
+still fails on an error in PIT's configuration, on a test that fails or crashes in the coverage pass,
+and on an error while PIT runs.
+
+The order of work for a first analysis:
+
+1. Run the dry run on Jenkins.
+2. Confirm that the three classes and the tests expected for them are found.
+3. Run the full analysis.
+4. Review each surviving and each uncovered safety check.
+5. Record which survivors are real gaps, which are equivalent mutants, and which change nothing that
+   matters.
+6. Decide from that evidence whether a threshold would be useful.
 ## Making runs faster
 
 - Name only the classes you need (`-Dtest`) while you work, and keep `mvn install` for

@@ -48,6 +48,8 @@ mvn clean install
 ```
 
 See [docs/TESTING.md](docs/TESTING.md) for the test suites, running a single test class, and the Docker suite.
+Mutation testing with PIT has the Maven profile `mutation-testing`; see
+[its section there](docs/TESTING.md#mutation-testing-with-pit).
 
 ## Local Cluster and Observability
 

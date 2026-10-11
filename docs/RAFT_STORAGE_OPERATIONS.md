@@ -227,6 +227,35 @@ When this occurs:
    restarting the intended server.
 4. Never bypass, delete, or replace lock state while an owner process is alive.
 
+## A warning in the log of a server that is stopping
+
+This one is not about storage. It is here because this is the runbook an
+operator reads when a server's log shows something unexpected.
+
+A server that is stopping can log this warning once, with a stack trace:
+
+```text
+WARN  io.netty.channel.ChannelInitializer - Failed to initialize a channel. Closing: [id: 0x81d5c86d, L:/10.0.0.5:9080 - R:/10.0.0.6:43752]
+io.netty.util.IllegalReferenceCountException: refCnt: 0, increment: 1
+	at io.grpc.netty.NettyServer$1.initChannel(NettyServer.java:278)
+```
+
+- **What happened.** A peer connected to the server's Raft port in the instant
+  the server stopped. gRPC's server had released its shared resources and had
+  not yet marked itself terminated, and the connection was prepared between
+  those two steps. A connection prepared after them is closed without a
+  message.
+- **What it costs.** One refused connection to a server that was stopping
+  anyway. The peer reads a closed connection and tries again by itself. No
+  state is touched: the server's Raft storage is closed by its own shutdown,
+  which this does not interrupt.
+- **What to do.** Nothing, when the warning is in the last lines of a server
+  that was told to stop. Investigate when it appears on a server that is
+  running and was not told to stop: that is not this case.
+- **Why Qraft does not prevent it.** The window is inside the gRPC library.
+  Two tests of `GrpcRaftServerTest` place a connection in the window and after
+  it, so a change in the library's behaviour is seen.
+
 ## Upgrade and migration
 
 Current Qraft supports only the external `raftlog` backend. The former `file`

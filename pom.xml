@@ -32,6 +32,8 @@
         <!-- The default build skips the suites that need Docker or wait out real TTLs and elections
              (docs/TESTING.md). Select them with -Dgroups=docker,e2e and clear this with -Dtest.excludedGroups= -->
         <test.excludedGroups>docker,slow,e2e</test.excludedGroups>
+        <pitest.version>1.30.0</pitest.version>
+        <pitest-junit5.version>1.2.3</pitest-junit5.version>
     </properties>
 
     <dependencyManagement>
@@ -416,5 +418,80 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- PIT mutation testing (docs/TESTING.md). It is too expensive for a normal build, so it has a
+             profile of its own and is bound to no phase. Run it with
+             mvn -Pmutation-testing test-compile org.pitest:pitest-maven:mutationCoverage -->
+        <profile>
+            <id>mutation-testing</id>
+
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.pitest</groupId>
+                        <artifactId>pitest-maven</artifactId>
+                        <version>${pitest.version}</version>
+
+                        <dependencies>
+                            <dependency>
+                                <groupId>org.pitest</groupId>
+                                <artifactId>pitest-junit5-plugin</artifactId>
+                                <version>${pitest-junit5.version}</version>
+                            </dependency>
+                        </dependencies>
+
+                        <configuration>
+                            <!-- Raft membership: the three classes the membership list's Step 4 gate asks
+                                 about. A trailing * takes a class's nested classes with it. RaftNode is
+                                 named with its nested classes separately, because RaftNode* would also
+                                 take RaftNodeMode, a fourth class. -->
+                            <targetClasses>
+                                <param>dev.mars.qraft.raft.RaftNode</param>
+                                <param>dev.mars.qraft.raft.RaftNode$*</param>
+                                <param>dev.mars.qraft.raft.MembershipService*</param>
+                                <param>dev.mars.qraft.raft.ClusterBootstrap*</param>
+                            </targetClasses>
+
+                            <excludedMethods>
+                                <param>toString</param>
+                                <param>equals</param>
+                                <param>hashCode</param>
+                            </excludedMethods>
+
+                            <!-- No targetTests: PIT chooses each mutant's tests from coverage. The suites
+                                 the default build excludes need Docker or wait out real time, so they are
+                                 excluded here too. -->
+                            <excludedGroups>
+                                <param>docker</param>
+                                <param>slow</param>
+                                <param>e2e</param>
+                            </excludedGroups>
+
+                            <!-- The arguments Surefire gives the test JVM. -->
+                            <jvmArgs>
+                                <jvmArg>--add-modules</jvmArg>
+                                <jvmArg>java.net.http,java.logging</jvmArg>
+                                <jvmArg>--enable-native-access=ALL-UNNAMED</jvmArg>
+                            </jvmArgs>
+
+                            <threads>4</threads>
+                            <withHistory>true</withHistory>
+
+                            <outputFormats>
+                                <param>HTML</param>
+                                <param>XML</param>
+                            </outputFormats>
+
+                            <!-- No thresholds yet: the first runs establish the baseline. -->
+
+                            <timeoutFactor>1.5</timeoutFactor>
+                            <timeoutConstant>4000</timeoutConstant>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
 </project>

@@ -95,6 +95,8 @@ contains its logging backend.
 | `org.junit.jupiter:junit-jupiter` | 5.14.3 | EPL 2.0 |
 | `org.awaitility:awaitility` | 4.3.0 | Apache License 2.0 |
 | `org.testcontainers:testcontainers`, `org.testcontainers:testcontainers-junit-jupiter` | 2.0.3 | MIT |
+| `org.pitest:pitest-maven`, a build plugin run on request only; nothing of it is packaged | 1.30.0 | Apache License 2.0 |
+| `org.pitest:pitest-junit5-plugin`, used by that plugin | 1.2.3 | Apache License 2.0 |
 
 ### Version sources and release inventory
 
