@@ -86,10 +86,11 @@ visible console window, reuses it, and never runs a build hidden in the backgrou
 |---|---|---|---|
 | **Default** | Unit and in-process integration tests: Raft on manual timers, gRPC on local ports, HTTP, storage, client, and a runtime start-up test | `src/test` | about 40 s (estimate) |
 | **End-to-end** | Real server and client processes that wait out real TTLs and a real leader change | tagged `@Tag("e2e")` | about 50 s |
-| **Docker** | Real three-server clusters in containers: restarts, partitions, clients | tagged `@Tag("docker")` | about 5.5 min |
+| **Docker** | Real three-server clusters in containers: restarts, partitions, clients. Since 2026-10-10 also every start command of `docker/` and both observability stacks | tagged `@Tag("docker")` | about 8.5 min |
 
 \* Time spent running tests, measured 2026-09-29 before the end-to-end tests were separated. Compiling
-and packaging come on top.
+and packaging come on top. The Docker suite's time is that of its Jenkins stage in build 19, on
+2026-10-11.
 
 The default build excludes the end-to-end and Docker suites, through `test.excludedGroups` in
 `pom.xml`.
@@ -338,6 +339,23 @@ Docker class that declares `RAFT_PEER_UNREACHABLE` declares it too, and a test c
 Docker merges stderr into stdout, so an event can land inside an uncaught exception's trace. Frames that
 follow an uncaught exception therefore belong to that exception, which has its own check above.
 
+The containers of the observability stacks are not Qraft's and do not log in its format, so the audit
+above archives their output and checks none of it. `DockerStartCommandsTest` checks it itself: a line
+of Grafana, Loki, Tempo, Prometheus, or the collector at their error level fails the test. It accepts
+one line, Tempo's `msg="error tailing WAL" err="failed to find segment for index"`, and only when
+Tempo's "Done replaying WAL" follows in the same log. Tempo 2.3.1 starts the watcher of its metrics
+generator's log with its first span, before that log has a segment, reports this once, and recovers.
+
+### A warning of a library, caused on purpose inside the test JVM
+
+A definition can also name a library's logger and a level below ERROR for an event inside the test JVM.
+`GRPC_CONNECTION_ACCEPTED_AS_SERVER_STOPS` is Netty's WARN "Failed to initialize a channel", which
+carries an `IllegalReferenceCountException`. A gRPC server that is stopping releases its shared
+resources and then marks itself terminated, and a connection that a worker thread prepares between
+those two steps is closed with this warning. One test of `GrpcRaftServerTest` places a connection
+exactly there and declares the warning once. Any other test that logs it has a defect in its teardown:
+see the rule on gRPC connections below.
+
 Source: `logs/docker/DockerDurableRestartTest/lock-contender.log`, lines 82 and 95-97. These are nonadjacent
 extracts; intervening cleanup messages and the first error's trace are omitted:
 
@@ -447,6 +465,11 @@ message patterns and severity; all nine durable-restart cases and their log audi
   writes its first snapshot restarts from its log, and one killed later restarts from its snapshot. The
   wait keeps every run on the second path, so a test does not take one or the other by timing. The first
   path has its own tests, which place the kill exactly ([TEST-RESULTS.md](TEST-RESULTS.md)).
+- **A test that stops a gRPC server has no connection half made.** A call that fails before it is
+  sent, such as one with a deadline already passed, still makes its channel start connecting. Stopping
+  the server while it accepts that connection can log Netty's "Failed to initialize a channel". Wait
+  until the channel is ready before the test can end, as `GrpcRaftServerTest.startServerAndConnect`
+  does, or complete a call.
 - **Raft timing uses manual timers** (`ManualRaftClusterFixture`, `ManualRaftTimersHelper`). A test fires an election or
   heartbeat itself, and doesn't wait for one on the clock.
 - **Real-time waits are rare and bounded.** They belong only to the runtime end-to-end tests and the

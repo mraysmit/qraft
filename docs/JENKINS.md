@@ -163,6 +163,49 @@ longer stops a server, and a log compacted further than the published snapshot r
   tests wait for first snapshots before they kill a server, so that is as intended. Both paths ran in the
   default build's tests, which place the kill exactly.
 
+Builds 12, 13, 16, and 17 belong to the lock described under "Suites and results" and are not recorded
+here.
+
+[Build 14](http://192.168.137.32:8080/job/Qraft/14/), of the same day on commit `0f6c497`, failed in
+its Docker stage. It is the first run of `DockerStartCommandsTest`, which runs every start command of
+`docker/` with the shell scripts, and six of its seven tests failed.
+- Default build: 925 tests, every coverage gate met. End-to-end: 10. Docker and slow: 26 passed and 6
+  failed. Jenkins published 967 results.
+- Five tests failed because `start.sh` and `start-quick.sh` called `build-runtime.sh` as a program, and
+  the file is not executable in the repository: "Permission denied". The scripts could not start
+  anything on Linux. They now run it with `sh`.
+- One test failed on an error line that Tempo logs once when its first span arrives, before it recovers.
+  The test now accepts exactly that line, and only with the recovery line after it.
+- Outside the new class, the 121 archived log files hold no ERROR event, uncaught exception, or stack
+  trace without a flag.
+
+[Build 15](http://192.168.137.32:8080/job/Qraft/15/), of the same day on commit `da87cb3`, passed with
+both fixes. It took 10 minutes 14 seconds.
+- Default build: 925 tests, every coverage gate met. End-to-end: 10. Docker and slow: 32, the 7 of
+  `DockerStartCommandsTest` among them.
+- Jenkins published 967 results, none failed or skipped.
+- The 140 archived log files hold 381 flagged ERROR events, counting copies. No ERROR event and no
+  uncaught exception is without a flag. The observability containers logged the one Tempo line and no
+  other error line.
+
+[Build 18](http://192.168.137.32:8080/job/Qraft/18/), of 2026-10-11 on commit `fac3696`, failed in its
+default stage. It is the first build against `raftlog-core` 1.5.0, which it downloaded and compiled
+against. 924 tests passed and 1 failed, and Jenkins skipped the two later stages.
+- `GrpcRaftServerTest#requestVoteWithAnAlreadyExpiredDeadlineFailsWithDeadlineExceeded` logged Netty's
+  warning "Failed to initialize a channel" with a stack trace and no flag. The test's one call fails
+  before it is sent but still starts a connection, and teardown stopped the server while the server
+  was accepting it. The test now connects before it calls.
+- The 25 archived log files hold 279 flagged ERROR events and no ERROR event or uncaught exception
+  without a flag.
+
+[Build 19](http://192.168.137.32:8080/job/Qraft/19/), of the same day on commit `f9b3403`, passed. It
+holds the move to `raftlog-core` 1.5.0, that fix, and two tests that place a connection exactly in and
+after the instant a gRPC server stops. It took 10 minutes 34 seconds.
+- Default build: 927 tests, every coverage gate met. End-to-end: 10. Docker and slow: 32.
+- Jenkins published 969 results, none failed or skipped.
+- The 141 archived log files hold 377 flagged ERROR events, counting copies. No ERROR event and no
+  uncaught exception is without a flag. The gRPC warning that the new test causes is flagged.
+
 No build ran between 2026-10-04 and 2026-10-10. In that time the `agent` directive of the
 `Jenkinsfile` had been renamed by mistake, which Jenkins would have refused; it was restored in
 `ce5890d` before build 4.

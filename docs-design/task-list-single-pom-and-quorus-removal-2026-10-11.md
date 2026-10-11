@@ -1,16 +1,16 @@
 # Task List: Single POM and Removal of the Quorus Leftovers
 
 **Date:** 2026-10-04
-**Last updated:** 2026-10-11 (Qraft moved to `raftlog-core` 1.5.0 and the test of the storage class removed, waiting for a Jenkins build; the file renamed to the date of its last change. On 2026-10-10: in the evening, Phase 6's open points closed and verified by Jenkins build 15: a Docker test runs every start command, the dashboard looked at and corrected, the Grafana errors fixed, `-Down` keeps the observability data, and RaftLog's interface given the compaction boundary, which waits for a release. Before that: Phase 6 applied, and verified by Jenkins build 6 except for its start commands and its dashboard: three unused log stacks, the load balancer, the demo scripts, and the hand-test data deleted, the start scripts reduced, and the kept observability stack corrected; then the recovery test that timed out on Jenkins given its own client profile. Phase 5 done and its exit met: the version source, then the configuration without a default document, as typed records, with one shared parsing helper; each verified on Jenkins; three third-party keywords that Phase 3A's sweep had renamed are restored; the file renamed to the date of its last change. On 2026-10-09: the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
+**Last updated:** 2026-10-11 (Qraft moved to `raftlog-core` 1.5.0 and the test of the storage class removed, verified by Jenkins build 19 with two tests of gRPC's shutdown window: Phase 6 is done; the other documents brought up to date with Phase 6, in Phase 8, and the other four task lists renamed with their links; the file renamed to the date of its last change. On 2026-10-10: in the evening, Phase 6's open points closed and verified by Jenkins build 15: a Docker test runs every start command, the dashboard looked at and corrected, the Grafana errors fixed, `-Down` keeps the observability data, and RaftLog's interface given the compaction boundary, which waits for a release. Before that: Phase 6 applied, and verified by Jenkins build 6 except for its start commands and its dashboard: three unused log stacks, the load balancer, the demo scripts, and the hand-test data deleted, the start scripts reduced, and the kept observability stack corrected; then the recovery test that timed out on Jenkins given its own client profile. Phase 5 done and its exit met: the version source, then the configuration without a default document, as typed records, with one shared parsing helper; each verified on Jenkins; three third-party keywords that Phase 3A's sweep had renamed are restored; the file renamed to the date of its last change. On 2026-10-09: the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
 **Status:** In progress. This is the current task list. It started on 2026-10-04 at the user's request, before the membership list's Step 4 close-out gate.
-**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 was done and its exit met on 2026-10-10: Jenkins build 4 verified its version source and build 5 the rest. Phase 6 was applied on 2026-10-10; Jenkins build 6 verified it on `d0275a7`. Its exit was open for the start commands run by hand and a look at the corrected dashboard on a running stack. Both were done on the evening of 2026-10-10, and Jenkins build 15 verified them on `da87cb3`: its exit is met for all but its one open task, which waits for a RaftLog release. Build 8 then failed on the recovery test and showed its cause, a kill during the follower's first snapshot; build 9 passed with the fix, on `122d739`. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
+**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 was done and its exit met on 2026-10-10: Jenkins build 4 verified its version source and build 5 the rest. Phase 6 was applied on 2026-10-10; Jenkins build 6 verified it on `d0275a7`. Its exit was open for the start commands run by hand and a look at the corrected dashboard on a running stack. Both were done on the evening of 2026-10-10, and Jenkins build 15 verified them on `da87cb3`: its exit was met for all but its one open task. That task was done on 2026-10-11 with `raftlog-core` 1.5.0, and Jenkins build 19 verified it on `f9b3403`: Phase 6 is done. Build 8 then failed on the recovery test and showed its cause, a kill during the follower's first snapshot; build 9 passed with the fix, on `122d739`. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
 **Last reviewed:** 2026-10-08, against the code at commit `9a4adf0`, with the other four task lists. The status table in section 4 and every item marked "review of 2026-10-08" come from that review. No build was run for it. The logs that the Phase 2A and Phase 3 records cite were written in another working tree and were not available, so their counts were checked for arithmetic only. The earlier review of 2026-10-05 was against `24beac3`; its items keep their date.
 **Order of work:**
 - The membership list's Step 4 close-out gate is the first task of Phase 7 here.
 - After this list, the membership list resumes at its Step 5, on the new layout, and runs to its end.
-- [`task-list-consul-style-client-2026-10-10.md`](task-list-consul-style-client-2026-10-10.md) follows the membership list. Decided 2026-10-05.
+- [`task-list-consul-style-client-2026-10-11.md`](task-list-consul-style-client-2026-10-11.md) follows the membership list. Decided 2026-10-05.
 
-**Related:** [`task-list-raft-membership-changes-2026-10-10.md`](task-list-raft-membership-changes-2026-10-10.md) (interrupted by this list), [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md)
+**Related:** [`task-list-raft-membership-changes-2026-10-11.md`](task-list-raft-membership-changes-2026-10-11.md) (interrupted by this list), [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md), section 2.4: inherited components must not remain without a clear role
 
 ## 1. Goal
@@ -23,7 +23,7 @@ runtime layer, or its unused tooling.
 
 1. **Client mode stays and becomes a full Consul-style client.** Decided
    2026-10-04, for VMs and bare metal. That work is
-   [`task-list-consul-style-client-2026-10-10.md`](task-list-consul-style-client-2026-10-10.md).
+   [`task-list-consul-style-client-2026-10-11.md`](task-list-consul-style-client-2026-10-11.md).
    This list removes only the client's Quorus-era node model.
 2. **One POM, one artifact.** The root `pom.xml` is the only POM and builds
    `target/qraft.jar`. Module boundaries become package boundaries, enforced by
@@ -87,9 +87,9 @@ rules and extracts from that run.
 | 3A. One word for each mode | Added and done 2026-10-09; verified the same day | 5 of 5 | `5a00975` |
 | 4. Node model and API | Done 2026-10-09, exit met; its four open points settled and its decisions confirmed by the user the same day | 7 of 7 | `e4bf00d` to `a6e7930` |
 | 5. Configuration and version | Done 2026-10-10, exit met | 6 of 6 | `693449e`, `c123ee9`, `12d365c`, `d4e1af8` |
-| 6. Docker and observability | Applied 2026-10-10, with the load balancer removed and the recovery test given its own client profile, both at the user's decision; verified by Jenkins build 6. The exit is open for the start commands run by hand and a look at the corrected dashboard. The gRPC warnings the audit found are flagged since build 8. Build 8 showed the cause of the recovery test's timeout, a kill during the follower's first snapshot; build 9 passed with the fix and with no unflagged error or stack trace. The server was then changed so that a kill in that window is survivable and a log compacted past its snapshot is refused; build 11 passed with that change. On the evening of 2026-10-10 the start commands got a test that Jenkins runs, the dashboard was looked at and corrected, the Grafana errors were fixed, and `-Down` keeps the observability data; build 14 failed on two defects the new test found, and build 15 passed with their fixes. The exit is met for all but the compaction-boundary task, which waits for a RaftLog release | 12 of 13 | `ce5890d`, `22a46a9`, `85bb120`, `d0275a7`, `cbb93f4`, `362b507`, `122d739`, `aa0d876`, `f2119d3`, `29fe503`, `10de474`, `0f6c497`, `da87cb3` |
+| 6. Docker and observability | Applied 2026-10-10, with the load balancer removed and the recovery test given its own client profile, both at the user's decision; verified by Jenkins build 6. The exit is open for the start commands run by hand and a look at the corrected dashboard. The gRPC warnings the audit found are flagged since build 8. Build 8 showed the cause of the recovery test's timeout, a kill during the follower's first snapshot; build 9 passed with the fix and with no unflagged error or stack trace. The server was then changed so that a kill in that window is survivable and a log compacted past its snapshot is refused; build 11 passed with that change. On the evening of 2026-10-10 the start commands got a test that Jenkins runs, the dashboard was looked at and corrected, the Grafana errors were fixed, and `-Down` keeps the observability data; build 14 failed on two defects the new test found, and build 15 passed with their fixes. The compaction-boundary task was done on 2026-10-11 with `raftlog-core` 1.5.0; build 18 failed on a teardown race in a gRPC test, and build 19 passed with its fix. Done, exit met | 13 of 13 | `ce5890d`, `22a46a9`, `85bb120`, `d0275a7`, `cbb93f4`, `362b507`, `122d739`, `aa0d876`, `f2119d3`, `29fe503`, `10de474`, `0f6c497`, `da87cb3`, `fac3696`, `f9b3403` |
 | 7. Async layer | Not started | 0 of 7 | |
-| 8. Documentation and close-out | Started early for Phases 1 and 2; Phase 3's names done with Phase 3; the documents of Phases 4 and 5 done as each ended | 2 of 6 | |
+| 8. Documentation and close-out | Started early for Phases 1 and 2; Phase 3's names done with Phase 3; the documents of Phases 4, 5, and 6 done as each ended | 2 of 6 | |
 
 ### Phase 0. Baseline
 
@@ -1918,7 +1918,7 @@ can show: the start commands run by hand, and a look at the dashboard.
       stack trace without a flag.
     - `docs/TEST-RESULTS.md` has the whole account; the runbook, the design
       document, and the testing rule are brought in line.
-- [ ] Read the log's compaction boundary through RaftLog's interface (added
+- [x] Read the log's compaction boundary through RaftLog's interface (added
   2026-10-10). `RaftPersistence.compactionBoundary` tests for the class
   `FileRaftStorage`, because `raftlog-core` 1.4.1 has `compactionBoundary()`
   on that class and not on the `RaftStorage` interface. Add the method to
@@ -1941,8 +1941,7 @@ can show: the start commands run by hand, and a look at the dashboard.
   reduce `RaftPersistence.compactionBoundary` to the call on the interface.
 
   Applied 2026-10-11, after the user released `raftlog-core` 1.5.0 to Maven
-  Central. Not yet built: it waits for a Jenkins build, and the box above
-  is ticked when that build passes.
+  Central. Jenkins build 19 verified it: see the end of this task.
   - 1.5.0 differs from 1.4.1 in its production code by this method alone:
     22 lines added in three files.
   - `raftlog.version` is 1.5.0, in `pom.xml`, the design's section 14.7,
@@ -2027,6 +2026,24 @@ can show: the start commands run by hand, and a look at the dashboard.
   - What it means for production is unchanged: the warning can appear on a
     server that is stopping, it costs one refused connection, and Qraft
     cannot prevent it from outside the library.
+
+  **Done 2026-10-11. Jenkins build 19, on `f9b3403`, passed.** It holds the
+  move to `raftlog-core` 1.5.0, the fix of the test that failed in build
+  18, and the two tests of the window.
+  - Default build: 927 tests, every coverage gate met. The 927 are the 925
+    before and the two new tests of `GrpcRaftServerTest`, which passed its
+    30. End-to-end: 10. Docker and slow: 32. Jenkins published 969 results,
+    none failed or skipped.
+  - The build compiled against `raftlog-core` 1.5.0. The two recovery
+    classes whose fixtures now pass the boundary on passed:
+    `RaftNodeInstalledSnapshotRealRecoveryTest` its 8 tests and
+    `RaftNodeRealSnapshotRecoveryTest` its 19.
+  - Its 141 archived log files hold 377 flagged ERROR events, counting
+    copies. No ERROR event and no uncaught exception is without a flag.
+    The gRPC warning appears twice, the one event in the Maven output and
+    in the application log, flagged both times.
+  - The observability containers logged the one Tempo line described
+    under build 14, followed by its recovery, and no other error line.
 - [x] Make the kept stack ask only for what a server publishes (added
   2026-10-10; applied the same day; seen working the same evening, see
   "The dashboard, looked at" below). Removing the
@@ -2100,8 +2117,8 @@ Jenkins build 9, on `122d739`, which holds everything of this phase, passed:
   flagged uncaught exception. No ERROR event, no uncaught exception, and no
   stack trace is without a flag.
 
-Still needed, as of the evening of 2026-10-10: the RaftLog release, for
-the compaction-boundary task. The Jenkins build of the changes recorded
+Nothing is still needed, as of 2026-10-11: the RaftLog release came that
+day, and Jenkins build 19 verified the compaction-boundary task. The Jenkins build of the changes recorded
 under "Those three points and the dashboard" below is done: build 15.
 
 Both points the exit named before are met: the commands are run by a test,
@@ -2314,7 +2331,8 @@ phase except the RaftLog release.
   Tempo line described above, in the stack with servers, followed by "Done
   replaying WAL". Grafana, Loki, Prometheus, and the collector logged none.
 
-**Exit met 2026-10-10,** for everything but the compaction-boundary task:
+**Exit met 2026-10-10,** for everything but the compaction-boundary task,
+which Jenkins build 19 closed on 2026-10-11, so that Phase 6 is done:
 `DockerDeploymentContractTest` and the Docker suite pass, and each
 remaining start command works, shown by a test on Jenkins for the shell
 scripts and by the same test on Windows for the PowerShell scripts.
@@ -2466,10 +2484,31 @@ What remains for this phase:
     Phase 3: the section names the files by mode, and its note that both
     modes write one log file is gone;
   - the names and removals of Phases 4 to 7, as each phase ends. Phase 4's
-    are in, as of 2026-10-09: see "Done early" above;
+    are in, as of 2026-10-09: see "Done early" above. Phase 6's are in, as
+    of 2026-10-11:
+    - `docker/README.md`: the start commands, `-Clean`, the port variable,
+      where a server writes its log, and when the jar is packaged;
+    - `TESTING.md`: the Docker suite's scope and time, the test of the
+      start commands, the check of the observability containers' error
+      lines, the definition for a library's warning, and the rule for a
+      test that stops a gRPC server;
+    - `JENKINS.md`: builds 14, 15, 18, and 19;
+    - the design: where the compaction index comes from (section 14.5),
+      `raftlog-core` 1.5.0 (section 14.7), and one scrape of each server
+      and the warning of a stopping gRPC server (section 18);
+    - `TEST-RESULTS.md`: where the compaction boundary comes from;
+    - the membership list, section 7: the record of RaftLog 1.5.0;
+    - `OPEN_SOURCE_USAGE.md`: `raftlog-core` 1.5.0.
+
+    Phase 7's remain;
   - the version source, in `OPEN_SOURCE_USAGE.md` if Phase 5 changes it.
+    Phase 5 did not change that file. Phase 6 did: see above.
 - [ ] Record the removals of Phases 4 to 7 in the feature validation and the
   Consul plan checklist. Phase 4's are recorded in both, as of 2026-10-09.
+  Phase 6's are recorded in both, as of 2026-10-11: a checklist entry in the
+  Consul plan, and in the feature validation a row for the deployment files
+  and a note on the row for metrics. Phase 5 removed settings and no
+  feature, so it has no entry. Phase 7's remain.
 - [x] Update the administrative interface's plan and task list for Phase 4:
   the plan's section 4.1, the list's read APIs, its reserved path segments,
   and the development proxy lose the routes Phase 4 removes: `/api/v1/clients`,

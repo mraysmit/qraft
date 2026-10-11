@@ -345,6 +345,13 @@ merged into one Maven project on 2026-10-04.
   host name and port, the job-system statuses, and the routes `/api/v1/clients*`,
   `/api/v1/info`, `/status`, and bare `/health`. A node's deregistration now
   removes its services and checks, as in Consul.
+- [x] Keep one observability stack and one set of start commands, each run by a
+  test (2026-10-10 and 2026-10-11, Phase 6 of the same list). Removed: the ELK,
+  Fluentd, and Promtail stacks, the nginx load balancer in front of the servers,
+  the logging demo scripts, the hand-test data, and the dashboard's panels for a
+  client metric that no server publishes. Kept: OpenTelemetry Collector, Tempo,
+  Prometheus, Loki, and Grafana. `DockerStartCommandsTest` runs every start
+  command and both observability stacks in the Docker suite.
 - [x] Make server readiness reflect recovery, fencing, draining, and leadership
   (feature validation item 2).
 - [ ] Complete the key/value store: tenant and namespace scoping, indexes,
@@ -358,7 +365,7 @@ merged into one Maven project on 2026-10-04.
 - [ ] Implement ACL tokens, policies, token validation, and audit events
   (phase 7; item 9).
 - [ ] Implement server membership change. Decided 2026-09-29, and in progress
-  in [`task-list-raft-membership-changes-2026-10-10.md`](task-list-raft-membership-changes-2026-10-10.md):
+  in [`task-list-raft-membership-changes-2026-10-11.md`](task-list-raft-membership-changes-2026-10-11.md):
   server IDs, the configuration in the log, and non-voter promotion are done.
 - [ ] Decide on and implement DNS discovery and persisted generated node
   identity (item 10).

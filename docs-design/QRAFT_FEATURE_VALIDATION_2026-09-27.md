@@ -44,7 +44,7 @@ Status key:
 | Raft | Election, replication, check-quorum, fencing | Done | `RaftNode*Test`, `RaftNodeCheckQuorumTest` |
 | Raft | Durable WAL, snapshots in every role, installation, recovery | Done | `RaftNodeFollowerLogTest`, `DockerDurableRestartTest`, `DockerClientRecoveryTest` |
 | Raft | Replica determinism; follower match index limited to verified entries | Done | `ReplicaDeterminismTest`, `RaftNodeFollowerLogTest` |
-| Raft | Adding or removing servers (membership change) | Partial | Updated 2026-10-02. Durable server IDs, the configuration in the replicated log, bootstrapping, and non-voter promotion are done (`RaftNodeServerIdentityTest`, `RaftNodeConfigurationChangeTest`, `RaftNodePromotionTest`). Joining, operator list and remove, and leader stickiness against disruptive servers are built and pass the default and Docker suites; mutation validation is outstanding (`RaftNodeMembershipTest`, `MembershipServiceTest`); failed-server cleanup and lost-quorum recovery are open. See [`task-list-raft-membership-changes-2026-10-10.md`](task-list-raft-membership-changes-2026-10-10.md) |
+| Raft | Adding or removing servers (membership change) | Partial | Updated 2026-10-02. Durable server IDs, the configuration in the replicated log, bootstrapping, and non-voter promotion are done (`RaftNodeServerIdentityTest`, `RaftNodeConfigurationChangeTest`, `RaftNodePromotionTest`). Joining, operator list and remove, and leader stickiness against disruptive servers are built and pass the default and Docker suites; mutation validation is outstanding (`RaftNodeMembershipTest`, `MembershipServiceTest`); failed-server cleanup and lost-quorum recovery are open. See [`task-list-raft-membership-changes-2026-10-11.md`](task-list-raft-membership-changes-2026-10-11.md) |
 | Catalog | Register and deregister through Raft; composite identity; idempotence | Done | `HttpApiServerTest`, `ClientEndToEndTest` |
 | Catalog | Catalog and health queries with deterministic ordering | Done | `ServiceCatalog` sorts names and instances |
 | Catalog | Registration and modification indexes on instances (design 7.5) | Missing | `ServiceInstance` has no index fields |
@@ -70,7 +70,8 @@ Status key:
 | Tenancy | Namespace lifecycle, validation, and isolation end to end | Missing | No namespace model. `qraft-tenant`, whose in-memory `NamespaceService` nothing used, was removed on 2026-10-04 (updated 2026-10-05) |
 | Security | Authentication, ACL tokens, policies, token middleware (Consul plan phase 7) | Missing | Trusted identity headers behind `HeaderRequestContext` only. One shared operator token (`server.operator.token`) guards Raft server removal, standing in for ACLs (updated 2026-10-02) |
 | Security | Audit events | Missing | — |
-| Operations | Prometheus metrics | Partial | Raft metrics only. The catalog, health-transition, request, and session metrics of design 18 are absent |
+| Operations | Prometheus metrics | Partial | Raft metrics only. The catalog, health-transition, request, and session metrics of design 18 are absent. Client mode publishes no metrics; the dashboard's panels for a `qraft_clients` metric that never existed were removed on 2026-10-10 (updated 2026-10-11) |
+| Operations | Deployment files: Compose clusters, start scripts, and one observability stack | Done | One server with a client, three and five servers, a network-test cluster, and OpenTelemetry Collector, Tempo, Prometheus, Loki, and Grafana, alone or with three servers. `DockerStartCommandsTest` runs every start command and both stacks. Removed on 2026-10-10: the ELK, Fluentd, and Promtail stacks, the nginx load balancer, the logging demo scripts, and the hand-test data (added 2026-10-11) |
 | Operations | Node and cluster status | Partial | `/raft/status` describes only the answering node. `GET /v1/operator/raft/configuration` lists the configured servers, with voter and leader flags (updated 2026-10-02). Still no reachability, lag, or quorum |
 | Operations | Health aggregation | Done | Derived service health; `?passing` filter |
 | Operations | Offline backup, corrupt-replica replacement, compatible-upgrade guidance | Done | [`RAFT_STORAGE_OPERATIONS.md`](../docs/RAFT_STORAGE_OPERATIONS.md); clarified 2026-10-03: lower-level legacy byte compatibility does not establish whole-node startup compatibility; an older backup cannot rejoin as the same voter |
@@ -142,11 +143,11 @@ need:
 9. **Security.** Authentication, ACL tokens and policies, and audit events.
    The token and ACL core is proposed, as of 2026-10-05, to come earlier,
    straight after the client:
-   [`task-list-acl-and-tokens-2026-10-10.md`](task-list-acl-and-tokens-2026-10-10.md).
+   [`task-list-acl-and-tokens-2026-10-11.md`](task-list-acl-and-tokens-2026-10-11.md).
 10. **Deferred until decided.** DNS discovery, and persisted generated node
     identity. Server membership change was decided on 2026-09-29 and is in
     progress in
-    [`task-list-raft-membership-changes-2026-10-10.md`](task-list-raft-membership-changes-2026-10-10.md).
+    [`task-list-raft-membership-changes-2026-10-11.md`](task-list-raft-membership-changes-2026-10-11.md).
 
 Items 3 to 5 complete the Consul plan's target feature set. Items 6 to 9 are
 the prerequisites of the interface's increments UI-2 to UI-6.

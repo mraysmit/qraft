@@ -6,7 +6,7 @@ and the full suites passed on 2026-10-02; its mutation evidence is outstanding
 (Step 4 record). Steps 1 to 3 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
-**Last updated:** 2026-10-10 (Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
+**Last updated:** 2026-10-11 (the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
 **Interrupted by:** [`task-list-single-pom-and-quorus-removal-2026-10-11.md`](task-list-single-pom-and-quorus-removal-2026-10-11.md),
 started 2026-10-04 before the Step 4 close-out gate. The gate's mutation evidence
 is recorded there, as the first task of its Phase 7. Step 5 resumes when that
@@ -14,7 +14,7 @@ list is archived, and this list then runs to its end before the Consul-style
 client list starts (decided 2026-10-05).
 **Predecessor:** [`task-list-test-suite-remediation-2026-09-27.md`](../docs/archive/task-list-test-suite-remediation-2026-09-27.md),
 archived 2026-10-02. Its packaged-artifact test waits for the admin interface.
-**Paused:** [`task-list-embedded-admin-interface-2026-10-10.md`](task-list-embedded-admin-interface-2026-10-10.md), after its Step 1
+**Paused:** [`task-list-embedded-admin-interface-2026-10-11.md`](task-list-embedded-admin-interface-2026-10-11.md), after its Step 1
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), principle 8 (section 3), sections 4.2, 14.4, 14.5 and 16
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
@@ -1030,6 +1030,28 @@ runtime behavior or new suite results:
 These were recorded in this list because it was the current list at the time.
 They were moved here from between the Step 4 records on 2026-10-05; their
 text is otherwise unchanged.
+
+### RaftLog 1.5.0 (2026-10-11)
+
+Recorded here beside the upgrade before it. The work is Phase 6 of
+[`task-list-single-pom-and-quorus-removal-2026-10-11.md`](task-list-single-pom-and-quorus-removal-2026-10-11.md),
+which has the whole record.
+
+- **Change.** The root POM pins `raftlog.version` 1.5.0, up from 1.4.1. The
+  WAL and metadata formats are unchanged. Design section 14.7 names the new
+  version.
+- **1.5.0 against Qraft's use of it.** Its production code differs from 1.4.1
+  by one addition: `compactionBoundary()` on the `RaftStorage` interface, as a
+  default method that answers 0, which `FileRaftStorage` overrides with the
+  method it already had. Nothing Qraft called has changed.
+- **What Qraft does with it.** `RaftPersistence.compactionBoundary` calls the
+  interface; its test of the class `FileRaftStorage` is gone. This is in the
+  `raft` package and not in `RaftNode`, so the source that the Step 4 gate's
+  mutation evidence is taken against changes in that one method.
+- **Verified.** Jenkins build 19, on `f9b3403`: 927 default tests with every
+  coverage gate met, 10 end-to-end, 32 Docker and slow, and no ERROR event or
+  uncaught exception without a flag in its 141 log files. The real-storage
+  recovery tests are among them.
 
 ### RaftLog 1.4.1 (2026-10-02)
 

@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-10-10 (recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
+**Last updated:** 2026-10-11 (section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
 
 ## 1. Purpose
 
@@ -265,7 +265,7 @@ Server mode currently owns:
     Every new leader appends a no-op so an idle cluster can commit an entry
     in that leader's term before changing membership.
   - Steps 5 to 8 of
-    [`task-list-raft-membership-changes-2026-10-10.md`](task-list-raft-membership-changes-2026-10-10.md)
+    [`task-list-raft-membership-changes-2026-10-11.md`](task-list-raft-membership-changes-2026-10-11.md)
     cover automatic removal of failed servers, further disruptive-server
     validation, recovery from lost quorum, and container scenarios.
     Step 5's configuration and removal limits are a planned contract, not
@@ -1534,10 +1534,13 @@ assuming that every WAL begins at index one.
   larger cluster in that state started empty, with its term and vote kept,
   and a server with an older snapshot started with the entries between
   missing.
-- The compaction index comes from RaftLog's file storage. RaftLog's storage
-  interface does not expose it yet, so `RaftPersistence` tests for the class.
-  Another implementation reports none and is not checked. Adding the method
-  to the interface is a change to RaftLog.
+- The compaction index comes from `compactionBoundary()` of RaftLog's storage
+  interface, which `raftlog-core` has had since 1.5.0. Its file storage
+  reports the index it recorded. The interface's default answers 0, for a
+  storage that never compacts, so an implementation that compacts must
+  override it to be checked. Until 2026-10-11 `RaftPersistence` tested for
+  the class of the file storage, because the interface did not have the
+  method.
 
 Restart recovery assumes the server's last durable state. An offline copy that
 predates later participation cannot replace that state under the same voter ID:
@@ -1868,6 +1871,21 @@ transition that ran before it supplies that context.
 Metrics avoid unbounded labels such as raw service IDs, keys, request IDs, or
 error messages.
 
+A server publishes its metrics on `server.telemetry.prometheusPort`, and
+Prometheus scrapes that port. The OpenTelemetry collector receives a server's
+traces and logs and scrapes nothing: a collector that also scraped the servers
+stored every server's metrics twice, and the dashboard counted six nodes for
+three servers until 2026-10-10.
+
+A server that is stopping can log one warning that is not Qraft's: Netty's
+"Failed to initialize a channel", with an `IllegalReferenceCountException`.
+gRPC's server releases its shared resources and then marks itself terminated.
+A peer's connection that a worker thread prepares between those two steps is
+closed with this warning; one prepared later is closed without it. The cost is
+one refused connection to a server that was stopping anyway, and Qraft cannot
+close the window from outside the library. Two tests of `GrpcRaftServerTest`
+place a connection in the window and after it.
+
 ## 19. Test strategy
 
 Development follows red-green-refactor in small behavioral increments.
@@ -1934,7 +1952,7 @@ not expose the administrative routes.
 
 Current progress, the active tranche's detailed steps, and the backlog are
 tracked in the current dated task list in `docs-design/`
-([`task-list-raft-membership-changes-2026-10-10.md`](task-list-raft-membership-changes-2026-10-10.md);
+([`task-list-raft-membership-changes-2026-10-11.md`](task-list-raft-membership-changes-2026-10-11.md);
 its predecessor, [`task-list-test-suite-remediation-2026-09-27.md`](../docs/archive/task-list-test-suite-remediation-2026-09-27.md),
 was archived on 2026-10-02 with its packaged-artifact test carried forward; the
 administrative interface list is paused, see [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md)).
@@ -2099,7 +2117,7 @@ Evidence as of 2026-09-27, except where a row gives a later date:
   primary client behavior.
 - Whether the server can trust a caller's claim to a node. Proposed 2026-10-05,
   not yet decided: ACL tokens on Consul's model, in
-  [`task-list-acl-and-tokens-2026-10-10.md`](task-list-acl-and-tokens-2026-10-10.md).
+  [`task-list-acl-and-tokens-2026-10-11.md`](task-list-acl-and-tokens-2026-10-11.md).
   Until it is built, any caller can claim any node name and node ID.
 - How long legacy command and snapshot readers remain supported.
 
@@ -2112,7 +2130,7 @@ implementations do, and the opinion recorded before the decision.
 Resolved on 2026-10-04, recorded here on 2026-10-05: how a node's identity is
 made and kept, which was half of the open item "how client identity is
 established". It is decision 8 of
-[`task-list-consul-style-client-2026-10-10.md`](task-list-consul-style-client-2026-10-10.md)
+[`task-list-consul-style-client-2026-10-11.md`](task-list-consul-style-client-2026-10-11.md)
 and is not yet built; section 7.3 changes when it is. It follows Consul: a node
 ID generated at first start and kept in the client's data directory, a node name
 that defaults to the host name, a catalog keyed by name, and a registration
