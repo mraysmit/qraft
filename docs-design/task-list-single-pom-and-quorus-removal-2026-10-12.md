@@ -1,16 +1,16 @@
 # Task List: Single POM and Removal of the Quorus Leftovers
 
 **Date:** 2026-10-04
-**Last updated:** 2026-10-11 (PIT mutation testing tried for Phase 7's first task and put on ice by the owner; the mutation rule then removed by the owner from every task list, and that first task, the membership list's Step 4 gate, closed; reviewed at the user's request, with three stale passages corrected, and the review's four questions answered: Phase 3's last task dropped, and the gRPC warning added to the operations runbook; Qraft moved to `raftlog-core` 1.5.0 and the test of the storage class removed, verified by Jenkins build 19 with two tests of gRPC's shutdown window: Phase 6 is done; the other documents brought up to date with Phase 6, in Phase 8, and the other four task lists renamed with their links; the file renamed to the date of its last change. On 2026-10-10: in the evening, Phase 6's open points closed and verified by Jenkins build 15: a Docker test runs every start command, the dashboard looked at and corrected, the Grafana errors fixed, `-Down` keeps the observability data, and RaftLog's interface given the compaction boundary, which waits for a release. Before that: Phase 6 applied, and verified by Jenkins build 6 except for its start commands and its dashboard: three unused log stacks, the load balancer, the demo scripts, and the hand-test data deleted, the start scripts reduced, and the kept observability stack corrected; then the recovery test that timed out on Jenkins given its own client profile. Phase 5 done and its exit met: the version source, then the configuration without a default document, as typed records, with one shared parsing helper; each verified on Jenkins; three third-party keywords that Phase 3A's sweep had renamed are restored; the file renamed to the date of its last change. On 2026-10-09: the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
+**Last updated:** 2026-10-12 (Phase 7's second task started: the first slice, `RaftStorageFactory`, returns a plain future; the test side sized and the phase kept in this list; the record of Phase 7's first task put in order, with four passages removed or reworded that still described its gate as open; the file renamed to the date of its last change. On 2026-10-11: PIT mutation testing tried for Phase 7's first task and put on ice by the owner; the mutation rule then removed by the owner from every task list, and that first task, the membership list's Step 4 gate, closed; reviewed at the user's request, with three stale passages corrected, and the review's four questions answered: Phase 3's last task dropped, and the gRPC warning added to the operations runbook; Qraft moved to `raftlog-core` 1.5.0 and the test of the storage class removed, verified by Jenkins build 19 with two tests of gRPC's shutdown window: Phase 6 is done; the other documents brought up to date with Phase 6, in Phase 8, and the other four task lists renamed with their links; the file renamed to the date of its last change. On 2026-10-10: in the evening, Phase 6's open points closed and verified by Jenkins build 15: a Docker test runs every start command, the dashboard looked at and corrected, the Grafana errors fixed, `-Down` keeps the observability data, and RaftLog's interface given the compaction boundary, which waits for a release. Before that: Phase 6 applied, and verified by Jenkins build 6 except for its start commands and its dashboard: three unused log stacks, the load balancer, the demo scripts, and the hand-test data deleted, the start scripts reduced, and the kept observability stack corrected; then the recovery test that timed out on Jenkins given its own client profile. Phase 5 done and its exit met: the version source, then the configuration without a default document, as typed records, with one shared parsing helper; each verified on Jenkins; three third-party keywords that Phase 3A's sweep had renamed are restored; the file renamed to the date of its last change. On 2026-10-09: the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
 **Status:** In progress. This is the current task list. It started on 2026-10-04 at the user's request, before the membership list's Step 4 close-out gate.
-**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 was done and its exit met on 2026-10-10: Jenkins build 4 verified its version source and build 5 the rest. Phase 6 was applied on 2026-10-10; Jenkins build 6 verified it on `d0275a7`. Build 8 then failed on the recovery test and showed its cause, a kill during the follower's first snapshot; build 9 passed with the fix, on `122d739`. Its exit was open for the start commands run by hand and a look at the corrected dashboard on a running stack. Both were done on the evening of 2026-10-10, and Jenkins build 15 verified them on `da87cb3`: its exit was met for all but its one open task. That task was done on 2026-10-11 with `raftlog-core` 1.5.0, and Jenkins build 19 verified it on `f9b3403`: Phase 6 is done. **Next: Phase 7's second task.** Its first, the membership list's Step 4 gate, was closed on 2026-10-11: the gate had waited on mutation evidence, PIT was tried for it and put on ice by the owner, and the owner then removed the mutation rule from every task list. Six tasks of Phase 7 and four of Phase 8 are open. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
+**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 was done and its exit met on 2026-10-10: Jenkins build 4 verified its version source and build 5 the rest. Phase 6 was applied on 2026-10-10; Jenkins build 6 verified it on `d0275a7`. Build 8 then failed on the recovery test and showed its cause, a kill during the follower's first snapshot; build 9 passed with the fix, on `122d739`. Its exit was open for the start commands run by hand and a look at the corrected dashboard on a running stack. Both were done on the evening of 2026-10-10, and Jenkins build 15 verified them on `da87cb3`: its exit was met for all but its one open task. That task was done on 2026-10-11 with `raftlog-core` 1.5.0, and Jenkins build 19 verified it on `f9b3403`: Phase 6 is done. **Next: Phase 7's second task.** Its first, the membership list's Step 4 gate, was closed on 2026-10-11: the gate had waited on mutation evidence, PIT was tried for it and put on ice by the owner, and the owner then removed the mutation rule from every task list. The second task, the replacement of the wrapper future types, started on 2026-10-12 in slices: the first, `RaftStorageFactory`, is changed and waits for Jenkins. The test side was sized that day, and the phase stays in this list. Five tasks of Phase 7 and four of Phase 8 are open. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
 **Last reviewed:** 2026-10-11, against the code at commit `f9b3403`, this list alone: see "Review of 2026-10-11" at the head of section 4. Before that: 2026-10-08, against the code at commit `9a4adf0`, with the other four task lists. The status table in section 4 and every item marked "review of 2026-10-08" come from that review. No build was run for it. The logs that the Phase 2A and Phase 3 records cite were written in another working tree and were not available, so their counts were checked for arithmetic only. The earlier review of 2026-10-05 was against `24beac3`; its items keep their date.
 **Order of work:**
 - The membership list's Step 4 close-out gate is the first task of Phase 7 here.
 - After this list, the membership list resumes at its Step 5, on the new layout, and runs to its end.
-- [`task-list-consul-style-client-2026-10-11.md`](task-list-consul-style-client-2026-10-11.md) follows the membership list. Decided 2026-10-05.
+- [`task-list-consul-style-client-2026-10-12.md`](task-list-consul-style-client-2026-10-12.md) follows the membership list. Decided 2026-10-05.
 
-**Related:** [`task-list-raft-membership-changes-2026-10-11.md`](task-list-raft-membership-changes-2026-10-11.md) (interrupted by this list), [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md)
+**Related:** [`task-list-raft-membership-changes-2026-10-12.md`](task-list-raft-membership-changes-2026-10-12.md) (interrupted by this list), [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md), section 2.4: inherited components must not remain without a clear role
 
 ## 1. Goal
@@ -23,7 +23,7 @@ runtime layer, or its unused tooling.
 
 1. **Client mode stays and becomes a full Consul-style client.** Decided
    2026-10-04, for VMs and bare metal. That work is
-   [`task-list-consul-style-client-2026-10-11.md`](task-list-consul-style-client-2026-10-11.md).
+   [`task-list-consul-style-client-2026-10-12.md`](task-list-consul-style-client-2026-10-12.md).
    This list removes only the client's Quorus-era node model.
 2. **One POM, one artifact.** The root `pom.xml` is the only POM and builds
    `target/qraft.jar`. Module boundaries become package boundaries, enforced by
@@ -91,7 +91,7 @@ rules and extracts from that run.
 | 4. Node model and API | Done 2026-10-09, exit met; its four open points settled and its decisions confirmed by the user the same day | 7 of 7 | `e4bf00d` to `a6e7930` |
 | 5. Configuration and version | Done 2026-10-10, exit met | 6 of 6 | `693449e`, `c123ee9`, `12d365c`, `d4e1af8` |
 | 6. Docker and observability | Applied 2026-10-10, with the load balancer removed and the recovery test given its own client profile, both at the user's decision; verified by Jenkins build 6. The exit is open for the start commands run by hand and a look at the corrected dashboard. The gRPC warnings the audit found are flagged since build 8. Build 8 showed the cause of the recovery test's timeout, a kill during the follower's first snapshot; build 9 passed with the fix and with no unflagged error or stack trace. The server was then changed so that a kill in that window is survivable and a log compacted past its snapshot is refused; build 11 passed with that change. On the evening of 2026-10-10 the start commands got a test that Jenkins runs, the dashboard was looked at and corrected, the Grafana errors were fixed, and `-Down` keeps the observability data; build 14 failed on two defects the new test found, and build 15 passed with their fixes. The compaction-boundary task was done on 2026-10-11 with `raftlog-core` 1.5.0; build 18 failed on a teardown race in a gRPC test, and build 19 passed with its fix. Done, exit met | 13 of 13 | `ce5890d`, `22a46a9`, `85bb120`, `d0275a7`, `cbb93f4`, `362b507`, `122d739`, `aa0d876`, `f2119d3`, `29fe503`, `10de474`, `0f6c497`, `da87cb3`, `fac3696`, `f9b3403` |
-| 7. Async layer | Its first task, the membership list's Step 4 gate, closed on 2026-10-11 without mutation evidence: the owner put PIT on ice and removed the mutation rule that day. No code of this phase is changed yet | 1 of 7 | |
+| 7. Async layer | Its first task, the membership list's Step 4 gate, closed on 2026-10-11 without mutation evidence: the owner put PIT on ice and removed the mutation rule that day. The test side was sized on 2026-10-12 and the phase stays in this list. The replacement of the future types started that day, in slices: `RaftStorageFactory` is changed, checked locally with its tests, and not yet verified on Jenkins | 2 of 7 | |
 | 8. Documentation and close-out | Started early for Phases 1 and 2; Phase 3's names done with Phase 3; the documents of Phases 4, 5, and 6 done as each ended | 2 of 6 | |
 
 **Review of 2026-10-11,** at the user's request, of this list alone, against
@@ -2454,8 +2454,10 @@ question was not open.
   under the rules of that list's "Step 4 close-out gate". The tests it
   validates are then the regression net for the changes to `RaftNode` below.
 
-  Prepared 2026-10-11; not yet run. Decided by the user that day, in two
-  steps: the evidence comes from Jenkins, and it comes from PIT.
+  Record of 2026-10-11. PIT was prepared for this task and no mutant was
+  ever run to a result; the task was closed without it, as the last two
+  entries say. Decided by the user that day, in two steps, before that: the
+  evidence comes from Jenkins, and it comes from PIT.
   - **PIT, configured as the user's guidance of that day lays it out.**
     `pom.xml` has a profile, `mutation-testing`, with the `pitest-maven`
     plugin, 1.30.0, and its JUnit 5 plugin. PIT is bound to no phase, so no
@@ -2527,6 +2529,34 @@ question was not open.
   - **Not proposed:** `RaftNode`, and `ClusterBootstrap` until the batches
     of `MembershipService` are run and reviewed. A batch is run and
     measured, and its survivors reviewed, before the next.
+  - **On Jenkins:** the `Jenkinsfile` has a parameter, `MUTATION_TESTING`,
+    with the values `off`, `dry-run`, and `run`. With the last two the job
+    runs PIT instead of the three suites and archives its report under
+    `reports/pit/`. `docs/TESTING.md` and `docs/JENKINS.md` describe it.
+  - **My first PIT configuration was wrong, and is replaced.** It put the
+    plugin in the main build, restricted PIT to 13 test classes that I had
+    chosen, which would have shown as survivors the mutants that other
+    tests kill, and named the target classes through a property. It also
+    named `RaftNode*`, which takes `RaftNodeMode` as a fourth class; the
+    profile now names `RaftNode` and its nested classes.
+  - **The order of work that was planned,** from the user's guidance: the
+    dry run on Jenkins; confirm that the three classes and their tests are
+    found; the full analysis; review each surviving and uncovered safety
+    check; record which are real gaps, equivalent mutants, or irrelevant;
+    then decide whether a threshold would be useful. It ended at the full
+    analysis.
+  - **How the gate was to be closed,** before the rule was removed. The
+    user's rule, given that day: PIT's mutants should mostly be killed, and
+    that result is the evidence. A survivor is a prompt for review, not an
+    instruction to add a test; some are equivalent or irrelevant and are
+    not chased to raise a score. So the survivors in the guards this gate
+    names were to be read with the user, each with a recorded judgement: a
+    missing test, equivalent, or not worth guarding.
+  - **Withdrawn the same day.** I had first written a driver of my own with
+    a hand-written list of 25 mutants. It was a custom tool where a standard
+    one exists, I first put it in a folder of its own outside the Maven
+    tree, and it failed the build on any survivor. The user rejected it. It
+    is deleted, and nothing of it is in the repository.
   - **PIT put on ice by the user, 2026-10-11:** "let put this whole pit
     thing on ice and leave it until much later. I see zero value at the
     moment ... The test coverage in QRaft is excellent which makes me
@@ -2543,51 +2573,81 @@ question was not open.
     is closed there. No mutation evidence was produced for it. What stands
     behind the tests that the rest of this phase relies on is the suites:
     Jenkins build 21, on `e3cf808`, with 969 results and none failed.
-  - **The gate is still open.**
-  - **No thresholds yet.** The first runs establish the baseline.
-  - **On Jenkins:** the `Jenkinsfile` has a parameter, `MUTATION_TESTING`,
-    with the values `off`, `dry-run`, and `run`. With the last two the job
-    runs PIT instead of the three suites and archives its report under
-    `reports/pit/`. `docs/TESTING.md` and `docs/JENKINS.md` describe it.
-  - **My first PIT configuration was wrong, and is replaced.** It put the
-    plugin in the main build, restricted PIT to 13 test classes that I had
-    chosen, which would have shown as survivors the mutants that other
-    tests kill, and named the target classes through a property. It also
-    named `RaftNode*`, which takes `RaftNodeMode` as a fourth class; the
-    profile now names `RaftNode` and its nested classes.
-  - **The order of work,** from the user's guidance: the dry run on
-    Jenkins; confirm that the three classes and their tests are found; the
-    full analysis; review each surviving and uncovered safety check; record
-    which are real gaps, equivalent mutants, or irrelevant; then decide
-    whether a threshold would be useful.
-  - **How the gate is closed.** The user's rule, given that day: PIT's
-    mutants should mostly be killed, and that result is the evidence. A
-    survivor is a prompt for review, not an instruction to add a test; some
-    are equivalent or irrelevant and are not chased to raise a score. So
-    the survivors in the guards this gate names are read with the user, and
-    each gets a recorded judgement: a missing test, equivalent, or not
-    worth guarding.
-  - **Withdrawn the same day.** I had first written a driver of my own with
-    a hand-written list of 25 mutants. It was a custom tool where a standard
-    one exists, I first put it in a folder of its own outside the Maven
-    tree, and it failed the build on any survivor. The user rejected it. It
-    is deleted, and nothing of it is in the repository.
-  - **Not known yet:** whether PIT works with JDK 27 and with the suite's
-    check of unflagged errors, and how long it takes over `RaftNode`, which
-    has about 3,900 lines. The first Jenkins run is a dry run, which
-    answers the first question without running tests against the mutants.
 - [ ] Replace `common.async.Future`, `Promise`, and `AsyncResult` with
   `CompletableFuture` and `CompletionStage` (11 production files import
   them, plus the `common.async` package itself; counted again on 2026-10-08).
+
+  Started 2026-10-12, in slices, smallest first, at the user's word. One
+  slice of this task is done; ten production files still import the types.
+  - **What the wrapper does that a plain future does not,** read from
+    `Future` that day. Each slice keeps these, with a test first where the
+    slice touches one:
+    - `recover`, `otherwise`, `onFailure`, and `cause()` hand over the
+      failure itself, without a `CompletionException` around it;
+    - `onSuccess` reports a callback that throws to the thread's
+      uncaught-exception handler;
+    - `onSuccess`, `onFailure`, and `onComplete` return the future they
+      were called on, not a dependent stage;
+    - `failedFuture(String)` and `Promise.fail(String)` make an
+      `IllegalStateException`.
+
+    Callbacks already run where a plain future runs them: the wrapper
+    holds a `CompletableFuture` and adds no dispatch.
+  - **`Completions.unwrap`,** new in `common.concurrent`, reads a failure
+    without its `CompletionException`, as the wrapper did. It is one static
+    method, with `CompletionsTest`, 4 tests.
+  - **Slice 1, `RaftStorageFactory`.** `createDurable` returns a
+    `CompletableFuture`, which it fails directly, so a callback on it sees
+    the storage failure itself. A close that throws, and not only one that
+    fails its future, is now suppressed under the opening failure.
+    - Its caller in production, `QraftServerService`, converts the result
+      back to the wrapper type until its own slice.
+    - In the tests, `RaftAwaitHelper` and `ManualRaftClusterFixture` each
+      got an `await` for a `CompletionStage`, beside the one for the
+      wrapper; `HttpApiServerTest` and `RaftNodeTest` lost the conversion.
+  - **RED, 2026-10-12,** a small check run locally in one visible console.
+    The new `RaftStorageFactoryTest`, against the unchanged factory, ran 2
+    tests with 1 failure: a callback on the returned stage got
+    `CompletionException` where `FileRaftStorage.StorageException` was
+    expected (`logs/qraft-async-slice1-red-2026-10-12_15-19-04-036.log`).
+    The second test, that a failed open leaves the directory to its owner,
+    passed at once.
+  - **GREEN, 2026-10-12,** the same way: `RaftStorageFactoryTest`,
+    `CompletionsTest`, `PackageDependencyTest`, `ClusterBootstrapTest`, and
+    `RaftNodeRealStorageRecoveryTest` ran 30 tests with no failures
+    (`logs/qraft-async-slice1-green-2026-10-12_15-20-46-808.log`). The run
+    wrote four logs, and all four were read: six ERROR headers, every one
+    flagged, three stack traces, each under a flagged header, and no
+    unflagged error.
+  - **Not verified yet.** The build and the three suites have not run on
+    this change. `HttpApiServerTest`, `RaftNodeTest`,
+    `RaftNodeConfigurationTest`, and the two other recovery classes call
+    the factory and were compiled, not run. Jenkins decides, once the
+    change is pushed.
+  - **Next slices, in order:** `ClusterBootstrap`, then `MembershipService`,
+    which import `Future` alone. `RaftTransport` also imports it alone, but
+    every transport and `RaftNode` implement or call it, so it goes with
+    them.
 - [ ] Replace `JavaRuntime` (an emulated event loop) and `WorkerExecutor` with
   explicitly owned executors: the Raft state loop and a bounded
   virtual-thread pool. Keep the `CallerContext` MDC and OpenTelemetry propagation.
 - [ ] Replace the `JavaTestContextHelper` and `JavaRuntimeExtensionHelper` test helpers
   with plain futures and bounded waits.
-- [ ] Size the test side before starting (review of 2026-10-05). 56 test
+- [x] Size the test side before starting (review of 2026-10-05). 56 test
   files import the async types, against 3 that use the two helpers above.
   They include every hand-written transport and Raft fixture. Decide then
   whether this phase moves to its own list, as decision 5 allows.
+
+  Done 2026-10-12, from a search of the code; the figures are counts of
+  lines and are approximate.
+  - Still 56 test files, and 3 that use the two helpers.
+  - About 173 lines call `toCompletionStage()`, and lose the call when the
+    method they wait on returns a plain future.
+  - The fixtures and transports that make futures need real edits: about
+    45 lines with `succeededFuture`, 44 with `failedFuture`, and 22 with
+    `Promise.promise`.
+  - **Decided by the user that day: the phase stays in this list.** The
+    production side is 11 files and the wrapper is thin.
 - [ ] Run the changed concurrency tests five times consecutively.
 - [ ] Have a fenced server say once why it is fenced (decided 2026-10-09, in
   the review of Phase 4's open points).

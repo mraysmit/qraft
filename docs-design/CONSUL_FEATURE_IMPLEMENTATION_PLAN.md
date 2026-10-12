@@ -340,7 +340,7 @@ merged into one Maven project on 2026-10-04.
 - [x] Remove the job-system concepts from the active build.
 - [x] Replace the inherited node model with a Consul-shaped node, and move the node
   routes to the catalog's write paths (2026-10-09, Phase 4 of
-  [`task-list-single-pom-and-quorus-removal-2026-10-11.md`](task-list-single-pom-and-quorus-removal-2026-10-11.md)).
+  [`task-list-single-pom-and-quorus-removal-2026-10-12.md`](task-list-single-pom-and-quorus-removal-2026-10-12.md)).
   Removed with it: a node's capabilities and the command that replaced them, its
   host name and port, the job-system statuses, and the routes `/api/v1/clients*`,
   `/api/v1/info`, `/status`, and bare `/health`. A node's deregistration now
@@ -365,7 +365,7 @@ merged into one Maven project on 2026-10-04.
 - [ ] Implement ACL tokens, policies, token validation, and audit events
   (phase 7; item 9).
 - [ ] Implement server membership change. Decided 2026-09-29, and in progress
-  in [`task-list-raft-membership-changes-2026-10-11.md`](task-list-raft-membership-changes-2026-10-11.md):
+  in [`task-list-raft-membership-changes-2026-10-12.md`](task-list-raft-membership-changes-2026-10-12.md):
   server IDs, the configuration in the log, and non-voter promotion are done.
 - [ ] Decide on and implement DNS discovery and persisted generated node
   identity (item 10).

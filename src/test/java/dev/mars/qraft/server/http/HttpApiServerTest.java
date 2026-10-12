@@ -884,7 +884,7 @@ class HttpApiServerTest {
         runtime = JavaRuntime.create();
         QraftStateStore store = new QraftStateStore();
         RaftStorageFactory.DurableStorage durable = RaftStorageFactory
-                .createDurable(directory, true).toCompletionStage().toCompletableFuture()
+                .createDurable(directory, true)
                 .get(10, TimeUnit.SECONDS);
         RaftStorage ambiguousStorage = new AmbiguousAppendStorageFixture(durable.wal());
         node = RaftNode.builder()
@@ -919,7 +919,7 @@ class HttpApiServerTest {
         IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.WAL_AMBIGUOUS_CORRUPTION, 1);
         IntentionalErrorsHelper.expect(dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_RECOVERY_AMBIGUOUS_CORRUPTION, 2);
         RaftStorageFactory.DurableStorage writer = RaftStorageFactory
-                .createDurable(directory, true).toCompletionStage().toCompletableFuture()
+                .createDurable(directory, true)
                 .get(10, TimeUnit.SECONDS);
         writer.wal().appendEntries(List.of(new RaftStorage.LogEntryData(
                 1, 1, new byte[]{1, 2, 3}))).join();
@@ -934,7 +934,7 @@ class HttpApiServerTest {
         runtime = JavaRuntime.create();
         QraftStateStore store = new QraftStateStore();
         RaftStorageFactory.DurableStorage reopened = RaftStorageFactory
-                .createDurable(directory, true).toCompletionStage().toCompletableFuture()
+                .createDurable(directory, true)
                 .get(10, TimeUnit.SECONDS);
         node = RaftNode.builder()
                 .runtime(runtime).nodeId("corrupt-node").clusterNodes(Set.of("corrupt-node"))
@@ -1463,7 +1463,7 @@ class HttpApiServerTest {
         runtime = JavaRuntime.create();
         QraftStateStore store = new QraftStateStore();
         RaftStorageFactory.DurableStorage durable = RaftStorageFactory
-                .createDurable(directory, true).toCompletionStage().toCompletableFuture()
+                .createDurable(directory, true)
                 .get(10, TimeUnit.SECONDS);
         GatedAppendStorageFixture gatedWal = new GatedAppendStorageFixture(durable.wal());
         node = RaftNode.builder()

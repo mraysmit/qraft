@@ -133,7 +133,7 @@ public class QraftServerService {
                         "Unsupported Raft storage type '" + storageType + "'; only the external WAL is supported"));
                 return;
             }
-            RaftStorageFactory.createDurable(storagePath, fsyncEnabled)
+            Future.fromCompletionStage(RaftStorageFactory.createDurable(storagePath, fsyncEnabled))
                 .onSuccess(storage -> {
                     this.raftStorage = storage;
                     continueStartup(startPromise, nodeId, raftPort, apiGrpcPort, clusterNodeIds,

@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -225,6 +226,11 @@ public final class ManualRaftClusterFixture implements AutoCloseable {
     /** Waits for {@code future}; the bound only diagnoses a hang. */
     public static <T> T await(Future<T> future) throws Exception {
         return future.toCompletionStage().toCompletableFuture().get(WAIT_SECONDS, TimeUnit.SECONDS);
+    }
+
+    /** Waits for {@code stage}; the bound only diagnoses a hang. */
+    public static <T> T await(CompletionStage<T> stage) throws Exception {
+        return stage.toCompletableFuture().get(WAIT_SECONDS, TimeUnit.SECONDS);
     }
 
     /** Stops every node built here, reporting the first failure with the others suppressed. */

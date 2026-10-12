@@ -9,7 +9,7 @@
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
 This list is paused; the current task list is
-[`task-list-single-pom-and-quorus-removal-2026-10-11.md`](task-list-single-pom-and-quorus-removal-2026-10-11.md).
+[`task-list-single-pom-and-quorus-removal-2026-10-12.md`](task-list-single-pom-and-quorus-removal-2026-10-12.md).
 When this list's work is complete, add a completion summary and move this file
 to `docs/archive/`.
 

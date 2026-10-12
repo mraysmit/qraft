@@ -89,7 +89,7 @@ recovery case remained red:
 timed out after 90 seconds while waiting for the restarted follower to install and expose the leader's
 snapshot state. This is a test/product integration result rather than a Jenkins configuration failure.
 Finding its cause is a task in Phase 6 of
-[the single-POM task list](../docs-design/task-list-single-pom-and-quorus-removal-2026-10-11.md).
+[the single-POM task list](../docs-design/task-list-single-pom-and-quorus-removal-2026-10-12.md).
 It was analysed on 2026-10-10. This build archived no container logs, so its cause cannot be proven
 from it. Build 8 failed the same way with the logs kept: the test had killed the follower while it wrote
 its first snapshot, and a server then refused to start on an unpublished first snapshot, by design. An earlier

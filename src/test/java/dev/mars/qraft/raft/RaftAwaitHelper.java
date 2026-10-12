@@ -18,9 +18,11 @@ package dev.mars.qraft.raft;
 
 import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.concurrent.Deadlines;
 
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -46,6 +48,11 @@ public final class RaftAwaitHelper {
     /** Waits up to {@code bound} for {@code future}; use a bound longer than any wait the future itself holds. */
     public static <T> T await(Future<T> future, Duration bound) {
         return future.timeout(bound.toMillis(), TimeUnit.MILLISECONDS).toCompletionStage().toCompletableFuture().join();
+    }
+
+    /** Waits up to 10 seconds for {@code stage}. */
+    public static <T> T await(CompletionStage<T> stage) {
+        return Deadlines.bound(stage, DEFAULT.toMillis(), TimeUnit.MILLISECONDS).join();
     }
 
     /** The index and term of a node's last log entry. */

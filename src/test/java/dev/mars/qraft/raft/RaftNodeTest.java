@@ -736,7 +736,7 @@ class RaftNodeTest {
     }
 
     private static RaftStorageFactory.DurableStorage awaitPersistence(Path directory) throws Exception {
-        return RaftStorageFactory.createDurable(directory, true).toCompletionStage().toCompletableFuture()
+        return RaftStorageFactory.createDurable(directory, true)
                 .get(10, TimeUnit.SECONDS);
     }
 

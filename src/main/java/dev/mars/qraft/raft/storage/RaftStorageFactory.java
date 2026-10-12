@@ -17,10 +17,13 @@
 package dev.mars.qraft.raft.storage;
 
 import dev.mars.qraft.raft.storage.snapshot.FileSnapshotStore;
-import dev.mars.qraft.common.async.Future;
+import dev.mars.qraft.common.concurrent.Completions;
 import dev.mars.qraft.raft.api.SnapshotStore;
 
 import java.nio.file.Path;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.function.Supplier;
 
 /**
  * Opens the persistence components used by a durable Qraft node.
@@ -47,7 +50,7 @@ public final class RaftStorageFactory {
      * Opens the external WAL and Qraft's application snapshot store.
      * If either open fails, both resources are closed before failure is returned.
      */
-    public static Future<DurableStorage> createDurable(Path storagePath, boolean fsync) {
+    public static CompletableFuture<DurableStorage> createDurable(Path storagePath, boolean fsync) {
         var config = dev.mars.raftlog.storage.RaftStorageConfig.builder()
                 .dataDir(storagePath)
                 .syncEnabled(fsync)
@@ -56,37 +59,34 @@ public final class RaftStorageFactory {
                 new dev.mars.raftlog.storage.FileRaftStorage(config);
         SnapshotStore snapshots = new FileSnapshotStore();
 
-        return Future.fromCompletionStage(wal.open(storagePath))
-                .compose(ignored -> Future.fromCompletionStage(snapshots.open(storagePath)))
-                .map(ignored -> new DurableStorage(wal, snapshots))
-                .recover(error -> closeAfterOpenFailure(snapshots, wal, error));
+        // The result is failed directly, so that its callbacks see the opening failure and not a wrapper.
+        CompletableFuture<DurableStorage> result = new CompletableFuture<>();
+        wal.open(storagePath)
+                .thenCompose(ignored -> snapshots.open(storagePath))
+                .whenComplete((ignored, error) -> {
+                    if (error == null) {
+                        result.complete(new DurableStorage(wal, snapshots));
+                        return;
+                    }
+                    Throwable openingFailure = Completions.unwrap(error);
+                    closeFailure(snapshots::closeAsync).thenCompose(snapshotFailure ->
+                            closeFailure(wal::closeAsync).thenAccept(walFailure -> {
+                                addSuppressed(openingFailure, snapshotFailure);
+                                addSuppressed(openingFailure, walFailure);
+                            })).whenComplete((closed, unexpected) -> {
+                                addSuppressed(openingFailure, unexpected);
+                                result.completeExceptionally(openingFailure);
+                            });
+                });
+        return result;
     }
 
-    private static Future<DurableStorage> closeAfterOpenFailure(
-            SnapshotStore snapshots,
-            dev.mars.raftlog.storage.RaftStorage wal,
-            Throwable openingFailure) {
-        return closeSnapshot(snapshots).compose(snapshotFailure ->
-                closeWal(wal).compose(walFailure -> {
-                    addSuppressed(openingFailure, snapshotFailure);
-                    addSuppressed(openingFailure, walFailure);
-                    return Future.failedFuture(openingFailure);
-                }));
-    }
-
-    private static Future<Throwable> closeSnapshot(SnapshotStore snapshots) {
-        return Future.fromCompletionStage(snapshots.closeAsync())
-                .map(ignored -> (Throwable) null)
-                .recover(error -> Future.succeededFuture(error));
-    }
-
-    private static Future<Throwable> closeWal(dev.mars.raftlog.storage.RaftStorage wal) {
+    /** Completes with the failure of {@code close}, or with {@code null} if it succeeds; never fails. */
+    private static CompletableFuture<Throwable> closeFailure(Supplier<? extends CompletionStage<?>> close) {
         try {
-            return Future.fromCompletionStage(wal.closeAsync())
-                    .map(ignored -> (Throwable) null)
-                    .recover(error -> Future.succeededFuture(error));
+            return close.get().handle((ignored, error) -> Completions.unwrap(error)).toCompletableFuture();
         } catch (Throwable error) {
-            return Future.succeededFuture(error);
+            return CompletableFuture.completedFuture(error);
         }
     }
 
