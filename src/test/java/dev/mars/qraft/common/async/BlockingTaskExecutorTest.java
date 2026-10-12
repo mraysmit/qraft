@@ -17,6 +17,7 @@
 package dev.mars.qraft.common.async;
 
 import org.junit.jupiter.api.Test;
+import org.slf4j.MDC;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -28,35 +29,48 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/**
- * Tests that {@link WorkerExecutor} limits unordered concurrency to its pool size and runs ordered
- * tasks one at a time.
- *
- * @author Mark Andrew Ray-Smith Cityline Ltd
- * @since 2026-09-09
- * @version 1.0
- */
-class WorkerExecutorTest {
+/** Tests bounded virtual-thread execution and caller-context propagation. */
+class BlockingTaskExecutorTest {
 
     @Test
-    void configuredPoolSizeLimitsUnorderedConcurrency() throws Exception {
-        assertEquals(2, maximumConcurrency(2, false), "two threads run two tasks at once, never more");
+    void configuredPoolSizeLimitsConcurrency() throws Exception {
+        assertEquals(2, maximumConcurrency(2), "two threads run two tasks at once, never more");
     }
 
     @Test
-    void orderedExecutionRunsOneTaskAtATime() throws Exception {
-        assertEquals(1, maximumConcurrency(4, true), "ordered tasks run one at a time despite four threads");
-    }
-
-    /**
-     * Submits four tasks that each hold their thread until allowed to finish, then lets them finish one at a
-     * time, each only once the expected number have started. A task can start only when a thread is free,
-     * so the highest concurrency observed is exactly the executor's limit, with no sleep or time window.
-     */
-    private static int maximumConcurrency(int poolSize, boolean ordered) throws Exception {
+    void taskAndCompletionKeepTheSubmittingContext() throws Exception {
         JavaRuntime runtime = JavaRuntime.create();
-        WorkerExecutor executor = runtime.createSharedWorkerExecutor("concurrency-" + poolSize, poolSize);
-        int limit = ordered ? 1 : poolSize;
+        BlockingTaskExecutor executor = new BlockingTaskExecutor(
+                "context", 1, command -> runtime.runOnContext(ignored -> command.run()));
+        try {
+            MDC.put("requestId", "request-1");
+            java.util.concurrent.CountDownLatch callbackRegistered = new java.util.concurrent.CountDownLatch(1);
+            CompletableFuture<String> taskContext = executor.execute(() -> {
+                if (!callbackRegistered.await(30, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("the callback was never registered");
+                }
+                return MDC.get("requestId");
+            });
+            CompletableFuture<Boolean> completionContext = new CompletableFuture<>();
+            taskContext.whenComplete((ignored, failure) -> completionContext.complete(
+                    JavaRuntime.currentContext() == runtime && "request-1".equals(MDC.get("requestId"))));
+            callbackRegistered.countDown();
+            MDC.clear();
+
+            assertTrue(completionContext.get(10, TimeUnit.SECONDS));
+            assertEquals("request-1", taskContext.getNow(null));
+        } finally {
+            MDC.clear();
+            executor.close();
+            runtime.close().get(10, TimeUnit.SECONDS);
+        }
+    }
+
+    private static int maximumConcurrency(int poolSize) throws Exception {
+        JavaRuntime runtime = JavaRuntime.create();
+        BlockingTaskExecutor executor = new BlockingTaskExecutor(
+                "concurrency-" + poolSize, poolSize,
+                command -> runtime.runOnContext(ignored -> command.run()));
         Semaphore finish = new Semaphore(0);
         AtomicInteger started = new AtomicInteger();
         AtomicInteger active = new AtomicInteger();
@@ -64,7 +78,7 @@ class WorkerExecutorTest {
         List<CompletableFuture<Void>> tasks = new ArrayList<>();
         try {
             for (int i = 0; i < 4; i++) {
-                tasks.add(executor.executeBlocking(() -> {
+                tasks.add(executor.execute(() -> {
                     started.incrementAndGet();
                     maximumActive.accumulateAndGet(active.incrementAndGet(), Math::max);
                     try {
@@ -73,16 +87,16 @@ class WorkerExecutorTest {
                         active.decrementAndGet();
                     }
                     return null;
-                }, ordered));
+                }));
             }
-            for (int expected = limit; expected <= 4; expected++) {
+            for (int expected = poolSize; expected <= 4; expected++) {
                 int target = expected;
                 assertTrue(waitUntil(() -> started.get() >= target, 10, TimeUnit.SECONDS),
                         "task " + target + " starts once a thread is free");
                 finish.release();
             }
             finish.release(4);
-            awaitAll(tasks);
+            CompletableFuture.allOf(tasks.toArray(CompletableFuture[]::new)).get(30, TimeUnit.SECONDS);
             assertEquals(4, started.get());
             return maximumActive.get();
         } finally {
@@ -92,19 +106,10 @@ class WorkerExecutorTest {
         }
     }
 
-    private static void awaitAll(List<CompletableFuture<Void>> tasks) throws Exception {
-        CompletableFuture<?>[] futures = tasks.stream()
-                .map(task -> task)
-                .toArray(CompletableFuture[]::new);
-        CompletableFuture.allOf(futures).get(30, TimeUnit.SECONDS);
-    }
-
     private static boolean waitUntil(java.util.function.BooleanSupplier condition, long timeout, TimeUnit unit)
             throws InterruptedException {
         long deadline = System.nanoTime() + unit.toNanos(timeout);
-        while (!condition.getAsBoolean() && System.nanoTime() < deadline) {
-            Thread.sleep(5);
-        }
+        while (!condition.getAsBoolean() && System.nanoTime() < deadline) Thread.sleep(5);
         return condition.getAsBoolean();
     }
 }

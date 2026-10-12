@@ -20,7 +20,6 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -38,9 +37,10 @@ import java.util.function.Consumer;
  * @version 1.0
  */
 public final class JavaRuntime {
+    private static final int DEFAULT_BLOCKING_PARALLELISM = 10;
     private static final ThreadLocal<JavaRuntime> CURRENT = new ThreadLocal<>();
     private final ScheduledExecutorService scheduler;
-    private final ExecutorService workers;
+    private final BlockingTaskExecutor blockingTasks;
     private final AtomicLong timerIds = new AtomicLong();
     private final Map<Long, ScheduledFuture<?>> timers = new ConcurrentHashMap<>();
 
@@ -52,16 +52,20 @@ public final class JavaRuntime {
     /** Runtime whose state loop and timers run on {@code scheduler}, which must have exactly one thread. */
     JavaRuntime(ScheduledExecutorService scheduler) {
         this.scheduler = scheduler;
-        workers = Executors.newThreadPerTaskExecutor(
-                Thread.ofVirtual().name("qraft-worker-", 0).factory());
+        blockingTasks = new BlockingTaskExecutor(
+                "qraft-worker", DEFAULT_BLOCKING_PARALLELISM, this::executeOnContext);
     }
 
     public static JavaRuntime create() { return new JavaRuntime(); }
     public static JavaRuntime currentContext() { return CURRENT.get(); }
 
     public void runOnContext(Consumer<Void> action) {
+        executeOnContext(() -> action.accept(null));
+    }
+
+    private void executeOnContext(Runnable action) {
         CallerContext context = CallerContext.capture();
-        scheduler.execute(() -> runInContext(context, () -> action.accept(null)));
+        scheduler.execute(() -> runInContext(context, action));
     }
 
     public long setTimer(long delayMs, Consumer<Long> action) {
@@ -104,30 +108,7 @@ public final class JavaRuntime {
      * completes or another thread blocked in {@code join} or {@code get} on it helps run them, as a
      * {@link CompletableFuture} allows.
      */
-    public <T> CompletableFuture<T> executeBlocking(Callable<T> task) { return executeBlocking(workers, task); }
-    public <T> CompletableFuture<T> executeBlocking(Callable<T> task, boolean ordered) { return executeBlocking(task); }
-
-    <T> CompletableFuture<T> executeBlocking(ExecutorService executor, Callable<T> task) {
-        CompletableFuture<T> promise = new CompletableFuture<>();
-        CallerContext context = CallerContext.capture();
-        executor.submit(() -> context.run(() -> {
-            try {
-                T value = task.call();
-                runOnContext(ignored -> promise.complete(value));
-            } catch (Throwable error) {
-                runOnContext(ignored -> promise.completeExceptionally(error));
-            }
-        }));
-        return promise;
-    }
-
-    public WorkerExecutor createSharedWorkerExecutor(String name, int poolSize) {
-        return new WorkerExecutor(this, name, poolSize);
-    }
-
-    public WorkerExecutor createSharedWorkerExecutor(String name, int poolSize, long maxExecuteTime) {
-        return createSharedWorkerExecutor(name, poolSize);
-    }
+    public <T> CompletableFuture<T> executeBlocking(Callable<T> task) { return blockingTasks.execute(task); }
 
     public CompletableFuture<Void> timer(long delayMs) {
         CompletableFuture<Void> promise = new CompletableFuture<>();
@@ -138,13 +119,7 @@ public final class JavaRuntime {
     public CompletableFuture<Void> shutdown() {
         timers.values().forEach(timer -> timer.cancel(false));
         timers.clear();
-        workers.shutdown();
-        try {
-            if (!workers.awaitTermination(5, TimeUnit.SECONDS)) workers.shutdownNow();
-        } catch (InterruptedException error) {
-            workers.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
+        blockingTasks.close();
         scheduler.shutdown();
         return CompletableFuture.completedFuture(null);
     }

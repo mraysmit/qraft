@@ -33,8 +33,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests {@link JavaRuntime} context serialization, virtual-thread blocking execution, timers
- * (including one that fires before its registration is recorded), worker executors, and MDC propagation.
+ * Tests {@link JavaRuntime} context serialization, bounded virtual-thread blocking execution, timers
+ * (including one that fires before its registration is recorded), and MDC propagation.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-09
@@ -134,15 +134,11 @@ class JavaRuntimeTest {
     }
 
     @Test
-    void workerExecutorRunsBlockingTask() throws Exception {
-        WorkerExecutor worker = runtime.createSharedWorkerExecutor("storage-test", 1);
-        try {
-            String threadName = worker.executeBlocking(() -> Thread.currentThread().getName())
-                    .get(10, TimeUnit.SECONDS);
-            assertTrue(threadName.startsWith("storage-test-"));
-        } finally {
-            worker.close();
-        }
+    void blockingTaskRunsOnNamedVirtualThread() throws Exception {
+        String threadName = runtime.executeBlocking(() -> Thread.currentThread().getName())
+                .get(10, TimeUnit.SECONDS);
+
+        assertTrue(threadName.startsWith("qraft-worker-"));
     }
 
     @Test
