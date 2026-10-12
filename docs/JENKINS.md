@@ -244,6 +244,13 @@ skipped, and every coverage check met. The six new results are `CompletionsTest`
 `RaftStorageFactoryTest`. Its 139 archived log files hold 531 flagged ERROR events, counting copies, and
 no ERROR event or uncaught exception without a flag.
 
+[Build 26](http://192.168.137.32:8080/job/Qraft/26/), of the same day on commit `9851987`, passed in ten
+minutes. It verified the rest of that replacement: the wrapper types `Future`, `Promise`, and
+`AsyncResult` are deleted, and production and test code use `CompletableFuture`. 931 default tests, 10
+end-to-end, 32 Docker and slow, 973 results, none failed or skipped, and every coverage check met. Its
+139 archived log files hold 378 flagged ERROR events, counting copies, and no ERROR event or uncaught
+exception without a flag.
+
 No build ran between 2026-10-04 and 2026-10-10. In that time the `agent` directive of the
 `Jenkinsfile` had been renamed by mistake, which Jenkins would have refused; it was restored in
 `ce5890d` before build 4.
