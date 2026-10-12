@@ -1,9 +1,9 @@
 # Task List: Single POM and Removal of the Quorus Leftovers
 
 **Date:** 2026-10-04
-**Last updated:** 2026-10-12 (Phase 7's second task started: the first slice, `RaftStorageFactory`, returns a plain future; the test side sized and the phase kept in this list; the record of Phase 7's first task put in order, with four passages removed or reworded that still described its gate as open; the file renamed to the date of its last change. On 2026-10-11: PIT mutation testing tried for Phase 7's first task and put on ice by the owner; the mutation rule then removed by the owner from every task list, and that first task, the membership list's Step 4 gate, closed; reviewed at the user's request, with three stale passages corrected, and the review's four questions answered: Phase 3's last task dropped, and the gRPC warning added to the operations runbook; Qraft moved to `raftlog-core` 1.5.0 and the test of the storage class removed, verified by Jenkins build 19 with two tests of gRPC's shutdown window: Phase 6 is done; the other documents brought up to date with Phase 6, in Phase 8, and the other four task lists renamed with their links; the file renamed to the date of its last change. On 2026-10-10: in the evening, Phase 6's open points closed and verified by Jenkins build 15: a Docker test runs every start command, the dashboard looked at and corrected, the Grafana errors fixed, `-Down` keeps the observability data, and RaftLog's interface given the compaction boundary, which waits for a release. Before that: Phase 6 applied, and verified by Jenkins build 6 except for its start commands and its dashboard: three unused log stacks, the load balancer, the demo scripts, and the hand-test data deleted, the start scripts reduced, and the kept observability stack corrected; then the recovery test that timed out on Jenkins given its own client profile. Phase 5 done and its exit met: the version source, then the configuration without a default document, as typed records, with one shared parsing helper; each verified on Jenkins; three third-party keywords that Phase 3A's sweep had renamed are restored; the file renamed to the date of its last change. On 2026-10-09: the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
+**Last updated:** 2026-10-12 (Phase 7's second task converted in full: `Future`, `Promise`, and `AsyncResult` are deleted, after three slices of which the first was verified by Jenkins build 25; the change waits for Jenkins; the test side sized and the phase kept in this list; the record of Phase 7's first task put in order, with four passages removed or reworded that still described its gate as open; the file renamed to the date of its last change. On 2026-10-11: PIT mutation testing tried for Phase 7's first task and put on ice by the owner; the mutation rule then removed by the owner from every task list, and that first task, the membership list's Step 4 gate, closed; reviewed at the user's request, with three stale passages corrected, and the review's four questions answered: Phase 3's last task dropped, and the gRPC warning added to the operations runbook; Qraft moved to `raftlog-core` 1.5.0 and the test of the storage class removed, verified by Jenkins build 19 with two tests of gRPC's shutdown window: Phase 6 is done; the other documents brought up to date with Phase 6, in Phase 8, and the other four task lists renamed with their links; the file renamed to the date of its last change. On 2026-10-10: in the evening, Phase 6's open points closed and verified by Jenkins build 15: a Docker test runs every start command, the dashboard looked at and corrected, the Grafana errors fixed, `-Down` keeps the observability data, and RaftLog's interface given the compaction boundary, which waits for a release. Before that: Phase 6 applied, and verified by Jenkins build 6 except for its start commands and its dashboard: three unused log stacks, the load balancer, the demo scripts, and the hand-test data deleted, the start scripts reduced, and the kept observability stack corrected; then the recovery test that timed out on Jenkins given its own client profile. Phase 5 done and its exit met: the version source, then the configuration without a default document, as typed records, with one shared parsing helper; each verified on Jenkins; three third-party keywords that Phase 3A's sweep had renamed are restored; the file renamed to the date of its last change. On 2026-10-09: the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
 **Status:** In progress. This is the current task list. It started on 2026-10-04 at the user's request, before the membership list's Step 4 close-out gate.
-**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 was done and its exit met on 2026-10-10: Jenkins build 4 verified its version source and build 5 the rest. Phase 6 was applied on 2026-10-10; Jenkins build 6 verified it on `d0275a7`. Build 8 then failed on the recovery test and showed its cause, a kill during the follower's first snapshot; build 9 passed with the fix, on `122d739`. Its exit was open for the start commands run by hand and a look at the corrected dashboard on a running stack. Both were done on the evening of 2026-10-10, and Jenkins build 15 verified them on `da87cb3`: its exit was met for all but its one open task. That task was done on 2026-10-11 with `raftlog-core` 1.5.0, and Jenkins build 19 verified it on `f9b3403`: Phase 6 is done. **Next: Phase 7's second task.** Its first, the membership list's Step 4 gate, was closed on 2026-10-11: the gate had waited on mutation evidence, PIT was tried for it and put on ice by the owner, and the owner then removed the mutation rule from every task list. The second task, the replacement of the wrapper future types, started on 2026-10-12 in slices: the first, `RaftStorageFactory`, is changed and waits for Jenkins. The test side was sized that day, and the phase stays in this list. Five tasks of Phase 7 and four of Phase 8 are open. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
+**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 was done and its exit met on 2026-10-10: Jenkins build 4 verified its version source and build 5 the rest. Phase 6 was applied on 2026-10-10; Jenkins build 6 verified it on `d0275a7`. Build 8 then failed on the recovery test and showed its cause, a kill during the follower's first snapshot; build 9 passed with the fix, on `122d739`. Its exit was open for the start commands run by hand and a look at the corrected dashboard on a running stack. Both were done on the evening of 2026-10-10, and Jenkins build 15 verified them on `da87cb3`: its exit was met for all but its one open task. That task was done on 2026-10-11 with `raftlog-core` 1.5.0, and Jenkins build 19 verified it on `f9b3403`: Phase 6 is done. **Next: Phase 7's second task.** Its first, the membership list's Step 4 gate, was closed on 2026-10-11: the gate had waited on mutation evidence, PIT was tried for it and put on ice by the owner, and the owner then removed the mutation rule from every task list. The second task, the replacement of the wrapper future types, started on 2026-10-12 in slices: the first, `RaftStorageFactory`, is done and verified by Jenkins build 25 on `a37a684`; `ClusterBootstrap` and `MembershipService` followed, and then the rest in one change. The three types are deleted and nothing imports them. The change passes the default tests locally and waits for Jenkins. The test side was sized that day, and the phase stays in this list. Five tasks of Phase 7 and four of Phase 8 are open. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
 **Last reviewed:** 2026-10-11, against the code at commit `f9b3403`, this list alone: see "Review of 2026-10-11" at the head of section 4. Before that: 2026-10-08, against the code at commit `9a4adf0`, with the other four task lists. The status table in section 4 and every item marked "review of 2026-10-08" come from that review. No build was run for it. The logs that the Phase 2A and Phase 3 records cite were written in another working tree and were not available, so their counts were checked for arithmetic only. The earlier review of 2026-10-05 was against `24beac3`; its items keep their date.
 **Order of work:**
 - The membership list's Step 4 close-out gate is the first task of Phase 7 here.
@@ -91,7 +91,7 @@ rules and extracts from that run.
 | 4. Node model and API | Done 2026-10-09, exit met; its four open points settled and its decisions confirmed by the user the same day | 7 of 7 | `e4bf00d` to `a6e7930` |
 | 5. Configuration and version | Done 2026-10-10, exit met | 6 of 6 | `693449e`, `c123ee9`, `12d365c`, `d4e1af8` |
 | 6. Docker and observability | Applied 2026-10-10, with the load balancer removed and the recovery test given its own client profile, both at the user's decision; verified by Jenkins build 6. The exit is open for the start commands run by hand and a look at the corrected dashboard. The gRPC warnings the audit found are flagged since build 8. Build 8 showed the cause of the recovery test's timeout, a kill during the follower's first snapshot; build 9 passed with the fix and with no unflagged error or stack trace. The server was then changed so that a kill in that window is survivable and a log compacted past its snapshot is refused; build 11 passed with that change. On the evening of 2026-10-10 the start commands got a test that Jenkins runs, the dashboard was looked at and corrected, the Grafana errors were fixed, and `-Down` keeps the observability data; build 14 failed on two defects the new test found, and build 15 passed with their fixes. The compaction-boundary task was done on 2026-10-11 with `raftlog-core` 1.5.0; build 18 failed on a teardown race in a gRPC test, and build 19 passed with its fix. Done, exit met | 13 of 13 | `ce5890d`, `22a46a9`, `85bb120`, `d0275a7`, `cbb93f4`, `362b507`, `122d739`, `aa0d876`, `f2119d3`, `29fe503`, `10de474`, `0f6c497`, `da87cb3`, `fac3696`, `f9b3403` |
-| 7. Async layer | Its first task, the membership list's Step 4 gate, closed on 2026-10-11 without mutation evidence: the owner put PIT on ice and removed the mutation rule that day. The test side was sized on 2026-10-12 and the phase stays in this list. The replacement of the future types started that day, in slices: `RaftStorageFactory` is changed, checked locally with its tests, and not yet verified on Jenkins | 2 of 7 | |
+| 7. Async layer | Its first task, the membership list's Step 4 gate, closed on 2026-10-11 without mutation evidence: the owner put PIT on ice and removed the mutation rule that day. The test side was sized on 2026-10-12 and the phase stays in this list. The replacement of the future types started that day, in slices: `RaftStorageFactory` was verified by Jenkins build 25; the rest is converted, the three types are deleted, and the change waits for Jenkins | 2 of 7 | `a37a684` |
 | 8. Documentation and close-out | Started early for Phases 1 and 2; Phase 3's names done with Phase 3; the documents of Phases 4, 5, and 6 done as each ended | 2 of 6 | |
 
 **Review of 2026-10-11,** at the user's request, of this list alone, against
@@ -2577,8 +2577,11 @@ question was not open.
   `CompletableFuture` and `CompletionStage` (11 production files import
   them, plus the `common.async` package itself; counted again on 2026-10-08).
 
-  Started 2026-10-12, in slices, smallest first, at the user's word. One
-  slice of this task is done; ten production files still import the types.
+  Started 2026-10-12, in slices, smallest first, at the user's word. Three
+  slices were made one at a time and the first verified on Jenkins; the
+  rest was then converted in one change, at the user's word to finish the
+  task. No file imports the three types any more, and they are deleted.
+  The whole change waits for Jenkins.
   - **What the wrapper does that a plain future does not,** read from
     `Future` that day. Each slice keeps these, with a test first where the
     slice touches one:
@@ -2619,15 +2622,137 @@ question was not open.
     wrote four logs, and all four were read: six ERROR headers, every one
     flagged, three stack traces, each under a flagged header, and no
     unflagged error.
-  - **Not verified yet.** The build and the three suites have not run on
-    this change. `HttpApiServerTest`, `RaftNodeTest`,
-    `RaftNodeConfigurationTest`, and the two other recovery classes call
-    the factory and were compiled, not run. Jenkins decides, once the
-    change is pushed.
-  - **Next slices, in order:** `ClusterBootstrap`, then `MembershipService`,
-    which import `Future` alone. `RaftTransport` also imports it alone, but
-    every transport and `RaftNode` implement or call it, so it goes with
-    them.
+  - **Verified by Jenkins build 25, 2026-10-12, on `a37a684`:** 933
+    default tests, 10 end-to-end, 32 Docker and slow, 975 results, none
+    failed or skipped, and every coverage check met. The 975 are build
+    21's 969 and the 6 new tests.
+    - Its 139 archived log files were read, with the console: 531 flagged
+      ERROR headers, counting copies, and no ERROR event without a flag.
+    - Every stack trace is under a flagged header. One is the uncaught
+      exception of the Docker lock contender, flagged
+      `SERVER_STORAGE_ALREADY_LOCKED` as before; it now passes through the
+      changed factory, and its cause is still the `StorageException`.
+    - One line at error level comes from Tempo's metrics generator, in
+      the start-commands test, which accepts it by the user's decision of
+      2026-10-11.
+  - **`Completions.unwrapped`,** added with slice 2, ends a chain of
+    stages that a method hands to its caller: the future it returns fails
+    with the failure itself. `CompletionsTest` has 6 tests.
+  - **Slice 2, `ClusterBootstrap`.** `attempt` returns a
+    `CompletableFuture`, ended with `Completions.unwrapped`. The class
+    reads the node and the transport, which still return the wrapper,
+    through `toCompletionStage()`. `QraftServerService` converts the result
+    back until its own slice; it logs the failure's message, which is why
+    the failure must arrive without a wrapper.
+    - RED, 2026-10-12, locally in one visible console. A new test in
+      `ClusterBootstrapTest` runs an attempt on a node whose state loop is
+      stopped. Against the unchanged class it ran 9 tests with 1 failure:
+      a callback got `CompletionException` where
+      `RejectedExecutionException` was expected
+      (`logs/qraft-async-slice2-red-2026-10-12_17-04-50-825.log`). A first
+      run failed on a mistake in the test itself, which looked up a
+      transport that only a started node registers
+      (`logs/qraft-async-slice2-red-2026-10-12_17-04-20-630.log`).
+    - GREEN, the same way: `ClusterBootstrapTest`, `CompletionsTest`,
+      `RaftNodeMembershipTest`, and `PackageDependencyTest` ran 40 tests
+      with no failures
+      (`logs/qraft-async-slice2-green-2026-10-12_17-05-57-027.log`). Its
+      two logs were read: 20 flagged ERROR headers, counting copies, and no
+      unflagged error or stack trace.
+  - **Slice 3, `MembershipService`.** `join` and `remove` return a
+    `CompletableFuture`. Neither ever fails: every failure becomes an
+    answer with a status. What the wrapper did here was read the failure
+    without its `CompletionException`, for the message of an unreachable
+    leader and for the choice between `NO_LEADER` and `REFUSED`; the class
+    now does that with `Completions.unwrap`, and bounds its waits with
+    `Deadlines.bound`.
+    - No behaviour changes, so there is no RED. Two checks were added to
+      `MembershipServiceTest` first, because the existing ones would have
+      passed with the name of an exception in a message: a new test of
+      the exact message when the leader does not answer, and an assertion
+      that the node's refusal carries no exception name. Both passed
+      against the unchanged class, 15 tests
+      (`logs/qraft-async-slice3-before-2026-10-12_17-09-30-817.log`), and,
+      by a reading of the code and not by a run, fail if the class
+      stops unwrapping.
+    - The choice of `NO_LEADER` for a timeout, for an unknown outcome, and
+      for "Not the leader" has no test of its own, before or after.
+    - Callers: `GrpcRaftServer` converts the result back until its own
+      slice; `HttpApiServer` lost a conversion. In the tests, the
+      in-memory transport and the forwarder of `MembershipServiceTest`
+      convert the result, because `RaftTransport` still returns the
+      wrapper, and `RaftNodeLeaderCommitTest` lost a conversion.
+    - After the change, locally: `MembershipServiceTest`,
+      `RaftNodeLeaderCommitTest`, `HttpApiServerOperatorTest`,
+      `ClusterBootstrapTest`, `GrpcRaftIntegrationTest`, and
+      `PackageDependencyTest` ran 54 tests with no failures
+      (`logs/qraft-async-slice3-green-2026-10-12_17-10-24-829.log`). Its
+      two logs were read: 24 flagged ERROR headers, counting copies, and no
+      unflagged error or stack trace.
+  - **The rest, 2026-10-12, in one change.** The user: "finish this task as
+    a priority and do not stop until done". `Future`, `Promise`,
+    `AsyncResult`, and `FutureTest` are deleted. 86 Java files differ from
+    `a37a684`, slices 2 and 3 among them: the
+    eight production files that still imported the types, `JavaRuntime`
+    and `WorkerExecutor`, which returned them, and the tests.
+    - **How.** A script made the exact replacements, and a direct `javac`
+      run, into a scratch folder and not into `target/`, found what it
+      missed; those were edited by hand. The script and its edits are not
+      in the repository.
+    - **The replacements.** The wrapper held a `CompletableFuture` and
+      passed each call to it, so most are renames: `map` to `thenApply`,
+      `compose` to `thenCompose`, `Promise.promise()` to a new
+      `CompletableFuture`, `fail` to `completeExceptionally`, and
+      `timeout` to `Deadlines.bound`, which the wrapper already called.
+    - **`Completions` keeps the four behaviours,** with four more methods:
+      - `unwrapping` gives a handler of `exceptionally` or
+        `exceptionallyCompose` the failure itself; `recover` became
+        `exceptionallyCompose(Completions.unwrapping(...))`;
+      - `onSuccess`, `onFailure`, and `outcome` make the callback of a
+        `whenComplete`. A success callback that throws is still reported
+        to its thread's uncaught-exception handler, and a failure callback
+        still gets the failure itself;
+      - `onComplete` became `whenComplete` with the value and the error,
+        the error read through `Completions.unwrap`;
+      - `failedFuture(String)` and `fail(String)` became an explicit
+        `IllegalStateException`.
+
+      `CompletionsTest` has 9 tests, with these.
+    - **Where a callback's future was returned or assigned,** the code now
+      registers the callback and returns the same future, as the wrapper
+      did, so that callbacks keep their order: recovery in `RaftNode`, the
+      three sends of `GrpcRaftTransport`, and the hook of
+      `ShutdownCoordinator`. One place returns the stage that
+      `whenComplete` makes: the snapshot's error log in `RaftNode`, where
+      the log line now comes before the caller's callbacks and not after.
+    - **`AsyncResult` in `RaftNode` and `RaftTransitionSequencer`** was a
+      completed outcome passed between methods. Those methods now take the
+      value and the failure: `finishStart`, `onStateLoopComplete`, and
+      `completeFrom`.
+    - **`RaftNode.toFuture`** only turned a `CompletableFuture` into the
+      wrapper. It is gone, with its 20 calls.
+    - **Test helpers.** `JavaTestContextHelper` makes callbacks for
+      `whenComplete`; the next tasks replace it. `RaftAwaitHelper` and
+      `ManualRaftClusterFixture` each have one `await`, for a
+      `CompletionStage`.
+    - **The nine tests of `FutureTest` are gone with the class they
+      tested.** What it pinned of the four behaviours is in
+      `CompletionsTest`, and its three timeout tests have their
+      counterparts in `DeadlinesTest`. Its tests of `all` and `eventually`
+      have none: no code uses a replacement of `eventually`, and `all`
+      became `CompletableFuture.allOf`.
+    - **Checked locally, 2026-10-12,** in one visible console, in four
+      stages, smallest first: 51 tests of the helpers, the runtime, the
+      sequencer, and the shutdown coordinator; the 215 of `RaftNode`'s
+      classes; then every class of the `raft` package, 390; then every
+      other package, 541. 931 tests in the last two together, none failed
+      (`logs/qraft-async-full1` to `full4-2026-10-12_19-1*.log`). The 47
+      logs these runs wrote were read: 451 flagged ERROR headers, counting
+      copies, and no unflagged error or stack trace.
+    - **Not checked locally:** the coverage gates, which run at `verify`,
+      and the end-to-end, Docker, and slow suites.
+  - **Not verified yet.** Slices 2 and 3 and the rest have not run on
+    Jenkins. Jenkins decides, once they are pushed.
 - [ ] Replace `JavaRuntime` (an emulated event loop) and `WorkerExecutor` with
   explicitly owned executors: the Raft state loop and a bounded
   virtual-thread pool. Keep the `CallerContext` MDC and OpenTelemetry propagation.

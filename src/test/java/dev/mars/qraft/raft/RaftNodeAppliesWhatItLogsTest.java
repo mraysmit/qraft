@@ -63,7 +63,7 @@ class RaftNodeAppliesWhatItLogsTest {
         try {
             cluster.close();
         } finally {
-            runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.close().get(10, TimeUnit.SECONDS);
             InMemoryTransportSimulatorFixture.clearAllTransports();
         }
     }
@@ -73,7 +73,7 @@ class RaftNodeAppliesWhatItLogsTest {
         String leader = startCluster("a", "b", "c");
 
         nodes.get(leader).submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put("key", "value")))
-                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                .get(10, TimeUnit.SECONDS);
 
         cluster.heartbeatUntil(nodes.get(leader), () -> stores.values().stream()
                 .allMatch(store -> store.findMetadata("key").isPresent()), "every replica applies the command");
@@ -88,7 +88,7 @@ class RaftNodeAppliesWhatItLogsTest {
         QraftStateStore store = new QraftStateStore();
         RaftNode follower = cluster.add(cluster.builder("follower", Set.of("follower", "leader"),
                 new InMemoryTransportSimulatorFixture("follower"), store, RaftNodeMode.volatileMode()));
-        follower.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        follower.start().get(10, TimeUnit.SECONDS);
         byte[] entry = registrationWhoseEncodingIsNotReproducedByReEncoding();
         AppendEntriesRequest request = AppendEntriesRequest.newBuilder().setTerm(1).setLeaderId("leader")
                 .setPrevLogIndex(1).setPrevLogTerm(0).setLeaderCommit(2)
@@ -97,9 +97,9 @@ class RaftNodeAppliesWhatItLogsTest {
                 .build();
 
         AppendEntriesResponse first = follower.handleAppendEntriesRequest(request)
-                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                .get(10, TimeUnit.SECONDS);
         AppendEntriesResponse retransmitted = follower.handleAppendEntriesRequest(request)
-                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                .get(10, TimeUnit.SECONDS);
 
         assertTrue(first.getSuccess());
         assertTrue(retransmitted.getSuccess(), "a duplicate of an identical entry is not a divergent log");

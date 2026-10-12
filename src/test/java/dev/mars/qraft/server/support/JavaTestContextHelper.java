@@ -16,15 +16,17 @@
 
 package dev.mars.qraft.server.support;
 
-import dev.mars.qraft.common.async.AsyncResult;
+import dev.mars.qraft.common.concurrent.Completions;
+
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
  * Test helper providing a completion latch for asynchronous server tests.
  * Records the first failure and provides succeeding and
- * failing result handlers.
+ * failing callbacks for {@code whenComplete}.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-09
@@ -45,19 +47,19 @@ public final class JavaTestContextHelper {
     public void verify(Runnable assertion) {
         try { assertion.run(); } catch (Throwable error) { failNow(error); }
     }
-    public <T> Consumer<AsyncResult<T>> succeeding(Consumer<T> action) {
-        return result -> {
-            if (result.failed()) failNow(result.cause());
-            else try { action.accept(result.result()); } catch (Throwable error) { failNow(error); }
+    public <T> BiConsumer<T, Throwable> succeeding(Consumer<T> action) {
+        return (value, failed) -> {
+            if (failed != null) failNow(Completions.unwrap(failed));
+            else try { action.accept(value); } catch (Throwable error) { failNow(error); }
         };
     }
-    public <T> Consumer<AsyncResult<T>> succeedingThenComplete() {
+    public <T> BiConsumer<T, Throwable> succeedingThenComplete() {
         return succeeding(ignored -> completeNow());
     }
-    public <T> Consumer<AsyncResult<T>> failing(Consumer<Throwable> action) {
-        return result -> {
-            if (result.succeeded()) failNow("Expected asynchronous operation to fail");
-            else try { action.accept(result.cause()); } catch (Throwable error) { failNow(error); }
+    public <T> BiConsumer<T, Throwable> failing(Consumer<Throwable> action) {
+        return (value, failed) -> {
+            if (failed == null) failNow("Expected asynchronous operation to fail");
+            else try { action.accept(Completions.unwrap(failed)); } catch (Throwable error) { failNow(error); }
         };
     }
     void assertComplete() throws Exception {

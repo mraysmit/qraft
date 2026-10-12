@@ -96,8 +96,8 @@ class HttpApiServerTest {
         if (server != null) {
             server.close();
         }
-        if (node != null) node.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-        if (runtime != null) runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        if (node != null) node.stop().get(10, TimeUnit.SECONDS);
+        if (runtime != null) runtime.close().get(10, TimeUnit.SECONDS);
         InMemoryTransportSimulatorFixture.clearAllTransports();
     }
 
@@ -748,11 +748,11 @@ class HttpApiServerTest {
                 .runtime(runtime).nodeId("follower").clusterNodes(Set.of("follower", "peer"))
                 .transport(transport).stateMachine(store).commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.volatileMode()).electionTimeout(10_000).build();
-        node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        node.start().get(10, TimeUnit.SECONDS);
         node.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
                         .setTerm(1).setLeaderId("peer").setPrevLogIndex(0).setPrevLogTerm(0)
                         .setLeaderCommit(0).build())
-                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                .get(10, TimeUnit.SECONDS);
         server = new HttpApiServer(0, node, store);
         server.start().join();
         String registration = """
@@ -894,7 +894,7 @@ class HttpApiServerTest {
                 .mode(RaftNodeMode.durable(ambiguousStorage, durable.snapshots()))
                 .snapshotEnabled(false).electionTimeout(25).heartbeatInterval(10_000)
                 .build();
-        node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        node.start().get(10, TimeUnit.SECONDS);
         // The node's first append after its bootstrap configuration is the leadership no-op of its first term.
         // The storage reports that append as failed, and that failure is the event that fences the node. The
         // test submits no command of its own: one would either queue behind the no-op or arrive after the
@@ -945,7 +945,7 @@ class HttpApiServerTest {
 
         java.util.concurrent.CompletionException failure = assertThrows(
                 java.util.concurrent.CompletionException.class,
-                () -> node.start().toCompletionStage().toCompletableFuture().join());
+                () -> node.start().join());
         String diagnostic = failure.getCause().toString();
         assertTrue(diagnostic.contains("raft.log") || diagnostic.contains(directory.toString()), diagnostic);
         assertTrue(diagnostic.toLowerCase().contains("position")
@@ -1432,7 +1432,7 @@ class HttpApiServerTest {
                 .electionTimeout(50)
                 .heartbeatInterval(20)
                 .build();
-        node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        node.start().get(10, TimeUnit.SECONDS);
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.sleep(10);
         assertTrue(node.isLeader());
@@ -1473,7 +1473,7 @@ class HttpApiServerTest {
                 .mode(RaftNodeMode.durable(gatedWal, durable.snapshots()))
                 .snapshotEnabled(false).electionTimeout(25).heartbeatInterval(10_000)
                 .build();
-        node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        node.start().get(10, TimeUnit.SECONDS);
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.onSpinWait();
         assertTrue(node.isLeader());

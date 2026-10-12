@@ -22,9 +22,7 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
-import dev.mars.qraft.common.async.Promise;
 import dev.mars.qraft.state.CatalogCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -67,8 +65,8 @@ class RaftNodeCheckQuorumTest {
 
     @AfterEach
     void tearDown() throws Exception {
-        if (node != null) node.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-        if (runtime != null) runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        if (node != null) node.stop().get(10, TimeUnit.SECONDS);
+        if (runtime != null) runtime.close().get(10, TimeUnit.SECONDS);
     }
 
     @Test
@@ -130,8 +128,7 @@ class RaftNodeCheckQuorumTest {
         transport.silence("peer-2", "peer-3");
 
         CompletableFuture<?> write = node.submitCommand(CatalogCommand.register(new ServiceInstance(
-                "web", "web", "client-1", "127.0.0.1", 8080, List.of(), Map.of(), ServiceHealth.UNKNOWN)))
-                .toCompletionStage().toCompletableFuture();
+                "web", "web", "client-1", "127.0.0.1", 8080, List.of(), Map.of(), ServiceHealth.UNKNOWN)));
         heartbeats(4);
 
         assertEquals(RaftNode.State.FOLLOWER, node.getState());
@@ -150,7 +147,7 @@ class RaftNodeCheckQuorumTest {
 
         transport.respond("peer-2", "peer-3");
         timers.fireElectionTimeout();
-        node.awaitState(RaftNode.State.LEADER, 10_000).toCompletionStage().toCompletableFuture()
+        node.awaitState(RaftNode.State.LEADER, 10_000)
                 .get(15, TimeUnit.SECONDS);
         heartbeats(10);
 
@@ -162,8 +159,7 @@ class RaftNodeCheckQuorumTest {
         startLeader(Set.of("node-1", "peer-2", "peer-3"), new PeerTransportFixture());
         int armed = timers.oneShotCount();
 
-        CompletableFuture<RaftNode.State> leader = node.awaitState(RaftNode.State.LEADER, 60_000)
-                .toCompletionStage().toCompletableFuture();
+        CompletableFuture<RaftNode.State> leader = node.awaitState(RaftNode.State.LEADER, 60_000);
         node.awaitState(RaftNode.State.CANDIDATE, 60_000);
 
         assertEquals(RaftNode.State.LEADER, leader.get(10, TimeUnit.SECONDS), "the current state satisfies at once");
@@ -182,9 +178,9 @@ class RaftNodeCheckQuorumTest {
                 .mode(RaftNodeMode.volatileMode()).snapshotEnabled(false)
                 .electionTimeout(ELECTION_TIMEOUT_MS).heartbeatInterval(HEARTBEAT_MS)
                 .timerScheduler(timers).build();
-        node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        node.start().get(10, TimeUnit.SECONDS);
         timers.fireElectionTimeout();
-        node.awaitState(RaftNode.State.LEADER, 10_000).toCompletionStage().toCompletableFuture()
+        node.awaitState(RaftNode.State.LEADER, 10_000)
                 .get(15, TimeUnit.SECONDS);
         settle();
     }
@@ -225,27 +221,27 @@ class RaftNodeCheckQuorumTest {
         @Override public void stop() { }
 
         @Override
-        public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
-            return Future.succeededFuture(VoteResponse.newBuilder()
+        public CompletableFuture<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
+            return CompletableFuture.completedFuture(VoteResponse.newBuilder()
                     .setTerm(request.getTerm()).setVoteGranted(true)
                     .setVoterServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
         }
 
         @Override
-        public Future<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
+        public CompletableFuture<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
             Mode mode = modes.getOrDefault(targetId, Mode.RESPOND);
-            if (mode == Mode.SILENT) return Promise.<AppendEntriesResponse>promise().future();
+            if (mode == Mode.SILENT) return new CompletableFuture<AppendEntriesResponse>();
             long matchIndex = request.getEntriesCount() == 0
                     ? request.getPrevLogIndex()
                     : request.getEntries(request.getEntriesCount() - 1).getIndex();
-            return Future.succeededFuture(AppendEntriesResponse.newBuilder().setTerm(request.getTerm())
+            return CompletableFuture.completedFuture(AppendEntriesResponse.newBuilder().setTerm(request.getTerm())
                     .setSuccess(mode == Mode.RESPOND).setMatchIndex(mode == Mode.RESPOND ? matchIndex : 0)
                     .setFollowerServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
         }
 
         @Override
-        public Future<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
-            return Promise.<InstallSnapshotResponse>promise().future();
+        public CompletableFuture<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
+            return new CompletableFuture<InstallSnapshotResponse>();
         }
     }
 }

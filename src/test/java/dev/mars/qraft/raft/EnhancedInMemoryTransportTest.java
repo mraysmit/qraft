@@ -77,7 +77,7 @@ class EnhancedInMemoryTransportTest {
         try {
             cluster.close();
         } finally {
-            runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.close().get(10, TimeUnit.SECONDS);
             InMemoryTransportSimulatorFixture.clearAllTransports();
         }
     }

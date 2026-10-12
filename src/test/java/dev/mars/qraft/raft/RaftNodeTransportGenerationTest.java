@@ -22,9 +22,7 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
-import dev.mars.qraft.common.async.Promise;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.raft.api.SnapshotStore;
@@ -70,7 +68,7 @@ class RaftNodeTransportGenerationTest {
     void tearDown() throws Exception {
         if (node != null) await(node.stop());
         if (runtime != null) {
-            runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.shutdown().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -157,7 +155,7 @@ class RaftNodeTransportGenerationTest {
         PendingVote oldElection = transport.takeVote();
         long oldTerm = oldElection.request().getTerm();
         storage.blockNextMetadataUpdate();
-        Future<VoteResponse> higherTermVote = node.handleVoteRequest(VoteRequest.newBuilder()
+        CompletableFuture<VoteResponse> higherTermVote = node.handleVoteRequest(VoteRequest.newBuilder()
                 .setTerm(oldTerm + 1)
                 .setCandidateId("peer-1")
                 .setCandidateServerId(ManualRaftClusterFixture.serverIdOf("peer-1"))
@@ -194,8 +192,8 @@ class RaftNodeTransportGenerationTest {
         }
     }
 
-    private record PendingAppend(AppendEntriesRequest request, Promise<AppendEntriesResponse> response) {}
-    private record PendingVote(VoteRequest request, Promise<VoteResponse> response) {}
+    private record PendingAppend(AppendEntriesRequest request, CompletableFuture<AppendEntriesResponse> response) {}
+    private record PendingVote(VoteRequest request, CompletableFuture<VoteResponse> response) {}
 
     /** Test transport fixture that lets tests complete pending requests across transport replacement. */
     private static final class ControlledTransportFixture implements RaftTransport {
@@ -225,25 +223,25 @@ class RaftNodeTransportGenerationTest {
 
         @Override public void start(Consumer<RaftMessage> messageHandler) {}
         @Override public void stop() {}
-        @Override public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
+        @Override public CompletableFuture<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
             if (holdVotes) {
-                Promise<VoteResponse> response = Promise.promise();
+                CompletableFuture<VoteResponse> response = new CompletableFuture<>();
                 votes.add(new PendingVote(request, response));
-                return response.future();
+                return response;
             }
-            return Future.succeededFuture(VoteResponse.newBuilder()
+            return CompletableFuture.completedFuture(VoteResponse.newBuilder()
                     .setTerm(request.getTerm()).setVoteGranted(true)
                     .setVoterServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
         }
-        @Override public Future<AppendEntriesResponse> sendAppendEntries(
+        @Override public CompletableFuture<AppendEntriesResponse> sendAppendEntries(
                 String targetId, AppendEntriesRequest request) {
-            Promise<AppendEntriesResponse> response = Promise.promise();
+            CompletableFuture<AppendEntriesResponse> response = new CompletableFuture<>();
             appends.add(new PendingAppend(request, response));
-            return response.future();
+            return response;
         }
-        @Override public Future<InstallSnapshotResponse> sendInstallSnapshot(
+        @Override public CompletableFuture<InstallSnapshotResponse> sendInstallSnapshot(
                 String targetId, InstallSnapshotRequest request) {
-            return Future.succeededFuture(InstallSnapshotResponse.newBuilder()
+            return CompletableFuture.completedFuture(InstallSnapshotResponse.newBuilder()
                     .setTerm(request.getTerm()).setSuccess(true)
                     .setNextChunkIndex(request.getTotalChunks())
                     .setFollowerServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());

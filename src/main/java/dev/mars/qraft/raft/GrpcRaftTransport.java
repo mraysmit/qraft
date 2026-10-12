@@ -44,9 +44,8 @@ import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Scope;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.propagation.TextMapSetter;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
-import dev.mars.qraft.common.async.Promise;
+import dev.mars.qraft.common.concurrent.Completions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -55,6 +54,7 @@ import java.net.SocketAddress;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -223,11 +223,11 @@ public class GrpcRaftTransport implements RaftTransport {
     }
 
     @Override
-    public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
+    public CompletableFuture<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
         requireKnownTarget(targetId);
         if (stopped) {
             // The callback executor is shut down, so the reply to a call made now would be discarded.
-            return Future.failedFuture(new IllegalStateException("Transport for " + selfId + " is stopped"));
+            return CompletableFuture.failedFuture(new IllegalStateException("Transport for " + selfId + " is stopped"));
         }
         String requestId = requestId();
         Span span = tracer.spanBuilder("raft.RequestVote")
@@ -240,28 +240,30 @@ public class GrpcRaftTransport implements RaftTransport {
                 .startSpan();
         try (MDC.MDCCloseable ignoredMdc = MDC.putCloseable("requestId", requestId);
              Scope ignoredSpan = span.makeCurrent()) {
-        return toFuture(correlatedStub(targetId, requestId).requestVote(request))
-                .onSuccess(r -> {
-                    span.setAttribute("raft.vote_granted", r.getVoteGranted());
-                    span.end();
-                })
-                .onFailure(e -> {
-                    span.setStatus(StatusCode.ERROR, e.getMessage());
-                    span.recordException(e);
-                    span.end();
-                });
+            CompletableFuture<VoteResponse> response = toFuture(correlatedStub(targetId, requestId).requestVote(request));
+            response.whenComplete(Completions.outcome(
+                    r -> {
+                        span.setAttribute("raft.vote_granted", r.getVoteGranted());
+                        span.end();
+                    },
+                    e -> {
+                        span.setStatus(StatusCode.ERROR, e.getMessage());
+                        span.recordException(e);
+                        span.end();
+                    }));
+            return response;
         } catch (Throwable error) {
             finishSpanWithError(span, error);
-            return Future.failedFuture(error);
+            return CompletableFuture.failedFuture(error);
         }
     }
 
     @Override
-    public Future<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
+    public CompletableFuture<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
         requireKnownTarget(targetId);
         if (stopped) {
             // The callback executor is shut down, so the reply to a call made now would be discarded.
-            return Future.failedFuture(new IllegalStateException("Transport for " + selfId + " is stopped"));
+            return CompletableFuture.failedFuture(new IllegalStateException("Transport for " + selfId + " is stopped"));
         }
         String requestId = requestId();
         Span span = tracer.spanBuilder("raft.AppendEntries")
@@ -274,48 +276,50 @@ public class GrpcRaftTransport implements RaftTransport {
                 .startSpan();
         try (MDC.MDCCloseable ignoredMdc = MDC.putCloseable("requestId", requestId);
              Scope ignoredSpan = span.makeCurrent()) {
-        return toFuture(correlatedStub(targetId, requestId).appendEntries(request))
-                .onSuccess(r -> {
-                    span.setAttribute("raft.success", r.getSuccess());
-                    span.end();
-                })
-                .onFailure(e -> {
-                    span.setStatus(StatusCode.ERROR, e.getMessage());
-                    span.recordException(e);
-                    span.end();
-                });
+            CompletableFuture<AppendEntriesResponse> response = toFuture(correlatedStub(targetId, requestId).appendEntries(request));
+            response.whenComplete(Completions.outcome(
+                    r -> {
+                        span.setAttribute("raft.success", r.getSuccess());
+                        span.end();
+                    },
+                    e -> {
+                        span.setStatus(StatusCode.ERROR, e.getMessage());
+                        span.recordException(e);
+                        span.end();
+                    }));
+            return response;
         } catch (Throwable error) {
             finishSpanWithError(span, error);
-            return Future.failedFuture(error);
+            return CompletableFuture.failedFuture(error);
         }
     }
 
     /** Like every send here, but an unaddressable target fails the future: a forwarder answers from it. */
     @Override
-    public Future<MembershipResponse> join(String targetId, JoinRequest request) {
+    public CompletableFuture<MembershipResponse> join(String targetId, JoinRequest request) {
         if (stopped) {
-            return Future.failedFuture(new IllegalStateException("Transport for " + selfId + " is stopped"));
+            return CompletableFuture.failedFuture(new IllegalStateException("Transport for " + selfId + " is stopped"));
         }
         try {
             requireKnownTarget(targetId);
             return toFuture(getStub(targetId)
                     .withDeadlineAfter(MembershipService.TIMEOUT_SECONDS, TimeUnit.SECONDS).join(request));
         } catch (Throwable error) {
-            return Future.failedFuture(error);
+            return CompletableFuture.failedFuture(error);
         }
     }
 
     @Override
-    public Future<MembershipResponse> removeServer(String targetId, RemoveServerRequest request) {
+    public CompletableFuture<MembershipResponse> removeServer(String targetId, RemoveServerRequest request) {
         if (stopped) {
-            return Future.failedFuture(new IllegalStateException("Transport for " + selfId + " is stopped"));
+            return CompletableFuture.failedFuture(new IllegalStateException("Transport for " + selfId + " is stopped"));
         }
         try {
             requireKnownTarget(targetId);
             return toFuture(getStub(targetId)
                     .withDeadlineAfter(MembershipService.TIMEOUT_SECONDS, TimeUnit.SECONDS).removeServer(request));
         } catch (Throwable error) {
-            return Future.failedFuture(error);
+            return CompletableFuture.failedFuture(error);
         }
     }
 
@@ -343,25 +347,25 @@ public class GrpcRaftTransport implements RaftTransport {
     }
 
     @Override
-    public Future<DescribeResponse> describe(String targetId) {
+    public CompletableFuture<DescribeResponse> describe(String targetId) {
         requireKnownTarget(targetId);
         if (stopped) {
-            return Future.failedFuture(new IllegalStateException("Transport for " + selfId + " is stopped"));
+            return CompletableFuture.failedFuture(new IllegalStateException("Transport for " + selfId + " is stopped"));
         }
         try {
             return toFuture(getStub(targetId).withDeadlineAfter(DESCRIBE_DEADLINE_SECONDS, TimeUnit.SECONDS)
                     .describe(DescribeRequest.getDefaultInstance()));
         } catch (Throwable error) {
-            return Future.failedFuture(error);
+            return CompletableFuture.failedFuture(error);
         }
     }
 
     @Override
-    public Future<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
+    public CompletableFuture<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
         requireKnownTarget(targetId);
         if (stopped) {
             // The callback executor is shut down, so the reply to a call made now would be discarded.
-            return Future.failedFuture(new IllegalStateException("Transport for " + selfId + " is stopped"));
+            return CompletableFuture.failedFuture(new IllegalStateException("Transport for " + selfId + " is stopped"));
         }
         String requestId = requestId();
         Span span = tracer.spanBuilder("raft.InstallSnapshot")
@@ -373,19 +377,21 @@ public class GrpcRaftTransport implements RaftTransport {
                 .startSpan();
         try (MDC.MDCCloseable ignoredMdc = MDC.putCloseable("requestId", requestId);
              Scope ignoredSpan = span.makeCurrent()) {
-        return toFuture(correlatedStub(targetId, requestId).installSnapshot(request))
-                .onSuccess(r -> {
-                    span.setAttribute("raft.success", r.getSuccess());
-                    span.end();
-                })
-                .onFailure(e -> {
-                    span.setStatus(StatusCode.ERROR, e.getMessage());
-                    span.recordException(e);
-                    span.end();
-                });
+            CompletableFuture<InstallSnapshotResponse> response = toFuture(correlatedStub(targetId, requestId).installSnapshot(request));
+            response.whenComplete(Completions.outcome(
+                    r -> {
+                        span.setAttribute("raft.success", r.getSuccess());
+                        span.end();
+                    },
+                    e -> {
+                        span.setStatus(StatusCode.ERROR, e.getMessage());
+                        span.recordException(e);
+                        span.end();
+                    }));
+            return response;
         } catch (Throwable error) {
             finishSpanWithError(span, error);
-            return Future.failedFuture(error);
+            return CompletableFuture.failedFuture(error);
         }
     }
 
@@ -432,8 +438,8 @@ public class GrpcRaftTransport implements RaftTransport {
         span.end();
     }
 
-    private <T> Future<T> toFuture(ListenableFuture<T> listenableFuture) {
-        Promise<T> promise = Promise.promise();
+    private <T> CompletableFuture<T> toFuture(ListenableFuture<T> listenableFuture) {
+        CompletableFuture<T> promise = new CompletableFuture<>();
         Map<String, String> currentContext = MDC.getCopyOfContextMap();
         Map<String, String> capturedContext = currentContext == null ? Map.of() : new HashMap<>(currentContext);
         Context telemetryContext = Context.current();
@@ -445,10 +451,10 @@ public class GrpcRaftTransport implements RaftTransport {
 
             @Override
             public void onFailure(Throwable t) {
-                runtime.runOnContext(v -> promise.fail(t));
+                runtime.runOnContext(v -> promise.completeExceptionally(t));
             }
         }, command -> executor.execute(() -> withContext(capturedContext, telemetryContext, command)));
-        return promise.future();
+        return promise;
     }
 
     private static void withContext(Map<String, String> context, Context telemetryContext, Runnable action) {

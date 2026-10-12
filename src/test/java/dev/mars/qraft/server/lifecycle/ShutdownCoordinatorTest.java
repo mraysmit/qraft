@@ -16,9 +16,7 @@
 
 package dev.mars.qraft.server.lifecycle;
 
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
-import dev.mars.qraft.common.async.Promise;
 import dev.mars.qraft.server.support.JavaRuntimeExtensionHelper;
 import dev.mars.qraft.server.support.JavaTestContextHelper;
 import dev.mars.qraft.testing.fault.InjectedFaultFixture;
@@ -30,6 +28,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -74,7 +73,7 @@ class ShutdownCoordinatorTest {
             ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime, 100, 100);
 
             coordinator.shutdown()
-                    .onComplete(ctx.succeeding(v -> ctx.verify(() -> {
+                    .whenComplete(ctx.succeeding(v -> ctx.verify(() -> {
                         assertEquals(ShutdownCoordinator.State.STOPPED, coordinator.getState());
                         assertFalse(coordinator.isAcceptingWork());
                         assertTrue(coordinator.isShutdownRequested());
@@ -107,15 +106,15 @@ class ShutdownCoordinatorTest {
 
             coordinator.onDrain("drain-1", () -> {
                 executionOrder.add("drain-1");
-                return Future.succeededFuture();
+                return CompletableFuture.completedFuture(null);
             });
             coordinator.onDrain("drain-2", () -> {
                 executionOrder.add("drain-2");
-                return Future.succeededFuture();
+                return CompletableFuture.completedFuture(null);
             });
 
             coordinator.shutdown()
-                    .onComplete(ctx.succeeding(v -> ctx.verify(() -> {
+                    .whenComplete(ctx.succeeding(v -> ctx.verify(() -> {
                         assertEquals(List.of("drain-1", "drain-2"), executionOrder);
                         ctx.completeNow();
                     })));
@@ -129,23 +128,23 @@ class ShutdownCoordinatorTest {
 
             coordinator.onDrain("drain", () -> {
                 executionOrder.add("DRAIN");
-                return Future.succeededFuture();
+                return CompletableFuture.completedFuture(null);
             });
             coordinator.onAwaitCompletion("await", () -> {
                 executionOrder.add("AWAIT_COMPLETION");
-                return Future.succeededFuture();
+                return CompletableFuture.completedFuture(null);
             });
             coordinator.onServiceStop("stop", () -> {
                 executionOrder.add("STOP_SERVICES");
-                return Future.succeededFuture();
+                return CompletableFuture.completedFuture(null);
             });
             coordinator.onResourceClose("close", () -> {
                 executionOrder.add("CLOSE_RESOURCES");
-                return Future.succeededFuture();
+                return CompletableFuture.completedFuture(null);
             });
 
             coordinator.shutdown()
-                    .onComplete(ctx.succeeding(v -> ctx.verify(() -> {
+                    .whenComplete(ctx.succeeding(v -> ctx.verify(() -> {
                         assertEquals(
                                 List.of("DRAIN", "AWAIT_COMPLETION", "STOP_SERVICES", "CLOSE_RESOURCES"),
                                 executionOrder
@@ -162,15 +161,15 @@ class ShutdownCoordinatorTest {
 
             coordinator.onDrain("failing", () -> {
                 callCount.incrementAndGet();
-                return Future.failedFuture(new InjectedFaultFixture(SHUTDOWN_HOOK_FAILURE, "Simulated failure"));
+                return CompletableFuture.failedFuture(new InjectedFaultFixture(SHUTDOWN_HOOK_FAILURE, "Simulated failure"));
             });
             coordinator.onDrain("succeeding", () -> {
                 callCount.incrementAndGet();
-                return Future.succeededFuture();
+                return CompletableFuture.completedFuture(null);
             });
 
             coordinator.shutdown()
-                    .onComplete(ctx.succeeding(v -> ctx.verify(() -> {
+                    .whenComplete(ctx.succeeding(v -> ctx.verify(() -> {
                         // Both hooks should be called despite first failure
                         assertEquals(2, callCount.get());
                         assertEquals(ShutdownCoordinator.State.STOPPED, coordinator.getState());
@@ -191,19 +190,19 @@ class ShutdownCoordinatorTest {
 
             coordinator.onDrain("counter", () -> {
                 drainCallCount.incrementAndGet();
-                return Future.succeededFuture();
+                return CompletableFuture.completedFuture(null);
             });
 
             // Call shutdown multiple times
-            Future<Void> first = coordinator.shutdown();
-            Future<Void> second = coordinator.shutdown();
-            Future<Void> third = coordinator.shutdown();
+            CompletableFuture<Void> first = coordinator.shutdown();
+            CompletableFuture<Void> second = coordinator.shutdown();
+            CompletableFuture<Void> third = coordinator.shutdown();
 
             assertSame(first, second);
             assertSame(first, third);
 
-            Future.all(first, second, third)
-                    .onComplete(ctx.succeeding(v -> ctx.verify(() -> {
+            CompletableFuture.allOf(first, second, third)
+                    .whenComplete(ctx.succeeding(v -> ctx.verify(() -> {
                         // Drain hook should only be called once
                         assertEquals(1, drainCallCount.get());
                         ctx.completeNow();
@@ -225,17 +224,17 @@ class ShutdownCoordinatorTest {
 
             // Slow hook that won't complete in time
             coordinator.onDrain("slow", () -> {
-                return runtime.timer(5000).mapEmpty(); // 5 second delay
+                return runtime.timer(5000).<Void>thenApply(ignored -> null); // 5 second delay
             });
 
             // Fast hook that should still run
             coordinator.onDrain("fast", () -> {
                 completedCount.incrementAndGet();
-                return Future.succeededFuture();
+                return CompletableFuture.completedFuture(null);
             });
 
             coordinator.shutdown()
-                    .onComplete(ctx.succeeding(v -> ctx.verify(() -> {
+                    .whenComplete(ctx.succeeding(v -> ctx.verify(() -> {
                         // Should complete despite slow hook timing out
                         assertEquals(ShutdownCoordinator.State.STOPPED, coordinator.getState());
                         // Fast hook should still have run
@@ -249,23 +248,23 @@ class ShutdownCoordinatorTest {
         void timeoutDoesNotMutateSourceHookFuture(JavaRuntime runtime, JavaTestContextHelper ctx) {
             IntentionalErrorsHelper.expect(BEST_EFFORT_SHUTDOWN_HOOK_TIMEOUT, 1);
             ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime, 50, 50);
-            Promise<Void> sourceOperation = Promise.promise();
+            CompletableFuture<Void> sourceOperation = new CompletableFuture<>();
             AtomicInteger laterHooks = new AtomicInteger();
 
-            coordinator.onDrain("slow", sourceOperation::future);
+            coordinator.onDrain("slow", () -> sourceOperation);
             coordinator.onDrain("later", () -> {
                 laterHooks.incrementAndGet();
-                return Future.succeededFuture();
+                return CompletableFuture.completedFuture(null);
             });
 
             coordinator.shutdown()
-                    .onComplete(ctx.succeeding(v -> ctx.verify(() -> {
+                    .whenComplete(ctx.succeeding(v -> ctx.verify(() -> {
                         assertEquals(ShutdownCoordinator.State.STOPPED, coordinator.getState());
                         assertEquals(1, laterHooks.get());
-                        assertFalse(sourceOperation.future().isComplete(),
+                        assertFalse(sourceOperation.isDone(),
                                 "coordinator timeout must not corrupt the hook's shared completion state");
-                        sourceOperation.complete();
-                        assertTrue(sourceOperation.future().succeeded());
+                        sourceOperation.complete(null);
+                        assertTrue(sourceOperation.isDone() && !sourceOperation.isCompletedExceptionally());
                         ctx.completeNow();
                     })));
         }
@@ -275,31 +274,31 @@ class ShutdownCoordinatorTest {
         void criticalServiceTimeoutStopsShutdownProgression(JavaRuntime runtime, JavaTestContextHelper ctx) {
             IntentionalErrorsHelper.expect(CRITICAL_SHUTDOWN_HOOK_TIMEOUT, 2);
             ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime, 50, 50);
-            Promise<Void> nodeStop = Promise.promise();
+            CompletableFuture<Void> nodeStop = new CompletableFuture<>();
             AtomicInteger laterServiceStops = new AtomicInteger();
             AtomicInteger resourceCloses = new AtomicInteger();
 
-            coordinator.onCriticalServiceStop("node-stop", nodeStop::future);
+            coordinator.onCriticalServiceStop("node-stop", () -> nodeStop);
             coordinator.onServiceStop("later-service", () -> {
                 laterServiceStops.incrementAndGet();
-                return Future.succeededFuture();
+                return CompletableFuture.completedFuture(null);
             });
             coordinator.onResourceClose("storage", () -> {
                 resourceCloses.incrementAndGet();
-                return Future.succeededFuture();
+                return CompletableFuture.completedFuture(null);
             });
 
-            Future<Void> shutdown = coordinator.shutdown();
+            CompletableFuture<Void> shutdown = coordinator.shutdown();
             assertSame(shutdown, coordinator.shutdown(),
                     "all callers must observe the same critical shutdown outcome");
-            shutdown.onComplete(ctx.failing(error -> ctx.verify(() -> {
+            shutdown.whenComplete(ctx.failing(error -> ctx.verify(() -> {
                 assertInstanceOf(TimeoutException.class, error);
                 assertEquals(ShutdownCoordinator.State.FAILED, coordinator.getState());
                 assertEquals(0, laterServiceStops.get());
                 assertEquals(0, resourceCloses.get(),
                         "resource closure is unsafe while the node may still own persistence work");
-                assertFalse(nodeStop.future().isComplete());
-                nodeStop.complete();
+                assertFalse(nodeStop.isDone());
+                nodeStop.complete(null);
                 ctx.completeNow();
             })));
         }
@@ -315,8 +314,8 @@ class ShutdownCoordinatorTest {
                 throw failure;
             });
 
-            Future<Void> shutdown = assertDoesNotThrow(coordinator::shutdown);
-            shutdown.onComplete(ctx.failing(error -> ctx.verify(() -> {
+            CompletableFuture<Void> shutdown = assertDoesNotThrow(coordinator::shutdown);
+            shutdown.whenComplete(ctx.failing(error -> ctx.verify(() -> {
                 assertSame(failure, error);
                 assertEquals(ShutdownCoordinator.State.FAILED, coordinator.getState());
                 assertSame(shutdown, coordinator.shutdown());
@@ -335,7 +334,7 @@ class ShutdownCoordinatorTest {
             ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime);
 
             coordinator.shutdown()
-                    .onComplete(ctx.succeeding(v -> ctx.verify(() -> {
+                    .whenComplete(ctx.succeeding(v -> ctx.verify(() -> {
                         assertEquals(ShutdownCoordinator.State.STOPPED, coordinator.getState());
                         ctx.completeNow();
                     })));

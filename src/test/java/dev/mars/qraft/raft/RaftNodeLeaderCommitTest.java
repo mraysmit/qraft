@@ -24,9 +24,7 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.LogEntry;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
-import dev.mars.qraft.common.async.Promise;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -69,8 +67,8 @@ class RaftNodeLeaderCommitTest {
 
     @AfterEach
     void tearDown() throws Exception {
-        if (node != null) node.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-        if (runtime != null) runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        if (node != null) node.stop().get(10, TimeUnit.SECONDS);
+        if (runtime != null) runtime.shutdown().get(10, TimeUnit.SECONDS);
     }
 
     @Test
@@ -86,7 +84,7 @@ class RaftNodeLeaderCommitTest {
 
         transport.answer("peer-2", append -> append.getEntriesCount() > 0);
         settle();
-        var admitted = service.join(request).toCompletionStage().toCompletableFuture();
+        var admitted = service.join(request);
         settle();
         transport.answer("peer-2", append -> append.getEntriesCount() > 0);
         assertEquals(dev.mars.qraft.raft.grpc.MembershipResponse.Status.JOINED,
@@ -100,7 +98,7 @@ class RaftNodeLeaderCommitTest {
         AppendEntriesResponse followed = node.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
                         .setTerm(1).setLeaderId("peer-2").setPrevLogIndex(1).setPrevLogTerm(0).setLeaderCommit(1)
                         .addEntries(entry(2, 1, "earlier-term")).build())
-                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                .get(10, TimeUnit.SECONDS);
         assertTrue(followed.getSuccess());
         becomeLeader();
         assertEquals(2, status().term());
@@ -166,23 +164,22 @@ class RaftNodeLeaderCommitTest {
                 .mode(RaftNodeMode.volatileMode()).snapshotEnabled(false)
                 .electionTimeout(ELECTION_TIMEOUT_MS).heartbeatInterval(HEARTBEAT_MS)
                 .timerScheduler(timers).build();
-        node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        node.start().get(10, TimeUnit.SECONDS);
     }
 
     private void becomeLeader() throws Exception {
         timers.fireElectionTimeout();
-        node.awaitState(RaftNode.State.LEADER, 10_000).toCompletionStage().toCompletableFuture()
+        node.awaitState(RaftNode.State.LEADER, 10_000)
                 .get(15, TimeUnit.SECONDS);
         settle();
     }
 
     private CompletableFuture<RaftCommandResult<?>> submit(String key) {
-        return node.submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put(key, key)))
-                .toCompletionStage().toCompletableFuture();
+        return node.submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put(key, key)));
     }
 
     private RaftStatus status() throws Exception {
-        return node.status().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        return node.status().get(10, TimeUnit.SECONDS);
     }
 
     private static LogEntry entry(long index, long term, String key) {
@@ -206,7 +203,7 @@ class RaftNodeLeaderCommitTest {
      * follower's success: its match index is the prefix the request verified.
      */
     private static final class HeldTransportFixture implements RaftTransport {
-        private record Held(String target, AppendEntriesRequest request, Promise<AppendEntriesResponse> response) { }
+        private record Held(String target, AppendEntriesRequest request, CompletableFuture<AppendEntriesResponse> response) { }
 
         private final List<Held> held = new CopyOnWriteArrayList<>();
 
@@ -229,22 +226,22 @@ class RaftNodeLeaderCommitTest {
         @Override public void stop() { }
 
         @Override
-        public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
-            return Future.succeededFuture(VoteResponse.newBuilder()
+        public CompletableFuture<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
+            return CompletableFuture.completedFuture(VoteResponse.newBuilder()
                     .setTerm(request.getTerm()).setVoteGranted(true)
                     .setVoterServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
         }
 
         @Override
-        public Future<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
-            Promise<AppendEntriesResponse> response = Promise.promise();
+        public CompletableFuture<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
+            CompletableFuture<AppendEntriesResponse> response = new CompletableFuture<>();
             held.add(new Held(targetId, request, response));
-            return response.future();
+            return response;
         }
 
         @Override
-        public Future<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
-            return Promise.<InstallSnapshotResponse>promise().future();
+        public CompletableFuture<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
+            return new CompletableFuture<InstallSnapshotResponse>();
         }
     }
 }

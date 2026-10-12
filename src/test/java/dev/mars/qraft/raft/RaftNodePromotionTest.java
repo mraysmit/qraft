@@ -22,7 +22,6 @@ import dev.mars.qraft.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.QraftStateStore;
@@ -33,6 +32,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
@@ -85,7 +85,7 @@ class RaftNodePromotionTest {
         try {
             cluster.close();
         } finally {
-            runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.close().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -191,7 +191,7 @@ class RaftNodePromotionTest {
     /** Commits a command with b's acknowledgement, so the leader has committed an entry in its term. */
     private void commitACommand() throws Exception {
         long index = leader.getLastLogIndex() + 1;
-        Future<?> write = leader.submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put("k", "v")));
+        CompletableFuture<?> write = leader.submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put("k", "v")));
         awaitTrue(() -> transport.appendCarrying(index, "b") != null, "the entry is sent to b");
         Held<AppendEntriesRequest, AppendEntriesResponse> held = transport.appends.stream()
                 .filter(candidate -> candidate.response() == transport.appendCarrying(index, "b"))

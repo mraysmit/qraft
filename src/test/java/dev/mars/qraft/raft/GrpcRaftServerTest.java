@@ -117,20 +117,20 @@ class GrpcRaftServerTest {
             channel.awaitTermination(10, TimeUnit.SECONDS);
         }
         if (grpcServer != null) {
-            grpcServer.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            grpcServer.stop().get(10, TimeUnit.SECONDS);
         }
         if (cluster != null) {
             cluster.close();
         }
         if (runtime != null) {
-            runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.close().get(10, TimeUnit.SECONDS);
         }
     }
 
     /** Starts the server on any free port and connects to the port it actually bound. */
     private void startServerAndConnect() throws Exception {
         grpcServer = new GrpcRaftServer(runtime, 0, raftNode);
-        grpcServer.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        grpcServer.start().get(10, TimeUnit.SECONDS);
 
         channel = ManagedChannelBuilder.forAddress("localhost", grpcServer.port())
                 .usePlaintext()
@@ -164,13 +164,12 @@ class GrpcRaftServerTest {
     void startOnAPortAnotherServerHasBoundFails() throws Exception {
         // Start first server
         grpcServer = new GrpcRaftServer(runtime, 0, raftNode);
-        grpcServer.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        grpcServer.start().get(10, TimeUnit.SECONDS);
 
         // Try to start second server on the port the first one bound
         GrpcRaftServer secondServer = new GrpcRaftServer(runtime, grpcServer.port(), raftNode);
 
-        CompletableFuture<Void> startFuture = secondServer.start()
-                .toCompletionStage().toCompletableFuture();
+        CompletableFuture<Void> startFuture = secondServer.start();
 
         assertThrows(ExecutionException.class, () -> startFuture.get(10, TimeUnit.SECONDS));
     }
@@ -191,8 +190,7 @@ class GrpcRaftServerTest {
         assertDoesNotThrow(() -> blockingStub.requestVote(request));
 
         // Stop server
-        CompletableFuture<Void> stopFuture = grpcServer.stop()
-                .toCompletionStage().toCompletableFuture();
+        CompletableFuture<Void> stopFuture = grpcServer.stop();
 
         assertDoesNotThrow(() -> stopFuture.get(10, TimeUnit.SECONDS));
 
@@ -211,7 +209,7 @@ class GrpcRaftServerTest {
         assertDoesNotThrow(() -> blockingStub.requestVote(VoteRequest.newBuilder()
                 .setTerm(1).setCandidateId("candidate").setLastLogIndex(0).setLastLogTerm(0).build()));
 
-        grpcServer.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        grpcServer.stop().get(10, TimeUnit.SECONDS);
         assertThrows(IllegalStateException.class, grpcServer::port, "no port is bound after stop");
     }
 
@@ -220,10 +218,10 @@ class GrpcRaftServerTest {
     void stoppingAServerThatNeverStartedLeavesItAbleToStartAndServe() throws Exception {
         grpcServer = new GrpcRaftServer(runtime, 0, raftNode);
 
-        grpcServer.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        grpcServer.stop().get(10, TimeUnit.SECONDS);
         assertThrows(IllegalStateException.class, grpcServer::port, "stopping did not bind a port");
 
-        grpcServer.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        grpcServer.start().get(10, TimeUnit.SECONDS);
         channel = ManagedChannelBuilder.forAddress("localhost", grpcServer.port()).usePlaintext().build();
         VoteResponse response = RaftServiceGrpc.newBlockingStub(channel).withDeadlineAfter(10, TimeUnit.SECONDS)
                 .requestVote(vote(1, "candidate1"));
@@ -236,7 +234,7 @@ class GrpcRaftServerTest {
         for (int i = 0; i < 3; i++) {
             GrpcRaftServer server = new GrpcRaftServer(runtime, 0, raftNode);
 
-            server.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            server.start().get(10, TimeUnit.SECONDS);
 
             // Quick health check
             ManagedChannel ch = ManagedChannelBuilder.forAddress("localhost", server.port())
@@ -256,7 +254,7 @@ class GrpcRaftServerTest {
             ch.shutdownNow();
             ch.awaitTermination(10, TimeUnit.SECONDS);
 
-            server.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            server.stop().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -278,7 +276,7 @@ class GrpcRaftServerTest {
         dev.mars.qraft.testing.fault.IntentionalErrorsHelper.expect(
                 dev.mars.qraft.testing.fault.IntentionalErrorFixture.GRPC_CONNECTION_ACCEPTED_AS_SERVER_STOPS, 1);
         grpcServer = new GrpcRaftServer(runtime, 0, raftNode);
-        grpcServer.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        grpcServer.start().get(10, TimeUnit.SECONDS);
         java.lang.reflect.Field holder = io.grpc.internal.SharedResourceHolder.class.getDeclaredField("holder");
         holder.setAccessible(true);
         Object handBackMonitor = holder.get(null);
@@ -293,7 +291,7 @@ class GrpcRaftServerTest {
             CompletableFuture<Void> stopped;
             synchronized (handBackMonitor) {
                 // The server stops. It releases its resources, and waits here to hand its threads back.
-                stopped = grpcServer.stop().toCompletionStage().toCompletableFuture();
+                stopped = grpcServer.stop();
                 org.awaitility.Awaitility.await().atMost(java.time.Duration.ofSeconds(10))
                         .until(() -> Thread.getAllStackTraces().entrySet().stream().anyMatch(thread ->
                                 thread.getKey().getState() == Thread.State.BLOCKED
@@ -331,7 +329,7 @@ class GrpcRaftServerTest {
     @DisplayName("A connection prepared after the server has stopped is closed without a warning")
     void aConnectionPreparedAfterTheServerHasStoppedIsClosedWithoutAWarning() throws Exception {
         grpcServer = new GrpcRaftServer(runtime, 0, raftNode);
-        grpcServer.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        grpcServer.start().get(10, TimeUnit.SECONDS);
 
         try (HeldWorkerThreads workers = new HeldWorkerThreads();
              NettyWarnings warnings = new NettyWarnings();
@@ -340,7 +338,7 @@ class GrpcRaftServerTest {
             workers.awaitOneConnectionWaiting();
 
             // The server stops completely while the accepted connection still waits for its worker thread.
-            grpcServer.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            grpcServer.stop().get(10, TimeUnit.SECONDS);
             assertThrows(IllegalStateException.class, grpcServer::port, "the server has stopped");
             workers.release();
 
@@ -806,7 +804,7 @@ class GrpcRaftServerTest {
         assertDoesNotThrow(() -> blockingStub.requestVote(request));
 
         // Stop server
-        grpcServer.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        grpcServer.stop().get(10, TimeUnit.SECONDS);
         grpcServer = null;
 
         // Client should get an error
@@ -1033,8 +1031,8 @@ class GrpcRaftServerTest {
         ManagedChannel channelA = null;
         ManagedChannel channelB = null;
         try {
-            serverA.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            serverB.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            serverA.start().get(10, TimeUnit.SECONDS);
+            serverB.start().get(10, TimeUnit.SECONDS);
             channelA = ManagedChannelBuilder.forAddress("localhost", serverA.port()).usePlaintext().build();
             channelB = ManagedChannelBuilder.forAddress("localhost", serverB.port()).usePlaintext().build();
             RaftServiceGrpc.RaftServiceBlockingStub stubA =
@@ -1053,8 +1051,8 @@ class GrpcRaftServerTest {
         } finally {
             if (channelA != null) channelA.shutdownNow();
             if (channelB != null) channelB.shutdownNow();
-            serverA.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            serverB.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            serverA.stop().get(10, TimeUnit.SECONDS);
+            serverB.stop().get(10, TimeUnit.SECONDS);
         }
     }
 }

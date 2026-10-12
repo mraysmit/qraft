@@ -22,9 +22,7 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
-import dev.mars.qraft.common.async.Promise;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -102,7 +100,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
     void tearDown() throws Exception {
         if (node != null) await(node.stop());
         if (runtime != null) {
-            runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.shutdown().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -151,7 +149,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
 
         stepDownAndReelect(oldTerm);
         long responseTerm = node.getCurrentTerm() + 1;
-        Future<RaftNode.State> follower = node.awaitState(RaftNode.State.FOLLOWER, 10_000);
+        CompletableFuture<RaftNode.State> follower = node.awaitState(RaftNode.State.FOLLOWER, 10_000);
         stale.response().complete(InstallSnapshotResponse.newBuilder()
                 .setTerm(responseTerm)
                 .setFollowerServerId(PEER_SERVER_ID)
@@ -180,7 +178,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
         node.submitCommand(put("current", "snapshot-transfer"));
         PendingSnapshot current = transport.takeSnapshot();
 
-        stale.response().fail(new IllegalStateException("late failure"));
+        stale.response().completeExceptionally(new IllegalStateException("late failure"));
         awaitStateLoop(runtime);
         current.response().complete(InstallSnapshotResponse.newBuilder()
                 .setTerm(current.request().getTerm())
@@ -201,10 +199,10 @@ class RaftNodeOutboundSnapshotGenerationTest {
         triggerSnapshotTransfer();
         storage.awaitBlockedSnapshotLoad();
 
-        Future<Void> stop = node.stop();
+        CompletableFuture<Void> stop = node.stop();
         awaitStateLoop(runtime);
 
-        assertTrue(!stop.isComplete(), "shutdown must wait for an accepted snapshot load");
+        assertTrue(!stop.isDone(), "shutdown must wait for an accepted snapshot load");
         assertEquals(0, storage.closeCount.get());
 
         storage.releaseBlockedSnapshotLoad();
@@ -338,7 +336,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
     }
 
     private record PendingSnapshot(
-            InstallSnapshotRequest request, Promise<InstallSnapshotResponse> response) {}
+            InstallSnapshotRequest request, CompletableFuture<InstallSnapshotResponse> response) {}
 
     /** Test transport fixture that records and controls snapshot requests for generation assertions. */
     private static final class SnapshotTransportFixture implements RaftTransport {
@@ -369,35 +367,35 @@ class RaftNodeOutboundSnapshotGenerationTest {
         @Override public void stop() {}
 
         @Override
-        public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
-            return Future.succeededFuture(VoteResponse.newBuilder()
+        public CompletableFuture<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
+            return CompletableFuture.completedFuture(VoteResponse.newBuilder()
                     .setTerm(request.getTerm()).setVoterServerId(ManualRaftClusterFixture.serverIdOf(targetId))
                     .setVoteGranted(true).build());
         }
 
         @Override
-        public Future<AppendEntriesResponse> sendAppendEntries(
+        public CompletableFuture<AppendEntriesResponse> sendAppendEntries(
                 String targetId, AppendEntriesRequest request) {
             if (rejectNextAppend.compareAndSet(true, false)) {
                 rejectedAppend.complete(null);
-                return Future.succeededFuture(AppendEntriesResponse.newBuilder()
+                return CompletableFuture.completedFuture(AppendEntriesResponse.newBuilder()
                         .setTerm(request.getTerm()).setFollowerServerId(ManualRaftClusterFixture.serverIdOf(targetId))
                         .setSuccess(false).build());
             }
             long matchIndex = request.getEntriesCount() == 0
                     ? request.getPrevLogIndex()
                     : request.getEntries(request.getEntriesCount() - 1).getIndex();
-            return Future.succeededFuture(AppendEntriesResponse.newBuilder()
+            return CompletableFuture.completedFuture(AppendEntriesResponse.newBuilder()
                     .setTerm(request.getTerm()).setFollowerServerId(ManualRaftClusterFixture.serverIdOf(targetId))
                     .setSuccess(true).setMatchIndex(matchIndex).build());
         }
 
         @Override
-        public Future<InstallSnapshotResponse> sendInstallSnapshot(
+        public CompletableFuture<InstallSnapshotResponse> sendInstallSnapshot(
                 String targetId, InstallSnapshotRequest request) {
-            Promise<InstallSnapshotResponse> response = Promise.promise();
+            CompletableFuture<InstallSnapshotResponse> response = new CompletableFuture<>();
             snapshots.add(new PendingSnapshot(request, response));
-            return response.future();
+            return response;
         }
     }
 

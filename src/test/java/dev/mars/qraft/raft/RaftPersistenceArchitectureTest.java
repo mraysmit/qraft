@@ -16,7 +16,6 @@
 
 package dev.mars.qraft.raft;
 
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
 import dev.mars.raftlog.storage.RaftStorage.LogEntryData;
 import org.junit.jupiter.api.AfterEach;
@@ -25,6 +24,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -56,7 +56,7 @@ class RaftPersistenceArchitectureTest {
     @AfterEach
     void tearDown() throws Exception {
         storage.close();
-        runtime.shutdown().toCompletionStage().toCompletableFuture()
+        runtime.shutdown()
                 .get(10, TimeUnit.SECONDS);
     }
 
@@ -64,10 +64,10 @@ class RaftPersistenceArchitectureTest {
     void activeTransitionCapabilityAuthorizesWalMutation() {
         RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 4);
 
-        Future<Void> result = sequencer.submit("append", () -> {
+        CompletableFuture<Void> result = sequencer.submit("append", () -> {
             RaftTransitionSequencer.Ownership ownership = sequencer.currentOwnership();
-            return Future.fromCompletionStage(persistence.appendEntries(
-                    ownership, List.of(new LogEntryData(1, 1, new byte[]{1}))));
+            return persistence.appendEntries(
+                    ownership, List.of(new LogEntryData(1, 1, new byte[]{1}))).toCompletableFuture();
         });
 
         await(result);
@@ -81,7 +81,7 @@ class RaftPersistenceArchitectureTest {
 
         await(sequencer.submit("capture", () -> {
             captured.set(sequencer.currentOwnership());
-            return Future.succeededFuture();
+            return CompletableFuture.completedFuture(null);
         }));
 
         IllegalStateException error = assertThrows(IllegalStateException.class,

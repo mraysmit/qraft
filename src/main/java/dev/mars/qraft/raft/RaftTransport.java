@@ -26,10 +26,10 @@ import dev.mars.qraft.raft.grpc.MembershipResponse;
 import dev.mars.qraft.raft.grpc.RemoveServerRequest;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.Future;
 
 import java.util.Map;
 import java.util.function.Consumer;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Interface for Raft transport layer.
@@ -52,17 +52,17 @@ public interface RaftTransport {
 
     void stop();
 
-    Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request);
+    CompletableFuture<VoteResponse> sendVoteRequest(String targetId, VoteRequest request);
 
-    Future<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request);
+    CompletableFuture<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request);
 
     /**
      * Asks {@code targetId} to describe itself, for a server deciding whether to bootstrap a new cluster. A
      * transport that cannot reach peers this way fails, and such a server never bootstraps a cluster of more
      * than one.
      */
-    default Future<DescribeResponse> describe(String targetId) {
-        return Future.failedFuture(new UnsupportedOperationException(
+    default CompletableFuture<DescribeResponse> describe(String targetId) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException(
                 getClass().getSimpleName() + " cannot ask " + targetId + " to describe itself"));
     }
 
@@ -70,14 +70,14 @@ public interface RaftTransport {
      * Forwards a server's request to join to {@code targetId}, the leader as this server knows it. A transport
      * that cannot forward fails, and the joining server asks again.
      */
-    default Future<MembershipResponse> join(String targetId, JoinRequest request) {
-        return Future.failedFuture(new UnsupportedOperationException(
+    default CompletableFuture<MembershipResponse> join(String targetId, JoinRequest request) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException(
                 getClass().getSimpleName() + " cannot forward a join to " + targetId));
     }
 
     /** Forwards an operator's removal of a server to {@code targetId}, the leader as this server knows it. */
-    default Future<MembershipResponse> removeServer(String targetId, RemoveServerRequest request) {
-        return Future.failedFuture(new UnsupportedOperationException(
+    default CompletableFuture<MembershipResponse> removeServer(String targetId, RemoveServerRequest request) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException(
                 getClass().getSimpleName() + " cannot forward a removal to " + targetId));
     }
 
@@ -98,7 +98,7 @@ public interface RaftTransport {
      * @param request the InstallSnapshot request (may be a single chunk)
      * @return Future containing the response
      */
-    Future<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request);
+    CompletableFuture<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request);
 
     /**
      * Sets the RaftNode reference for direct method invocation.

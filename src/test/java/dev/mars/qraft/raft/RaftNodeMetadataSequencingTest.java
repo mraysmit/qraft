@@ -20,12 +20,12 @@ import dev.mars.qraft.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.raft.api.SnapshotStore;
 import dev.mars.raftlog.storage.RaftStorage;
+import dev.mars.qraft.common.concurrent.Completions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -86,7 +86,7 @@ class RaftNodeMetadataSequencingTest {
     void tearDown() throws Exception {
         if (node != null) await(node.stop());
         if (runtime != null) {
-            runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.shutdown().get(10, TimeUnit.SECONDS);
         }
         InMemoryTransportSimulatorFixture.clearAllTransports();
     }
@@ -95,14 +95,14 @@ class RaftNodeMetadataSequencingTest {
     void concurrentCandidatesInOneTermCannotBothReachPersistenceOrReceiveVotes() {
         storage.blockNextUpdate();
 
-        Future<VoteResponse> candidateA = node.handleVoteRequest(vote(1, "candidate-a"));
+        CompletableFuture<VoteResponse> candidateA = node.handleVoteRequest(vote(1, "candidate-a"));
         storage.awaitBlockedUpdate();
-        Future<VoteResponse> candidateB = node.handleVoteRequest(vote(1, "candidate-b"));
+        CompletableFuture<VoteResponse> candidateB = node.handleVoteRequest(vote(1, "candidate-b"));
 
         awaitStateLoop(runtime);
         storage.assertUpdateCount(1);
-        assertFalse(candidateA.isComplete());
-        assertFalse(candidateB.isComplete());
+        assertFalse(candidateA.isDone());
+        assertFalse(candidateB.isDone());
 
         storage.releaseBlockedUpdate();
 
@@ -116,13 +116,13 @@ class RaftNodeMetadataSequencingTest {
     void higherTermVoteWaitsForEarlierVoteThenAdvancesTheDurableTerm() {
         storage.blockNextUpdate();
 
-        Future<VoteResponse> termOne = node.handleVoteRequest(vote(1, "candidate-a"));
+        CompletableFuture<VoteResponse> termOne = node.handleVoteRequest(vote(1, "candidate-a"));
         storage.awaitBlockedUpdate();
-        Future<VoteResponse> termTwo = node.handleVoteRequest(vote(2, "candidate-b"));
+        CompletableFuture<VoteResponse> termTwo = node.handleVoteRequest(vote(2, "candidate-b"));
 
         awaitStateLoop(runtime);
         storage.assertUpdateCount(1);
-        assertFalse(termTwo.isComplete());
+        assertFalse(termTwo.isDone());
         storage.releaseBlockedUpdateOffLoop();
 
         assertTrue(await(termOne).getVoteGranted());
@@ -139,9 +139,9 @@ class RaftNodeMetadataSequencingTest {
     void higherTermAppendCannotOvertakeAnInFlightVoteMetadataWrite() {
         storage.blockNextUpdate();
 
-        Future<VoteResponse> vote = node.handleVoteRequest(vote(1, "candidate-a"));
+        CompletableFuture<VoteResponse> vote = node.handleVoteRequest(vote(1, "candidate-a"));
         storage.awaitBlockedUpdate();
-        Future<AppendEntriesResponse> append = node.handleAppendEntriesRequest(
+        CompletableFuture<AppendEntriesResponse> append = node.handleAppendEntriesRequest(
                 AppendEntriesRequest.newBuilder()
                         .setTerm(2)
                         .setLeaderId("leader-2")
@@ -151,7 +151,7 @@ class RaftNodeMetadataSequencingTest {
 
         awaitStateLoop(runtime);
         storage.assertUpdateCount(1);
-        assertFalse(append.isComplete());
+        assertFalse(append.isDone());
 
         storage.releaseBlockedUpdateOffLoop();
 
@@ -168,8 +168,8 @@ class RaftNodeMetadataSequencingTest {
         storage.blockNextUpdate();
         CompletableFuture<JavaRuntime> completionContext = new CompletableFuture<>();
 
-        Future<VoteResponse> response = node.handleVoteRequest(vote(1, "candidate-a"));
-        response.onSuccess(ignored -> completionContext.complete(JavaRuntime.currentContext()));
+        CompletableFuture<VoteResponse> response = node.handleVoteRequest(vote(1, "candidate-a"));
+        response.whenComplete(Completions.onSuccess(ignored -> completionContext.complete(JavaRuntime.currentContext())));
         storage.awaitBlockedUpdate();
         storage.releaseBlockedUpdateOffLoop();
 
@@ -248,7 +248,7 @@ class RaftNodeMetadataSequencingTest {
                 .electionTimeout(25)
                 .heartbeatInterval(10_000)
                 .build();
-        CompletableFuture<Future<Void>> stopRequested = new CompletableFuture<>();
+        CompletableFuture<CompletableFuture<Void>> stopRequested = new CompletableFuture<>();
         node.addStateChangeListener(state -> {
             if (state == RaftNode.State.LEADER) stopRequested.complete(node.stop());
         });
@@ -281,7 +281,7 @@ class RaftNodeMetadataSequencingTest {
                 .electionTimeout(25)
                 .heartbeatInterval(10_000)
                 .build();
-        CompletableFuture<Future<Void>> stopRequested = new CompletableFuture<>();
+        CompletableFuture<CompletableFuture<Void>> stopRequested = new CompletableFuture<>();
         node.addStateChangeListener(state -> {
             if (state != RaftNode.State.CANDIDATE) return;
             // Hold the winning election on its state loop until an independent caller has queued stop.

@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.server;
 
+import dev.mars.qraft.common.concurrent.Completions;
 import dev.mars.qraft.common.concurrent.Deadlines;
 import dev.mars.qraft.server.api.DistributedStateGrpcService;
 import dev.mars.qraft.server.config.AppConfig;
@@ -24,9 +25,7 @@ import dev.mars.qraft.server.health.ExpiryScheduler;
 import dev.mars.qraft.server.health.LeaderHealthExpiry;
 import dev.mars.qraft.server.health.NodeExpiryPolicy;
 import dev.mars.qraft.server.lifecycle.ShutdownCoordinator;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
-import dev.mars.qraft.common.async.Promise;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import dev.mars.qraft.raft.RaftNode;
@@ -51,6 +50,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -91,13 +91,13 @@ public class QraftServerService {
         this.config = java.util.Objects.requireNonNull(config, "config");
     }
 
-    public Future<Void> start() {
-        Promise<Void> promise = Promise.promise();
+    public CompletableFuture<Void> start() {
+        CompletableFuture<Void> promise = new CompletableFuture<>();
         start(promise);
-        return promise.future();
+        return promise;
     }
 
-    public void start(Promise<Void> startPromise) {
+    public void start(CompletableFuture<Void> startPromise) {
         logger.info("Starting QraftServerService...");
 
         try {
@@ -129,30 +129,31 @@ public class QraftServerService {
 
             // Create storage via factory
             if (!"raftlog".equalsIgnoreCase(storageType) && !"wal".equalsIgnoreCase(storageType)) {
-                startPromise.fail(new IllegalArgumentException(
+                startPromise.completeExceptionally(new IllegalArgumentException(
                         "Unsupported Raft storage type '" + storageType + "'; only the external WAL is supported"));
                 return;
             }
-            Future.fromCompletionStage(RaftStorageFactory.createDurable(storagePath, fsyncEnabled))
-                .onSuccess(storage -> {
-                    this.raftStorage = storage;
-                    continueStartup(startPromise, nodeId, raftPort, apiGrpcPort, clusterNodeIds,
-                            listedAddresses);
-                })
-                .onFailure(err -> {
-                    logger.error("Failed to initialize Raft storage: {}", err.getMessage(), err);
-                    startPromise.fail(err);
-                });
+            RaftStorageFactory.createDurable(storagePath, fsyncEnabled)
+                .whenComplete(Completions.outcome(
+                        storage -> {
+                            this.raftStorage = storage;
+                            continueStartup(startPromise, nodeId, raftPort, apiGrpcPort, clusterNodeIds,
+                                    listedAddresses);
+                        },
+                        err -> {
+                            logger.error("Failed to initialize Raft storage: {}", err.getMessage(), err);
+                            startPromise.completeExceptionally(err);
+                        }));
 
         } catch (Exception e) {
-            startPromise.fail(e);
+            startPromise.completeExceptionally(e);
         }
     }
 
     /**
      * Continues the startup sequence after storage is initialized.
      */
-    private void continueStartup(Promise<Void> startPromise,
+    private void continueStartup(CompletableFuture<Void> startPromise,
                                  String nodeId, int raftPort, int apiGrpcPort,
                                  Set<String> clusterNodeIds, Map<String, String> listedAddresses) {
         try {
@@ -213,20 +214,21 @@ public class QraftServerService {
                     Duration.ofMillis(config.getNodeReapAfterMs()));
             this.healthExpiry = Optional.of(LeaderHealthExpiry.attach(node, stateMachine::healthChecks,
                     () -> stateMachine.getNodes().values(), nodePolicy,
-                    command -> Deadlines.bound(node.submitCommand(command).toCompletionStage(),
+                    command -> Deadlines.bound(node.submitCommand(command),
                             HEALTH_EXPIRY_PROPOSAL_TIMEOUT_MS, TimeUnit.MILLISECONDS),
                     ExpiryScheduler.of(expiryExecutor), Clock.systemUTC(),
                     Duration.ofMillis(config.getHealthExpiryIntervalMs())));
 
-            internalRaftServer.start().compose(v1 -> {
+            internalRaftServer.start().thenCompose(v1 -> {
                 logger.info("Internal Raft gRPC server started on port {}", internalRaftServer.port());
                 return externalApiServer.start();
-            }).onSuccess(v2 -> {
+            }).whenComplete(Completions.outcome(
+                    v2 -> {
                 logger.info("External API gRPC server started on port {}", externalApiServer.port());
 
                 try {
                     healthServer.start();
-                    node.start().onSuccess(v3 -> {
+                    node.start().whenComplete(Completions.outcome(v3 -> {
                         logger.info("HTTP health server started on port {}", healthServer.port());
 
                         // 8. Start Raft (includes recovery from WAL)
@@ -236,26 +238,28 @@ public class QraftServerService {
                         startClusterBootstrap(node);
 
                         logger.info("QraftServerService started successfully (gRPC and HTTP health mode)");
-                        startPromise.complete();
-                    }).onFailure(error -> {
+                        startPromise.complete(null);
+                    },
+                    error -> {
                         if (node.isFenced()) {
                             logger.error("Raft recovery failed; node remains live but unready and will not "
                                             + "participate. Preserve the node directory for diagnosis, then "
                                             + "replace it from a healthy peer and restart: {}",
                                     error.getMessage(), error);
                             setupShutdownCoordinator();
-                            startPromise.complete();
+                            startPromise.complete(null);
                         } else {
-                            startPromise.fail(error);
+                            startPromise.completeExceptionally(error);
                         }
-                    });
+                    }));
                 } catch (Exception e) {
-                    startPromise.fail(e);
+                    startPromise.completeExceptionally(e);
                 }
-            }).onFailure(startPromise::fail);
+            },
+                    startPromise::completeExceptionally));
 
         } catch (Exception e) {
-            startPromise.fail(e);
+            startPromise.completeExceptionally(e);
         }
     }
 
@@ -280,16 +284,16 @@ public class QraftServerService {
         AtomicBoolean attempting = new AtomicBoolean();
         Consumer<Long> attempt = ignored -> {
             if (!attempting.compareAndSet(false, true)) return;
-            bootstrap.attempt().onComplete(result -> {
+            bootstrap.attempt().whenComplete((resultValue, resultError) -> {
                 attempting.set(false);
-                if (result.failed()) {
-                    logger.warn("Cluster bootstrap attempt failed: {}", result.cause().getMessage());
-                } else if (result.result() == ClusterBootstrap.Outcome.BOOTSTRAPPED
-                        || result.result() == ClusterBootstrap.Outcome.CONFIGURED) {
+                if (resultError != null) {
+                    logger.warn("Cluster bootstrap attempt failed: {}", Completions.unwrap(resultError).getMessage());
+                } else if (resultValue == ClusterBootstrap.Outcome.BOOTSTRAPPED
+                        || resultValue == ClusterBootstrap.Outcome.CONFIGURED) {
                     logger.info("Cluster configuration established: {}", node.getConfiguration().orElse(null));
                     bootstrapTimer.ifPresent(runtime::cancelTimer);
                 } else {
-                    logger.info("Cluster bootstrap: {}", result.result());
+                    logger.info("Cluster bootstrap: {}", resultValue);
                 }
             });
         };
@@ -309,17 +313,19 @@ public class QraftServerService {
         // Phase 3: STOP_SERVICES - Stop in reverse order of startup
         coordinator.onServiceStop("health-expiry-stop", () -> {
             stopHealthExpiry();
-            return Future.succeededFuture();
+            return CompletableFuture.completedFuture(null);
         });
         coordinator.onServiceStop("grpc-server-stop", () -> {
-            Future<Void> raftStop = raftGrpcServer.map(GrpcRaftServer::stop).orElseGet(Future::succeededFuture);
-            Future<Void> apiStop = apiGrpcServer.map(GrpcServiceServer::stop).orElseGet(Future::succeededFuture);
+            CompletableFuture<Void> raftStop = raftGrpcServer.map(GrpcRaftServer::stop)
+                    .orElseGet(QraftServerService::nothingToStop);
+            CompletableFuture<Void> apiStop = apiGrpcServer.map(GrpcServiceServer::stop)
+                    .orElseGet(QraftServerService::nothingToStop);
             httpApiServer.ifPresent(HttpApiServer::stop);
-            return Future.all(raftStop, apiStop).mapEmpty();
+            return CompletableFuture.allOf(raftStop, apiStop);
         });
 
         coordinator.onCriticalServiceStop("raft-node-stop", () -> {
-            return raftNode.map(RaftNode::stop).orElseGet(Future::succeededFuture);
+            return raftNode.map(RaftNode::stop).orElseGet(QraftServerService::nothingToStop);
         });
         
         // Phase 4: CLOSE_RESOURCES - Storage is closed by raftNode.stop()
@@ -346,47 +352,55 @@ public class QraftServerService {
         return Map.of("http", http.port(), "raft", raft.port(), "apiGrpc", api.port());
     }
 
-    public Future<Void> stop() {
-        Promise<Void> promise = Promise.promise();
+    public CompletableFuture<Void> stop() {
+        CompletableFuture<Void> promise = new CompletableFuture<>();
         stop(promise);
-        return promise.future();
+        return promise;
     }
 
-    public void stop(Promise<Void> stopPromise) {
+    private static CompletableFuture<Void> nothingToStop() {
+        return CompletableFuture.completedFuture(null);
+    }
+
+    public void stop(CompletableFuture<Void> stopPromise) {
         logger.info("Stopping QraftServerService...");
         bootstrapTimer.ifPresent(runtime::cancelTimer);
 
         shutdownCoordinator.ifPresentOrElse(
-            coordinator -> coordinator.shutdown()
-                    .onSuccess(v -> {
+            coordinator -> coordinator.shutdown().whenComplete(Completions.outcome(
+                    v -> {
                         logger.info("QraftServerService stopped successfully (graceful)");
-                        stopPromise.complete();
-                    })
-                    .onFailure(err -> {
+                        stopPromise.complete(null);
+                    },
+                    err -> {
                         logger.error("Graceful shutdown could not complete safely: {}", err.getMessage(), err);
-                        stopPromise.fail(err);
-                    }),
+                        stopPromise.completeExceptionally(err);
+                    })),
             () -> {
                 // Fallback to immediate shutdown if coordinator wasn't initialized
                 stopHealthExpiry();
                 try {
-                    Future<Void> raftStop = raftNode.map(RaftNode::stop).orElseGet(Future::succeededFuture);
-                    Future<Void> internalGrpcStop = raftGrpcServer.map(GrpcRaftServer::stop).orElseGet(Future::succeededFuture);
-                    Future<Void> externalGrpcStop = apiGrpcServer.map(GrpcServiceServer::stop).orElseGet(Future::succeededFuture);
+                    CompletableFuture<Void> raftStop = raftNode.map(RaftNode::stop)
+                            .orElseGet(QraftServerService::nothingToStop);
+                    CompletableFuture<Void> internalGrpcStop = raftGrpcServer.map(GrpcRaftServer::stop)
+                            .orElseGet(QraftServerService::nothingToStop);
+                    CompletableFuture<Void> externalGrpcStop = apiGrpcServer.map(GrpcServiceServer::stop)
+                            .orElseGet(QraftServerService::nothingToStop);
                     httpApiServer.ifPresent(HttpApiServer::stop);
 
-                    Future.all(raftStop, internalGrpcStop, externalGrpcStop)
-                            .onSuccess(v -> {
-                                logger.info("QraftServerService stopped successfully (immediate)");
-                                stopPromise.complete();
-                            })
-                            .onFailure(err -> {
-                                logger.warn("Error during immediate shutdown: {}", err.getMessage(), err);
-                                stopPromise.fail(err);
-                            });
+                    CompletableFuture.allOf(raftStop, internalGrpcStop, externalGrpcStop)
+                            .whenComplete(Completions.outcome(
+                                    v -> {
+                                        logger.info("QraftServerService stopped successfully (immediate)");
+                                        stopPromise.complete(null);
+                                    },
+                                    err -> {
+                                        logger.warn("Error during immediate shutdown: {}", err.getMessage(), err);
+                                        stopPromise.completeExceptionally(err);
+                                    }));
                 } catch (Exception e) {
                     logger.warn("Error during shutdown: {}", e.getMessage(), e);
-                    stopPromise.fail(e);
+                    stopPromise.completeExceptionally(e);
                 }
             }
         );

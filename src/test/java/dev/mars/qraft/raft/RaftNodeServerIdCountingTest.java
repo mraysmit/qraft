@@ -21,9 +21,7 @@ import dev.mars.qraft.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
-import dev.mars.qraft.common.async.Promise;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.state.distributed.DistributedStateCommand;
@@ -33,6 +31,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
@@ -81,7 +80,7 @@ class RaftNodeServerIdCountingTest {
         try {
             cluster.close();
         } finally {
-            runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.close().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -118,7 +117,7 @@ class RaftNodeServerIdCountingTest {
     void anAcknowledgementCountsOnlyFromTheServerConfiguredUnderThatName() throws Exception {
         elect();
         long index = node.getLastLogIndex() + 1;
-        Future<?> write = node.submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put("k", "v")));
+        CompletableFuture<?> write = node.submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put("k", "v")));
         awaitTrue(() -> transport.appendCarrying(index, "b") != null && transport.appendCarrying(index, "c") != null,
                 "the leader replicates the entry to both followers");
 
@@ -136,12 +135,12 @@ class RaftNodeServerIdCountingTest {
         elect();
         awaitTrue(() -> transport.appends.stream().anyMatch(held -> held.target().equals("b")),
                 "the new leader heartbeats b");
-        Promise<AppendEntriesResponse> heartbeat = transport.appends.stream()
+        CompletableFuture<AppendEntriesResponse> heartbeat = transport.appends.stream()
                 .filter(held -> held.target().equals("b")).findFirst().orElseThrow().response();
         long heartbeatMatch = transport.appends.stream()
                 .filter(held -> held.target().equals("b")).findFirst().orElseThrow().request().getPrevLogIndex();
         long index = node.getLastLogIndex() + 1;
-        Future<?> write = node.submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put("k", "v")));
+        CompletableFuture<?> write = node.submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put("k", "v")));
         awaitTrue(() -> transport.appendCarrying(index, "b") != null, "the entry is sent to b");
 
         transport.appendCarrying(index, "b").complete(ack(1, index, serverIdOf("b")));
@@ -183,7 +182,7 @@ class RaftNodeServerIdCountingTest {
         awaitTrue(() -> leader.getState() == RaftNode.State.LEADER, "x leads with y's vote");
         awaitTrue(() -> leader.getLastLogIndex() == 2, "leadership no-op appended before the tested write");
         long index = leader.getLastLogIndex() + 1;
-        Future<?> write = leader.submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put("k", "v")));
+        CompletableFuture<?> write = leader.submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put("k", "v")));
         awaitTrue(() -> held.appendCarrying(index, "z") != null && held.appendCarrying(index, "y") != null,
                 "the leader replicates to the voter and the non-voter");
 
@@ -214,7 +213,7 @@ class RaftNodeServerIdCountingTest {
         awaitTrue(() -> leader.getLastLogIndex() == 2, "leadership no-op appended");
         for (int i = 0; i < 4; i++) {
             long index = leader.getLastLogIndex() + 1;
-            Future<?> write = leader.submitCommand(
+            CompletableFuture<?> write = leader.submitCommand(
                     new DistributedStateRaftCommand(DistributedStateCommand.put("k" + i, "v")));
             awaitTrue(() -> held.appendCarrying(index, "b") != null, "the entry is sent to b");
             held.appendCarrying(index, "b").complete(ack(1, index, serverIdOf("b")));

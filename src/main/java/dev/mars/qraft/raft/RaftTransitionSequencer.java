@@ -16,15 +16,14 @@
 
 package dev.mars.qraft.raft;
 
-import dev.mars.qraft.common.async.AsyncResult;
 import dev.mars.qraft.common.async.CallerContext;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
-import dev.mars.qraft.common.async.Promise;
+import dev.mars.qraft.common.concurrent.Completions;
 
 import java.util.ArrayDeque;
 import java.util.Objects;
 import java.util.Queue;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
@@ -110,7 +109,7 @@ final class RaftTransitionSequencer {
     private final Queue<Transition<?>> queue = new ArrayDeque<>();
     private volatile State state = State.OPEN;
     private Transition<?> active;
-    private Promise<Void> drainPromise;
+    private CompletableFuture<Void> drainPromise;
 
     RaftTransitionSequencer(JavaRuntime runtime, int capacity) {
         this.runtime = Objects.requireNonNull(runtime, "runtime");
@@ -120,39 +119,39 @@ final class RaftTransitionSequencer {
         this.normalCapacity = capacity - essentialReserve;
     }
 
-    <T> Future<T> submit(String name, Supplier<Future<T>> action) {
+    <T> CompletableFuture<T> submit(String name, Supplier<CompletableFuture<T>> action) {
         return submit(name, FailurePolicy.CONTINUE, action);
     }
 
-    <T> Future<T> submit(String name, FailurePolicy failurePolicy, Supplier<Future<T>> action) {
+    <T> CompletableFuture<T> submit(String name, FailurePolicy failurePolicy, Supplier<CompletableFuture<T>> action) {
         return submit(name, failurePolicy, action, Function.identity());
     }
 
-    <P, T> Future<T> submit(String name, FailurePolicy failurePolicy,
-                            Supplier<Future<P>> prepareAndPersist,
+    <P, T> CompletableFuture<T> submit(String name, FailurePolicy failurePolicy,
+                            Supplier<CompletableFuture<P>> prepareAndPersist,
                             Function<? super P, ? extends T> apply) {
         return submit(name, failurePolicy, ignored -> true, prepareAndPersist, apply);
     }
 
-    <P, T> Future<T> submit(String name, FailurePolicy failurePolicy,
+    <P, T> CompletableFuture<T> submit(String name, FailurePolicy failurePolicy,
                             Predicate<Throwable> fenceOnFailure,
-                            Supplier<Future<P>> prepareAndPersist,
+                            Supplier<CompletableFuture<P>> prepareAndPersist,
                             Function<? super P, ? extends T> apply) {
         return submit(name, AdmissionClass.NORMAL, failurePolicy,
                 fenceOnFailure, prepareAndPersist, apply);
     }
 
-    <P, T> Future<T> submitEssential(String name, FailurePolicy failurePolicy,
-                                     Supplier<Future<P>> prepareAndPersist,
+    <P, T> CompletableFuture<T> submitEssential(String name, FailurePolicy failurePolicy,
+                                     Supplier<CompletableFuture<P>> prepareAndPersist,
                                      Function<? super P, ? extends T> apply) {
         return submit(name, AdmissionClass.ESSENTIAL, failurePolicy,
                 ignored -> true, prepareAndPersist, apply);
     }
 
-    private <P, T> Future<T> submit(String name, AdmissionClass admissionClass,
+    private <P, T> CompletableFuture<T> submit(String name, AdmissionClass admissionClass,
                                     FailurePolicy failurePolicy,
                                     Predicate<Throwable> fenceOnFailure,
-                                    Supplier<Future<P>> prepareAndPersist,
+                                    Supplier<CompletableFuture<P>> prepareAndPersist,
                                     Function<? super P, ? extends T> apply) {
         Objects.requireNonNull(name, "name");
         Objects.requireNonNull(admissionClass, "admissionClass");
@@ -164,21 +163,21 @@ final class RaftTransitionSequencer {
         Transition<T> transition = new Transition<>(name, admissionClass, failurePolicy, fenceOnFailure,
                 prepareAndPersist, value -> apply.apply(cast(value)));
         dispatch(() -> admit(transition), transition.result);
-        return transition.result.future();
+        return transition.result;
     }
 
-    Future<Void> drain() {
-        Promise<Void> requested = Promise.promise();
+    CompletableFuture<Void> drain() {
+        CompletableFuture<Void> requested = new CompletableFuture<>();
         Runnable beginDrain = () -> {
-            if (drainPromise == null) drainPromise = Promise.promise();
-            Future<Void> sharedDrain = drainPromise.future();
-            sharedDrain.onComplete(result -> completeFrom(result, requested));
+            if (drainPromise == null) drainPromise = new CompletableFuture<>();
+            CompletableFuture<Void> sharedDrain = drainPromise;
+            sharedDrain.whenComplete((drained, failure) -> completeFrom(drained, failure, requested));
             if (state == State.OPEN) state = State.DRAINING;
             completeDrainIfIdle();
         };
         if (JavaRuntime.currentContext() == runtime) beginDrain.run();
         else dispatch(beginDrain, requested);
-        return requested.future();
+        return requested;
     }
 
     boolean isDraining() {
@@ -218,17 +217,17 @@ final class RaftTransitionSequencer {
     private <T> void admit(Transition<T> transition) {
         assertStateLoop();
         if (state == State.DRAINING) {
-            transition.result.fail(new DrainingException());
+            transition.result.completeExceptionally(new DrainingException());
             return;
         }
         if (state == State.FENCED) {
-            transition.result.fail(new FencedException(null));
+            transition.result.completeExceptionally(new FencedException(null));
             return;
         }
         int admissionLimit = transition.admissionClass == AdmissionClass.ESSENTIAL
                 ? capacity : normalCapacity;
         if (outstandingCount() >= admissionLimit) {
-            transition.result.fail(new QueueFullException(capacity));
+            transition.result.completeExceptionally(new QueueFullException(capacity));
             return;
         }
         queue.add(transition);
@@ -251,7 +250,7 @@ final class RaftTransitionSequencer {
 
     private <T> void start(Transition<T> transition) {
         transition.context.run(() -> {
-            Future<?> operation;
+            CompletableFuture<?> operation;
             try {
                 operation = Objects.requireNonNull(
                         transition.action.get(), "transition action returned null");
@@ -259,8 +258,8 @@ final class RaftTransitionSequencer {
                 dispatch(() -> finish(transition, null, error), transition.result);
                 return;
             }
-            operation.onComplete(result -> dispatch(
-                    () -> finish(transition, result.result(), result.cause()), transition.result));
+            operation.whenComplete((value, failure) -> dispatch(
+                    () -> finish(transition, value, Completions.unwrap(failure)), transition.result));
         });
     }
 
@@ -293,21 +292,21 @@ final class RaftTransitionSequencer {
         transition.ownership.expire();
         active = null;
 
-        if (error == null) transition.result.tryComplete(applied);
-        else transition.result.tryFail(error);
+        if (error == null) transition.result.complete(applied);
+        else transition.result.completeExceptionally(error);
     }
 
     private void fenceQueuedTransitions(Throwable cause) {
         state = State.FENCED;
         Transition<?> queued;
         while ((queued = queue.poll()) != null) {
-            queued.result.tryFail(new FencedException(cause));
+            queued.result.completeExceptionally(new FencedException(cause));
         }
     }
 
     private void completeDrainIfIdle() {
         if (drainPromise != null && active == null && queue.isEmpty()) {
-            drainPromise.tryComplete();
+            drainPromise.complete(null);
         }
     }
 
@@ -321,17 +320,17 @@ final class RaftTransitionSequencer {
         }
     }
 
-    private void dispatch(Runnable action, Promise<?> rejectionTarget) {
+    private void dispatch(Runnable action, CompletableFuture<?> rejectionTarget) {
         try {
             runtime.runOnContext(ignored -> action.run());
         } catch (RejectedExecutionException error) {
-            rejectionTarget.tryFail(error);
+            rejectionTarget.completeExceptionally(error);
         }
     }
 
-    private static <T> void completeFrom(AsyncResult<T> source, Promise<T> target) {
-        if (source.succeeded()) target.tryComplete(source.result());
-        else target.tryFail(source.cause());
+    private static <T> void completeFrom(T value, Throwable failure, CompletableFuture<T> target) {
+        if (failure == null) target.complete(value);
+        else target.completeExceptionally(Completions.unwrap(failure));
     }
 
     @SuppressWarnings("unchecked")
@@ -344,15 +343,15 @@ final class RaftTransitionSequencer {
         private final AdmissionClass admissionClass;
         private final FailurePolicy failurePolicy;
         private final Predicate<Throwable> fenceOnFailure;
-        private final Supplier<? extends Future<?>> action;
+        private final Supplier<? extends CompletableFuture<?>> action;
         private final Function<Object, T> apply;
-        private final Promise<T> result = Promise.promise();
+        private final CompletableFuture<T> result = new CompletableFuture<>();
         private final Ownership ownership = new Ownership();
         private final CallerContext context = CallerContext.capture();
 
         private Transition(String name, AdmissionClass admissionClass, FailurePolicy failurePolicy,
                            Predicate<Throwable> fenceOnFailure,
-                           Supplier<? extends Future<?>> action, Function<Object, T> apply) {
+                           Supplier<? extends CompletableFuture<?>> action, Function<Object, T> apply) {
             this.name = name;
             this.admissionClass = admissionClass;
             this.failurePolicy = failurePolicy;

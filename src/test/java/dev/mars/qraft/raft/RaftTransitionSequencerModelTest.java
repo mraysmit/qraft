@@ -16,7 +16,6 @@
 
 package dev.mars.qraft.raft;
 
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,7 +57,7 @@ class RaftTransitionSequencerModelTest {
 
     @AfterEach
     void tearDown() throws Exception {
-        runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        runtime.shutdown().get(10, TimeUnit.SECONDS);
     }
 
     @Test
@@ -92,7 +91,7 @@ class RaftTransitionSequencerModelTest {
         RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 128);
         AtomicReference<ModelState> actual = new AtomicReference<>(ModelState.initial());
         List<String> history = new ArrayList<>();
-        List<Future<ModelState>> accepted = new ArrayList<>();
+        List<CompletableFuture<ModelState>> accepted = new ArrayList<>();
 
         for (int index = 0; index < operations.size(); index++) {
             int position = index;
@@ -106,8 +105,8 @@ class RaftTransitionSequencerModelTest {
                                 "stale preparation; seed=" + seed + ", operation=" + position);
                         history.add("prepare:" + position + ":" + operation.type());
                         ModelState captured = actual.get();
-                        return Future.fromCompletionStage(CompletableFuture.supplyAsync(
-                                () -> executeSystemOperation(operation, captured)));
+                        return CompletableFuture.supplyAsync(
+                                () -> executeSystemOperation(operation, captured)).toCompletableFuture();
                     },
                     persisted -> {
                         assertSame(runtime, JavaRuntime.currentContext(), "seed=" + seed);
@@ -119,17 +118,17 @@ class RaftTransitionSequencerModelTest {
                     }));
         }
 
-        Future<Void> drained = sequencer.drain();
-        List<Future<Void>> rejected = new ArrayList<>();
+        CompletableFuture<Void> drained = sequencer.drain();
+        List<CompletableFuture<Void>> rejected = new ArrayList<>();
         for (int index = 0; index < 8; index++) {
-            rejected.add(sequencer.submit("after-shutdown-" + index, Future::succeededFuture));
+            rejected.add(sequencer.submit("after-shutdown-" + index, () -> CompletableFuture.completedFuture(null)));
         }
 
-        for (Future<ModelState> result : accepted) await(result);
+        for (CompletableFuture<ModelState> result : accepted) await(result);
         await(drained);
         assertEquals(reference, actual.get(), "final state; seed=" + seed);
         assertEquals(expectedHistory(operations), history, "event history; seed=" + seed);
-        for (Future<Void> result : rejected) {
+        for (CompletableFuture<Void> result : rejected) {
             CompletionException failure = assertThrows(CompletionException.class,
                     () -> await(result), "seed=" + seed);
             assertInstanceOf(RaftTransitionSequencer.DrainingException.class, failure.getCause(),

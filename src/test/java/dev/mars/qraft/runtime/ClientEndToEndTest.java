@@ -249,7 +249,7 @@ class ClientEndToEndTest {
             CleanupHelper cleanup = new CleanupHelper();
             for (HttpApiServer server : servers.reversed()) cleanup.run(server::close);
             cleanup.run(raft::close)
-                    .run(() -> runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS))
+                    .run(() -> runtime.close().get(10, TimeUnit.SECONDS))
                     .rethrow();
         }
     }

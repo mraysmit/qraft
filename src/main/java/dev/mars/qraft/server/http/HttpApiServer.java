@@ -237,7 +237,7 @@ public final class HttpApiServer implements AutoCloseable {
         if (raftNode == null) return failed;
         RaftStatus status;
         try {
-            status = Deadlines.bound(raftNode.status().toCompletionStage(),
+            status = Deadlines.bound(raftNode.status(),
                     raftTimeout.toNanos(), TimeUnit.NANOSECONDS).join();
         } catch (CompletionException unavailable) {
             failed.add("unavailable");
@@ -294,7 +294,7 @@ public final class HttpApiServer implements AutoCloseable {
         RaftStatus current;
         try {
             // Read on the node's state loop: fields read one by one from here could mix two moments.
-            current = Deadlines.bound(raftNode.status().toCompletionStage(),
+            current = Deadlines.bound(raftNode.status(),
                     raftTimeout.toNanos(), TimeUnit.NANOSECONDS).join();
         } catch (CompletionException unavailable) {
             respondError(exchange, 503, "raft_unavailable", "Raft state is unavailable", true);
@@ -371,7 +371,7 @@ public final class HttpApiServer implements AutoCloseable {
                 .setToken(operatorToken(exchange)).build();
         MembershipResponse answer;
         try {
-            answer = Deadlines.bound(membership.remove(request).toCompletionStage(),
+            answer = Deadlines.bound(membership.remove(request),
                     MembershipService.TIMEOUT_SECONDS * 2, TimeUnit.SECONDS).join();
         } catch (CompletionException unavailable) {
             respondUnavailable(exchange, unavailable);
@@ -704,7 +704,7 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     private RaftCommandResult<?> submit(RaftCommand command) {
-        return Deadlines.bound(raftNode.submitCommand(command).toCompletionStage(),
+        return Deadlines.bound(raftNode.submitCommand(command),
                 raftTimeout.toNanos(), TimeUnit.NANOSECONDS)
                 .join();
     }

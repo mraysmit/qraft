@@ -67,6 +67,6 @@ public final class JavaRuntimeExtensionHelper
     }
 
     private static void close(JavaRuntime runtime) throws Exception {
-        if (runtime != null) runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        if (runtime != null) runtime.close().get(10, TimeUnit.SECONDS);
     }
 }

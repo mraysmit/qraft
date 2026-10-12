@@ -74,7 +74,7 @@ class DistributedStateGrpcServiceTest {
                 .electionTimeout(50)
                 .heartbeatInterval(20)
                 .build();
-        node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        node.start().get(10, TimeUnit.SECONDS);
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.sleep(10);
         assertTrue(node.isLeader());
@@ -83,8 +83,8 @@ class DistributedStateGrpcServiceTest {
 
     @AfterEach
     void tearDown() throws Exception {
-        if (node != null) node.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-        if (runtime != null) runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        if (node != null) node.stop().get(10, TimeUnit.SECONDS);
+        if (runtime != null) runtime.close().get(10, TimeUnit.SECONDS);
         InMemoryTransportSimulatorFixture.clearAllTransports();
     }
 

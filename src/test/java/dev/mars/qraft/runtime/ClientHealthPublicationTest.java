@@ -261,7 +261,7 @@ class ClientHealthPublicationTest {
                     .clusterNodes(Set.of("health-server")).transport(new PeerlessTransportFixture())
                     .stateMachine(store).commandCodec(new ProtobufRaftCommandCodec())
                     .mode(RaftNodeMode.volatileMode()).electionTimeout(25).heartbeatInterval(10_000).build();
-            node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            node.start().get(10, TimeUnit.SECONDS);
             waitUntil(node::isLeader);
             HttpApiServer server = new HttpApiServer(port, node, store);
             server.start().get(10, TimeUnit.SECONDS);
@@ -275,8 +275,8 @@ class ClientHealthPublicationTest {
         @Override
         public void close() throws Exception {
             server.close();
-            node.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            node.stop().get(10, TimeUnit.SECONDS);
+            runtime.close().get(10, TimeUnit.SECONDS);
         }
     }
 }

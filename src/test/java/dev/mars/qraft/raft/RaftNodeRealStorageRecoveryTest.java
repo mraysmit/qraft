@@ -73,7 +73,7 @@ class RaftNodeRealStorageRecoveryTest {
     void tearDown() throws Exception {
         if (node != null) await(node.stop());
         if (runtime != null) {
-            runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.shutdown().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -176,7 +176,7 @@ class RaftNodeRealStorageRecoveryTest {
         node = singleNode(new QraftStateStore());
         java.util.concurrent.ExecutionException failure = org.junit.jupiter.api.Assertions.assertThrows(
                 java.util.concurrent.ExecutionException.class,
-                () -> node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
+                () -> node.start().get(10, TimeUnit.SECONDS));
 
         Throwable cause = failure;
         while (cause != null && !(cause instanceof FileRaftStorage.CorruptLogException)) cause = cause.getCause();

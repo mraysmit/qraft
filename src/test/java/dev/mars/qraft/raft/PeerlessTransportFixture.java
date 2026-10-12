@@ -22,9 +22,9 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.Future;
 
 import java.util.function.Consumer;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Test transport helper for Raft tests that run a node without communicating with peers.
@@ -45,21 +45,21 @@ public final class PeerlessTransportFixture implements RaftTransport {
     }
 
     @Override
-    public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
+    public CompletableFuture<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
         return noPeer("vote", targetId);
     }
 
     @Override
-    public Future<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
+    public CompletableFuture<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
         return noPeer("append", targetId);
     }
 
     @Override
-    public Future<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
+    public CompletableFuture<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
         return noPeer("snapshot", targetId);
     }
 
-    private static <T> Future<T> noPeer(String request, String targetId) {
-        return Future.failedFuture("a peerless transport has no peer for the " + request + " request to " + targetId);
+    private static <T> CompletableFuture<T> noPeer(String request, String targetId) {
+        return CompletableFuture.failedFuture(new IllegalStateException("a peerless transport has no peer for the " + request + " request to " + targetId));
     }
 }

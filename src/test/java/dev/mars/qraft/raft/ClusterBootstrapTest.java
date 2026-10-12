@@ -35,11 +35,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 
 import static dev.mars.qraft.raft.ManualRaftClusterFixture.await;
 import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.BOOTSTRAP_SERVER_LISTS_DISAGREE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -78,7 +80,7 @@ class ClusterBootstrapTest {
         try {
             cluster.close();
         } finally {
-            runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.close().get(10, TimeUnit.SECONDS);
             InMemoryTransportSimulatorFixture.clearAllTransports();
         }
     }
@@ -213,6 +215,22 @@ class ClusterBootstrapTest {
 
         assertEquals(Outcome.CONFIGURED, await(bootstrapOf(configured).attempt()));
         assertEquals(1, configured.getLastLogIndex(), "no second configuration is written");
+    }
+
+    @Test
+    void anAttemptThatFailsGivesACallbackTheFailureItself() throws Exception {
+        JavaRuntime stopped = JavaRuntime.create();
+        InMemoryTransportSimulatorFixture transport = new InMemoryTransportSimulatorFixture("a");
+        RaftNode node = new ManualRaftClusterFixture(stopped).unconfiguredBuilder("a", Set.of("a"),
+                transport, new QraftStateStore(), RaftNodeMode.volatileMode()).build();
+        stopped.close().get(10, TimeUnit.SECONDS);
+
+        Throwable failure = new ClusterBootstrap(node, transport).attempt()
+                .handle((outcome, error) -> error)
+                .get(10, TimeUnit.SECONDS);
+
+        assertInstanceOf(RejectedExecutionException.class, failure,
+                "a callback on the returned future sees the failure, not a wrapper around it");
     }
 
     /** A member of a cluster of a, b and c that serves joins, with its promotions left to their default. */

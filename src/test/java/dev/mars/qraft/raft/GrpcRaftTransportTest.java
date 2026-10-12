@@ -27,7 +27,6 @@ import dev.mars.qraft.raft.grpc.VoteResponse;
 
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
@@ -45,6 +44,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -98,7 +98,7 @@ class GrpcRaftTransportTest {
         targetNode = node("target");
 
         targetServer = new GrpcRaftServer(runtime, 0, targetNode);
-        targetServer.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        targetServer.start().get(10, TimeUnit.SECONDS);
         targetPort = targetServer.port();
     }
 
@@ -110,7 +110,7 @@ class GrpcRaftTransportTest {
         } finally {
             try {
                 if (targetServer != null) {
-                    targetServer.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                    targetServer.stop().get(10, TimeUnit.SECONDS);
                 }
             } finally {
                 try {
@@ -119,7 +119,7 @@ class GrpcRaftTransportTest {
                     }
                 } finally {
                     if (runtime != null) {
-                        runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                        runtime.close().get(10, TimeUnit.SECONDS);
                     }
                 }
             }
@@ -219,10 +219,10 @@ class GrpcRaftTransportTest {
                 .setLastLogTerm(0)
                 .build();
 
-        Future<VoteResponse> future = transport.sendVoteRequest("dead", request);
+        CompletableFuture<VoteResponse> future = transport.sendVoteRequest("dead", request);
 
         assertThrows(ExecutionException.class, () ->
-                future.toCompletionStage().toCompletableFuture().get(30, TimeUnit.SECONDS));
+                future.get(30, TimeUnit.SECONDS));
 
         transport.stop();
     }
@@ -240,18 +240,18 @@ class GrpcRaftTransportTest {
         VoteRequest request = vote(1, "client");
 
         VoteResponse response1 = transport.sendVoteRequest("target", request)
-                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                .get(10, TimeUnit.SECONDS);
         assertTrue(response1.getVoteGranted(), "the peer answered while its server ran");
 
         // Shut down the server
-        targetServer.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        targetServer.stop().get(10, TimeUnit.SECONDS);
         targetServer = null;
 
         // Next request should fail
-        Future<VoteResponse> failFuture = transport.sendVoteRequest("target", request);
+        CompletableFuture<VoteResponse> failFuture = transport.sendVoteRequest("target", request);
 
         assertThrows(ExecutionException.class, () ->
-                failFuture.toCompletionStage().toCompletableFuture().get(30, TimeUnit.SECONDS));
+                failFuture.get(30, TimeUnit.SECONDS));
 
         transport.stop();
     }
@@ -307,7 +307,7 @@ class GrpcRaftTransportTest {
                             .build();
 
                     VoteResponse response = transport.sendVoteRequest("target", request)
-                            .toCompletionStage().toCompletableFuture()
+
                             .get(10, TimeUnit.SECONDS);
 
                     if (response != null) {
@@ -357,7 +357,7 @@ class GrpcRaftTransportTest {
                                 .setLastLogTerm(0)
                                 .build();
                         transport.sendVoteRequest("target", request)
-                                .toCompletionStage().toCompletableFuture()
+
                                 .get(10, TimeUnit.SECONDS);
                     } else {
                         AppendEntriesRequest request = AppendEntriesRequest.newBuilder()
@@ -368,7 +368,7 @@ class GrpcRaftTransportTest {
                                 .setLeaderCommit(0)
                                 .build();
                         transport.sendAppendEntries("target", request)
-                                .toCompletionStage().toCompletableFuture()
+
                                 .get(10, TimeUnit.SECONDS);
                     }
                     successCount.incrementAndGet();
@@ -397,7 +397,7 @@ class GrpcRaftTransportTest {
         RaftNode secondNode = node("target2");
         GrpcRaftServer secondServer = new GrpcRaftServer(runtime, 0, secondNode);
         try {
-            secondServer.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            secondServer.start().get(10, TimeUnit.SECONDS);
             GrpcRaftTransport transport = startedTransport(Map.of(
                     "target1", "localhost:" + targetPort, "target2", "localhost:" + secondServer.port()));
 
@@ -411,7 +411,7 @@ class GrpcRaftTransportTest {
             assertEquals(5, fromFirst.getTerm());
             assertEquals(List.of(5L, 1L), List.of(targetNode.getCurrentTerm(), secondNode.getCurrentTerm()));
         } finally {
-            secondServer.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            secondServer.stop().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -421,7 +421,7 @@ class GrpcRaftTransportTest {
         RaftNode secondNode = node("target2");
         GrpcRaftServer secondServer = new GrpcRaftServer(runtime, 0, secondNode);
         try {
-            secondServer.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            secondServer.start().get(10, TimeUnit.SECONDS);
             GrpcRaftTransport transport = startedTransport(Map.of());
 
             transport.useAddresses(Map.of("peer", "localhost:" + targetPort));
@@ -431,7 +431,7 @@ class GrpcRaftTransportTest {
             transport.useAddresses(Map.of("peer", "localhost:" + secondServer.port()));
             assertEquals(secondNode.getServerId(), decided(transport.describe("peer")).getServerId());
         } finally {
-            secondServer.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            secondServer.stop().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -443,11 +443,11 @@ class GrpcRaftTransportTest {
         // A caller forwarding to the leader it was told of must get a failed future it can turn into an answer.
         ExecutionException join = assertThrows(ExecutionException.class, () -> transport
                 .join("nobody", JoinRequest.getDefaultInstance())
-                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
+                .get(10, TimeUnit.SECONDS));
         assertInstanceOf(IllegalArgumentException.class, join.getCause());
         ExecutionException removal = assertThrows(ExecutionException.class, () -> transport
                 .removeServer("nobody", RemoveServerRequest.getDefaultInstance())
-                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
+                .get(10, TimeUnit.SECONDS));
         assertInstanceOf(IllegalArgumentException.class, removal.getCause());
     }
 
@@ -476,7 +476,7 @@ class GrpcRaftTransportTest {
                 .build();
 
         AppendEntriesResponse response = transport.sendAppendEntries("target", request)
-                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                .get(10, TimeUnit.SECONDS);
 
         assertTrue(response.getSuccess(), response.toString());
         assertEquals(2, response.getMatchIndex());
@@ -504,7 +504,7 @@ class GrpcRaftTransportTest {
         }
 
         AppendEntriesResponse response = transport.sendAppendEntries("target", requestBuilder.build())
-                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                .get(10, TimeUnit.SECONDS);
 
         assertTrue(response.getSuccess(), response.toString());
         assertEquals(101, response.getMatchIndex(), "every entry of the batch is verified");
@@ -535,8 +535,8 @@ class GrpcRaftTransportTest {
     }
 
     /** The outcome of {@code future}; the bound only diagnoses a send that never completes. */
-    private static <T> T decided(Future<T> future) throws Exception {
-        return future.toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+    private static <T> T decided(CompletableFuture<T> future) throws Exception {
+        return future.get(10, TimeUnit.SECONDS);
     }
 
     /** A vote request from a candidate whose log, like the target's, holds only the bootstrap configuration. */

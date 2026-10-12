@@ -22,7 +22,6 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.QraftStateStore;
@@ -36,6 +35,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -89,7 +89,7 @@ class RaftFailureTest {
         try {
             cluster.close();
         } finally {
-            runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.close().get(10, TimeUnit.SECONDS);
             InMemoryTransportSimulatorFixture.clearAllTransports();
         }
     }
@@ -189,18 +189,18 @@ class RaftFailureTest {
             public void stop() { }
 
             @Override
-            public Future<VoteResponse> sendVoteRequest(String nodeId, VoteRequest request) {
-                return Future.failedFuture(new InjectedFaultFixture(RAFT_TRANSPORT_FAILURE, "Network error"));
+            public CompletableFuture<VoteResponse> sendVoteRequest(String nodeId, VoteRequest request) {
+                return CompletableFuture.failedFuture(new InjectedFaultFixture(RAFT_TRANSPORT_FAILURE, "Network error"));
             }
 
             @Override
-            public Future<AppendEntriesResponse> sendAppendEntries(String nodeId, AppendEntriesRequest request) {
-                return Future.failedFuture(new InjectedFaultFixture(RAFT_TRANSPORT_FAILURE, "Network error"));
+            public CompletableFuture<AppendEntriesResponse> sendAppendEntries(String nodeId, AppendEntriesRequest request) {
+                return CompletableFuture.failedFuture(new InjectedFaultFixture(RAFT_TRANSPORT_FAILURE, "Network error"));
             }
 
             @Override
-            public Future<InstallSnapshotResponse> sendInstallSnapshot(String nodeId, InstallSnapshotRequest request) {
-                return Future.failedFuture(new InjectedFaultFixture(RAFT_TRANSPORT_FAILURE, "Network error"));
+            public CompletableFuture<InstallSnapshotResponse> sendInstallSnapshot(String nodeId, InstallSnapshotRequest request) {
+                return CompletableFuture.failedFuture(new InjectedFaultFixture(RAFT_TRANSPORT_FAILURE, "Network error"));
             }
         };
         RaftNode failingNode = cluster.add(cluster.builder("failing", Set.of("failing"), failingTransport,

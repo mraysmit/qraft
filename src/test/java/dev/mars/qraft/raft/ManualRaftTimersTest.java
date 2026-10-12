@@ -48,7 +48,7 @@ class ManualRaftTimersTest {
 
     @AfterEach
     void tearDown() throws Exception {
-        runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        runtime.close().get(10, TimeUnit.SECONDS);
     }
 
     @Test

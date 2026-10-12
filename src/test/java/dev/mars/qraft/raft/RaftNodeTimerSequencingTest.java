@@ -22,9 +22,7 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
-import dev.mars.qraft.common.async.Promise;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -71,7 +69,7 @@ class RaftNodeTimerSequencingTest {
     void tearDown() throws Exception {
         if (node != null) await(node.stop());
         if (runtime != null) {
-            runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.shutdown().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -86,7 +84,7 @@ class RaftNodeTimerSequencingTest {
                 MEMBERS, 200, 10_000, false, 60_000);
         await(node.start());
 
-        Future<VoteResponse> vote = node.handleVoteRequest(VoteRequest.newBuilder()
+        CompletableFuture<VoteResponse> vote = node.handleVoteRequest(VoteRequest.newBuilder()
                 .setTerm(1)
                 .setCandidateId("peer-1")
                 .setCandidateServerId(ManualRaftClusterFixture.serverIdOf("peer-1"))
@@ -148,7 +146,7 @@ class RaftNodeTimerSequencingTest {
                 DistributedStateCommand.put("snapshot", "candidate"))));
 
         storage.blockNextMetadataUpdate();
-        Future<AppendEntriesResponse> vote = node.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
+        CompletableFuture<AppendEntriesResponse> vote = node.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
                 .setTerm(node.getCurrentTerm() + 1)
                 .setLeaderId("peer-1")
                 .setPrevLogIndex(node.getLastLogIndex())
@@ -193,12 +191,12 @@ class RaftNodeTimerSequencingTest {
                 .timerScheduler(timers).build();
         await(node.start());
         storage.blockNextMetadataUpdate();
-        Future<VoteResponse> vote = node.handleVoteRequest(VoteRequest.newBuilder()
+        CompletableFuture<VoteResponse> vote = node.handleVoteRequest(VoteRequest.newBuilder()
                 .setTerm(1).setCandidateId("peer-1").setCandidateServerId(ManualRaftClusterFixture.serverIdOf("peer-1"))
                 .setLastLogIndex(1).setLastLogTerm(0).build());
         storage.awaitBlockedMetadataUpdate();
 
-        Future<Void> stop = node.stop();
+        CompletableFuture<Void> stop = node.stop();
         awaitStateLoop(runtime);
         storage.releaseBlockedMetadataUpdate();
         await(vote);
@@ -233,7 +231,7 @@ class RaftNodeTimerSequencingTest {
                 .build();
         await(node.start());
 
-        Future<VoteResponse> vote = node.handleVoteRequest(VoteRequest.newBuilder()
+        CompletableFuture<VoteResponse> vote = node.handleVoteRequest(VoteRequest.newBuilder()
                 .setTerm(1).setCandidateId("peer-1").setCandidateServerId(ManualRaftClusterFixture.serverIdOf("peer-1"))
                 .setLastLogIndex(1).setLastLogTerm(0).build());
         storage.awaitBlockedMetadataUpdate();
@@ -278,7 +276,7 @@ class RaftNodeTimerSequencingTest {
         await(node.awaitState(RaftNode.State.LEADER, 10_000));
     }
 
-    private static <T> T await(Future<T> future) {
+    private static <T> T await(CompletableFuture<T> future) {
         return RaftAwaitHelper.await(future, Duration.ofSeconds(15));
     }
 
@@ -298,29 +296,29 @@ class RaftNodeTimerSequencingTest {
         @Override public void stop() {}
 
         @Override
-        public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
-            if (!grantVotes) return Promise.<VoteResponse>promise().future();
-            return Future.succeededFuture(VoteResponse.newBuilder()
+        public CompletableFuture<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
+            if (!grantVotes) return new CompletableFuture<VoteResponse>();
+            return CompletableFuture.completedFuture(VoteResponse.newBuilder()
                     .setTerm(request.getTerm()).setVoteGranted(true)
                     .setVoterServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
         }
 
         @Override
-        public Future<AppendEntriesResponse> sendAppendEntries(
+        public CompletableFuture<AppendEntriesResponse> sendAppendEntries(
                 String targetId, AppendEntriesRequest request) {
             appendCount.incrementAndGet();
             long matchIndex = request.getEntriesCount() == 0
                     ? request.getPrevLogIndex()
                     : request.getEntries(request.getEntriesCount() - 1).getIndex();
-            return Future.succeededFuture(AppendEntriesResponse.newBuilder()
+            return CompletableFuture.completedFuture(AppendEntriesResponse.newBuilder()
                     .setTerm(request.getTerm()).setSuccess(true).setMatchIndex(matchIndex)
                     .setFollowerServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
         }
 
         @Override
-        public Future<InstallSnapshotResponse> sendInstallSnapshot(
+        public CompletableFuture<InstallSnapshotResponse> sendInstallSnapshot(
                 String targetId, InstallSnapshotRequest request) {
-            return Future.succeededFuture(InstallSnapshotResponse.newBuilder()
+            return CompletableFuture.completedFuture(InstallSnapshotResponse.newBuilder()
                     .setTerm(request.getTerm()).setSuccess(true)
                     .setNextChunkIndex(request.getTotalChunks())
                     .setFollowerServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());

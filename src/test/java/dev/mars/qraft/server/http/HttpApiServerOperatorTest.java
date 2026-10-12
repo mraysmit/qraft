@@ -95,7 +95,7 @@ class HttpApiServerOperatorTest {
             if (server != null) server.close();
             cluster.close();
         } finally {
-            runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.close().get(10, TimeUnit.SECONDS);
             InMemoryTransportSimulatorFixture.clearAllTransports();
         }
     }

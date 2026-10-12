@@ -24,7 +24,6 @@ import dev.mars.qraft.raft.RaftNodeMode;
 import dev.mars.qraft.raft.SnapshotEnvelope;
 import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -127,7 +126,7 @@ public final class InstalledSnapshotCrashWriterFixture {
                 .build();
         await(node.start());
 
-        Future<InstallSnapshotResponse> installation = node.handleInstallSnapshot(
+        CompletableFuture<InstallSnapshotResponse> installation = node.handleInstallSnapshot(
                 InstallSnapshotRequest.newBuilder()
                         .setTerm(3)
                         .setLeaderId("leader-1")
@@ -142,7 +141,7 @@ public final class InstalledSnapshotCrashWriterFixture {
 
         if (gatedWal != null) {
             gatedWal.awaitCompaction();
-            Future<Void> stop = node.stop();
+            CompletableFuture<Void> stop = node.stop();
             InstallSnapshotResponse rejected = await(node.handleInstallSnapshot(
                     InstallSnapshotRequest.newBuilder()
                             .setTerm(3)
@@ -154,7 +153,7 @@ public final class InstalledSnapshotCrashWriterFixture {
                             .setData(ByteString.copyFrom(snapshotBytes()))
                             .setDone(true)
                             .build()));
-            if (rejected.getSuccess() || stop.isComplete() || installation.isComplete()) {
+            if (rejected.getSuccess() || stop.isDone() || installation.isDone()) {
                 throw new AssertionError("shutdown did not remain in drain behind installed snapshot");
             }
             Runtime.getRuntime().halt(HALT_EXIT_CODE);

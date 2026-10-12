@@ -16,7 +16,6 @@
 
 package dev.mars.qraft.raft;
 
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -141,7 +140,7 @@ public final class ManualRaftClusterFixture implements AutoCloseable {
         timers(candidate).fireElectionTimeout();
         // The outer bound outlasts the node's own, so a failed election reports the node's timeout.
         candidate.awaitState(RaftNode.State.LEADER, TimeUnit.SECONDS.toMillis(WAIT_SECONDS))
-                .toCompletionStage().toCompletableFuture().get(WAIT_SECONDS + 5, TimeUnit.SECONDS);
+                .get(WAIT_SECONDS + 5, TimeUnit.SECONDS);
         settle(System.nanoTime() + TimeUnit.SECONDS.toNanos(WAIT_SECONDS));
         return candidate;
     }
@@ -221,11 +220,6 @@ public final class ManualRaftClusterFixture implements AutoCloseable {
             }
         }
         assertFalse(leader.isLeader(), "an isolated leader steps down after its check-quorum window");
-    }
-
-    /** Waits for {@code future}; the bound only diagnoses a hang. */
-    public static <T> T await(Future<T> future) throws Exception {
-        return future.toCompletionStage().toCompletableFuture().get(WAIT_SECONDS, TimeUnit.SECONDS);
     }
 
     /** Waits for {@code stage}; the bound only diagnoses a hang. */

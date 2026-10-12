@@ -61,7 +61,7 @@ class WorkerExecutorTest {
         AtomicInteger started = new AtomicInteger();
         AtomicInteger active = new AtomicInteger();
         AtomicInteger maximumActive = new AtomicInteger();
-        List<Future<Void>> tasks = new ArrayList<>();
+        List<CompletableFuture<Void>> tasks = new ArrayList<>();
         try {
             for (int i = 0; i < 4; i++) {
                 tasks.add(executor.executeBlocking(() -> {
@@ -88,13 +88,13 @@ class WorkerExecutorTest {
         } finally {
             finish.release(8);
             executor.close();
-            runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.close().get(10, TimeUnit.SECONDS);
         }
     }
 
-    private static void awaitAll(List<Future<Void>> tasks) throws Exception {
+    private static void awaitAll(List<CompletableFuture<Void>> tasks) throws Exception {
         CompletableFuture<?>[] futures = tasks.stream()
-                .map(task -> task.toCompletionStage().toCompletableFuture())
+                .map(task -> task)
                 .toArray(CompletableFuture[]::new);
         CompletableFuture.allOf(futures).get(30, TimeUnit.SECONDS);
     }

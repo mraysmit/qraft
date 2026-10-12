@@ -31,6 +31,7 @@ import dev.mars.qraft.raft.RaftCommandResult;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.state.distributed.DistributedStateCommand;
+import dev.mars.qraft.common.concurrent.Completions;
 import io.grpc.stub.StreamObserver;
 
 import java.util.Map;
@@ -56,12 +57,12 @@ public class DistributedStateGrpcService extends DistributedStateServiceGrpc.Dis
     public void put(PutRequest request, StreamObserver<PutResponse> responseObserver) {
         DistributedStateCommand command = DistributedStateCommand.put(request.getKey(), request.getValue());
         raftNode.submitCommand(new DistributedStateRaftCommand(command))
-                .onSuccess(result -> {
+                .whenComplete(Completions.outcome(result -> {
                     boolean accepted = result instanceof RaftCommandResult.Success<?>;
                     responseObserver.onNext(PutResponse.newBuilder().setAccepted(accepted).build());
                     responseObserver.onCompleted();
-                })
-                .onFailure(responseObserver::onError);
+                },
+                        responseObserver::onError));
     }
 
     @Override
@@ -80,12 +81,12 @@ public class DistributedStateGrpcService extends DistributedStateServiceGrpc.Dis
     public void delete(DeleteRequest request, StreamObserver<DeleteResponse> responseObserver) {
         DistributedStateCommand command = DistributedStateCommand.delete(request.getKey());
         raftNode.submitCommand(new DistributedStateRaftCommand(command))
-                .onSuccess(result -> {
+                .whenComplete(Completions.outcome(result -> {
                     boolean deleted = result instanceof RaftCommandResult.Success<?>;
                     responseObserver.onNext(DeleteResponse.newBuilder().setDeleted(deleted).build());
                     responseObserver.onCompleted();
-                })
-                .onFailure(responseObserver::onError);
+                },
+                        responseObserver::onError));
     }
 
     @Override

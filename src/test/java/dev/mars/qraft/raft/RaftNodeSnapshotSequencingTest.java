@@ -16,7 +16,6 @@
 
 package dev.mars.qraft.raft;
 
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
@@ -97,7 +96,7 @@ class RaftNodeSnapshotSequencingTest {
     void tearDown() throws Exception {
         if (node != null) await(node.stop());
         if (runtime != null) {
-            runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.shutdown().get(10, TimeUnit.SECONDS);
         }
         InMemoryTransportSimulatorFixture.clearAllTransports();
     }
@@ -106,9 +105,9 @@ class RaftNodeSnapshotSequencingTest {
     void publicationBlocksLaterAppendAndCapturesStateOnTheOwningLoop() {
         storage.blockNextSnapshotPublication();
 
-        Future<Void> snapshot = node.takeSnapshot();
+        CompletableFuture<Void> snapshot = node.takeSnapshot();
         storage.awaitBlockedSnapshotPublication();
-        Future<RaftCommandResult<?>> later = node.submitCommand(put("after", "excluded"));
+        CompletableFuture<RaftCommandResult<?>> later = node.submitCommand(put("after", "excluded"));
 
         awaitStateLoop(runtime);
         assertSame(runtime, stateMachine.snapshotContext());
@@ -116,8 +115,8 @@ class RaftNodeSnapshotSequencingTest {
         storage.assertPrefixTruncateCount(0);
         storage.assertAppendCount(3);
         assertEquals(0, node.getSnapshotLastIndex());
-        assertFalse(snapshot.isComplete());
-        assertFalse(later.isComplete());
+        assertFalse(snapshot.isDone());
+        assertFalse(later.isDone());
 
         storage.releaseBlockedSnapshotPublication();
 
@@ -141,17 +140,17 @@ class RaftNodeSnapshotSequencingTest {
     void prefixCompactionBlocksLaterAppendAndBoundaryApplication() {
         storage.blockNextPrefixCompaction();
 
-        Future<Void> snapshot = node.takeSnapshot();
+        CompletableFuture<Void> snapshot = node.takeSnapshot();
         storage.awaitBlockedPrefixCompaction();
-        Future<RaftCommandResult<?>> later = node.submitCommand(put("after", "compaction"));
+        CompletableFuture<RaftCommandResult<?>> later = node.submitCommand(put("after", "compaction"));
 
         awaitStateLoop(runtime);
         storage.assertSaveCount(1);
         storage.assertPrefixTruncateCount(1);
         storage.assertAppendCount(3);
         assertEquals(0, node.getSnapshotLastIndex());
-        assertFalse(snapshot.isComplete());
-        assertFalse(later.isComplete());
+        assertFalse(snapshot.isDone());
+        assertFalse(later.isDone());
 
         storage.releaseBlockedPrefixCompaction();
 
@@ -167,14 +166,14 @@ class RaftNodeSnapshotSequencingTest {
     void snapshotWaitsForInFlightCommandAndCapturesItsAppliedState() {
         storage.blockNextSyncCompletion();
 
-        Future<RaftCommandResult<?>> command = node.submitCommand(put("during", "included"));
+        CompletableFuture<RaftCommandResult<?>> command = node.submitCommand(put("during", "included"));
         storage.awaitBlockedSync();
-        Future<Void> snapshot = node.takeSnapshot();
+        CompletableFuture<Void> snapshot = node.takeSnapshot();
 
         awaitStateLoop(runtime);
         storage.assertSaveCount(0);
-        assertFalse(command.isComplete());
-        assertFalse(snapshot.isComplete());
+        assertFalse(command.isDone());
+        assertFalse(snapshot.isDone());
 
         storage.releaseBlockedSync();
 
@@ -195,9 +194,9 @@ class RaftNodeSnapshotSequencingTest {
         storage.blockNextSnapshotPublication();
         storage.completeNextMetadataUpdateOffLoop();
 
-        Future<Void> snapshot = node.takeSnapshot();
+        CompletableFuture<Void> snapshot = node.takeSnapshot();
         storage.awaitBlockedSnapshotPublication();
-        Future<dev.mars.qraft.raft.grpc.AppendEntriesResponse> vote = node.handleAppendEntriesRequest(
+        CompletableFuture<dev.mars.qraft.raft.grpc.AppendEntriesResponse> vote = node.handleAppendEntriesRequest(
                 dev.mars.qraft.raft.grpc.AppendEntriesRequest.newBuilder()
                 .setTerm(2)
                 .setLeaderId("leader-2")
@@ -209,7 +208,7 @@ class RaftNodeSnapshotSequencingTest {
         storage.assertMetadataUpdateCount(1);
         assertEquals(1, node.getCurrentTerm());
         assertEquals(RaftNode.State.LEADER, node.getState());
-        assertFalse(vote.isComplete());
+        assertFalse(vote.isDone());
 
         storage.releaseBlockedSnapshotPublication();
 
@@ -226,15 +225,15 @@ class RaftNodeSnapshotSequencingTest {
     void concurrentDirectSnapshotsPublishAndCompactOneBoundaryOnce() {
         storage.blockNextSnapshotPublication();
 
-        Future<Void> first = node.takeSnapshot();
+        CompletableFuture<Void> first = node.takeSnapshot();
         storage.awaitBlockedSnapshotPublication();
-        Future<Void> second = node.takeSnapshot();
+        CompletableFuture<Void> second = node.takeSnapshot();
 
         awaitStateLoop(runtime);
         storage.assertSaveCount(1);
         storage.assertPrefixTruncateCount(0);
-        assertFalse(first.isComplete());
-        assertFalse(second.isComplete());
+        assertFalse(first.isDone());
+        assertFalse(second.isDone());
 
         storage.releaseBlockedSnapshotPublication();
 

@@ -21,7 +21,6 @@ import dev.mars.qraft.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
@@ -102,7 +101,7 @@ class RaftNodeInstalledSnapshotSequencingTest {
     void tearDown() throws Exception {
         if (node != null) await(node.stop());
         if (runtime != null) {
-            runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.shutdown().get(10, TimeUnit.SECONDS);
         }
         InMemoryTransportSimulatorFixture.clearAllTransports();
     }
@@ -110,16 +109,16 @@ class RaftNodeInstalledSnapshotSequencingTest {
     @Test
     void finalPublicationBlocksAppendAndRestoresOnOwningLoop() {
         storage.blockNextSnapshotPublication();
-        Future<InstallSnapshotResponse> install = node.handleInstallSnapshot(
+        CompletableFuture<InstallSnapshotResponse> install = node.handleInstallSnapshot(
                 installRequest(1, 5, 3, 0, 1, snapshotBytes(5, "installed", "yes"), true));
         storage.awaitBlockedSnapshotPublication();
 
-        Future<AppendEntriesResponse> append = node.handleAppendEntriesRequest(
+        CompletableFuture<AppendEntriesResponse> append = node.handleAppendEntriesRequest(
                 heartbeat(1, 1, 0));
         awaitStateLoop(runtime);
 
-        assertFalse(install.isComplete());
-        assertFalse(append.isComplete(), "AppendEntries must not prepare across installation publication");
+        assertFalse(install.isDone());
+        assertFalse(append.isDone(), "AppendEntries must not prepare across installation publication");
         assertEquals(0, storage.prefixTruncateCount());
         assertEquals(0, node.getSnapshotLastIndex());
         assertNull(stateMachine.restoreContext());

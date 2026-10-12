@@ -24,9 +24,7 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.LogEntry;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
-import dev.mars.qraft.common.async.Promise;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -70,8 +68,8 @@ class RaftNodeApplyFailureTest {
 
     @AfterEach
     void tearDown() throws Exception {
-        if (node != null) node.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-        if (runtime != null) runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        if (node != null) node.stop().get(10, TimeUnit.SECONDS);
+        if (runtime != null) runtime.shutdown().get(10, TimeUnit.SECONDS);
     }
 
     @Test
@@ -105,7 +103,7 @@ class RaftNodeApplyFailureTest {
                         .addEntries(entry(3, PoisonedStateMachineFixture.POISON))
                         .addEntries(entry(4, "third"))
                         .build())
-                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                .get(10, TimeUnit.SECONDS);
 
         assertTrue(response.getSuccess(), "the entries were durably appended before application failed");
         RaftStatus status = status();
@@ -117,7 +115,7 @@ class RaftNodeApplyFailureTest {
         AppendEntriesResponse later = node.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
                         .setTerm(1).setLeaderId("leader").setPrevLogIndex(4).setPrevLogTerm(1).setLeaderCommit(4)
                         .build())
-                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                .get(10, TimeUnit.SECONDS);
         assertEquals(false, later.getSuccess(), "a fenced follower accepts no further appends");
         assertEquals(2, status().lastApplied());
     }
@@ -133,21 +131,20 @@ class RaftNodeApplyFailureTest {
                 .mode(RaftNodeMode.volatileMode()).snapshotEnabled(false)
                 .electionTimeout(members.size() == 1 ? 30 : 60_000).heartbeatInterval(60_000)
                 .build();
-        node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        node.start().get(10, TimeUnit.SECONDS);
     }
 
     private void awaitLeader() throws Exception {
-        node.awaitState(RaftNode.State.LEADER, 10_000).toCompletionStage().toCompletableFuture()
+        node.awaitState(RaftNode.State.LEADER, 10_000)
                 .get(15, TimeUnit.SECONDS);
     }
 
     private CompletableFuture<RaftCommandResult<?>> submit(String key) {
-        return node.submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put(key, key)))
-                .toCompletionStage().toCompletableFuture();
+        return node.submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put(key, key)));
     }
 
     private RaftStatus status() throws Exception {
-        return node.status().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        return node.status().get(10, TimeUnit.SECONDS);
     }
 
     private static LogEntry entry(long index, String key) {
@@ -191,14 +188,14 @@ class RaftNodeApplyFailureTest {
     private static final class SilentTransportFixture implements RaftTransport {
         @Override public void start(Consumer<RaftMessage> messageHandler) { }
         @Override public void stop() { }
-        @Override public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
-            return Promise.<VoteResponse>promise().future();
+        @Override public CompletableFuture<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
+            return new CompletableFuture<VoteResponse>();
         }
-        @Override public Future<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
-            return Promise.<AppendEntriesResponse>promise().future();
+        @Override public CompletableFuture<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
+            return new CompletableFuture<AppendEntriesResponse>();
         }
-        @Override public Future<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
-            return Promise.<InstallSnapshotResponse>promise().future();
+        @Override public CompletableFuture<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
+            return new CompletableFuture<InstallSnapshotResponse>();
         }
     }
 }

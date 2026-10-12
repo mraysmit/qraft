@@ -23,12 +23,12 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.state.distributed.DistributedStateCommand;
 import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
+import dev.mars.qraft.common.concurrent.Completions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,6 +37,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
@@ -87,7 +88,7 @@ class RaftNodeServerIdentityTest {
         try {
             cluster.close();
         } finally {
-            runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.close().get(10, TimeUnit.SECONDS);
             InMemoryTransportSimulatorFixture.clearAllTransports();
         }
     }
@@ -276,25 +277,25 @@ class RaftNodeServerIdentityTest {
         }
 
         @Override
-        public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
+        public CompletableFuture<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
             return record(targetId, request, delegate::sendVoteRequest);
         }
 
         @Override
-        public Future<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
+        public CompletableFuture<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
             return record(targetId, request, delegate::sendAppendEntries);
         }
 
         @Override
-        public Future<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
+        public CompletableFuture<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
             return record(targetId, request, delegate::sendInstallSnapshot);
         }
 
-        private <Q, R> Future<R> record(String targetId, Q request,
-                                        BiFunction<String, Q, Future<R>> send) {
+        private <Q, R> CompletableFuture<R> record(String targetId, Q request,
+                                        BiFunction<String, Q, CompletableFuture<R>> send) {
             sent.add(new Exchange(targetId, request));
-            Future<R> response = send.apply(targetId, request);
-            response.onSuccess(result -> answered.add(new Exchange(targetId, result)));
+            CompletableFuture<R> response = send.apply(targetId, request);
+            response.whenComplete(Completions.onSuccess(result -> answered.add(new Exchange(targetId, result))));
             return response;
         }
     }

@@ -26,8 +26,6 @@ import dev.mars.qraft.raft.grpc.MembershipResponse;
 import dev.mars.qraft.raft.grpc.RemoveServerRequest;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.Future;
-import dev.mars.qraft.common.async.Promise;
 import dev.mars.qraft.testing.fault.InjectedFaultFixture;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,6 +34,7 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -402,72 +401,72 @@ public class InMemoryTransportSimulatorFixture implements RaftTransport {
     }
 
     @Override
-    public Future<MembershipResponse> join(String targetNodeId, JoinRequest request) {
-        return membershipOf(targetNodeId).compose(target -> target.join(request));
+    public CompletableFuture<MembershipResponse> join(String targetNodeId, JoinRequest request) {
+        return membershipOf(targetNodeId).thenCompose(target -> target.join(request));
     }
 
     @Override
-    public Future<MembershipResponse> removeServer(String targetNodeId, RemoveServerRequest request) {
-        return membershipOf(targetNodeId).compose(target -> target.remove(request));
+    public CompletableFuture<MembershipResponse> removeServer(String targetNodeId, RemoveServerRequest request) {
+        return membershipOf(targetNodeId).thenCompose(target -> target.remove(request));
     }
 
-    private Future<MembershipService> membershipOf(String targetNodeId) {
+    private CompletableFuture<MembershipService> membershipOf(String targetNodeId) {
         if (crashed || !canCommunicate(nodeId, targetNodeId)) {
-            return Future.failedFuture(new RuntimeException("Cannot reach " + targetNodeId));
+            return CompletableFuture.failedFuture(new RuntimeException("Cannot reach " + targetNodeId));
         }
         InMemoryTransportSimulatorFixture targetTransport = transports.get(targetNodeId);
         if (targetTransport == null || !targetTransport.running || targetTransport.crashed
                 || targetTransport.membership == null) {
-            return Future.failedFuture(new RuntimeException("Target node not available: " + targetNodeId));
+            return CompletableFuture.failedFuture(new RuntimeException("Target node not available: " + targetNodeId));
         }
-        return Future.succeededFuture(targetTransport.membership);
+        return CompletableFuture.completedFuture(targetTransport.membership);
     }
 
     @Override
-    public Future<DescribeResponse> describe(String targetNodeId) {
+    public CompletableFuture<DescribeResponse> describe(String targetNodeId) {
         if (crashed || !canCommunicate(nodeId, targetNodeId)) {
-            return Future.failedFuture(new RuntimeException("Cannot reach " + targetNodeId));
+            return CompletableFuture.failedFuture(new RuntimeException("Cannot reach " + targetNodeId));
         }
         InMemoryTransportSimulatorFixture targetTransport = transports.get(targetNodeId);
         if (targetTransport == null || !targetTransport.running || targetTransport.crashed
                 || targetTransport.raftNode == null) {
-            return Future.failedFuture(new RuntimeException("Target node not available: " + targetNodeId));
+            return CompletableFuture.failedFuture(new RuntimeException("Target node not available: " + targetNodeId));
         }
         return targetTransport.raftNode.describe();
     }
 
     @Override
-    public Future<VoteResponse> sendVoteRequest(String targetNodeId, VoteRequest request) {
-        Promise<VoteResponse> promise = Promise.promise();
+    public CompletableFuture<VoteResponse> sendVoteRequest(String targetNodeId, VoteRequest request) {
+        CompletableFuture<VoteResponse> promise = new CompletableFuture<>();
         dispatch(() -> {
             try {
                 // Check if crashed
                 if (crashed) {
-                    promise.fail(new RuntimeException("Node crashed"));
+                    promise.completeExceptionally(new RuntimeException("Node crashed"));
                     return;
                 }
 
                 // Check for network partition
                 if (!canCommunicate(nodeId, targetNodeId)) {
                     logger.debug("Network partition prevents communication from {} to {}", nodeId, targetNodeId);
-                    promise.fail(new RuntimeException("Network partition"));
+                    promise.completeExceptionally(new RuntimeException("Network partition"));
                     return;
                 }
 
                 // Simulate Packet Drop
                 if (dropRate > 0 && random.nextDouble() < dropRate) {
                     logger.debug("Dropped VoteRequest from {} to {}", nodeId, targetNodeId);
-                    promise.fail(new RuntimeException("Network packet dropped (Chaos)"));
+                    promise.completeExceptionally(new RuntimeException("Network packet dropped (Chaos)"));
                     return;
                 }
 
                 InMemoryTransportSimulatorFixture targetTransport = transports.get(targetNodeId);
                 if (targetTransport == null || !targetTransport.running) {
-                    promise.fail(new RuntimeException("Target node not available: " + targetNodeId));
+                    promise.completeExceptionally(new RuntimeException("Target node not available: " + targetNodeId));
                     return;
                 }
                 if (targetTransport.crashed) {
-                    promise.fail(new RuntimeException("Target node crashed: " + targetNodeId));
+                    promise.completeExceptionally(new RuntimeException("Target node crashed: " + targetNodeId));
                     return;
                 }
 
@@ -477,47 +476,47 @@ public class InMemoryTransportSimulatorFixture implements RaftTransport {
                     VoteResponse response = targetTransport.handleVoteRequest(request);
                     logger.debug("Vote request from {} to {}: {}", nodeId, targetNodeId, response.getVoteGranted());
                     promise.complete(response);
-                }, promise::fail);
+                }, promise::completeExceptionally);
             } catch (Exception e) {
-                promise.fail(e);
+                promise.completeExceptionally(e);
             }
-        }, promise::fail);
-        return promise.future();
+        }, promise::completeExceptionally);
+        return promise;
     }
 
     @Override
-    public Future<AppendEntriesResponse> sendAppendEntries(String targetNodeId,
+    public CompletableFuture<AppendEntriesResponse> sendAppendEntries(String targetNodeId,
                                                                      AppendEntriesRequest request) {
-        Promise<AppendEntriesResponse> promise = Promise.promise();
+        CompletableFuture<AppendEntriesResponse> promise = new CompletableFuture<>();
         dispatch(() -> {
             try {
                 // Check if crashed
                 if (crashed) {
-                    promise.fail(new RuntimeException("Node crashed"));
+                    promise.completeExceptionally(new RuntimeException("Node crashed"));
                     return;
                 }
 
                 // Check for network partition
                 if (!canCommunicate(nodeId, targetNodeId)) {
                     logger.debug("Network partition prevents communication from {} to {}", nodeId, targetNodeId);
-                    promise.fail(new RuntimeException("Network partition"));
+                    promise.completeExceptionally(new RuntimeException("Network partition"));
                     return;
                 }
 
                 // Simulate Packet Drop
                 if (dropRate > 0 && random.nextDouble() < dropRate) {
                     logger.debug("Dropped AppendEntries from {} to {}", nodeId, targetNodeId);
-                    promise.fail(new RuntimeException("Network packet dropped (Chaos)"));
+                    promise.completeExceptionally(new RuntimeException("Network packet dropped (Chaos)"));
                     return;
                 }
 
                 InMemoryTransportSimulatorFixture targetTransport = transports.get(targetNodeId);
                 if (targetTransport == null || !targetTransport.running) {
-                    promise.fail(new RuntimeException("Target node not available: " + targetNodeId));
+                    promise.completeExceptionally(new RuntimeException("Target node not available: " + targetNodeId));
                     return;
                 }
                 if (targetTransport.crashed) {
-                    promise.fail(new RuntimeException("Target node crashed: " + targetNodeId));
+                    promise.completeExceptionally(new RuntimeException("Target node crashed: " + targetNodeId));
                     return;
                 }
 
@@ -527,12 +526,12 @@ public class InMemoryTransportSimulatorFixture implements RaftTransport {
                     AppendEntriesResponse response = targetTransport.handleAppendEntries(request);
                     logger.debug("Append entries from {} to {}: {}", nodeId, targetNodeId, response.getSuccess());
                     promise.complete(response);
-                }, promise::fail);
+                }, promise::completeExceptionally);
             } catch (Exception e) {
-                promise.fail(e);
+                promise.completeExceptionally(e);
             }
-        }, promise::fail);
-        return promise.future();
+        }, promise::completeExceptionally);
+        return promise;
     }
 
     /** The extra delay of a reordered message, or none; reordering lets a later message overtake it. */
@@ -607,38 +606,38 @@ public class InMemoryTransportSimulatorFixture implements RaftTransport {
     }
 
     @Override
-    public Future<InstallSnapshotResponse> sendInstallSnapshot(String targetNodeId,
+    public CompletableFuture<InstallSnapshotResponse> sendInstallSnapshot(String targetNodeId,
                                                                 InstallSnapshotRequest request) {
-        Promise<InstallSnapshotResponse> promise = Promise.promise();
+        CompletableFuture<InstallSnapshotResponse> promise = new CompletableFuture<>();
         dispatch(() -> {
             try {
                 // Check if crashed
                 if (crashed) {
-                    promise.fail(new RuntimeException("Node crashed"));
+                    promise.completeExceptionally(new RuntimeException("Node crashed"));
                     return;
                 }
 
                 // Check for network partition
                 if (!canCommunicate(nodeId, targetNodeId)) {
                     logger.debug("Network partition prevents communication from {} to {}", nodeId, targetNodeId);
-                    promise.fail(new RuntimeException("Network partition"));
+                    promise.completeExceptionally(new RuntimeException("Network partition"));
                     return;
                 }
 
                 // Simulate Packet Drop
                 if (dropRate > 0 && random.nextDouble() < dropRate) {
                     logger.debug("Dropped InstallSnapshot from {} to {}", nodeId, targetNodeId);
-                    promise.fail(new RuntimeException("Network packet dropped (Chaos)"));
+                    promise.completeExceptionally(new RuntimeException("Network packet dropped (Chaos)"));
                     return;
                 }
 
                 InMemoryTransportSimulatorFixture targetTransport = transports.get(targetNodeId);
                 if (targetTransport == null || !targetTransport.running) {
-                    promise.fail(new RuntimeException("Target node not available: " + targetNodeId));
+                    promise.completeExceptionally(new RuntimeException("Target node not available: " + targetNodeId));
                     return;
                 }
                 if (targetTransport.crashed) {
-                    promise.fail(new RuntimeException("Target node crashed: " + targetNodeId));
+                    promise.completeExceptionally(new RuntimeException("Target node crashed: " + targetNodeId));
                     return;
                 }
 
@@ -646,18 +645,18 @@ public class InMemoryTransportSimulatorFixture implements RaftTransport {
                     InstallSnapshotResponse response = targetTransport.handleInstallSnapshot(request);
                     logger.debug("InstallSnapshot from {} to {}: success={}", nodeId, targetNodeId, response.getSuccess());
                     promise.complete(response);
-                }, promise::fail);
+                }, promise::completeExceptionally);
             } catch (Exception e) {
-                promise.fail(e);
+                promise.completeExceptionally(e);
             }
-        }, promise::fail);
-        return promise.future();
+        }, promise::completeExceptionally);
+        return promise;
     }
 
     /** Waits a bounded time for the target node's answer; a node that never answers fails the request. */
-    private static <T> T answer(Future<T> response) {
+    private static <T> T answer(CompletableFuture<T> response) {
         try {
-            return response.toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            return response.get(10, TimeUnit.SECONDS);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             IllegalStateException failure = new IllegalStateException(

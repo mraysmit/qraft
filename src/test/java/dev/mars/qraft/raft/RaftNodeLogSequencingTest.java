@@ -22,7 +22,6 @@ import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import com.google.protobuf.ByteString;
 import dev.mars.qraft.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.raft.grpc.AppendEntriesResponse;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
@@ -32,6 +31,7 @@ import dev.mars.qraft.raft.api.CommandCodec;
 import dev.mars.qraft.raft.api.SnapshotStore;
 import dev.mars.raftlog.storage.FileRaftStorage;
 import dev.mars.raftlog.storage.RaftStorage;
+import dev.mars.qraft.common.concurrent.Completions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -104,7 +104,7 @@ class RaftNodeLogSequencingTest {
     void tearDown() throws Exception {
         if (node != null) await(node.stop());
         if (runtime != null) {
-            runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.shutdown().get(10, TimeUnit.SECONDS);
         }
         InMemoryTransportSimulatorFixture.clearAllTransports();
     }
@@ -113,14 +113,14 @@ class RaftNodeLogSequencingTest {
     void secondLeaderSubmissionCannotPrepareOrPersistUntilFirstAppendApplies() {
         storage.blockNextAppendCompletion();
 
-        Future<RaftCommandResult<?>> first = node.submitCommand(put("first", "one"));
+        CompletableFuture<RaftCommandResult<?>> first = node.submitCommand(put("first", "one"));
         storage.awaitBlockedAppend();
-        Future<RaftCommandResult<?>> second = node.submitCommand(put("second", "two"));
+        CompletableFuture<RaftCommandResult<?>> second = node.submitCommand(put("second", "two"));
 
         awaitStateLoop(runtime);
         storage.assertAppendCount(LEADERSHIP_WRITES + 1);
-        assertFalse(first.isComplete());
-        assertFalse(second.isComplete());
+        assertFalse(first.isDone());
+        assertFalse(second.isDone());
 
         storage.releaseBlockedAppend();
 
@@ -203,16 +203,16 @@ class RaftNodeLogSequencingTest {
         awaitLeadershipCommit();
 
         storage.blockNextSyncCompletion();
-        Future<RaftCommandResult<?>> active = node.submitCommand(put("active", "one"));
+        CompletableFuture<RaftCommandResult<?>> active = node.submitCommand(put("active", "one"));
         storage.awaitBlockedSync();
-        Future<RaftCommandResult<?>> overflow = node.submitCommand(put("overflow", "rejected"));
-        Future<AppendEntriesResponse> higherTerm = node.handleAppendEntriesRequest(
+        CompletableFuture<RaftCommandResult<?>> overflow = node.submitCommand(put("overflow", "rejected"));
+        CompletableFuture<AppendEntriesResponse> higherTerm = node.handleAppendEntriesRequest(
                 appendRequest(node.getCurrentTerm() + 1, 0, 0));
 
         CompletionException rejection = assertThrows(CompletionException.class,
                 () -> await(overflow));
         assertInstanceOf(RaftTransitionSequencer.QueueFullException.class, rejection.getCause());
-        assertFalse(higherTerm.isComplete());
+        assertFalse(higherTerm.isDone());
 
         storage.releaseBlockedSync();
         assertInstanceOf(RaftCommandResult.Success.class, await(active));
@@ -280,17 +280,17 @@ class RaftNodeLogSequencingTest {
         storage.blockNextSyncCompletion();
         CompletableFuture<JavaRuntime> completionContext = new CompletableFuture<>();
 
-        Future<RaftCommandResult<?>> first = node.submitCommand(put("sync", "barrier"));
-        first.onSuccess(ignored -> completionContext.complete(JavaRuntime.currentContext()));
+        CompletableFuture<RaftCommandResult<?>> first = node.submitCommand(put("sync", "barrier"));
+        first.whenComplete(Completions.onSuccess(ignored -> completionContext.complete(JavaRuntime.currentContext())));
         storage.awaitBlockedSync();
-        Future<RaftCommandResult<?>> second = node.submitCommand(put("after-sync", "queued"));
+        CompletableFuture<RaftCommandResult<?>> second = node.submitCommand(put("after-sync", "queued"));
 
         awaitStateLoop(runtime);
 
         assertEquals(3, node.getLogSize(),
                 "Only the snapshot sentinel, bootstrap configuration and leadership no-op may be visible before sync");
-        assertFalse(first.isComplete());
-        assertFalse(second.isComplete());
+        assertFalse(first.isDone());
+        assertFalse(second.isDone());
         storage.assertAppendCount(LEADERSHIP_WRITES + 1);
         storage.assertSyncCount(LEADERSHIP_WRITES + 1);
 
@@ -358,18 +358,18 @@ class RaftNodeLogSequencingTest {
         storage.assertAppendCount(BOOTSTRAP_WRITES + 1);
 
         storage.blockNextTruncateCompletion();
-        Future<AppendEntriesResponse> replacement = node.handleAppendEntriesRequest(appendRequest(
+        CompletableFuture<AppendEntriesResponse> replacement = node.handleAppendEntriesRequest(appendRequest(
                 1, 1, 0, grpcEntry(2, "seed", "replacement")));
         storage.awaitBlockedTruncate();
 
-        Future<AppendEntriesResponse> stalePlan = node.handleAppendEntriesRequest(appendRequest(
+        CompletableFuture<AppendEntriesResponse> stalePlan = node.handleAppendEntriesRequest(appendRequest(
                 1, 2, 1, grpcEntry(1, "later", "must-not-append")));
 
         awaitStateLoop(runtime);
         storage.assertTruncateCount(1);
         storage.assertAppendCount(BOOTSTRAP_WRITES + 1);
-        assertFalse(replacement.isComplete());
-        assertFalse(stalePlan.isComplete());
+        assertFalse(replacement.isDone());
+        assertFalse(stalePlan.isDone());
 
         storage.releaseBlockedTruncate();
 
@@ -389,16 +389,16 @@ class RaftNodeLogSequencingTest {
         restartAsFollower();
         storage.blockNextAppendCompletion();
 
-        Future<AppendEntriesResponse> first = node.handleAppendEntriesRequest(appendRequest(
+        CompletableFuture<AppendEntriesResponse> first = node.handleAppendEntriesRequest(appendRequest(
                 1, 1, 0, grpcEntry(1, "first", "one")));
         storage.awaitBlockedAppend();
-        Future<AppendEntriesResponse> second = node.handleAppendEntriesRequest(appendRequest(
+        CompletableFuture<AppendEntriesResponse> second = node.handleAppendEntriesRequest(appendRequest(
                 1, 2, 1, grpcEntry(1, "second", "two")));
 
         awaitStateLoop(runtime);
         storage.assertAppendCount(BOOTSTRAP_WRITES + 1);
-        assertFalse(first.isComplete());
-        assertFalse(second.isComplete());
+        assertFalse(first.isDone());
+        assertFalse(second.isDone());
 
         storage.releaseBlockedAppend();
 
@@ -418,17 +418,17 @@ class RaftNodeLogSequencingTest {
                 1, 1, 0, grpcEntry(1, "seed", "one")))).getSuccess());
 
         storage.blockNextSyncCompletion();
-        Future<AppendEntriesResponse> first = node.handleAppendEntriesRequest(appendRequest(
+        CompletableFuture<AppendEntriesResponse> first = node.handleAppendEntriesRequest(appendRequest(
                 1, 2, 1, grpcEntry(1, "first", "two")));
         storage.awaitBlockedSync();
-        Future<AppendEntriesResponse> second = node.handleAppendEntriesRequest(appendRequest(
+        CompletableFuture<AppendEntriesResponse> second = node.handleAppendEntriesRequest(appendRequest(
                 1, 3, 1, grpcEntry(1, "second", "three")));
 
         awaitStateLoop(runtime);
         storage.assertAppendCount(BOOTSTRAP_WRITES + 2);
         storage.assertSyncCount(BOOTSTRAP_WRITES + 2);
-        assertFalse(first.isComplete());
-        assertFalse(second.isComplete());
+        assertFalse(first.isDone());
+        assertFalse(second.isDone());
 
         storage.releaseBlockedSync();
 
@@ -468,15 +468,15 @@ class RaftNodeLogSequencingTest {
                 1, 1, 0, grpcEntry(1, "seed", "original")))).getSuccess());
         storage.blockNextTruncateCompletion();
 
-        Future<AppendEntriesResponse> failing = node.handleAppendEntriesRequest(appendRequest(
+        CompletableFuture<AppendEntriesResponse> failing = node.handleAppendEntriesRequest(appendRequest(
                 1, 1, 0, grpcEntry(2, "seed", "replacement")));
         storage.awaitBlockedTruncate();
-        Future<AppendEntriesResponse> queued = node.handleAppendEntriesRequest(appendRequest(
+        CompletableFuture<AppendEntriesResponse> queued = node.handleAppendEntriesRequest(appendRequest(
                 1, 2, 1, grpcEntry(1, "queued", "must-not-persist")));
 
         awaitStateLoop(runtime);
-        assertFalse(failing.isComplete());
-        assertFalse(queued.isComplete());
+        assertFalse(failing.isDone());
+        assertFalse(queued.isDone());
         storage.failBlockedTruncate();
 
         assertFalse(await(failing).getSuccess());

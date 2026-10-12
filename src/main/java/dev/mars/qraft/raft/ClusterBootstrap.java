@@ -19,7 +19,7 @@ package dev.mars.qraft.raft;
 import dev.mars.qraft.raft.grpc.DescribeResponse;
 import dev.mars.qraft.raft.grpc.JoinRequest;
 import dev.mars.qraft.raft.grpc.MembershipResponse;
-import dev.mars.qraft.common.async.Future;
+import dev.mars.qraft.common.concurrent.Completions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,6 +27,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 
 /**
  * Decides whether a server with no Raft state may bootstrap a new cluster, and if so does it. One {@link #attempt}
@@ -70,39 +72,42 @@ public final class ClusterBootstrap {
         this.transport = Objects.requireNonNull(transport, "transport");
     }
 
-    public Future<Outcome> attempt() {
-        return node.describe().compose(self -> {
+    public CompletableFuture<Outcome> attempt() {
+        return Completions.unwrapped(node.describe().<Outcome>thenCompose(self -> {
             Optional<RaftConfiguration> configured = node.getConfiguration();
             if (configured.isPresent()) {
                 Optional<RaftConfiguration.Server> known = configured.get().server(self.getServerId());
                 // Removed servers must not re-admit themselves. A moved member, however,
                 // must advertise its address even though it recovered a configuration.
                 if (known.isEmpty() || known.get().address().equals(self.getAddress())) {
-                    return Future.succeededFuture(Outcome.CONFIGURED);
+                    return CompletableFuture.completedFuture(Outcome.CONFIGURED);
                 }
                 if (node.isLeader()) {
                     return node.admit(new RaftConfiguration.Server(self.getServerId(), self.getName(),
-                            self.getAddress(), false)).map(ignored -> Outcome.JOINING_EXISTING);
+                            self.getAddress(), false))
+                            .thenApply(ignored -> Outcome.JOINING_EXISTING);
                 }
                 return askToJoin(self, configured.get().servers().stream()
                         .filter(server -> !server.serverId().equals(self.getServerId()))
                         .map(RaftConfiguration.Server::name).toList());
             }
-            if (self.getHasState()) return Future.succeededFuture(Outcome.CONFIGURED);
+            if (self.getHasState()) return CompletableFuture.completedFuture(Outcome.CONFIGURED);
             List<String> peers = self.getListedServersList().stream()
                     .map(listed -> listed.substring(0, listed.indexOf('=')))
                     .filter(name -> !name.equals(self.getName()))
                     .toList();
-            List<Future<Optional<DescribeResponse>>> answers = new ArrayList<>();
+            List<CompletableFuture<Optional<DescribeResponse>>> answers = new ArrayList<>();
             for (String peer : peers) {
-                answers.add(transport.describe(peer).map(Optional::of)
-                        .recover(unreachable -> {
-                            logger.debug("Bootstrap: {} did not answer: {}", peer, unreachable.getMessage());
-                            return Future.succeededFuture(Optional.empty());
-                        }));
+                answers.add(transport.describe(peer).thenApply(Optional::of)
+                        .exceptionally(unreachable -> {
+                            logger.debug("Bootstrap: {} did not answer: {}", peer,
+                                    Completions.unwrap(unreachable).getMessage());
+                            return Optional.empty();
+                        }).toCompletableFuture());
             }
-            return Future.all(answers).compose(ignored -> decide(self, peers, answers));
-        });
+            return CompletableFuture.allOf(answers.toArray(CompletableFuture[]::new))
+                    .thenCompose(ignored -> decide(self, peers, answers));
+        }));
     }
 
     /**
@@ -112,28 +117,28 @@ public final class ClusterBootstrap {
      * itself does not, is passed over. Whatever the answer, this server waits for the leader to replicate the
      * configuration to it, and the next attempt asks again, as when an old entry for it had to be removed first.
      */
-    private Future<Outcome> askToJoin(DescribeResponse self, List<String> members) {
+    private CompletionStage<Outcome> askToJoin(DescribeResponse self, List<String> members) {
         JoinRequest request = JoinRequest.newBuilder().setServerId(self.getServerId()).setName(self.getName())
                 .setAddress(self.getAddress()).build();
         return askToJoin(request, members, 0);
     }
 
-    private Future<Outcome> askToJoin(JoinRequest request, List<String> members, int next) {
-        if (next == members.size()) return Future.succeededFuture(Outcome.JOINING_EXISTING);
+    private CompletionStage<Outcome> askToJoin(JoinRequest request, List<String> members, int next) {
+        if (next == members.size()) return CompletableFuture.completedFuture(Outcome.JOINING_EXISTING);
         String member = members.get(next);
-        Future<MembershipResponse> answer;
+        CompletionStage<MembershipResponse> answer;
         try {
             answer = transport.join(member, request);
         } catch (RuntimeException unaddressable) {
-            answer = Future.failedFuture(unaddressable);
+            answer = CompletableFuture.failedFuture(unaddressable);
         }
-        return answer.map(Optional::of)
-                .recover(unreachable -> {
+        return answer.thenApply(Optional::of)
+                .exceptionally(unreachable -> {
                     logger.info("Bootstrap: could not ask {} to join its cluster: {}",
-                            member, unreachable.getMessage());
-                    return Future.succeededFuture(Optional.<MembershipResponse>empty());
+                            member, Completions.unwrap(unreachable).getMessage());
+                    return Optional.empty();
                 })
-                .compose(response -> {
+                .<Outcome>thenCompose(response -> {
                     if (response.isEmpty()) return askToJoin(request, members, next + 1);
                     MembershipResponse.Status status = response.get().getStatus();
                     if (status == MembershipResponse.Status.NO_LEADER
@@ -144,15 +149,15 @@ public final class ClusterBootstrap {
                     }
                     logger.info("Bootstrap: asked {} to join its cluster: {} {}",
                             member, status, response.get().getMessage());
-                    return Future.succeededFuture(Outcome.JOINING_EXISTING);
+                    return CompletableFuture.completedFuture(Outcome.JOINING_EXISTING);
                 });
     }
 
-    private Future<Outcome> decide(
-            DescribeResponse self, List<String> peers, List<Future<Optional<DescribeResponse>>> answers) {
+    private CompletionStage<Outcome> decide(DescribeResponse self, List<String> peers,
+                                            List<CompletableFuture<Optional<DescribeResponse>>> answers) {
         List<String> members = new ArrayList<>();
         for (int i = 0; i < peers.size(); i++) {
-            Optional<DescribeResponse> answer = answers.get(i).result();
+            Optional<DescribeResponse> answer = answers.get(i).join();
             if (answer.isPresent() && answer.get().getHasState()) members.add(peers.get(i));
         }
         if (!members.isEmpty()) return askToJoin(self, members);
@@ -161,7 +166,7 @@ public final class ClusterBootstrap {
         described.add(self);
         boolean everyoneAnswered = true;
         for (int i = 0; i < peers.size(); i++) {
-            Optional<DescribeResponse> answer = answers.get(i).result();
+            Optional<DescribeResponse> answer = answers.get(i).join();
             if (answer.isEmpty()) {
                 everyoneAnswered = false;
                 continue;
@@ -170,21 +175,21 @@ public final class ClusterBootstrap {
             if (!peer.getName().equals(peers.get(i)) || !peer.getListedServersList().equals(self.getListedServersList())) {
                 logger.error("Bootstrap refused: {} answers as {} and lists {}, but this server lists {}",
                         peers.get(i), peer.getName(), peer.getListedServersList(), self.getListedServersList());
-                return Future.succeededFuture(Outcome.LISTS_DISAGREE);
+                return CompletableFuture.completedFuture(Outcome.LISTS_DISAGREE);
             }
             described.add(peer);
         }
-        if (!everyoneAnswered) return Future.succeededFuture(Outcome.WAITING);
+        if (!everyoneAnswered) return CompletableFuture.completedFuture(Outcome.WAITING);
 
         RaftConfiguration configuration = new RaftConfiguration(described.stream()
                 .map(server -> new RaftConfiguration.Server(
                         server.getServerId(), server.getName(), server.getAddress(), true))
                 .toList());
         return node.bootstrap(configuration)
-                .map(ignored -> Outcome.BOOTSTRAPPED)
-                .recover(error -> node.getConfiguration().isPresent()
+                .thenApply(ignored -> Outcome.BOOTSTRAPPED)
+                .exceptionallyCompose(error -> node.getConfiguration().isPresent()
                         // A leader replicated to this server while it was deciding.
-                        ? Future.succeededFuture(Outcome.CONFIGURED)
-                        : Future.failedFuture(error));
+                        ? CompletableFuture.completedFuture(Outcome.CONFIGURED)
+                        : CompletableFuture.<Outcome>failedFuture(Completions.unwrap(error)));
     }
 }

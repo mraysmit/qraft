@@ -175,8 +175,7 @@ class InMemoryTransportSimulatorTest {
 
     private static CompletableFuture<VoteResponse> vote(InMemoryTransportSimulatorFixture sender, String target) {
         return sender.sendVoteRequest(target, VoteRequest.newBuilder()
-                        .setTerm(1).setCandidateId("sender").setLastLogIndex(0).setLastLogTerm(0).build())
-                .toCompletionStage().toCompletableFuture();
+                        .setTerm(1).setCandidateId("sender").setLastLogIndex(0).setLastLogTerm(0).build());
     }
 
     /** A stopped transport's threads exit; the bound only diagnoses one that never does. */

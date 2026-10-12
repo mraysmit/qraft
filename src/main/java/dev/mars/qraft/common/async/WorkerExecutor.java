@@ -17,6 +17,7 @@
 package dev.mars.qraft.common.async;
 
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -42,11 +43,11 @@ public final class WorkerExecutor implements AutoCloseable {
                 Thread.ofVirtual().name(name + "-ordered-", 0).factory());
     }
 
-    public <T> Future<T> executeBlocking(Callable<T> task) {
+    public <T> CompletableFuture<T> executeBlocking(Callable<T> task) {
         return executeBlocking(task, true);
     }
 
-    public <T> Future<T> executeBlocking(Callable<T> task, boolean ordered) {
+    public <T> CompletableFuture<T> executeBlocking(Callable<T> task, boolean ordered) {
         return runtime.executeBlocking(ordered ? orderedExecutor : executor, task);
     }
 

@@ -80,8 +80,8 @@ class GrpcRaftIntegrationTest {
     private record Member(String id, RaftNode node, GrpcRaftServer server, ManualRaftTimersHelper timers,
                           QraftStateStore state, GrpcRaftTransport transport) {
         void stop() throws Exception {
-            server.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-            node.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            server.stop().get(10, TimeUnit.SECONDS);
+            node.stop().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -101,7 +101,7 @@ class GrpcRaftIntegrationTest {
                 else failure.addSuppressed(error);
             }
         }
-        runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        runtime.close().get(10, TimeUnit.SECONDS);
         if (failure != null) throw failure;
     }
 
@@ -246,7 +246,7 @@ class GrpcRaftIntegrationTest {
         try (RaftNodeLogFixture log = new RaftNodeLogFixture()) {
             MembershipResponse answer = cluster.get(2).transport().join("node2", JoinRequest.newBuilder()
                     .setServerId("joining-id").setName("node4").setAddress("localhost:1").build())
-                    .toCompletionStage().toCompletableFuture().get(15, TimeUnit.SECONDS);
+                    .get(15, TimeUnit.SECONDS);
 
             assertEquals(MembershipResponse.Status.JOINED, answer.getStatus(), answer.getMessage());
             assertEquals(new RaftConfiguration.Server("joining-id", "node4", "localhost:1", false),
@@ -268,7 +268,7 @@ class GrpcRaftIntegrationTest {
 
         MembershipResponse answer = cluster.get(2).transport().removeServer("node2", RemoveServerRequest.newBuilder()
                 .setName("node3").setToken(OPERATOR_TOKEN).build())
-                .toCompletionStage().toCompletableFuture().get(15, TimeUnit.SECONDS);
+                .get(15, TimeUnit.SECONDS);
 
         assertEquals(MembershipResponse.Status.REMOVED, answer.getStatus(), answer.getMessage());
         assertTrue(leader.node().getConfiguration().orElseThrow().serverNamed("node3").isEmpty());
@@ -313,7 +313,7 @@ class GrpcRaftIntegrationTest {
                     .build();
             GrpcRaftServer server = new GrpcRaftServer(runtime, 0, node,
                     new MembershipService(node, transport, OPERATOR_TOKEN));
-            server.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            server.start().get(10, TimeUnit.SECONDS);
             addresses.put(id, "localhost:" + server.port());
             Member member = new Member(id, node, server, timers, state, transport);
             cluster.add(member);
@@ -326,9 +326,9 @@ class GrpcRaftIntegrationTest {
 
     /** Starts the member and bootstraps it; a sole member bootstraps itself as it starts. */
     private void start(Member member) throws Exception {
-        member.node().start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        member.node().start().get(10, TimeUnit.SECONDS);
         if (member.node().getConfiguration().isEmpty()) {
-            member.node().bootstrap(configuration).toCompletionStage().toCompletableFuture()
+            member.node().bootstrap(configuration)
                     .get(10, TimeUnit.SECONDS);
         }
     }
@@ -336,13 +336,13 @@ class GrpcRaftIntegrationTest {
     private static Member elect(Member candidate) throws Exception {
         candidate.timers().fireElectionTimeout();
         candidate.node().awaitState(RaftNode.State.LEADER, 10_000)
-                .toCompletionStage().toCompletableFuture().get(15, TimeUnit.SECONDS);
+                .get(15, TimeUnit.SECONDS);
         return candidate;
     }
 
     private static RaftCommandResult<?> submit(Member leader, String key, String value) throws Exception {
         return leader.node().submitCommand(new DistributedStateRaftCommand(DistributedStateCommand.put(key, value)))
-                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                .get(10, TimeUnit.SECONDS);
     }
 
     private static Map<Long, Set<String>> recordLeaders(List<Member> cluster) {

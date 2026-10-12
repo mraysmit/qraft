@@ -27,7 +27,6 @@ import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
 import dev.mars.qraft.raft.storage.RaftStorageFactory;
 import dev.mars.qraft.raft.storage.snapshot.FileSnapshotStore;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
 import dev.mars.qraft.state.CatalogCommand;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
@@ -117,7 +116,7 @@ class RaftNodeTest {
         try {
             cluster.close();
         } finally {
-            runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.close().get(10, TimeUnit.SECONDS);
             InMemoryTransportSimulatorFixture.clearAllTransports();
         }
     }
@@ -194,7 +193,7 @@ class RaftNodeTest {
         // The followers must be in node1's term before the partition, so node2's election is for term 2.
         heartbeatUntil(node1, () -> "node1".equals(node2.getLeaderId()) && "node1".equals(node3.getLeaderId()));
         InMemoryTransportSimulatorFixture.createPartition(Set.of("node1"), Set.of("node2", "node3"));
-        Future<RaftCommandResult<?>> uncertainWrite = node1.submitCommand(
+        CompletableFuture<RaftCommandResult<?>> uncertainWrite = node1.submitCommand(
                 CatalogCommand.register(serviceInstance("partitioned-1", 8080)));
 
         elect(node2);
@@ -209,7 +208,7 @@ class RaftNodeTest {
                 .allMatch(store -> store.getServiceCatalog().instances(ServiceKey.inDefaultScope("catalog"))
                         .equals(List.of(winningValue))));
         ExecutionException lost = assertThrows(ExecutionException.class,
-                () -> uncertainWrite.toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
+                () -> uncertainWrite.get(10, TimeUnit.SECONDS));
         assertInstanceOf(CommandOutcomeUnknownException.class, lost.getCause(),
                 "a write the old leader could not commit has an unknown outcome");
     }
@@ -297,7 +296,7 @@ class RaftNodeTest {
 
         ExecutionException refused = assertThrows(ExecutionException.class,
                 () -> node1.submitCommand(distributedPut("test-key", "test-value"))
-                        .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
+                        .get(10, TimeUnit.SECONDS));
 
         assertInstanceOf(IllegalStateException.class, refused.getCause());
         assertTrue(refused.getCause().getMessage().contains("Not the leader"), refused.getCause().getMessage());
@@ -503,7 +502,7 @@ class RaftNodeTest {
                 .setTerm(7).setCandidateId("candidate-x").setLastLogIndex(99).setLastLogTerm(99).build();
 
         ExecutionException persistenceFailure = assertThrows(ExecutionException.class,
-                () -> durableNode.handleVoteRequest(voteRequest).toCompletionStage().toCompletableFuture()
+                () -> durableNode.handleVoteRequest(voteRequest)
                         .get(10, TimeUnit.SECONDS));
 
         assertEquals("Simulated one-shot metadata failure", persistenceFailure.getCause().getMessage());
@@ -515,7 +514,7 @@ class RaftNodeTest {
                 "the node must not issue a compensating metadata write after an uncertain failure");
         ExecutionException fenced = assertThrows(ExecutionException.class,
                 () -> durableNode.handleVoteRequest(voteRequest.toBuilder().setCandidateId("candidate-y").build())
-                        .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
+                        .get(10, TimeUnit.SECONDS));
         assertInstanceOf(RaftTransitionSequencer.FencedException.class, fenced.getCause());
         assertEquals(1, flakyMetadataStorage.updateCalls(), "a fenced node must not execute a later metadata transition");
     }
@@ -590,7 +589,7 @@ class RaftNodeTest {
                 () -> durableNode.handleVoteRequest(VoteRequest.newBuilder()
                                 .setTerm(higherTerm).setCandidateId("candidate-behind-failing-persist")
                                 .setLastLogTerm(0).setLastLogIndex(1).build())
-                        .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
+                        .get(10, TimeUnit.SECONDS));
 
         assertInstanceOf(InjectedFaultFixture.class, voteFailure.getCause());
         assertTrue(flakyMetadataStorage.hasFailed(), "the higher-term empty-vote write was the one that failed");
@@ -731,7 +730,7 @@ class RaftNodeTest {
         cluster.heartbeatUntil(leader, condition, "the cluster converges");
     }
 
-    private static <T> T await(Future<T> future) throws Exception {
+    private static <T> T await(CompletableFuture<T> future) throws Exception {
         return ManualRaftClusterFixture.await(future);
     }
 

@@ -19,13 +19,13 @@ package dev.mars.qraft.raft;
 import io.grpc.BindableService;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
-import dev.mars.qraft.common.async.Promise;
+import dev.mars.qraft.common.concurrent.Completions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -50,8 +50,8 @@ public class GrpcServiceServer {
         this.services = services != null ? services : new BindableService[0];
     }
 
-    public Future<Void> start() {
-        Promise<Void> promise = Promise.promise();
+    public CompletableFuture<Void> start() {
+        CompletableFuture<Void> promise = new CompletableFuture<>();
 
         runtime.executeBlocking(() -> {
             try {
@@ -65,10 +65,9 @@ public class GrpcServiceServer {
             } catch (IOException e) {
                 throw new RuntimeException("Failed to start gRPC API server on port " + port, e);
             }
-        }).onSuccess(v -> promise.complete())
-          .onFailure(promise::fail);
+        }).whenComplete(Completions.outcome(v -> promise.complete(null), promise::completeExceptionally));
 
-        return promise.future();
+        return promise;
     }
 
     /**
@@ -83,12 +82,12 @@ public class GrpcServiceServer {
         return current.getPort();
     }
 
-    public Future<Void> stop() {
-        Promise<Void> promise = Promise.promise();
+    public CompletableFuture<Void> stop() {
+        CompletableFuture<Void> promise = new CompletableFuture<>();
 
         if (server == null) {
-            promise.complete();
-            return promise.future();
+            promise.complete(null);
+            return promise;
         }
 
         runtime.executeBlocking(() -> {
@@ -107,9 +106,8 @@ public class GrpcServiceServer {
                 server.shutdownNow();
                 throw new RuntimeException("Interrupted while stopping gRPC API server", e);
             }
-        }).onSuccess(v -> promise.complete())
-          .onFailure(promise::fail);
+        }).whenComplete(Completions.outcome(v -> promise.complete(null), promise::completeExceptionally));
 
-        return promise.future();
+        return promise;
     }
 }

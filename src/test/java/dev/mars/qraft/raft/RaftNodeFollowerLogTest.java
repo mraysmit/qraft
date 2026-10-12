@@ -57,8 +57,8 @@ class RaftNodeFollowerLogTest {
 
     @AfterEach
     void stop() throws Exception {
-        if (follower != null) follower.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-        if (runtime != null) runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        if (follower != null) follower.stop().get(10, TimeUnit.SECONDS);
+        if (runtime != null) runtime.close().get(10, TimeUnit.SECONDS);
     }
 
     @Test
@@ -130,7 +130,7 @@ class RaftNodeFollowerLogTest {
                 .mode(RaftNodeMode.durable(storage, storage))
                 .snapshotEnabled(true).snapshotThreshold(1).snapshotCheckInterval(SNAPSHOT_INTERVAL_MS)
                 .electionTimeout(60_000).heartbeatInterval(50).timerScheduler(timers).build();
-        follower.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        follower.start().get(10, TimeUnit.SECONDS);
     }
 
     /** Sends one AppendEntries whose entries follow {@code prevIndex} and each put {@code key=key}. */
@@ -146,7 +146,7 @@ class RaftNodeFollowerLogTest {
                     .setTerm(term).setIndex(index).setData(ByteString.copyFrom(data)));
         }
         return follower.handleAppendEntriesRequest(request.build())
-                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                .get(10, TimeUnit.SECONDS);
     }
 
     /** Waits until the follower, read on its own state loop, has compacted through {@code index}. */

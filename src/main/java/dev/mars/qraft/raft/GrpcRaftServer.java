@@ -46,15 +46,15 @@ import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Scope;
 import io.opentelemetry.context.propagation.TextMapGetter;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
-import dev.mars.qraft.common.async.Promise;
+import dev.mars.qraft.common.concurrent.Completions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 
 import java.io.IOException;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -119,8 +119,8 @@ public class GrpcRaftServer {
      * 
      * @return Future that completes when server is started
      */
-    public Future<Void> start() {
-        Promise<Void> promise = Promise.promise();
+    public CompletableFuture<Void> start() {
+        CompletableFuture<Void> promise = new CompletableFuture<>();
 
         runtime.executeBlocking(() -> {
             try {
@@ -138,10 +138,9 @@ public class GrpcRaftServer {
             } catch (IOException e) {
                 throw new RuntimeException("Failed to start gRPC server on port " + port, e);
             }
-        }).onSuccess(v -> promise.complete())
-          .onFailure(promise::fail);
+        }).whenComplete(Completions.outcome(v -> promise.complete(null), promise::completeExceptionally));
 
-        return promise.future();
+        return promise;
     }
 
     /**
@@ -161,12 +160,12 @@ public class GrpcRaftServer {
      * 
      * @return Future that completes when server is stopped
      */
-    public Future<Void> stop() {
-        Promise<Void> promise = Promise.promise();
+    public CompletableFuture<Void> stop() {
+        CompletableFuture<Void> promise = new CompletableFuture<>();
 
         if (server == null) {
-            promise.complete();
-            return promise.future();
+            promise.complete(null);
+            return promise;
         }
 
         runtime.executeBlocking(() -> {
@@ -185,10 +184,9 @@ public class GrpcRaftServer {
                 server.shutdownNow();
                 throw new RuntimeException("Interrupted while stopping gRPC server", e);
             }
-        }).onSuccess(v -> promise.complete())
-          .onFailure(promise::fail);
+        }).whenComplete(Completions.outcome(v -> promise.complete(null), promise::completeExceptionally));
 
-        return promise.future();
+        return promise;
     }
 
     /**
@@ -213,17 +211,18 @@ public class GrpcRaftServer {
             try (Scope ignored = span.makeCurrent()) {
             logger.debug("Received RequestVote from {} for term {}", request.getCandidateId(), request.getTerm());
             raftNode.handleVoteRequest(request)
-                    .onSuccess(response -> {
-                        span.setAttribute("raft.vote_granted", response.getVoteGranted());
-                        span.end();
-                        logger.debug("Responding to RequestVote: granted={}, term={}", 
-                                response.getVoteGranted(), response.getTerm());
-                        responseObserver.onNext(response);
-                        responseObserver.onCompleted();
-                    })
-                    .onFailure(e -> {
-                        failRpc("RequestVote", span, e, responseObserver);
-                    });
+                    .whenComplete(Completions.outcome(
+                            response -> {
+                                span.setAttribute("raft.vote_granted", response.getVoteGranted());
+                                span.end();
+                                logger.debug("Responding to RequestVote: granted={}, term={}",
+                                        response.getVoteGranted(), response.getTerm());
+                                responseObserver.onNext(response);
+                                responseObserver.onCompleted();
+                            },
+                            e -> {
+                                failRpc("RequestVote", span, e, responseObserver);
+                            }));
             } catch (Throwable error) {
                 failRpc("RequestVote", span, error, responseObserver);
             }
@@ -247,16 +246,17 @@ public class GrpcRaftServer {
             try (Scope ignored = span.makeCurrent()) {
             logAppendEntriesRequest(request);
             raftNode.handleAppendEntriesRequest(request)
-                    .onSuccess(response -> {
-                        span.setAttribute("raft.success", response.getSuccess());
-                        span.end();
-                        logAppendEntriesResponse(request, response);
-                        responseObserver.onNext(response);
-                        responseObserver.onCompleted();
-                    })
-                    .onFailure(e -> {
-                        failRpc("AppendEntries", span, e, responseObserver);
-                    });
+                    .whenComplete(Completions.outcome(
+                            response -> {
+                                span.setAttribute("raft.success", response.getSuccess());
+                                span.end();
+                                logAppendEntriesResponse(request, response);
+                                responseObserver.onNext(response);
+                                responseObserver.onCompleted();
+                            },
+                            e -> {
+                                failRpc("AppendEntries", span, e, responseObserver);
+                            }));
             } catch (Throwable error) {
                 failRpc("AppendEntries", span, error, responseObserver);
             }
@@ -265,37 +265,40 @@ public class GrpcRaftServer {
 
         @Override
         public void join(JoinRequest request, StreamObserver<MembershipResponse> responseObserver) {
-            answer(membership == null ? null : membership.join(request), responseObserver);
+            answer(membership == null ? null : membership.join(request),
+                    responseObserver);
         }
 
         @Override
         public void removeServer(RemoveServerRequest request, StreamObserver<MembershipResponse> responseObserver) {
-            answer(membership == null ? null : membership.remove(request), responseObserver);
+            answer(membership == null ? null : membership.remove(request),
+                    responseObserver);
         }
 
-        private void answer(Future<MembershipResponse> response, StreamObserver<MembershipResponse> observer) {
+        private void answer(CompletableFuture<MembershipResponse> response, StreamObserver<MembershipResponse> observer) {
             if (response == null) {
-                response = Future.succeededFuture(MembershipResponse.newBuilder()
+                response = CompletableFuture.completedFuture(MembershipResponse.newBuilder()
                         .setStatus(MembershipResponse.Status.NO_LEADER)
                         .setMessage(raftNode.getNodeId() + " does not serve membership changes").build());
             }
-            response.onSuccess(answer -> {
+            response.whenComplete(Completions.outcome(
+                    answer -> {
                         observer.onNext(answer);
                         observer.onCompleted();
-                    })
-                    .onFailure(error -> observer.onError(Status.UNAVAILABLE
-                            .withDescription("Membership change failed").withCause(error).asRuntimeException()));
+                    },
+                    error -> observer.onError(Status.UNAVAILABLE
+                            .withDescription("Membership change failed").withCause(error).asRuntimeException())));
         }
 
         @Override
         public void describe(DescribeRequest request, StreamObserver<DescribeResponse> responseObserver) {
             raftNode.describe()
-                    .onSuccess(description -> {
+                    .whenComplete(Completions.outcome(description -> {
                         responseObserver.onNext(description);
                         responseObserver.onCompleted();
-                    })
-                    .onFailure(error -> responseObserver.onError(Status.UNAVAILABLE
-                            .withDescription("Describe failed").withCause(error).asRuntimeException()));
+                    },
+                            error -> responseObserver.onError(Status.UNAVAILABLE
+                            .withDescription("Describe failed").withCause(error).asRuntimeException())));
         }
 
         @Override
@@ -316,17 +319,17 @@ public class GrpcRaftServer {
                     request.getLeaderId(), request.getTerm(), request.getLastIncludedIndex(),
                     request.getChunkIndex() + 1, request.getTotalChunks());
             raftNode.handleInstallSnapshot(request)
-                    .onSuccess(response -> {
+                    .whenComplete(Completions.outcome(response -> {
                         span.setAttribute("raft.success", response.getSuccess());
                         span.end();
                         logger.debug("Responding to InstallSnapshot: success={}, term={}",
                                 response.getSuccess(), response.getTerm());
                         responseObserver.onNext(response);
                         responseObserver.onCompleted();
-                    })
-                    .onFailure(e -> {
+                    },
+                    e -> {
                         failRpc("InstallSnapshot", span, e, responseObserver);
-                    });
+                    }));
             } catch (Throwable error) {
                 failRpc("InstallSnapshot", span, error, responseObserver);
             }

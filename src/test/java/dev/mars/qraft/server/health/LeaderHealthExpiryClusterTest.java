@@ -92,7 +92,7 @@ class LeaderHealthExpiryClusterTest {
         try {
             if (cluster != null) cluster.close();
         } finally {
-            if (runtime != null) runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            if (runtime != null) runtime.close().get(10, TimeUnit.SECONDS);
             InMemoryTransportSimulatorFixture.clearAllTransports();
         }
     }
@@ -212,7 +212,7 @@ class LeaderHealthExpiryClusterTest {
     }
 
     private CompletableFuture<RaftCommandResult<?>> propose(String nodeId, RaftCommand command) {
-        return nodes.get(nodeId).submitCommand(command).toCompletionStage().toCompletableFuture();
+        return nodes.get(nodeId).submitCommand(command);
     }
 
     private void submit(String nodeId, RaftCommand command) throws Exception {

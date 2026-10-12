@@ -127,21 +127,21 @@ public class QraftServerApplication {
                 return new ServerResources(server, runtime, telemetry);
             } catch (RuntimeException | Error failure) {
                 JavaRuntime opened = runtime;
-                closePartiallyOpened(opened == null ? null : () -> opened.shutdown().toCompletionStage(),
+                closePartiallyOpened(opened == null ? null : () -> opened.shutdown(),
                         telemetry, failure);
                 throw failure;
             }
         }
 
         CompletableFuture<Void> start() {
-            return server.start().toCompletionStage().toCompletableFuture()
+            return server.start()
                     .thenRun(() -> Logging.LOGGER.info("Qraft server started successfully"));
         }
 
         synchronized CompletableFuture<Void> shutdown() {
             if (shutdown == null) {
-                shutdown = releaseAfter(server.stop().toCompletionStage(),
-                        () -> runtime.shutdown().toCompletionStage(), telemetry);
+                shutdown = releaseAfter(server.stop(),
+                        () -> runtime.shutdown(), telemetry);
             }
             return shutdown;
         }

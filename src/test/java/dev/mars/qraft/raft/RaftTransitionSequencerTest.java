@@ -16,9 +16,7 @@
 
 package dev.mars.qraft.raft;
 
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
-import dev.mars.qraft.common.async.Promise;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.ContextKey;
 import io.opentelemetry.context.Scope;
@@ -63,36 +61,36 @@ class RaftTransitionSequencerTest {
 
     @AfterEach
     void tearDown() throws Exception {
-        runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        runtime.shutdown().get(10, TimeUnit.SECONDS);
     }
 
     @Test
     void serializesTheWholeTransitionAndAppliesCompletionOnTheStateLoop() throws Exception {
         RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 8);
-        Promise<String> firstGate = Promise.promise();
+        CompletableFuture<String> firstGate = new CompletableFuture<>();
         List<String> history = Collections.synchronizedList(new ArrayList<>());
         AtomicBoolean firstCompletionOnStateLoop = new AtomicBoolean();
 
-        Future<String> first = sequencer.submit(
+        CompletableFuture<String> first = sequencer.submit(
                 "first",
                 RaftTransitionSequencer.FailurePolicy.CONTINUE,
                 () -> {
                     history.add("first-start");
                     assertSame(runtime, JavaRuntime.currentContext());
-                    return firstGate.future();
+                    return firstGate;
                 },
                 result -> {
                     firstCompletionOnStateLoop.set(JavaRuntime.currentContext() == runtime);
                     history.add("first-complete");
                     return result;
                 });
-        Future<String> second = sequencer.submit("second", () -> {
+        CompletableFuture<String> second = sequencer.submit("second", () -> {
             history.add("second-start");
             assertSame(runtime, JavaRuntime.currentContext());
-            return Future.succeededFuture("second-result");
+            return CompletableFuture.completedFuture("second-result");
         });
         awaitHistory(history, List.of("first-start"));
-        assertFalse(second.isComplete(), "second transition started while the first was in flight");
+        assertFalse(second.isDone(), "second transition started while the first was in flight");
 
         CompletableFuture.runAsync(() -> firstGate.complete("first-result")).get(10, TimeUnit.SECONDS);
 
@@ -108,9 +106,9 @@ class RaftTransitionSequencerTest {
         IOException failure = new IOException("recoverable transition failure");
         AtomicInteger completions = new AtomicInteger();
 
-        Future<Void> first = sequencer.submit("first", () -> Future.failedFuture(failure));
-        first.onComplete(ignored -> completions.incrementAndGet());
-        Future<String> second = sequencer.submit("second", () -> Future.succeededFuture("ran"));
+        CompletableFuture<Void> first = sequencer.submit("first", () -> CompletableFuture.failedFuture(failure));
+        first.whenComplete((value, error) -> completions.incrementAndGet());
+        CompletableFuture<String> second = sequencer.submit("second", () -> CompletableFuture.completedFuture("ran"));
 
         CompletionException thrown = assertThrows(CompletionException.class, () -> await(first));
         assertSame(failure, thrown.getCause());
@@ -122,17 +120,17 @@ class RaftTransitionSequencerTest {
     @Test
     void fatalFailureFencesTheSequencerAndRejectsQueuedAndNewWork() throws Exception {
         RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 4);
-        Promise<Void> gate = Promise.promise();
+        CompletableFuture<Void> gate = new CompletableFuture<>();
         IOException failure = new IOException("durability uncertain");
         AtomicBoolean queuedStarted = new AtomicBoolean();
 
-        Future<Void> first = sequencer.submit(
-                "fatal", RaftTransitionSequencer.FailurePolicy.FENCE, () -> gate.future());
-        Future<Void> queued = sequencer.submit("queued", () -> {
+        CompletableFuture<Void> first = sequencer.submit(
+                "fatal", RaftTransitionSequencer.FailurePolicy.FENCE, () -> gate);
+        CompletableFuture<Void> queued = sequencer.submit("queued", () -> {
             queuedStarted.set(true);
-            return Future.succeededFuture();
+            return CompletableFuture.completedFuture(null);
         });
-        gate.fail(failure);
+        gate.completeExceptionally(failure);
 
         assertSame(failure, assertThrows(CompletionException.class, () -> await(first)).getCause());
         assertInstanceOf(RaftTransitionSequencer.FencedException.class,
@@ -140,7 +138,7 @@ class RaftTransitionSequencerTest {
         assertFalse(queuedStarted.get());
         assertTrue(sequencer.isFenced());
 
-        Future<Void> rejected = sequencer.submit("too-late", Future::succeededFuture);
+        CompletableFuture<Void> rejected = sequencer.submit("too-late", () -> CompletableFuture.completedFuture(null));
         assertInstanceOf(RaftTransitionSequencer.FencedException.class,
                 assertThrows(CompletionException.class, () -> await(rejected)).getCause());
     }
@@ -150,17 +148,17 @@ class RaftTransitionSequencerTest {
         RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 4);
         IllegalStateException rejection = new IllegalStateException("pre-write rejection");
 
-        Future<String> rejected = sequencer.submit(
+        CompletableFuture<String> rejected = sequencer.submit(
                 "pre-write",
                 RaftTransitionSequencer.FailurePolicy.FENCE,
                 error -> error != rejection,
-                () -> Future.<String>failedFuture(rejection),
+                () -> CompletableFuture.<String>failedFuture(rejection),
                 value -> value);
         assertSame(rejection,
                 assertThrows(CompletionException.class, () -> await(rejected)).getCause());
 
-        Future<String> later = sequencer.submit(
-                "later", () -> Future.succeededFuture("accepted"));
+        CompletableFuture<String> later = sequencer.submit(
+                "later", () -> CompletableFuture.completedFuture("accepted"));
         assertEquals("accepted", await(later));
         assertFalse(sequencer.isFenced());
     }
@@ -168,17 +166,17 @@ class RaftTransitionSequencerTest {
     @Test
     void boundedAdmissionCountsTheActiveTransition() throws Exception {
         RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 3);
-        Promise<Void> gate = Promise.promise();
+        CompletableFuture<Void> gate = new CompletableFuture<>();
 
-        Future<Void> active = sequencer.submit("active", () -> gate.future());
-        Future<Void> queued = sequencer.submit("queued", Future::succeededFuture);
-        Future<Void> rejected = sequencer.submit("overflow", Future::succeededFuture);
+        CompletableFuture<Void> active = sequencer.submit("active", () -> gate);
+        CompletableFuture<Void> queued = sequencer.submit("queued", () -> CompletableFuture.completedFuture(null));
+        CompletableFuture<Void> rejected = sequencer.submit("overflow", () -> CompletableFuture.completedFuture(null));
 
         assertInstanceOf(RaftTransitionSequencer.QueueFullException.class,
                 assertThrows(CompletionException.class, () -> await(rejected)).getCause());
-        assertFalse(queued.isComplete());
+        assertFalse(queued.isDone());
 
-        gate.complete();
+        gate.complete(null);
         await(active);
         await(queued);
     }
@@ -186,21 +184,21 @@ class RaftTransitionSequencerTest {
     @Test
     void normalTrafficCannotConsumeCapacityReservedForEssentialRaftWork() throws Exception {
         RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 2);
-        Promise<Void> gate = Promise.promise();
+        CompletableFuture<Void> gate = new CompletableFuture<>();
 
-        Future<Void> active = sequencer.submit("client-active", () -> gate.future());
-        Future<Void> rejected = sequencer.submit("client-overflow", Future::succeededFuture);
-        Future<String> essential = sequencer.submitEssential(
+        CompletableFuture<Void> active = sequencer.submit("client-active", () -> gate);
+        CompletableFuture<Void> rejected = sequencer.submit("client-overflow", () -> CompletableFuture.completedFuture(null));
+        CompletableFuture<String> essential = sequencer.submitEssential(
                 "higher-term-rpc",
                 RaftTransitionSequencer.FailurePolicy.CONTINUE,
-                () -> Future.succeededFuture("accepted"),
+                () -> CompletableFuture.completedFuture("accepted"),
                 value -> value);
 
         assertInstanceOf(RaftTransitionSequencer.QueueFullException.class,
                 assertThrows(CompletionException.class, () -> await(rejected)).getCause());
-        assertFalse(essential.isComplete());
+        assertFalse(essential.isDone());
 
-        gate.complete();
+        gate.complete(null);
         await(active);
         assertEquals("accepted", await(essential));
     }
@@ -208,18 +206,18 @@ class RaftTransitionSequencerTest {
     @Test
     void drainRejectsNewWorkAndWaitsForAllAcceptedTransitions() throws Exception {
         RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 4);
-        Promise<Void> gate = Promise.promise();
+        CompletableFuture<Void> gate = new CompletableFuture<>();
 
-        Future<Void> active = sequencer.submit("active", () -> gate.future());
-        Future<Void> queued = sequencer.submit("queued", Future::succeededFuture);
-        Future<Void> drained = sequencer.drain();
-        Future<Void> rejected = sequencer.submit("after-drain", Future::succeededFuture);
+        CompletableFuture<Void> active = sequencer.submit("active", () -> gate);
+        CompletableFuture<Void> queued = sequencer.submit("queued", () -> CompletableFuture.completedFuture(null));
+        CompletableFuture<Void> drained = sequencer.drain();
+        CompletableFuture<Void> rejected = sequencer.submit("after-drain", () -> CompletableFuture.completedFuture(null));
 
         assertInstanceOf(RaftTransitionSequencer.DrainingException.class,
                 assertThrows(CompletionException.class, () -> await(rejected)).getCause());
-        assertFalse(drained.isComplete());
+        assertFalse(drained.isDone());
 
-        gate.complete();
+        gate.complete(null);
         await(active);
         await(queued);
         await(drained);
@@ -231,23 +229,23 @@ class RaftTransitionSequencerTest {
         int transitionCount = 10_000;
         // Normal admission holds an eighth of the capacity in reserve; size it so the whole burst is admitted.
         RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 2 * transitionCount);
-        CompletableFuture<List<Future<Integer>>> submitted = new CompletableFuture<>();
+        CompletableFuture<List<CompletableFuture<Integer>>> submitted = new CompletableFuture<>();
         AtomicInteger started = new AtomicInteger();
 
         // Submitting from one state-loop task queues every transition before the first can finish,
         // which is the deepest chain of already-completed transitions.
         runtime.runOnContext(ignored -> {
-            List<Future<Integer>> results = new ArrayList<>(transitionCount);
+            List<CompletableFuture<Integer>> results = new ArrayList<>(transitionCount);
             for (int index = 0; index < transitionCount; index++) {
                 int result = index;
                 results.add(sequencer.submit("sync-" + index, () -> {
                     started.incrementAndGet();
-                    return Future.succeededFuture(result);
+                    return CompletableFuture.completedFuture(result);
                 }));
             }
             submitted.complete(results);
         });
-        List<Future<Integer>> results = submitted.get(10, TimeUnit.SECONDS);
+        List<CompletableFuture<Integer>> results = submitted.get(10, TimeUnit.SECONDS);
 
         assertEquals(transitionCount - 1, await(results.getLast()));
         assertEquals(transitionCount, started.get());
@@ -270,9 +268,9 @@ class RaftTransitionSequencerTest {
         assertInstanceOf(IllegalStateException.class, rejected);
         assertTrue(rejected.getMessage().contains("without transition ownership"));
 
-        Future<Void> owned = sequencer.submit("owned-persistence", () -> {
+        CompletableFuture<Void> owned = sequencer.submit("owned-persistence", () -> {
             sequencer.assertActiveTransition();
-            return Future.succeededFuture();
+            return CompletableFuture.completedFuture(null);
         });
         await(owned);
     }
@@ -281,21 +279,21 @@ class RaftTransitionSequencerTest {
     void eachTransitionRunsInTheLoggingAndTracingContextItWasSubmittedIn() throws Exception {
         RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 8);
         ContextKey<String> trace = ContextKey.named("trace");
-        Promise<String> firstPersisted = Promise.promise();
+        CompletableFuture<String> firstPersisted = new CompletableFuture<>();
         List<String> seen = Collections.synchronizedList(new ArrayList<>());
 
-        Future<String> first = submitIn("request-a", Context.root().with(trace, "trace-a"), () ->
+        CompletableFuture<String> first = submitIn("request-a", Context.root().with(trace, "trace-a"), () ->
                 sequencer.submit("first", RaftTransitionSequencer.FailurePolicy.CONTINUE, () -> {
                     seen.add("first-start " + observed(trace));
-                    return firstPersisted.future();
+                    return firstPersisted;
                 }, value -> {
                     seen.add("first-apply " + observed(trace));
                     return value;
                 }));
-        Future<String> second = submitIn("request-b", Context.root().with(trace, "trace-b"), () ->
+        CompletableFuture<String> second = submitIn("request-b", Context.root().with(trace, "trace-b"), () ->
                 sequencer.submit("second", RaftTransitionSequencer.FailurePolicy.CONTINUE, () -> {
                     seen.add("second-start " + observed(trace));
-                    return Future.succeededFuture("b");
+                    return CompletableFuture.completedFuture("b");
                 }, value -> {
                     seen.add("second-apply " + observed(trace));
                     return value;

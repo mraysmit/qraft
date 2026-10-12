@@ -77,10 +77,10 @@ class ClientServerContractTest {
                 .run(() -> { if (retryableServer != null) retryableServer.stop(0); })
                 .run(() -> { if (server != null) server.close(); })
                 .run(() -> {
-                    if (node != null) node.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                    if (node != null) node.stop().get(10, TimeUnit.SECONDS);
                 })
                 .run(() -> {
-                    if (runtime != null) runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                    if (runtime != null) runtime.close().get(10, TimeUnit.SECONDS);
                 })
                 .rethrow();
     }
@@ -167,7 +167,7 @@ class ClientServerContractTest {
                 .electionTimeout(25)
                 .heartbeatInterval(10_000)
                 .build();
-        node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        node.start().get(10, TimeUnit.SECONDS);
         waitUntil(node::isLeader);
         server = new HttpApiServer(0, node, store);
         server.start().get(10, TimeUnit.SECONDS);

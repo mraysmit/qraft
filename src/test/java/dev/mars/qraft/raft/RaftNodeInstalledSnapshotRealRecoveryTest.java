@@ -46,6 +46,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
@@ -79,7 +80,7 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
     void tearDown() throws Exception {
         if (node != null) await(node.stop());
         if (runtime != null) {
-            runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.shutdown().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -222,13 +223,13 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
                 .snapshotEnabled(false).electionTimeout(60_000).heartbeatInterval(60_000)
                 .build();
         ExecutionException failure = assertThrows(ExecutionException.class,
-                () -> node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
+                () -> node.start().get(10, TimeUnit.SECONDS));
 
         assertEquals("Simulated recovery sync failure", rootMessage(failure), failure.toString());
         assertFalse(node.isRunning());
         await(node.stop());
         node = null;
-        runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        runtime.shutdown().get(10, TimeUnit.SECONDS);
         runtime = null;
         assertDurableState(4, 99, List.of(1L, 2L, 3L, 4L));
 

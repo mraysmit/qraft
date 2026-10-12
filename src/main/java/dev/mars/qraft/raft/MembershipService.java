@@ -20,7 +20,8 @@ import dev.mars.qraft.raft.grpc.JoinRequest;
 import dev.mars.qraft.raft.grpc.MembershipResponse;
 import dev.mars.qraft.raft.grpc.MembershipResponse.Status;
 import dev.mars.qraft.raft.grpc.RemoveServerRequest;
-import dev.mars.qraft.common.async.Future;
+import dev.mars.qraft.common.concurrent.Completions;
+import dev.mars.qraft.common.concurrent.Deadlines;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,8 +29,11 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Function;
 
 /**
  * Serves joins and removals on every server, as Consul's servers serve {@code retry_join} and
@@ -71,20 +75,20 @@ public final class MembershipService {
     }
 
     /** Admits {@code request}'s server as a non-voter on the leader, or forwards the request to it. */
-    public Future<MembershipResponse> join(JoinRequest request) {
+    public CompletableFuture<MembershipResponse> join(JoinRequest request) {
         Objects.requireNonNull(request, "request");
         RaftConfiguration.Server joining;
         try {
             joining = new RaftConfiguration.Server(
                     request.getServerId(), request.getName(), request.getAddress(), false);
         } catch (IllegalArgumentException invalid) {
-            return Future.succeededFuture(response(Status.REFUSED, invalid.getMessage()));
+            return CompletableFuture.completedFuture(response(Status.REFUSED, invalid.getMessage()));
         }
         if (!node.isLeader()) {
             return forward(request.getForwarded(), leader -> forwarder.join(leader,
                     request.toBuilder().setForwarded(true).build()));
         }
-        return outcome(node.admit(joining).map(result -> switch (result) {
+        return outcome(node.admit(joining).thenApply(result -> switch (result) {
             case JOINED -> response(Status.JOINED, "Added " + joining.name() + " as a non-voter");
             case ALREADY_MEMBER -> response(Status.ALREADY_MEMBER, joining.name() + " is already a member");
             case ADDRESS_UPDATED -> response(Status.ALREADY_MEMBER,
@@ -95,65 +99,64 @@ public final class MembershipService {
     }
 
     /** Removes the server {@code request} names, by ID or by name, on the leader, or forwards it there. */
-    public Future<MembershipResponse> remove(RemoveServerRequest request) {
+    public CompletableFuture<MembershipResponse> remove(RemoveServerRequest request) {
         Objects.requireNonNull(request, "request");
         if (operatorToken == null) {
-            return Future.succeededFuture(response(Status.UNAUTHORIZED,
+            return CompletableFuture.completedFuture(response(Status.UNAUTHORIZED,
                     "Removal refused: no operator token is configured on " + node.getNodeId()));
         }
         if (!MessageDigest.isEqual(operatorToken, request.getToken().getBytes(StandardCharsets.UTF_8))) {
             logger.warn("Refused a server removal with a missing or wrong operator token");
-            return Future.succeededFuture(response(Status.UNAUTHORIZED, "The operator token is missing or wrong"));
+            return CompletableFuture.completedFuture(response(Status.UNAUTHORIZED, "The operator token is missing or wrong"));
         }
         if (!node.isLeader()) {
             return forward(request.getForwarded(), leader -> forwarder.removeServer(leader,
                     request.toBuilder().setForwarded(true).build()));
         }
         if (request.getServerId().isBlank() && request.getName().isBlank()) {
-            return Future.succeededFuture(response(Status.REFUSED, "Name the server to remove by ID or by name"));
+            return CompletableFuture.completedFuture(response(Status.REFUSED, "Name the server to remove by ID or by name"));
         }
         Optional<RaftConfiguration.Server> removed = node.getConfiguration().flatMap(current ->
                 request.getServerId().isBlank()
                         ? current.serverNamed(request.getName())
                         : current.server(request.getServerId()));
         if (removed.isEmpty()) {
-            return Future.succeededFuture(response(Status.NOT_FOUND, "No configured server is "
+            return CompletableFuture.completedFuture(response(Status.NOT_FOUND, "No configured server is "
                     + (request.getServerId().isBlank() ? "named " + request.getName() : request.getServerId())));
         }
         RaftConfiguration.Server server = removed.get();
         logger.info("Removing server {} ({}) at an operator's request", server.name(), server.serverId());
-        return outcome(node.removeServer(server.serverId()).map(ignored ->
+        return outcome(node.removeServer(server.serverId()).thenApply(ignored ->
                 response(Status.REMOVED, "Removed " + server.name() + " (" + server.serverId() + ")")));
     }
 
-    private Future<MembershipResponse> forward(boolean alreadyForwarded,
-                                               java.util.function.Function<String, Future<MembershipResponse>> send) {
+    private CompletableFuture<MembershipResponse> forward(
+            boolean alreadyForwarded, Function<String, CompletionStage<MembershipResponse>> send) {
         String leader = node.getLeaderId();
         if (alreadyForwarded || leader == null || leader.isBlank()) {
-            return Future.succeededFuture(response(Status.NO_LEADER,
+            return CompletableFuture.completedFuture(response(Status.NO_LEADER,
                     node.getNodeId() + " is not the leader and knows of none; try again"));
         }
-        Future<MembershipResponse> answer;
+        CompletionStage<MembershipResponse> answer;
         try {
             answer = send.apply(leader);
         } catch (RuntimeException unaddressable) {
             // A leader this server has heard of but cannot address yet, for one.
-            answer = Future.failedFuture(unaddressable);
+            answer = CompletableFuture.failedFuture(unaddressable);
         }
-        return answer
-                .timeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .recover(unreachable -> Future.succeededFuture(response(Status.NO_LEADER,
-                        "The leader " + leader + " could not be reached: " + unreachable.getMessage())));
+        return Deadlines.bound(answer, TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .exceptionally(unreachable -> response(Status.NO_LEADER, "The leader " + leader
+                        + " could not be reached: " + Completions.unwrap(unreachable).getMessage()));
     }
 
     /** The node's answer, or its refusal as a status: leadership lost or no commit in time is worth retrying. */
-    private static Future<MembershipResponse> outcome(Future<MembershipResponse> change) {
-        return change.timeout(TIMEOUT_SECONDS, TimeUnit.SECONDS).recover(error -> {
+    private static CompletableFuture<MembershipResponse> outcome(CompletionStage<MembershipResponse> change) {
+        return Deadlines.bound(change, TIMEOUT_SECONDS, TimeUnit.SECONDS).exceptionally(failure -> {
+            Throwable error = Completions.unwrap(failure);
             boolean retry = error instanceof CommandOutcomeUnknownException || error instanceof TimeoutException
                     || String.valueOf(error.getMessage()).startsWith("A configuration change waits until")
                     || String.valueOf(error.getMessage()).startsWith("Not the leader");
-            return Future.succeededFuture(response(retry ? Status.NO_LEADER : Status.REFUSED,
-                    String.valueOf(error.getMessage())));
+            return response(retry ? Status.NO_LEADER : Status.REFUSED, String.valueOf(error.getMessage()));
         });
     }
 

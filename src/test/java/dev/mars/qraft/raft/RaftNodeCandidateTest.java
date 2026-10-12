@@ -22,9 +22,7 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
-import dev.mars.qraft.common.async.Promise;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
 import org.junit.jupiter.api.AfterEach;
@@ -32,6 +30,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
@@ -70,7 +69,7 @@ class RaftNodeCandidateTest {
                 .mode(RaftNodeMode.volatileMode()).snapshotEnabled(false)
                 .electionTimeout(300).heartbeatInterval(100)
                 .timerScheduler(timers).build();
-        node.start().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        node.start().get(10, TimeUnit.SECONDS);
         timers.fireElectionTimeout();
         awaitCandidacyInTerm(1);
         timers.fireElectionTimeout();
@@ -92,8 +91,8 @@ class RaftNodeCandidateTest {
 
     @AfterEach
     void tearDown() throws Exception {
-        if (node != null) node.stop().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
-        if (runtime != null) runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        if (node != null) node.stop().get(10, TimeUnit.SECONDS);
+        if (runtime != null) runtime.shutdown().get(10, TimeUnit.SECONDS);
     }
 
     @Test
@@ -135,11 +134,11 @@ class RaftNodeCandidateTest {
         return node.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
                         .setTerm(term).setLeaderId("peer-2").setPrevLogIndex(1).setPrevLogTerm(0)
                         .setLeaderCommit(1).build())
-                .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                .get(10, TimeUnit.SECONDS);
     }
 
     private RaftStatus status() throws Exception {
-        return node.status().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        return node.status().get(10, TimeUnit.SECONDS);
     }
 
     /**
@@ -153,20 +152,20 @@ class RaftNodeCandidateTest {
         @Override public void stop() { }
 
         @Override
-        public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
-            return Future.succeededFuture(VoteResponse.newBuilder()
+        public CompletableFuture<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
+            return CompletableFuture.completedFuture(VoteResponse.newBuilder()
                     .setTerm(request.getTerm()).setVoteGranted(false)
                     .setVoterServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
         }
 
         @Override
-        public Future<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
-            return Promise.<AppendEntriesResponse>promise().future();
+        public CompletableFuture<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
+            return new CompletableFuture<AppendEntriesResponse>();
         }
 
         @Override
-        public Future<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
-            return Promise.<InstallSnapshotResponse>promise().future();
+        public CompletableFuture<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
+            return new CompletableFuture<InstallSnapshotResponse>();
         }
     }
 }

@@ -237,6 +237,13 @@ Builds 22 to 24 were PIT runs, with the three suites skipped. PIT has been on ic
   aborted after two hours with no report. PIT had ended 160 mutants that made a test hang, at a steady
   one every 44 seconds, and the whole run would have taken days.
 
+[Build 25](http://192.168.137.32:8080/job/Qraft/25/), of 2026-10-12 on commit `a37a684`, passed in ten
+minutes. It verified the first slice of the replacement of the wrapper future types, in
+`RaftStorageFactory`: 933 default tests, 10 end-to-end, 32 Docker and slow, 975 results, none failed or
+skipped, and every coverage check met. The six new results are `CompletionsTest` and
+`RaftStorageFactoryTest`. Its 139 archived log files hold 531 flagged ERROR events, counting copies, and
+no ERROR event or uncaught exception without a flag.
+
 No build ran between 2026-10-04 and 2026-10-10. In that time the `agent` directive of the
 `Jenkinsfile` had been renamed by mistake, which Jenkins would have refused; it was restored in
 `ce5890d` before build 4.

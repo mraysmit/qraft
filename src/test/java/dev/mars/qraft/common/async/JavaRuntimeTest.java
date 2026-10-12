@@ -24,6 +24,7 @@ import org.slf4j.MDC;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import dev.mars.qraft.common.concurrent.Completions;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -49,7 +50,7 @@ class JavaRuntimeTest {
 
     @AfterEach
     void tearDown() throws Exception {
-        runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        runtime.shutdown().get(10, TimeUnit.SECONDS);
     }
 
     @Test
@@ -71,26 +72,26 @@ class JavaRuntimeTest {
 
         // The task waits until the callback is registered; otherwise a completion that wins the race runs
         // the late-registered callback inline on the test thread instead of on the runtime context.
-        Future<Boolean> operation = runtime.executeBlocking(() -> {
+        CompletableFuture<Boolean> operation = runtime.executeBlocking(() -> {
             if (!callbackRegistered.await(30, TimeUnit.SECONDS)) {
                 throw new IllegalStateException("the callback was never registered");
             }
             return Thread.currentThread().isVirtual();
         });
-        operation.onSuccess(ignored -> callbackOnRuntime.complete(JavaRuntime.currentContext() == runtime));
+        operation.whenComplete(Completions.onSuccess(ignored -> callbackOnRuntime.complete(JavaRuntime.currentContext() == runtime)));
         callbackRegistered.countDown();
 
         // Wait on the callback, never on the operation: a thread blocked in get() on the operation's future
         // helps complete it and may run the callback itself (reproduced 2 in 2,000 runs).
         assertTrue(callbackOnRuntime.get(10, TimeUnit.SECONDS));
-        assertTrue(operation.toCompletionStage().toCompletableFuture().getNow(false));
+        assertTrue(operation.getNow(false));
     }
 
     @Test
     void timerCompletesAfterDelay() throws Exception {
         long started = System.nanoTime();
 
-        runtime.timer(30).toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        runtime.timer(30).get(10, TimeUnit.SECONDS);
 
         assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started) >= 20);
     }
@@ -107,7 +108,7 @@ class JavaRuntimeTest {
             assertEquals(0, racing.pendingTimerCount(),
                     "a timer that fires before its registration is recorded must not leave a stale entry");
         } finally {
-            racing.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            racing.shutdown().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -128,7 +129,7 @@ class JavaRuntimeTest {
             assertFalse(invoked.get());
             assertFalse(timed.cancelTimer(timerId), "a timer is cancelled at most once");
         } finally {
-            timed.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            timed.shutdown().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -137,7 +138,7 @@ class JavaRuntimeTest {
         WorkerExecutor worker = runtime.createSharedWorkerExecutor("storage-test", 1);
         try {
             String threadName = worker.executeBlocking(() -> Thread.currentThread().getName())
-                    .toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+                    .get(10, TimeUnit.SECONDS);
             assertTrue(threadName.startsWith("storage-test-"));
         } finally {
             worker.close();
@@ -161,10 +162,10 @@ class JavaRuntimeTest {
     @Test
     void propagatesMdcThroughVirtualThreadCompletion() throws Exception {
         MDC.put("requestId", "request-1");
-        Future<String> operation = runtime.executeBlocking(() -> MDC.get("requestId"));
+        CompletableFuture<String> operation = runtime.executeBlocking(() -> MDC.get("requestId"));
         MDC.clear();
 
-        assertEquals("request-1", operation.toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS));
+        assertEquals("request-1", operation.get(10, TimeUnit.SECONDS));
     }
 
     /**

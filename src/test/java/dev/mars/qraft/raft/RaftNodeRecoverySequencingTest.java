@@ -22,7 +22,6 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
@@ -69,7 +68,7 @@ class RaftNodeRecoverySequencingTest {
         if (storage != null) storage.releaseAll();
         if (node != null) await(node.stop());
         if (runtime != null) {
-            runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.shutdown().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -85,7 +84,7 @@ class RaftNodeRecoverySequencingTest {
         RecordingStateMachineFixture stateMachine = new RecordingStateMachineFixture();
         node = buildNode(storage, stateMachine);
 
-        Future<Void> start = node.start();
+        CompletableFuture<Void> start = node.start();
         assertSame(runtime, storage.awaitMetadataRequest());
         completeOffLoop(() -> storage.metadata.complete(storage.metadataValue));
         assertSame(runtime, storage.awaitSnapshotRequest(),
@@ -120,7 +119,7 @@ class RaftNodeRecoverySequencingTest {
         RecordingStateMachineFixture stateMachine = new RecordingStateMachineFixture();
         node = buildNode(storage, stateMachine);
 
-        Future<Void> start = node.start();
+        CompletableFuture<Void> start = node.start();
         storage.awaitMetadataRequest();
         completeOffLoop(() -> storage.metadata.complete(storage.metadataValue));
         storage.awaitSnapshotRequest();
@@ -146,14 +145,12 @@ class RaftNodeRecoverySequencingTest {
                 Optional.empty(), List.of());
         node = buildNode(storage, new RecordingStateMachineFixture(), Set.of("node-1", "node-2", "node-3"));
 
-        Future<Void> start = node.start();
+        CompletableFuture<Void> start = node.start();
         storage.awaitMetadataRequest();
         CompletableFuture<VoteResponse> vote = node.handleVoteRequest(VoteRequest.newBuilder()
-                .setTerm(5).setCandidateId("node-3").setLastLogIndex(100).setLastLogTerm(5).build())
-                .toCompletionStage().toCompletableFuture();
+                .setTerm(5).setCandidateId("node-3").setLastLogIndex(100).setLastLogTerm(5).build());
         CompletableFuture<AppendEntriesResponse> append = node.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
-                .setTerm(6).setLeaderId("node-3").setPrevLogIndex(0).setPrevLogTerm(0).setLeaderCommit(0).build())
-                .toCompletionStage().toCompletableFuture();
+                .setTerm(6).setLeaderId("node-3").setPrevLogIndex(0).setPrevLogTerm(0).setLeaderCommit(0).build());
 
         assertTrue(vote.handle((response, failure) -> failure != null || !response.getVoteGranted())
                 .get(10, TimeUnit.SECONDS), "a vote cannot be decided against unrecovered state");
@@ -308,14 +305,14 @@ class RaftNodeRecoverySequencingTest {
     private static final class RecoveryTransportFixture implements RaftTransport {
         @Override public void start(Consumer<RaftMessage> messageHandler) {}
         @Override public void stop() {}
-        @Override public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
-            return Future.failedFuture("unexpected vote request");
+        @Override public CompletableFuture<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
+            return CompletableFuture.failedFuture(new IllegalStateException("unexpected vote request"));
         }
-        @Override public Future<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
-            return Future.failedFuture("unexpected append request");
+        @Override public CompletableFuture<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
+            return CompletableFuture.failedFuture(new IllegalStateException("unexpected append request"));
         }
-        @Override public Future<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
-            return Future.failedFuture("unexpected snapshot request");
+        @Override public CompletableFuture<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
+            return CompletableFuture.failedFuture(new IllegalStateException("unexpected snapshot request"));
         }
     }
 }

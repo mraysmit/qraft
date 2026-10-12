@@ -22,7 +22,6 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
@@ -113,21 +112,21 @@ class RaftNodeShutdownSequencingTest {
             }
         }
         if (runtime != null) {
-            runtime.shutdown().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.shutdown().get(10, TimeUnit.SECONDS);
         }
     }
 
     @Test
     void stopWaitsForAcceptedWalTransitionsBeforeClosingResources() {
         storage.blockNextSync();
-        Future<RaftCommandResult<?>> first = node.submitCommand(put("first", "one"));
+        CompletableFuture<RaftCommandResult<?>> first = node.submitCommand(put("first", "one"));
         storage.awaitBlockedSync();
-        Future<RaftCommandResult<?>> queued = node.submitCommand(put("queued", "two"));
+        CompletableFuture<RaftCommandResult<?>> queued = node.submitCommand(put("queued", "two"));
 
-        Future<Void> stop = node.stop();
+        CompletableFuture<Void> stop = node.stop();
         awaitStateLoop(runtime);
 
-        assertFalse(stop.isComplete(), "shutdown must wait for the active WAL transition");
+        assertFalse(stop.isDone(), "shutdown must wait for the active WAL transition");
         assertEquals(0, transport.stopCount.get(), "transport must remain open while accepted work drains");
         assertEquals(0, storage.closeCount.get(), "storage must remain open while accepted work drains");
 
@@ -166,16 +165,16 @@ class RaftNodeShutdownSequencingTest {
         awaitLeader(leader);
 
         clusterStorage.blockNextSync();
-        Future<RaftCommandResult<?>> active = leader.submitCommand(put("active", "one"));
+        CompletableFuture<RaftCommandResult<?>> active = leader.submitCommand(put("active", "one"));
         clusterStorage.awaitBlockedSync();
         assertEquals(List.of(1L, 2L, 3L), clusterStorage.appendedIndexes,
                 "the held sync must belong to the active command after the durable leadership no-op");
-        Future<RaftCommandResult<?>> queued = leader.submitCommand(put("queued", "two"));
-        Future<Void> stop = leader.stop();
+        CompletableFuture<RaftCommandResult<?>> queued = leader.submitCommand(put("queued", "two"));
+        CompletableFuture<Void> stop = leader.stop();
         clusterStorage.releaseBlockedSync();
         await(stop);
 
-        for (Future<RaftCommandResult<?>> write : List.of(active, queued)) {
+        for (CompletableFuture<RaftCommandResult<?>> write : List.of(active, queued)) {
             CompletionException failure = assertThrows(CompletionException.class, () -> await(write),
                     "a write accepted during the drain that cannot commit must still complete");
             assertInstanceOf(CommandOutcomeUnknownException.class, failure.getCause());
@@ -185,14 +184,14 @@ class RaftNodeShutdownSequencingTest {
     @Test
     void concurrentStopsShareOneCompletionAndCloseResourcesOnce() {
         storage.blockNextSync();
-        Future<RaftCommandResult<?>> active = node.submitCommand(put("active", "one"));
+        CompletableFuture<RaftCommandResult<?>> active = node.submitCommand(put("active", "one"));
         storage.awaitBlockedSync();
 
-        Future<Void> firstStop = node.stop();
-        Future<Void> secondStop = node.stop();
+        CompletableFuture<Void> firstStop = node.stop();
+        CompletableFuture<Void> secondStop = node.stop();
 
         assertSame(firstStop, secondStop, "all shutdown callers must observe one shared operation");
-        assertFalse(firstStop.isComplete());
+        assertFalse(firstStop.isDone());
 
         storage.releaseBlockedSync();
         assertInstanceOf(RaftCommandResult.Success.class, await(active));
@@ -206,13 +205,13 @@ class RaftNodeShutdownSequencingTest {
         assertInstanceOf(RaftCommandResult.Success.class,
                 await(node.submitCommand(put("snapshotted", "value"))));
         storage.blockNextSnapshotPublication();
-        Future<Void> snapshot = node.takeSnapshot();
+        CompletableFuture<Void> snapshot = node.takeSnapshot();
         storage.awaitBlockedSnapshotPublication();
 
-        Future<Void> stop = node.stop();
+        CompletableFuture<Void> stop = node.stop();
         awaitStateLoop(runtime);
 
-        assertFalse(stop.isComplete(), "shutdown must wait for snapshot publication and compaction");
+        assertFalse(stop.isDone(), "shutdown must wait for snapshot publication and compaction");
         assertEquals(0, storage.closeCount.get());
 
         storage.releaseBlockedSnapshotPublication();
@@ -230,15 +229,15 @@ class RaftNodeShutdownSequencingTest {
                 await(node.submitCommand(put("snapshotted", "value"))));
         storage.blockNextPrefixCompaction();
 
-        Future<Void> snapshot = node.takeSnapshot();
+        CompletableFuture<Void> snapshot = node.takeSnapshot();
         storage.awaitBlockedPrefixCompaction();
 
-        Future<Void> stop = node.stop();
+        CompletableFuture<Void> stop = node.stop();
         awaitStateLoop(runtime);
 
-        assertFalse(snapshot.isComplete(),
+        assertFalse(snapshot.isDone(),
                 "snapshot completion must include its post-publication WAL compaction");
-        assertFalse(stop.isComplete(),
+        assertFalse(stop.isDone(),
                 "shutdown must not close storage after publication but before prefix compaction");
         assertEquals(0, storage.closeCount.get());
 
@@ -271,12 +270,12 @@ class RaftNodeShutdownSequencingTest {
         transport = new ShutdownTransportFixture(closeEvents);
         node = buildNode(Set.of("node-1"));
 
-        Future<Void> start = node.start();
+        CompletableFuture<Void> start = node.start();
         storage.awaitBlockedMetadataLoad();
-        Future<Void> stop = node.stop();
+        CompletableFuture<Void> stop = node.stop();
         awaitStateLoop(runtime);
 
-        assertFalse(stop.isComplete(), "shutdown must own an in-flight recovery operation");
+        assertFalse(stop.isDone(), "shutdown must own an in-flight recovery operation");
         assertEquals(0, storage.closeCount.get());
 
         storage.releaseBlockedMetadataLoad();
@@ -327,9 +326,9 @@ class RaftNodeShutdownSequencingTest {
         await(node.start());
         awaitLeader();
 
-        Future<RaftCommandResult<?>> command = node.submitCommand(put("pending", "commit"));
+        CompletableFuture<RaftCommandResult<?>> command = node.submitCommand(put("pending", "commit"));
         transport.awaitHeldAppend();
-        Future<Void> stop = node.stop();
+        CompletableFuture<Void> stop = node.stop();
 
         CompletionException unresolved = assertThrows(CompletionException.class,
                 () -> await(command));
@@ -430,7 +429,7 @@ class RaftNodeShutdownSequencingTest {
         private final AtomicInteger stopCount = new AtomicInteger();
         private volatile boolean holdAppendResponses;
         private long awaitedAppendIndex;
-        private final List<dev.mars.qraft.common.async.Promise<AppendEntriesResponse>>
+        private final List<java.util.concurrent.CompletableFuture<AppendEntriesResponse>>
                 heldAppends = new CopyOnWriteArrayList<>();
         private volatile CompletableFuture<Void> appendHeld;
         private volatile RuntimeException stopFailure;
@@ -475,30 +474,30 @@ class RaftNodeShutdownSequencingTest {
             if (stopFailure != null) throw stopFailure;
         }
         // Each simulated peer answers as the server configured under its name.
-        @Override public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
-            return Future.succeededFuture(VoteResponse.newBuilder()
+        @Override public CompletableFuture<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
+            return CompletableFuture.completedFuture(VoteResponse.newBuilder()
                     .setTerm(request.getTerm()).setVoteGranted(true)
                     .setVoterServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
         }
-        @Override public Future<AppendEntriesResponse> sendAppendEntries(
+        @Override public CompletableFuture<AppendEntriesResponse> sendAppendEntries(
                 String targetId, AppendEntriesRequest request) {
             if (holdAppendResponses && request.getEntriesCount() > 0) {
-                dev.mars.qraft.common.async.Promise<AppendEntriesResponse> heldAppend =
-                        dev.mars.qraft.common.async.Promise.promise();
+                java.util.concurrent.CompletableFuture<AppendEntriesResponse> heldAppend =
+                        new java.util.concurrent.CompletableFuture<>();
                 heldAppends.add(heldAppend);
                 if (request.getEntriesList().stream().anyMatch(entry -> entry.getIndex() >= awaitedAppendIndex)) {
                     appendHeld.complete(null);
                 }
-                return heldAppend.future().map(response -> response.toBuilder()
+                return heldAppend.thenApply(response -> response.toBuilder()
                         .setFollowerServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
             }
-            return Future.succeededFuture(AppendEntriesResponse.newBuilder()
+            return CompletableFuture.completedFuture(AppendEntriesResponse.newBuilder()
                     .setTerm(request.getTerm()).setSuccess(true)
                     .setFollowerServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
         }
-        @Override public Future<InstallSnapshotResponse> sendInstallSnapshot(
+        @Override public CompletableFuture<InstallSnapshotResponse> sendInstallSnapshot(
                 String targetId, InstallSnapshotRequest request) {
-            return Future.succeededFuture(InstallSnapshotResponse.newBuilder()
+            return CompletableFuture.completedFuture(InstallSnapshotResponse.newBuilder()
                     .setTerm(request.getTerm()).setSuccess(true)
                     .setFollowerServerId(ManualRaftClusterFixture.serverIdOf(targetId)).build());
         }

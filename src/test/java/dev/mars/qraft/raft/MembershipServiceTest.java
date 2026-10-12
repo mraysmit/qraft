@@ -26,7 +26,6 @@ import dev.mars.qraft.raft.grpc.MembershipResponse.Status;
 import dev.mars.qraft.raft.grpc.RemoveServerRequest;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.Future;
 import dev.mars.qraft.common.async.JavaRuntime;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.QraftStateStore;
@@ -39,6 +38,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
@@ -97,7 +97,7 @@ class MembershipServiceTest {
         try {
             cluster.close();
         } finally {
-            runtime.close().toCompletionStage().toCompletableFuture().get(10, TimeUnit.SECONDS);
+            runtime.close().get(10, TimeUnit.SECONDS);
             InMemoryTransportSimulatorFixture.clearAllTransports();
         }
     }
@@ -152,6 +152,20 @@ class MembershipServiceTest {
         assertEquals(Status.NO_LEADER, join.getStatus(), join.getMessage());
         assertTrue(join.getMessage().contains("could not be reached"), join.getMessage());
         assertEquals(Status.NO_LEADER, removal.getStatus(), removal.getMessage());
+    }
+
+    @Test
+    void aLeaderThatDoesNotAnswerIsNamedWithTheReasonAlone() throws Exception {
+        leadWithACommit();
+        // The leader serves no membership changes over the in-memory network, so the forwarded request fails.
+        MembershipService follower = new MembershipService(b,
+                InMemoryTransportSimulatorFixture.getAllTransports().get("b"), TOKEN);
+
+        MembershipResponse join = await(follower.join(JOIN_D));
+
+        assertEquals(Status.NO_LEADER, join.getStatus(), join.getMessage());
+        assertEquals("The leader a could not be reached: Target node not available: a", join.getMessage(),
+                "the reason is the failure's own message, without the name of an exception around it");
     }
 
     @Test
@@ -259,6 +273,7 @@ class MembershipServiceTest {
 
         assertEquals(Status.REFUSED, answer.getStatus());
         assertTrue(answer.getMessage().contains("quorum"), answer.getMessage());
+        assertFalse(answer.getMessage().contains("Exception"), answer.getMessage());
         assertFalse(a.getConfiguration().orElseThrow().serverNamed("b").isEmpty());
     }
 
@@ -283,12 +298,12 @@ class MembershipServiceTest {
      */
     private static final class ThrowingForwarderFixture implements RaftTransport {
         @Override
-        public Future<MembershipResponse> join(String targetId, JoinRequest request) {
+        public CompletableFuture<MembershipResponse> join(String targetId, JoinRequest request) {
             throw new IllegalArgumentException("Unknown node: " + targetId);
         }
 
         @Override
-        public Future<MembershipResponse> removeServer(String targetId, RemoveServerRequest request) {
+        public CompletableFuture<MembershipResponse> removeServer(String targetId, RemoveServerRequest request) {
             throw new IllegalArgumentException("Unknown node: " + targetId);
         }
 
@@ -296,17 +311,17 @@ class MembershipServiceTest {
         @Override public void stop() { }
 
         @Override
-        public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
+        public CompletableFuture<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public Future<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
+        public CompletableFuture<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public Future<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
+        public CompletableFuture<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
             throw new UnsupportedOperationException();
         }
     }
@@ -318,14 +333,14 @@ class MembershipServiceTest {
      */
     private final class ForwarderFixture implements RaftTransport {
         @Override
-        public Future<MembershipResponse> join(String targetId, JoinRequest request) {
+        public CompletableFuture<MembershipResponse> join(String targetId, JoinRequest request) {
             forwardedTo.add(targetId);
             markedForwarded.add(request.getForwarded());
             return services.get(targetId).join(request);
         }
 
         @Override
-        public Future<MembershipResponse> removeServer(String targetId, RemoveServerRequest request) {
+        public CompletableFuture<MembershipResponse> removeServer(String targetId, RemoveServerRequest request) {
             forwardedTo.add(targetId);
             markedForwarded.add(request.getForwarded());
             return services.get(targetId).remove(request);
@@ -335,17 +350,17 @@ class MembershipServiceTest {
         @Override public void stop() { }
 
         @Override
-        public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
+        public CompletableFuture<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public Future<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
+        public CompletableFuture<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
             throw new UnsupportedOperationException();
         }
 
         @Override
-        public Future<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
+        public CompletableFuture<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
             throw new UnsupportedOperationException();
         }
     }

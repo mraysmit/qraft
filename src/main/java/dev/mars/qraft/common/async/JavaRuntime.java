@@ -18,6 +18,7 @@ package dev.mars.qraft.common.async;
 
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -100,23 +101,24 @@ public final class JavaRuntime {
     /**
      * Runs {@code task} on a virtual thread and completes the returned future on this runtime's context, with
      * the caller's logging and tracing context. Its callbacks run there unless they are registered after it
-     * completes or another thread blocked on it helps run them (see {@link Future}).
+     * completes or another thread blocked in {@code join} or {@code get} on it helps run them, as a
+     * {@link CompletableFuture} allows.
      */
-    public <T> Future<T> executeBlocking(Callable<T> task) { return executeBlocking(workers, task); }
-    public <T> Future<T> executeBlocking(Callable<T> task, boolean ordered) { return executeBlocking(task); }
+    public <T> CompletableFuture<T> executeBlocking(Callable<T> task) { return executeBlocking(workers, task); }
+    public <T> CompletableFuture<T> executeBlocking(Callable<T> task, boolean ordered) { return executeBlocking(task); }
 
-    <T> Future<T> executeBlocking(ExecutorService executor, Callable<T> task) {
-        Promise<T> promise = Promise.promise();
+    <T> CompletableFuture<T> executeBlocking(ExecutorService executor, Callable<T> task) {
+        CompletableFuture<T> promise = new CompletableFuture<>();
         CallerContext context = CallerContext.capture();
         executor.submit(() -> context.run(() -> {
             try {
                 T value = task.call();
                 runOnContext(ignored -> promise.complete(value));
             } catch (Throwable error) {
-                runOnContext(ignored -> promise.fail(error));
+                runOnContext(ignored -> promise.completeExceptionally(error));
             }
         }));
-        return promise.future();
+        return promise;
     }
 
     public WorkerExecutor createSharedWorkerExecutor(String name, int poolSize) {
@@ -127,13 +129,13 @@ public final class JavaRuntime {
         return createSharedWorkerExecutor(name, poolSize);
     }
 
-    public Future<Void> timer(long delayMs) {
-        Promise<Void> promise = Promise.promise();
-        setTimer(delayMs, ignored -> promise.complete());
-        return promise.future();
+    public CompletableFuture<Void> timer(long delayMs) {
+        CompletableFuture<Void> promise = new CompletableFuture<>();
+        setTimer(delayMs, ignored -> promise.complete(null));
+        return promise;
     }
 
-    public Future<Void> shutdown() {
+    public CompletableFuture<Void> shutdown() {
         timers.values().forEach(timer -> timer.cancel(false));
         timers.clear();
         workers.shutdown();
@@ -144,10 +146,10 @@ public final class JavaRuntime {
             Thread.currentThread().interrupt();
         }
         scheduler.shutdown();
-        return Future.succeededFuture();
+        return CompletableFuture.completedFuture(null);
     }
 
-    public Future<Void> close() { return shutdown(); }
+    public CompletableFuture<Void> close() { return shutdown(); }
 
     private void runInContext(CallerContext context, Runnable task) {
         CURRENT.set(this);

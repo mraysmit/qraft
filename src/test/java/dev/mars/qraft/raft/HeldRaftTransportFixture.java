@@ -22,10 +22,9 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.Future;
-import dev.mars.qraft.common.async.Promise;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
@@ -41,9 +40,9 @@ import java.util.function.Consumer;
 final class HeldRaftTransportFixture implements RaftTransport {
 
     /** A request sent to {@code target}, and the promise the test completes to answer it. */
-    record Held<Q, R>(String target, Q request, Promise<R> response) {
+    record Held<Q, R>(String target, Q request, CompletableFuture<R> response) {
         boolean answered() {
-            return response.future().isComplete();
+            return response.isDone();
         }
     }
 
@@ -52,12 +51,12 @@ final class HeldRaftTransportFixture implements RaftTransport {
     final List<Held<InstallSnapshotRequest, InstallSnapshotResponse>> snapshots = new CopyOnWriteArrayList<>();
 
     /** The first vote request sent to {@code target}. */
-    Promise<VoteResponse> vote(String target) {
+    CompletableFuture<VoteResponse> vote(String target) {
         return votes.stream().filter(held -> held.target().equals(target)).findFirst().orElseThrow().response();
     }
 
     /** The latest append to {@code target} carrying the entry at {@code index}, or null if none was sent. */
-    Promise<AppendEntriesResponse> appendCarrying(long index, String target) {
+    CompletableFuture<AppendEntriesResponse> appendCarrying(long index, String target) {
         return appends.reversed().stream()
                 .filter(held -> held.target().equals(target) && held.request().getEntriesList().stream()
                         .anyMatch(entry -> entry.getIndex() == index))
@@ -78,23 +77,23 @@ final class HeldRaftTransportFixture implements RaftTransport {
     }
 
     @Override
-    public Future<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
-        Promise<VoteResponse> response = Promise.promise();
+    public CompletableFuture<VoteResponse> sendVoteRequest(String targetId, VoteRequest request) {
+        CompletableFuture<VoteResponse> response = new CompletableFuture<>();
         votes.add(new Held<>(targetId, request, response));
-        return response.future();
+        return response;
     }
 
     @Override
-    public Future<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
-        Promise<AppendEntriesResponse> response = Promise.promise();
+    public CompletableFuture<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request) {
+        CompletableFuture<AppendEntriesResponse> response = new CompletableFuture<>();
         appends.add(new Held<>(targetId, request, response));
-        return response.future();
+        return response;
     }
 
     @Override
-    public Future<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
-        Promise<InstallSnapshotResponse> response = Promise.promise();
+    public CompletableFuture<InstallSnapshotResponse> sendInstallSnapshot(String targetId, InstallSnapshotRequest request) {
+        CompletableFuture<InstallSnapshotResponse> response = new CompletableFuture<>();
         snapshots.add(new Held<>(targetId, request, response));
-        return response.future();
+        return response;
     }
 }

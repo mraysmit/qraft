@@ -21,7 +21,10 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
@@ -62,5 +65,80 @@ class CompletionsTest {
     @Test
     void noFailureIsReadAsNone() {
         assertNull(Completions.unwrap(null));
+    }
+
+    @Test
+    void anUnwrappedChainGivesItsCallbacksTheFailureItself() {
+        IOException failure = new IOException("disk");
+        CompletableFuture<Integer> chain = CompletableFuture.<String>failedFuture(failure).thenApply(String::length);
+
+        Throwable seen = Completions.unwrapped(chain).handle((length, error) -> error).join();
+
+        assertSame(failure, seen);
+    }
+
+    @Test
+    void anUnwrappedChainCompletesWithItsValueAndLeavesItsSourceAlone() {
+        CompletableFuture<String> source = new CompletableFuture<>();
+        CompletableFuture<String> unwrapped = Completions.unwrapped(source);
+
+        unwrapped.cancel(false);
+        assertFalse(source.isDone(), "cancelling the result does not reach the source");
+
+        source.complete("value");
+        assertEquals("value", Completions.unwrapped(source).join());
+    }
+
+    @Test
+    void anUnwrappingHandlerIsGivenTheFailureItself() {
+        IOException failure = new IOException("disk");
+        CompletableFuture<String> chain = CompletableFuture.<String>failedFuture(failure).thenApply(String::trim);
+
+        assertSame(failure, chain.handle((value, error) -> error)
+                .thenApply(Completions.unwrapping(error -> error)).join());
+        assertEquals("disk", chain.exceptionally(Completions.unwrapping(Throwable::getMessage)).join());
+        assertEquals("disk", chain.exceptionallyCompose(Completions.unwrapping(
+                error -> CompletableFuture.completedFuture(error.getMessage()))).join());
+    }
+
+    @Test
+    void theSuccessCallbackRunsOnlyForAValueAndTheFailureCallbackOnlyForAFailure() {
+        IOException failure = new IOException("disk");
+        AtomicReference<Object> seen = new AtomicReference<>();
+        CompletableFuture<String> succeeded = CompletableFuture.completedFuture("value");
+        CompletableFuture<Integer> failed = CompletableFuture.<String>failedFuture(failure).thenApply(String::length);
+
+        succeeded.whenComplete(Completions.onFailure(seen::set));
+        failed.whenComplete(Completions.onSuccess(seen::set));
+        assertNull(seen.get(), "neither callback runs for the other outcome");
+
+        succeeded.whenComplete(Completions.onSuccess(seen::set));
+        assertEquals("value", seen.get());
+        failed.whenComplete(Completions.onFailure(seen::set));
+        assertSame(failure, seen.get());
+
+        succeeded.whenComplete(Completions.outcome(value -> seen.set("success " + value), seen::set));
+        assertEquals("success value", seen.get());
+        failed.whenComplete(Completions.outcome(value -> seen.set("success " + value), seen::set));
+        assertSame(failure, seen.get());
+    }
+
+    @Test
+    void aSuccessCallbackThatThrowsIsReportedToItsThreadsHandler() throws Exception {
+        IllegalStateException thrown = new IllegalStateException("callback");
+        AtomicReference<Throwable> reported = new AtomicReference<>();
+        Thread thread = new Thread(() -> {
+            CompletableFuture.completedFuture("value").whenComplete(Completions.onSuccess(value -> {
+                throw thrown;
+            }));
+            CompletableFuture.completedFuture("value").whenComplete(Completions.outcome(value -> {
+                throw thrown;
+            }, error -> { }));
+        });
+        thread.setUncaughtExceptionHandler((ignored, error) -> reported.set(error));
+        thread.start();
+        thread.join(10_000);
+
+        assertSame(thrown, reported.get());
     }
 }
