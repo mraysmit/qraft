@@ -19,7 +19,7 @@ package dev.mars.qraft.raft;
 import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 
 import dev.mars.qraft.raft.RaftConfiguration.Server;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.state.distributed.DistributedStateCommand;
@@ -62,7 +62,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RaftNodeConfigurationChangeTest {
     private static final Set<String> MEMBERS = Set.of("a", "b", "c");
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private ManualRaftClusterFixture cluster;
     private RaftNode a;
     private RaftNode b;
@@ -70,7 +70,7 @@ class RaftNodeConfigurationChangeTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         cluster = new ManualRaftClusterFixture(runtime);
         InMemoryTransportSimulatorFixture.clearAllTransports();
         a = node("a");

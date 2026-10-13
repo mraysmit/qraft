@@ -24,7 +24,7 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.LogEntry;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -62,7 +62,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RaftNodeApplyFailureTest {
     private static final ProtobufRaftCommandCodec CODEC = new ProtobufRaftCommandCodec();
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private RaftNode node;
     private PoisonedStateMachineFixture state;
 
@@ -121,10 +121,10 @@ class RaftNodeApplyFailureTest {
     }
 
     private void start(Set<String> members) throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         state = new PoisonedStateMachineFixture();
         node = RaftNode.builder()
-                .runtime(runtime).nodeId("node-1").serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks()).nodeId("node-1").serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
                 .initialConfiguration(ManualRaftClusterFixture.configurationOf(members))
                 .clusterNodes(members).transport(new SilentTransportFixture())
                 .stateMachine(state).commandCodec(CODEC)

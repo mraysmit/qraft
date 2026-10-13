@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.raft;
 
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.raftlog.storage.RaftStorage.LogEntryData;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,13 +41,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * @version 1.0
  */
 class RaftPersistenceArchitectureTest {
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private TestRaftStorageFixture storage;
     private RaftPersistence persistence;
 
     @BeforeEach
     void setUp() {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         storage = new TestRaftStorageFixture();
         storage.open(null).join();
         persistence = new RaftPersistence(Optional.of(storage), Optional.of(storage));
@@ -62,7 +62,7 @@ class RaftPersistenceArchitectureTest {
 
     @Test
     void activeTransitionCapabilityAuthorizesWalMutation() {
-        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 4);
+        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime.stateLoop(), 4);
 
         CompletableFuture<Void> result = sequencer.submit("append", () -> {
             RaftTransitionSequencer.Ownership ownership = sequencer.currentOwnership();
@@ -76,7 +76,7 @@ class RaftPersistenceArchitectureTest {
 
     @Test
     void capabilityExpiresWhenItsTransitionCompletes() {
-        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 4);
+        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime.stateLoop(), 4);
         AtomicReference<RaftTransitionSequencer.Ownership> captured = new AtomicReference<>();
 
         await(sequencer.submit("capture", () -> {

@@ -20,13 +20,17 @@ import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
- * A bounded virtual-thread executor for blocking operations. Work and its completion dispatch retain
- * the submitting thread's MDC and OpenTelemetry context.
+ * Runs blocking work with bounded parallelism and queue capacity. Work and completion dispatch retain
+ * the caller's MDC and tracing context. The owner must shut this executor down before its completion
+ * executor, which must execute accepted commands or reject them explicitly.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-10-12
@@ -35,55 +39,167 @@ import java.util.concurrent.TimeUnit;
 public final class BlockingTaskExecutor implements AutoCloseable {
     private static final long SHUTDOWN_TIMEOUT_SECONDS = 5;
 
-    private final ExecutorService executor;
+    private final ThreadPoolExecutor executor;
     private final Executor completionExecutor;
+    private final Set<PendingTask<?>> pending = ConcurrentHashMap.newKeySet();
+    private CompletableFuture<Void> shutdown;
+    private boolean forcedShutdown;
+    private boolean shutdownOutcomeClaimed;
 
     public BlockingTaskExecutor(String name, int poolSize, Executor completionExecutor) {
-        if (poolSize <= 0) throw new IllegalArgumentException("poolSize must be greater than zero");
-        this.completionExecutor = Objects.requireNonNull(completionExecutor, "completionExecutor");
-        this.executor = Executors.newFixedThreadPool(poolSize,
-                Thread.ofVirtual().name(name + "-", 0).factory());
+        this(name, poolSize, 1000, completionExecutor);
     }
 
+    public BlockingTaskExecutor(String name, int poolSize, int queueCapacity, Executor completionExecutor) {
+        if (poolSize <= 0) throw new IllegalArgumentException("poolSize must be greater than zero");
+        if (queueCapacity <= 0) throw new IllegalArgumentException("queueCapacity must be greater than zero");
+        this.completionExecutor = Objects.requireNonNull(completionExecutor, "completionExecutor");
+        this.executor = new ThreadPoolExecutor(poolSize, poolSize, 0, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(queueCapacity), Thread.ofVirtual().name(name + "-", 0).factory(),
+                new ThreadPoolExecutor.AbortPolicy());
+    }
+
+    /**
+     * Rejects overload and submissions after shutdown through a failed future; never runs work inline.
+     * Task outcomes complete on the completion executor. Rejected dispatch or forced shutdown can
+     * fail a future on the dispatching or shutdown thread, with its captured context. Cancelling the
+     * returned future does not interrupt the submitted task.
+     * As with any CompletableFuture, late callbacks can run on the registering thread.
+     */
     public <T> CompletableFuture<T> execute(Callable<T> task) {
         Objects.requireNonNull(task, "task");
-        CompletableFuture<T> result = new CompletableFuture<>();
-        CallerContext context = CallerContext.capture();
+        PendingTask<T> submitted = new PendingTask<>(task, CallerContext.capture());
+        pending.add(submitted);
+        submitted.result.whenComplete((value, failure) -> pending.remove(submitted));
         try {
-            executor.submit(() -> context.run(() -> {
+            executor.execute(submitted);
+        } catch (Throwable failure) {
+            submitted.result.completeExceptionally(failure);
+        }
+        return submitted.result;
+    }
+
+    private final class PendingTask<T> implements Runnable {
+        private final Callable<T> task;
+        private final CallerContext context;
+        private final CompletableFuture<T> result = new CompletableFuture<>();
+
+        private PendingTask(Callable<T> task, CallerContext context) {
+            this.task = task;
+            this.context = context;
+        }
+
+        @Override public void run() {
+            context.run(() -> {
+                if (result.isDone()) return;
                 T value;
                 try {
                     value = task.call();
                 } catch (Throwable failure) {
-                    dispatchCompletion(context, () -> result.completeExceptionally(failure), result);
+                    finish(null, failure);
                     return;
                 }
-                dispatchCompletion(context, () -> result.complete(value), result);
-            }));
-        } catch (Throwable failure) {
-            result.completeExceptionally(failure);
+                finish(value, null);
+            });
         }
-        return result;
-    }
 
-    private void dispatchCompletion(CallerContext context, Runnable completion, CompletableFuture<?> result) {
-        try {
-            completionExecutor.execute(() -> context.run(completion));
-        } catch (Throwable failure) {
-            result.completeExceptionally(failure);
-        }
-    }
-
-    @Override
-    public void close() {
-        executor.shutdown();
-        try {
-            if (!executor.awaitTermination(SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                executor.shutdownNow();
+        private void finish(T value, Throwable failure) {
+            if (result.isDone()) return;
+            try {
+                Runnable completion = () -> context.run(() -> {
+                    if (failure == null) result.complete(value);
+                    else result.completeExceptionally(failure);
+                });
+                if (completionExecutor instanceof RaftStateLoop stateLoop) {
+                    stateLoop.submit(completion).whenComplete((ignored, dispatchFailure) -> {
+                        if (dispatchFailure != null) failDispatch(dispatchFailure, failure);
+                    });
+                } else {
+                    completionExecutor.execute(completion);
+                }
+            } catch (Throwable dispatchFailure) {
+                failDispatch(dispatchFailure, failure);
             }
-        } catch (InterruptedException failure) {
+        }
+
+        private void failDispatch(Throwable dispatchFailure, Throwable taskFailure) {
+            if (result.isDone()) return;
+            if (taskFailure != null && taskFailure != dispatchFailure) dispatchFailure.addSuppressed(taskFailure);
+            context.run(() -> result.completeExceptionally(dispatchFailure));
+        }
+    }
+
+    /** Stops admission, drains work and delivered outcomes, and settles outstanding tasks before reporting failure. */
+    public synchronized CompletableFuture<Void> shutdown() {
+        if (shutdown != null) return shutdown;
+        shutdown = new CompletableFuture<>();
+        executor.shutdown();
+        Thread.ofVirtual().name("qraft-blocking-shutdown").start(() -> {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(SHUTDOWN_TIMEOUT_SECONDS);
+            try {
+                if (!executor.awaitTermination(SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                    forceShutdown(new TimeoutException("Blocking executor did not terminate within 5 seconds"));
+                } else {
+                    // A worker can terminate while its result is still queued on the state loop.
+                    // Wait on derived outcomes, not a task future whose callbacks a waiting thread could run.
+                    CompletableFuture<?>[] outcomes = pending.stream()
+                            .map(task -> task.result.handle((value, failure) -> null))
+                            .toArray(CompletableFuture[]::new);
+                    CompletableFuture.allOf(outcomes).get(
+                            Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
+                    synchronized (this) {
+                        if (forcedShutdown || shutdownOutcomeClaimed) return;
+                        shutdownOutcomeClaimed = true;
+                    }
+                    shutdown.complete(null);
+                }
+            } catch (TimeoutException failure) {
+                forceShutdown(new TimeoutException("Blocking executor outcomes did not settle within 5 seconds"));
+            } catch (java.util.concurrent.ExecutionException failure) {
+                forceShutdown(failure.getCause());
+            } catch (InterruptedException failure) {
+                forceShutdown(failure);
+                Thread.currentThread().interrupt();
+            }
+        });
+        return shutdown;
+    }
+
+    // Shared forced-stop path; package access lets lifecycle tests drive it without a clock delay.
+    void forceShutdown(Throwable failure) {
+        CompletableFuture<Void> stopped;
+        synchronized (this) {
+            if (shutdown == null) shutdown = new CompletableFuture<>();
+            if (forcedShutdown || shutdownOutcomeClaimed) return;
+            forcedShutdown = true;
+            stopped = shutdown;
             executor.shutdownNow();
+        }
+        // Settle operations before notifying the owner, which can now close the completion loop.
+        // Callbacks run outside the lifecycle lock and may request shutdown again.
+        for (PendingTask<?> task : Set.copyOf(pending)) {
+            task.context.run(() -> task.result.completeExceptionally(failure));
+        }
+        stopped.completeExceptionally(failure);
+    }
+
+    boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
+        return executor.awaitTermination(timeout, unit);
+    }
+
+    /**
+     * Waits for shutdown; throws CompletionException on failure. Owners call this off the worker and
+     * completion threads; a callback on either thread uses the non-blocking {@link #shutdown()} instead.
+     */
+    @Override public void close() {
+        try {
+            shutdown().get();
+        } catch (InterruptedException failure) {
+            forceShutdown(failure);
             Thread.currentThread().interrupt();
+            throw new java.util.concurrent.CompletionException(failure);
+        } catch (java.util.concurrent.ExecutionException failure) {
+            throw new java.util.concurrent.CompletionException(failure.getCause());
         }
     }
 }

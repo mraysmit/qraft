@@ -21,7 +21,8 @@ import dev.mars.qraft.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
+import dev.mars.qraft.common.async.RaftStateLoop;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -67,7 +68,7 @@ class RaftNodeInstalledSnapshotSequencingTest {
     /** The follower bootstraps its configuration at index 1, so a leader's first command is at index 2. */
     private static final long FIRST_COMMAND_INDEX = 2;
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private GatedStorageFixture storage;
     private RecordingStateMachineFixture stateMachine;
     private ProtobufRaftCommandCodec codec;
@@ -75,13 +76,13 @@ class RaftNodeInstalledSnapshotSequencingTest {
 
     @BeforeEach
     void setUp() {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         storage = new GatedStorageFixture();
         storage.open(null).join();
         stateMachine = new RecordingStateMachineFixture();
         codec = new ProtobufRaftCommandCodec();
         node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("follower-1")
                 .serverId(ManualRaftClusterFixture.serverIdOf("follower-1"))
                 .clusterNodes(MEMBERS)
@@ -129,7 +130,7 @@ class RaftNodeInstalledSnapshotSequencingTest {
         AppendEntriesResponse queued = await(append);
         assertTrue(queued.getSuccess(), "a previous entry inside the snapshot is committed and matches");
         assertEquals(5, queued.getMatchIndex(), "queued AppendEntries must see the installed boundary");
-        assertSame(runtime, stateMachine.restoreContext());
+        assertSame(runtime.stateLoop(), stateMachine.restoreContext());
         assertEquals(5, node.getSnapshotLastIndex());
         assertEquals(5, node.getLastApplied());
         assertEquals(5, node.getCommitIndex());
@@ -540,17 +541,17 @@ class RaftNodeInstalledSnapshotSequencingTest {
     /** Test state-machine fixture that records application and snapshot operations for sequencing assertions. */
     private static final class RecordingStateMachineFixture implements RaftLogApplicator {
         private final QraftStateStore delegate = new QraftStateStore();
-        private volatile JavaRuntime restoreContext;
+        private volatile RaftStateLoop restoreContext;
         private volatile boolean failNextRestore;
 
-        JavaRuntime restoreContext() { return restoreContext; }
+        RaftStateLoop restoreContext() { return restoreContext; }
         String getMetadata(String key) { return delegate.getMetadata(key); }
         void failNextRestore() { failNextRestore = true; }
 
         @Override public RaftCommandResult<?> apply(RaftCommand command) { return delegate.apply(command); }
         @Override public byte[] takeSnapshot() { return delegate.takeSnapshot(); }
         @Override public void restoreSnapshot(byte[] snapshot) {
-            restoreContext = JavaRuntime.currentContext();
+            restoreContext = RaftStateLoop.currentContext();
             if (failNextRestore) {
                 failNextRestore = false;
                 throw new IllegalStateException("installed snapshot restoration failed",

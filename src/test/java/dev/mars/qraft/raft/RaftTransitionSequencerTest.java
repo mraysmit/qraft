@@ -16,7 +16,8 @@
 
 package dev.mars.qraft.raft;
 
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
+import dev.mars.qraft.common.async.RaftStateLoop;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.ContextKey;
 import io.opentelemetry.context.Scope;
@@ -52,11 +53,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 class RaftTransitionSequencerTest {
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
 
     @BeforeEach
     void setUp() {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
     }
 
     @AfterEach
@@ -66,7 +67,7 @@ class RaftTransitionSequencerTest {
 
     @Test
     void serializesTheWholeTransitionAndAppliesCompletionOnTheStateLoop() throws Exception {
-        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 8);
+        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime.stateLoop(), 8);
         CompletableFuture<String> firstGate = new CompletableFuture<>();
         List<String> history = Collections.synchronizedList(new ArrayList<>());
         AtomicBoolean firstCompletionOnStateLoop = new AtomicBoolean();
@@ -76,17 +77,17 @@ class RaftTransitionSequencerTest {
                 RaftTransitionSequencer.FailurePolicy.CONTINUE,
                 () -> {
                     history.add("first-start");
-                    assertSame(runtime, JavaRuntime.currentContext());
+                    assertSame(runtime.stateLoop(), RaftStateLoop.currentContext());
                     return firstGate;
                 },
                 result -> {
-                    firstCompletionOnStateLoop.set(JavaRuntime.currentContext() == runtime);
+                    firstCompletionOnStateLoop.set(RaftStateLoop.currentContext() == runtime.stateLoop());
                     history.add("first-complete");
                     return result;
                 });
         CompletableFuture<String> second = sequencer.submit("second", () -> {
             history.add("second-start");
-            assertSame(runtime, JavaRuntime.currentContext());
+            assertSame(runtime.stateLoop(), RaftStateLoop.currentContext());
             return CompletableFuture.completedFuture("second-result");
         });
         awaitHistory(history, List.of("first-start"));
@@ -102,7 +103,7 @@ class RaftTransitionSequencerTest {
 
     @Test
     void nonFatalFailureCompletesOnceAndReleasesTheNextTransition() throws Exception {
-        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 4);
+        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime.stateLoop(), 4);
         IOException failure = new IOException("recoverable transition failure");
         AtomicInteger completions = new AtomicInteger();
 
@@ -119,7 +120,7 @@ class RaftTransitionSequencerTest {
 
     @Test
     void fatalFailureFencesTheSequencerAndRejectsQueuedAndNewWork() throws Exception {
-        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 4);
+        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime.stateLoop(), 4);
         CompletableFuture<Void> gate = new CompletableFuture<>();
         IOException failure = new IOException("durability uncertain");
         AtomicBoolean queuedStarted = new AtomicBoolean();
@@ -145,7 +146,7 @@ class RaftTransitionSequencerTest {
 
     @Test
     void classifiedPreWriteFailureDoesNotFenceLaterWork() throws Exception {
-        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 4);
+        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime.stateLoop(), 4);
         IllegalStateException rejection = new IllegalStateException("pre-write rejection");
 
         CompletableFuture<String> rejected = sequencer.submit(
@@ -165,7 +166,7 @@ class RaftTransitionSequencerTest {
 
     @Test
     void boundedAdmissionCountsTheActiveTransition() throws Exception {
-        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 3);
+        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime.stateLoop(), 3);
         CompletableFuture<Void> gate = new CompletableFuture<>();
 
         CompletableFuture<Void> active = sequencer.submit("active", () -> gate);
@@ -183,7 +184,7 @@ class RaftTransitionSequencerTest {
 
     @Test
     void normalTrafficCannotConsumeCapacityReservedForEssentialRaftWork() throws Exception {
-        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 2);
+        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime.stateLoop(), 2);
         CompletableFuture<Void> gate = new CompletableFuture<>();
 
         CompletableFuture<Void> active = sequencer.submit("client-active", () -> gate);
@@ -205,7 +206,7 @@ class RaftTransitionSequencerTest {
 
     @Test
     void drainRejectsNewWorkAndWaitsForAllAcceptedTransitions() throws Exception {
-        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 4);
+        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime.stateLoop(), 4);
         CompletableFuture<Void> gate = new CompletableFuture<>();
 
         CompletableFuture<Void> active = sequencer.submit("active", () -> gate);
@@ -228,7 +229,7 @@ class RaftTransitionSequencerTest {
     void alreadyCompletedTransitionsDoNotDrainRecursively() throws Exception {
         int transitionCount = 10_000;
         // Normal admission holds an eighth of the capacity in reserve; size it so the whole burst is admitted.
-        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 2 * transitionCount);
+        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime.stateLoop(), 2 * transitionCount);
         CompletableFuture<List<CompletableFuture<Integer>>> submitted = new CompletableFuture<>();
         AtomicInteger started = new AtomicInteger();
 
@@ -253,7 +254,7 @@ class RaftTransitionSequencerTest {
 
     @Test
     void persistenceOwnershipGuardRejectsBypassAndAcceptsTheActiveTransition() throws Exception {
-        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 4);
+        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime.stateLoop(), 4);
         CompletableFuture<Throwable> bypassFailure = new CompletableFuture<>();
         runtime.runOnContext(ignored -> {
             try {
@@ -277,7 +278,7 @@ class RaftTransitionSequencerTest {
 
     @Test
     void eachTransitionRunsInTheLoggingAndTracingContextItWasSubmittedIn() throws Exception {
-        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 8);
+        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime.stateLoop(), 8);
         ContextKey<String> trace = ContextKey.named("trace");
         CompletableFuture<String> firstPersisted = new CompletableFuture<>();
         List<String> seen = Collections.synchronizedList(new ArrayList<>());

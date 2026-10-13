@@ -35,6 +35,9 @@ Qraft is a Consul-style service discovery and distributed coordination platform.
 - Configured worker-pool sizes and queue bounds must be honored.
 - Asynchronous operations must complete successfully or exceptionally on every code path.
 - Resource shutdown must wait for active work or fail with a bounded timeout.
+- The server composition root owns `RaftStateLoop` and `BlockingTaskExecutor`. Stop the service,
+  then drain blocking work while the state loop can still deliver its completions, then stop the loop.
+  The blocking executor bounds both active work and queued work and rejects overload through failed futures.
 - Tests must cover election, replication, storage recovery, snapshot installation, network failure, and shutdown behavior.
 
 ### 2.4 Feature scope
@@ -51,7 +54,7 @@ packages of each layer are listed in the design document, section 1.1.
 
 - Raft (`dev.mars.qraft.raft`) owns consensus implementation, contracts, transport, storage adapters, and metrics; it may use only Common.
 - State (`dev.mars.qraft.state`) owns the deterministic state host, commands, codecs, and catalog projections; it may use Raft and Common.
-- Common (`dev.mars.qraft.common`) owns shared models, configuration helpers, deadlines, and temporary async support; it uses no other Qraft layer.
+- Common (`dev.mars.qraft.common`) owns shared models, configuration helpers, deadlines, caller-context propagation, and the state-loop and blocking executors; it uses no other Qraft layer.
 - Client (`dev.mars.qraft.client`) implements the Java 27 discovery client and may use only Common.
 - Server (`dev.mars.qraft.server`) composes Raft and State, HTTP/external gRPC APIs, telemetry, and lifecycle; it may use Common, Raft, and State.
 - The entry point is the thin executable composition root that selects `server` or `client` mode and owns no domain logic.

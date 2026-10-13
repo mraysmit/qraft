@@ -19,7 +19,7 @@ package dev.mars.qraft.raft;
 import com.google.protobuf.ByteString;
 import dev.mars.qraft.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.raft.grpc.AppendEntriesResponse;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -51,7 +51,7 @@ class RaftNodeFollowerLogTest {
     private static final ProtobufRaftCommandCodec CODEC = new ProtobufRaftCommandCodec();
 
     private final QraftStateStore store = new QraftStateStore();
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private ManualRaftTimersHelper timers;
     private RaftNode follower;
 
@@ -116,12 +116,12 @@ class RaftNodeFollowerLogTest {
      * leader's does, so every entry the test sends follows it.
      */
     private void startFollower() throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         timers = new ManualRaftTimersHelper(runtime);
         TestRaftStorageFixture storage = new TestRaftStorageFixture();
         storage.open(null).join();
         Set<String> members = Set.of("follower", "leader", "other");
-        follower = RaftNode.builder().runtime(runtime).nodeId("follower")
+        follower = RaftNode.builder().stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks()).nodeId("follower")
                 .serverId(ManualRaftClusterFixture.serverIdOf("follower"))
                 .initialConfiguration(ManualRaftClusterFixture.configurationOf(members))
                 .clusterNodes(members)

@@ -24,7 +24,7 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.LogEntry;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -60,7 +60,7 @@ class RaftNodeLeaderCommitTest {
     private static final long ELECTION_TIMEOUT_MS = 300;
     private static final long HEARTBEAT_MS = 100;
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private RaftNode node;
     private ManualRaftTimersHelper timers;
     private final HeldTransportFixture transport = new HeldTransportFixture();
@@ -154,10 +154,10 @@ class RaftNodeLeaderCommitTest {
 
     /** Starts node-1 with configuration at index 1; election appends a no-op before client writes. */
     private void start(Set<String> members) throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         timers = new ManualRaftTimersHelper(runtime);
         node = RaftNode.builder()
-                .runtime(runtime).nodeId("node-1").clusterNodes(members).transport(transport)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks()).nodeId("node-1").clusterNodes(members).transport(transport)
                 .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
                 .initialConfiguration(ManualRaftClusterFixture.configurationOf(members))
                 .stateMachine(new QraftStateStore()).commandCodec(CODEC)

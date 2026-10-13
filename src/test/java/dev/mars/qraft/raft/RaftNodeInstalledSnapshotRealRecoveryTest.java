@@ -27,7 +27,7 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.storage.RaftStorageFactory;
 import dev.mars.qraft.raft.storage.snapshot.FileSnapshotStore;
 import dev.mars.qraft.raft.storage.snapshot.InstalledSnapshotCrashWriterFixture;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -73,7 +73,7 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
     @TempDir
     Path directory;
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private RaftNode node;
 
     @AfterEach
@@ -214,9 +214,9 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
         saveConflictingSnapshot();
         RaftStorageFactory.DurableStorage durable = await(
                 RaftStorageFactory.createDurable(directory, true));
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         node = RaftNode.builder()
-                .runtime(runtime).nodeId("follower-1").serverId(ManualRaftClusterFixture.serverIdOf("follower-1"))
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks()).nodeId("follower-1").serverId(ManualRaftClusterFixture.serverIdOf("follower-1"))
                 .clusterNodes(MEMBERS)
                 .transport(new PeerlessTransportFixture()).stateMachine(new QraftStateStore()).commandCodec(CODEC)
                 .mode(RaftNodeMode.durable(new FailingSyncStorageFixture(durable.wal()), durable.snapshots()))
@@ -251,11 +251,11 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
     void emptyWalFollowerCanInstallSnapshotBeyondItsLastIndex() throws Exception {
         RaftStorageFactory.DurableStorage durable = await(
                 RaftStorageFactory.createDurable(directory, true));
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         QraftStateStore state = new QraftStateStore();
         Set<String> members = Set.of("leader", "empty-follower", "peer");
         node = RaftNode.builder()
-                .runtime(runtime).nodeId("empty-follower").serverId(ManualRaftClusterFixture.serverIdOf("empty-follower"))
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks()).nodeId("empty-follower").serverId(ManualRaftClusterFixture.serverIdOf("empty-follower"))
                 .clusterNodes(members)
                 .transport(new PeerlessTransportFixture()).stateMachine(state).commandCodec(CODEC)
                 .mode(RaftNodeMode.durable(durable.wal(), durable.snapshots()))
@@ -390,9 +390,9 @@ class RaftNodeInstalledSnapshotRealRecoveryTest {
     private RaftNode follower(QraftStateStore state) {
         RaftStorageFactory.DurableStorage durable = await(
                 RaftStorageFactory.createDurable(directory, true));
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         return RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("follower-1")
                 .serverId(ManualRaftClusterFixture.serverIdOf("follower-1"))
                 .clusterNodes(MEMBERS)

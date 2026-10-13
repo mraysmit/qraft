@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.server.lifecycle;
 
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.server.support.JavaRuntimeExtensionHelper;
 import dev.mars.qraft.server.support.JavaTestContextHelper;
 import dev.mars.qraft.testing.fault.InjectedFaultFixture;
@@ -59,8 +59,8 @@ class ShutdownCoordinatorTest {
 
         @Test
         @DisplayName("Should start in RUNNING state")
-        void shouldStartInRunningState(JavaRuntime runtime) {
-            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime);
+        void shouldStartInRunningState(RaftExecutorsFixture runtime) {
+            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime.stateLoop());
 
             assertEquals(ShutdownCoordinator.State.RUNNING, coordinator.getState());
             assertTrue(coordinator.isAcceptingWork());
@@ -69,8 +69,8 @@ class ShutdownCoordinatorTest {
 
         @Test
         @DisplayName("Should transition to DRAINING on shutdown")
-        void shouldTransitionToDrainingOnShutdown(JavaRuntime runtime, JavaTestContextHelper ctx) {
-            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime, 100, 100);
+        void shouldTransitionToDrainingOnShutdown(RaftExecutorsFixture runtime, JavaTestContextHelper ctx) {
+            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime.stateLoop(), 100, 100);
 
             coordinator.shutdown()
                     .whenComplete(ctx.succeeding(v -> ctx.verify(() -> {
@@ -83,8 +83,8 @@ class ShutdownCoordinatorTest {
 
         @Test
         @DisplayName("Should reject work after shutdown requested")
-        void shouldRejectWorkAfterShutdownRequested(JavaRuntime runtime) {
-            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime);
+        void shouldRejectWorkAfterShutdownRequested(RaftExecutorsFixture runtime) {
+            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime.stateLoop());
 
             // Initiate shutdown (don't wait for completion)
             coordinator.shutdown();
@@ -100,8 +100,8 @@ class ShutdownCoordinatorTest {
 
         @Test
         @DisplayName("Should execute drain hooks in order")
-        void shouldExecuteDrainHooksInOrder(JavaRuntime runtime, JavaTestContextHelper ctx) {
-            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime, 5000, 5000);
+        void shouldExecuteDrainHooksInOrder(RaftExecutorsFixture runtime, JavaTestContextHelper ctx) {
+            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime.stateLoop(), 5000, 5000);
             List<String> executionOrder = new ArrayList<>();
 
             coordinator.onDrain("drain-1", () -> {
@@ -122,8 +122,8 @@ class ShutdownCoordinatorTest {
 
         @Test
         @DisplayName("Should execute all phases in order")
-        void shouldExecuteAllPhasesInOrder(JavaRuntime runtime, JavaTestContextHelper ctx) {
-            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime, 5000, 5000);
+        void shouldExecuteAllPhasesInOrder(RaftExecutorsFixture runtime, JavaTestContextHelper ctx) {
+            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime.stateLoop(), 5000, 5000);
             List<String> executionOrder = new ArrayList<>();
 
             coordinator.onDrain("drain", () -> {
@@ -155,8 +155,8 @@ class ShutdownCoordinatorTest {
 
         @Test
         @DisplayName("Should continue on hook failure")
-        void shouldContinueOnHookFailure(JavaRuntime runtime, JavaTestContextHelper ctx) {
-            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime, 5000, 5000);
+        void shouldContinueOnHookFailure(RaftExecutorsFixture runtime, JavaTestContextHelper ctx) {
+            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime.stateLoop(), 5000, 5000);
             AtomicInteger callCount = new AtomicInteger(0);
 
             coordinator.onDrain("failing", () -> {
@@ -184,8 +184,8 @@ class ShutdownCoordinatorTest {
 
         @Test
         @DisplayName("Should be idempotent - multiple calls return same result")
-        void shouldBeIdempotent(JavaRuntime runtime, JavaTestContextHelper ctx) {
-            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime, 100, 100);
+        void shouldBeIdempotent(RaftExecutorsFixture runtime, JavaTestContextHelper ctx) {
+            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime.stateLoop(), 100, 100);
             AtomicInteger drainCallCount = new AtomicInteger(0);
 
             coordinator.onDrain("counter", () -> {
@@ -216,10 +216,10 @@ class ShutdownCoordinatorTest {
 
         @Test
         @DisplayName("Should timeout slow hooks")
-        void shouldTimeoutSlowHooks(JavaRuntime runtime, JavaTestContextHelper ctx) {
+        void shouldTimeoutSlowHooks(RaftExecutorsFixture runtime, JavaTestContextHelper ctx) {
             IntentionalErrorsHelper.expect(BEST_EFFORT_SHUTDOWN_HOOK_TIMEOUT, 1);
             // Very short timeout
-            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime, 50, 50);
+            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime.stateLoop(), 50, 50);
             AtomicInteger completedCount = new AtomicInteger(0);
 
             // Slow hook that won't complete in time
@@ -245,9 +245,9 @@ class ShutdownCoordinatorTest {
 
         @Test
         @DisplayName("Timing out a hook must not complete its source operation")
-        void timeoutDoesNotMutateSourceHookFuture(JavaRuntime runtime, JavaTestContextHelper ctx) {
+        void timeoutDoesNotMutateSourceHookFuture(RaftExecutorsFixture runtime, JavaTestContextHelper ctx) {
             IntentionalErrorsHelper.expect(BEST_EFFORT_SHUTDOWN_HOOK_TIMEOUT, 1);
-            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime, 50, 50);
+            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime.stateLoop(), 50, 50);
             CompletableFuture<Void> sourceOperation = new CompletableFuture<>();
             AtomicInteger laterHooks = new AtomicInteger();
 
@@ -271,9 +271,9 @@ class ShutdownCoordinatorTest {
 
         @Test
         @DisplayName("A critical service timeout must fail shutdown without closing later resources")
-        void criticalServiceTimeoutStopsShutdownProgression(JavaRuntime runtime, JavaTestContextHelper ctx) {
+        void criticalServiceTimeoutStopsShutdownProgression(RaftExecutorsFixture runtime, JavaTestContextHelper ctx) {
             IntentionalErrorsHelper.expect(CRITICAL_SHUTDOWN_HOOK_TIMEOUT, 2);
-            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime, 50, 50);
+            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime.stateLoop(), 50, 50);
             CompletableFuture<Void> nodeStop = new CompletableFuture<>();
             AtomicInteger laterServiceStops = new AtomicInteger();
             AtomicInteger resourceCloses = new AtomicInteger();
@@ -305,8 +305,8 @@ class ShutdownCoordinatorTest {
 
         @Test
         @DisplayName("A synchronously throwing critical hook must become the shared shutdown failure")
-        void synchronousCriticalHookFailureIsReportedAsynchronously(JavaRuntime runtime, JavaTestContextHelper ctx) {
-            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime, 50, 50);
+        void synchronousCriticalHookFailureIsReportedAsynchronously(RaftExecutorsFixture runtime, JavaTestContextHelper ctx) {
+            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime.stateLoop(), 50, 50);
             InjectedFaultFixture failure = new InjectedFaultFixture(
                     SHUTDOWN_HOOK_FAILURE, "node stop failed before returning");
 
@@ -330,8 +330,8 @@ class ShutdownCoordinatorTest {
 
         @Test
         @DisplayName("Should complete successfully with no hooks registered")
-        void shouldCompleteWithNoHooks(JavaRuntime runtime, JavaTestContextHelper ctx) {
-            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime);
+        void shouldCompleteWithNoHooks(RaftExecutorsFixture runtime, JavaTestContextHelper ctx) {
+            ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime.stateLoop());
 
             coordinator.shutdown()
                     .whenComplete(ctx.succeeding(v -> ctx.verify(() -> {

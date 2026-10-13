@@ -44,7 +44,7 @@ import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Scope;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.propagation.TextMapSetter;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftStateLoop;
 import dev.mars.qraft.common.concurrent.Completions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -85,7 +85,7 @@ public class GrpcRaftTransport implements RaftTransport {
             carrier.put(Metadata.Key.of(key, Metadata.ASCII_STRING_MARSHALLER), value);
     private static final Tracer tracer = GlobalOpenTelemetry.getTracer("qraft-raft");
 
-    private final JavaRuntime runtime;
+    private final RaftStateLoop runtime;
     private final String selfId;
     private final Map<String, String> clusterNodes; // nodeId -> host:port
     /** Addresses from the configuration in force, which override the listed ones; see {@link #useAddresses}. */
@@ -103,24 +103,24 @@ public class GrpcRaftTransport implements RaftTransport {
     /**
      * Creates a GrpcRaftTransport with default pool configuration.
      * 
-     * @param runtime Java runtime instance
+     * @param runtime Raft state loop
      * @param selfId this node's ID
      * @param clusterNodes map of nodeId to host:port
      */
-    public GrpcRaftTransport(JavaRuntime runtime, String selfId, Map<String, String> clusterNodes) {
+    public GrpcRaftTransport(RaftStateLoop runtime, String selfId, Map<String, String> clusterNodes) {
         this(runtime, selfId, clusterNodes, 10, 1000);
     }
 
     /**
      * Creates a GrpcRaftTransport with custom pool configuration.
      * 
-     * @param runtime Java runtime instance
+     * @param runtime Raft state loop
      * @param selfId this node's ID
      * @param clusterNodes map of nodeId to host:port
      * @param poolSize maximum number of worker threads for gRPC callbacks
      * @param queueSize maximum number of queued tasks before back-pressure
      */
-    public GrpcRaftTransport(JavaRuntime runtime, String selfId, Map<String, String> clusterNodes,
+    public GrpcRaftTransport(RaftStateLoop runtime, String selfId, Map<String, String> clusterNodes,
                               int poolSize, int queueSize) {
         this.runtime = runtime;
         this.selfId = selfId;
@@ -446,12 +446,12 @@ public class GrpcRaftTransport implements RaftTransport {
         Futures.addCallback(listenableFuture, new FutureCallback<T>() {
             @Override
             public void onSuccess(T result) {
-                runtime.runOnContext(v -> promise.complete(result));
+                runtime.execute(() -> promise.complete(result));
             }
 
             @Override
             public void onFailure(Throwable t) {
-                runtime.runOnContext(v -> promise.completeExceptionally(t));
+                runtime.execute(() -> promise.completeExceptionally(t));
             }
         }, command -> executor.execute(() -> withContext(capturedContext, telemetryContext, command)));
         return promise;

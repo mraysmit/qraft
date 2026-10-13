@@ -109,6 +109,48 @@ mvn -B "-Dstyle.color=never" test "-Dtest=RaftNodeMembershipTest,MembershipServi
 
 Qraft is one Maven module, so there is no `-pl` and nothing to install first.
 
+### State-loop and blocking-executor changes
+
+Start with the executor, ownership and package-boundary tests:
+
+```powershell
+mvn -B "-Dstyle.color=never" test "-Dtest=BlockingTaskExecutorTest,RaftStateLoopTest,QraftServerLifecycleTest,PackageDependencyTest" 2>&1 | Tee-Object -FilePath ".\logs\qraft-tests-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
+$qraftBuildExitCode = $LASTEXITCODE
+if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
+```
+
+The tests cover worker and queue bounds, overload rejection, shutdown outcomes,
+completion dispatch, timer cleanup and MDC/OpenTelemetry propagation. Protocol and
+recovery tests borrow both resources from `RaftExecutorsFixture`, which closes blocking
+work before its completion loop. Production ownership belongs to the server composition root.
+
+| Contract | Regression coverage |
+|---|---|
+| Worker and queue bounds; invalid limits; rejection after stop | `BlockingTaskExecutorTest` |
+| Logging and tracing context through successful and failed work; restoration afterward | `BlockingTaskExecutorTest`, `RaftStateLoopTest` |
+| Queued cancellation; task failure retains its cause; later work still runs | Both executor test classes |
+| Graceful shutdown waits for delivered results; forced shutdown settles operations before notifying the owner | Both executor test classes |
+| Timer registration races, timer-future cancellation, periodic context and schedule cleanup | `RaftStateLoopTest` |
+| Rejected or abandoned completion dispatch cannot strand a worker result | Both executor test classes |
+| Blocking work stops before the loop; failed cleanup still releases the loop and telemetry; interrupts are preserved | `QraftServerLifecycleTest` |
+| Raft ordering, recovery and protocol behavior on the separated executors | Existing `RaftNode*Test`, `RaftTransitionSequencer*Test`, gRPC and lifecycle tests |
+
+After the small focused run passes, run the affected concurrency and lifecycle tests
+five times consecutively, executing this same command separately each time:
+
+```powershell
+mvn -B "-Dstyle.color=never" test "-Dtest=BlockingTaskExecutorTest,RaftStateLoopTest,QraftServerLifecycleTest,RaftNode*Test,RaftTransitionSequencer*Test,ShutdownCoordinatorTest,GrpcRaft*Test,ClusterBootstrapTest" 2>&1 | Tee-Object -FilePath ".\logs\qraft-executor-repeat-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
+$qraftBuildExitCode = $LASTEXITCODE
+if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
+```
+
+Keep each capture. A failed
+run requires investigation; a later pass does not erase it. For the executor replacement,
+use `clean install` with the standard capture options to remove deleted runtime and test
+classes from `target/`. Then run the runtime suites below, including `slow` for Phase 7's
+full-suite exit, on a fresh image. Audit all retained output and logs under the
+intentional-error rules below. Passing assertions alone does not close the task.
+
 ## Before you call a change done: `mvn install`
 
 ```powershell

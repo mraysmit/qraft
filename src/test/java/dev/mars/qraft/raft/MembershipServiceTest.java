@@ -26,7 +26,7 @@ import dev.mars.qraft.raft.grpc.MembershipResponse.Status;
 import dev.mars.qraft.raft.grpc.RemoveServerRequest;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.state.distributed.DistributedStateCommand;
@@ -71,7 +71,7 @@ class MembershipServiceTest {
     private static final JoinRequest JOIN_D = JoinRequest.newBuilder()
             .setServerId(serverIdOf("d")).setName("d").setAddress("d").build();
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private ManualRaftClusterFixture cluster;
     private RaftNode a;
     private RaftNode b;
@@ -81,7 +81,7 @@ class MembershipServiceTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         cluster = new ManualRaftClusterFixture(runtime);
         InMemoryTransportSimulatorFixture.clearAllTransports();
         a = node("a");

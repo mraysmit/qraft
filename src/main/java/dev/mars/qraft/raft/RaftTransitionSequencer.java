@@ -17,7 +17,7 @@
 package dev.mars.qraft.raft;
 
 import dev.mars.qraft.common.async.CallerContext;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftStateLoop;
 import dev.mars.qraft.common.concurrent.Completions;
 
 import java.util.ArrayDeque;
@@ -103,7 +103,7 @@ final class RaftTransitionSequencer {
         }
     }
 
-    private final JavaRuntime runtime;
+    private final RaftStateLoop runtime;
     private final int capacity;
     private final int normalCapacity;
     private final Queue<Transition<?>> queue = new ArrayDeque<>();
@@ -111,7 +111,7 @@ final class RaftTransitionSequencer {
     private Transition<?> active;
     private CompletableFuture<Void> drainPromise;
 
-    RaftTransitionSequencer(JavaRuntime runtime, int capacity) {
+    RaftTransitionSequencer(RaftStateLoop runtime, int capacity) {
         this.runtime = Objects.requireNonNull(runtime, "runtime");
         if (capacity < 1) throw new IllegalArgumentException("capacity must be at least one");
         this.capacity = capacity;
@@ -175,7 +175,7 @@ final class RaftTransitionSequencer {
             if (state == State.OPEN) state = State.DRAINING;
             completeDrainIfIdle();
         };
-        if (JavaRuntime.currentContext() == runtime) beginDrain.run();
+        if (RaftStateLoop.currentContext() == runtime) beginDrain.run();
         else dispatch(beginDrain, requested);
         return requested;
     }
@@ -315,14 +315,14 @@ final class RaftTransitionSequencer {
     }
 
     private void assertStateLoop() {
-        if (JavaRuntime.currentContext() != runtime) {
+        if (RaftStateLoop.currentContext() != runtime) {
             throw new IllegalStateException("Raft transition accessed outside its owning state loop");
         }
     }
 
     private void dispatch(Runnable action, CompletableFuture<?> rejectionTarget) {
         try {
-            runtime.runOnContext(ignored -> action.run());
+            runtime.execute(() -> action.run());
         } catch (RejectedExecutionException error) {
             rejectionTarget.completeExceptionally(error);
         }

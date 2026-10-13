@@ -22,7 +22,7 @@ import dev.mars.qraft.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.state.distributed.DistributedStateCommand;
@@ -68,14 +68,14 @@ class RaftNodePromotionTest {
     private static final Server D_NON_VOTER = new Server(serverIdOf("d"), "d", "d", false);
     private static final long FULL = -1;
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private ManualRaftClusterFixture cluster;
     private HeldRaftTransportFixture transport;
     private RaftNode leader;
 
     @BeforeEach
     void setUp() {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         cluster = new ManualRaftClusterFixture(runtime);
         transport = new HeldRaftTransportFixture();
     }

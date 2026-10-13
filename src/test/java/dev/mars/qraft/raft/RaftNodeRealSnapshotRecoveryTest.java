@@ -19,7 +19,7 @@ package dev.mars.qraft.raft;
 import dev.mars.qraft.raft.storage.RaftStorageFactory;
 import dev.mars.qraft.raft.storage.snapshot.FileSnapshotStore;
 import dev.mars.qraft.raft.storage.snapshot.SnapshotStoreCrashWriterFixture;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -75,7 +75,7 @@ class RaftNodeRealSnapshotRecoveryTest {
     @TempDir
     Path directory;
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private RaftNode node;
 
     @AfterEach
@@ -342,9 +342,9 @@ class RaftNodeRealSnapshotRecoveryTest {
     private RaftNode durableNode(QraftStateStore state, Set<String> members) {
         RaftStorageFactory.DurableStorage durable = await(
                 RaftStorageFactory.createDurable(directory, true));
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         return RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("node-1")
                 .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
                 .clusterNodes(members)

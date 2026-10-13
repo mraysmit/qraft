@@ -27,7 +27,7 @@ import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
 import dev.mars.qraft.raft.storage.RaftStorageFactory;
 import dev.mars.qraft.raft.storage.snapshot.FileSnapshotStore;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.CatalogCommand;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
@@ -84,7 +84,7 @@ class RaftNodeTest {
     @TempDir
     Path tempDir;
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private ManualRaftClusterFixture cluster;
     private RaftNode node1;
     private RaftNode node2;
@@ -96,7 +96,7 @@ class RaftNodeTest {
 
     @BeforeEach
     void setUp() {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         cluster = new ManualRaftClusterFixture(runtime);
         InMemoryTransportSimulatorFixture.clearAllTransports();
         Set<String> clusterNodes = Set.of("node1", "node2", "node3");

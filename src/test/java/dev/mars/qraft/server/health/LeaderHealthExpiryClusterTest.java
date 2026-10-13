@@ -28,7 +28,7 @@ import dev.mars.qraft.raft.InMemoryTransportSimulatorFixture;
 import dev.mars.qraft.raft.ManualRaftClusterFixture;
 import dev.mars.qraft.raft.RaftNode;
 import dev.mars.qraft.raft.RaftNodeMode;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.CatalogCommand;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.raft.RaftCommand;
@@ -82,7 +82,7 @@ class LeaderHealthExpiryClusterTest {
     private final Map<String, QraftStateStore> stores = new LinkedHashMap<>();
     private final Map<String, AtomicInteger> proposals = new LinkedHashMap<>();
     private final List<LeaderHealthExpiry> expiries = new ArrayList<>();
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private ManualRaftClusterFixture cluster;
 
     @AfterEach
@@ -184,7 +184,7 @@ class LeaderHealthExpiryClusterTest {
     /** Starts the members on manual timers and elects the first; every member follows it on return. */
     private String startCluster(String... nodeIds) throws Exception {
         InMemoryTransportSimulatorFixture.clearAllTransports();
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         cluster = new ManualRaftClusterFixture(runtime);
         Set<String> members = new LinkedHashSet<>(List.of(nodeIds));
         for (String nodeId : nodeIds) {

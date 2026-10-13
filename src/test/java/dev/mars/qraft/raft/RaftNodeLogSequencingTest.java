@@ -22,7 +22,8 @@ import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import com.google.protobuf.ByteString;
 import dev.mars.qraft.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.raft.grpc.AppendEntriesResponse;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
+import dev.mars.qraft.common.async.RaftStateLoop;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -73,17 +74,17 @@ class RaftNodeLogSequencingTest {
     private static final int LEADERSHIP_WRITES = 2;
     private static final int BOOTSTRAP_WRITES = 1;
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private GatedRaftStorageFixture storage;
     private RaftNode node;
 
     @BeforeEach
     void setUp() {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         storage = new GatedRaftStorageFixture();
         storage.open(null).join();
         node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("leader-1")
                 .clusterNodes(Set.of("leader-1"))
                 .transport(new InMemoryTransportSimulatorFixture("leader-1"))
@@ -149,7 +150,7 @@ class RaftNodeLogSequencingTest {
             @Override public RaftCommand deserialize(byte[] bytes) { return delegate.deserialize(bytes); }
         };
         node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("leader-1")
                 .clusterNodes(Set.of("leader-1"))
                 .transport(new InMemoryTransportSimulatorFixture("leader-1"))
@@ -185,7 +186,7 @@ class RaftNodeLogSequencingTest {
         storage = new GatedRaftStorageFixture();
         storage.open(null).join();
         node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("leader-1")
                 .clusterNodes(Set.of("leader-1"))
                 .transport(new InMemoryTransportSimulatorFixture("leader-1"))
@@ -278,10 +279,10 @@ class RaftNodeLogSequencingTest {
     @Test
     void leaderAppendWaitsForSyncBeforeMemoryAndClientCompletion() throws Exception {
         storage.blockNextSyncCompletion();
-        CompletableFuture<JavaRuntime> completionContext = new CompletableFuture<>();
+        CompletableFuture<RaftStateLoop> completionContext = new CompletableFuture<>();
 
         CompletableFuture<RaftCommandResult<?>> first = node.submitCommand(put("sync", "barrier"));
-        first.whenComplete(Completions.onSuccess(ignored -> completionContext.complete(JavaRuntime.currentContext())));
+        first.whenComplete(Completions.onSuccess(ignored -> completionContext.complete(RaftStateLoop.currentContext())));
         storage.awaitBlockedSync();
         CompletableFuture<RaftCommandResult<?>> second = node.submitCommand(put("after-sync", "queued"));
 
@@ -296,7 +297,7 @@ class RaftNodeLogSequencingTest {
 
         storage.releaseBlockedSync();
 
-        assertSame(runtime, completionContext.get(10, TimeUnit.SECONDS));
+        assertSame(runtime.stateLoop(), completionContext.get(10, TimeUnit.SECONDS));
         assertInstanceOf(RaftCommandResult.Success.class, await(first));
         assertInstanceOf(RaftCommandResult.Success.class, await(second));
         assertEquals(5, node.getLogSize());
@@ -516,7 +517,7 @@ class RaftNodeLogSequencingTest {
         storage = new GatedRaftStorageFixture();
         storage.open(null).join();
         node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("follower-1")
                 .serverId(ManualRaftClusterFixture.serverIdOf("follower-1"))
                 .initialConfiguration(ManualRaftClusterFixture.configurationOf(Set.of("follower-1", "leader-1")))

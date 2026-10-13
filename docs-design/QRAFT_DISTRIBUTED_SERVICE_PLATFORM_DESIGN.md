@@ -29,7 +29,7 @@ state referring to server HTTP or the runtime entry point.
 |---|---|---|
 | Raft | `dev.mars.qraft.raft` and subpackages | Consensus implementation, contracts under `raft.api`, transport, generated Raft protocol classes, durable storage adapters, and Raft metrics. |
 | Replicated state | `dev.mars.qraft.state`, `state.catalog`, `state.distributed` | Deterministic state host, replicated commands/codecs, catalog projections, health observations, and distributed metadata. |
-| Common | `dev.mars.qraft.common` and subpackages | Shared node models and `ServiceDefinition`, configuration helpers, deadlines, and the temporary `common.async` API until Phase 7 removes it. |
+| Common | `dev.mars.qraft.common` and subpackages | Shared node models and `ServiceDefinition`, configuration helpers, deadlines, caller-context propagation, `RaftStateLoop`, and `BlockingTaskExecutor`. |
 | Client | `dev.mars.qraft.client` and subpackages | Registration, server-seed failover, reconciliation, heartbeat scheduling, local checks, liveness/readiness, and bounded graceful shutdown. |
 | Server | `dev.mars.qraft.server` and subpackages | Server composition/lifecycle, HTTP and external gRPC adapters, telemetry exporters, background health processing, and administrative UI. |
 | Runtime | `dev.mars.qraft.runtime` | Executable mode selection, operator command, and runtime-owned completion/shutdown boundary. |
@@ -1828,6 +1828,17 @@ The runtime owns mode selection. The selected mode owns its application service.
 Each service owns its servers, clients, schedulers, storage, and background tasks.
 No component creates an executor that another component is expected to discover
 and close implicitly.
+
+The server composition root owns two separate execution resources. `RaftStateLoop`
+serializes Raft state transitions and timers. `BlockingTaskExecutor` runs blocking
+resource operations on virtual threads, with parallelism and queue capacity taken
+from `server.raft.io.poolSize` and `server.raft.io.queueSize`. These are independent
+of the transport's callback pool, which uses the same settings. Overload fails the
+submitted operation rather than running blocking work on the submitting thread.
+Both resources preserve the submitting `CallerContext` MDC and OpenTelemetry context.
+After stopping the service, the owner drains blocking work, stops the state loop,
+and then closes telemetry. Each executor reports failure if it cannot terminate
+within five seconds; forced blocking shutdown also fails outstanding operations.
 
 A future's callbacks run on the thread that completes it, so blocking work never
 runs inline on a thread the component did not create for that work:

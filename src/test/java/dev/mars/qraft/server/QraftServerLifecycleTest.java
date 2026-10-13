@@ -16,6 +16,8 @@
 
 package dev.mars.qraft.server;
 
+import dev.mars.qraft.common.async.BlockingTaskExecutor;
+import dev.mars.qraft.common.async.RaftStateLoop;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -53,6 +55,79 @@ class QraftServerLifecycleTest {
     /** {@code launch} sets the process-wide log directory; it is restored so later tests do not log to a deleted directory. */
     private final String previousLogDirectory = System.getProperty("qraft.log.dir");
     private final String previousLogMode = System.getProperty("qraft.log.mode");
+
+    @Test
+    void blockingWorkCompletesOnTheStateLoopBeforeTheOwnerStopsThatLoop() throws Exception {
+        RaftStateLoop loop = RaftStateLoop.create();
+        BlockingTaskExecutor workers = new BlockingTaskExecutor("server-release-test", 1, 1, loop);
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CompletableFuture<Boolean> completedOnLoop = new CompletableFuture<>();
+        try {
+            CompletableFuture<Void> operation = workers.execute(() -> {
+                started.countDown();
+                if (!release.await(30, TimeUnit.SECONDS)) throw new IllegalStateException("never released");
+                return null;
+            });
+            operation.whenComplete((value, failure) -> completedOnLoop.complete(
+                    failure == null && RaftStateLoop.currentContext() == loop));
+            assertTrue(started.await(10, TimeUnit.SECONDS));
+            CompletableFuture<Void> stopped = QraftServerApplication.shutdownExecutors(workers, loop);
+            org.junit.jupiter.api.Assertions.assertFalse(stopped.isDone());
+            CompletableFuture<Void> stillRunning = new CompletableFuture<>();
+            loop.execute(() -> stillRunning.complete(null));
+            stillRunning.get(10, TimeUnit.SECONDS);
+            release.countDown();
+            assertTrue(completedOnLoop.get(10, TimeUnit.SECONDS));
+            stopped.get(10, TimeUnit.SECONDS);
+            assertThrows(java.util.concurrent.RejectedExecutionException.class, () -> loop.execute(() -> {}));
+        } finally {
+            release.countDown();
+            QraftServerApplication.shutdownExecutors(workers, loop).get(10, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void aFailedBlockingShutdownStillClosesTheStateLoopAndTelemetry() throws Exception {
+        RaftStateLoop loop = RaftStateLoop.create();
+        BlockingTaskExecutor workers = new BlockingTaskExecutor("failed-release-test", 1, 1, loop);
+        CountDownLatch release = new CountDownLatch(1);
+        CompletableFuture<Thread> workerThread = new CompletableFuture<>();
+        AtomicBoolean telemetryClosed = new AtomicBoolean();
+        CompletableFuture<Void> operation = workers.execute(() -> {
+            workerThread.complete(Thread.currentThread());
+            if (!release.await(30, TimeUnit.SECONDS)) throw new IllegalStateException("never released");
+            return null;
+        });
+        try {
+            workerThread.get(10, TimeUnit.SECONDS);
+            // Interrupt the waiting owner to drive the real forced-shutdown path without a clock delay.
+            Thread.currentThread().interrupt();
+            CompletionException interrupted = assertThrows(CompletionException.class, workers::close);
+            assertTrue(Thread.interrupted(), "close must restore the owner's interrupt flag");
+            org.junit.jupiter.api.Assertions.assertInstanceOf(InterruptedException.class, interrupted.getCause());
+            CompletableFuture<Void> released = QraftServerApplication.releaseAfter(
+                    CompletableFuture.completedFuture(null),
+                    () -> QraftServerApplication.shutdownExecutors(workers, loop),
+                    () -> telemetryClosed.set(true));
+            ExecutionException failure = assertThrows(ExecutionException.class,
+                    () -> released.get(10, TimeUnit.SECONDS));
+            assertSame(interrupted.getCause(), failure.getCause());
+            assertTrue(operation.isCompletedExceptionally());
+            assertTrue(telemetryClosed.get());
+            assertThrows(java.util.concurrent.RejectedExecutionException.class, () -> loop.execute(() -> {}));
+        } finally {
+            Thread.interrupted();
+            release.countDown();
+            QraftServerApplication.shutdownExecutors(workers, loop)
+                    .handle((value, failure) -> null).get(10, TimeUnit.SECONDS);
+            if (workerThread.isDone()) {
+                Thread worker = workerThread.getNow(null);
+                worker.join(10_000);
+                org.junit.jupiter.api.Assertions.assertFalse(worker.isAlive());
+            }
+        }
+    }
 
     @AfterEach
     void restoreProcessWideState() {
@@ -101,7 +176,7 @@ class QraftServerLifecycleTest {
         CompletableFuture<Boolean> runtimeSawTheStoppingThreadReturn = new CompletableFuture<>();
         AtomicBoolean telemetryClosed = new AtomicBoolean();
 
-        // Like JavaRuntime.shutdown when the stop finished on one of its workers: it waits for that thread.
+        // A resource release must not wait on the same thread that is completing server stop.
         CompletableFuture<Void> released = QraftServerApplication.releaseAfter(serverStopped, () -> {
             runtimeSawTheStoppingThreadReturn.complete(awaitQuietly(stoppingThreadReturned));
             return CompletableFuture.completedFuture(null);

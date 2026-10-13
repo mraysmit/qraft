@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.raft;
 
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -44,17 +44,17 @@ import java.util.function.Supplier;
  * @version 1.2
  */
 public final class ManualRaftTimersHelper implements RaftTimerScheduler {
-    private final JavaRuntime runtime;
+    private final RaftExecutorsFixture runtime;
     private final AtomicLong ids = new AtomicLong();
     private final Map<Long, Scheduled> oneShots = new ConcurrentHashMap<>();
     private final Map<Long, Scheduled> periodics = new ConcurrentHashMap<>();
     private final AtomicLong clock;
 
-    public ManualRaftTimersHelper(JavaRuntime runtime) {
+    public ManualRaftTimersHelper(RaftExecutorsFixture runtime) {
         this(runtime, new AtomicLong());
     }
 
-    ManualRaftTimersHelper(JavaRuntime runtime, AtomicLong clock) {
+    ManualRaftTimersHelper(RaftExecutorsFixture runtime, AtomicLong clock) {
         this.runtime = runtime;
         this.clock = clock;
     }

@@ -29,7 +29,7 @@ import dev.mars.qraft.common.ServiceDefinition;
 import dev.mars.qraft.server.http.HttpApiServer;
 import dev.mars.qraft.raft.RaftNode;
 import dev.mars.qraft.raft.RaftNodeMode;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
 import org.junit.jupiter.api.AfterEach;
@@ -62,7 +62,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 class ClientServerContractTest {
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private RaftNode node;
     private HttpApiServer server;
     private QraftClient client;
@@ -154,10 +154,10 @@ class ClientServerContractTest {
     }
 
     private QraftStateStore startServer() throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         QraftStateStore store = new QraftStateStore();
         node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("contract-node")
                 .clusterNodes(Set.of("contract-node"))
                 .transport(new PeerlessTransportFixture())

@@ -16,7 +16,8 @@
 
 package dev.mars.qraft.raft;
 
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
+import dev.mars.qraft.common.async.RaftStateLoop;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
@@ -61,19 +62,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 class RaftNodeSnapshotSequencingTest {
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private GatedSnapshotStorageFixture storage;
     private RecordingStateMachineFixture stateMachine;
     private RaftNode node;
 
     @BeforeEach
     void setUp() {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         storage = new GatedSnapshotStorageFixture();
         storage.open(null).join();
         stateMachine = new RecordingStateMachineFixture();
         node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("leader-1")
                 .clusterNodes(Set.of("leader-1"))
                 .transport(new InMemoryTransportSimulatorFixture("leader-1"))
@@ -110,7 +111,7 @@ class RaftNodeSnapshotSequencingTest {
         CompletableFuture<RaftCommandResult<?>> later = node.submitCommand(put("after", "excluded"));
 
         awaitStateLoop(runtime);
-        assertSame(runtime, stateMachine.snapshotContext());
+        assertSame(runtime.stateLoop(), stateMachine.snapshotContext());
         storage.assertSaveCount(1);
         storage.assertPrefixTruncateCount(0);
         storage.assertAppendCount(3);
@@ -313,13 +314,13 @@ class RaftNodeSnapshotSequencingTest {
     /** Test state-machine fixture that records application and snapshot operations for sequencing assertions. */
     private static final class RecordingStateMachineFixture implements RaftLogApplicator {
         private final QraftStateStore delegate = new QraftStateStore();
-        private volatile JavaRuntime snapshotContext;
+        private volatile RaftStateLoop snapshotContext;
 
-        JavaRuntime snapshotContext() { return snapshotContext; }
+        RaftStateLoop snapshotContext() { return snapshotContext; }
 
         @Override public RaftCommandResult<?> apply(RaftCommand command) { return delegate.apply(command); }
         @Override public byte[] takeSnapshot() {
-            snapshotContext = JavaRuntime.currentContext();
+            snapshotContext = RaftStateLoop.currentContext();
             return delegate.takeSnapshot();
         }
         @Override public void restoreSnapshot(byte[] snapshot) { delegate.restoreSnapshot(snapshot); }

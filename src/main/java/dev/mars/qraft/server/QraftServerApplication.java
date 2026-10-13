@@ -19,7 +19,8 @@ package dev.mars.qraft.server;
 import dev.mars.qraft.common.QraftVersion;
 import dev.mars.qraft.server.config.AppConfig;
 import dev.mars.qraft.server.observability.TelemetryConfig;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftStateLoop;
+import dev.mars.qraft.common.async.BlockingTaskExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.bridge.SLF4JBridgeHandler;
@@ -100,14 +101,16 @@ public class QraftServerApplication {
 
     private static final class ServerResources {
         private final QraftServerService server;
-        private final JavaRuntime runtime;
+        private final RaftStateLoop runtime;
+        private final BlockingTaskExecutor blockingTasks;
         private final AutoCloseable telemetry;
         private CompletableFuture<Void> shutdown;
 
-        private ServerResources(QraftServerService server, JavaRuntime runtime,
+        private ServerResources(QraftServerService server, RaftStateLoop runtime, BlockingTaskExecutor blockingTasks,
                                     AutoCloseable telemetry) {
             this.server = server;
             this.runtime = runtime;
+            this.blockingTasks = blockingTasks;
             this.telemetry = telemetry;
         }
 
@@ -116,18 +119,22 @@ public class QraftServerApplication {
             configureJulToSlf4jBridge();
             Logging.LOGGER.info("Initializing Qraft Server with OpenTelemetry (Java 27 runtime)...");
             AutoCloseable telemetry = TelemetryConfig.configure(config);
-            JavaRuntime runtime = null;
+            RaftStateLoop runtime = null;
+            BlockingTaskExecutor blockingTasks = null;
             try {
-                runtime = JavaRuntime.create();
-                QraftServerService server = new QraftServerService(runtime, config);
+                runtime = RaftStateLoop.create();
+                blockingTasks = new BlockingTaskExecutor("qraft-worker", config.getRaftIoPoolSize(),
+                        config.getRaftIoQueueSize(), runtime);
+                QraftServerService server = new QraftServerService(runtime, blockingTasks, config);
                 if (config.isTelemetryEnabled()) {
                     Logging.LOGGER.info("OpenTelemetry tracing enabled - OTLP endpoint: {}, Prometheus metrics port: {}",
                             config.getRedactedOtlpEndpoint(), TelemetryConfig.getPrometheusPort());
                 }
-                return new ServerResources(server, runtime, telemetry);
+                return new ServerResources(server, runtime, blockingTasks, telemetry);
             } catch (RuntimeException | Error failure) {
-                JavaRuntime opened = runtime;
-                closePartiallyOpened(opened == null ? null : () -> opened.shutdown(),
+                RaftStateLoop opened = runtime;
+                BlockingTaskExecutor openedTasks = blockingTasks;
+                closePartiallyOpened(opened == null ? null : () -> shutdownExecutors(openedTasks, opened),
                         telemetry, failure);
                 throw failure;
             }
@@ -141,11 +148,23 @@ public class QraftServerApplication {
         synchronized CompletableFuture<Void> shutdown() {
             if (shutdown == null) {
                 shutdown = releaseAfter(server.stop(),
-                        () -> runtime.shutdown(), telemetry);
+                        () -> shutdownExecutors(blockingTasks, runtime), telemetry);
             }
             return shutdown;
         }
 
+    }
+
+    /** Stops blocking work before its completion loop, releasing both even if the first shutdown fails. */
+    static CompletableFuture<Void> shutdownExecutors(BlockingTaskExecutor blockingTasks, RaftStateLoop stateLoop) {
+        CompletableFuture<Void> workersStopped = blockingTasks == null
+                ? CompletableFuture.completedFuture(null) : blockingTasks.shutdown();
+        return workersStopped.handle((ignored, failure) -> failure).thenCompose(workerFailure ->
+                stateLoop.shutdown().handle((ignored, loopFailure) -> {
+                    Throwable failure = firstFailure(workerFailure, loopFailure);
+                    if (failure != null) throw new CompletionException(failure);
+                    return null;
+                }));
     }
 
     /**

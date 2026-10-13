@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.raft;
 
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.common.concurrent.Deadlines;
 
 import java.time.Duration;
@@ -58,7 +58,7 @@ public final class RaftAwaitHelper {
      * from the test thread can straddle an entry the loop is adding, such as a new leader's no-op, and pair the
      * old index with the new term.
      */
-    public static LogEnd logEnd(JavaRuntime runtime, RaftNode node) {
+    public static LogEnd logEnd(RaftExecutorsFixture runtime, RaftNode node) {
         CompletableFuture<LogEnd> end = new CompletableFuture<>();
         runtime.runOnContext(ignored -> end.complete(new LogEnd(node.getLastLogIndex(), node.getLastLogTerm())));
         try {
@@ -72,7 +72,7 @@ public final class RaftAwaitHelper {
     }
 
     /** Waits until every task already queued on {@code runtime}'s state loop has run. */
-    public static void awaitStateLoop(JavaRuntime runtime) {
+    public static void awaitStateLoop(RaftExecutorsFixture runtime) {
         CompletableFuture<Void> marker = new CompletableFuture<>();
         runtime.runOnContext(ignored -> marker.complete(null));
         try {

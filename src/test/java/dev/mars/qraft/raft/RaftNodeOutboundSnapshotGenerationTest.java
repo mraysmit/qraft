@@ -22,7 +22,7 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -63,19 +63,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RaftNodeOutboundSnapshotGenerationTest {
     private static final String PEER_SERVER_ID = ManualRaftClusterFixture.serverIdOf("peer-1");
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private GatedSnapshotLoadStorageFixture storage;
     private SnapshotTransportFixture transport;
     private RaftNode node;
 
     @BeforeEach
     void setUp() {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         storage = new GatedSnapshotLoadStorageFixture();
         storage.open(null).join();
         transport = new SnapshotTransportFixture();
         node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("node-1")
                 .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
                 .clusterNodes(Set.of("node-1", "peer-1"))

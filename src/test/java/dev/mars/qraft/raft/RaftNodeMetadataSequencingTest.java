@@ -20,7 +20,8 @@ import dev.mars.qraft.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
+import dev.mars.qraft.common.async.RaftStateLoop;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.raft.api.SnapshotStore;
@@ -59,17 +60,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 class RaftNodeMetadataSequencingTest {
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private GatedMetadataStorageFixture storage;
     private RaftNode node;
 
     @BeforeEach
     void setUp() {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         storage = new GatedMetadataStorageFixture();
         storage.open(null).join();
         node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("node-1")
                 .clusterNodes(Set.of("node-1", "node-2", "node-3"))
                 .transport(new InMemoryTransportSimulatorFixture("node-1"))
@@ -166,15 +167,15 @@ class RaftNodeMetadataSequencingTest {
     @Test
     void voteStateAndResponseCompleteOnTheOwningStateLoop() {
         storage.blockNextUpdate();
-        CompletableFuture<JavaRuntime> completionContext = new CompletableFuture<>();
+        CompletableFuture<RaftStateLoop> completionContext = new CompletableFuture<>();
 
         CompletableFuture<VoteResponse> response = node.handleVoteRequest(vote(1, "candidate-a"));
-        response.whenComplete(Completions.onSuccess(ignored -> completionContext.complete(JavaRuntime.currentContext())));
+        response.whenComplete(Completions.onSuccess(ignored -> completionContext.complete(RaftStateLoop.currentContext())));
         storage.awaitBlockedUpdate();
         storage.releaseBlockedUpdateOffLoop();
 
         try {
-            assertSame(runtime, completionContext.get(10, TimeUnit.SECONDS));
+            assertSame(runtime.stateLoop(), completionContext.get(10, TimeUnit.SECONDS));
         } catch (Exception error) {
             throw new AssertionError("vote completion callback did not run", error);
         }
@@ -203,7 +204,7 @@ class RaftNodeMetadataSequencingTest {
         electionStorage.open(null).join();
         electionStorage.blockNextUpdate();
         node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("single")
                 .clusterNodes(Set.of("single"))
                 .transport(new InMemoryTransportSimulatorFixture("single"))
@@ -237,7 +238,7 @@ class RaftNodeMetadataSequencingTest {
         storage.open(null).join();
         ManualRaftTimersHelper timers = new ManualRaftTimersHelper(runtime, new AtomicLong());
         node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("single")
                 .clusterNodes(Set.of("single"))
                 .transport(new InMemoryTransportSimulatorFixture("single"))
@@ -270,7 +271,7 @@ class RaftNodeMetadataSequencingTest {
         storage.open(null).join();
         ManualRaftTimersHelper timers = new ManualRaftTimersHelper(runtime, new AtomicLong());
         node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("single")
                 .clusterNodes(Set.of("single"))
                 .transport(new InMemoryTransportSimulatorFixture("single"))

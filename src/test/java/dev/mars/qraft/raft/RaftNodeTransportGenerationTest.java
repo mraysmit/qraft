@@ -22,7 +22,7 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.raft.api.SnapshotStore;
@@ -60,7 +60,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RaftNodeTransportGenerationTest {
     private static final Set<String> MEMBERS = Set.of("node-1", "peer-1");
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private RaftNode node;
     private ManualRaftTimersHelper timers;
 
@@ -74,11 +74,11 @@ class RaftNodeTransportGenerationTest {
 
     @Test
     void delayedAppendSuccessFromPreviousLeadershipCannotAdvancePeerIndexes() throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         timers = new ManualRaftTimersHelper(runtime);
         ControlledTransportFixture transport = new ControlledTransportFixture();
         node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("node-1")
                 .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
                 .initialConfiguration(ManualRaftClusterFixture.configurationOf(MEMBERS))
@@ -129,13 +129,13 @@ class RaftNodeTransportGenerationTest {
 
     @Test
     void grantedVoteCannotOvertakeBlockedHigherTermTransition() throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         timers = new ManualRaftTimersHelper(runtime);
         GatedMetadataStorageFixture storage = new GatedMetadataStorageFixture();
         storage.open(null).join();
         ControlledTransportFixture transport = new ControlledTransportFixture(true);
         node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("node-1")
                 .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
                 .initialConfiguration(ManualRaftClusterFixture.configurationOf(MEMBERS))

@@ -27,7 +27,7 @@ import dev.mars.qraft.server.api.grpc.PutResponse;
 import dev.mars.qraft.raft.InMemoryTransportSimulatorFixture;
 import dev.mars.qraft.raft.RaftNode;
 import dev.mars.qraft.raft.RaftNodeMode;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
 import io.grpc.stub.StreamObserver;
@@ -52,19 +52,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class DistributedStateGrpcServiceTest {
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private RaftNode node;
     private QraftStateStore store;
     private DistributedStateGrpcService service;
 
     @BeforeEach
     void setUp() throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         InMemoryTransportSimulatorFixture.clearAllTransports();
         InMemoryTransportSimulatorFixture transport = new InMemoryTransportSimulatorFixture("single");
         store = new QraftStateStore();
         node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("single")
                 .clusterNodes(Set.of("single"))
                 .transport(transport)

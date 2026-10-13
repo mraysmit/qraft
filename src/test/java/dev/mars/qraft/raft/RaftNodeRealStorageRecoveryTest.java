@@ -20,7 +20,7 @@ import com.google.protobuf.ByteString;
 import dev.mars.qraft.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.raft.storage.RaftStorageFactory;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -66,7 +66,7 @@ class RaftNodeRealStorageRecoveryTest {
     @TempDir
     Path directory;
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private RaftNode node;
 
     @AfterEach
@@ -100,9 +100,9 @@ class RaftNodeRealStorageRecoveryTest {
         RaftStorageFactory.DurableStorage durable = await(
                 RaftStorageFactory.createDurable(directory, true));
         durable.wal().updateMetadata(1, Optional.empty()).get(10, TimeUnit.SECONDS);
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("node-1")
                 .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
                 .initialConfiguration(ManualRaftClusterFixture.configurationOf(Set.of("node-1", "leader-1")))
@@ -191,9 +191,9 @@ class RaftNodeRealStorageRecoveryTest {
     private RaftNode singleNode(QraftStateStore state) {
         RaftStorageFactory.DurableStorage durable = await(
                 RaftStorageFactory.createDurable(directory, true));
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         return RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("node-1")
                 .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
                 .clusterNodes(MEMBERS)
@@ -211,9 +211,9 @@ class RaftNodeRealStorageRecoveryTest {
     void stopCompletionReleasesWalForImmediateReopen() {
         RaftStorageFactory.DurableStorage durable = await(
                 RaftStorageFactory.createDurable(directory, true));
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("node-1")
                 .clusterNodes(Set.of("node-1"))
                 .transport(new PeerlessTransportFixture())
@@ -257,10 +257,10 @@ class RaftNodeRealStorageRecoveryTest {
 
         RaftStorageFactory.DurableStorage durable = await(
                 RaftStorageFactory.createDurable(directory, true));
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         QraftStateStore state = new QraftStateStore();
         node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("node-1")
                 .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
                 .clusterNodes(MEMBERS)

@@ -26,7 +26,7 @@ import dev.mars.qraft.raft.InMemoryTransportSimulatorFixture;
 import dev.mars.qraft.raft.ManualRaftClusterFixture;
 import dev.mars.qraft.raft.RaftNode;
 import dev.mars.qraft.raft.RaftNodeMode;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.QraftStateStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -170,14 +170,14 @@ class ClientEndToEndTest {
 
     /** Test cluster fixture that owns servers and their resources for client end-to-end tests. */
     private static final class ServerGroupFixture implements AutoCloseable {
-        private final JavaRuntime runtime;
+        private final RaftExecutorsFixture runtime;
         private final ManualRaftClusterFixture raft;
         private final List<RaftNode> nodes;
         private final List<QraftStateStore> stores;
         private final List<HttpApiServer> servers;
         private boolean closed;
 
-        private ServerGroupFixture(JavaRuntime runtime, ManualRaftClusterFixture raft, List<RaftNode> nodes,
+        private ServerGroupFixture(RaftExecutorsFixture runtime, ManualRaftClusterFixture raft, List<RaftNode> nodes,
                                 List<QraftStateStore> stores, List<HttpApiServer> servers) {
             this.runtime = runtime;
             this.raft = raft;
@@ -187,7 +187,7 @@ class ClientEndToEndTest {
         }
 
         static ServerGroupFixture single(int port) throws Exception {
-            JavaRuntime runtime = JavaRuntime.create();
+            RaftExecutorsFixture runtime = RaftExecutorsFixture.create();
             ManualRaftClusterFixture raft = new ManualRaftClusterFixture(runtime);
             QraftStateStore store = new QraftStateStore();
             RaftNode node = raft.add(raft.builder("single", Set.of("single"), new PeerlessTransportFixture(), store,
@@ -202,7 +202,7 @@ class ClientEndToEndTest {
         /** Starts the members, elects the first, and returns once every member follows it. */
         static ServerGroupFixture cluster(String... nodeIds) throws Exception {
             InMemoryTransportSimulatorFixture.clearAllTransports();
-            JavaRuntime runtime = JavaRuntime.create();
+            RaftExecutorsFixture runtime = RaftExecutorsFixture.create();
             ManualRaftClusterFixture raft = new ManualRaftClusterFixture(runtime);
             Set<String> members = new LinkedHashSet<>(List.of(nodeIds));
             List<RaftNode> nodes = new ArrayList<>();

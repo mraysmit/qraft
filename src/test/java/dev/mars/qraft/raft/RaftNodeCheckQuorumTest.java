@@ -22,7 +22,7 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.CatalogCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -59,7 +59,7 @@ class RaftNodeCheckQuorumTest {
     private static final long ELECTION_TIMEOUT_MS = 300;
     private static final long HEARTBEAT_MS = 100;
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private ManualRaftTimersHelper timers;
     private RaftNode node;
 
@@ -168,10 +168,10 @@ class RaftNodeCheckQuorumTest {
     }
 
     private void startLeader(Set<String> members, PeerTransportFixture transport) throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         timers = new ManualRaftTimersHelper(runtime);
         node = RaftNode.builder()
-                .runtime(runtime).nodeId("node-1").clusterNodes(members).transport(transport)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks()).nodeId("node-1").clusterNodes(members).transport(transport)
                 .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
                 .initialConfiguration(ManualRaftClusterFixture.configurationOf(members))
                 .stateMachine(new QraftStateStore()).commandCodec(new ProtobufRaftCommandCodec())

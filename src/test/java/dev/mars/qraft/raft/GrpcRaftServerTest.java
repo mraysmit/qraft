@@ -33,7 +33,7 @@ import io.grpc.ManagedChannelBuilder;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import io.grpc.stub.StreamObserver;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -79,7 +79,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Timeout(value = 90, unit = TimeUnit.SECONDS)
 class GrpcRaftServerTest {
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private ManualRaftClusterFixture cluster;
     private RaftNode raftNode;
     private GrpcRaftServer grpcServer;
@@ -89,7 +89,7 @@ class GrpcRaftServerTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         cluster = new ManualRaftClusterFixture(runtime);
         // On manual timers the node never elects itself, so it stays a follower in term 0 with no vote until a
         // request changes that, and every vote decision below is the same on every run.
@@ -129,7 +129,7 @@ class GrpcRaftServerTest {
 
     /** Starts the server on any free port and connects to the port it actually bound. */
     private void startServerAndConnect() throws Exception {
-        grpcServer = new GrpcRaftServer(runtime, 0, raftNode);
+        grpcServer = new GrpcRaftServer(runtime.blockingTasks(), 0, raftNode);
         grpcServer.start().get(10, TimeUnit.SECONDS);
 
         channel = ManagedChannelBuilder.forAddress("localhost", grpcServer.port())
@@ -163,11 +163,11 @@ class GrpcRaftServerTest {
     @DisplayName("Server should fail to start on occupied port")
     void startOnAPortAnotherServerHasBoundFails() throws Exception {
         // Start first server
-        grpcServer = new GrpcRaftServer(runtime, 0, raftNode);
+        grpcServer = new GrpcRaftServer(runtime.blockingTasks(), 0, raftNode);
         grpcServer.start().get(10, TimeUnit.SECONDS);
 
         // Try to start second server on the port the first one bound
-        GrpcRaftServer secondServer = new GrpcRaftServer(runtime, grpcServer.port(), raftNode);
+        GrpcRaftServer secondServer = new GrpcRaftServer(runtime.blockingTasks(), grpcServer.port(), raftNode);
 
         CompletableFuture<Void> startFuture = secondServer.start();
 
@@ -201,7 +201,7 @@ class GrpcRaftServerTest {
     @Test
     @DisplayName("A server on port 0 reports the port it bound, and only while running")
     void reportsTheBoundPortOnlyWhileRunning() throws Exception {
-        grpcServer = new GrpcRaftServer(runtime, 0, raftNode);
+        grpcServer = new GrpcRaftServer(runtime.blockingTasks(), 0, raftNode);
         assertThrows(IllegalStateException.class, grpcServer::port, "no port is bound before start");
 
         startServerAndConnect();
@@ -216,7 +216,7 @@ class GrpcRaftServerTest {
     @Test
     @DisplayName("Stopping a server that never started leaves it able to start and serve")
     void stoppingAServerThatNeverStartedLeavesItAbleToStartAndServe() throws Exception {
-        grpcServer = new GrpcRaftServer(runtime, 0, raftNode);
+        grpcServer = new GrpcRaftServer(runtime.blockingTasks(), 0, raftNode);
 
         grpcServer.stop().get(10, TimeUnit.SECONDS);
         assertThrows(IllegalStateException.class, grpcServer::port, "stopping did not bind a port");
@@ -232,7 +232,7 @@ class GrpcRaftServerTest {
     @DisplayName("Server should handle multiple start-stop cycles")
     void threeSuccessiveServersEachStartAnswerRequestVoteAndStop() throws Exception {
         for (int i = 0; i < 3; i++) {
-            GrpcRaftServer server = new GrpcRaftServer(runtime, 0, raftNode);
+            GrpcRaftServer server = new GrpcRaftServer(runtime.blockingTasks(), 0, raftNode);
 
             server.start().get(10, TimeUnit.SECONDS);
 
@@ -275,7 +275,7 @@ class GrpcRaftServerTest {
     void aConnectionPreparedInTheInstantTheServerStopsIsClosedWithOneWarning() throws Exception {
         dev.mars.qraft.testing.fault.IntentionalErrorsHelper.expect(
                 dev.mars.qraft.testing.fault.IntentionalErrorFixture.GRPC_CONNECTION_ACCEPTED_AS_SERVER_STOPS, 1);
-        grpcServer = new GrpcRaftServer(runtime, 0, raftNode);
+        grpcServer = new GrpcRaftServer(runtime.blockingTasks(), 0, raftNode);
         grpcServer.start().get(10, TimeUnit.SECONDS);
         java.lang.reflect.Field holder = io.grpc.internal.SharedResourceHolder.class.getDeclaredField("holder");
         holder.setAccessible(true);
@@ -328,7 +328,7 @@ class GrpcRaftServerTest {
     @Test
     @DisplayName("A connection prepared after the server has stopped is closed without a warning")
     void aConnectionPreparedAfterTheServerHasStoppedIsClosedWithoutAWarning() throws Exception {
-        grpcServer = new GrpcRaftServer(runtime, 0, raftNode);
+        grpcServer = new GrpcRaftServer(runtime.blockingTasks(), 0, raftNode);
         grpcServer.start().get(10, TimeUnit.SECONDS);
 
         try (HeldWorkerThreads workers = new HeldWorkerThreads();
@@ -1026,8 +1026,8 @@ class GrpcRaftServerTest {
     void serversForTwoNodesServeEachNodesOwnState() throws Exception {
         RaftNode nodeA = node("nodeA");
         RaftNode nodeB = node("nodeB");
-        GrpcRaftServer serverA = new GrpcRaftServer(runtime, 0, nodeA);
-        GrpcRaftServer serverB = new GrpcRaftServer(runtime, 0, nodeB);
+        GrpcRaftServer serverA = new GrpcRaftServer(runtime.blockingTasks(), 0, nodeA);
+        GrpcRaftServer serverB = new GrpcRaftServer(runtime.blockingTasks(), 0, nodeB);
         ManagedChannel channelA = null;
         ManagedChannel channelB = null;
         try {

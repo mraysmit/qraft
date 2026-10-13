@@ -24,7 +24,7 @@ import dev.mars.qraft.raft.RaftNodeMode;
 import dev.mars.qraft.raft.SnapshotEnvelope;
 import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.state.distributed.DistributedStateCommand;
@@ -110,9 +110,9 @@ public final class InstalledSnapshotCrashWriterFixture {
         });
         snapshots.open(directory).get(10, TimeUnit.SECONDS);
 
-        JavaRuntime runtime = JavaRuntime.create();
+        RaftExecutorsFixture runtime = RaftExecutorsFixture.create();
         RaftNode node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("follower-1")
                 .serverId(ManualRaftClusterFixture.serverIdOf("follower-1"))
                 .clusterNodes(MEMBERS)

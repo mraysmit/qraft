@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.server.lifecycle;
 
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftStateLoop;
 import dev.mars.qraft.common.concurrent.Completions;
 import dev.mars.qraft.common.concurrent.Deadlines;
 import org.slf4j.Logger;
@@ -83,7 +83,7 @@ public class ShutdownCoordinator {
         FAILED
     }
     
-    private final JavaRuntime runtime;
+    private final RaftStateLoop runtime;
     private final long drainTimeoutMs;
     private final long shutdownTimeoutMs;
     
@@ -99,11 +99,11 @@ public class ShutdownCoordinator {
     /**
      * Creates a shutdown coordinator with specified timeouts.
      *
-     * @param runtime the Java runtime instance
+     * @param runtime the Raft state loop
      * @param drainTimeoutMs maximum time to wait for drain (stop accepting new work)
      * @param shutdownTimeoutMs maximum time to wait for active operations to complete
      */
-    public ShutdownCoordinator(JavaRuntime runtime, long drainTimeoutMs, long shutdownTimeoutMs) {
+    public ShutdownCoordinator(RaftStateLoop runtime, long drainTimeoutMs, long shutdownTimeoutMs) {
         this.runtime = Objects.requireNonNull(runtime, "runtime must not be null");
         this.drainTimeoutMs = drainTimeoutMs;
         this.shutdownTimeoutMs = shutdownTimeoutMs;
@@ -112,9 +112,9 @@ public class ShutdownCoordinator {
     /**
      * Creates a shutdown coordinator with default timeouts (5s drain, 30s shutdown).
      *
-     * @param runtime the Java runtime instance
+     * @param runtime the Raft state loop
      */
-    public ShutdownCoordinator(JavaRuntime runtime) {
+    public ShutdownCoordinator(RaftStateLoop runtime) {
         this(runtime, 5000, 30000);
     }
     

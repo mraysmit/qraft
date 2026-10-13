@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.raft;
 
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 class ManualRaftTimersTest {
-    private final JavaRuntime runtime = JavaRuntime.create();
+    private final RaftExecutorsFixture runtime = RaftExecutorsFixture.create();
     private final ManualRaftTimersHelper timers = new ManualRaftTimersHelper(runtime);
     private final List<String> fired = new CopyOnWriteArrayList<>();
 

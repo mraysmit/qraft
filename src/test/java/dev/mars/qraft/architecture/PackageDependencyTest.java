@@ -136,7 +136,7 @@ class PackageDependencyTest {
         writeDependencyFixture("dev.mars.qraft.state.StateBoundaryFixture",
                 "dev.mars.qraft.raft.api.ReplicatedCommand");
         writeDependencyFixture("dev.mars.qraft.raft.RaftBoundaryFixture",
-                "dev.mars.qraft.common.async.JavaRuntime");
+                "dev.mars.qraft.common.async.RaftStateLoop");
         writeDependencyFixture("dev.mars.qraft.client.ClientBoundaryFixture",
                 "dev.mars.qraft.common.ServiceDefinition");
         Map<String, Set<String>> scanned = dependencies(fixtureClasses);

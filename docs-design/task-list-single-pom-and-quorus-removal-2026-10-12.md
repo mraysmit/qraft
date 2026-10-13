@@ -1,10 +1,10 @@
 # Task List: Single POM and Removal of the Quorus Leftovers
 
 **Date:** 2026-10-04
-**Last updated:** 2026-10-12 (Phase 7's second task converted in full: `Future`, `Promise`, and `AsyncResult` are deleted, after three slices of which the first was verified by Jenkins build 25; Jenkins build 26 verified the whole change; the test side sized and the phase kept in this list; the record of Phase 7's first task put in order, with four passages removed or reworded that still described its gate as open; the file renamed to the date of its last change. On 2026-10-11: PIT mutation testing tried for Phase 7's first task and put on ice by the owner; the mutation rule then removed by the owner from every task list, and that first task, the membership list's Step 4 gate, closed; reviewed at the user's request, with three stale passages corrected, and the review's four questions answered: Phase 3's last task dropped, and the gRPC warning added to the operations runbook; Qraft moved to `raftlog-core` 1.5.0 and the test of the storage class removed, verified by Jenkins build 19 with two tests of gRPC's shutdown window: Phase 6 is done; the other documents brought up to date with Phase 6, in Phase 8, and the other four task lists renamed with their links; the file renamed to the date of its last change. On 2026-10-10: in the evening, Phase 6's open points closed and verified by Jenkins build 15: a Docker test runs every start command, the dashboard looked at and corrected, the Grafana errors fixed, `-Down` keeps the observability data, and RaftLog's interface given the compaction boundary, which waits for a release. Before that: Phase 6 applied, and verified by Jenkins build 6 except for its start commands and its dashboard: three unused log stacks, the load balancer, the demo scripts, and the hand-test data deleted, the start scripts reduced, and the kept observability stack corrected; then the recovery test that timed out on Jenkins given its own client profile. Phase 5 done and its exit met: the version source, then the configuration without a default document, as typed records, with one shared parsing helper; each verified on Jenkins; three third-party keywords that Phase 3A's sweep had renamed are restored; the file renamed to the date of its last change. On 2026-10-09: the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
+**Last updated:** 2026-10-13 (Phase 7 executor ownership and its five-run concurrency gate verified: 953 default tests, 42 runtime tests, all coverage gates, and the retained-log audit passed. On 2026-10-12: Phase 7's second task converted in full: `Future`, `Promise`, and `AsyncResult` are deleted, after three slices of which the first was verified by Jenkins build 25; Jenkins build 26 verified the whole change; the test side sized and the phase kept in this list; the record of Phase 7's first task put in order, with four passages removed or reworded that still described its gate as open; the file renamed to the date of its last change. On 2026-10-11: PIT mutation testing tried for Phase 7's first task and put on ice by the owner; the mutation rule then removed by the owner from every task list, and that first task, the membership list's Step 4 gate, closed; reviewed at the user's request, with three stale passages corrected, and the review's four questions answered: Phase 3's last task dropped, and the gRPC warning added to the operations runbook; Qraft moved to `raftlog-core` 1.5.0 and the test of the storage class removed, verified by Jenkins build 19 with two tests of gRPC's shutdown window: Phase 6 is done; the other documents brought up to date with Phase 6, in Phase 8, and the other four task lists renamed with their links; the file renamed to the date of its last change. On 2026-10-10: in the evening, Phase 6's open points closed and verified by Jenkins build 15: a Docker test runs every start command, the dashboard looked at and corrected, the Grafana errors fixed, `-Down` keeps the observability data, and RaftLog's interface given the compaction boundary, which waits for a release. Before that: Phase 6 applied, and verified by Jenkins build 6 except for its start commands and its dashboard: three unused log stacks, the load balancer, the demo scripts, and the hand-test data deleted, the start scripts reduced, and the kept observability stack corrected; then the recovery test that timed out on Jenkins given its own client profile. Phase 5 done and its exit met: the version source, then the configuration without a default document, as typed records, with one shared parsing helper; each verified on Jenkins; three third-party keywords that Phase 3A's sweep had renamed are restored; the file renamed to the date of its last change. On 2026-10-09: the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
 **Status:** In progress. This is the current task list. It started on 2026-10-04 at the user's request, before the membership list's Step 4 close-out gate.
-**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 was done and its exit met on 2026-10-10: Jenkins build 4 verified its version source and build 5 the rest. Phase 6 was applied on 2026-10-10; Jenkins build 6 verified it on `d0275a7`. Build 8 then failed on the recovery test and showed its cause, a kill during the follower's first snapshot; build 9 passed with the fix, on `122d739`. Its exit was open for the start commands run by hand and a look at the corrected dashboard on a running stack. Both were done on the evening of 2026-10-10, and Jenkins build 15 verified them on `da87cb3`: its exit was met for all but its one open task. That task was done on 2026-10-11 with `raftlog-core` 1.5.0, and Jenkins build 19 verified it on `f9b3403`: Phase 6 is done. **Active: Phase 7's third task, the replacement of `JavaRuntime` and `WorkerExecutor`, started with the bounded blocking executor.** Its first, the membership list's Step 4 gate, was closed on 2026-10-11: the gate had waited on mutation evidence, PIT was tried for it and put on ice by the owner, and the owner then removed the mutation rule from every task list. The second task, the replacement of the wrapper future types, started on 2026-10-12 in slices: the first, `RaftStorageFactory`, is done and verified by Jenkins build 25 on `a37a684`; `ClusterBootstrap` and `MembershipService` followed, and then the rest in one change. The three types are deleted and nothing imports them. Jenkins build 26 verified the whole change on `9851987`: the second task is done. The test side was sized that day, and the phase stays in this list. Four tasks of Phase 7 and four of Phase 8 are open. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
-**Last reviewed:** 2026-10-11, against the code at commit `f9b3403`, this list alone: see "Review of 2026-10-11" at the head of section 4. Before that: 2026-10-08, against the code at commit `9a4adf0`, with the other four task lists. The status table in section 4 and every item marked "review of 2026-10-08" come from that review. No build was run for it. The logs that the Phase 2A and Phase 3 records cite were written in another working tree and were not available, so their counts were checked for arithmetic only. The earlier review of 2026-10-05 was against `24beac3`; its items keep their date.
+**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 was done and its exit met on 2026-10-10: Jenkins build 4 verified its version source and build 5 the rest. Phase 6 was applied on 2026-10-10; Jenkins build 6 verified it on `d0275a7`. Build 8 then failed on the recovery test and showed its cause, a kill during the follower's first snapshot; build 9 passed with the fix, on `122d739`. Its exit was open for the start commands run by hand and a look at the corrected dashboard on a running stack. Both were done on the evening of 2026-10-10, and Jenkins build 15 verified them on `da87cb3`: its exit was met for all but its one open task. That task was done on 2026-10-11 with `raftlog-core` 1.5.0, and Jenkins build 19 verified it on `f9b3403`: Phase 6 is done. **Phase 7's third task, executor replacement, is verified as of 2026-10-13. Its remaining tasks are the test-helper replacement and the fenced-node diagnostic.** Its first, the membership list's Step 4 gate, was closed on 2026-10-11: the gate had waited on mutation evidence, PIT was tried for it and put on ice by the owner, and the owner then removed the mutation rule from every task list. The second task, the replacement of the wrapper future types, started on 2026-10-12 in slices: the first, `RaftStorageFactory`, is done and verified by Jenkins build 25 on `a37a684`; `ClusterBootstrap` and `MembershipService` followed, and then the rest in one change. The three types are deleted and nothing imports them. Jenkins build 26 verified the whole change on `9851987`: the second task is done. The test side was sized that day, and the phase stays in this list. Two tasks of Phase 7 and four of Phase 8 are open. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
+**Last reviewed:** 2026-10-13, Phase 7 executor code and coverage at `9a6fbd0` plus the working-tree changes, with the verification recorded below. Before that: 2026-10-11, against the code at commit `f9b3403`, this list alone: see "Review of 2026-10-11" at the head of section 4. Before that: 2026-10-08, against the code at commit `9a4adf0`, with the other four task lists. The status table in section 4 and every item marked "review of 2026-10-08" come from that review. No build was run for it. The logs that the Phase 2A and Phase 3 records cite were written in another working tree and were not available, so their counts were checked for arithmetic only. The earlier review of 2026-10-05 was against `24beac3`; its items keep their date.
 **Order of work:**
 - The membership list's Step 4 close-out gate is the first task of Phase 7 here.
 - After this list, the membership list resumes at its Step 5, on the new layout, and runs to its end.
@@ -71,9 +71,9 @@ runtime layer, or its unused tooling.
 
 ## 4. Tasks
 
-### Status (2026-10-11)
+### Status (2026-10-13)
 
-The table is as of 2026-10-11. The review of 2026-10-08 wrote it, from the code
+The table is as of 2026-10-13. The review of 2026-10-08 wrote it, from the code
 at `9a4adf0` and the records below; the rows of Phases 3A to 8 were added or
 changed since, as each phase's record says. Phase 2A was accepted on 2026-10-08 after 845 default and 31
 tagged tests passed, coverage passed, and all 80 retained log files were audited
@@ -91,7 +91,7 @@ rules and extracts from that run.
 | 4. Node model and API | Done 2026-10-09, exit met; its four open points settled and its decisions confirmed by the user the same day | 7 of 7 | `e4bf00d` to `a6e7930` |
 | 5. Configuration and version | Done 2026-10-10, exit met | 6 of 6 | `693449e`, `c123ee9`, `12d365c`, `d4e1af8` |
 | 6. Docker and observability | Applied 2026-10-10, with the load balancer removed and the recovery test given its own client profile, both at the user's decision; verified by Jenkins build 6. The exit is open for the start commands run by hand and a look at the corrected dashboard. The gRPC warnings the audit found are flagged since build 8. Build 8 showed the cause of the recovery test's timeout, a kill during the follower's first snapshot; build 9 passed with the fix and with no unflagged error or stack trace. The server was then changed so that a kill in that window is survivable and a log compacted past its snapshot is refused; build 11 passed with that change. On the evening of 2026-10-10 the start commands got a test that Jenkins runs, the dashboard was looked at and corrected, the Grafana errors were fixed, and `-Down` keeps the observability data; build 14 failed on two defects the new test found, and build 15 passed with their fixes. The compaction-boundary task was done on 2026-10-11 with `raftlog-core` 1.5.0; build 18 failed on a teardown race in a gRPC test, and build 19 passed with its fix. Done, exit met | 13 of 13 | `ce5890d`, `22a46a9`, `85bb120`, `d0275a7`, `cbb93f4`, `362b507`, `122d739`, `aa0d876`, `f2119d3`, `29fe503`, `10de474`, `0f6c497`, `da87cb3`, `fac3696`, `f9b3403` |
-| 7. Async layer | Its first task, the membership list's Step 4 gate, closed on 2026-10-11 without mutation evidence: the owner put PIT on ice and removed the mutation rule that day. The test side was sized on 2026-10-12 and the phase stays in this list. The replacement of the future types started that day, in slices: `RaftStorageFactory` was verified by Jenkins build 25; the rest is converted, the three types are deleted, and Jenkins build 26 verified the whole change: the second task is done | 3 of 7 | `a37a684`, `9851987` |
+| 7. Async layer | The membership gate, future-type replacement and test sizing are done. Executor ownership and five consecutive concurrency runs verified on 2026-10-13, with full suites, coverage and retained-log auditing. Test-helper replacement and fenced-node diagnostics remain | 5 of 7 | `a37a684`, `9851987`, `9a6fbd0`; executor extraction and verification follow-up in the working tree |
 | 8. Documentation and close-out | Started early for Phases 1 and 2; Phase 3's names done with Phase 3; the documents of Phases 4, 5, and 6 done as each ended | 2 of 6 | |
 
 **Review of 2026-10-11,** at the user's request, of this list alone, against
@@ -2766,17 +2766,17 @@ question was not open.
     - One line at error level comes from Tempo's metrics generator, in
       the start-commands test, which accepts it by the user's decision of
       2026-10-11.
-- [ ] Replace `JavaRuntime` (an emulated event loop) and `WorkerExecutor` with
-  explicitly owned executors: the Raft state loop and a bounded
-  virtual-thread pool. Keep the `CallerContext` MDC and OpenTelemetry propagation.
+- [x] Replace `JavaRuntime`'s combined scheduling and blocking-work abstraction
+  and `WorkerExecutor` with an explicitly owned Raft state loop and bounded
+  virtual-thread executor. Preserve `CallerContext` MDC and OpenTelemetry propagation.
 
   Started 2026-10-12, after Jenkins build 26 closed the task before it.
-  - **First slice, not yet run:** `WorkerExecutor`, which production did not use,
+  - **First slice, `9a6fbd0`, unverified before the next slice:** `WorkerExecutor`, which production did not use,
     is replaced by `BlockingTaskExecutor`. The replacement has one bounded
     virtual-thread pool, preserves the submitting `CallerContext` through the
     blocking task and its completion dispatch, and completes a rejected
     submission as a failed future.
-  - `JavaRuntime` now delegates blocking work to that executor with parallelism
+  - In that slice, `JavaRuntime` delegated blocking work to that executor with parallelism
     10 instead of creating one virtual thread per submitted task. Completions
     still return to the serialized state loop. The obsolete ordered-execution
     overload and factory methods are gone; nothing called them.
@@ -2784,9 +2784,98 @@ question was not open.
     sides of the dispatch. `JavaRuntimeTest` keeps the named-virtual-thread
     check. Test counts are unchanged by this slice: the two tests of the old
     worker become two tests of the replacement.
-  - Next slice: extract the timer/serialization half of `JavaRuntime` as the
-    explicitly owned Raft state loop, then give the server composition root
-    ownership of both executors.
+  - **Second slice, applied 2026-10-13; verification recorded below:**
+    - Deleted `JavaRuntime`. `RaftStateLoop` owns state serialization and timers;
+      `BlockingTaskExecutor` owns blocking work. Raft nodes receive both explicitly,
+      the transport receives the loop, and gRPC servers receive the blocking executor.
+    - `QraftServerApplication.ServerResources` creates and closes both executors.
+      The blocking pool uses the existing `server.raft.io.poolSize` and
+      `server.raft.io.queueSize` settings, independently of the transport callback pool.
+      It rejects overload rather than running blocking work inline.
+    - After service stop, blocking work drains before the state loop stops; telemetry
+      closes last. Executor shutdown waits for termination and reports failure after
+      five seconds. Forced blocking shutdown fails outstanding task futures, including
+      queued tasks that will never run. State-loop shutdown cancels outstanding timer futures.
+      Completion dispatch is tracked, so a state-loop timeout also fails worker results
+      whose queued completion callbacks are discarded. Forced shutdown can complete
+      failures on the shutdown thread, preserving the submitting caller context.
+    - Protocol tests borrow the separate executors from `RaftExecutorsFixture`, which
+      owns their lifetime. The two existing callback test helpers remain for the next task.
+    - Added coverage for queue saturation, graceful and forced shutdown, state-loop
+      termination, owner shutdown order, completion rejection, and MDC/OpenTelemetry
+      propagation and restoration on successful and failed work. The concurrency
+      test records an active worker before announcing that it has started, avoiding
+      a race where it released a task before measuring the maximum concurrency.
+    - Updated the design and standards for the new ownership. The task stayed open
+      until the verification and retained-log audit recorded below passed.
+  - **Coverage audit and TDD follow-up, 2026-10-13:**
+    - The first focused build failed before tests because `target/` still contained
+      generated protobuf classes for removed types
+      (`logs/qraft-executor-baseline-2026-10-13_14-04-28-244.log`). The clean build
+      regenerated those sources and found one missed fixture declaration in
+      `ClusterBootstrapTest`
+      (`logs/qraft-executor-clean-baseline-2026-10-13_14-06-49-556.log`); it is corrected.
+    - **RED recorded:** the strengthened
+      `BlockingTaskExecutorTest.forcedShutdownSettlesActiveAndQueuedTasksAndReportsTheFailure`
+      observes the operation futures inside the shutdown callback. It proved that
+      shutdown published its outcome before settling queued operations: 41 tests,
+      1 assertion failure, no test errors or skips
+      (`logs/qraft-executor-red-2026-10-13_14-09-27-878.log`). This is retained failure
+      evidence, not an accepted verification run. Its console capture and
+      `logs/qraft-maven-tests-2026-10-13_14-09-43.log` were read: the Maven failure is
+      the named regression assertion; the application log has three INFO entries
+      and no ERROR or stack trace. No helper JVM or Docker suite ran.
+    - The analogous state-loop regression was written before its fix, but its RED
+      was not executed: the user stopped Computer Use, then requested continuation
+      with test commands supplied for manual execution. Original implementation
+      tests and the further characterization tests are not claimed as recorded TDD cycles.
+    - **Fix applied; subsequent GREEN recorded below:** forced shutdown now settles outstanding task
+      and dispatch futures before notifying the owner. The worker shutdown waiter
+      cannot overwrite a forced failure with success, and graceful worker shutdown
+      waits for result delivery as well as worker termination, within the same bound.
+    - Added coverage for invalid bounds and null dependencies, cancellation of
+      queued work and timer futures, original failure identity, completion rejection
+      by a stopped loop, periodic MDC/tracing context and cancellation, interrupted
+      cleanup, and release of the loop and telemetry after worker shutdown fails.
+      The four focused classes now contain 49 tests by source count (12 worker,
+      18 loop, 10 lifecycle, 9 package-boundary); the subsequent focused GREEN ran all 49.
+      `docs/TESTING.md` maps the contracts to tests and gives the repetition command.
+  - **Verified 2026-10-13, before any commit of the working-tree change:**
+    - The user first ran the focused command: 49 tests passed, with no failures,
+      errors or skips (`logs/qraft-executor-focused-2026-10-13_14-38-29-232.log`).
+    - Five consecutive runs of the affected concurrency/protocol classes each
+      passed 346 tests, with no failures, errors or skips. The user ran the first
+      three; after expressly authorising execution without desktop automation,
+      the assistant ran the remaining two through command sessions with the same
+      Maven options and timestamped `Tee-Object` capture. No desktop was automated.
+      Captures: `qraft-executor-repeat-2026-10-13_14-39-00-504.log`,
+      `14-41-42-417.log`, `14-42-37-914.log`, `15-26-14-806.log`, and
+      `15-27-35-595.log`, all under `logs/` with the same prefix.
+    - `clean install` passed 953 default tests and every coverage gate, and
+      packaged a fresh jar
+      (`logs/qraft-executor-install-2026-10-13_15-28-50-213.log`).
+    - The combined `docker,e2e,slow` run rebuilt `qraft-runtime:test` from that jar
+      and passed 42 tests, none failed or skipped
+      (`logs/qraft-executor-runtime-2026-10-13_15-31-42-459.log`).
+      Default and tagged suites total 995 results; the focused and repeated runs
+      are additional executions, not additional unique tests.
+    - JaCoCo: `BlockingTaskExecutor` including `PendingTask` covers 87/97 lines
+      (89.7%) and 29/36 branches (80.6%); `RaftStateLoop` covers 95/98 lines
+      (96.9%) and 18/22 branches (81.8%); `CallerContext` covers all 14 lines.
+      The existing exclusions for the server composition classes are unchanged;
+      their lifecycle behavior is checked by the 10 lifecycle tests and the real
+      server/process suites. No coverage gate or exclusion was relaxed.
+    - Audited 221 retained logs from the successful verification window: 217 text
+      logs and four JSON application logs, including 98 Docker archives. The 1,423
+      flagged ERROR headers and 1,128 exception headers include duplicate copies
+      across console captures, application logs and archives. No unflagged ERROR
+      or exception header, nor ANSI escape, was found. One uncaught Docker lock
+      contender rethrow is explicitly flagged `SERVER_STORAGE_ALREADY_LOCKED`;
+      its cause remains `FileRaftStorage.StorageException`. Observability container
+      output was checked as well, including its native error-level formats.
+    - The packaged jar contains `RaftStateLoop`, `BlockingTaskExecutor` and
+      `CallerContext`, with neither retired runtime/worker type. `git diff --check`
+      passed. The next Phase 7 work is the separate helper-replacement task below.
 - [ ] Replace the `JavaTestContextHelper` and `JavaRuntimeExtensionHelper` test helpers
   with plain futures and bounded waits.
 - [x] Size the test side before starting (review of 2026-10-05). 56 test
@@ -2804,7 +2893,7 @@ question was not open.
     `Promise.promise`.
   - **Decided by the user that day: the phase stays in this list.** The
     production side is 11 files and the wrapper is thin.
-- [ ] Run the changed concurrency tests five times consecutively.
+- [x] Run the changed concurrency tests five times consecutively. Verified 2026-10-13: five runs of 346 tests, recorded above.
 - [ ] Have a fenced server say once why it is fenced (decided 2026-10-09, in
   the review of Phase 4's open points).
   - Today nothing announces a fence. The failing operation logs its own

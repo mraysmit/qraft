@@ -18,7 +18,7 @@ package dev.mars.qraft.raft;
 
 import dev.mars.qraft.raft.ClusterBootstrap.Outcome;
 import dev.mars.qraft.raft.RaftConfiguration.Server;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.raft.storage.RaftStorageFactory;
@@ -64,13 +64,13 @@ class ClusterBootstrapTest {
     private static final Set<String> MEMBERS = Set.of("a", "b", "c");
     private static final Map<String, String> ADDRESSES = Map.of("a", "a:9080", "b", "b:9080", "c", "c:9080");
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private ManualRaftClusterFixture cluster;
     @TempDir Path storageDirectory;
 
     @BeforeEach
     void setUp() {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         cluster = new ManualRaftClusterFixture(runtime);
         InMemoryTransportSimulatorFixture.clearAllTransports();
     }
@@ -219,7 +219,7 @@ class ClusterBootstrapTest {
 
     @Test
     void anAttemptThatFailsGivesACallbackTheFailureItself() throws Exception {
-        JavaRuntime stopped = JavaRuntime.create();
+        RaftExecutorsFixture stopped = RaftExecutorsFixture.create();
         InMemoryTransportSimulatorFixture transport = new InMemoryTransportSimulatorFixture("a");
         RaftNode node = new ManualRaftClusterFixture(stopped).unconfiguredBuilder("a", Set.of("a"),
                 transport, new QraftStateStore(), RaftNodeMode.volatileMode()).build();

@@ -21,7 +21,7 @@ import dev.mars.qraft.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.state.distributed.DistributedStateCommand;
@@ -61,14 +61,14 @@ class RaftNodeServerIdCountingTest {
     private static final Set<String> MEMBERS = Set.of("a", "b", "c");
     private static final String WIPED = "00000000-0000-0000-0000-00000000dead";
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private ManualRaftClusterFixture cluster;
     private HeldRaftTransportFixture transport;
     private RaftNode node;
 
     @BeforeEach
     void setUp() throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         cluster = new ManualRaftClusterFixture(runtime);
         transport = new HeldRaftTransportFixture();
         node = cluster.add(cluster.builder("a", MEMBERS, transport, new QraftStateStore(), RaftNodeMode.volatileMode()));

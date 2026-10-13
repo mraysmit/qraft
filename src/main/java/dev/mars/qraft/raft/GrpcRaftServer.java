@@ -46,7 +46,7 @@ import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Scope;
 import io.opentelemetry.context.propagation.TextMapGetter;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.BlockingTaskExecutor;
 import dev.mars.qraft.common.concurrent.Completions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -86,28 +86,28 @@ public class GrpcRaftServer {
         }
     };
 
-    private final JavaRuntime runtime;
+    private final BlockingTaskExecutor blockingTasks;
     private final int port;
     private final RaftNode raftNode;
     private final MembershipService membership;
     private final BindableService[] extraServices;
     private volatile Server server;
 
-    public GrpcRaftServer(JavaRuntime runtime, int port, RaftNode raftNode) {
-        this(runtime, port, raftNode, new BindableService[0]);
+    public GrpcRaftServer(BlockingTaskExecutor blockingTasks, int port, RaftNode raftNode) {
+        this(blockingTasks, port, raftNode, new BindableService[0]);
     }
 
-    public GrpcRaftServer(JavaRuntime runtime, int port, RaftNode raftNode, BindableService... extraServices) {
-        this(runtime, port, raftNode, null, extraServices);
+    public GrpcRaftServer(BlockingTaskExecutor blockingTasks, int port, RaftNode raftNode, BindableService... extraServices) {
+        this(blockingTasks, port, raftNode, null, extraServices);
     }
 
     /**
      * A server that also serves joins and removals through {@code membership}; without it, both are answered
      * {@code NO_LEADER}.
      */
-    public GrpcRaftServer(JavaRuntime runtime, int port, RaftNode raftNode, MembershipService membership,
+    public GrpcRaftServer(BlockingTaskExecutor blockingTasks, int port, RaftNode raftNode, MembershipService membership,
                           BindableService... extraServices) {
-        this.runtime = runtime;
+        this.blockingTasks = blockingTasks;
         this.port = port;
         this.raftNode = raftNode;
         this.membership = membership;
@@ -122,7 +122,7 @@ public class GrpcRaftServer {
     public CompletableFuture<Void> start() {
         CompletableFuture<Void> promise = new CompletableFuture<>();
 
-        runtime.executeBlocking(() -> {
+        blockingTasks.execute(() -> {
             try {
             ServerBuilder<?> builder = ServerBuilder.forPort(port)
                 .intercept(new CorrelationIdServerInterceptor())
@@ -168,7 +168,7 @@ public class GrpcRaftServer {
             return promise;
         }
 
-        runtime.executeBlocking(() -> {
+        blockingTasks.execute(() -> {
             try {
                 server.shutdown();
                 if (!server.awaitTermination(5, TimeUnit.SECONDS)) {

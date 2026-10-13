@@ -19,7 +19,7 @@ package dev.mars.qraft.raft;
 import io.grpc.BindableService;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.BlockingTaskExecutor;
 import dev.mars.qraft.common.concurrent.Completions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,13 +39,13 @@ public class GrpcServiceServer {
 
     private static final Logger logger = LoggerFactory.getLogger(GrpcServiceServer.class);
 
-    private final JavaRuntime runtime;
+    private final BlockingTaskExecutor blockingTasks;
     private final int port;
     private final BindableService[] services;
     private volatile Server server;
 
-    public GrpcServiceServer(JavaRuntime runtime, int port, BindableService... services) {
-        this.runtime = runtime;
+    public GrpcServiceServer(BlockingTaskExecutor blockingTasks, int port, BindableService... services) {
+        this.blockingTasks = blockingTasks;
         this.port = port;
         this.services = services != null ? services : new BindableService[0];
     }
@@ -53,7 +53,7 @@ public class GrpcServiceServer {
     public CompletableFuture<Void> start() {
         CompletableFuture<Void> promise = new CompletableFuture<>();
 
-        runtime.executeBlocking(() -> {
+        blockingTasks.execute(() -> {
             try {
                 ServerBuilder<?> builder = ServerBuilder.forPort(port);
                 for (BindableService service : services) {
@@ -90,7 +90,7 @@ public class GrpcServiceServer {
             return promise;
         }
 
-        runtime.executeBlocking(() -> {
+        blockingTasks.execute(() -> {
             try {
                 server.shutdown();
                 if (!server.awaitTermination(5, TimeUnit.SECONDS)) {

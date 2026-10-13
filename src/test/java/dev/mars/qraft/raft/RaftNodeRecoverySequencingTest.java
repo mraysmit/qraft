@@ -22,7 +22,8 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
+import dev.mars.qraft.common.async.RaftStateLoop;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -59,7 +60,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class RaftNodeRecoverySequencingTest {
     private final ProtobufRaftCommandCodec codec = new ProtobufRaftCommandCodec();
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private RaftNode node;
     private AsyncRecoveryStorageFixture storage;
 
@@ -74,7 +75,7 @@ class RaftNodeRecoverySequencingTest {
 
     @Test
     void fullLogRecoveryReentersStateLoopAfterEveryStorageCompletion() throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         DistributedStateRaftCommand command = put("recovered", "from-log");
         storage = new AsyncRecoveryStorageFixture(
                 new RaftStorage.PersistentMeta(7, Optional.of("node-1")),
@@ -85,12 +86,12 @@ class RaftNodeRecoverySequencingTest {
         node = buildNode(storage, stateMachine);
 
         CompletableFuture<Void> start = node.start();
-        assertSame(runtime, storage.awaitMetadataRequest());
+        assertSame(runtime.stateLoop(), storage.awaitMetadataRequest());
         completeOffLoop(() -> storage.metadata.complete(storage.metadataValue));
-        assertSame(runtime, storage.awaitSnapshotRequest(),
+        assertSame(runtime.stateLoop(), storage.awaitSnapshotRequest(),
                 "snapshot load must be initiated from the state loop after metadata completion");
         completeOffLoop(() -> storage.snapshot.complete(storage.snapshotValue));
-        assertSame(runtime, storage.awaitReplayRequest(),
+        assertSame(runtime.stateLoop(), storage.awaitReplayRequest(),
                 "log replay must be initiated from the state loop after snapshot completion");
         completeOffLoop(() -> storage.replay.complete(storage.replayValue));
 
@@ -98,14 +99,14 @@ class RaftNodeRecoverySequencingTest {
 
         assertEquals(7, node.getCurrentTerm());
         assertEquals("from-log", stateMachine.delegate.getMetadata("recovered"));
-        assertEquals(List.of(runtime), stateMachine.resetContexts);
-        assertEquals(List.of(runtime), stateMachine.applyContexts);
-        assertTrue(stateMachine.mutationContexts().stream().allMatch(context -> context == runtime));
+        assertEquals(List.of(runtime.stateLoop()), stateMachine.resetContexts);
+        assertEquals(List.of(runtime.stateLoop()), stateMachine.applyContexts);
+        assertTrue(stateMachine.mutationContexts().stream().allMatch(context -> context == runtime.stateLoop()));
     }
 
     @Test
     void snapshotAndSuffixRecoveryMutateStateOnlyOnStateLoop() throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         QraftStateStore snapshotSource = new QraftStateStore();
         snapshotSource.apply(put("snapshot", "restored"));
         snapshotSource.setLastAppliedIndex(5);
@@ -133,14 +134,14 @@ class RaftNodeRecoverySequencingTest {
         assertEquals(6, node.getLastApplied());
         assertEquals("restored", stateMachine.delegate.getMetadata("snapshot"));
         assertEquals("replayed", stateMachine.delegate.getMetadata("suffix"));
-        assertEquals(List.of(runtime), stateMachine.restoreContexts);
-        assertEquals(List.of(runtime), stateMachine.applyContexts);
-        assertTrue(stateMachine.mutationContexts().stream().allMatch(context -> context == runtime));
+        assertEquals(List.of(runtime.stateLoop()), stateMachine.restoreContexts);
+        assertEquals(List.of(runtime.stateLoop()), stateMachine.applyContexts);
+        assertTrue(stateMachine.mutationContexts().stream().allMatch(context -> context == runtime.stateLoop()));
     }
 
     @Test
     void raftRequestsArrivingDuringRecoveryAreRejectedWithoutTouchingDurableState() throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         storage = new AsyncRecoveryStorageFixture(new RaftStorage.PersistentMeta(5, Optional.of("node-2")),
                 Optional.empty(), List.of());
         node = buildNode(storage, new RecordingStateMachineFixture(), Set.of("node-1", "node-2", "node-3"));
@@ -179,7 +180,7 @@ class RaftNodeRecoverySequencingTest {
 
     private RaftNode buildNode(AsyncRecoveryStorageFixture storage, RecordingStateMachineFixture stateMachine, Set<String> members) {
         return RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("node-1")
                 .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
                 .clusterNodes(members)
@@ -198,9 +199,9 @@ class RaftNodeRecoverySequencingTest {
     }
 
     private static void completeOffLoop(Runnable completion) throws Exception {
-        AtomicReference<JavaRuntime> context = new AtomicReference<>();
+        AtomicReference<RaftStateLoop> context = new AtomicReference<>();
         Thread thread = Thread.ofPlatform().name("recovery-storage-completion").start(() -> {
-            context.set(JavaRuntime.currentContext());
+            context.set(RaftStateLoop.currentContext());
             completion.run();
         });
         thread.join();
@@ -210,32 +211,32 @@ class RaftNodeRecoverySequencingTest {
     /** Test state-machine fixture that records application and snapshot operations for sequencing assertions. */
     private static final class RecordingStateMachineFixture implements RaftLogApplicator {
         private final QraftStateStore delegate = new QraftStateStore();
-        private final List<JavaRuntime> resetContexts = new ArrayList<>();
-        private final List<JavaRuntime> restoreContexts = new ArrayList<>();
-        private final List<JavaRuntime> applyContexts = new ArrayList<>();
-        private final List<JavaRuntime> indexContexts = new ArrayList<>();
+        private final List<RaftStateLoop> resetContexts = new ArrayList<>();
+        private final List<RaftStateLoop> restoreContexts = new ArrayList<>();
+        private final List<RaftStateLoop> applyContexts = new ArrayList<>();
+        private final List<RaftStateLoop> indexContexts = new ArrayList<>();
 
         @Override public RaftCommandResult<?> apply(RaftCommand command) {
-            applyContexts.add(JavaRuntime.currentContext());
+            applyContexts.add(RaftStateLoop.currentContext());
             return delegate.apply(command);
         }
         @Override public byte[] takeSnapshot() { return delegate.takeSnapshot(); }
         @Override public void restoreSnapshot(byte[] snapshot) {
-            restoreContexts.add(JavaRuntime.currentContext());
+            restoreContexts.add(RaftStateLoop.currentContext());
             delegate.restoreSnapshot(snapshot);
         }
         @Override public long getLastAppliedIndex() { return delegate.getLastAppliedIndex(); }
         @Override public void setLastAppliedIndex(long index) {
-            indexContexts.add(JavaRuntime.currentContext());
+            indexContexts.add(RaftStateLoop.currentContext());
             delegate.setLastAppliedIndex(index);
         }
         @Override public void reset() {
-            resetContexts.add(JavaRuntime.currentContext());
+            resetContexts.add(RaftStateLoop.currentContext());
             delegate.reset();
         }
 
-        List<JavaRuntime> mutationContexts() {
-            List<JavaRuntime> contexts = new ArrayList<>();
+        List<RaftStateLoop> mutationContexts() {
+            List<RaftStateLoop> contexts = new ArrayList<>();
             contexts.addAll(resetContexts);
             contexts.addAll(restoreContexts);
             contexts.addAll(applyContexts);
@@ -252,9 +253,9 @@ class RaftNodeRecoverySequencingTest {
         private final CompletableFuture<PersistentMeta> metadata = new CompletableFuture<>();
         private final CompletableFuture<Optional<SnapshotData>> snapshot = new CompletableFuture<>();
         private final CompletableFuture<List<LogEntryData>> replay = new CompletableFuture<>();
-        private final CompletableFuture<JavaRuntime> metadataRequested = new CompletableFuture<>();
-        private final CompletableFuture<JavaRuntime> snapshotRequested = new CompletableFuture<>();
-        private final CompletableFuture<JavaRuntime> replayRequested = new CompletableFuture<>();
+        private final CompletableFuture<RaftStateLoop> metadataRequested = new CompletableFuture<>();
+        private final CompletableFuture<RaftStateLoop> snapshotRequested = new CompletableFuture<>();
+        private final CompletableFuture<RaftStateLoop> replayRequested = new CompletableFuture<>();
         private final List<String> metadataWrites = new java.util.concurrent.CopyOnWriteArrayList<>();
 
         private AsyncRecoveryStorageFixture(PersistentMeta metadataValue,
@@ -265,9 +266,9 @@ class RaftNodeRecoverySequencingTest {
             this.replayValue = replayValue;
         }
 
-        JavaRuntime awaitMetadataRequest() throws Exception { return metadataRequested.get(10, TimeUnit.SECONDS); }
-        JavaRuntime awaitSnapshotRequest() throws Exception { return snapshotRequested.get(10, TimeUnit.SECONDS); }
-        JavaRuntime awaitReplayRequest() throws Exception { return replayRequested.get(10, TimeUnit.SECONDS); }
+        RaftStateLoop awaitMetadataRequest() throws Exception { return metadataRequested.get(10, TimeUnit.SECONDS); }
+        RaftStateLoop awaitSnapshotRequest() throws Exception { return snapshotRequested.get(10, TimeUnit.SECONDS); }
+        RaftStateLoop awaitReplayRequest() throws Exception { return replayRequested.get(10, TimeUnit.SECONDS); }
 
         void releaseAll() {
             metadata.complete(metadataValue);
@@ -281,7 +282,7 @@ class RaftNodeRecoverySequencingTest {
             return CompletableFuture.completedFuture(null);
         }
         @Override public CompletableFuture<PersistentMeta> loadMetadata() {
-            metadataRequested.complete(JavaRuntime.currentContext());
+            metadataRequested.complete(RaftStateLoop.currentContext());
             return metadata;
         }
         @Override public CompletableFuture<Void> appendEntries(List<LogEntryData> entries) { return CompletableFuture.completedFuture(null); }
@@ -289,12 +290,12 @@ class RaftNodeRecoverySequencingTest {
         @Override public CompletableFuture<Void> truncatePrefix(long toIndex) { return CompletableFuture.completedFuture(null); }
         @Override public CompletableFuture<Void> sync() { return CompletableFuture.completedFuture(null); }
         @Override public CompletableFuture<List<LogEntryData>> replayLog() {
-            replayRequested.complete(JavaRuntime.currentContext());
+            replayRequested.complete(RaftStateLoop.currentContext());
             return replay;
         }
         @Override public CompletableFuture<Void> saveAtomically(SnapshotData snapshot) { return CompletableFuture.completedFuture(null); }
         @Override public CompletableFuture<Optional<SnapshotData>> loadLatest() {
-            snapshotRequested.complete(JavaRuntime.currentContext());
+            snapshotRequested.complete(RaftStateLoop.currentContext());
             return snapshot;
         }
         @Override public void close() {}

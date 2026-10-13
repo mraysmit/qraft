@@ -31,7 +31,7 @@ import dev.mars.qraft.raft.RaftNode;
 import dev.mars.qraft.raft.RaftNodeMode;
 import dev.mars.qraft.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.raft.storage.RaftStorageFactory;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.CatalogCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.server.ui.AdminUiConfig;
@@ -89,7 +89,7 @@ class HttpApiServerTest {
     Path directory;
     private HttpApiServer server;
     private RaftNode node;
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
 
     @AfterEach
     void stopServer() throws Exception {
@@ -741,11 +741,11 @@ class HttpApiServerTest {
 
     @Test
     void returnsServiceUnavailableWhenCatalogWriteReachesFollower() throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         InMemoryTransportSimulatorFixture transport = new InMemoryTransportSimulatorFixture("follower");
         QraftStateStore store = new QraftStateStore();
         node = RaftNode.builder()
-                .runtime(runtime).nodeId("follower").clusterNodes(Set.of("follower", "peer"))
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks()).nodeId("follower").clusterNodes(Set.of("follower", "peer"))
                 .transport(transport).stateMachine(store).commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.volatileMode()).electionTimeout(10_000).build();
         node.start().get(10, TimeUnit.SECONDS);
@@ -881,14 +881,14 @@ class HttpApiServerTest {
 
     @Test
     void fencedNodeFailsReadinessWhileLivenessRemainsAvailable() throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         QraftStateStore store = new QraftStateStore();
         RaftStorageFactory.DurableStorage durable = RaftStorageFactory
                 .createDurable(directory, true)
                 .get(10, TimeUnit.SECONDS);
         RaftStorage ambiguousStorage = new AmbiguousAppendStorageFixture(durable.wal());
         node = RaftNode.builder()
-                .runtime(runtime).nodeId("fenced-node").clusterNodes(Set.of("fenced-node"))
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks()).nodeId("fenced-node").clusterNodes(Set.of("fenced-node"))
                 .transport(new InMemoryTransportSimulatorFixture("fenced-node"))
                 .stateMachine(store).commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.durable(ambiguousStorage, durable.snapshots()))
@@ -931,13 +931,13 @@ class HttpApiServerTest {
         corruptWal[corruptWal.length - 1] ^= 0x01;
         Files.write(walPath, corruptWal);
 
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         QraftStateStore store = new QraftStateStore();
         RaftStorageFactory.DurableStorage reopened = RaftStorageFactory
                 .createDurable(directory, true)
                 .get(10, TimeUnit.SECONDS);
         node = RaftNode.builder()
-                .runtime(runtime).nodeId("corrupt-node").clusterNodes(Set.of("corrupt-node"))
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks()).nodeId("corrupt-node").clusterNodes(Set.of("corrupt-node"))
                 .transport(new InMemoryTransportSimulatorFixture("corrupt-node"))
                 .stateMachine(store).commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.durable(reopened.wal(), reopened.snapshots()))
@@ -1418,11 +1418,11 @@ class HttpApiServerTest {
     }
 
     private void startSingleNode(RaftLogApplicator store) throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         InMemoryTransportSimulatorFixture.clearAllTransports();
         InMemoryTransportSimulatorFixture transport = new InMemoryTransportSimulatorFixture("catalog-node");
         node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("catalog-node")
                 .clusterNodes(Set.of("catalog-node"))
                 .transport(transport)
@@ -1460,14 +1460,14 @@ class HttpApiServerTest {
     }
 
     private GatedAppendStorageFixture startGatedHttpNode(Duration raftTimeout) throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         QraftStateStore store = new QraftStateStore();
         RaftStorageFactory.DurableStorage durable = RaftStorageFactory
                 .createDurable(directory, true)
                 .get(10, TimeUnit.SECONDS);
         GatedAppendStorageFixture gatedWal = new GatedAppendStorageFixture(durable.wal());
         node = RaftNode.builder()
-                .runtime(runtime).nodeId("pending-http-node").clusterNodes(Set.of("pending-http-node"))
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks()).nodeId("pending-http-node").clusterNodes(Set.of("pending-http-node"))
                 .transport(new InMemoryTransportSimulatorFixture("pending-http-node"))
                 .stateMachine(store).commandCodec(new ProtobufRaftCommandCodec())
                 .mode(RaftNodeMode.durable(gatedWal, durable.snapshots()))

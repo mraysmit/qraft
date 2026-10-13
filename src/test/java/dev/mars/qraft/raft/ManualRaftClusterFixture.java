@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.raft;
 
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.raftlog.storage.RaftStorage.LogEntryData;
@@ -61,12 +61,12 @@ public final class ManualRaftClusterFixture implements AutoCloseable {
     private static final int QUIET_PASSES = 3;
     private static final long WAIT_SECONDS = 10;
 
-    private final JavaRuntime runtime;
+    private final RaftExecutorsFixture runtime;
     private final AtomicLong clock = new AtomicLong();
     private final List<RaftNode> nodes = new ArrayList<>();
     private final Map<RaftNode, ManualRaftTimersHelper> timers = new ConcurrentHashMap<>();
 
-    public ManualRaftClusterFixture(JavaRuntime runtime) {
+    public ManualRaftClusterFixture(RaftExecutorsFixture runtime) {
         this.runtime = runtime;
     }
 
@@ -88,7 +88,7 @@ public final class ManualRaftClusterFixture implements AutoCloseable {
      */
     public RaftNode.Builder unconfiguredBuilder(String nodeId, Set<String> members, RaftTransport transport,
                                                QraftStateStore store, RaftNodeMode mode) {
-        return RaftNode.builder().runtime(runtime).nodeId(nodeId).clusterNodes(members).transport(transport)
+        return RaftNode.builder().stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks()).nodeId(nodeId).clusterNodes(members).transport(transport)
                 .stateMachine(store).commandCodec(new ProtobufRaftCommandCodec()).mode(mode)
                 .electionTimeout(ELECTION_TIMEOUT_MS).heartbeatInterval(HEARTBEAT_MS);
     }

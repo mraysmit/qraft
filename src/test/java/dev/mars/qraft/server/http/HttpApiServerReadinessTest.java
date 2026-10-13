@@ -24,7 +24,7 @@ import dev.mars.qraft.raft.InMemoryTransportSimulatorFixture;
 import dev.mars.qraft.raft.ManualRaftClusterFixture;
 import dev.mars.qraft.raft.RaftNode;
 import dev.mars.qraft.raft.RaftNodeMode;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.state.distributed.DistributedStateCommand;
@@ -65,7 +65,7 @@ class HttpApiServerReadinessTest {
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private final Map<String, RaftNode> nodes = new LinkedHashMap<>();
     private final List<HttpApiServer> servers = new ArrayList<>();
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private ManualRaftClusterFixture cluster;
 
     @AfterEach
@@ -151,7 +151,7 @@ class HttpApiServerReadinessTest {
 
     @Test
     void aNodeThatHasNotFinishedRecoveryIsNotReady() throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         cluster = new ManualRaftClusterFixture(runtime);
         QraftStateStore store = new QraftStateStore();
         RaftNode unstarted = node("a", Set.of("a"), store);
@@ -203,7 +203,7 @@ class HttpApiServerReadinessTest {
 
     private Map<String, RaftNode> startCluster(Set<String> members, Set<String> started) throws Exception {
         InMemoryTransportSimulatorFixture.clearAllTransports();
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         cluster = new ManualRaftClusterFixture(runtime);
         for (String id : members.stream().sorted().toList()) {
             if (!started.contains(id)) continue;

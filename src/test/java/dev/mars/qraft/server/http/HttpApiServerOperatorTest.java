@@ -26,7 +26,7 @@ import dev.mars.qraft.raft.MembershipService;
 import dev.mars.qraft.raft.RaftConfiguration;
 import dev.mars.qraft.raft.RaftNode;
 import dev.mars.qraft.raft.RaftNodeMode;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.server.ui.AdminUiConfig;
@@ -68,7 +68,7 @@ class HttpApiServerOperatorTest {
     private static final String TOKEN = "operator-secret-token";
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private ManualRaftClusterFixture cluster;
     private final Map<String, RaftNode> nodes = new HashMap<>();
     private RaftNode leader;
@@ -77,7 +77,7 @@ class HttpApiServerOperatorTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         cluster = new ManualRaftClusterFixture(runtime);
         InMemoryTransportSimulatorFixture.clearAllTransports();
         for (String name : MEMBERS) {

@@ -21,7 +21,7 @@ import dev.mars.qraft.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -62,7 +62,7 @@ class RaftNodeModelTest {
             0x4E4F_4445L, 0x5141_4654L, 0x5EED_1001L, 0x5EED_1002L
     };
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private RaftNode node;
 
     @AfterEach
@@ -141,12 +141,12 @@ class RaftNodeModelTest {
     }
 
     private Fixture startFollower() {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         TestRaftStorageFixture storage = new TestRaftStorageFixture();
         storage.open(null).join();
         QraftStateStore stateStore = new QraftStateStore();
         node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("follower")
                 .serverId(ManualRaftClusterFixture.serverIdOf("follower"))
                 .initialConfiguration(ManualRaftClusterFixture.configurationOf(MEMBERS))

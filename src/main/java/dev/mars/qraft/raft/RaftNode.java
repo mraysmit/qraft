@@ -32,7 +32,8 @@ import dev.mars.qraft.raft.api.SnapshotStore.SnapshotData;
 import dev.mars.qraft.raft.api.SnapshotStore.SnapshotPublicationException;
 import dev.mars.qraft.raft.api.CommandCodec;
 import com.google.protobuf.ByteString;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftStateLoop;
+import dev.mars.qraft.common.async.BlockingTaskExecutor;
 import dev.mars.qraft.common.concurrent.Completions;
 import dev.mars.qraft.common.concurrent.Deadlines;
 import org.slf4j.Logger;
@@ -65,7 +66,7 @@ import static java.util.Objects.requireNonNull;
 
 /**
  * Raft node implementation with durable WAL storage.
- * Raft state transitions run on the dedicated Java runtime state loop.
+ * Raft state transitions run on the dedicated Raft state loop.
  * 
  * <p>Implements the "Persist-before-response" rule for all state-changing
  * Raft operations:
@@ -91,7 +92,8 @@ public class RaftNode {
 
     // ========== NODE CONFIGURATION ==========
 
-    private final JavaRuntime runtime;
+    private final RaftStateLoop runtime;
+    private final BlockingTaskExecutor blockingTasks;
     private final String nodeId;
     /** Durable identity from the data directory; every Raft message this node sends names it. */
     private final String serverId;
@@ -229,7 +231,7 @@ public class RaftNode {
      * <pre>{@code
      * // Minimal (volatile, default timing)
      * RaftNode node = RaftNode.builder()
-     *     .runtime(runtime)
+     *     .stateLoop(runtime).blockingTasks(blockingTasks)
      *     .nodeId("node1")
      *     .clusterNodes(cluster)
      *     .transport(transport)
@@ -239,7 +241,7 @@ public class RaftNode {
      *
      * // Production (durable, custom timing, snapshots)
      * RaftNode node = RaftNode.builder()
-     *     .runtime(runtime)
+     *     .stateLoop(runtime).blockingTasks(blockingTasks)
      *     .nodeId("node1")
      *     .clusterNodes(cluster)
      *     .transport(transport)
@@ -269,7 +271,8 @@ public class RaftNode {
      */
     public static final class Builder {
         // Required (validated at build())
-        private JavaRuntime runtime;
+        private RaftStateLoop runtime;
+        private BlockingTaskExecutor blockingTasks;
         private String nodeId;
         private Set<String> clusterNodes;
         private RaftTransport transport;
@@ -294,8 +297,14 @@ public class RaftNode {
 
         private Builder() {}
 
-        /** The Java runtime that owns the node state loop (required). */
-        public Builder runtime(JavaRuntime runtime) { this.runtime = runtime; return this; }
+        /** The executor that owns the node state loop (required). */
+        public Builder stateLoop(RaftStateLoop runtime) { this.runtime = runtime; return this; }
+
+        /** Executor for blocking resource operations, owned and closed by the caller (required). */
+        public Builder blockingTasks(BlockingTaskExecutor blockingTasks) {
+            this.blockingTasks = blockingTasks;
+            return this;
+        }
 
         /** Unique node identifier (required). */
         public Builder nodeId(String nodeId) { this.nodeId = nodeId; return this; }
@@ -399,7 +408,8 @@ public class RaftNode {
          * @throws IllegalStateException if any required parameter is missing
          */
         public RaftNode build() {
-            if (runtime == null) throw new IllegalStateException("runtime is required");
+            if (runtime == null) throw new IllegalStateException("stateLoop is required");
+            if (blockingTasks == null) throw new IllegalStateException("blockingTasks is required");
             if (nodeId == null) throw new IllegalStateException("nodeId is required");
             if (clusterNodes == null) throw new IllegalStateException("clusterNodes is required");
             // The list is where a server learns its own address, which it gives when it bootstraps or joins.
@@ -420,7 +430,7 @@ public class RaftNode {
             }
             Map<String, String> listed = new TreeMap<>();
             for (String name : clusterNodes) listed.put(name, addresses.getOrDefault(name, name));
-            return new RaftNode(runtime, nodeId, resolvedServerId, initialConfiguration, listed,
+            return new RaftNode(runtime, blockingTasks, nodeId, resolvedServerId, initialConfiguration, listed,
                     clusterNodes, transport, stateMachine,
                     commandCodec, mode, electionTimeoutMs, heartbeatIntervalMs, snap,
                     snapshotThreshold, snapshotCheckIntervalMs, logHardLimit, promotionStabilizationMs,
@@ -430,7 +440,7 @@ public class RaftNode {
 
     // ========== CONSTRUCTOR (private) ==========
 
-    private RaftNode(JavaRuntime runtime, String nodeId, String serverId,
+    private RaftNode(RaftStateLoop runtime, BlockingTaskExecutor blockingTasks, String nodeId, String serverId,
             RaftConfiguration initialConfiguration, Map<String, String> listedServers, Set<String> clusterNodes,
             RaftTransport transport,
             RaftLogApplicator stateMachine, CommandCodec<RaftCommand> commandCodec,
@@ -440,6 +450,7 @@ public class RaftNode {
             RaftTimerScheduler configuredTimerScheduler,
             int transitionQueueCapacity) {
         this.runtime = runtime;
+        this.blockingTasks = blockingTasks;
         this.nodeId = nodeId;
         this.serverId = serverId;
         this.initialConfiguration = initialConfiguration;
@@ -686,7 +697,7 @@ public class RaftNode {
     public CompletableFuture<DescribeResponse> describe() {
         CompletableFuture<DescribeResponse> description = new CompletableFuture<>();
         try {
-            runtime.runOnContext(ignored -> description.complete(DescribeResponse.newBuilder()
+            runtime.execute(() -> description.complete(DescribeResponse.newBuilder()
                     .setServerId(serverId)
                     .setName(nodeId)
                     .setAddress(listedServers.get(nodeId))
@@ -1241,7 +1252,7 @@ public class RaftNode {
     public CompletableFuture<RaftStatus> status() {
         CompletableFuture<RaftStatus> status = new CompletableFuture<>();
         try {
-            runtime.runOnContext(ignored -> status.complete(new RaftStatus(nodeId, serverId, state, currentTerm,
+            runtime.execute(() -> status.complete(new RaftStatus(nodeId, serverId, state, currentTerm,
                     currentLeaderId, commitIndex, lastApplied, lastLogIndex(), snapshotLastIndex, isFenced(),
                     running, isRemoved())));
         } catch (java.util.concurrent.RejectedExecutionException stopped) {
@@ -1457,7 +1468,7 @@ public class RaftNode {
 
     /**
      * Registers a listener that is notified whenever this node's Raft state changes.
-     * <p>Listeners are invoked on the node's Java runtime state-loop context, so
+     * <p>Listeners are invoked on the node's Raft state-loop context, so
      * listeners observe serialized Raft state changes.
      *
      * @param listener handler that receives the new {@link State}
@@ -1994,8 +2005,8 @@ public class RaftNode {
      * @param message the incoming RaftMessage
      */
     private void handleMessage(RaftMessage message) {
-        // Ensure we are on the node's Java runtime state-loop context.
-        if (JavaRuntime.currentContext() != runtime) {
+        // Ensure we are on the node's Raft state-loop context.
+        if (RaftStateLoop.currentContext() != runtime) {
             runOnContext(v -> handleMessage(message));
             return;
         }
@@ -3751,7 +3762,7 @@ public class RaftNode {
     // ========== SERIALIZATION ==========
 
     private CompletableFuture<Void> closeNodeResources() {
-        CompletableFuture<Throwable> transportClose = runtime.executeBlocking(() -> {
+        CompletableFuture<Throwable> transportClose = blockingTasks.execute(() -> {
             try {
                 transport.stop();
                 return null;
@@ -3774,7 +3785,7 @@ public class RaftNode {
     private CompletableFuture<Throwable> closeSnapshots() {
         SnapshotStore snapshots = persistence.snapshotStoreForClose();
         if (snapshots == null) return CompletableFuture.completedFuture(null);
-        return runtime.executeBlocking(snapshots::closeAsync)
+        return blockingTasks.execute(snapshots::closeAsync)
                 .thenCompose(stage -> stage)
                 .thenApply(ignored -> (Throwable) null)
                 .exceptionallyCompose(Completions.unwrapping(error -> CompletableFuture.completedFuture(error)));
@@ -3785,7 +3796,7 @@ public class RaftNode {
         if (wal == null || persistence.sharesCloseTarget()) {
             return CompletableFuture.completedFuture(null);
         }
-        return runtime.executeBlocking(wal::closeAsync)
+        return blockingTasks.execute(wal::closeAsync)
                 .thenCompose(stage -> stage)
                 .thenApply(ignored -> (Throwable) null)
                 .exceptionallyCompose(Completions.unwrapping(error -> CompletableFuture.completedFuture(error)));
@@ -3808,7 +3819,7 @@ public class RaftNode {
     }
 
     private void runOnContext(java.util.function.Consumer<Void> action) {
-        runtime.runOnContext(ignored -> withLoggingContext(() -> action.accept(null)));
+        runtime.execute(() -> withLoggingContext(() -> action.accept(null)));
     }
 
     /** Runs {@code action} on the state loop with the value of {@code future}, or with the failure itself. */
@@ -3817,7 +3828,7 @@ public class RaftNode {
             java.util.function.BiConsumer<? super T, Throwable> action) {
         future.whenComplete((value, wrapped) -> {
             Throwable failure = Completions.unwrap(wrapped);
-            if (JavaRuntime.currentContext() == runtime) {
+            if (RaftStateLoop.currentContext() == runtime) {
                 action.accept(value, failure);
             } else {
                 runOnContext(ignored -> action.accept(value, failure));
@@ -3861,7 +3872,7 @@ public class RaftNode {
             CompletableFuture<?> rejectionTarget,
             Map<String, String> capturedMdc,
             io.opentelemetry.context.Context capturedTrace) {
-        if (JavaRuntime.currentContext() == runtime) {
+        if (RaftStateLoop.currentContext() == runtime) {
             runWithCapturedContext(action, capturedMdc, capturedTrace);
             return;
         }

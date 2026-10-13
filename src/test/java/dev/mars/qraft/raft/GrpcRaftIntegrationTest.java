@@ -25,7 +25,7 @@ import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import dev.mars.qraft.raft.grpc.JoinRequest;
 import dev.mars.qraft.raft.grpc.MembershipResponse;
 import dev.mars.qraft.raft.grpc.RemoveServerRequest;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -70,7 +70,7 @@ class GrpcRaftIntegrationTest {
     private static final long HEARTBEAT_MS = 200;
     private static final String OPERATOR_TOKEN = "operator-secret";
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private final java.util.concurrent.atomic.AtomicLong clock = new java.util.concurrent.atomic.AtomicLong();
     private final Map<String, String> addresses = new ConcurrentHashMap<>();
     private final List<Member> members = new ArrayList<>();
@@ -87,7 +87,7 @@ class GrpcRaftIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
     }
 
     @AfterEach
@@ -302,16 +302,16 @@ class GrpcRaftIntegrationTest {
         Set<String> memberIds = Set.of(ids);
         List<Member> cluster = new ArrayList<>();
         for (String id : ids) {
-            GrpcRaftTransport transport = new GrpcRaftTransport(runtime, id, addresses);
+            GrpcRaftTransport transport = new GrpcRaftTransport(runtime.stateLoop(), id, addresses);
             ManualRaftTimersHelper timers = new ManualRaftTimersHelper(runtime, clock);
             QraftStateStore state = new QraftStateStore();
-            RaftNode node = RaftNode.builder().runtime(runtime).nodeId(id).clusterNodes(memberIds)
+            RaftNode node = RaftNode.builder().stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks()).nodeId(id).clusterNodes(memberIds)
                     .serverId(ManualRaftClusterFixture.serverIdOf(id))
                     .transport(transport).stateMachine(state).commandCodec(new ProtobufRaftCommandCodec())
                     .mode(RaftNodeMode.volatileMode()).snapshotEnabled(false)
                     .electionTimeout(1_000).heartbeatInterval(HEARTBEAT_MS).timerScheduler(timers)
                     .build();
-            GrpcRaftServer server = new GrpcRaftServer(runtime, 0, node,
+            GrpcRaftServer server = new GrpcRaftServer(runtime.blockingTasks(), 0, node,
                     new MembershipService(node, transport, OPERATOR_TOKEN));
             server.start().get(10, TimeUnit.SECONDS);
             addresses.put(id, "localhost:" + server.port());

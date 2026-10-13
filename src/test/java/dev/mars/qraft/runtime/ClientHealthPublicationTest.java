@@ -34,7 +34,7 @@ import dev.mars.qraft.state.catalog.ServiceInstanceId;
 import dev.mars.qraft.server.http.HttpApiServer;
 import dev.mars.qraft.raft.RaftNode;
 import dev.mars.qraft.raft.RaftNodeMode;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
 import org.junit.jupiter.api.AfterEach;
@@ -251,13 +251,13 @@ class ClientHealthPublicationTest {
     }
 
     /** One single-node server with its own runtime, so it can be stopped and restarted on a port. */
-    private record Server(JavaRuntime runtime, RaftNode node, QraftStateStore store, HttpApiServer server)
+    private record Server(RaftExecutorsFixture runtime, RaftNode node, QraftStateStore store, HttpApiServer server)
             implements AutoCloseable {
 
         static Server start(int port) throws Exception {
-            JavaRuntime runtime = JavaRuntime.create();
+            RaftExecutorsFixture runtime = RaftExecutorsFixture.create();
             QraftStateStore store = new QraftStateStore();
-            RaftNode node = RaftNode.builder().runtime(runtime).nodeId("health-server")
+            RaftNode node = RaftNode.builder().stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks()).nodeId("health-server")
                     .clusterNodes(Set.of("health-server")).transport(new PeerlessTransportFixture())
                     .stateMachine(store).commandCodec(new ProtobufRaftCommandCodec())
                     .mode(RaftNodeMode.volatileMode()).electionTimeout(25).heartbeatInterval(10_000).build();

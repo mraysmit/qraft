@@ -37,14 +37,14 @@ import static java.util.Objects.requireNonNull;
  * <pre>{@code
  * // Volatile mode (tests)
  * RaftNode.builder()
- *         .runtime(runtime).nodeId(id).clusterNodes(nodes)
+ *         .stateLoop(stateLoop).blockingTasks(blockingTasks).nodeId(id).clusterNodes(nodes)
  *         .transport(transport).stateMachine(sm)
  *         .mode(RaftNodeMode.volatileMode())
  *         .electionTimeout(1000).heartbeatInterval(200).build();
  *
  * // Durable mode (production)
  * RaftNode.builder()
- *         .runtime(runtime).nodeId(id).clusterNodes(nodes)
+ *         .stateLoop(stateLoop).blockingTasks(blockingTasks).nodeId(id).clusterNodes(nodes)
  *         .transport(transport).stateMachine(sm)
  *         .mode(RaftNodeMode.durable(wal, snapshots))
  *         .electionTimeout(1000).heartbeatInterval(200).build();

@@ -25,7 +25,8 @@ import dev.mars.qraft.server.health.ExpiryScheduler;
 import dev.mars.qraft.server.health.LeaderHealthExpiry;
 import dev.mars.qraft.server.health.NodeExpiryPolicy;
 import dev.mars.qraft.server.lifecycle.ShutdownCoordinator;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftStateLoop;
+import dev.mars.qraft.common.async.BlockingTaskExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import dev.mars.qraft.raft.RaftNode;
@@ -71,7 +72,8 @@ public class QraftServerService {
     private static final long HEALTH_EXPIRY_PROPOSAL_TIMEOUT_MS = 5_000;
     private static final long BOOTSTRAP_RETRY_MS = 1_000;
 
-    private final JavaRuntime runtime;
+    private final RaftStateLoop runtime;
+    private final BlockingTaskExecutor blockingTasks;
     private final AppConfig config;
 
     private RaftTransport transport;
@@ -86,8 +88,9 @@ public class QraftServerService {
     private volatile Optional<Long> bootstrapTimer = Optional.empty();
 
     /** A server that runs on {@code runtime} with the configuration it is given; it reads no other. */
-    public QraftServerService(JavaRuntime runtime, AppConfig config) {
-        this.runtime = runtime;
+    public QraftServerService(RaftStateLoop runtime, BlockingTaskExecutor blockingTasks, AppConfig config) {
+        this.runtime = java.util.Objects.requireNonNull(runtime, "stateLoop");
+        this.blockingTasks = java.util.Objects.requireNonNull(blockingTasks, "blockingTasks");
         this.config = java.util.Objects.requireNonNull(config, "config");
     }
 
@@ -168,7 +171,8 @@ public class QraftServerService {
 
             // Use the builder with storage and snapshot configuration
             RaftNode node = RaftNode.builder()
-                    .runtime(runtime)
+                    .stateLoop(runtime)
+                    .blockingTasks(blockingTasks)
                     .nodeId(nodeId)
                     .serverId(serverId)
                     .clusterNodes(clusterNodeIds)
@@ -195,11 +199,11 @@ public class QraftServerService {
             if (config.getOperatorToken().isEmpty()) {
                 logger.info("No server.operator.token is configured: Raft operator removals are refused");
             }
-            GrpcRaftServer internalRaftServer = new GrpcRaftServer(runtime, raftPort, node, membership);
+            GrpcRaftServer internalRaftServer = new GrpcRaftServer(blockingTasks, raftPort, node, membership);
             this.raftGrpcServer = Optional.of(internalRaftServer);
 
             DistributedStateGrpcService distributedStateService = new DistributedStateGrpcService(node, stateMachine);
-            GrpcServiceServer externalApiServer = new GrpcServiceServer(runtime, apiGrpcPort, distributedStateService);
+            GrpcServiceServer externalApiServer = new GrpcServiceServer(blockingTasks, apiGrpcPort, distributedStateService);
             this.apiGrpcServer = Optional.of(externalApiServer);
             HttpApiServer healthServer = new HttpApiServer(config.getHttpPort(), node, stateMachine, Clock.systemUTC(),
                     config.getAdminUi(), UiAssets.forConfig(config.getAdminUi()), HttpApiServer.DEFAULT_RAFT_TIMEOUT,

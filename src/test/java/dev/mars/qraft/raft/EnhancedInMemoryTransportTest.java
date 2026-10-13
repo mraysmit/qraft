@@ -18,7 +18,7 @@ package dev.mars.qraft.raft;
 
 import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.state.distributed.DistributedStateCommand;
@@ -58,7 +58,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @since 2026-01-20
  */
 class EnhancedInMemoryTransportTest {
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private ManualRaftClusterFixture cluster;
     private final Map<String, RaftNode> nodes = new LinkedHashMap<>();
     private final Map<String, InMemoryTransportSimulatorFixture> transports = new LinkedHashMap<>();
@@ -66,7 +66,7 @@ class EnhancedInMemoryTransportTest {
 
     @BeforeEach
     void setUp() {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         cluster = new ManualRaftClusterFixture(runtime);
         InMemoryTransportSimulatorFixture.clearAllTransports();
     }

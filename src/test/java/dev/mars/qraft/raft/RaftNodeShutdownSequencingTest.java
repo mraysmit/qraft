@@ -22,7 +22,8 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
+import dev.mars.qraft.common.async.RaftStateLoop;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -69,7 +70,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.1
  */
 class RaftNodeShutdownSequencingTest {
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private ShutdownStorageFixture storage;
     private ShutdownTransportFixture transport;
     private RaftNode node;
@@ -77,13 +78,13 @@ class RaftNodeShutdownSequencingTest {
 
     @BeforeEach
     void setUp() {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         closeEvents = new CopyOnWriteArrayList<>();
         storage = new ShutdownStorageFixture(closeEvents);
         storage.open(null).join();
         transport = new ShutdownTransportFixture(closeEvents);
         node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("node-1")
                 .clusterNodes(Set.of("node-1"))
                 .transport(transport)
@@ -154,7 +155,7 @@ class RaftNodeShutdownSequencingTest {
         ShutdownTransportFixture silentPeers = new ShutdownTransportFixture(closeEvents);
         silentPeers.holdAppendResponses();
         Set<String> members = Set.of("leader", "peer-2", "peer-3");
-        RaftNode leader = RaftNode.builder().runtime(runtime).nodeId("leader")
+        RaftNode leader = RaftNode.builder().stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks()).nodeId("leader")
                 .serverId(ManualRaftClusterFixture.serverIdOf("leader"))
                 .initialConfiguration(ManualRaftClusterFixture.configurationOf(members))
                 .clusterNodes(members).transport(silentPeers)
@@ -388,7 +389,7 @@ class RaftNodeShutdownSequencingTest {
 
     private RaftNode buildNode(Set<String> members) {
         return RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("node-1")
                 .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
                 .initialConfiguration(ManualRaftClusterFixture.configurationOf(members))
@@ -434,7 +435,7 @@ class RaftNodeShutdownSequencingTest {
         private volatile CompletableFuture<Void> appendHeld;
         private volatile RuntimeException stopFailure;
         private volatile RuntimeException startFailure;
-        private volatile JavaRuntime closeContext;
+        private volatile RaftStateLoop closeContext;
 
         private ShutdownTransportFixture(List<String> closeEvents) {
             this.closeEvents = closeEvents;
@@ -468,7 +469,7 @@ class RaftNodeShutdownSequencingTest {
             if (startFailure != null) throw startFailure;
         }
         @Override public void stop() {
-            closeContext = JavaRuntime.currentContext();
+            closeContext = RaftStateLoop.currentContext();
             closeEvents.add("transport");
             stopCount.incrementAndGet();
             if (stopFailure != null) throw stopFailure;
@@ -524,7 +525,7 @@ class RaftNodeShutdownSequencingTest {
         private volatile CompletableFuture<Void> prefixCompactionEntered;
         private volatile boolean closed;
         private volatile RuntimeException closeFailure;
-        private volatile JavaRuntime closeContext;
+        private volatile RaftStateLoop closeContext;
 
         private ShutdownStorageFixture(List<String> closeEvents) {
             this.closeEvents = closeEvents;
@@ -683,7 +684,7 @@ class RaftNodeShutdownSequencingTest {
 
         @Override
         public void close() {
-            closeContext = JavaRuntime.currentContext();
+            closeContext = RaftStateLoop.currentContext();
             closeEvents.add("storage");
             closeCount.incrementAndGet();
             closed = true;

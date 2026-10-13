@@ -19,7 +19,7 @@ package dev.mars.qraft.raft;
 import dev.mars.qraft.state.catalog.ServiceKey;
 import dev.mars.qraft.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.raft.grpc.AppendEntriesResponse;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -55,7 +55,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RaftNodeAppliesWhatItLogsTest {
     private final Map<String, RaftNode> nodes = new LinkedHashMap<>();
     private final Map<String, QraftStateStore> stores = new LinkedHashMap<>();
-    private final JavaRuntime runtime = JavaRuntime.create();
+    private final RaftExecutorsFixture runtime = RaftExecutorsFixture.create();
     private final ManualRaftClusterFixture cluster = new ManualRaftClusterFixture(runtime);
 
     @AfterEach

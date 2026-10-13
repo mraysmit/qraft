@@ -22,7 +22,7 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -61,7 +61,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RaftNodeTimerSequencingTest {
     private static final Set<String> MEMBERS = Set.of("node-1", "peer-1");
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private ManualTimerSchedulerHelper timers;
     private RaftNode node;
 
@@ -75,7 +75,7 @@ class RaftNodeTimerSequencingTest {
 
     @Test
     void expiredElectionTimerCannotStartNewTermAfterVoteResetsIt() throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         timers = new ManualTimerSchedulerHelper(runtime);
         GatedTimerStorageFixture storage = new GatedTimerStorageFixture();
         storage.open(null).join();
@@ -106,7 +106,7 @@ class RaftNodeTimerSequencingTest {
 
     @Test
     void heartbeatTimerCannotSendWhileWalTransitionIsBlocked() throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         timers = new ManualTimerSchedulerHelper(runtime);
         GatedTimerStorageFixture storage = new GatedTimerStorageFixture();
         storage.open(null).join();
@@ -134,7 +134,7 @@ class RaftNodeTimerSequencingTest {
 
     @Test
     void aScheduledSnapshotQueuedBehindAStepDownWaitsForItAndCompactsOnlyAppliedEntries() throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         timers = new ManualTimerSchedulerHelper(runtime);
         GatedTimerStorageFixture storage = new GatedTimerStorageFixture();
         storage.open(null).join();
@@ -178,11 +178,11 @@ class RaftNodeTimerSequencingTest {
 
     @Test
     void aVoteAppliedWhileStoppingDoesNotReArmTheElectionTimer() throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         timers = new ManualTimerSchedulerHelper(runtime);
         GatedTimerStorageFixture storage = new GatedTimerStorageFixture();
         storage.open(null).join();
-        node = RaftNode.builder().runtime(runtime).nodeId("node-1").clusterNodes(MEMBERS)
+        node = RaftNode.builder().stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks()).nodeId("node-1").clusterNodes(MEMBERS)
                 .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
                 .initialConfiguration(ManualRaftClusterFixture.configurationOf(MEMBERS))
                 .transport(new AutoTransportFixture(false)).stateMachine(new QraftStateStore())
@@ -208,13 +208,13 @@ class RaftNodeTimerSequencingTest {
 
     @Test
     void queueRejectedElectionRearmsTheElectionTimer() throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         timers = new ManualTimerSchedulerHelper(runtime);
         GatedTimerStorageFixture storage = new GatedTimerStorageFixture();
         storage.open(null).join();
         storage.blockNextMetadataUpdate();
         node = RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("node-1")
                 .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
                 .initialConfiguration(ManualRaftClusterFixture.configurationOf(MEMBERS))
@@ -253,7 +253,7 @@ class RaftNodeTimerSequencingTest {
             long electionTimeout, long heartbeatInterval,
             boolean snapshotEnabled, long snapshotInterval) {
         return RaftNode.builder()
-                .runtime(runtime)
+                .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("node-1")
                 .serverId(ManualRaftClusterFixture.serverIdOf("node-1"))
                 .initialConfiguration(ManualRaftClusterFixture.configurationOf(members))
@@ -327,12 +327,12 @@ class RaftNodeTimerSequencingTest {
 
     /** Test timer helper that records timers and lets the test choose when callbacks run. */
     private static final class ManualTimerSchedulerHelper implements RaftTimerScheduler {
-        private final JavaRuntime runtime;
+        private final RaftExecutorsFixture runtime;
         private final AtomicLong ids = new AtomicLong();
         private final Map<Long, ScheduledAction> oneShots = new ConcurrentHashMap<>();
         private final Map<Long, ScheduledAction> periodics = new ConcurrentHashMap<>();
 
-        private ManualTimerSchedulerHelper(JavaRuntime runtime) { this.runtime = runtime; }
+        private ManualTimerSchedulerHelper(RaftExecutorsFixture runtime) { this.runtime = runtime; }
 
         @Override
         public long setTimer(long delayMs, Consumer<Long> action) {

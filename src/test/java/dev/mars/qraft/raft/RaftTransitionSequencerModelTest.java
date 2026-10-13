@@ -16,7 +16,8 @@
 
 package dev.mars.qraft.raft;
 
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
+import dev.mars.qraft.common.async.RaftStateLoop;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,11 +49,11 @@ class RaftTransitionSequencerModelTest {
             0x5141_4654L, 0x5EED_0001L, 0x5EED_0002L, 0x5EED_0003L
     };
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
 
     @BeforeEach
     void setUp() {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
     }
 
     @AfterEach
@@ -88,7 +89,7 @@ class RaftTransitionSequencerModelTest {
             expectedAfter.add(reference);
         }
 
-        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime, 128);
+        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime.stateLoop(), 128);
         AtomicReference<ModelState> actual = new AtomicReference<>(ModelState.initial());
         List<String> history = new ArrayList<>();
         List<CompletableFuture<ModelState>> accepted = new ArrayList<>();
@@ -100,7 +101,7 @@ class RaftTransitionSequencerModelTest {
                     operation.type().name().toLowerCase() + "-" + index,
                     RaftTransitionSequencer.FailurePolicy.FENCE,
                     () -> {
-                        assertSame(runtime, JavaRuntime.currentContext(), "seed=" + seed);
+                        assertSame(runtime.stateLoop(), RaftStateLoop.currentContext(), "seed=" + seed);
                         assertEquals(expectedBefore.get(position), actual.get(),
                                 "stale preparation; seed=" + seed + ", operation=" + position);
                         history.add("prepare:" + position + ":" + operation.type());
@@ -109,7 +110,7 @@ class RaftTransitionSequencerModelTest {
                                 () -> executeSystemOperation(operation, captured)).toCompletableFuture();
                     },
                     persisted -> {
-                        assertSame(runtime, JavaRuntime.currentContext(), "seed=" + seed);
+                        assertSame(runtime.stateLoop(), RaftStateLoop.currentContext(), "seed=" + seed);
                         assertEquals(expectedAfter.get(position), persisted,
                                 "persistence plan diverged; seed=" + seed + ", operation=" + position);
                         actual.set(persisted);

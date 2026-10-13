@@ -16,7 +16,7 @@
 
 package dev.mars.qraft.server.support;
 
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.AfterTestExecutionCallback;
@@ -27,7 +27,7 @@ import org.junit.jupiter.api.extension.ParameterResolver;
 import java.util.concurrent.TimeUnit;
 
 /**
- * JUnit test support extension that injects a {@link JavaRuntime} and {@link JavaTestContextHelper}, awaits test
+ * JUnit test support extension that injects a {@link RaftExecutorsFixture} and {@link JavaTestContextHelper}, awaits test
  * completion, and closes the runtime after each test, waiting for it to stop. A runtime injected into a
  * class-level method is closed after the class.
  *
@@ -41,13 +41,13 @@ public final class JavaRuntimeExtensionHelper
 
     @Override public boolean supportsParameter(ParameterContext parameter, ExtensionContext context) {
         Class<?> type = parameter.getParameter().getType();
-        return type == JavaRuntime.class || type == JavaTestContextHelper.class;
+        return type == RaftExecutorsFixture.class || type == JavaTestContextHelper.class;
     }
 
     @Override public Object resolveParameter(ParameterContext parameter, ExtensionContext context) {
         ExtensionContext.Store store = context.getStore(NS);
-        if (parameter.getParameter().getType() == JavaRuntime.class) {
-            return store.getOrComputeIfAbsent("runtime", key -> JavaRuntime.create(), JavaRuntime.class);
+        if (parameter.getParameter().getType() == RaftExecutorsFixture.class) {
+            return store.getOrComputeIfAbsent("runtime", key -> RaftExecutorsFixture.create(), RaftExecutorsFixture.class);
         }
         return store.getOrComputeIfAbsent("context", key -> new JavaTestContextHelper(), JavaTestContextHelper.class);
     }
@@ -58,15 +58,15 @@ public final class JavaRuntimeExtensionHelper
     }
 
     @Override public void afterEach(ExtensionContext context) throws Exception {
-        close(context.getStore(NS).remove("runtime", JavaRuntime.class));
+        close(context.getStore(NS).remove("runtime", RaftExecutorsFixture.class));
     }
 
     /** Closes a runtime a class-level method such as {@code @BeforeAll} resolved, which no test owns. */
     @Override public void afterAll(ExtensionContext context) throws Exception {
-        close(context.getStore(NS).remove("runtime", JavaRuntime.class));
+        close(context.getStore(NS).remove("runtime", RaftExecutorsFixture.class));
     }
 
-    private static void close(JavaRuntime runtime) throws Exception {
+    private static void close(RaftExecutorsFixture runtime) throws Exception {
         if (runtime != null) runtime.close().get(10, TimeUnit.SECONDS);
     }
 }

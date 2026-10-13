@@ -27,7 +27,7 @@ import dev.mars.qraft.raft.grpc.VoteResponse;
 
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
-import dev.mars.qraft.common.async.JavaRuntime;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import org.junit.jupiter.api.AfterEach;
@@ -81,7 +81,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Execution(ExecutionMode.SAME_THREAD)
 class GrpcRaftTransportTest {
 
-    private JavaRuntime runtime;
+    private RaftExecutorsFixture runtime;
     private ManualRaftClusterFixture cluster;
     private GrpcRaftServer targetServer;
     private RaftNode targetNode;
@@ -91,13 +91,13 @@ class GrpcRaftTransportTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        runtime = JavaRuntime.create();
+        runtime = RaftExecutorsFixture.create();
         cluster = new ManualRaftClusterFixture(runtime);
         // On manual timers the target never elects itself, so it stays a follower in term 0 with no vote until a
         // request changes that, and every decision it returns is the same on every run.
         targetNode = node("target");
 
-        targetServer = new GrpcRaftServer(runtime, 0, targetNode);
+        targetServer = new GrpcRaftServer(runtime.blockingTasks(), 0, targetNode);
         targetServer.start().get(10, TimeUnit.SECONDS);
         targetPort = targetServer.port();
     }
@@ -135,7 +135,7 @@ class GrpcRaftTransportTest {
     }
 
     private GrpcRaftTransport startedTransport(Map<String, String> peers) {
-        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime, "client", peers));
+        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime.stateLoop(), "client", peers));
         transport.start(msg -> {});
         return transport;
     }
@@ -209,7 +209,7 @@ class GrpcRaftTransportTest {
         Map<String, String> cluster = new HashMap<>();
         cluster.put("dead", "localhost:" + deadPort);
 
-        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime, "client", cluster));
+        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime.stateLoop(), "client", cluster));
         transport.start(msg -> {});
 
         VoteRequest request = VoteRequest.newBuilder()
@@ -233,7 +233,7 @@ class GrpcRaftTransportTest {
         Map<String, String> cluster = new HashMap<>();
         cluster.put("target", "localhost:" + targetPort);
 
-        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime, "client", cluster));
+        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime.stateLoop(), "client", cluster));
         transport.start(msg -> {});
 
         // First request should work
@@ -262,7 +262,7 @@ class GrpcRaftTransportTest {
         Map<String, String> cluster = new HashMap<>();
         cluster.put("known", "localhost:" + targetPort);
 
-        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime, "client", cluster));
+        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime.stateLoop(), "client", cluster));
         transport.start(msg -> {});
 
         VoteRequest request = VoteRequest.newBuilder()
@@ -286,7 +286,7 @@ class GrpcRaftTransportTest {
         Map<String, String> cluster = new HashMap<>();
         cluster.put("target", "localhost:" + targetPort);
 
-        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime, "client", cluster));
+        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime.stateLoop(), "client", cluster));
         transport.start(msg -> {});
 
         int numRequests = 50;
@@ -336,7 +336,7 @@ class GrpcRaftTransportTest {
         Map<String, String> cluster = new HashMap<>();
         cluster.put("target", "localhost:" + targetPort);
 
-        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime, "client", cluster));
+        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime.stateLoop(), "client", cluster));
         transport.start(msg -> {});
 
         int numRequests = 100;
@@ -395,7 +395,7 @@ class GrpcRaftTransportTest {
     @DisplayName("Each request goes to the peer it names")
     void eachRequestGoesToThePeerItNames() throws Exception {
         RaftNode secondNode = node("target2");
-        GrpcRaftServer secondServer = new GrpcRaftServer(runtime, 0, secondNode);
+        GrpcRaftServer secondServer = new GrpcRaftServer(runtime.blockingTasks(), 0, secondNode);
         try {
             secondServer.start().get(10, TimeUnit.SECONDS);
             GrpcRaftTransport transport = startedTransport(Map.of(
@@ -419,7 +419,7 @@ class GrpcRaftTransportTest {
     @DisplayName("A server known only from the configuration is reached, and redialled when its address changes")
     void aConfiguredServerIsReachedAtItsConfiguredAddressAndRedialledWhenItChanges() throws Exception {
         RaftNode secondNode = node("target2");
-        GrpcRaftServer secondServer = new GrpcRaftServer(runtime, 0, secondNode);
+        GrpcRaftServer secondServer = new GrpcRaftServer(runtime.blockingTasks(), 0, secondNode);
         try {
             secondServer.start().get(10, TimeUnit.SECONDS);
             GrpcRaftTransport transport = startedTransport(Map.of());
@@ -459,7 +459,7 @@ class GrpcRaftTransportTest {
         Map<String, String> cluster = new HashMap<>();
         cluster.put("target", "localhost:" + targetPort);
 
-        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime, "client", cluster));
+        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime.stateLoop(), "client", cluster));
         transport.start(msg -> {});
 
         // A real encoded command about 100 KB long. The term is beyond any the single-member target can
@@ -489,7 +489,7 @@ class GrpcRaftTransportTest {
         Map<String, String> cluster = new HashMap<>();
         cluster.put("target", "localhost:" + targetPort);
 
-        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime, "client", cluster));
+        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime.stateLoop(), "client", cluster));
         transport.start(msg -> {});
 
         // The batch follows the bootstrap configuration at index 1 in term 0.
@@ -516,7 +516,7 @@ class GrpcRaftTransportTest {
     @Test
     @DisplayName("After stop, however often repeated, a send fails at once and never reaches the peer")
     void aSendAfterStopFailsAtOnceAndNeverReachesThePeer() throws Exception {
-        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime, "client",
+        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime.stateLoop(), "client",
                 Map.of("target", "localhost:" + targetPort)));
         transport.start(msg -> {});
         assertTrue(decided(transport.sendVoteRequest("target", vote(1, "client"))).getVoteGranted());
@@ -597,7 +597,7 @@ class GrpcRaftTransportTest {
         cluster.put("target", "localhost:" + targetPort);
 
         // Test with custom pool size
-        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime, "client", cluster, 5, 500));
+        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime.stateLoop(), "client", cluster, 5, 500));
         assertEquals(5, transport.getPoolSize(), "Pool size should be configurable");
         transport.stop();
     }
@@ -608,7 +608,7 @@ class GrpcRaftTransportTest {
         Map<String, String> cluster = new HashMap<>();
         cluster.put("target", "localhost:" + targetPort);
 
-        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime, "client", cluster));
+        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime.stateLoop(), "client", cluster));
         assertEquals(10, transport.getPoolSize(), "Default pool size should be 10");
         transport.stop();
     }
