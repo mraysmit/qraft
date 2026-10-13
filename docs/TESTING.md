@@ -124,6 +124,13 @@ completion dispatch, timer cleanup and MDC/OpenTelemetry propagation. Protocol a
 recovery tests borrow both resources from `RaftExecutorsFixture`, which closes blocking
 work before its completion loop. Production ownership belongs to the server composition root.
 
+`ShutdownCoordinatorTest` owns only a `RaftStateLoop`, created in `@BeforeEach`
+and stopped in `@AfterEach`. It awaits shutdown futures with bounded `get` calls
+and asserts their results or failure causes on the test thread. An incomplete
+future holds the drain phase while the test checks that work is refused; timeout
+tests use incomplete hook futures rather than artificial delays. State-loop
+teardown is awaited before the intentional-error audit closes the test's scope.
+
 | Contract | Regression coverage |
 |---|---|
 | Worker and queue bounds; invalid limits; rejection after stop | `BlockingTaskExecutorTest` |
