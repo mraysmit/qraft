@@ -355,7 +355,7 @@ then 42 runtime tests on the fresh jar and rebuilt image. Five consecutive
 affected Raft/HTTP runs passed 293 tests each; the recorded final retained-log
 audit found no unflagged errors or exception headers in the accepted output.
 [TESTING.md](../docs/TESTING.md#phase-7-verification-record-2026-10-13) records
-the captures, tests and audit; [the cleanup task list](task-list-single-pom-and-quorus-removal-2026-10-12.md#phase-7-replace-the-vertx-shaped-async-layer)
+the captures, tests and audit; [the cleanup task list](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-12.md#phase-7-replace-the-vertx-shaped-async-layer)
 holds the TDD evidence and earlier failed-run remediation. These local results
 are separate from Jenkins build 26. No new build was run for this checklist
 update. Cluster-wide status, broader metrics, security, tenancy and the other
@@ -398,7 +398,7 @@ unchecked features below remain open.
 - [x] Remove the job-system concepts from the active build.
 - [x] Replace the inherited node model with a Consul-shaped node, and move the node
   routes to the catalog's write paths (2026-10-09, Phase 4 of
-  [`task-list-single-pom-and-quorus-removal-2026-10-12.md`](task-list-single-pom-and-quorus-removal-2026-10-12.md)).
+  [`task-list-single-pom-and-quorus-removal-2026-10-12.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-12.md)).
   Removed with it: a node's capabilities and the command that replaced them, its
   host name and port, the job-system statuses, and the routes `/api/v1/clients*`,
   `/api/v1/info`, `/status`, and bare `/health`. A node's deregistration now

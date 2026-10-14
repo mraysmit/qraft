@@ -1,18 +1,19 @@
 # Task List: Raft Membership Changes
 
 **Date:** 2026-09-29
-**Active work:** None here until the single-POM list is archived. Step 4, joining,
+**Active work:** Step 5, failed-server cleanup, resumed on 2026-10-14 after
+the single-POM list was archived. Implementation is pending. Step 4, joining,
 and operator list and remove, is built, and its close-out gate was closed on
 2026-10-11, when the owner removed the mutation rule that the gate had waited
-on. Step 5 is next. Steps 1 to 3 were done
+on. Steps 1 to 3 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
-**Last updated:** 2026-10-11 (the mutation rule removed at the owner's decision, from the rules and from the exits of Steps 5 to 8; the Step 4 gate, which had waited on it, closed, after PIT was tried for it and put on ice; the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
-**Interrupted by:** [`task-list-single-pom-and-quorus-removal-2026-10-12.md`](task-list-single-pom-and-quorus-removal-2026-10-12.md),
+**Last updated:** 2026-10-14 (single-POM cleanup list archived and its links repaired; Step 5 resumed as the active task, with implementation pending. On 2026-10-11: the mutation rule removed at the owner's decision, from the rules and from the exits of Steps 5 to 8; the Step 4 gate, which had waited on it, closed, after PIT was tried for it and put on ice; the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
+**Interruption completed:** [`task-list-single-pom-and-quorus-removal-2026-10-12.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-12.md),
 started 2026-10-04 before the Step 4 close-out gate. The gate was closed on
-2026-10-11, as the first task of that list's Phase 7. Step 5 resumes when that
-list is archived, and this list then runs to its end before the Consul-style
-client list starts (decided 2026-10-05).
+2026-10-11, as the first task of that list's Phase 7. That list was completed
+and archived on 2026-10-14. Step 5 is now active, and this list runs to its
+end before the Consul-style client list starts (decided 2026-10-05).
 **Predecessor:** [`task-list-test-suite-remediation-2026-09-27.md`](../docs/archive/task-list-test-suite-remediation-2026-09-27.md),
 archived 2026-10-02. Its packaged-artifact test waits for the admin interface.
 **Paused:** [`task-list-embedded-admin-interface-2026-10-12.md`](task-list-embedded-admin-interface-2026-10-12.md), after its Step 1
@@ -798,7 +799,7 @@ unchanged final source/dependency state covered by the existing full-suite
 evidence. Passing ordinary suites alone does not close the outstanding gate.
 
 **Scheduled (2026-10-05).** This gate is the first task of Phase 7 in
-[`task-list-single-pom-and-quorus-removal-2026-10-12.md`](task-list-single-pom-and-quorus-removal-2026-10-12.md).
+[`task-list-single-pom-and-quorus-removal-2026-10-12.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-12.md).
 By then the source has its final packages and its tests declare their
 intentional errors, and Phase 7 has not yet changed `RaftNode`'s async code.
 
@@ -845,11 +846,12 @@ nothing that is still required:
 What stands behind Step 4 is what its records above describe: the tests
 written with it, red before green where a defect was fixed, and the suites
 that have passed on the source since, the last of them Jenkins build 21 on
-`e3cf808`, with 969 results and none failed. Step 5 may start once the
-single-POM list is archived, as "Interrupted by" at the head of this list says.
+`e3cf808`, with 969 results and none failed. Step 5 resumed on 2026-10-14 after the
+single-POM list was completed and archived, as recorded at the head of this list.
+
 ### Step 5. Failed-server cleanup
 
-**Status: Planned; not implemented.** The contract below was specified during
+**Status: Active from 2026-10-14; not implemented.** The contract below was specified during
 the document review on 2026-10-03. Current server JSON rejects these new settings;
 the promotion settings still exist only on `RaftNode.Builder`.
 
@@ -1061,7 +1063,7 @@ text is otherwise unchanged.
 ### RaftLog 1.5.0 (2026-10-11)
 
 Recorded here beside the upgrade before it. The work is Phase 6 of
-[`task-list-single-pom-and-quorus-removal-2026-10-12.md`](task-list-single-pom-and-quorus-removal-2026-10-12.md),
+[`task-list-single-pom-and-quorus-removal-2026-10-12.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-12.md),
 which has the whole record.
 
 - **Change.** The root POM pins `raftlog.version` 1.5.0, up from 1.4.1. The

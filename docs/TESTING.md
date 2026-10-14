@@ -202,7 +202,7 @@ headers and 2,846 exception headers were attributed, including one flagged
 lock-contender uncaught exception. No unflagged error or exception header
 remained. Counts include duplicate captures. Earlier failed runs are retained
 separately with their causes and fixes; passing test totals did not erase them.
-See [the Phase 7 record](../docs-design/task-list-single-pom-and-quorus-removal-2026-10-12.md#phase-7-replace-the-vertx-shaped-async-layer)
+See [the Phase 7 record](archive/task-list-single-pom-and-quorus-removal-2026-10-12.md#phase-7-replace-the-vertx-shaped-async-layer)
 for TDD evidence, capture names and the native-container audit follow-up.
 These are dated results, not expected counts for future runs or Jenkins results.
 
