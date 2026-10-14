@@ -19,6 +19,8 @@ package dev.mars.qraft.raft;
 import dev.mars.qraft.common.async.CallerContext;
 import dev.mars.qraft.common.async.RaftStateLoop;
 import dev.mars.qraft.common.concurrent.Completions;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayDeque;
 import java.util.Objects;
@@ -46,6 +48,7 @@ import java.util.function.Supplier;
  * @version 1.0
  */
 final class RaftTransitionSequencer {
+    private static final Logger logger = LoggerFactory.getLogger(RaftTransitionSequencer.class);
     /** Opaque capability proving ownership of one currently active transition. */
     static final class Ownership {
         private final AtomicBoolean active = new AtomicBoolean();
@@ -108,6 +111,7 @@ final class RaftTransitionSequencer {
     private final int normalCapacity;
     private final Queue<Transition<?>> queue = new ArrayDeque<>();
     private volatile State state = State.OPEN;
+    private volatile Throwable fenceCause;
     private Transition<?> active;
     private CompletableFuture<Void> drainPromise;
 
@@ -186,6 +190,11 @@ final class RaftTransitionSequencer {
 
     boolean isFenced() {
         return state == State.FENCED;
+    }
+
+    /** The first failure that fenced this sequencer, or null while it has not been fenced. */
+    Throwable fenceCause() {
+        return fenceCause;
     }
 
     /**
@@ -297,7 +306,11 @@ final class RaftTransitionSequencer {
     }
 
     private void fenceQueuedTransitions(Throwable cause) {
+        Objects.requireNonNull(cause, "cause");
+        if (state == State.FENCED) return;
+        fenceCause = cause;
         state = State.FENCED;
+        logger.error("Raft transition sequencer fenced: {}", cause.toString(), cause);
         Transition<?> queued;
         while ((queued = queue.poll()) != null) {
             queued.result.completeExceptionally(new FencedException(cause));

@@ -78,6 +78,12 @@ public enum IntentionalErrorFixture {
     /** A test storage fails recovery while an installed snapshot is being reconciled with the WAL. */
     RAFT_RECOVERY_STORAGE_FAILURE,
 
+    /** A fresh Tempo 2.3.1 metrics WAL races its remote watcher; only accepted after matching replay recovery. */
+    TEMPO_METRICS_WAL_STARTUP("grafana.tempo.metrics-generator", Level.ERROR,
+            "ts=\\S+ caller=dedupe\\.go:\\d+ tenant=\\S+ component=remote level=error"
+                    + " remote_name=\\S+ url=http://prometheus:9090/api/v1/write"
+                    + " msg=\"error tailing WAL\" err=\"failed to find segment for index\""),
+
     /** Bootstrap refuses a peer whose advertised server list disagrees with the local list. */
     BOOTSTRAP_SERVER_LISTS_DISAGREE("dev.mars.qraft.raft.ClusterBootstrap", Level.ERROR,
             "Bootstrap refused: \\S+ answers as \\S+ and lists \\[.*], but this server lists \\[.*]"),

@@ -27,6 +27,7 @@ import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.raft.api.SnapshotStore;
 import dev.mars.raftlog.storage.RaftStorage;
 import dev.mars.qraft.common.concurrent.Completions;
+import dev.mars.qraft.testing.fault.InjectedFaultFixture;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -326,7 +327,10 @@ class RaftNodeMetadataSequencingTest {
         private final TestRaftStorageFixture delegate = new TestRaftStorageFixture();
         private final AtomicInteger updateCount = new AtomicInteger();
         private final CompletableFuture<Void> updateEntered = new CompletableFuture<>();
-        private final IllegalStateException failure = new IllegalStateException("uncertain metadata write");
+        private final IllegalStateException failure = new IllegalStateException("uncertain metadata write",
+                new InjectedFaultFixture(
+                        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_METADATA_PERSISTENCE_FAILURE,
+                        "uncertain metadata write"));
         private volatile CompletableFuture<Void> updateGate;
         private volatile CompletableFuture<Void> blockedUpdateGate;
         private volatile boolean failNext;

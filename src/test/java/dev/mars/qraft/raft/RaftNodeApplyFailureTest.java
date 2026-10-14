@@ -86,6 +86,7 @@ class RaftNodeApplyFailureTest {
         assertSame(PoisonedStateMachineFixture.FAILURE, failed.getCause(), "the client learns why the entry failed");
         RaftStatus status = status();
         assertTrue(status.fenced(), "a node that cannot apply a committed entry must not keep serving");
+        assertEquals(PoisonedStateMachineFixture.FAILURE.toString(), status.fenceReason());
         assertEquals(appliedBefore, status.lastApplied(), "the entry that failed is not counted as applied");
         ExecutionException refused = assertThrows(ExecutionException.class,
                 () -> submit("after").get(10, TimeUnit.SECONDS));
@@ -108,6 +109,7 @@ class RaftNodeApplyFailureTest {
         assertTrue(response.getSuccess(), "the entries were durably appended before application failed");
         RaftStatus status = status();
         assertTrue(status.fenced());
+        assertEquals(PoisonedStateMachineFixture.FAILURE.toString(), status.fenceReason());
         assertEquals(2, status.lastApplied(), "the bootstrap configuration and the first command");
         assertEquals("first", state.store.getMetadata("first"));
         assertNull(state.store.getMetadata("third"), "nothing after the failed entry is applied");

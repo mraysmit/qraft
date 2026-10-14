@@ -33,6 +33,60 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Tests the Docker log audit without requiring Docker. */
 class DockerLogCaptureTest {
+    private static final String TEMPO_WAL_ERROR = "ts=2026-10-13T10:54:54.903704224Z caller=dedupe.go:112"
+            + " tenant=single-tenant component=remote level=error remote_name=5c925e"
+            + " url=http://prometheus:9090/api/v1/write msg=\"error tailing WAL\""
+            + " err=\"failed to find segment for index\"\n";
+    private static final String TEMPO_WAL_RECOVERED = "ts=2026-10-13T10:55:14.903724947Z caller=dedupe.go:112"
+            + " tenant=single-tenant component=remote level=info remote_name=5c925e"
+            + " url=http://prometheus:9090/api/v1/write msg=\"Done replaying WAL\" duration=15s\n";
+
+    @Test
+    void nativeErrorFormatsFailWithoutAnExplicitDeclaration() {
+        String output = TEMPO_WAL_ERROR + TEMPO_WAL_RECOVERED
+                + "level=error msg=\"another native error\"\n"
+                + "2026-10-13T10:55:15Z\terror\texporter failed\n";
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(output, Set.of(), "DockerClass");
+        assertEquals(3, audit.problems().size());
+        assertEquals(output, audit.archivedOutput());
+    }
+
+    @Test
+    void declaredTempoStartupErrorIsFlaggedAndPreservedAfterMatchingRecovery() {
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(TEMPO_WAL_ERROR + TEMPO_WAL_RECOVERED,
+                Set.of(IntentionalErrorFixture.TEMPO_METRICS_WAL_STARTUP), "DockerClass");
+        assertTrue(audit.problems().isEmpty());
+        assertEquals(1, audit.recognised().size());
+        assertEquals(TEMPO_WAL_ERROR.replace("level=error ",
+                "level=error *** INTENTIONAL ERROR: TEMPO_METRICS_WAL_STARTUP, caused by DockerClass *** ")
+                + TEMPO_WAL_RECOVERED, audit.archivedOutput());
+    }
+
+    @Test
+    void tempoStartupAllowanceRequiresOneErrorAndLaterRecoveryOfTheSameRemote() {
+        for (String output : java.util.List.of(TEMPO_WAL_ERROR,
+                TEMPO_WAL_ERROR + TEMPO_WAL_RECOVERED.replace("remote_name=5c925e", "remote_name=other"),
+                TEMPO_WAL_ERROR + TEMPO_WAL_RECOVERED.replace("tenant=single-tenant", "tenant=other"),
+                TEMPO_WAL_ERROR + TEMPO_WAL_RECOVERED.replace("/api/v1/write", "/another-endpoint"),
+                TEMPO_WAL_RECOVERED + TEMPO_WAL_ERROR,
+                TEMPO_WAL_ERROR + TEMPO_WAL_ERROR + TEMPO_WAL_RECOVERED)) {
+            DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(output,
+                    Set.of(IntentionalErrorFixture.TEMPO_METRICS_WAL_STARTUP), "DockerClass");
+            assertTrue(!audit.problems().isEmpty(), output);
+            assertEquals(output, audit.archivedOutput(), "an invalid allowance must not label the error");
+        }
+    }
+
+    @Test
+    void classCaptureFlagsAndReprintsTheRecoveredTempoError() throws Exception {
+        DockerLogCaptureHelper.beginClass("RecoveredTempoDockerClass",
+                Set.of(IntentionalErrorFixture.TEMPO_METRICS_WAL_STARTUP));
+        DockerLogCaptureHelper.capture("tempo-startup-source", "tempo", TEMPO_WAL_ERROR + TEMPO_WAL_RECOVERED);
+        assertTrue(DockerLogCaptureHelper.finishClass(directory).isEmpty());
+        assertEquals(TEMPO_WAL_ERROR.replace("level=error ",
+                "level=error *** INTENTIONAL ERROR: TEMPO_METRICS_WAL_STARTUP, caused by RecoveredTempoDockerClass *** ")
+                + TEMPO_WAL_RECOVERED, Files.readString(directory.resolve("RecoveredTempoDockerClass/tempo.log")));
+    }
 
     private static final String LOCK_FAILURE = "Cannot acquire exclusive lock on WAL directory: /app/data."
             + " Another process may be using this storage.";

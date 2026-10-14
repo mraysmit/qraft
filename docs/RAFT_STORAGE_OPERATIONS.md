@@ -100,7 +100,14 @@ fenced process deliberately stays observable but stops participating safely:
 
 - `GET /health/live` returns HTTP 200 with `{"status":"alive"}`.
 - `GET /health/ready` returns HTTP 503 with `{"status":"fenced"}`.
-- `GET /raft/status` reports `"fenced":true`.
+- `GET /raft/status` reports `"fenced":true` and `fenceReason`, the original
+  failure's exception type and message. A healthy node reports `fenceReason: null`.
+- When a transition first fences the node, `RaftTransitionSequencer` logs
+  `Raft transition sequencer fenced: <exception type>: <message>` at ERROR,
+  with the original stack trace. Later fence attempts keep the first reason
+  and emit no further fence announcement. The failing operation's own error
+  remains in the log. Failed startup exposes its retained recovery or transport
+  failure in `fenceReason` and retains its existing startup error logs.
 - Logs identify the affected path and the underlying cause. WAL corruption
   diagnostics include `raft.log` and a byte position; directory-lock failures
   name the directory and indicate that another process may hold it.
@@ -329,7 +336,13 @@ tests:
   is removed, the removal's quorum rule and token, and a server refusing a log
   or snapshot meant for another server ID. The replacement procedure as a
   whole has no container test yet.
-- `HttpApiServerTest`: fenced liveness/readiness and corruption evidence.
+- `HttpApiServerTest`: fenced liveness/readiness, the status reason for a
+  transition or startup failure, and corruption evidence.
+- `RaftTransitionSequencerTest`: first-cause retention, one fence announcement,
+  caller context, and unchanged later refusals.
+- `RaftNodeApplyFailureTest`: a state-machine failure is retained as the fence reason.
+- `RaftNodeConfigurationTest`: rejecting bootstrap before a write keeps the
+  node healthy, while uncertain bootstrap persistence still fences it.
 - `RaftLogStorageIntegrationTest`: corruption, locking, and legacy WAL/metadata
   compatibility against the real external library.
 - `FileSnapshotStoreTest` and `RaftNodeRealSnapshotRecoveryTest`: atomic snapshot

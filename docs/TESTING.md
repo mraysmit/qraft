@@ -158,6 +158,22 @@ classes from `target/`. Then run the runtime suites below, including `slow` for 
 full-suite exit, on a fresh image. Audit all retained output and logs under the
 intentional-error rules below. Passing assertions alone does not close the task.
 
+### Fencing diagnostics
+
+For fencing diagnostics, the focused classes are `RaftTransitionSequencerTest`,
+`RaftNodeApplyFailureTest`, `RaftNodeConfigurationTest`,
+`RaftNodeMetadataSequencingTest` and `HttpApiServerTest`. They check first-cause
+retention, one ERROR announcement with caller context, the nullable `fenceReason`
+status field for healthy, transition-fenced and startup-fenced nodes, and the
+boundary between a rejected bootstrap and uncertain bootstrap persistence.
+Repeat the affected Raft and HTTP tests five times before the final build:
+
+```powershell
+mvn -B "-Dstyle.color=never" test "-Dtest=RaftTransitionSequencer*Test,RaftNode*Test,HttpApiServer*Test" 2>&1 | Tee-Object -FilePath ".\logs\qraft-fence-repeat-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
+$qraftBuildExitCode = $LASTEXITCODE
+if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
+```
+
 ## Before you call a change done: `mvn install`
 
 ```powershell
@@ -556,12 +572,17 @@ Docker class that declares `RAFT_PEER_UNREACHABLE` declares it too, and a test c
 Docker merges stderr into stdout, so an event can land inside an uncaught exception's trace. Frames that
 follow an uncaught exception therefore belong to that exception, which has its own check above.
 
-The containers of the observability stacks are not Qraft's and do not log in its format, so the audit
-above archives their output and checks none of it. `DockerStartCommandsTest` checks it itself: a line
-of Grafana, Loki, Tempo, Prometheus, or the collector at their error level fails the test. It accepts
-one line, Tempo's `msg="error tailing WAL" err="failed to find segment for index"`, and only when
-Tempo's "Done replaying WAL" follows in the same log. Tempo 2.3.1 starts the watcher of its metrics
-generator's log with its first span, before that log has a segment, reports this once, and recovers.
+The observability programs use native log formats. `DockerLogCaptureHelper` checks their
+`level=error`/`level=fatal` and tab-delimited error levels during archive auditing;
+`DockerStartCommandsTest` also checks live output before stopping them. Their errors fail the test.
+The one previously approved startup allowance is declared as `TEMPO_METRICS_WAL_STARTUP`:
+Tempo's exact `msg="error tailing WAL" err="failed to find segment for index"` signature.
+It must occur only once per captured source, with "Done replaying WAL" later in the same output
+for the same tenant, remote name and endpoint. Missing, earlier or mismatched recovery, repeated
+errors, and every other native error fail. The archive flags this event explicitly with its
+definition and Docker test class, preserving its original error level and line, and replays it
+into the Maven/application log with the same attribution. Tempo 2.3.1 starts the remote watcher
+before opening its metrics WAL; the first span can expose this startup race.
 
 ### A warning of a library, caused on purpose inside the test JVM
 

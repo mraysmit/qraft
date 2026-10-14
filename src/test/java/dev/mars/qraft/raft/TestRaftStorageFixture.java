@@ -45,6 +45,7 @@ final class TestRaftStorageFixture implements RaftStorage, SnapshotStore {
     private boolean closed;
     private boolean failOnSync;
     private boolean failOnAppend;
+    private Throwable appendFailure;
     private boolean failOnMetadataUpdate;
 
     @Override
@@ -72,6 +73,7 @@ final class TestRaftStorageFixture implements RaftStorage, SnapshotStore {
     @Override
     public CompletableFuture<Void> appendEntries(List<LogEntryData> entries) {
         if (!isOpen()) return failed(new IllegalStateException("Storage not open"));
+        if (appendFailure != null) return failed(appendFailure);
         if (failOnAppend) return failed(new IOException("Simulated append failure"));
         log.addAll(entries);
         return CompletableFuture.completedFuture(null);
@@ -130,6 +132,7 @@ final class TestRaftStorageFixture implements RaftStorage, SnapshotStore {
 
     void setFailOnSync(boolean fail) { failOnSync = fail; }
     void setFailOnAppend(boolean fail) { failOnAppend = fail; }
+    void setAppendFailure(Throwable failure) { appendFailure = failure; }
     void setFailOnMetadataUpdate(boolean fail) { failOnMetadataUpdate = fail; }
     List<LogEntryData> getLog() { return Collections.unmodifiableList(log); }
     long getCurrentTerm() { return currentTerm; }

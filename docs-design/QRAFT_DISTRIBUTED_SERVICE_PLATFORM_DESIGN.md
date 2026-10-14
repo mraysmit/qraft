@@ -1867,8 +1867,13 @@ Required signals include:
 - Session count, expiry count, and lock contention.
 
 `/raft/status` reports the node ID, server ID, role, term, leader, commit index,
-last applied index, last log index, snapshot index, and fenced flag as one
-consistent view read on the node's state loop. `/v1/operator/raft/configuration`
+last applied index, last log index, snapshot index, fenced flag and nullable
+`fenceReason` as one consistent view read on the node's state loop. The reason is
+the first fencing failure's exception type and message; healthy nodes report null.
+The sequencer retains that first failure and logs one ERROR announcement with
+its stack trace when it becomes fenced. Later refusals keep their existing
+messages. Failed startup exposes its retained failure and keeps its existing
+error logs. `/v1/operator/raft/configuration`
 lists the servers in the Raft configuration (section 12.5).
 
 Logs carry request ID, node ID, Raft role and term where applicable, tenant, and

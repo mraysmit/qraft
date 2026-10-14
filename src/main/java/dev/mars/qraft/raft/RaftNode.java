@@ -654,13 +654,15 @@ public class RaftNode {
     private CompletableFuture<Void> writeBootstrapEntry(RaftConfiguration initial) {
         ConfigurationCommand command = new ConfigurationCommand(initial);
         LogEntry entry = new LogEntry(0, 1, command, serialize(command).toByteArray());
+        IllegalStateException alreadyBootstrapped = new IllegalStateException(
+                "Node " + nodeId + " already holds Raft state and cannot be bootstrapped");
         return transitionSequencer.submit(
                 "bootstrap-configuration",
                 RaftTransitionSequencer.FailurePolicy.FENCE,
+                failure -> failure != alreadyBootstrapped,
                 () -> hasRaftState()
                         // Checked in the transition, so an append that arrived first cannot be overwritten.
-                        ? CompletableFuture.failedFuture(new IllegalStateException(
-                                "Node " + nodeId + " already holds Raft state and cannot be bootstrapped"))
+                        ? CompletableFuture.failedFuture(alreadyBootstrapped)
                         : persistLogEntry(entry).thenApply(ignored -> entry),
                 persisted -> {
                     log.add(persisted);
@@ -1254,7 +1256,7 @@ public class RaftNode {
         try {
             runtime.execute(() -> status.complete(new RaftStatus(nodeId, serverId, state, currentTerm,
                     currentLeaderId, commitIndex, lastApplied, lastLogIndex(), snapshotLastIndex, isFenced(),
-                    running, isRemoved())));
+                    fenceReason(), running, isRemoved())));
         } catch (java.util.concurrent.RejectedExecutionException stopped) {
             status.completeExceptionally(stopped);
         }
@@ -1263,6 +1265,12 @@ public class RaftNode {
 
     public boolean isFenced() {
         return startupFailure != null || transitionSequencer.isFenced();
+    }
+
+    private String fenceReason() {
+        Throwable cause = transitionSequencer.fenceCause();
+        if (cause == null) cause = startupFailure;
+        return cause == null ? null : cause.toString();
     }
 
     public String getLeaderId() {

@@ -27,6 +27,7 @@ import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.state.distributed.DistributedStateCommand;
 import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
+import dev.mars.qraft.testing.fault.InjectedFaultFixture;
 import dev.mars.qraft.raft.storage.RaftStorageFactory;
 import dev.mars.raftlog.storage.FileRaftStorage;
 import dev.mars.raftlog.storage.RaftStorage.LogEntryData;
@@ -50,6 +51,7 @@ import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_STATE_WI
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -188,6 +190,30 @@ class RaftNodeConfigurationTest {
         assertTrue(again.getCause().getMessage().contains("already holds Raft state"), again.getCause().getMessage());
         assertEquals(Optional.of(FL), fresh.getConfiguration(), "the first configuration stands");
         assertEquals(1, fresh.getLastLogIndex());
+        assertFalse(fresh.isFenced(), "rejecting bootstrap before a write must not fence a healthy node");
+        assertTrue(await(fresh.handleAppendEntriesRequest(append(1, 1, 0,
+                entry(2, 1, put("after-rejected-bootstrap"))))).getSuccess(),
+                "the healthy node still accepts replication after refusing bootstrap");
+    }
+
+    @Test
+    void uncertainBootstrapWriteStillFencesTheNode() throws Exception {
+        TestRaftStorageFixture storage = openStorage();
+        RaftNode fresh = cluster.add(cluster.unconfiguredBuilder("f", Set.of("f", "l"),
+                new InMemoryTransportSimulatorFixture("f"), new QraftStateStore(),
+                RaftNodeMode.durable(storage, storage)).serverId("id-f"));
+        await(fresh.start());
+        IllegalStateException failure = new IllegalStateException("ambiguous bootstrap write",
+                new InjectedFaultFixture(
+                        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_WAL_TRANSITION_FAILURE,
+                        "ambiguous bootstrap write"));
+        storage.setAppendFailure(failure);
+
+        ExecutionException rejected = assertThrows(ExecutionException.class, () -> await(fresh.bootstrap(FL)));
+
+        assertSame(failure, rejected.getCause());
+        assertTrue(fresh.isFenced(), "a storage failure must still fence bootstrap");
+        assertEquals(failure.toString(), await(fresh.status()).fenceReason());
     }
 
     @Test

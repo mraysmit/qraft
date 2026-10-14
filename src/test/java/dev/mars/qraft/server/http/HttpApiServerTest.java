@@ -414,6 +414,9 @@ class HttpApiServerTest {
                 "operators and acceptance tests need the node's last log index: " + response.body());
         assertTrue(response.body().contains("\"lastApplied\":" + node.getLastApplied()), response.body());
         assertTrue(response.body().contains("\"removed\":false"), response.body());
+        JsonNode status = new ObjectMapper().readTree(response.body());
+        assertTrue(status.has("fenceReason"), "status includes the nullable diagnostic field");
+        assertTrue(status.get("fenceReason").isNull(), "a healthy node has no fence reason");
     }
 
     @Test
@@ -912,6 +915,14 @@ class HttpApiServerTest {
         assertEquals(503, ready.statusCode());
         assertTrue(ready.body().contains("fenced"));
         assertEquals(200, live.statusCode());
+        HttpResponse<String> status = request(client, "/raft/status", "GET");
+        assertEquals(200, status.statusCode());
+        JsonNode diagnostic = new ObjectMapper().readTree(status.body());
+        assertTrue(diagnostic.path("fenced").asBoolean());
+        assertEquals("java.lang.IllegalStateException: append persisted before completion failed",
+                diagnostic.path("fenceReason").asText());
+        assertEquals(diagnostic.path("fenceReason"), new ObjectMapper().readTree(
+                request(client, "/raft/status", "GET").body()).path("fenceReason"));
     }
 
     @Test
@@ -958,6 +969,10 @@ class HttpApiServerTest {
         HttpResponse<String> ready = request(HttpClient.newHttpClient(), "/health/ready", "GET");
         assertEquals(503, ready.statusCode());
         assertTrue(ready.body().contains("fenced"), ready.body());
+        HttpResponse<String> status = request(HttpClient.newHttpClient(), "/raft/status", "GET");
+        assertEquals(200, status.statusCode());
+        assertEquals(diagnostic, new ObjectMapper().readTree(status.body()).path("fenceReason").asText(),
+                "failed startup exposes the original recovery failure");
         assertArrayEquals(corruptWal, Files.readAllBytes(walPath),
                 "failed recovery must preserve the corrupt WAL for diagnosis");
     }

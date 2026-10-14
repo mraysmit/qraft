@@ -17,6 +17,8 @@
 package dev.mars.qraft.runtime;
 
 import dev.mars.qraft.testing.fault.DockerLogCaptureHelper;
+import dev.mars.qraft.testing.fault.ExpectedDockerErrorsHelper;
+import dev.mars.qraft.testing.fault.IntentionalErrorFixture;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -65,6 +67,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 @Tag("docker")
+@ExpectedDockerErrorsHelper(IntentionalErrorFixture.TEMPO_METRICS_WAL_STARTUP)
 @Timeout(value = 20, unit = TimeUnit.MINUTES)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @Execution(ExecutionMode.SAME_THREAD)
@@ -78,8 +81,6 @@ class DockerStartCommandsTest {
             "qraft-prometheus", "qraft-loki", "qraft-grafana");
     private static final List<String> OBSERVABILITY_VOLUMES = List.of(PROJECT + "_grafana-data",
             PROJECT + "_loki-data", PROJECT + "_prometheus-data", PROJECT + "_tempo-data");
-    /** An error line of Grafana, Loki, Tempo, or Prometheus, or of the collector. */
-    private static final Pattern THIRD_PARTY_ERROR = Pattern.compile("\\blevel=error\\b|\\terror\\t");
     /**
      * Tempo 2.3.1 starts the watcher of its metrics generator's write-ahead log with the first span it
      * receives, a fraction of a millisecond after it creates that log and before the log has a segment. The
@@ -240,14 +241,15 @@ class DockerStartCommandsTest {
 
     private static void assertNoThirdPartyError() throws Exception {
         for (String container : OBSERVABILITY_CONTAINERS) {
-            List<String> errors = new ArrayList<>(run(Duration.ofSeconds(30), "docker", "logs", container).lines()
-                    .filter(line -> THIRD_PARTY_ERROR.matcher(line).find()).toList());
-            if (errors.removeIf(line -> TEMPO_WAL_NOT_YET_WRITTEN.matcher(line).find())) {
+            String output = run(Duration.ofSeconds(30), "docker", "logs", container);
+            if (container.equals("qraft-tempo") && output.lines()
+                    .anyMatch(line -> TEMPO_WAL_NOT_YET_WRITTEN.matcher(line).find())) {
                 await().atMost(Duration.ofSeconds(120)).pollInterval(Duration.ofSeconds(2)).ignoreExceptions()
                         .until(() -> run(Duration.ofSeconds(30), "docker", "logs", container)
                                 .contains("msg=\"Done replaying WAL\""));
+                output = run(Duration.ofSeconds(30), "docker", "logs", container);
             }
-            assertEquals(List.of(), errors, container + " logged an error");
+            DockerLogCaptureHelper.requireNoErrors(container, output);
         }
     }
 

@@ -311,6 +311,7 @@ public final class HttpApiServer implements AutoCloseable {
         status.put("lastLogIndex", current.lastLogIndex());
         status.put("snapshotLastIndex", current.snapshotLastIndex());
         status.put("fenced", current.fenced());
+        status.put("fenceReason", current.fenceReason());
         status.put("removed", current.removed());
         respondJson(exchange, 200, status);
     }

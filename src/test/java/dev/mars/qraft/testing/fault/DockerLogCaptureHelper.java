@@ -47,6 +47,8 @@ public final class DockerLogCaptureHelper {
                     + "(?<level>TRACE|DEBUG|INFO|WARN|ERROR)\\s+"
                     + "(?<logger>\\S+?)(?: \\[[^]]*])*(?: \\[[^]]*])? - (?<message>.*)$");
     private static final Pattern ERROR_TOKEN = Pattern.compile("(?:^|[|\\s-])ERROR(?:[|:\\s-]|$)");
+    private static final Pattern NATIVE_ERROR = Pattern.compile(
+            "\\blevel=(?:error|fatal)\\b|\\t(?:error|fatal)\\t", Pattern.CASE_INSENSITIVE);
     private static final Pattern UNCAUGHT_EXCEPTION = Pattern.compile(
             "(?:^|\\s)Exception in thread \"[^\"]+\" (?<exception>.+)$");
     private static final Pattern STACK_TRACE_LINE = Pattern.compile(
@@ -100,6 +102,17 @@ public final class DockerLogCaptureHelper {
             if (!addition.isEmpty()) {
                 destination.append(addition);
                 if (!addition.endsWith("\n")) destination.append(System.lineSeparator());
+            }
+        }
+    }
+
+    /** Checks a live container's complete output using this class's declarations, before it is archived. */
+    public static void requireNoErrors(String sourceName, String completeOutput) {
+        synchronized (LOCK) {
+            if (owner == null) throw new IllegalStateException("No Docker class owns the log audit");
+            Audit audit = audit(completeOutput, declared, owner);
+            if (!audit.problems().isEmpty()) {
+                throw new AssertionError(sourceName + ": " + String.join("\n", audit.problems()));
             }
         }
     }
@@ -175,6 +188,8 @@ public final class DockerLogCaptureHelper {
             lines[index] = ANSI.matcher(rawLines[index]).replaceAll("").stripTrailing();
         }
         List<ExternalError> recognised = new ArrayList<>();
+        ExternalError tempoStartup = recoveredTempoStartup(lines, expected);
+        if (tempoStartup != null) recognised.add(tempoStartup);
         // Docker can merge stderr ahead of stdout. Discover matching events before auditing rethrows.
         for (String line : lines) {
             Matcher event = EVENT.matcher(line);
@@ -217,12 +232,45 @@ public final class DockerLogCaptureHelper {
                     if (match == null) problems.add("undeclared container uncaught exception: " + line);
                     else rawLine = labelLine(rawLine, uncaught.start("exception"), match.error(), classOwner);
                 }
+            } else if (NATIVE_ERROR.matcher(line).find()) {
+                if (tempoStartup != null && line.equals(tempoStartup.originalLine())) {
+                    rawLine = labelLine(rawLine, line.indexOf("level=error ") + "level=error ".length(),
+                            tempoStartup.error(), classOwner);
+                } else {
+                    problems.add("undeclared native container ERROR: " + line);
+                }
             } else if (ERROR_TOKEN.matcher(line).find()) {
                 problems.add("unparseable container ERROR: " + line);
             }
             archived.append(rawLine);
         }
         return new Audit(List.copyOf(recognised), List.copyOf(problems), archived.toString());
+    }
+
+    /** Accepts the previously approved Tempo startup race only once and with later recovery of that same remote. */
+    private static ExternalError recoveredTempoStartup(String[] lines, Set<IntentionalErrorFixture> expected) {
+        IntentionalErrorFixture definition = IntentionalErrorFixture.TEMPO_METRICS_WAL_STARTUP;
+        if (!expected.contains(definition)) return null;
+        int failure = -1;
+        for (int index = 0; index < lines.length; index++) {
+            if (!definition.matches("grafana.tempo.metrics-generator", Level.ERROR, lines[index])) continue;
+            if (failure >= 0) return null;
+            failure = index;
+        }
+        if (failure < 0) return null;
+        Matcher identity = Pattern.compile("tenant=(\\S+) component=remote level=error remote_name=(\\S+) url=(\\S+)")
+                .matcher(lines[failure]);
+        if (!identity.find()) return null;
+        Pattern recovery = Pattern.compile("ts=\\S+ caller=dedupe\\.go:\\d+ tenant="
+                + Pattern.quote(identity.group(1)) + " component=remote level=info remote_name="
+                + Pattern.quote(identity.group(2)) + " url=" + Pattern.quote(identity.group(3))
+                + " msg=\"Done replaying WAL\"(?: duration=\\S+)?");
+        for (int index = failure + 1; index < lines.length; index++) {
+            if (recovery.matcher(lines[index]).matches()) {
+                return new ExternalError(definition, "grafana.tempo.metrics-generator", lines[failure], lines[failure]);
+            }
+        }
+        return null;
     }
 
     /** The declared error with this event's logger, level, and message, or {@code null}. */

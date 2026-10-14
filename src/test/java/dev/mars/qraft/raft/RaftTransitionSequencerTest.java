@@ -16,8 +16,13 @@
 
 package dev.mars.qraft.raft;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.classic.spi.ThrowableProxy;
+import ch.qos.logback.core.read.ListAppender;
 import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.common.async.RaftStateLoop;
+import dev.mars.qraft.testing.fault.InjectedFaultFixture;
 import io.opentelemetry.context.Context;
 import io.opentelemetry.context.ContextKey;
 import io.opentelemetry.context.Scope;
@@ -25,6 +30,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -32,14 +38,17 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static dev.mars.qraft.raft.RaftAwaitHelper.await;
+import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_WAL_TRANSITION_FAILURE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -122,7 +131,8 @@ class RaftTransitionSequencerTest {
     void fatalFailureFencesTheSequencerAndRejectsQueuedAndNewWork() throws Exception {
         RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime.stateLoop(), 4);
         CompletableFuture<Void> gate = new CompletableFuture<>();
-        IOException failure = new IOException("durability uncertain");
+        IOException failure = new IOException("durability uncertain",
+                new InjectedFaultFixture(RAFT_WAL_TRANSITION_FAILURE, "durability uncertain"));
         AtomicBoolean queuedStarted = new AtomicBoolean();
 
         CompletableFuture<Void> first = sequencer.submit(
@@ -142,6 +152,83 @@ class RaftTransitionSequencerTest {
         CompletableFuture<Void> rejected = sequencer.submit("too-late", () -> CompletableFuture.completedFuture(null));
         assertInstanceOf(RaftTransitionSequencer.FencedException.class,
                 assertThrows(CompletionException.class, () -> await(rejected)).getCause());
+    }
+
+    @Test
+    void fencingLogsTheFirstCauseOnceAndPreservesCallerContext() throws Exception {
+        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime.stateLoop(), 4);
+        IOException firstCause = new IOException("first durable failure",
+                new InjectedFaultFixture(RAFT_WAL_TRANSITION_FAILURE, "first durable failure"));
+        IOException laterCause = new IOException("later failure",
+                new InjectedFaultFixture(RAFT_WAL_TRANSITION_FAILURE, "later failure"));
+        ch.qos.logback.classic.Logger logger = (ch.qos.logback.classic.Logger)
+                LoggerFactory.getLogger(RaftTransitionSequencer.class);
+        ListAppender<ILoggingEvent> events = new ListAppender<>();
+        events.list = new CopyOnWriteArrayList<>();
+        events.start();
+        logger.addAppender(events);
+        try {
+            assertSame(firstCause, assertThrows(CompletionException.class, () -> await(
+                    sequencer.submit("recoverable", () -> CompletableFuture.failedFuture(firstCause)))).getCause());
+            assertFalse(sequencer.isFenced());
+            assertNull(sequencer.fenceCause());
+            assertTrue(events.list.isEmpty());
+
+            CompletableFuture<Void> persisted = new CompletableFuture<>();
+            CompletableFuture<Void> fatal;
+            MDC.put("requestId", "fencing-request");
+            try {
+                fatal = sequencer.submit("fatal", RaftTransitionSequencer.FailurePolicy.FENCE, () -> persisted);
+            } finally {
+                MDC.remove("requestId");
+            }
+            CompletableFuture<Void> queued = sequencer.submit("queued", () -> CompletableFuture.completedFuture(null));
+            persisted.completeExceptionally(firstCause);
+
+            assertSame(firstCause, assertThrows(CompletionException.class, () -> await(fatal)).getCause());
+            Throwable refusal = assertThrows(CompletionException.class, () -> await(queued)).getCause();
+            assertInstanceOf(RaftTransitionSequencer.FencedException.class, refusal);
+            assertSame(firstCause, refusal.getCause());
+
+            await(runtime.stateLoop().submit(() -> sequencer.fence(laterCause)));
+            assertSame(firstCause, sequencer.fenceCause(), "later failures must not replace the diagnostic");
+            Throwable laterRefusal = assertThrows(CompletionException.class, () -> await(
+                    sequencer.submit("later", () -> CompletableFuture.completedFuture(null)))).getCause();
+            assertEquals("Raft transition sequencer is fenced", laterRefusal.getMessage());
+            assertNull(laterRefusal.getCause(), "later refusals must not repeat the original stack trace");
+            await(sequencer.drain());
+
+            assertEquals(1, events.list.size(), "only the first fence announces its cause");
+            ILoggingEvent diagnostic = events.list.getFirst();
+            assertEquals(Level.ERROR, diagnostic.getLevel());
+            assertEquals("Raft transition sequencer fenced: java.io.IOException: first durable failure",
+                    diagnostic.getFormattedMessage());
+            assertSame(firstCause, ((ThrowableProxy) diagnostic.getThrowableProxy()).getThrowable());
+            assertEquals("fencing-request", diagnostic.getMDCPropertyMap().get("requestId"));
+        } finally {
+            logger.detachAppender(events);
+            events.stop();
+        }
+    }
+
+    @Test
+    void externalFenceRetainsItsCauseWhenTheActiveTransitionLaterFails() throws Exception {
+        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime.stateLoop(), 4);
+        InjectedFaultFixture original = new InjectedFaultFixture(RAFT_WAL_TRANSITION_FAILURE, "external fence");
+        InjectedFaultFixture later = new InjectedFaultFixture(RAFT_WAL_TRANSITION_FAILURE, "active operation failed later");
+        CompletableFuture<Void> gate = new CompletableFuture<>();
+        CompletableFuture<Void> active = sequencer.submit("active", RaftTransitionSequencer.FailurePolicy.FENCE, () -> gate);
+        CompletableFuture<Void> queued = sequencer.submit("queued", () -> CompletableFuture.completedFuture(null));
+
+        await(runtime.stateLoop().submit(() -> sequencer.fence(original)));
+
+        assertTrue(sequencer.isFenced());
+        assertFalse(active.isDone(), "an external fence does not abandon the active transition");
+        assertSame(original, assertThrows(CompletionException.class, () -> await(queued)).getCause().getCause());
+        gate.completeExceptionally(later);
+        assertSame(later, assertThrows(CompletionException.class, () -> await(active)).getCause());
+        assertSame(original, sequencer.fenceCause(), "the first fence remains the diagnostic");
+        await(sequencer.drain());
     }
 
     @Test

@@ -361,6 +361,11 @@ class DockerDurableRestartTest {
             });
             String logs = cluster.getContainerByServiceName(corruptService).orElseThrow().getLogs();
             assertTrue(logs.contains("raft.log") && logs.contains("corrupt at byte"), logs);
+            JsonNode diagnostic = status(endpoints.get(corruptIndex));
+            assertTrue(diagnostic.path("fenced").asBoolean());
+            String reason = diagnostic.path("fenceReason").asText();
+            assertTrue(reason.contains("raft.log") && reason.contains("corrupt at byte"), reason);
+            assertTrue(logs.contains(reason), "status retains the recovery failure recorded in the container log");
         } finally {
             SharedDockerClusterFixture.stopAndCapture(cluster);
         }
