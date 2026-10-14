@@ -69,6 +69,19 @@ them, so a configuration created by the Jenkins user cannot be read by a bind-mo
 test configurations on POSIX filesystems. The image continues to run with its normal user, and the mounts
 remain read-only. The existing Docker topology and storage-lock tests exercise these configurations.
 
+## Phase 7 local verification, 2026-10-13
+
+The executor ownership, test-helper removal and fenced-node diagnostics changes
+are committed as `7a9108f`, `d876349` and `f737d6b`. Their final verification was
+local: 960 default tests with all coverage gates and 42 runtime tests passed,
+followed by the retained-log audit. These results are separate from Jenkins
+build 26 below, which verified the earlier future-wrapper removal at `9851987`.
+This document records no newer Jenkins run for the later commits; see
+[TESTING.md](TESTING.md#phase-7-verification-record-2026-10-13) for the local
+captures and [the task plan](../docs-design/task-list-single-pom-and-quorus-removal-2026-10-12.md#phase-7-replace-the-vertx-shaped-async-layer)
+for the detailed evidence. The pipeline commands and archival policy above
+continue to apply to these changes.
+
 ## Current server setup, 2026-10-04
 
 The memory fault recorded in the historical sections below is resolved, and the `Qraft` job was

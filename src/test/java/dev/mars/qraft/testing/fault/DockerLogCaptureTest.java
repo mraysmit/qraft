@@ -31,7 +31,13 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Tests the Docker log audit without requiring Docker. */
+/**
+ * Tests the Docker log audit without requiring Docker.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-10-06
+ * @version 1.0
+ */
 class DockerLogCaptureTest {
     private static final String TEMPO_WAL_ERROR = "ts=2026-10-13T10:54:54.903704224Z caller=dedupe.go:112"
             + " tenant=single-tenant component=remote level=error remote_name=5c925e"

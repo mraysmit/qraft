@@ -9,9 +9,11 @@ recorded in
 [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md)
 and in the dated task lists in this directory and in `docs/archive/`. The checklist
 at the end of this plan was last reconciled with the code on 2026-09-27; its
-membership items were updated on 2026-10-02. Sections 3 and 4 were brought up
-to date on 2026-10-05 with the move to one Maven project and the removal of
-`qraft-tenant`.
+membership items were updated on 2026-10-02. Later updates recorded node-model
+removal on 2026-10-09, deployment cleanup on 2026-10-11, and the single-POM
+plan's Phase 7 runtime and diagnostic close-out on 2026-10-14. Sections 3 and 4
+reflect the one-project layout and explicit executor ownership. The open
+feature items in the checklist remain delivery gaps.
 
 ## 2. Target Feature Set
 
@@ -29,6 +31,16 @@ to date on 2026-10-05 with the move to one Maven project and the removal of
 Qraft will not use Vert.x. The runtime model will use Java 27 platform APIs and standard-library concurrency primitives.
 
 The active Maven build is Java-native. The server uses Java 27 concurrency primitives and native grpc-java transport with no Vert.x runtime dependency.
+
+The single-POM plan's Phase 7 completed this runtime migration on 2026-10-13:
+the emulated future types, `JavaRuntime`, `WorkerExecutor` and old test-context
+helpers are removed. Production asynchronous APIs use `CompletableFuture` and
+`CompletionStage`. `QraftServerApplication` owns the Raft state loop and a
+separate bounded blocking executor using virtual threads; both preserve caller
+MDC and OpenTelemetry context. It stops the service, drains blocking work, stops
+the state loop and closes telemetry. The checklist below records the tests and
+verification. This cleanup phase is separate from this plan's security and
+tenancy phase 7.
 
 ### Replacement principles
 
@@ -101,7 +113,7 @@ These were Maven modules until 2026-10-04 and are now layers of packages in one
 build. The package is given in brackets; the design's section 1.1 has the full map
 and the dependencies allowed between the layers.
 
-- Common (`dev.mars.qraft.common`): the shared node model, `ServiceDefinition`, configuration helpers, and deadlines
+- Common (`dev.mars.qraft.common`): the shared node model, `ServiceDefinition`, configuration helpers, deadlines, caller-context propagation, `RaftStateLoop`, and `BlockingTaskExecutor`
 - Raft (`dev.mars.qraft.raft`): the consensus implementation, its contracts, transport, and durable storage adapters
 - Replicated state (`dev.mars.qraft.state`): the deterministic state host, replicated commands and codecs, the service catalog, health observations, and key/value state
 - Server (`dev.mars.qraft.server`): server composition and lifecycle, the HTTP and gRPC APIs, telemetry, and background health processing
@@ -303,6 +315,52 @@ merged into one Maven project on 2026-10-04.
 - [x] Bound client shutdown, deregister services before the node, and terminate
   owned scheduler and HTTP resources.
 
+### Async execution and fencing close-out (single-POM plan, Phase 7)
+
+Recorded 2026-10-14 against `f737d6b`, with completion and verification dated
+2026-10-12 and 2026-10-13:
+
+- [x] Replace the `Future`, `Promise` and `AsyncResult` wrappers with native
+  Java futures (`9851987`, Jenkins build 26).
+  [CompletionsTest](../src/test/java/dev/mars/qraft/common/concurrent/CompletionsTest.java),
+  `RaftStorageFactoryTest` and `ClusterBootstrapTest` cover completion failures
+  and the migrated boundaries.
+- [x] Replace `JavaRuntime` and `WorkerExecutor` with explicitly owned
+  `RaftStateLoop` and `BlockingTaskExecutor` (`9a6fbd0`, `7a9108f`). Keep
+  configured worker/queue bounds, overload rejection, caller MDC/OpenTelemetry
+  propagation and restoration, and blocking-work shutdown before the state
+  loop. [BlockingTaskExecutorTest](../src/test/java/dev/mars/qraft/common/async/BlockingTaskExecutorTest.java),
+  [RaftStateLoopTest](../src/test/java/dev/mars/qraft/common/async/RaftStateLoopTest.java) and
+  [QraftServerLifecycleTest](../src/test/java/dev/mars/qraft/server/QraftServerLifecycleTest.java)
+  cover these contracts.
+- [x] Remove `JavaTestContextHelper` and `JavaRuntimeExtensionHelper`
+  (`d876349`). [ShutdownCoordinatorTest](../src/test/java/dev/mars/qraft/server/lifecycle/ShutdownCoordinatorTest.java)
+  owns its loop and uses bounded future
+  waits; `RaftExecutorsFixture` owns both resources for protocol tests.
+- [x] Expose nullable `fenceReason`, retain the first fencing cause and log one
+  transition-fence announcement with the original stack and caller context
+  (`f737d6b`). [RaftTransitionSequencerTest](../src/test/java/dev/mars/qraft/raft/RaftTransitionSequencerTest.java),
+  `RaftNodeApplyFailureTest`,
+  `RaftNodeConfigurationTest`, `RaftNodeMetadataSequencingTest`,
+  `HttpApiServerTest` and `DockerDurableRestartTest` cover the diagnostic and
+  the distinction between rejected bootstrap and uncertain persistence.
+- [x] Audit native observability-container errors with explicit attribution
+  and matching recovery for the previously approved Tempo startup case,
+  preserving full severity and output (`f737d6b`).
+  [DockerLogCaptureTest](../src/test/java/dev/mars/qraft/testing/fault/DockerLogCaptureTest.java) and
+  `DockerStartCommandsTest` cover the audit; all unrelated native errors fail.
+
+The final local verification passed 960 default tests and all coverage gates,
+then 42 runtime tests on the fresh jar and rebuilt image. Five consecutive
+affected Raft/HTTP runs passed 293 tests each; the recorded final retained-log
+audit found no unflagged errors or exception headers in the accepted output.
+[TESTING.md](../docs/TESTING.md#phase-7-verification-record-2026-10-13) records
+the captures, tests and audit; [the cleanup task list](task-list-single-pom-and-quorus-removal-2026-10-12.md#phase-7-replace-the-vertx-shaped-async-layer)
+holds the TDD evidence and earlier failed-run remediation. These local results
+are separate from Jenkins build 26. No new build was run for this checklist
+update. Cluster-wide status, broader metrics, security, tenancy and the other
+unchecked features below remain open.
+
 ### Remaining implementation work
 
 - [x] Complete server-mode configuration and bootstrap behavior. A cluster
@@ -366,6 +424,10 @@ merged into one Maven project on 2026-10-04.
   (phase 7; item 9).
 - [ ] Implement server membership change. Decided 2026-09-29, and in progress
   in [`task-list-raft-membership-changes-2026-10-12.md`](task-list-raft-membership-changes-2026-10-12.md):
-  server IDs, the configuration in the log, and non-voter promotion are done.
+  server IDs, the configuration in the log, non-voter promotion, joining, and
+  operator list/remove are done. The Step 4 close-out gate closed on 2026-10-11
+  when the owner removed the mutation requirement. Failed-server cleanup and
+  lost-quorum recovery remain open; Step 5 resumes after the single-POM list
+  is archived (updated 2026-10-14).
 - [ ] Decide on and implement DNS discovery and persisted generated node
   identity (item 10).

@@ -52,6 +52,7 @@ import static java.util.Objects.requireNonNull;
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-02-22
+ * @version 1.0
  */
 public sealed interface RaftNodeMode {
 

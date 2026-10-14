@@ -28,6 +28,10 @@ import java.util.Set;
  * JUnit test support helper that audits container output around every class tagged
  * {@code docker}. Registered through {@code META-INF/services}; delegates capture
  * to {@link DockerLogCaptureHelper} and fails the test class on unexpected errors.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-10-06
+ * @version 1.0
  */
 public final class DockerLogExtensionHelper implements BeforeAllCallback, AfterAllCallback {
     @Override

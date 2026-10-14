@@ -38,6 +38,10 @@ import java.util.regex.Pattern;
  * Test logging helper used by {@link DockerLogExtensionHelper} to capture, archive,
  * audit, label, and reprint container output while a Docker test class is running.
  * Reports unexpected errors so the extension can fail the calling test class.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-10-06
+ * @version 1.0
  */
 public final class DockerLogCaptureHelper {
     private static final Object LOCK = new Object();

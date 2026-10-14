@@ -48,6 +48,7 @@ import java.util.function.Supplier;
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-01-30
+ * @version 1.0
  */
 public class ShutdownCoordinator {
     

@@ -346,5 +346,7 @@ tests:
 - `RaftLogStorageIntegrationTest`: corruption, locking, and legacy WAL/metadata
   compatibility against the real external library.
 - `FileSnapshotStoreTest` and `RaftNodeRealSnapshotRecoveryTest`: atomic snapshot
-  publication, legacy snapshot reading, and first-snapshot temporary-file
-  fencing.
+  publication and legacy snapshot reading; crash recovery before and after
+  first-snapshot publication and compaction, including preservation of an
+  interrupted first snapshot and fencing when compaction exceeds the published
+  snapshot boundary.

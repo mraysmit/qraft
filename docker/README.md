@@ -107,6 +107,15 @@ suite starts the stacks that way. Compose reads the variable; Qraft does not.
 A server writes its log files inside its container, under `/app/logs`, and to
 its console: read them with `docker logs <container>`.
 
+`/raft/status` includes `fenced` and nullable `fenceReason`. A fenced server
+remains live but returns HTTP 503 from `/health/ready`; preserve its logs and
+storage before following [the storage recovery runbook](../docs/RAFT_STORAGE_OPERATIONS.md#detecting-corruption-and-fencing).
+
+The mounted server JSON's `server.raft.io.poolSize` and `queueSize` bound active
+blocking work and its queue. The transport uses a separate callback pool with
+the same configured limits. The Raft state loop remains separate from both;
+no environment-variable worker settings are used.
+
 ## Observability
 
 There is one observability stack: OpenTelemetry Collector, Tempo, Prometheus,
@@ -138,6 +147,12 @@ Default local endpoints:
 | OTLP HTTP | localhost:4318 |
 
 The default Grafana development credentials are `admin` / `admin`.
+
+The Docker tests audit native observability logs as well as Qraft logs. Every
+unflagged error fails verification. The previously approved Tempo metrics-WAL
+startup race is accepted only under its specific declaration with matching
+later recovery; [TESTING.md](../docs/TESTING.md#docker-archives-and-uncaught-exceptions) describes the
+attribution and retained-log rules.
 
 The scripts start the stack alone, for servers run on this machine. A second
 compose file starts the same stack with three servers that report to it. Both

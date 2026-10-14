@@ -1,10 +1,11 @@
 # Qraft Feature Validation
 
 **Date:** 2026-09-27
+**Last updated:** 2026-10-14 (single-POM plan Phase 7: native futures, executor ownership, test-helper removal, fenced-node diagnostics and the closed membership Step 4 gate; existing feature gaps remain open)
 **Scope:** every server and client feature in
 [`CONSUL_FEATURE_IMPLEMENTATION_PLAN.md`](CONSUL_FEATURE_IMPLEMENTATION_PLAN.md) and
 [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md),
-checked against the code on the date above
+checked against the code on the original date above, with dated updates below
 **Purpose:** establish which platform features exist before the administrative
 interface ([`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md))
 goes further than its first increment
@@ -39,12 +40,14 @@ Status key:
 | Area | Feature | Status | Evidence or gap |
 |---|---|---|---|
 | Runtime | `qraft server` from one image; file configuration validated before resources open | Done | `QraftRuntimeApplication`, `AppConfig`, `QraftServerLifecycleTest` |
-| Runtime | Drain before shutdown; bounded shutdown | Done | `ShutdownCoordinator`, `RaftNodeShutdownSequencingTest` |
+| Runtime | Native Java asynchronous contracts | Done | Updated 2026-10-14. `Future`, `Promise` and `AsyncResult` wrappers removed on 2026-10-12 (`9851987`, Jenkins build 26); production and tests use `CompletableFuture` / `CompletionStage`. `CompletionsTest`, `RaftStorageFactoryTest`, `ClusterBootstrapTest` |
+| Runtime | Explicitly owned Raft state loop and bounded blocking executor | Done | Done 2026-10-13 (`7a9108f`; recorded 2026-10-14). `QraftServerApplication` owns `RaftStateLoop` and `BlockingTaskExecutor`; configured work/queue bounds, overload rejection, MDC/OpenTelemetry propagation and restoration. `BlockingTaskExecutorTest`, `RaftStateLoopTest`, `QraftServerLifecycleTest` |
+| Runtime | Drain before shutdown; bounded shutdown | Done | `ShutdownCoordinator`, `RaftNodeShutdownSequencingTest`. Updated 2026-10-14: service stop, blocking-work drain, state-loop termination, then telemetry cleanup, including failed cleanup and interrupts (`QraftServerLifecycleTest`) |
 | Runtime | Readiness that reflects recovery, fencing, draining, and leadership (design 6.1) | Done | `HttpApiServerReadinessTest`; done 2026-09-27. Since 2026-10-09 a server that does not campaign loses a silent leader too, and is unready (`RaftNodeServerIdCountingTest`) |
 | Raft | Election, replication, check-quorum, fencing | Done | `RaftNode*Test`, `RaftNodeCheckQuorumTest` |
 | Raft | Durable WAL, snapshots in every role, installation, recovery | Done | `RaftNodeFollowerLogTest`, `DockerDurableRestartTest`, `DockerClientRecoveryTest` |
 | Raft | Replica determinism; follower match index limited to verified entries | Done | `ReplicaDeterminismTest`, `RaftNodeFollowerLogTest` |
-| Raft | Adding or removing servers (membership change) | Partial | Updated 2026-10-02. Durable server IDs, the configuration in the replicated log, bootstrapping, and non-voter promotion are done (`RaftNodeServerIdentityTest`, `RaftNodeConfigurationChangeTest`, `RaftNodePromotionTest`). Joining, operator list and remove, and leader stickiness against disruptive servers are built and pass the default and Docker suites; mutation validation is outstanding (`RaftNodeMembershipTest`, `MembershipServiceTest`); failed-server cleanup and lost-quorum recovery are open. See [`task-list-raft-membership-changes-2026-10-12.md`](task-list-raft-membership-changes-2026-10-12.md) |
+| Raft | Adding or removing servers (membership change) | Partial | Updated 2026-10-14. Durable server IDs, the configuration in the replicated log, bootstrapping, and non-voter promotion are done (`RaftNodeServerIdentityTest`, `RaftNodeConfigurationChangeTest`, `RaftNodePromotionTest`). Joining, operator list and remove, and leader stickiness against disruptive servers are built and pass the default and Docker suites (`RaftNodeMembershipTest`, `MembershipServiceTest`). Their Step 4 close-out gate closed on 2026-10-11 when the owner removed the mutation requirement; failed-server cleanup and lost-quorum recovery remain open. See [`task-list-raft-membership-changes-2026-10-12.md`](task-list-raft-membership-changes-2026-10-12.md) |
 | Catalog | Register and deregister through Raft; composite identity; idempotence | Done | `HttpApiServerTest`, `ClientEndToEndTest` |
 | Catalog | Catalog and health queries with deterministic ordering | Done | `ServiceCatalog` sorts names and instances |
 | Catalog | Registration and modification indexes on instances (design 7.5) | Missing | `ServiceInstance` has no index fields |
@@ -73,6 +76,7 @@ Status key:
 | Operations | Prometheus metrics | Partial | Raft metrics only. The catalog, health-transition, request, and session metrics of design 18 are absent. Client mode publishes no metrics; the dashboard's panels for a `qraft_clients` metric that never existed were removed on 2026-10-10 (updated 2026-10-11) |
 | Operations | Deployment files: Compose clusters, start scripts, and one observability stack | Done | One server with a client, three and five servers, a network-test cluster, and OpenTelemetry Collector, Tempo, Prometheus, Loki, and Grafana, alone or with three servers. `DockerStartCommandsTest` runs every start command and both stacks. Removed on 2026-10-10: the ELK, Fluentd, and Promtail stacks, the nginx load balancer, the logging demo scripts, and the hand-test data (added 2026-10-11) |
 | Operations | Node and cluster status | Partial | `/raft/status` describes only the answering node. `GET /v1/operator/raft/configuration` lists the configured servers, with voter and leader flags (updated 2026-10-02). Still no reachability, lag, or quorum |
+| Operations | Fenced-node reason and one-time transition failure diagnostic | Done | Done 2026-10-13 (`f737d6b`; recorded 2026-10-14). `/raft/status` exposes nullable `fenceReason`; the sequencer retains the first cause and logs one ERROR announcement with its original stack and caller context. Startup failures remain observable. `RaftTransitionSequencerTest`, `RaftNodeApplyFailureTest`, `RaftNodeConfigurationTest`, `RaftNodeMetadataSequencingTest`, `HttpApiServerTest`, `DockerDurableRestartTest`. Cluster-wide reachability, lag and quorum remain outside this completed diagnostic |
 | Operations | Health aggregation | Done | Derived service health; `?passing` filter |
 | Operations | Offline backup, corrupt-replica replacement, compatible-upgrade guidance | Done | [`RAFT_STORAGE_OPERATIONS.md`](../docs/RAFT_STORAGE_OPERATIONS.md); clarified 2026-10-03: lower-level legacy byte compatibility does not establish whole-node startup compatibility; an older backup cannot rejoin as the same voter |
 | Operations | Lost-quorum recovery and whole-cluster backup restore | Missing | No supported procedure yet. Membership Step 7 must establish and test it; clarified 2026-10-03 |
@@ -112,7 +116,47 @@ Status key:
   - multi-node integration and failure-injection coverage.
 
   Snapshot, restore, upgrade, and recovery workflows are partly done. Server
-  configuration and bootstrap is done apart from membership change.
+  configuration and bootstrap are done; membership remains partial because
+  failed-server cleanup and lost-quorum recovery are still open.
+
+### Phase 7 runtime and diagnostic close-out, recorded 2026-10-14
+
+This is Phase 7 of
+[the single-POM cleanup list](task-list-single-pom-and-quorus-removal-2026-10-12.md#phase-7-replace-the-vertx-shaped-async-layer),
+whose exit was met on 2026-10-13. It is separate from the Consul plan's
+security and tenancy phase.
+
+- Native futures replaced the emulated future types at `9851987`, verified by
+  Jenkins build 26. `Completions` retains the original failure at completion
+  boundaries; [CompletionsTest](../src/test/java/dev/mars/qraft/common/concurrent/CompletionsTest.java)
+  and [RaftStorageFactoryTest](../src/test/java/dev/mars/qraft/raft/storage/RaftStorageFactoryTest.java)
+  cover that contract.
+- `JavaRuntime` and `WorkerExecutor` were removed in favour of explicitly owned
+  executors (`9a6fbd0`, `7a9108f`).
+  [The executor coverage table](../docs/TESTING.md#state-loop-and-blocking-executor-changes)
+  maps bounds, rejection, caller context, cancellation, timers, completion
+  dispatch and shutdown to their regression tests.
+- `JavaTestContextHelper` and `JavaRuntimeExtensionHelper` were removed
+  (`d876349`). [ShutdownCoordinatorTest](../src/test/java/dev/mars/qraft/server/lifecycle/ShutdownCoordinatorTest.java)
+  owns its state loop directly and uses
+  bounded future waits; protocol fixtures borrow both resources from
+  `RaftExecutorsFixture` and release them in ownership order.
+- Fencing diagnostics and the bootstrap pre-write rejection correction are
+  covered by the tests in the Operations row above (`f737d6b`). The native
+  observability-log audit follow-up preserves full error output and requires
+  specific attribution and matching recovery for the previously approved Tempo
+  startup case (`DockerLogCaptureTest`, `DockerStartCommandsTest`).
+
+Final local verification on 2026-10-13 passed 960 default tests with every
+coverage gate and 42 runtime tests against the freshly packaged jar and rebuilt
+image. Five consecutive affected Raft/HTTP runs passed 293 tests each. The
+recorded audit of 322 retained logs, including 163 Docker archives, found no
+unflagged error or exception header in the accepted output; earlier failed
+captures remain separately recorded with their causes and fixes.
+[TESTING.md](../docs/TESTING.md#phase-7-verification-record-2026-10-13) names the
+final captures and links the TDD and log-audit evidence. These are local results,
+separate from Jenkins build 26's earlier wrapper removal. No tests were rerun
+for this documentation update, and the remaining feature gaps stay open.
 
 ## 5. Recommended order
 

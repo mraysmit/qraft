@@ -36,7 +36,8 @@ import java.util.Optional;
  * <p>Package-private utility class used by {@link ProtobufCommandCodec}.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
- * @since 2025
+ * @since 2026-10-09
+ * @version 1.0
  */
 final class NodeCodec {
 

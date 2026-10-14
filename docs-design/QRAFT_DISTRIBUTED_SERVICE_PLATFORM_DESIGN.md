@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-10-11 (section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
+**Last updated:** 2026-10-14 (Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
 
 ## 1. Purpose
 
@@ -53,7 +53,7 @@ namespaces `qraft.raft` and `qraft.api` remain unchanged.
 
 The client configuration retains its `client` and `servers` objects;
 `/v1/client/*` paths move in the client implementation plan. Node models remain
-shared until Phase 4 replaces the inherited fleet fields.
+in Common; Phase 4 removed their inherited fleet fields (section 7.3).
 
 Until 2026-10-04 the build had seven Maven modules. The unused `qraft-tenant`
 module was removed; namespaces return as replicated state in section 15.
@@ -1311,43 +1311,36 @@ between a snapshot boundary and the Raft log.
 The detailed test-first migration and removal gates are maintained in
 [`RAFTLOG_EXTERNALISATION_TDD_PLAN.md`](../docs/archive/RAFTLOG_EXTERNALISATION_TDD_PLAN.md).
 
-The storage design therefore has two distinct ports:
+Production pairs RaftLog's `dev.mars.raftlog.storage.RaftStorage` with Qraft's
+`dev.mars.qraft.raft.api.SnapshotStore` in `RaftStorageFactory.DurableStorage`:
 
 ```java
-interface RaftWal extends AutoCloseable {
-    CompletableFuture<Void> open(Path directory);
-    CompletableFuture<Void> updateMetadata(long term, Optional<String> votedFor);
-    CompletableFuture<PersistentMeta> loadMetadata();
-    CompletableFuture<Void> appendEntries(List<LogEntryData> entries);
-    CompletableFuture<Void> truncateSuffix(long fromIndex);
-    CompletableFuture<Void> sync();
-    CompletableFuture<List<LogEntryData>> replayLog();
-    CompletableFuture<Void> truncatePrefix(long throughIndex);
-}
-
-interface SnapshotStore extends AutoCloseable {
-    CompletableFuture<Void> saveAtomically(SnapshotData snapshot);
-    CompletableFuture<Optional<SnapshotData>> loadLatest();
-}
+public record DurableStorage(dev.mars.raftlog.storage.RaftStorage wal,
+                             SnapshotStore snapshots) { }
 ```
 
-Qraft uses RaftLog's `RaftStorage` interface directly. A private future-conversion
-helper adapts `CompletableFuture` to the server runtime without recreating a
-storage interface. No semantic storage adapter exists, so prefix compaction and
-every other WAL operation reach the external implementation.
+`RaftStorageFactory.createDurable` returns `CompletableFuture<DurableStorage>`.
+Both storage contracts expose native Java futures. `SnapshotStore` opens a node
+directory, saves atomically, loads the latest snapshot, and closes asynchronously
+or through `AutoCloseable`. `Completions` handles completion failures and unwraps
+`CompletionException`; it does not convert futures into another runtime type.
+No semantic WAL adapter exists, so prefix compaction and every other WAL
+operation reach the external implementation directly.
 
 The snapshot store may share a node data directory with the WAL, but it is a
 separate ownership and durability contract. The same directory holds the
-server's `server-id` (section 4.2). Snapshot data is an envelope: the cluster
+server's `server-id` (section 4.2), written atomically and made durable once,
+at the server's first start, while the WAL holds the directory's lock.
+Snapshot data is an envelope: the cluster
 configuration at the snapshot's last included index, then the state machine's
-snapshot. It is restored with the snapshot and sent with an install. It is written atomically and made durable
-once, at the server's first start, while the WAL holds the directory's lock. Snapshot data, last included index,
+snapshot. It is restored with the snapshot and sent with an install.
+Snapshot data, last included index,
 last included term, format version, and checksum are published atomically as one
 recoverable unit.
 
-The consensus layer should use standard `CompletableFuture` or `CompletionStage`
-at this boundary. Runtime-specific future wrappers add no storage semantics and
-should not leak into the reusable storage port.
+The consensus layer uses standard `CompletableFuture` and `CompletionStage`
+contracts. The former `Future`, `Promise`, and `AsyncResult` wrapper types were
+removed in Phase 7; storage ports and their callers use the Java APIs directly.
 
 ### 14.2 Opaque command payloads and materialized state
 
@@ -1829,28 +1822,35 @@ Each service owns its servers, clients, schedulers, storage, and background task
 No component creates an executor that another component is expected to discover
 and close implicitly.
 
-The server composition root owns two separate execution resources. `RaftStateLoop`
-serializes Raft state transitions and timers. `BlockingTaskExecutor` runs blocking
+`QraftServerApplication` owns two separate execution resources from
+`dev.mars.qraft.common.async`. `RaftStateLoop` serializes Raft state transitions
+and timers on one platform thread. `BlockingTaskExecutor` runs blocking
 resource operations on virtual threads, with parallelism and queue capacity taken
 from `server.raft.io.poolSize` and `server.raft.io.queueSize`. These are independent
 of the transport's callback pool, which uses the same settings. Overload fails the
 submitted operation rather than running blocking work on the submitting thread.
-Both resources preserve the submitting `CallerContext` MDC and OpenTelemetry context.
+Both resources preserve the submitting `CallerContext` MDC and OpenTelemetry
+context and restore the executing thread's previous context afterward. Blocking
+task results normally complete on the state loop; rejected completion dispatch
+and forced shutdown can fail results on the dispatching or shutdown thread.
+Cancelling a queued task skips it before execution and does not interrupt active work.
 After stopping the service, the owner drains blocking work, stops the state loop,
 and then closes telemetry. Each executor reports failure if it cannot terminate
 within five seconds; forced blocking shutdown also fails outstanding operations.
 
-A future's callbacks run on the thread that completes it, so blocking work never
-runs inline on a thread the component did not create for that work:
+Non-async future callbacks can run on a completing thread or a thread registering
+or helping complete a callback. Blocking work must be dispatched to its owned
+executor rather than run inline on an arbitrary callback thread:
 
-- Bounded waits use `dev.mars.qraft.concurrent.Deadlines`, not `CompletableFuture.orTimeout`
+- Bounded waits use `dev.mars.qraft.common.concurrent.Deadlines`, not `CompletableFuture.orTimeout`
   or `completeOnTimeout`. The JDK completes those on one JVM-wide delay thread,
   where a blocked callback would stall every timeout in the process. `Deadlines`
   delivers each timeout on a new virtual thread and releases the pending expiry
   once the result arrives.
-- The server releases its runtime and telemetry on a virtual thread of its
-  own after the service stops. Otherwise the runtime shutdown could wait for the
-  thread running it.
+- The server releases its executors and telemetry from virtual threads it owns
+  after the service stops. This keeps cleanup off the execution resources whose
+  termination it awaits. Later cleanup steps still run after a failure; the first
+  failure is reported with later failures suppressed.
 - The client awaits executor and HTTP client termination on a virtual thread
   before reporting shutdown complete.
 

@@ -25,6 +25,10 @@ import java.lang.annotation.Target;
  * Test annotation helper that declares the intentional error signatures a Docker
  * test class may cause in container output, each at the level its definition names.
  * {@link DockerLogExtensionHelper} reads it when configuring the class's container-log audit.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-10-06
+ * @version 1.0
  */
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.TYPE)

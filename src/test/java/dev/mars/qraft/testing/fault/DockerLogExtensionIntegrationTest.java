@@ -19,7 +19,13 @@ package dev.mars.qraft.testing.fault;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Proves the two auto-detected extensions compose correctly without needing a Docker daemon. */
+/**
+ * Proves the two auto-detected extensions compose correctly without needing a Docker daemon.
+ *
+ * @author Mark Andrew Ray-Smith Cityline Ltd
+ * @since 2026-10-06
+ * @version 1.0
+ */
 @Tag("docker")
 @ExpectedDockerErrorsHelper(IntentionalErrorFixture.RAFT_PEER_UNREACHABLE)
 class DockerLogExtensionIntegrationTest {

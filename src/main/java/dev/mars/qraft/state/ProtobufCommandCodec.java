@@ -56,6 +56,7 @@ import java.time.Instant;
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2025-02-15
+ * @version 1.0
  */
 public final class ProtobufCommandCodec {
 

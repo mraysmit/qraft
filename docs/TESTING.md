@@ -130,6 +130,9 @@ and asserts their results or failure causes on the test thread. An incomplete
 future holds the drain phase while the test checks that work is refused; timeout
 tests use incomplete hook futures rather than artificial delays. State-loop
 teardown is awaited before the intentional-error audit closes the test's scope.
+The former `JavaTestContextHelper` and `JavaRuntimeExtensionHelper` are removed;
+tests own the required execution resources explicitly and assert completed
+future outcomes on the test thread.
 
 | Contract | Regression coverage |
 |---|---|
@@ -158,6 +161,14 @@ classes from `target/`. Then run the runtime suites below, including `slow` for 
 full-suite exit, on a fresh image. Audit all retained output and logs under the
 intentional-error rules below. Passing assertions alone does not close the task.
 
+For that full runtime gate, include every default-excluded group:
+
+```powershell
+mvn -B "-Dstyle.color=never" test "-Dgroups=docker,e2e,slow" "-Dtest.excludedGroups=" 2>&1 | Tee-Object -FilePath ".\logs\qraft-tests-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
+$qraftBuildExitCode = $LASTEXITCODE
+if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
+```
+
 ### Fencing diagnostics
 
 For fencing diagnostics, the focused classes are `RaftTransitionSequencerTest`,
@@ -173,6 +184,27 @@ mvn -B "-Dstyle.color=never" test "-Dtest=RaftTransitionSequencer*Test,RaftNode*
 $qraftBuildExitCode = $LASTEXITCODE
 if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
 ```
+
+### Phase 7 verification record, 2026-10-13
+
+The committed executor, test-helper and fencing changes (`7a9108f`, `d876349`,
+`f737d6b`) completed their verification locally. Five consecutive affected Raft
+and HTTP runs passed 293 tests each. The final default `install` passed 960 tests
+and every coverage gate; the runtime gate passed 42 `docker,e2e,slow` tests
+against the freshly packaged jar and rebuilt image. Neither final suite had a
+failure, error or skip.
+
+Retained Maven captures are
+`logs/qraft-fence-final-install-2026-10-13_19-03-35-146.log` and
+`logs/qraft-fence-final-runtime-2026-10-13_19-04-56-948.log`. The recorded final
+audit covered 322 retained logs, including 163 Docker archives: all 2,214 ERROR
+headers and 2,846 exception headers were attributed, including one flagged
+lock-contender uncaught exception. No unflagged error or exception header
+remained. Counts include duplicate captures. Earlier failed runs are retained
+separately with their causes and fixes; passing test totals did not erase them.
+See [the Phase 7 record](../docs-design/task-list-single-pom-and-quorus-removal-2026-10-12.md#phase-7-replace-the-vertx-shaped-async-layer)
+for TDD evidence, capture names and the native-container audit follow-up.
+These are dated results, not expected counts for future runs or Jenkins results.
 
 ## Before you call a change done: `mvn install`
 
@@ -190,7 +222,7 @@ dependencies into its own jar as well. Without `clean`, that step started from t
 kept an old dependency's classes, and `qraft-runtime.jar` inherited them. The unit tests ran against the
 new version, so nothing failed: only the packaged jar, and so the Docker suite and any deployment, ran the
 old one. It was found when RaftLog went from 1.4.0 to 1.4.1. A plain `mvn install` now packages the
-versions the poms name; `clean` is not needed after a dependency change. To check what a jar holds:
+versions the root POM names; `clean` is not needed after a dependency change. To check what a jar holds:
 
 ```bash
 unzip -p target/qraft.jar META-INF/maven/io.github.mraysmit/raftlog-core/pom.properties
@@ -199,7 +231,7 @@ unzip -p target/qraft.jar META-INF/maven/io.github.mraysmit/raftlog-core/pom.pro
 ## When the change touches the runtime: the end-to-end and Docker suites
 
 Run them when a change touches server or client start-up, health checks and their TTLs, ports,
-configuration files, the poms, or the Dockerfiles. They aren't needed for every change. Run them straight
+configuration files, the POM, or the Dockerfiles. They aren't needed for every change. Run them straight
 after `mvn install`, together:
 
 ```powershell
@@ -274,8 +306,10 @@ A passing suite shows that the code works. It does not show that the tests would
 check were lost: the suite passes just as well when no test reaches the check. Mutation testing asks
 that question. [PIT](https://pitest.org) is the tool.
 
-**On ice since 2026-10-11, at the owner's decision.** PIT is configured and has passed its dry runs,
-but no mutant has been run against a test, and none is to be until the owner asks. The owner sees no
+**On ice since 2026-10-11, at the owner's decision.** PIT is configured and has passed its dry runs.
+An earlier whole-class analysis was aborted after two hours without a report; its
+history is recorded in [JENKINS.md](JENKINS.md#current-server-setup-2026-10-04).
+No further mutant is to be run against a test until the owner asks. The owner sees no
 value in it for now: Qraft's test coverage is high, and its tests are written test-first. Do not run
 it, extend it, or propose it. What follows describes the configuration as it was left.
 
@@ -301,7 +335,7 @@ Compile Qraft and its tests
         ↓
 Run the eligible JUnit tests for coverage
         ↓
-Generate mutations in three Raft classes
+Generate mutations in the configured Raft class
         ↓
 Select the tests that cover each changed instruction
         ↓

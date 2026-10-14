@@ -1,10 +1,10 @@
 # Task List: Single POM and Removal of the Quorus Leftovers
 
 **Date:** 2026-10-04
-**Last updated:** 2026-10-13 (Phase 7 complete: fenced-node diagnostics and the bootstrap rejection fix verified, native-container log attribution strengthened, 960 default tests and 42 runtime tests passed with all coverage gates and a clean final log audit. Phase 7 test-helper replacement verified: all 12 shutdown tests preserved, five consecutive focused runs, 953 default tests, coverage gates, and the retained-log audit passed. Phase 7 executor ownership and its five-run concurrency gate verified: 953 default tests, 42 runtime tests, all coverage gates, and the retained-log audit passed. On 2026-10-12: Phase 7's second task converted in full: `Future`, `Promise`, and `AsyncResult` are deleted, after three slices of which the first was verified by Jenkins build 25; Jenkins build 26 verified the whole change; the test side sized and the phase kept in this list; the record of Phase 7's first task put in order, with four passages removed or reworded that still described its gate as open; the file renamed to the date of its last change. On 2026-10-11: PIT mutation testing tried for Phase 7's first task and put on ice by the owner; the mutation rule then removed by the owner from every task list, and that first task, the membership list's Step 4 gate, closed; reviewed at the user's request, with three stale passages corrected, and the review's four questions answered: Phase 3's last task dropped, and the gRPC warning added to the operations runbook; Qraft moved to `raftlog-core` 1.5.0 and the test of the storage class removed, verified by Jenkins build 19 with two tests of gRPC's shutdown window: Phase 6 is done; the other documents brought up to date with Phase 6, in Phase 8, and the other four task lists renamed with their links; the file renamed to the date of its last change. On 2026-10-10: in the evening, Phase 6's open points closed and verified by Jenkins build 15: a Docker test runs every start command, the dashboard looked at and corrected, the Grafana errors fixed, `-Down` keeps the observability data, and RaftLog's interface given the compaction boundary, which waits for a release. Before that: Phase 6 applied, and verified by Jenkins build 6 except for its start commands and its dashboard: three unused log stacks, the load balancer, the demo scripts, and the hand-test data deleted, the start scripts reduced, and the kept observability stack corrected; then the recovery test that timed out on Jenkins given its own client profile. Phase 5 done and its exit met: the version source, then the configuration without a default document, as typed records, with one shared parsing helper; each verified on Jenkins; three third-party keywords that Phase 3A's sweep had renamed are restored; the file renamed to the date of its last change. On 2026-10-09: the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
+**Last updated:** 2026-10-14 (Reviewed against `f737d6b`: Phase 7 is committed and complete; Phase 8 documentation/checklist reconciliation and final audits completed; archival and membership resumption remain. No new build was run for this review. On 2026-10-13: Phase 7 complete: fenced-node diagnostics and the bootstrap rejection fix verified, native-container log attribution strengthened, 960 default tests and 42 runtime tests passed with all coverage gates and a clean final log audit. Phase 7 test-helper replacement verified: all 12 shutdown tests preserved, five consecutive focused runs, 953 default tests, coverage gates, and the retained-log audit passed. Phase 7 executor ownership and its five-run concurrency gate verified: 953 default tests, 42 runtime tests, all coverage gates, and the retained-log audit passed. On 2026-10-12: Phase 7's second task converted in full: `Future`, `Promise`, and `AsyncResult` are deleted, after three slices of which the first was verified by Jenkins build 25; Jenkins build 26 verified the whole change; the test side sized and the phase kept in this list; the record of Phase 7's first task put in order, with four passages removed or reworded that still described its gate as open; the file renamed to the date of its last change. On 2026-10-11: PIT mutation testing tried for Phase 7's first task and put on ice by the owner; the mutation rule then removed by the owner from every task list, and that first task, the membership list's Step 4 gate, closed; reviewed at the user's request, with three stale passages corrected, and the review's four questions answered: Phase 3's last task dropped, and the gRPC warning added to the operations runbook; Qraft moved to `raftlog-core` 1.5.0 and the test of the storage class removed, verified by Jenkins build 19 with two tests of gRPC's shutdown window: Phase 6 is done; the other documents brought up to date with Phase 6, in Phase 8, and the other four task lists renamed with their links; the file renamed to the date of its last change. On 2026-10-10: in the evening, Phase 6's open points closed and verified by Jenkins build 15: a Docker test runs every start command, the dashboard looked at and corrected, the Grafana errors fixed, `-Down` keeps the observability data, and RaftLog's interface given the compaction boundary, which waits for a release. Before that: Phase 6 applied, and verified by Jenkins build 6 except for its start commands and its dashboard: three unused log stacks, the load balancer, the demo scripts, and the hand-test data deleted, the start scripts reduced, and the kept observability stack corrected; then the recovery test that timed out on Jenkins given its own client profile. Phase 5 done and its exit met: the version source, then the configuration without a default document, as typed records, with one shared parsing helper; each verified on Jenkins; three third-party keywords that Phase 3A's sweep had renamed are restored; the file renamed to the date of its last change. On 2026-10-09: the plans and the other documents brought up to date with Phase 4, in Phase 8; Phase 4 done, with its mutation evidence; its four open points reviewed with the user and its three remaining decisions confirmed; Phase 3A added and done; the audit of child JVMs under Phase 2A; the file renamed to the date of its last change)
 **Status:** In progress. This is the current task list. It started on 2026-10-04 at the user's request, before the membership list's Step 4 close-out gate.
-**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 was done and its exit met on 2026-10-10: Jenkins build 4 verified its version source and build 5 the rest. Phase 6 was applied on 2026-10-10; Jenkins build 6 verified it on `d0275a7`. Build 8 then failed on the recovery test and showed its cause, a kill during the follower's first snapshot; build 9 passed with the fix, on `122d739`. Its exit was open for the start commands run by hand and a look at the corrected dashboard on a running stack. Both were done on the evening of 2026-10-10, and Jenkins build 15 verified them on `da87cb3`: its exit was met for all but its one open task. That task was done on 2026-10-11 with `raftlog-core` 1.5.0, and Jenkins build 19 verified it on `f9b3403`: Phase 6 is done. **Phase 7 is complete and its exit met on 2026-10-13. Executor ownership is committed as `7a9108f` and test-helper replacement as `d876349`. Fenced-node diagnostics, the bootstrap pre-write rejection fix and the native-container audit follow-up are verified in the working tree. Phase 8 documentation and close-out are next.** Its first, the membership list's Step 4 gate, was closed on 2026-10-11: the gate had waited on mutation evidence, PIT was tried for it and put on ice by the owner, and the owner then removed the mutation rule from every task list. The second task, the replacement of the wrapper future types, started on 2026-10-12 in slices: the first, `RaftStorageFactory`, is done and verified by Jenkins build 25 on `a37a684`; `ClusterBootstrap` and `MembershipService` followed, and then the rest in one change. The three types are deleted and nothing imports them. Jenkins build 26 verified the whole change on `9851987`: the second task is done. The test side was sized that day, and the phase stays in this list. Phase 7 is complete; four tasks of Phase 8 are open. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
-**Last reviewed:** 2026-10-13, Phase 7 close-out against `d876349` plus the working-tree changes, with its TDD, repeated tests, full suites, source audit and retained-log verification below. Earlier that day: Phase 7 test-helper replacement against `7a9108f` plus the working-tree changes, with its baseline, repeated runs, clean install and log audit recorded below. Earlier that day: Phase 7 executor code and coverage at `9a6fbd0` plus the working-tree changes, with the verification recorded below. Before that: 2026-10-11, against the code at commit `f9b3403`, this list alone: see "Review of 2026-10-11" at the head of section 4. Before that: 2026-10-08, against the code at commit `9a4adf0`, with the other four task lists. The status table in section 4 and every item marked "review of 2026-10-08" come from that review. No build was run for it. The logs that the Phase 2A and Phase 3 records cite were written in another working tree and were not available, so their counts were checked for arithmetic only. The earlier review of 2026-10-05 was against `24beac3`; its items keep their date.
+**Active work:** Phase 3A, which replaces Qraft's two retired words with `client` and `server`, was applied and verified on 2026-10-09, and committed as `5a00975`. Phase 3 is implemented and verified complete on 2026-10-08. Phase 4 was done and its exit met on 2026-10-09: the legacy node fixtures, the Consul-shaped node, the removal of the capabilities update, the three node statuses, the node routes at `/v1/catalog/*`, and the removal of `/api/v1/info`, `/status`, and bare `/health`; it was committed as `e4bf00d` to `a6e7930`. The user reviewed its four open points the same day: three were done at once and one became a task of Phase 7. The user then confirmed the phase's three remaining decisions as built. Nothing of Phase 4 is open. Phase 5 was done and its exit met on 2026-10-10: Jenkins build 4 verified its version source and build 5 the rest. Phase 6 was applied on 2026-10-10; Jenkins build 6 verified it on `d0275a7`. Build 8 then failed on the recovery test and showed its cause, a kill during the follower's first snapshot; build 9 passed with the fix, on `122d739`. Its exit was open for the start commands run by hand and a look at the corrected dashboard on a running stack. Both were done on the evening of 2026-10-10, and Jenkins build 15 verified them on `da87cb3`: its exit was met for all but its one open task. That task was done on 2026-10-11 with `raftlog-core` 1.5.0, and Jenkins build 19 verified it on `f9b3403`: Phase 6 is done. **Phase 7 is complete and its exit met on 2026-10-13. Executor ownership is committed as `7a9108f` and test-helper replacement as `d876349`. Fenced-node diagnostics, the bootstrap pre-write rejection fix and the native-container audit follow-up are committed as `f737d6b`. Phase 8 documentation/checklist reconciliation and final audits are complete on 2026-10-14; archival and membership resumption remain.** Its first, the membership list's Step 4 gate, was closed on 2026-10-11: the gate had waited on mutation evidence, PIT was tried for it and put on ice by the owner, and the owner then removed the mutation rule from every task list. The second task, the replacement of the wrapper future types, started on 2026-10-12 in slices: the first, `RaftStorageFactory`, is done and verified by Jenkins build 25 on `a37a684`; `ClusterBootstrap` and `MembershipService` followed, and then the rest in one change. The three types are deleted and nothing imports them. Jenkins build 26 verified the whole change on `9851987`: the second task is done. The test side was sized that day, and the phase stays in this list. Phase 7 is complete; the Phase 8 archival/resumption task is open. Phase 2A was accepted on 2026-10-08; its last open task, the audit of child JVMs that cannot audit themselves, was done on 2026-10-09. Phases 0 to 2 were done 2026-10-04.
+**Last reviewed:** 2026-10-14 against `f737d6b`: current source, commit history, documentation and retained verification summaries checked; Phase 7 completion and Phase 8 documentation/checklists reconciled; final framework, environment, timeout, header and legacy-reference audits completed, with nine attribution-comment corrections and unchanged executable source. No new build was run. Previous review: 2026-10-13, Phase 7 close-out against `d876349` plus the working-tree changes, with its TDD, repeated tests, full suites, source audit and retained-log verification below. Earlier that day: Phase 7 test-helper replacement against `7a9108f` plus the working-tree changes, with its baseline, repeated runs, clean install and log audit recorded below. Earlier that day: Phase 7 executor code and coverage at `9a6fbd0` plus the working-tree changes, with the verification recorded below. Before that: 2026-10-11, against the code at commit `f9b3403`, this list alone: see "Review of 2026-10-11" at the head of section 4. Before that: 2026-10-08, against the code at commit `9a4adf0`, with the other four task lists. The status table in section 4 and every item marked "review of 2026-10-08" come from that review. No build was run for it. The logs that the Phase 2A and Phase 3 records cite were written in another working tree and were not available, so their counts were checked for arithmetic only. The earlier review of 2026-10-05 was against `24beac3`; its items keep their date.
 **Order of work:**
 - The membership list's Step 4 close-out gate is the first task of Phase 7 here.
 - After this list, the membership list resumes at its Step 5, on the new layout, and runs to its end.
@@ -71,9 +71,9 @@ runtime layer, or its unused tooling.
 
 ## 4. Tasks
 
-### Status (2026-10-13)
+### Status (2026-10-14)
 
-The table is as of 2026-10-13. The review of 2026-10-08 wrote it, from the code
+The table is as of 2026-10-14. The review of 2026-10-08 wrote it, from the code
 at `9a4adf0` and the records below; the rows of Phases 3A to 8 were added or
 changed since, as each phase's record says. Phase 2A was accepted on 2026-10-08 after 845 default and 31
 tagged tests passed, coverage passed, and all 80 retained log files were audited
@@ -91,8 +91,8 @@ rules and extracts from that run.
 | 4. Node model and API | Done 2026-10-09, exit met; its four open points settled and its decisions confirmed by the user the same day | 7 of 7 | `e4bf00d` to `a6e7930` |
 | 5. Configuration and version | Done 2026-10-10, exit met | 6 of 6 | `693449e`, `c123ee9`, `12d365c`, `d4e1af8` |
 | 6. Docker and observability | Applied 2026-10-10, with the load balancer removed and the recovery test given its own client profile, both at the user's decision; verified by Jenkins build 6. The exit is open for the start commands run by hand and a look at the corrected dashboard. The gRPC warnings the audit found are flagged since build 8. Build 8 showed the cause of the recovery test's timeout, a kill during the follower's first snapshot; build 9 passed with the fix and with no unflagged error or stack trace. The server was then changed so that a kill in that window is survivable and a log compacted past its snapshot is refused; build 11 passed with that change. On the evening of 2026-10-10 the start commands got a test that Jenkins runs, the dashboard was looked at and corrected, the Grafana errors were fixed, and `-Down` keeps the observability data; build 14 failed on two defects the new test found, and build 15 passed with their fixes. The compaction-boundary task was done on 2026-10-11 with `raftlog-core` 1.5.0; build 18 failed on a teardown race in a gRPC test, and build 19 passed with its fix. Done, exit met | 13 of 13 | `ce5890d`, `22a46a9`, `85bb120`, `d0275a7`, `cbb93f4`, `362b507`, `122d739`, `aa0d876`, `f2119d3`, `29fe503`, `10de474`, `0f6c497`, `da87cb3`, `fac3696`, `f9b3403` |
-| 7. Async layer | Done, exit met 2026-10-13: executor ownership, helper removal and fenced-node diagnostics verified, with 960 default tests, 42 runtime tests, coverage gates and final retained-log auditing | 7 of 7 | `a37a684`, `9851987`, `9a6fbd0`, `7a9108f`, `d876349`; fencing and native-audit follow-up in the working tree |
-| 8. Documentation and close-out | Started early for Phases 1 and 2; Phase 3's names done with Phase 3; the documents of Phases 4, 5, and 6 done as each ended | 2 of 6 | |
+| 7. Async layer | Done, exit met 2026-10-13: executor ownership, helper removal and fenced-node diagnostics verified, with 960 default tests, 42 runtime tests, coverage gates and final retained-log auditing | 7 of 7 | `a37a684`, `9851987`, `9a6fbd0`, `7a9108f`, `d876349`, `f737d6b` |
+| 8. Documentation and close-out | Documentation, feature/checklist records and final audits completed 2026-10-14. Archival and membership resumption remain | 5 of 6 | `7a9108f`, `d876349`, `f737d6b`; documentation/checklist reconciliation and attribution-comment fixes in the working tree |
 
 **Review of 2026-10-11,** at the user's request, of this list alone, against
 the code at `f9b3403`. No build was run for it.
@@ -2932,7 +2932,7 @@ question was not open.
 - [x] Have a fenced server say once why it is fenced (decided 2026-10-09, in
   the review of Phase 4's open points).
 
-  Done and verified 2026-10-13 against `d876349` plus this follow-up.
+  Done and verified 2026-10-13 against `d876349` plus this follow-up; committed as `f737d6b`.
   - `RaftTransitionSequencer` retains the first fencing failure and emits one
     ERROR announcement with its exception type, message and original stack trace.
     Later fence attempts retain that cause and emit no further announcement.
@@ -3071,7 +3071,38 @@ decisions that followed it:
 
 What remains for this phase:
 
-- [ ] Bring the documents above up to date with Phases 3 to 7:
+**Documentation reconciliation completed 2026-10-14 against `f737d6b`.**
+The README, `PROJECT_STANDARDS.md`, `TESTING.md`, `JENKINS.md`,
+`docker/README.md`, platform design and storage runbook were reviewed against
+the production executors, lifecycle owner, caller context, storage factory,
+snapshot recovery tests and the existing Phase 7 verification evidence.
+Relative file and heading links were checked, and historical records kept
+dated. No build or test was rerun for these documentation changes.
+
+**Feature/checklist records completed 2026-10-14 against `f737d6b`.**
+[The feature validation](QRAFT_FEATURE_VALIDATION_2026-09-27.md) and
+[the Consul plan](CONSUL_FEATURE_IMPLEMENTATION_PLAN.md) now record the native
+future and executor migration, test-helper removal, fenced-node diagnostics and
+native-container audit follow-up, with existing regression tests and dated
+verification evidence. Both correct the stale outstanding mutation gate for
+membership Step 4, which closed on 2026-10-11. Membership remains partial;
+failed-server cleanup, lost-quorum recovery and unrelated feature gaps stay open.
+Local verification remains separate from Jenkins build 26's wrapper removal.
+
+**Final audits completed 2026-10-14 against `f737d6b` and the working-tree
+documentation and attribution-comment changes.** Findings and the nine
+comment-only corrections are recorded under the audit checkbox below. No build
+or test was rerun; the Phase 7 build and retained-log evidence remains dated
+evidence, not a new run.
+
+**Next task: archive this list and resume membership Step 5.** Move this
+completed cleanup record into `docs/archive/`, repair its relative links and
+all incoming references, and update the membership list's active-work status
+for Step 5. Preserve the completed phases and their test/log evidence. The
+client list still follows the membership list. Archival and resumption have
+not yet been performed.
+
+- [x] Bring the documents above up to date with Phases 3 to 7:
   - the package and class names of Phase 3, in the design's section 1.1 table
     first, then the README, `PROJECT_STANDARDS.md` section 3, `TESTING.md`,
     `JENKINS.md`, and `docker/README.md`. Done with Phase 3 (`9a4adf0`). The
@@ -3100,15 +3131,54 @@ What remains for this phase:
     - the membership list, section 7: the record of RaftLog 1.5.0;
     - `OPEN_SOURCE_USAGE.md`: `raftlog-core` 1.5.0.
 
-    Phase 7's remain;
+    The initial Phase 7 documentation was committed with the code:
+    - `7a9108f`: the design's package map and executor ownership,
+      configuration and shutdown; `PROJECT_STANDARDS.md`'s explicit
+      owners; `TESTING.md`'s executor commands and contract coverage;
+    - `d876349`: `TESTING.md`'s direct test-helper ownership and bounded
+      waits on futures;
+    - `f737d6b`: the design, `TESTING.md` and
+      `RAFT_STORAGE_OPERATIONS.md` describe fenced-node diagnostics and
+      the applicable retained-log attribution rules.
+
+    Final review completed 2026-10-14:
+    - README: Common's responsibilities, executor ownership and shutdown,
+      the required visible-terminal log-capture command, and the fencing runbook;
+    - design: direct native storage futures instead of the deleted conversion
+      helper, current node-model ownership, the correct `Deadlines` package,
+      callback threads, cancellation, context restoration and cleanup failures;
+      clarified that first-start-only publication describes `server-id`, not
+      application snapshots;
+    - standards: native future APIs, callback-thread ownership and preservation
+      and restoration of MDC/OpenTelemetry context;
+    - testing: removed test helpers, the full `docker,e2e,slow` runtime command,
+      dated final Phase 7 results and log-audit evidence, the single root POM,
+      and a correction to the historical aborted PIT analysis record;
+    - Jenkins: the local Phase 7 verification is recorded separately from
+      build 26's earlier wrapper removal; no new Jenkins result is claimed;
+    - Docker: fenced-node inspection, configured work/queue bounds and the
+      existing native-log attribution contract;
+    - storage runbook: snapshot coverage now describes recovery from an
+      interrupted first snapshot and refusal of an unsafe compaction boundary,
+      matching the existing tests rather than the former startup refusal;
   - the version source, in `OPEN_SOURCE_USAGE.md` if Phase 5 changes it.
     Phase 5 did not change that file. Phase 6 did: see above.
-- [ ] Record the removals of Phases 4 to 7 in the feature validation and the
+- [x] Record the removals of Phases 4 to 7 in the feature validation and the
   Consul plan checklist. Phase 4's are recorded in both, as of 2026-10-09.
   Phase 6's are recorded in both, as of 2026-10-11: a checklist entry in the
   Consul plan, and in the feature validation a row for the deployment files
   and a note on the row for metrics. Phase 5 removed settings and no
-  feature, so it has no entry. Phase 7's remain.
+  feature, so it has no entry. Phase 7's were recorded 2026-10-14:
+  - native futures, explicitly owned executors, their bounds and caller
+    context, ownership-ordered shutdown and removal of the old test helpers;
+  - first-cause fencing diagnostics, the bootstrap rejection boundary and
+    native-container error attribution, with the existing regression tests;
+  - the final local 960-test default and 42-test runtime gates, repeated tests
+    and retained-log audit, linked to the existing TDD/verification record;
+  - the already closed membership Step 4 gate, with failed-server cleanup,
+    lost-quorum recovery, cluster-wide status and other feature gaps kept open.
+  Relative source/document links and headings were checked; no build or test
+  was rerun for this documentation update.
 - [x] Update the administrative interface's plan and task list for Phase 4:
   the plan's section 4.1, the list's read APIs, its reserved path segments,
   and the development proxy lose the routes Phase 4 removes: `/api/v1/clients`,
@@ -3135,13 +3205,65 @@ What remains for this phase:
   Done 2026-10-10. `AppConfig` kept its name. The membership list's Step 5
   now says what it became: records that follow the document, and a
   configuration that `QraftServerService` is given.
-- [ ] Run the final audits:
+- [x] Run the final audits:
   - prohibited frameworks;
   - environment-variable configuration;
   - the timeout API;
   - source headers;
   - `git diff --check`;
   - a search for `quorus`, `job`, `transfer`, `fleet`, and `/api/v1`.
+
+  Done 2026-10-14. Searches cover tracked source, the root POM, configuration,
+  deployment files, CI, current documentation and the remaining repository
+  files; dated historical and archive references are classified as such.
+  - **Prohibited frameworks and retired abstractions:** no Vert.x, Mockito or
+    alternative mocking-framework references in `src/`, the POM, Docker or
+    Jenkins; no prohibited imports/dependency declarations. `JavaRuntime`,
+    `WorkerExecutor`, the wrapper future types and the retired test-context
+    helpers are absent from source. The root POM is the only tracked POM.
+  - **Environment configuration:** no production environment-read calls,
+    `QRAFT_*` settings or configuration-file placeholders. `ConfigFileResolver`
+    uses the documented argument/JVM-property/file paths, and
+    `ConfigurationPlaceholders` rejects interpolation. Compose's
+    `PUBLISHED_PORT`, test-only Docker/Compose process variables, Jenkins
+    toolchain/build parameters, shell positional defaults and Logback's internal
+    properties do not configure the Qraft application from its environment.
+    Existing rejection fixtures intentionally contain placeholders.
+  - **Timeout API:** no calls to `orTimeout` or `completeOnTimeout`, and no
+    `delayedExecutor` use. The only source mentions of those timeout methods
+    are `Deadlines` Javadoc explaining their prohibition. `Deadlines` owns its
+    timer and dispatches expiry completion to a virtual thread.
+  - **Source headers:** all 307 tracked Java files (138 production, 169 test)
+    have the required Apache header followed by their package declaration.
+    Nine top-level types had incomplete attribution Javadoc; corrected in
+    `RaftNodeMode`, `ShutdownCoordinator`, `NodeCodec`, `ProtobufCommandCodec`,
+    `DockerLogCaptureHelper`, `DockerLogCaptureTest`, `DockerLogExtensionHelper`,
+    `DockerLogExtensionIntegrationTest` and `ExpectedDockerErrorsHelper`.
+    The corrections supply missing version/attribution tags and replace
+    `NodeCodec`'s year-only `@since` with its first-add date, 2026-10-09.
+    The Docker logging types retain their original 2026-10-06 creation date
+    across their later helper renames. The repeated audit found zero license,
+    package or type-attribution issues across all 307 top-level types.
+    Comparing the nine files with `f737d6b` after excluding Javadoc confirmed
+    that executable source is unchanged.
+  - **Legacy terms:** no `quorus` or `fleet` in source, Docker, the POM or
+    Jenkins, and no `/api/v1` in production source. The production search
+    matched 84 lines in four files: 82 describe Raft snapshot transfer in
+    `RaftNode`/`raft.proto`; two are comments in `NodeStatus`/`commands.proto`
+    explaining how retired job statuses remain readable. Test matches cover
+    those immutable legacy bytes, snapshot-transfer failures and HTTP 404s for
+    removed routes. Docker `/api/v1` endpoints are Prometheus/Loki APIs;
+    scrape job names, dashboard job columns and Jenkins jobs are third-party
+    concepts. Other retained matches are historical records, plan filenames,
+    the licence's transfer wording, Docker build-context transfer, and the
+    console prototype's `reporting-job` service example. No active inherited
+    job scheduler, fleet model or file-transfer feature remains.
+  - **Change review:** `git diff --check` passed. Relative documentation/source
+    paths and heading links were checked; CRLF was retained. No new wrapper
+    scripts, desktop automation, build runs or log allowances were introduced.
+    The accepted 2026-10-13 Phase 7 verification and retained-log audit above
+    remains the behavioral evidence; earlier failed captures remain recorded
+    separately with their causes and fixes.
 - [ ] Archive this list and resume the membership list at its Step 5. The
   client list follows the membership list.
 

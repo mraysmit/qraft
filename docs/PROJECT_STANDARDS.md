@@ -16,8 +16,9 @@ Qraft is a Consul-style service discovery and distributed coordination platform.
 - Do not introduce compatibility wrappers that reproduce Vert.x APIs without a clear project-level abstraction.
 - Blocking operations should use bounded executors or virtual threads as appropriate to the workload.
 - Shared mutable state must have an explicit ownership and serialization model.
-- A future's callbacks run on the thread that completes it. Blocking work must not run inline in a callback on a
-  thread the code does not own; hand it to a thread created for that work.
+- Asynchronous contracts use standard `CompletableFuture` or `CompletionStage` APIs.
+- Non-async future callbacks can run on a completing thread or a thread registering or helping complete a callback.
+  Blocking work must not run inline on a thread the code does not own; hand it to an executor owned for that work.
 - Bound asynchronous waits with `dev.mars.qraft.common.concurrent.Deadlines`, never `CompletableFuture.orTimeout` or
   `completeOnTimeout`, which complete on one JVM-wide delay thread.
 
@@ -38,6 +39,8 @@ Qraft is a Consul-style service discovery and distributed coordination platform.
 - The server composition root owns `RaftStateLoop` and `BlockingTaskExecutor`. Stop the service,
   then drain blocking work while the state loop can still deliver its completions, then stop the loop.
   The blocking executor bounds both active work and queued work and rejects overload through failed futures.
+- State-loop work, timers, blocking work and delivered completions preserve the submitting
+  `CallerContext` MDC and OpenTelemetry context, then restore the executing thread's previous context.
 - Tests must cover election, replication, storage recovery, snapshot installation, network failure, and shutdown behavior.
 
 ### 2.4 Feature scope
