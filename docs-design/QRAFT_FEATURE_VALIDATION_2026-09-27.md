@@ -122,7 +122,7 @@ Status key:
 ### Phase 7 runtime and diagnostic close-out, recorded 2026-10-14
 
 This is Phase 7 of
-[the single-POM cleanup list](task-list-single-pom-and-quorus-removal-2026-10-12.md#phase-7-replace-the-vertx-shaped-async-layer),
+[the single-POM cleanup list](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-12.md#phase-7-replace-the-vertx-shaped-async-layer),
 whose exit was met on 2026-10-13. It is separate from the Consul plan's
 security and tenancy phase.
 
