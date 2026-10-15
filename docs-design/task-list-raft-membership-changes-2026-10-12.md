@@ -1,20 +1,21 @@
 # Task List: Raft Membership Changes
 
 **Date:** 2026-09-29
-**Active work:** Step 5, failed-server cleanup, resumed 2026-10-15 after the
-single-POM cleanup list was completed and archived. Configuration-parser tests
-are the first slice; production cleanup is not implemented. Step 4, joining,
+**Active work:** Step 5, failed-server cleanup, resumed on 2026-10-14 after
+the single-POM list was archived. Configuration-parser tests were added on
+2026-10-15 and their failing baseline is recorded below. Implementation is
+pending. Step 4, joining,
 and operator list and remove, is built, and its close-out gate was closed on
 2026-10-11, when the owner removed the mutation rule that the gate had waited
 on. Steps 1 to 3 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
-**Last updated:** 2026-10-15 (resumed Step 5 after cleanup archival; added first-slice parser tests, not yet run; production code unchanged. On 2026-10-11: the mutation rule removed at the owner's decision, from the rules and from the exits of Steps 5 to 8; the Step 4 gate, which had waited on it, closed, after PIT was tried for it and put on ice; the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
-**Completed interruption:** [`task-list-single-pom-and-quorus-removal-2026-10-12.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-12.md),
+**Last updated:** 2026-10-15 (merge reconciled the 2026-10-14 archival with the newer parser tests; the focused RED run and retained output are recorded under Step 5. On 2026-10-14: single-POM cleanup list archived and its links repaired; Step 5 resumed as the active task, with implementation pending. On 2026-10-11: the mutation rule removed at the owner's decision, from the rules and from the exits of Steps 5 to 8; the Step 4 gate, which had waited on it, closed, after PIT was tried for it and put on ice; the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
+**Interruption completed:** [`task-list-single-pom-and-quorus-removal-2026-10-12.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-12.md),
 started 2026-10-04 before the Step 4 close-out gate. The gate was closed on
-2026-10-11, as the first task of that list's Phase 7. That list was archived
-2026-10-15 and Step 5 resumed. This list runs to its end before the Consul-style
-client list starts (decided 2026-10-05).
+2026-10-11, as the first task of that list's Phase 7. That list was completed
+and archived on 2026-10-14. Step 5 is now active, and this list runs to its
+end before the Consul-style client list starts (decided 2026-10-05).
 **Predecessor:** [`task-list-test-suite-remediation-2026-09-27.md`](../docs/archive/task-list-test-suite-remediation-2026-09-27.md),
 archived 2026-10-02. Its packaged-artifact test waits for the admin interface.
 **Paused:** [`task-list-embedded-admin-interface-2026-10-12.md`](task-list-embedded-admin-interface-2026-10-12.md), after its Step 1
@@ -847,27 +848,37 @@ nothing that is still required:
 What stands behind Step 4 is what its records above describe: the tests
 written with it, red before green where a defect was fixed, and the suites
 that have passed on the source since, the last of them Jenkins build 21 on
-`e3cf808`, with 969 results and none failed. The single-POM list was archived
-on 2026-10-15, and Step 5 resumed as recorded at the head of this list.
+`e3cf808`, with 969 results and none failed. Step 5 resumed on 2026-10-14 after the
+single-POM list was completed and archived, as recorded at the head of this list.
 
 ### Step 5. Failed-server cleanup
 
-**Status: Active from 2026-10-15; not implemented.** The contract below was specified during
+**Status: Active from 2026-10-14; not implemented.** The contract below was specified during
 the document review on 2026-10-03. Current server JSON rejects these new settings;
 the promotion settings still exist only on `RaftNode.Builder`.
 
-**Resumption record, 2026-10-15.** The cleanup list was archived after its
-documentation and final audits were completed in `12aa44f`. Incoming links and
-the archived list's relative links were repaired; the client list still follows
-this list. `AppConfigRaftMembershipTest` now specifies parser acceptance and
-rejection for the first slice using the existing `AppConfig.fromJson` API.
-It covers empty and non-default settings, zero promotion limits, cleanup
-timing boundaries, overflow-safe duration inputs, malformed types and ranges,
-unknown fields and duplicate keys. The tests have not been run; no RED result
-is claimed and production behavior is unchanged. Run the focused test through
-the documented visible VS Code terminal and capture its output before the
-parser implementation. Parsed-value assertions, lifecycle wiring and the
-node cleanup behavior remain to be implemented and verified.
+**Parser-test record, 2026-10-15.** The cleanup archival and membership
+resumption were committed on 2026-10-14 in `217e28c`. Local commit `88457d1`
+added `AppConfigRaftMembershipTest` as the first implementation slice. The
+merge preserves the original archival date and these newer tests.
+
+The tests specify parser acceptance and rejection through the existing
+`AppConfig.fromJson` API: empty and non-default settings, zero promotion
+limits, cleanup timing boundaries, large representable duration inputs,
+malformed types and ranges, unknown fields and duplicate keys.
+
+At the owner's request, the focused Maven command ran in the visible VS Code
+integrated terminal with combined-output capture and an immediate exit-code
+check. RED: 61 tests, 59 failures, zero errors or skips; Maven exit code 1.
+All 59 failures trace to `Unknown server.raft setting: membership`, the
+missing parser behavior. The two passing tests cover absent membership and
+duplicate JSON keys. Retained output:
+`logs/qraft-membership-red-2026-10-15_17-16-26-101.log`; the accompanying
+application log, `logs/qraft-maven-tests-2026-10-15_17-16-56.log`, is empty.
+This is a failing baseline, not a successful verification run. No helper
+subprocess or Docker suite was run. Production code is unchanged. Parser
+implementation, parsed-value assertions, lifecycle wiring and node cleanup
+behavior remain to be implemented and verified.
 
 `QraftServerService` is the class that wires these settings. The single-POM
 list's Phase 5 was done on 2026-10-10, and this is what it left:

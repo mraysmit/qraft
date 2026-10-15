@@ -427,8 +427,9 @@ unchecked features below remain open.
   server IDs, the configuration in the log, non-voter promotion, joining, and
   operator list/remove are done. The Step 4 close-out gate closed on 2026-10-11
   when the owner removed the mutation requirement. Failed-server cleanup and
-  lost-quorum recovery remain open; Step 5 resumed on 2026-10-15 after the
-  completed single-POM list was archived. Configuration-parser tests are the
-  first slice; production cleanup is not implemented.
+  lost-quorum recovery remain open; Step 5 resumed on 2026-10-14 after the
+  completed single-POM list was archived. Configuration-parser tests were
+  added on 2026-10-15 and their failing baseline is recorded in the membership
+  list; production cleanup is not implemented.
 - [ ] Decide on and implement DNS discovery and persisted generated node
   identity (item 10).
