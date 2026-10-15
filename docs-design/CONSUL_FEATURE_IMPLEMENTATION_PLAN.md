@@ -428,8 +428,10 @@ unchecked features below remain open.
   operator list/remove are done. The Step 4 close-out gate closed on 2026-10-11
   when the owner removed the mutation requirement. Failed-server cleanup and
   lost-quorum recovery remain open; Step 5 resumed on 2026-10-14 after the
-  completed single-POM list was archived. Configuration-parser tests were
-  added on 2026-10-15 and their failing baseline is recorded in the membership
-  list; production cleanup is not implemented.
+  completed single-POM list was archived. Membership configuration parsing,
+  validation, defaults and getters were implemented on 2026-10-15; 64 focused
+  parser tests passed after the recorded failing baseline. Full verification,
+  server wiring and automatic cleanup remain pending; the membership list
+  records the captures and scope of verification.
 - [ ] Decide on and implement DNS discovery and persisted generated node
   identity (item 10).

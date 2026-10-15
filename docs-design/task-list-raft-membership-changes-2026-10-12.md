@@ -2,15 +2,15 @@
 
 **Date:** 2026-09-29
 **Active work:** Step 5, failed-server cleanup, resumed on 2026-10-14 after
-the single-POM list was archived. Configuration-parser tests were added on
-2026-10-15 and their failing baseline is recorded below. Implementation is
-pending. Step 4, joining,
+the single-POM list was archived. Membership configuration parsing, defaults
+and getters are implemented and passed 64 focused tests on 2026-10-15.
+Full verification, server wiring and node cleanup remain. Step 4, joining,
 and operator list and remove, is built, and its close-out gate was closed on
 2026-10-11, when the owner removed the mutation rule that the gate had waited
 on. Steps 1 to 3 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
-**Last updated:** 2026-10-15 (merge reconciled the 2026-10-14 archival with the newer parser tests; the focused RED run and retained output are recorded under Step 5. On 2026-10-14: single-POM cleanup list archived and its links repaired; Step 5 resumed as the active task, with implementation pending. On 2026-10-11: the mutation rule removed at the owner's decision, from the rules and from the exits of Steps 5 to 8; the Step 4 gate, which had waited on it, closed, after PIT was tried for it and put on ice; the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
+**Last updated:** 2026-10-15 (membership parser implemented with defaults, validation and getters; 64 focused tests passed, full verification and runtime wiring pending. Earlier: merge reconciled the 2026-10-14 archival with the newer parser tests; the focused RED run and retained output are recorded under Step 5. On 2026-10-14: single-POM cleanup list archived and its links repaired; Step 5 resumed as the active task, with implementation pending. On 2026-10-11: the mutation rule removed at the owner's decision, from the rules and from the exits of Steps 5 to 8; the Step 4 gate, which had waited on it, closed, after PIT was tried for it and put on ice; the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
 **Interruption completed:** [`task-list-single-pom-and-quorus-removal-2026-10-12.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-12.md),
 started 2026-10-04 before the Step 4 close-out gate. The gate was closed on
 2026-10-11, as the first task of that list's Phase 7. That list was completed
@@ -853,9 +853,11 @@ single-POM list was completed and archived, as recorded at the head of this list
 
 ### Step 5. Failed-server cleanup
 
-**Status: Active from 2026-10-14; not implemented.** The contract below was specified during
-the document review on 2026-10-03. Current server JSON rejects these new settings;
-the promotion settings still exist only on `RaftNode.Builder`.
+**Status: Active from 2026-10-14; parser slice implemented, full verification pending.**
+The contract below was specified during the document review on 2026-10-03.
+`AppConfig` now accepts and validates the membership settings. Server wiring
+and automatic cleanup are not implemented; promotion still uses the node
+builder's existing defaults at runtime.
 
 **Parser-test record, 2026-10-15.** The cleanup archival and membership
 resumption were committed on 2026-10-14 in `217e28c`. Local commit `88457d1`
@@ -876,9 +878,32 @@ duplicate JSON keys. Retained output:
 `logs/qraft-membership-red-2026-10-15_17-16-26-101.log`; the accompanying
 application log, `logs/qraft-maven-tests-2026-10-15_17-16-56.log`, is empty.
 This is a failing baseline, not a successful verification run. No helper
-subprocess or Docker suite was run. Production code is unchanged. Parser
-implementation, parsed-value assertions, lifecycle wiring and node cleanup
-behavior remain to be implemented and verified.
+subprocess or Docker suite was run. Production code was unchanged for this
+RED run; the parser implementation follows below.
+
+**Parser implementation, 2026-10-15.** `AppConfig` stores membership and
+cleanup settings in immutable records, reads them through the existing
+`JsonSettings` helpers and exposes all six values through getters. It rejects
+unknown fields, malformed types (including explicit null objects), negative
+promotion settings, nonpositive cleanup settings and cleanup durations below
+their configured Raft timing bounds. Disabling cleanup does not bypass
+validation. Omitted values retain the documented defaults; larger election
+or heartbeat intervals increase the corresponding cleanup defaults. Parsing
+preserves representable millisecond values without converting them to rounds;
+the node wiring must use overflow-safe ceiling division.
+
+GREEN: all 64 focused `AppConfigRaftMembershipTest` cases passed, with zero
+failures, errors or skips and Maven exit code 0. The expanded assertions check
+all getters, defaults, partial settings, timing boundaries, disabled cleanup
+and the largest representable values. Retained output:
+`logs/qraft-membership-parser-green-2026-10-15_18-12-22-126.log`; application
+log `logs/qraft-maven-tests-2026-10-15_18-12-52.log` is empty. The retained
+capture has no ERROR entry, exception trace or ANSI escape. JaCoCo reported
+execution-data/class mismatches from earlier builds; this focused test result
+does not establish coverage. A clean default build and the runtime suites
+remain pending; no full-suite result is claimed. Lifecycle wiring, effective
+settings logging, overflow-safe round conversion and automatic cleanup follow
+in the next slice. The overall Step 5 exit gate remains open.
 
 `QraftServerService` is the class that wires these settings. The single-POM
 list's Phase 5 was done on 2026-10-10, and this is what it left:

@@ -78,13 +78,17 @@ public final class AppConfig {
 
     /** {@code nodes} maps each listed member's name to its Raft address, in the document's order. */
     private record Raft(int port, Map<String, String> nodes, long electionTimeoutMs, long heartbeatIntervalMs,
-                        Storage storage, Snapshot snapshot, long logHardLimit, Io io) { }
+                        Storage storage, Snapshot snapshot, long logHardLimit, Io io, Membership membership) { }
 
     private record Storage(String type, String path, boolean fsync) { }
 
     private record Snapshot(boolean enabled, long threshold, long checkIntervalMs) { }
 
     private record Io(int poolSize, int queueSize) { }
+
+    private record Membership(long promotionStabilizationMs, long promotionMaxTrailingEntries, Cleanup cleanup) { }
+
+    private record Cleanup(boolean enabled, long failureTimeoutMs, long intervalMs, int minVoters) { }
 
     private record Telemetry(boolean enabled, String otlpEndpoint, int prometheusPort, String serviceName) { }
 
@@ -122,7 +126,7 @@ public final class AppConfig {
                 "raft", "telemetry", "shutdown", "health", "ui", "operator");
         rejectUnknown(http, "server.http", "host", "port");
         rejectUnknown(raft, "server.raft", "port", "nodes", "electionTimeoutMs",
-                "heartbeatIntervalMs", "storage", "snapshot", "logHardLimit", "io");
+                "heartbeatIntervalMs", "storage", "snapshot", "logHardLimit", "io", "membership");
         rejectUnknown(storage, "server.raft.storage", "type", "path", "fsync");
         rejectUnknown(snapshot, "server.raft.snapshot", "enabled", "threshold", "checkIntervalMs");
         rejectUnknown(io, "server.raft.io", "poolSize", "queueSize");
@@ -143,6 +147,7 @@ public final class AppConfig {
         Map<String, String> nodes = parseNodes(raft.get("nodes"));
         long electionTimeoutMs = optionalLong(raft, "electionTimeoutMs", 5000);
         long heartbeatIntervalMs = optionalLong(raft, "heartbeatIntervalMs", 1000);
+        Membership membershipSettings = parseMembership(raft, electionTimeoutMs, heartbeatIntervalMs);
         Storage storageSettings = new Storage(optionalText(storage, "type", "raftlog"),
                 optionalText(storage, "path", ""), optionalBoolean(storage, "fsync", true));
         Snapshot snapshotSettings = new Snapshot(optionalBoolean(snapshot, "enabled", true),
@@ -167,7 +172,7 @@ public final class AppConfig {
 
         return new AppConfig(new Settings(id, httpSettings, apiGrpcPort,
                 new Raft(raftPort, nodes, electionTimeoutMs, heartbeatIntervalMs, storageSettings, snapshotSettings,
-                        logHardLimit, ioSettings),
+                        logHardLimit, ioSettings, membershipSettings),
                 operatorToken, telemetrySettings, shutdownSettings,
                 new Health(expiryIntervalMs, nodeTtlMs, nodeReapAfterMs), adminUi, loggingDirectory));
     }
@@ -204,6 +209,19 @@ public final class AppConfig {
     public int getApiGrpcPort() { return settings.apiGrpcPort(); }
     public long getElectionTimeoutMs() { return settings.raft().electionTimeoutMs(); }
     public long getHeartbeatIntervalMs() { return settings.raft().heartbeatIntervalMs(); }
+
+    /** Configured continuous health period before a non-voter may be promoted, in milliseconds. */
+    public long getPromotionStabilizationMs() { return settings.raft().membership().promotionStabilizationMs(); }
+    /** Configured maximum log lag of a non-voter eligible for promotion, in entries. */
+    public long getPromotionMaxTrailingEntries() { return settings.raft().membership().promotionMaxTrailingEntries(); }
+    /** Whether the configured membership policy enables automatic failed-voter cleanup. */
+    public boolean isRaftCleanupEnabled() { return settings.raft().membership().cleanup().enabled(); }
+    /** Configured continuous absence before a failed voter becomes eligible for cleanup, in milliseconds. */
+    public long getRaftCleanupFailureTimeoutMs() { return settings.raft().membership().cleanup().failureTimeoutMs(); }
+    /** Configured periodic cleanup cadence, in milliseconds. */
+    public long getRaftCleanupIntervalMs() { return settings.raft().membership().cleanup().intervalMs(); }
+    /** Minimum voter count that the configured automatic cleanup policy must preserve. */
+    public int getRaftCleanupMinVoters() { return settings.raft().membership().cleanup().minVoters(); }
 
     /**
      * The cluster's members: each name with its Raft address, in the document's order. A document that lists
@@ -268,6 +286,51 @@ public final class AppConfig {
     public String getLoggingDirectory() { return settings.loggingDirectory(); }
     /** The validated {@code server.ui} settings; parsing already rejected any invalid combination. */
     public AdminUiConfig getAdminUi() { return settings.ui(); }
+
+    /** Parses and validates membership settings before any runtime resource is opened. */
+    private static Membership parseMembership(JsonNode raft, long electionTimeoutMs, long heartbeatIntervalMs) {
+        // An omitted object uses defaults; an explicit null is a malformed membership setting.
+        JsonNode membership = raft.has("membership")
+                ? requiredObject(raft, "membership") : optionalObject(raft, "membership");
+        rejectUnknown(membership, "server.raft.membership",
+                "promotionStabilizationMs", "promotionMaxTrailingEntries", "cleanup");
+        JsonNode cleanup = membership.has("cleanup")
+                ? requiredObject(membership, "cleanup") : optionalObject(membership, "cleanup");
+        rejectUnknown(cleanup, "server.raft.membership.cleanup",
+                "enabled", "failureTimeoutMs", "intervalMs", "minVoters");
+
+        long stabilizationMs = optionalLong(membership, "promotionStabilizationMs", 10_000);
+        long trailingEntries = optionalLong(membership, "promotionMaxTrailingEntries", 250);
+        boolean enabled = optionalBoolean(cleanup, "enabled", true);
+        long failureTimeoutMs = optionalLong(cleanup, "failureTimeoutMs", Math.max(60_000, electionTimeoutMs));
+        long intervalMs = optionalLong(cleanup, "intervalMs", Math.max(10_000, heartbeatIntervalMs));
+        int minVoters = optionalInt(cleanup, "minVoters", 3);
+        if (stabilizationMs < 0) {
+            throw new IllegalArgumentException("server.raft.membership.promotionStabilizationMs must not be negative");
+        }
+        if (trailingEntries < 0) {
+            throw new IllegalArgumentException("server.raft.membership.promotionMaxTrailingEntries must not be negative");
+        }
+        if (failureTimeoutMs < 1) {
+            throw new IllegalArgumentException("server.raft.membership.cleanup.failureTimeoutMs must be positive");
+        }
+        if (intervalMs < 1) {
+            throw new IllegalArgumentException("server.raft.membership.cleanup.intervalMs must be positive");
+        }
+        if (minVoters < 1) {
+            throw new IllegalArgumentException("server.raft.membership.cleanup.minVoters must be positive");
+        }
+        if (failureTimeoutMs < electionTimeoutMs) {
+            throw new IllegalArgumentException("server.raft.membership.cleanup.failureTimeoutMs must be at least "
+                    + "server.raft.electionTimeoutMs");
+        }
+        if (intervalMs < heartbeatIntervalMs) {
+            throw new IllegalArgumentException("server.raft.membership.cleanup.intervalMs must be at least "
+                    + "server.raft.heartbeatIntervalMs");
+        }
+        return new Membership(stabilizationMs, trailingEntries,
+                new Cleanup(enabled, failureTimeoutMs, intervalMs, minVoters));
+    }
 
     /** Validates {@code server.ui} while the file is parsed, before any listener or file is opened. */
     private static AdminUiConfig parseAdminUi(JsonNode ui) {

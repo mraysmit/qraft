@@ -109,6 +109,31 @@ mvn -B "-Dstyle.color=never" test "-Dtest=RaftNodeMembershipTest,MembershipServi
 
 Qraft is one Maven module, so there is no `-pl` and nothing to install first.
 
+### Membership configuration parsing
+
+`AppConfigRaftMembershipTest` exercises the real JSON parser and all six
+membership getters. It covers omitted and partial settings, timing-dependent
+cleanup defaults, non-default values, zero promotion limits, positive cleanup
+limits, disabled cleanup, unknown fields, malformed types, duplicate keys and
+numeric representation bounds. Membership and cleanup must be objects when
+present; explicit null is rejected. These parser tests do not prove server
+wiring, heartbeat-round conversion or automatic removal behavior.
+
+```powershell
+mvn -B "-Dstyle.color=never" test "-Dtest=AppConfigRaftMembershipTest" 2>&1 | Tee-Object -FilePath ".\logs\qraft-membership-parser-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
+$qraftBuildExitCode = $LASTEXITCODE
+if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
+```
+
+On 2026-10-15 the initial run recorded 61 cases and 59 failures because
+`membership` was not accepted. After implementation and expanded value
+assertions, all 64 focused cases passed. The captured Maven output has no
+ERROR entry, exception trace or ANSI escape, and the application log is empty.
+The focused run reported JaCoCo execution-data/class mismatches from earlier
+builds; coverage and full-suite verification remain pending. See the
+[Step 5 record](../docs-design/task-list-raft-membership-changes-2026-10-12.md#step-5-failed-server-cleanup)
+for the retained output and remaining runtime work.
+
 ### State-loop and blocking-executor changes
 
 Start with the executor, ownership and package-boundary tests:

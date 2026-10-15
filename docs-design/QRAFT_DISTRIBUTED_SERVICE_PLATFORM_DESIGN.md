@@ -268,8 +268,12 @@ Server mode currently owns:
     [`task-list-raft-membership-changes-2026-10-12.md`](task-list-raft-membership-changes-2026-10-12.md)
     cover automatic removal of failed servers, further disruptive-server
     validation, recovery from lost quorum, and container scenarios.
-    Step 5's configuration and removal limits are a planned contract, not
-    accepted server settings today. A promotion can trigger cleanup after a
+    Step 5's membership settings are parsed and validated by `AppConfig` as of
+    2026-10-15, with getters and 64 passing focused parser tests. Server wiring,
+    effective settings logging and automatic cleanup remain pending; configured
+    membership values do not yet change node behavior. Full verification is
+    pending. The removal limits remain a planned contract. Under that contract,
+    a promotion can trigger cleanup after a
     replacement joins with a distinct name and address; a replacement reusing
     either still needs the old member removed first. Joins never evict a member.
 - **Bootstrapping.** A server with no Raft state asks every server in

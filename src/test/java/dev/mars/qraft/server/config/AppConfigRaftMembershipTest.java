@@ -26,6 +26,7 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -40,39 +41,82 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AppConfigRaftMembershipTest {
     @Test
     void acceptsAnAbsentMembershipObjectWithExistingTimingSettings() {
-        assertDoesNotThrow(() -> config("\"electionTimeoutMs\":90000,\"heartbeatIntervalMs\":20000").validate());
+        AppConfig config = config("\"electionTimeoutMs\":90000,\"heartbeatIntervalMs\":20000");
+        assertDoesNotThrow(config::validate);
+        assertDefaults(config, 90_000, 20_000);
+        assertDefaults(config(""), 60_000, 10_000);
     }
 
     @Test
     void acceptsEmptyMembershipAndCleanupObjects() {
         for (String membership : List.of("{}", "{\"cleanup\":{}}")) {
-            assertDoesNotThrow(() -> membership(membership).validate(), membership);
+            AppConfig config = membership(membership);
+            assertDoesNotThrow(config::validate, membership);
+            assertDefaults(config, 60_000, 10_000);
+            AppConfig slowIntervals = config("\"electionTimeoutMs\":90000,\"heartbeatIntervalMs\":20000,"
+                    + "\"membership\":" + membership);
+            assertDoesNotThrow(slowIntervals::validate);
+            assertDefaults(slowIntervals, 90_000, 20_000);
         }
     }
 
     @Test
     void acceptsNonDefaultPromotionAndCleanupSettings() {
-        assertDoesNotThrow(() -> membership("""
+        AppConfig config = membership("""
                 {"promotionStabilizationMs":12501,"promotionMaxTrailingEntries":17,
                  "cleanup":{"enabled":false,"failureTimeoutMs":75001,"intervalMs":12501,"minVoters":5}}
-                """).validate());
+                """);
+        assertDoesNotThrow(config::validate);
+        assertEquals(12_501, config.getPromotionStabilizationMs());
+        assertEquals(17, config.getPromotionMaxTrailingEntries());
+        assertFalse(config.isRaftCleanupEnabled());
+        assertEquals(75_001, config.getRaftCleanupFailureTimeoutMs());
+        assertEquals(12_501, config.getRaftCleanupIntervalMs());
+        assertEquals(5, config.getRaftCleanupMinVoters());
     }
 
     @Test
     void acceptsZeroPromotionLimitsAndCleanupAtTheTimingBoundaries() {
-        assertDoesNotThrow(() -> membership("""
+        AppConfig config = membership("""
                 {"promotionStabilizationMs":0,"promotionMaxTrailingEntries":0,
                  "cleanup":{"enabled":true,"failureTimeoutMs":5000,"intervalMs":1000,"minVoters":1}}
-                """).validate());
+                """);
+        assertDoesNotThrow(config::validate);
+        assertEquals(0, config.getPromotionStabilizationMs());
+        assertEquals(0, config.getPromotionMaxTrailingEntries());
+        assertTrue(config.isRaftCleanupEnabled());
+        assertEquals(5_000, config.getRaftCleanupFailureTimeoutMs());
+        assertEquals(1_000, config.getRaftCleanupIntervalMs());
+        assertEquals(1, config.getRaftCleanupMinVoters());
     }
 
     @Test
-    void acceptsDurationsWhoseCeilingDivisionRequiresOverflowSafeArithmetic() {
-        assertDoesNotThrow(() -> membership("""
+    void preservesTheLargestRepresentableMembershipValues() {
+        AppConfig config = membership("""
                 {"promotionStabilizationMs":9223372036854775807,
                  "promotionMaxTrailingEntries":9223372036854775807,
-                 "cleanup":{"failureTimeoutMs":9223372036854775807,"intervalMs":9223372036854775807}}
-                """).validate());
+                 "cleanup":{"failureTimeoutMs":9223372036854775807,"intervalMs":9223372036854775807,
+                            "minVoters":2147483647}}
+                """);
+        assertDoesNotThrow(config::validate);
+        assertEquals(Long.MAX_VALUE, config.getPromotionStabilizationMs());
+        assertEquals(Long.MAX_VALUE, config.getPromotionMaxTrailingEntries());
+        assertEquals(Long.MAX_VALUE, config.getRaftCleanupFailureTimeoutMs());
+        assertEquals(Long.MAX_VALUE, config.getRaftCleanupIntervalMs());
+        assertEquals(Integer.MAX_VALUE, config.getRaftCleanupMinVoters());
+    }
+
+    @Test
+    void partiallyConfiguredMembershipRetainsDefaultsForOmittedValues() {
+        AppConfig config = membership("{\"promotionMaxTrailingEntries\":7,\"cleanup\":{\"enabled\":false}}");
+        assertDoesNotThrow(config::validate);
+        assertEquals(10_000, config.getPromotionStabilizationMs());
+        assertEquals(7, config.getPromotionMaxTrailingEntries());
+        assertFalse(config.isRaftCleanupEnabled());
+        assertEquals(60_000, config.getRaftCleanupFailureTimeoutMs());
+        assertEquals(10_000, config.getRaftCleanupIntervalMs());
+        assertEquals(3, config.getRaftCleanupMinVoters(),
+                "a single-server configuration remains valid below the cleanup minimum");
     }
 
     @ParameterizedTest(name = "rejects {1} in {0}")
@@ -111,7 +155,10 @@ class AppConfigRaftMembershipTest {
                 Arguments.of("{\"cleanup\":{\"failureTimeoutMs\":4999}}", "failureTimeoutMs", "electionTimeoutMs"),
                 Arguments.of("{\"cleanup\":{\"intervalMs\":999}}", "intervalMs", "heartbeatIntervalMs"),
                 Arguments.of("{\"cleanup\":{\"enabled\":false,\"failureTimeoutMs\":4999}}",
-                        "failureTimeoutMs", "electionTimeoutMs"));
+                        "failureTimeoutMs", "electionTimeoutMs"),
+                Arguments.of("{\"cleanup\":{\"enabled\":false,\"intervalMs\":999}}",
+                        "intervalMs", "heartbeatIntervalMs"),
+                Arguments.of("{\"cleanup\":{\"enabled\":false,\"minVoters\":0}}", "minVoters", "positive"));
         return Stream.of(promotionTypes, cleanupTypes, booleanTypes, ranges).flatMap(stream -> stream);
     }
 
@@ -142,7 +189,7 @@ class AppConfigRaftMembershipTest {
 
     @Test
     void requiresMembershipAndCleanupToBeObjects() {
-        for (String value : List.of("[]", "true", "1", "\"settings\"")) {
+        for (String value : List.of("null", "[]", "true", "1", "\"settings\"")) {
             IllegalArgumentException membership = assertThrows(IllegalArgumentException.class,
                     () -> membership(value));
             assertTrue(membership.getMessage().contains("membership"), membership.getMessage());
@@ -170,5 +217,14 @@ class AppConfigRaftMembershipTest {
 
     private static AppConfig config(String raft) {
         return AppConfig.fromJson("{\"version\":1,\"server\":{\"id\":\"server-a\",\"raft\":{" + raft + "}}}");
+    }
+
+    private static void assertDefaults(AppConfig config, long failureTimeoutMs, long intervalMs) {
+        assertEquals(10_000, config.getPromotionStabilizationMs());
+        assertEquals(250, config.getPromotionMaxTrailingEntries());
+        assertTrue(config.isRaftCleanupEnabled());
+        assertEquals(failureTimeoutMs, config.getRaftCleanupFailureTimeoutMs());
+        assertEquals(intervalMs, config.getRaftCleanupIntervalMs());
+        assertEquals(3, config.getRaftCleanupMinVoters());
     }
 }
