@@ -1,7 +1,13 @@
 # Task List: Raft Membership Changes
 
 **Date:** 2026-09-29
-**Next work:** Step 6, the remaining disruptive-server validation. Step 5,
+**Active work:** Step 6, disruptive-server validation. Five manual-timer
+scenarios have been added. After correcting the first run's incorrect expected-error
+declaration, the focused rerun passed all 64 tests and its retained-log audit.
+Five consecutive affected runs, `mvn install` and final
+retained-log audits remain pending. Desktop automation is disabled
+at the owner's request; verification must use the owner's VS Code terminal.
+Step 5,
 failed-server cleanup, completed on 2026-10-21: runtime wiring, effective policy
 logging, safe heartbeat-round conversion and leader-only cleanup are implemented
 and verified. Five consecutive affected runs passed 332 tests each; the clean
@@ -12,7 +18,7 @@ and operator list and remove, is built, and its close-out gate was closed on
 on. Steps 1 to 3 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
-**Last updated:** 2026-10-21 (Step 5 runtime policy and failed-voter cleanup completed; five repeated runs, clean build/coverage, fresh-image runtime gate and retained-log audits passed; Step 6 is next. Earlier, 2026-10-15: membership parser implemented with defaults, validation and getters; 64 focused tests passed, full verification and runtime wiring pending. Earlier: merge reconciled the 2026-10-14 archival with the newer parser tests; the focused RED run and retained output are recorded under Step 5. On 2026-10-14: single-POM cleanup list archived and its links repaired; Step 5 resumed as the active task, with implementation pending. On 2026-10-11: the mutation rule removed at the owner's decision, from the rules and from the exits of Steps 5 to 8; the Step 4 gate, which had waited on it, closed, after PIT was tried for it and put on ice; the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
+**Last updated:** 2026-10-21 (Step 6 corrected focused run: all 64 tests and retained-log audits passed; five repeats and install gates pending in the owner's terminal; desktop automation disabled at the owner's request. Earlier today: Step 5 runtime policy and failed-voter cleanup completed; five repeated runs, clean build/coverage, fresh-image runtime gate and retained-log audits passed; Step 6 is next. Earlier, 2026-10-15: membership parser implemented with defaults, validation and getters; 64 focused tests passed, full verification and runtime wiring pending. Earlier: merge reconciled the 2026-10-14 archival with the newer parser tests; the focused RED run and retained output are recorded under Step 5. On 2026-10-14: single-POM cleanup list archived and its links repaired; Step 5 resumed as the active task, with implementation pending. On 2026-10-11: the mutation rule removed at the owner's decision, from the rules and from the exits of Steps 5 to 8; the Step 4 gate, which had waited on it, closed, after PIT was tried for it and put on ice; the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
 **Interruption completed:** [`task-list-single-pom-and-quorus-removal-2026-10-21.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md),
 started 2026-10-04 before the Step 4 close-out gate. The gate was closed on
 2026-10-11, as the first task of that list's Phase 7. That list was completed
@@ -1109,10 +1115,83 @@ environment overrides. Record the effective settings without secrets.
 
 ### Step 6. Protection from disruptive servers
 
+**Status: In progress, 2026-10-21; corrected focused run and log audit passed; repeat and install gates pending.**
+
 Leader stickiness was built on 2026-10-02 (see "Review remediation" under
 Step 4), with unit tests for a removed server and for the contact-expiry
-boundary. Still open: the test of a server rejoining after a partition, and the
-container scenarios.
+boundary. `RaftNodeDisruptionTest` now adds five scenarios using the existing
+manual-timer cluster and in-memory transport:
+
+- Twenty actual election campaigns from a removed server that retains its old
+  voter configuration. Held vote requests are delivered after fresh leader
+  contact; both retained voters refuse without changing their term, and a
+  subsequent write still commits.
+- Heartbeat renewal and refusal one millisecond before the renewed contact
+  lease expires, followed by voting at its exact minimum-timeout boundary.
+- A higher-term stale-log candidate remains refused after lease expiry; the
+  observed higher term still advances, preserving the log freshness rule.
+- A partitioned server campaigns to a higher term while missing committed
+  entries. After healing, fresh leader contact protects the live voters from
+  its campaign. Releasing a genuine higher-term AppendEntries response then
+  advances the leader's term; an up-to-date server elects above it, brings the
+  returning server up to date and commits another write.
+- An isolated leader steps down at the check-quorum boundary without raising
+  its term, fails its pending write with an unknown outcome, and the retained
+  majority elects a successor. Healing preserves acknowledged writes and
+  replaces the isolated leader's uncommitted tail.
+
+The local transport gates retain original requests and futures and release
+them through the existing simulator. They control ordering rather than forge
+peer answers. No production election behavior or logging allowance has changed.
+These are tests of existing behavior. The first focused run, its test-setup
+correction and the successful focused rerun are recorded below. Step 6 remains
+open for five consecutive affected runs and `mvn install`. The owner
+stopped desktop automation and requested no further desktop control; use the documented visible-terminal
+commands in [TESTING.md](../docs/TESTING.md#disruptive-server-validation), then
+inspect all retained output before recording any gate as passed. Step 8's real
+transport disruption and partition-healing scenarios remain open.
+
+**First focused run and correction, 2026-10-21.** The owner ran the documented
+seven-class selector. Capture
+`logs/qraft-disruption-focused-2026-10-21_17-27-16-405.log` records 64 tests,
+one failure, zero errors and zero skips. Four new cases passed. The removed-server
+case completed all twenty real campaigns and its functional assertions, then
+failed the strict audit: its declared `RAFT_PEER_UNREACHABLE` for `c` occurred
+zero times. The retained case output and `recordIfConfiguration`/`peers` show
+why: the removal changes the active replication targets before the next send,
+so no RPC crosses that partition. The partition preserves the removed server's
+old configuration; this scenario does not deliberately cause a transport error.
+The incorrect declaration was removed and that ordering is documented in the
+test. No error is suppressed and no expectation or failure definition is widened.
+
+The Maven capture and application log
+`logs/qraft-maven-tests-2026-10-21_17-27-38.log` are the two retained logs from
+this run; no helper or Docker logs were generated. Each holds 31 application
+ERROR headers, all explicitly attributed. Each holds 25 attributed exception
+headers; the Maven capture additionally holds the test framework's unflagged
+`java.lang.AssertionError` for the missing expected occurrence. That audit failure
+is the defect corrected above, not accepted noise. Neither capture has ANSI
+escapes. The application log has no other unflagged error or exception. The
+failed capture remains retained. At that point the corrected focused run and
+the completion gates were pending; the focused rerun is recorded next.
+
+**Corrected focused run, 2026-10-21.** Capture
+`logs/qraft-disruption-focused-2026-10-21_17-43-47-201.log` records BUILD SUCCESS:
+64 tests, zero failures, errors or skips. All five `RaftNodeDisruptionTest`
+cases passed, alongside 16 membership, seven check-quorum, three candidate,
+two transport-generation, five timer-sequencing and 26 general node tests.
+The test source was unchanged after the correction at 17:29; this run finished
+at 17:44:57. The application capture is
+`logs/qraft-maven-tests-2026-10-21_17-44-41.log`. These are the only two retained
+logs from this run; no helper subprocess or Docker archives were generated.
+
+Both captures were read and audited. Each has 31 attributed application ERROR
+headers: 25 `RAFT_PEER_UNREACHABLE` and six injected
+`RAFT_METADATA_PERSISTENCE_FAILURE` events. Each has 25 attributed exception
+headers and 251 associated stack frames, with no unflagged error, exception or
+stack frame, no ANSI escape and no JaCoCo execution-data/class mismatch. The
+corrected focused gate is verified. No five-repeat or Step 6 install captures
+are present yet; those gates and their log audits remain pending.
 
 Leader stickiness is the selected protection (thesis section 4.2.3). Do not add
 a second election protocol merely to close this validation step.
