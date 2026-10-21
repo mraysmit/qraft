@@ -130,9 +130,62 @@ On 2026-10-15 the initial run recorded 61 cases and 59 failures because
 assertions, all 64 focused cases passed. The captured Maven output has no
 ERROR entry, exception trace or ANSI escape, and the application log is empty.
 The focused run reported JaCoCo execution-data/class mismatches from earlier
-builds; coverage and full-suite verification remain pending. See the
-[Step 5 record](../docs-design/task-list-raft-membership-changes-2026-10-12.md#step-5-failed-server-cleanup)
-for the retained output and remaining runtime work.
+builds; at that date coverage and full-suite verification remained pending. See the
+[Step 5 record](../docs-design/task-list-raft-membership-changes-2026-10-21.md#step-5-failed-server-cleanup)
+for the retained output and the completed 2026-10-21 runtime verification below.
+
+### Membership runtime policy and failed-voter cleanup
+
+`QraftServerLifecycleTest` now starts the real server on ephemeral ports and
+checks the effective policy from its constructed Raft node, including absent
+settings, non-default settings and the largest representable durations.
+`RaftNodePromotionTest` covers overflow-safe stabilization. `RaftNodeCleanupTest`
+drives held replies and manual heartbeat rounds: grace and interval boundaries,
+contact reset, wrong/stale identities, leadership reset, minimum and quorum
+limits, frozen budget and ordering, one committed removal at a time,
+promotion-triggered cleanup, unrelated changes, rejected proposals and real-WAL
+reopening. Its deliberately ambiguous sync failure uses the existing injected
+WAL-failure fixture; its ERROR headers and traces identify that exact test.
+
+Start with these focused tests, using the usual capture and exit-code check:
+
+```powershell
+mvn -B "-Dstyle.color=never" test "-Dtest=RaftNodeCleanupTest,RaftNodePromotionTest,QraftServerLifecycleTest,AppConfigRaftMembershipTest" 2>&1 | Tee-Object -FilePath ".\logs\qraft-cleanup-focused-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
+$qraftBuildExitCode = $LASTEXITCODE
+if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
+```
+
+Run the following command separately five consecutive times before accepting
+changed membership concurrency behavior. Then run the clean default build and
+the `docker,e2e,slow` runtime gate below against its fresh artifact and image.
+Audit every retained log; an eventual pass does not erase a failed run.
+
+```powershell
+mvn -B "-Dstyle.color=never" test "-Dtest=RaftNode*Test,MembershipServiceTest,QraftServerLifecycleTest,AppConfigRaftMembershipTest" 2>&1 | Tee-Object -FilePath ".\logs\qraft-cleanup-repeat-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
+$qraftBuildExitCode = $LASTEXITCODE
+if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
+```
+
+On 2026-10-21 a clean baseline initially lost compiled classes while test
+compilation was running. VS Code was also rebuilding `target/classes` during
+that interval. With `java.autobuild.enabled` set to `false` in local workspace
+settings, the same clean build passed 1,024 tests and every coverage gate.
+Keep Maven as the sole writer of its output during verification; preserve the
+first failed capture and investigate disappearing class files rather than
+accepting a rerun alone. The dated Step 5 record holds the exact captures.
+
+**Step 5 verification, 2026-10-21.** Five consecutive affected runs passed 332
+tests each. The clean `install` passed 1,051 tests and all coverage gates; the
+fresh-image `docker,e2e,slow` gate passed 42 tests. Neither final gate had a
+failure, error or skip. Final captures are
+`logs/qraft-cleanup-final-install-2026-10-21_12-14-06-286.log` and
+`logs/qraft-cleanup-final-runtime-2026-10-21_12-17-32-605.log`.
+The final default/runtime audit covered 138 retained files, including 98 Docker
+archives, with no unflagged error or exception trace and no ANSI escape. The
+clean build had no JaCoCo mismatch warning. The jar hash was unchanged through
+the runtime gate. The task list holds the full RED/GREEN, repeat, archive and
+artifact evidence. Step 5 is complete; Step 8's expanded cleanup/replacement
+container scenarios and the remaining membership work are still open.
 
 ### State-loop and blocking-executor changes
 
@@ -227,7 +280,7 @@ headers and 2,846 exception headers were attributed, including one flagged
 lock-contender uncaught exception. No unflagged error or exception header
 remained. Counts include duplicate captures. Earlier failed runs are retained
 separately with their causes and fixes; passing test totals did not erase them.
-See [the Phase 7 record](archive/task-list-single-pom-and-quorus-removal-2026-10-12.md#phase-7-replace-the-vertx-shaped-async-layer)
+See [the Phase 7 record](archive/task-list-single-pom-and-quorus-removal-2026-10-21.md#phase-7-replace-the-vertx-shaped-async-layer)
 for TDD evidence, capture names and the native-container audit follow-up.
 These are dated results, not expected counts for future runs or Jenkins results.
 

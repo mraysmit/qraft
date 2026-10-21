@@ -1,9 +1,10 @@
 # Task List: Unified Runtime Flow
 
 **Date:** 2026-09-24
+**Last updated:** 2026-10-21 (dated document links refreshed and file renamed; historical findings and completion dates retained)
 **Completed:** 2026-09-25
 **Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), Tranche 5
-**Predecessor:** [`task-list-agent-catalog-client-2026-09-24.md`](task-list-agent-catalog-client-2026-09-24.md)
+**Predecessor:** [`task-list-agent-catalog-client-2026-10-21.md`](task-list-agent-catalog-client-2026-10-21.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
 This task list is complete and retained as the implementation record for the
@@ -153,4 +154,4 @@ environment-variable configuration.
 
 The next active work is Tranche 6, health propagation and automatic
 deregistration, tracked in
-[`task-list-health-propagation-2026-09-25.md`](task-list-health-propagation-2026-09-25.md).
+[`task-list-health-propagation-2026-10-21.md`](task-list-health-propagation-2026-10-21.md).

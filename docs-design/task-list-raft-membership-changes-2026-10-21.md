@@ -1,24 +1,26 @@
 # Task List: Raft Membership Changes
 
 **Date:** 2026-09-29
-**Active work:** Step 5, failed-server cleanup, resumed on 2026-10-14 after
-the single-POM list was archived. Membership configuration parsing, defaults
-and getters are implemented and passed 64 focused tests on 2026-10-15.
-Full verification, server wiring and node cleanup remain. Step 4, joining,
+**Next work:** Step 6, the remaining disruptive-server validation. Step 5,
+failed-server cleanup, completed on 2026-10-21: runtime wiring, effective policy
+logging, safe heartbeat-round conversion and leader-only cleanup are implemented
+and verified. Five consecutive affected runs passed 332 tests each; the clean
+default build passed 1,051 tests and coverage, and the runtime gate passed 42.
+The retained-log audit is complete. Step 4, joining,
 and operator list and remove, is built, and its close-out gate was closed on
 2026-10-11, when the owner removed the mutation rule that the gate had waited
 on. Steps 1 to 3 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
-**Last updated:** 2026-10-15 (membership parser implemented with defaults, validation and getters; 64 focused tests passed, full verification and runtime wiring pending. Earlier: merge reconciled the 2026-10-14 archival with the newer parser tests; the focused RED run and retained output are recorded under Step 5. On 2026-10-14: single-POM cleanup list archived and its links repaired; Step 5 resumed as the active task, with implementation pending. On 2026-10-11: the mutation rule removed at the owner's decision, from the rules and from the exits of Steps 5 to 8; the Step 4 gate, which had waited on it, closed, after PIT was tried for it and put on ice; the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
-**Interruption completed:** [`task-list-single-pom-and-quorus-removal-2026-10-12.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-12.md),
+**Last updated:** 2026-10-21 (Step 5 runtime policy and failed-voter cleanup completed; five repeated runs, clean build/coverage, fresh-image runtime gate and retained-log audits passed; Step 6 is next. Earlier, 2026-10-15: membership parser implemented with defaults, validation and getters; 64 focused tests passed, full verification and runtime wiring pending. Earlier: merge reconciled the 2026-10-14 archival with the newer parser tests; the focused RED run and retained output are recorded under Step 5. On 2026-10-14: single-POM cleanup list archived and its links repaired; Step 5 resumed as the active task, with implementation pending. On 2026-10-11: the mutation rule removed at the owner's decision, from the rules and from the exits of Steps 5 to 8; the Step 4 gate, which had waited on it, closed, after PIT was tried for it and put on ice; the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
+**Interruption completed:** [`task-list-single-pom-and-quorus-removal-2026-10-21.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md),
 started 2026-10-04 before the Step 4 close-out gate. The gate was closed on
 2026-10-11, as the first task of that list's Phase 7. That list was completed
-and archived on 2026-10-14. Step 5 is now active, and this list runs to its
+and archived on 2026-10-14. Step 5 completed on 2026-10-21, and this list runs to its
 end before the Consul-style client list starts (decided 2026-10-05).
-**Predecessor:** [`task-list-test-suite-remediation-2026-09-27.md`](../docs/archive/task-list-test-suite-remediation-2026-09-27.md),
+**Predecessor:** [`task-list-test-suite-remediation-2026-10-21.md`](../docs/archive/task-list-test-suite-remediation-2026-10-21.md),
 archived 2026-10-02. Its packaged-artifact test waits for the admin interface.
-**Paused:** [`task-list-embedded-admin-interface-2026-10-12.md`](task-list-embedded-admin-interface-2026-10-12.md), after its Step 1
+**Paused:** [`task-list-embedded-admin-interface-2026-10-21.md`](task-list-embedded-admin-interface-2026-10-21.md), after its Step 1
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), principle 8 (section 3), sections 4.2, 14.4, 14.5 and 16
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
@@ -801,7 +803,7 @@ unchanged final source/dependency state covered by the existing full-suite
 evidence. Passing ordinary suites alone does not close the outstanding gate.
 
 **Scheduled (2026-10-05).** This gate is the first task of Phase 7 in
-[`task-list-single-pom-and-quorus-removal-2026-10-12.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-12.md).
+[`task-list-single-pom-and-quorus-removal-2026-10-21.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md).
 By then the source has its final packages and its tests declare their
 intentional errors, and Phase 7 has not yet changed `RaftNode`'s async code.
 
@@ -853,11 +855,13 @@ single-POM list was completed and archived, as recorded at the head of this list
 
 ### Step 5. Failed-server cleanup
 
-**Status: Active from 2026-10-14; parser slice implemented, full verification pending.**
+**Status: Complete, 2026-10-21; all Step 5 verification gates passed.**
 The contract below was specified during the document review on 2026-10-03.
-`AppConfig` now accepts and validates the membership settings. Server wiring
-and automatic cleanup are not implemented; promotion still uses the node
-builder's existing defaults at runtime.
+`AppConfig` accepts and validates the membership settings. `QraftServerService`
+wires all six values into `RaftMembershipPolicy`, and the node logs the effective
+policy and its safely rounded heartbeat durations. Automatic cleanup is
+implemented and verified. The expanded real replacement and cleanup container
+matrix remains mandatory in Step 8 before the overall membership list closes.
 
 **Parser-test record, 2026-10-15.** The cleanup archival and membership
 resumption were committed on 2026-10-14 in `217e28c`. Local commit `88457d1`
@@ -903,7 +907,107 @@ execution-data/class mismatches from earlier builds; this focused test result
 does not establish coverage. A clean default build and the runtime suites
 remain pending; no full-suite result is claimed. Lifecycle wiring, effective
 settings logging, overflow-safe round conversion and automatic cleanup follow
-in the next slice. The overall Step 5 exit gate remains open.
+in the next slice. At that date the overall Step 5 exit gate remained open.
+
+**Runtime implementation and verification, 2026-10-21.** A clean baseline on
+`bef4637` passed 1,024 tests and every coverage gate. Its capture is
+`logs/qraft-membership-baseline-2026-10-21_11-47-15-990.log`. The audit of its
+25 retained Maven/application/helper logs found 337 flagged ERROR headers and
+288 exception headers with no unflagged header or ANSI escape. These are counts
+including duplicate captures. The earlier baseline,
+`qraft-membership-baseline-2026-10-21_11-44-36-970.log`, failed test compilation:
+main classes disappeared while VS Code was also rebuilding `target/classes`.
+Java auto-build was disabled in local `.vscode/settings.json` before the clean
+rerun; no compiler or generated-source error was excused as test noise.
+
+The first new behavioral RED run,
+`qraft-cleanup-red-2026-10-21_11-50-37-689.log`, showed missing default cleanup
+and overflow into immediate promotion, plus a timeout in the existing promotion
+test helper. That helper chose a command index before the leadership no-op had
+been appended and could acknowledge the wrong request. It now awaits a sequenced
+barrier after leadership. The corrected RED run,
+`qraft-cleanup-red-2026-10-21_11-51-59-210.log`, had exactly those two assertion
+failures among eight tests, with no error or skip.
+
+`RaftMembershipPolicy` holds the local settings; node construction validates
+timing and uses `Math.ceilDiv` for promotion, cleanup and check-quorum durations.
+`RaftNode` tracks continuous absence by durable server ID, resets it per
+leadership, and freezes eligible IDs and the committed voter budget per pass.
+Each proposal rechecks its leadership and configuration revision, eligibility,
+both quorums, minimum and the existing configuration-change guards inside the
+sequencer. Only commitment schedules the next proposal. An unrelated change,
+lost leadership or failed proposal abandons the pass. Promotion-triggered
+cleanup begins only after promotion commits. Only replicated configuration
+persists; failure eligibility and pass decisions are local.
+
+The expanded RED capture,
+`qraft-cleanup-policy-red-2026-10-21_11-55-17-053.log`, recorded missing runtime
+wiring and cleanup. It also exposed a new test-fixture readback race: a public
+membership call dispatches to the loop before admitting its sequenced append.
+The cleanup fixture now drains both boundaries before reading the pending
+index. Production errors were not broadly permitted or suppressed.
+
+The first GREEN capture,
+`qraft-cleanup-green-2026-10-21_11-57-54-657.log`, passed 97 cases. After adding
+promotion, cancellation, real-WAL reopen, rejection and sync-failure scenarios,
+`qraft-cleanup-green-2026-10-21_12-00-37-500.log` passed 104. The deliberately
+ambiguous sync failure is attributed through `TestRaftStorageFixture`'s
+`RAFT_WAL_TRANSITION_FAILURE` injection to
+`RaftNodeCleanupTest#anAmbiguousCleanupSyncFailureFencesTheNodeAndAbandonsThePass`.
+All four ERROR headers and four exception headers in those four retained logs
+were flagged; no unflagged header or ANSI escape remained. Focused JaCoCo
+mismatch warnings reflect changed classes with retained execution data; only
+the forthcoming clean build establishes final coverage. Additional boundary
+tests were included in five consecutive broader runs, each passing 332 tests
+with no failure, error or skip:
+
+- `qraft-cleanup-repeat-2026-10-21_12-02-45-486.log`
+- `qraft-cleanup-repeat-2026-10-21_12-05-18-893.log`
+- `qraft-cleanup-repeat-2026-10-21_12-07-13-964.log`
+- `qraft-cleanup-repeat-2026-10-21_12-09-40-986.log`
+- `qraft-cleanup-repeat-2026-10-21_12-12-02-273.log`
+
+The repeat audit covered 115 Maven/application/helper logs: 1,070 ERROR headers
+and 990 exception headers, including duplicates, all attributed. No unflagged
+header, orphaned stack frame, Maven error or ANSI escape remained in those runs.
+The final clean default build passed 1,051 tests, all coverage gates and
+packaging, with no failure, error or skip. Its capture is
+`qraft-cleanup-final-install-2026-10-21_12-14-06-286.log`. The default audit
+covered 25 Maven/application/helper logs: 343 flagged ERROR headers and 292
+exception headers, no unflagged header or frame, no ANSI escape, and no JaCoCo
+class/data mismatch. The packaged jar includes `RaftMembershipPolicy` and
+contains no test fixtures, test Logback configuration or generated logs.
+Its SHA-256 is
+`953AAA601CCA511BEBFE7A6B1788A173EEE2845C5A0C0266CD3644EC7E033148`.
+The complete `docker,e2e,slow` gate on that jar passed 42 tests, with no failure,
+error or skip, in `qraft-cleanup-final-runtime-2026-10-21_12-17-32-605.log`.
+The image was rebuilt from that jar before the container scenarios. The initial
+runtime image was `sha256:f87ecc8b118d834da0670221f2c78621390ae8dad0c0012988a828e2128a29c5`,
+created at `2026-10-21T04:18:11Z` (12:18:11 local). A final jar hash check matched
+the value above.
+
+The runtime audit read all 113 newly retained files: 107 `.log` files, four
+JSON files and two support files, including 98 Docker archives. All 272 ERROR
+headers and 99 exception headers were attributed; 2,430 stack frames were
+covered by their flagged headers. No unflagged error, exception header or frame,
+Maven error, fatal-JVM header or ANSI escape remained. The default and runtime
+audits together covered 138 retained files, including duplicate captures, with
+615 attributed ERROR headers and 391 exception headers. ERROR counts use the
+event's severity; flagged WARN events and their traces were also audited.
+Earlier failed RED
+and baseline captures remain retained with their causes and fixes above.
+
+Source-header/attribution, prohibited-framework, environment-configuration,
+timeout-API and whitespace audits passed. The jar contains no test fixtures,
+test Logback configuration or generated logs. Step 5 is closed. Steps 6 to 8
+remain open, including the expanded cleanup/replacement container matrix and
+the unsupported lost-quorum recovery procedure; the current runtime pass does
+not claim those future scenarios were implemented. No commit was made.
+
+Docker preflight initially found a stopped engine with a cached "WSL update
+required" startup reason. Installed WSL was already 3.0.4. Restarting the
+existing Docker Desktop cleared that state; its engine API then answered as
+29.9.1. No WSL installation, data reset or container-test bypass was used.
 
 `QraftServerService` is the class that wires these settings. The single-POM
 list's Phase 5 was done on 2026-10-10, and this is what it left:
@@ -916,11 +1020,11 @@ list's Phase 5 was done on 2026-10-10, and this is what it left:
 
 #### Configuration contract
 
-Add the following settings under `server.raft.membership`, validated before any
-runtime resource opens. Existing files without this object retain the current
-promotion defaults and receive the cleanup defaults when Step 5 is implemented.
+The settings under `server.raft.membership` are validated before any runtime
+resource opens. Existing files without this object retain the promotion defaults
+and receive the timing-aware cleanup defaults.
 
-| Setting | Planned default | Validation and meaning |
+| Setting | Default | Validation and meaning |
 |---|---|---|
 | `promotionStabilizationMs` | 10000 | Integer, nonnegative; maps to the existing builder option |
 | `promotionMaxTrailingEntries` | 250 | Integer, nonnegative; maps to the existing builder option |
@@ -929,8 +1033,8 @@ promotion defaults and receive the cleanup defaults when Step 5 is implemented.
 | `cleanup.intervalMs` | `max(10000, heartbeatIntervalMs)` | Positive integer, at least `server.raft.heartbeatIntervalMs`; periodic cleanup cadence |
 | `cleanup.minVoters` | 3 | Positive integer; automatic cleanup must not leave fewer voters; a smaller existing cluster remains valid and is not expanded automatically |
 
-Unknown fields, wrong JSON types, and values whose conversion to heartbeat
-rounds would overflow are refused. Durations use ceiling division by the
+Unknown fields, wrong JSON types and integers outside their representation
+bounds are refused. All representable durations use overflow-safe ceiling division by the
 heartbeat interval and are measured in applied heartbeat rounds, as promotion
 and check-quorum already are. A delayed loop must not turn elapsed wall-clock
 time into fictitious missed rounds. Expose parsed values through `AppConfig`
@@ -1113,7 +1217,7 @@ text is otherwise unchanged.
 ### RaftLog 1.5.0 (2026-10-11)
 
 Recorded here beside the upgrade before it. The work is Phase 6 of
-[`task-list-single-pom-and-quorus-removal-2026-10-12.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-12.md),
+[`task-list-single-pom-and-quorus-removal-2026-10-21.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md),
 which has the whole record.
 
 - **Change.** The root POM pins `raftlog.version` 1.5.0, up from 1.4.1. The

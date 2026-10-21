@@ -1,9 +1,10 @@
 # Task List: Agent Catalog Client and Reconciliation
 
 **Date:** 2026-09-24
+**Last updated:** 2026-10-21 (dated document links refreshed and file renamed; historical findings and completion dates retained)
 **Completed:** 2026-09-24
 **Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md)
-**Predecessor:** [`task-list-catalog-identity-2026-09-22.md`](task-list-catalog-identity-2026-09-22.md) (Tranches 1 and 2, complete)
+**Predecessor:** [`task-list-catalog-identity-2026-10-21.md`](task-list-catalog-identity-2026-10-21.md) (Tranches 1 and 2, complete)
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
 This is the current task list for the project. When the active work is complete,
@@ -439,4 +440,4 @@ added, and Qraft runtime configuration remains file-only with no environment
 variable configuration or discovery path.
 
 The next active work is Tranche 5, unified runtime flow, tracked in
-[`task-list-unified-runtime-flow-2026-09-24.md`](task-list-unified-runtime-flow-2026-09-24.md).
+[`task-list-unified-runtime-flow-2026-10-21.md`](task-list-unified-runtime-flow-2026-10-21.md).

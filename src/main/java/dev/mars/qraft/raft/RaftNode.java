@@ -180,6 +180,35 @@ public class RaftNode {
     /** The round from which each non-voter has been continuously healthy. */
     private final Map<String, Long> healthySinceRound = new HashMap<>();
 
+    // ========== FAILED-VOTER CLEANUP (state loop only) ==========
+    /** Contact is keyed by durable identity; a new member never inherits another server's failure history. */
+    private final Map<String, Long> cleanupContactRound = new HashMap<>();
+    private long lastCleanupRound;
+    private boolean cleanupExpedited;
+    private long configurationRevision;
+    private CleanupPass cleanupPass;
+
+    /** One leadership's frozen candidate list and removal budget; only committed removals spend the budget. */
+    private static final class CleanupPass {
+        private final long term;
+        private final long leadershipGeneration;
+        private final List<String> candidates;
+        private final int budget;
+        private long configurationRevision;
+        private int cursor;
+        private int committed;
+        private String target;
+
+        private CleanupPass(long term, long leadershipGeneration, long configurationRevision,
+                            List<String> candidates, int budget) {
+            this.term = term;
+            this.leadershipGeneration = leadershipGeneration;
+            this.configurationRevision = configurationRevision;
+            this.candidates = candidates;
+            this.budget = budget;
+        }
+    }
+
     // ========== STATE CHANGE LISTENERS ==========
     private final List<java.util.function.Consumer<State>> stateChangeListeners = new CopyOnWriteArrayList<>();
 
@@ -198,6 +227,9 @@ public class RaftNode {
     /** Heartbeat rounds a non-voter must stay healthy before it is promoted. */
     private final long promotionStabilizationRounds;
     private final long promotionMaxTrailingEntries;
+    private final RaftMembershipPolicy membershipPolicy;
+    private final long cleanupFailureRounds;
+    private final long cleanupIntervalRounds;
 
     // ========== INSTALL SNAPSHOT STATE ==========
     /** Maximum chunk size for InstallSnapshot RPC (default 1 MB). */
@@ -292,6 +324,7 @@ public class RaftNode {
         private long logHardLimit = 100000;
         private long promotionStabilizationMs = 10_000;
         private long promotionMaxTrailingEntries = 250;
+        private RaftMembershipPolicy membershipPolicy;
         private RaftTimerScheduler timerScheduler;
         private int transitionQueueCapacity = 1024;
 
@@ -391,6 +424,14 @@ public class RaftNode {
             return this;
         }
 
+        /** Local promotion and automatic failed-voter cleanup policy; omitted values use timing-aware defaults. */
+        public Builder membershipPolicy(RaftMembershipPolicy policy) {
+            this.membershipPolicy = requireNonNull(policy, "membershipPolicy");
+            this.promotionStabilizationMs = policy.promotionStabilizationMs();
+            this.promotionMaxTrailingEntries = policy.promotionMaxTrailingEntries();
+            return this;
+        }
+
         Builder timerScheduler(RaftTimerScheduler timerScheduler) {
             this.timerScheduler = requireNonNull(timerScheduler, "timerScheduler");
             return this;
@@ -430,11 +471,17 @@ public class RaftNode {
             }
             Map<String, String> listed = new TreeMap<>();
             for (String name : clusterNodes) listed.put(name, addresses.getOrDefault(name, name));
+            RaftMembershipPolicy cleanup = membershipPolicy != null ? membershipPolicy
+                    : RaftMembershipPolicy.defaults(electionTimeoutMs, heartbeatIntervalMs);
+            RaftMembershipPolicy policy = new RaftMembershipPolicy(promotionStabilizationMs,
+                    promotionMaxTrailingEntries, cleanup.cleanupEnabled(), cleanup.cleanupFailureTimeoutMs(),
+                    cleanup.cleanupIntervalMs(), cleanup.cleanupMinVoters());
+            policy.validateTiming(electionTimeoutMs, heartbeatIntervalMs);
             return new RaftNode(runtime, blockingTasks, nodeId, resolvedServerId, initialConfiguration, listed,
                     clusterNodes, transport, stateMachine,
                     commandCodec, mode, electionTimeoutMs, heartbeatIntervalMs, snap,
-                    snapshotThreshold, snapshotCheckIntervalMs, logHardLimit, promotionStabilizationMs,
-                    promotionMaxTrailingEntries, timerScheduler, transitionQueueCapacity);
+                    snapshotThreshold, snapshotCheckIntervalMs, logHardLimit, policy,
+                    timerScheduler, transitionQueueCapacity);
         }
     }
 
@@ -446,7 +493,7 @@ public class RaftNode {
             RaftLogApplicator stateMachine, CommandCodec<RaftCommand> commandCodec,
             RaftNodeMode mode, long electionTimeoutMs, long heartbeatIntervalMs,
             boolean snapshotEnabled, long snapshotThreshold, long snapshotCheckIntervalMs,
-            long logHardLimit, long promotionStabilizationMs, long promotionMaxTrailingEntries,
+            long logHardLimit, RaftMembershipPolicy membershipPolicy,
             RaftTimerScheduler configuredTimerScheduler,
             int transitionQueueCapacity) {
         this.runtime = runtime;
@@ -473,14 +520,19 @@ public class RaftNode {
             @Override public boolean cancelTimer(long id) { return runtime.cancelTimer(id); }
         } : configuredTimerScheduler;
         this.electionTimeoutMs = electionTimeoutMs;
-        this.quorumContactRounds = Math.max(1, (electionTimeoutMs + heartbeatIntervalMs - 1) / heartbeatIntervalMs);
+        this.quorumContactRounds = Math.ceilDiv(electionTimeoutMs, heartbeatIntervalMs);
         this.heartbeatIntervalMs = heartbeatIntervalMs;
         this.snapshotEnabled = snapshotEnabled && this.persistence.isDurable();
         this.snapshotThreshold = snapshotThreshold;
         this.snapshotCheckIntervalMs = snapshotCheckIntervalMs;
         this.logHardLimit = logHardLimit;
-        this.promotionStabilizationRounds = (promotionStabilizationMs + heartbeatIntervalMs - 1) / heartbeatIntervalMs;
-        this.promotionMaxTrailingEntries = promotionMaxTrailingEntries;
+        this.membershipPolicy = membershipPolicy;
+        this.promotionStabilizationRounds = Math.ceilDiv(membershipPolicy.promotionStabilizationMs(), heartbeatIntervalMs);
+        this.promotionMaxTrailingEntries = membershipPolicy.promotionMaxTrailingEntries();
+        this.cleanupFailureRounds = Math.ceilDiv(membershipPolicy.cleanupFailureTimeoutMs(), heartbeatIntervalMs);
+        this.cleanupIntervalRounds = Math.ceilDiv(membershipPolicy.cleanupIntervalMs(), heartbeatIntervalMs);
+        logger.info("Raft membership policy: {}; promotionStabilizationRounds={}, cleanupFailureRounds={}, cleanupIntervalRounds={}",
+                membershipPolicy, promotionStabilizationRounds, cleanupFailureRounds, cleanupIntervalRounds);
 
         // Initialize log with a dummy entry
         log.add(new LogEntry(0, 0, null));
@@ -1194,15 +1246,7 @@ public class RaftNode {
         }
         if (configuration.isVoter(changedId) && !next.isVoter(changedId)) {
             // The voters left must still be able to commit: those this leader has heard from must be a quorum.
-            Set<String> reachable = new HashSet<>();
-            reachable.add(serverId);
-            for (RaftConfiguration.Server peer : peers()) {
-                Long round = lastContactRound.get(peer.name());
-                if (answeredPeers.contains(peer.name()) && round != null
-                        && heartbeatRound - round <= quorumContactRounds) {
-                    reachable.add(peer.serverId());
-                }
-            }
+            Set<String> reachable = recentlyAnsweredServerIds();
             reachable.retainAll(next.voterIds());
             if (!next.hasQuorum(reachable)) {
                 return new IllegalStateException("Removing voter " + changedId + " would leave "
@@ -1333,6 +1377,10 @@ public class RaftNode {
 
     private void recordIfConfiguration(LogEntry entry) {
         if (entry.getCommand() instanceof ConfigurationCommand command) {
+            configurationRevision++;
+            if (cleanupPass != null && cleanupPass.configurationRevision != configurationRevision) {
+                abandonCleanup("an unrelated configuration change was appended");
+            }
             logConfigurations.put(entry.getIndex(), command.configuration());
             refreshConfiguration();
             if (state == State.LEADER) trackNewPeers();
@@ -1354,10 +1402,14 @@ public class RaftNode {
         answeredPeers.retainAll(configured);
         healthySinceRound.keySet().retainAll(configured);
         unavailablePeers.retainAll(configured);
+        Set<String> configuredIds = peers().stream().map(RaftConfiguration.Server::serverId)
+                .collect(java.util.stream.Collectors.toSet());
+        cleanupContactRound.keySet().retainAll(configuredIds);
         for (RaftConfiguration.Server peer : peers()) {
             nextIndex.putIfAbsent(peer.name(), lastLogIndex() + 1);
             matchIndex.putIfAbsent(peer.name(), 0L);
             lastContactRound.putIfAbsent(peer.name(), 0L);
+            cleanupContactRound.putIfAbsent(peer.serverId(), heartbeatRound);
         }
     }
 
@@ -1385,6 +1437,11 @@ public class RaftNode {
     /** The server's durable Raft identity, which every message it sends names as the sender. */
     public String getServerId() {
         return serverId;
+    }
+
+    /** Effective local membership policy, including the defaults resolved when this node was built. */
+    public RaftMembershipPolicy getMembershipPolicy() {
+        return membershipPolicy;
     }
 
     public boolean isLeader() {
@@ -1573,6 +1630,8 @@ public class RaftNode {
         cancelElectionTimer();
         cancelHeartbeatTimer();
         outboundSnapshotTransfers.clear();
+        abandonCleanup("the leadership ended");
+        cleanupExpedited = false;
     }
 
     private void cancelElectionTimer() {
@@ -1798,6 +1857,11 @@ public class RaftNode {
             for (RaftConfiguration.Server peer : peers()) lastContactRound.put(peer.name(), 0L);
             answeredPeers.clear();
             healthySinceRound.clear();
+            cleanupContactRound.clear();
+            for (RaftConfiguration.Server peer : peers()) cleanupContactRound.put(peer.serverId(), 0L);
+            lastCleanupRound = 0;
+            cleanupExpedited = false;
+            cleanupPass = null;
             appendLeadershipNoOp();
             state = State.LEADER;
         }
@@ -1901,6 +1965,7 @@ public class RaftNode {
             }
             sendHeartbeats();
             considerPromotions();
+            considerFailedServerCleanup();
         }
         return null;
     }
@@ -1945,6 +2010,140 @@ public class RaftNode {
                 && matchIndex.getOrDefault(peerName, 0L) >= lastLogIndex() - promotionMaxTrailingEntries;
     }
 
+    /** Starts a pass from committed membership, either periodically or after a promotion commits. */
+    private void considerFailedServerCleanup() {
+        if (!running || state != State.LEADER || !membershipPolicy.cleanupEnabled() || cleanupPass != null) return;
+        if (!cleanupExpedited && heartbeatRound - lastCleanupRound < cleanupIntervalRounds) return;
+        RaftConfiguration committed = configurationAt(commitIndex);
+        if (committed == null || !committed.equals(configuration)) {
+            logger.debug("Failed-voter cleanup deferred: a configuration change is uncommitted");
+            return;
+        }
+        lastCleanupRound = heartbeatRound;
+        cleanupExpedited = false;
+        List<String> eligible = committed.servers().stream()
+                .filter(peer -> failedVoter(peer, heartbeatRound))
+                .map(RaftConfiguration.Server::serverId).sorted().toList();
+        if (eligible.isEmpty()) return;
+        int budget = (committed.voterIds().size() - 1) / 2;
+        logger.info("Failed-voter cleanup: eligibleServerIds={}, voters={}, removalBudget={}, minVoters={}",
+                eligible, committed.voterIds().size(), budget, membershipPolicy.cleanupMinVoters());
+        CleanupPass pass = new CleanupPass(currentTerm, leadershipGeneration, configurationRevision, eligible, budget);
+        cleanupPass = pass;
+        continueCleanup(pass);
+    }
+
+    private boolean failedVoter(RaftConfiguration.Server peer, long round) {
+        Long contact = cleanupContactRound.get(peer.serverId());
+        return peer.voter() && !peer.serverId().equals(serverId) && contact != null
+                && round - contact >= cleanupFailureRounds;
+    }
+
+    /**
+     * Proposes at most one removal in a sequenced transition. Eligibility, leadership, both quorums and
+     * configuration ownership are checked when that transition starts, after any earlier queued work.
+     * The next proposal is admitted only by the previous removal's commitment callback.
+     */
+    private void continueCleanup(CleanupPass pass) {
+        if (cleanupPass != pass) return;
+        CompletableFuture<RaftCommandResult<?>> removal = new CompletableFuture<>();
+        removal.whenComplete((ignored, failure) -> {
+            if (cleanupPass != pass) return;
+            if (failure != null) {
+                abandonCleanup("the removal did not commit: " + Completions.unwrap(failure).getMessage());
+            } else if (!running || !isCurrentLeadership(pass.term, pass.leadershipGeneration)) {
+                abandonCleanup("the leadership ended before the removal completed");
+            } else {
+                pass.committed++;
+                logger.info("Automatic cleanup committed removal of failed voter {}: removals={}/{}",
+                        pass.target, pass.committed, pass.budget);
+                continueCleanup(pass);
+            }
+        });
+        transitionSequencer.submit("failed-voter-cleanup", RaftTransitionSequencer.FailurePolicy.FENCE,
+                        RaftNode::isAmbiguousLeaderAppendFailure,
+                        () -> prepareCleanupRemoval(pass),
+                        decision -> {
+                            if (decision == null) {
+                                removal.cancel(false);
+                                return null;
+                            }
+                            if (decision.rejection() == null) {
+                                // recordIfConfiguration distinguishes this pass's own append from all other changes.
+                                pass.configurationRevision = configurationRevision + 1;
+                            }
+                            return applyLeaderAppend(decision, removal);
+                        })
+                .whenComplete(Completions.onFailure(failure -> {
+                    if (failure instanceof RaftTransitionSequencer.DrainingException) {
+                        logger.debug("Failed-voter cleanup stopped while transitions drain: {}", failure.getMessage());
+                    } else {
+                        logger.error("Failed to persist automatic failed-voter removal: {}", failure.getMessage(), failure);
+                    }
+                    removal.completeExceptionally(failure);
+                }));
+    }
+
+    private CompletableFuture<LeaderAppendDecision> prepareCleanupRemoval(CleanupPass pass) {
+        if (cleanupPass != pass) return CompletableFuture.completedFuture(null);
+        if (!running || !isCurrentLeadership(pass.term, pass.leadershipGeneration)
+                || pass.configurationRevision != configurationRevision) {
+            abandonCleanup("leadership or membership changed before proposal");
+            return CompletableFuture.completedFuture(null);
+        }
+        if (pass.committed >= pass.budget) {
+            abandonCleanup("the frozen removal budget is exhausted");
+            return CompletableFuture.completedFuture(null);
+        }
+        RaftConfiguration current = configuration;
+        while (pass.cursor < pass.candidates.size()) {
+            String candidate = pass.candidates.get(pass.cursor++);
+            Optional<RaftConfiguration.Server> peer = current.server(candidate);
+            if (peer.isEmpty() || !failedVoter(peer.get(), heartbeatRound)) {
+                logger.info("Failed-voter cleanup skipped {}: it is no longer eligible", candidate);
+                continue;
+            }
+            if (current.voterIds().size() - 1 < membershipPolicy.cleanupMinVoters()) {
+                abandonCleanup("removal would fall below the configured minimum voters");
+                return CompletableFuture.completedFuture(null);
+            }
+            RaftConfiguration next = without(current, candidate);
+            Set<String> contacted = recentlyAnsweredServerIds();
+            if (!current.hasQuorum(contacted) || !next.hasQuorum(contacted)) {
+                abandonCleanup("recent contact does not establish both the current and proposed quorums");
+                return CompletableFuture.completedFuture(null);
+            }
+            Throwable refusal = configurationChangeRefusal(next);
+            if (refusal != null) {
+                abandonCleanup(refusal.getMessage());
+                return CompletableFuture.completedFuture(null);
+            }
+            pass.target = candidate;
+            logger.info("Automatic cleanup proposing removal of failed voter {} after {} absent heartbeat rounds",
+                    candidate, heartbeatRound - cleanupContactRound.get(candidate));
+            return prepareAndPersistLeaderAppend(new ConfigurationCommand(next));
+        }
+        abandonCleanup("every frozen candidate has been considered");
+        return CompletableFuture.completedFuture(null);
+    }
+
+    private Set<String> recentlyAnsweredServerIds() {
+        Set<String> contacted = new HashSet<>();
+        contacted.add(serverId);
+        for (RaftConfiguration.Server peer : peers()) {
+            Long round = lastContactRound.get(peer.name());
+            if (answeredPeers.contains(peer.name()) && round != null && heartbeatRound - round <= quorumContactRounds) {
+                contacted.add(peer.serverId());
+            }
+        }
+        return contacted;
+    }
+
+    private void abandonCleanup(String reason) {
+        if (cleanupPass != null) logger.debug("Failed-voter cleanup pass ended: {}", reason);
+        cleanupPass = null;
+    }
+
     /**
      * Check-quorum: true while this leader plus the peers that answered within the last election
      * timeout's worth of heartbeat rounds form a majority. A single-node cluster is always its own
@@ -1966,6 +2165,7 @@ public class RaftNode {
         if (lastContactRound.containsKey(peerId)) {
             lastContactRound.put(peerId, heartbeatRound);
             answeredPeers.add(peerId);
+            configuration.serverNamed(peerId).ifPresent(peer -> cleanupContactRound.put(peer.serverId(), heartbeatRound));
         }
     }
 
@@ -2729,10 +2929,19 @@ public class RaftNode {
             }
             lastApplied = index;
 
+            if (state == State.LEADER && entry.getCommand() instanceof ConfigurationCommand change) {
+                RaftConfiguration previous = configurationAt(index - 1);
+                if (previous != null && change.configuration().servers().stream().anyMatch(peer -> peer.voter()
+                        && previous.server(peer.serverId()).filter(before -> !before.voter()).isPresent())) {
+                    cleanupExpedited = true;
+                }
+            }
+
             // Complete future if this node is leader
             CompletableFuture<RaftCommandResult<?>> promise = pendingCommands.remove(index);
             if (promise != null) promise.complete(result);
         }
+        if (cleanupExpedited) considerFailedServerCleanup();
     }
 
     private void fenceOnApplyFailure(long index, Exception failure) {

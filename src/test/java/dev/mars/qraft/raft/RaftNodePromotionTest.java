@@ -163,6 +163,14 @@ class RaftNodePromotionTest {
     }
 
     @Test
+    void theLargestStabilizationDurationDoesNotOverflowIntoAnImmediatePromotion() throws Exception {
+        startWithMillis(new RaftConfiguration(List.of(A, B, D_NON_VOTER)), Long.MAX_VALUE, 250);
+        commitACommand();
+        for (int round = 0; round < 5; round++) round(FULL);
+        assertFalse(dIsVoter(), "a representable long duration must retain its stabilization period");
+    }
+
+    @Test
     void aNonVoterThatHasNotAnsweredIsNotPromoted() throws Exception {
         start(new RaftConfiguration(List.of(A, B, D_NON_VOTER)), 1, 250);
         commitACommand();
@@ -175,10 +183,16 @@ class RaftNodePromotionTest {
     /** Starts {@code a} leading {@code configuration}, promoting after the given rounds and log lag. */
     private void start(RaftConfiguration configuration, int stabilizationRounds, long maxTrailingEntries)
             throws Exception {
+        startWithMillis(configuration, stabilizationRounds * ManualRaftClusterFixture.HEARTBEAT_MS,
+                maxTrailingEntries);
+    }
+
+    private void startWithMillis(RaftConfiguration configuration, long stabilizationMs, long maxTrailingEntries)
+            throws Exception {
         leader = cluster.add(cluster.unconfiguredBuilder("a", Set.of("a", "b", "d"), transport,
                         new QraftStateStore(), RaftNodeMode.volatileMode())
                 .serverId(serverIdOf("a")).initialConfiguration(configuration)
-                .promotionStabilization(stabilizationRounds * ManualRaftClusterFixture.HEARTBEAT_MS)
+                .promotionStabilization(stabilizationMs)
                 .promotionMaxTrailingEntries(maxTrailingEntries));
         await(leader.start());
         cluster.timers(leader).fireElectionTimeout();
@@ -186,6 +200,7 @@ class RaftNodePromotionTest {
         transport.vote("b").complete(VoteResponse.newBuilder()
                 .setTerm(1).setVoteGranted(true).setVoterServerId(serverIdOf("b")).build());
         awaitTrue(() -> leader.getState() == RaftNode.State.LEADER, "a leads");
+        barrier(); // Leadership is announced before its no-op is appended; settle it before choosing a command index.
     }
 
     /** Commits a command with b's acknowledgement, so the leader has committed an entry in its term. */

@@ -31,6 +31,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import dev.mars.qraft.raft.RaftNode;
 import dev.mars.qraft.raft.RaftNodeMode;
+import dev.mars.qraft.raft.RaftMembershipPolicy;
 import dev.mars.qraft.raft.RaftTransport;
 import dev.mars.qraft.raft.GrpcServiceServer;
 import dev.mars.qraft.raft.GrpcRaftTransport;
@@ -183,6 +184,10 @@ public class QraftServerService {
                     .mode(RaftNodeMode.durable(raftStorage.wal(), raftStorage.snapshots()))
                     .electionTimeout(config.getElectionTimeoutMs())
                     .heartbeatInterval(config.getHeartbeatIntervalMs())
+                    .membershipPolicy(new RaftMembershipPolicy(config.getPromotionStabilizationMs(),
+                            config.getPromotionMaxTrailingEntries(), config.isRaftCleanupEnabled(),
+                            config.getRaftCleanupFailureTimeoutMs(), config.getRaftCleanupIntervalMs(),
+                            config.getRaftCleanupMinVoters()))
                     .snapshotEnabled(config.isSnapshotEnabled())
                     .snapshotThreshold(config.getSnapshotThreshold())
                     .snapshotCheckInterval(config.getSnapshotCheckIntervalMs())
@@ -354,6 +359,12 @@ public class QraftServerService {
         GrpcRaftServer raft = raftGrpcServer.orElseThrow(() -> new IllegalStateException("the server is not running"));
         GrpcServiceServer api = apiGrpcServer.orElseThrow(() -> new IllegalStateException("the server is not running"));
         return Map.of("http", http.port(), "raft", raft.port(), "apiGrpc", api.port());
+    }
+
+    /** Effective policy of the constructed Raft node, for startup diagnostics and lifecycle inspection. */
+    public RaftMembershipPolicy membershipPolicy() {
+        return raftNode.orElseThrow(() -> new IllegalStateException("the Raft node has not been constructed"))
+                .getMembershipPolicy();
     }
 
     public CompletableFuture<Void> stop() {

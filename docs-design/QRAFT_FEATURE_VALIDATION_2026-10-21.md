@@ -1,7 +1,7 @@
 # Qraft Feature Validation
 
 **Date:** 2026-09-27
-**Last updated:** 2026-10-14 (single-POM plan Phase 7: native futures, executor ownership, test-helper removal, fenced-node diagnostics and the closed membership Step 4 gate; existing feature gaps remain open)
+**Last updated:** 2026-10-21 (membership Step 5 completed with runtime policy wiring and automatic failed-voter cleanup; five 332-test affected runs, 1,051 default tests with coverage and 42 runtime tests passed; retained-log audits clean; Steps 6 to 8 remain open; dated links refreshed. Earlier, 2026-10-14: single-POM plan Phase 7: native futures, executor ownership, test-helper removal, fenced-node diagnostics and the closed membership Step 4 gate; existing feature gaps remain open)
 **Scope:** every server and client feature in
 [`CONSUL_FEATURE_IMPLEMENTATION_PLAN.md`](CONSUL_FEATURE_IMPLEMENTATION_PLAN.md) and
 [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md),
@@ -47,7 +47,7 @@ Status key:
 | Raft | Election, replication, check-quorum, fencing | Done | `RaftNode*Test`, `RaftNodeCheckQuorumTest` |
 | Raft | Durable WAL, snapshots in every role, installation, recovery | Done | `RaftNodeFollowerLogTest`, `DockerDurableRestartTest`, `DockerClientRecoveryTest` |
 | Raft | Replica determinism; follower match index limited to verified entries | Done | `ReplicaDeterminismTest`, `RaftNodeFollowerLogTest` |
-| Raft | Adding or removing servers (membership change) | Partial | Updated 2026-10-14. Durable server IDs, the configuration in the replicated log, bootstrapping, and non-voter promotion are done (`RaftNodeServerIdentityTest`, `RaftNodeConfigurationChangeTest`, `RaftNodePromotionTest`). Joining, operator list and remove, and leader stickiness against disruptive servers are built and pass the default and Docker suites (`RaftNodeMembershipTest`, `MembershipServiceTest`). Their Step 4 close-out gate closed on 2026-10-11 when the owner removed the mutation requirement. On 2026-10-15 membership configuration parsing, validation, defaults and getters were implemented; 64 focused `AppConfigRaftMembershipTest` cases passed. Full verification and server wiring are pending; automatic failed-server cleanup and lost-quorum recovery remain open. See [`task-list-raft-membership-changes-2026-10-12.md`](task-list-raft-membership-changes-2026-10-12.md) |
+| Raft | Adding or removing servers (membership change) | Partial | Updated 2026-10-21. Durable server IDs, replicated configuration, bootstrapping, non-voter promotion, joining, operator list/remove and leader stickiness are built. Membership parsing and all six runtime settings are wired and logged. `RaftNodeCleanupTest` covers automatic failed-voter cleanup, grace/interval boundaries, contact and leadership resets, quorum/minimum/budget limits, promotion triggers, cancellation, injected WAL failure and real-WAL reopening. Step 5 passed five consecutive 332-test affected runs, 1,051 default tests with coverage, 42 runtime tests and retained-log audits. Further disruptive-server validation, lost-quorum recovery and the expanded cleanup/replacement container scenarios remain open. See [`task-list-raft-membership-changes-2026-10-21.md`](task-list-raft-membership-changes-2026-10-21.md) |
 | Catalog | Register and deregister through Raft; composite identity; idempotence | Done | `HttpApiServerTest`, `ClientEndToEndTest` |
 | Catalog | Catalog and health queries with deterministic ordering | Done | `ServiceCatalog` sorts names and instances |
 | Catalog | Registration and modification indexes on instances (design 7.5) | Missing | `ServiceInstance` has no index fields |
@@ -101,7 +101,7 @@ Status key:
 ## 4. Consistency of the plans with the code
 
 - **Legacy concepts remained.** Resolved 2026-09-27 by
-  [`task-list-platform-hygiene-and-readiness-2026-09-27.md`](../docs/archive/task-list-platform-hygiene-and-readiness-2026-09-27.md).
+  [`task-list-platform-hygiene-and-readiness-2026-10-21.md`](../docs/archive/task-list-platform-hygiene-and-readiness-2026-10-21.md).
   The Consul plan's completion criteria require that no job or workflow concepts
   remain. `ClientStatus` still has
   `getJobAssignmentPriority()`, which nothing calls, and the work-scheduling
@@ -117,12 +117,14 @@ Status key:
 
   Snapshot, restore, upgrade, and recovery workflows are partly done. Server
   configuration and bootstrap are done; membership remains partial because
-  failed-server cleanup and lost-quorum recovery are still open.
+  further disruptive-server validation, lost-quorum recovery and the final
+  membership container scenarios are still open. Failed-server cleanup was
+  implemented on 2026-10-21; its verification record is in the membership list.
 
 ### Phase 7 runtime and diagnostic close-out, recorded 2026-10-14
 
 This is Phase 7 of
-[the single-POM cleanup list](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-12.md#phase-7-replace-the-vertx-shaped-async-layer),
+[the single-POM cleanup list](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md#phase-7-replace-the-vertx-shaped-async-layer),
 whose exit was met on 2026-10-13. It is separate from the Consul plan's
 security and tenancy phase.
 
@@ -187,11 +189,11 @@ need:
 9. **Security.** Authentication, ACL tokens and policies, and audit events.
    The token and ACL core is proposed, as of 2026-10-05, to come earlier,
    straight after the client:
-   [`task-list-acl-and-tokens-2026-10-12.md`](task-list-acl-and-tokens-2026-10-12.md).
+   [`task-list-acl-and-tokens-2026-10-21.md`](task-list-acl-and-tokens-2026-10-21.md).
 10. **Deferred until decided.** DNS discovery, and persisted generated node
     identity. Server membership change was decided on 2026-09-29 and is in
     progress in
-    [`task-list-raft-membership-changes-2026-10-12.md`](task-list-raft-membership-changes-2026-10-12.md).
+    [`task-list-raft-membership-changes-2026-10-21.md`](task-list-raft-membership-changes-2026-10-21.md).
 
 Items 3 to 5 complete the Consul plan's target feature set. Items 6 to 9 are
 the prerequisites of the interface's increments UI-2 to UI-6.

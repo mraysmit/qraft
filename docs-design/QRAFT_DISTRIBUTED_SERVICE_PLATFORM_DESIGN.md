@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-10-14 (Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
+**Last updated:** 2026-10-21 (Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; Step 6 is next; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
 
 ## 1. Purpose
 
@@ -265,15 +265,31 @@ Server mode currently owns:
     Every new leader appends a no-op so an idle cluster can commit an entry
     in that leader's term before changing membership.
   - Steps 5 to 8 of
-    [`task-list-raft-membership-changes-2026-10-12.md`](task-list-raft-membership-changes-2026-10-12.md)
+    [`task-list-raft-membership-changes-2026-10-21.md`](task-list-raft-membership-changes-2026-10-21.md)
     cover automatic removal of failed servers, further disruptive-server
     validation, recovery from lost quorum, and container scenarios.
-    Step 5's membership settings are parsed and validated by `AppConfig` as of
-    2026-10-15, with getters and 64 passing focused parser tests. Server wiring,
-    effective settings logging and automatic cleanup remain pending; configured
-    membership values do not yet change node behavior. Full verification is
-    pending. The removal limits remain a planned contract. Under that contract,
-    a promotion can trigger cleanup after a
+    Step 5's membership settings are parsed and validated by `AppConfig` and,
+    as of 2026-10-21, wired through `QraftServerService` into an immutable
+    `RaftMembershipPolicy`. Startup logs the effective settings and their
+    overflow-safe, ceiling-divided heartbeat rounds. Only applied heartbeat
+    rounds advance failure grace or the cleanup interval; delayed execution
+    never invents missed rounds. A new leadership starts a fresh grace, and
+    valid replies reset absence by durable server ID.
+    A cleanup pass freezes its committed voter count, eligible IDs in sorted
+    order, and budget `floor((N - 1) / 2)`. Before every sequenced proposal it
+    rechecks failure eligibility, the configured minimum, recent contact with
+    both current and proposed quorums, the current-term commit and the
+    single-change guard. It waits for each removal to commit before the next;
+    recovered candidates are skipped. Unrelated membership changes, failed
+    proposals and leadership changes abandon the pass. Failure tracking and
+    pass state are local and never persisted as membership.
+    Focused tests cover configuration wiring, manual-round boundaries,
+    promotion-triggered cleanup, safety limits, cancellation and real-WAL
+    reopening. The Step 5 gate passed on 2026-10-21: five consecutive affected
+    runs, the clean default build and coverage, the fresh-image runtime suite,
+    and retained-log audits. The task list holds the captures and remaining
+    Steps 6 to 8; the broader cleanup/replacement container matrix is still open.
+    A committed promotion can trigger cleanup after a
     replacement joins with a distinct name and address; a replacement reusing
     either still needs the old member removed first. Joins never evict a member.
 - **Bootstrapping.** A server with no Raft state asks every server in
@@ -1972,10 +1988,11 @@ not expose the administrative routes.
 
 Current progress, the active tranche's detailed steps, and the backlog are
 tracked in the current dated task list in `docs-design/`
-([`task-list-raft-membership-changes-2026-10-12.md`](task-list-raft-membership-changes-2026-10-12.md);
-its predecessor, [`task-list-test-suite-remediation-2026-09-27.md`](../docs/archive/task-list-test-suite-remediation-2026-09-27.md),
+([`task-list-raft-membership-changes-2026-10-21.md`](task-list-raft-membership-changes-2026-10-21.md),
+Step 5 complete on 2026-10-21 and Step 6 next;
+its predecessor, [`task-list-test-suite-remediation-2026-10-21.md`](../docs/archive/task-list-test-suite-remediation-2026-10-21.md),
 was archived on 2026-10-02 with its packaged-artifact test carried forward; the
-administrative interface list is paused, see [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md)).
+administrative interface list is paused, see [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md)).
 Completed task lists are moved to `docs/archive/`.
 
 ### Tranche 0: Align the WAL and snapshot contracts
@@ -2045,7 +2062,7 @@ Status: complete (verified 2026-09-25).
 ### Tranche 6: Health propagation
 
 Status: complete (2026-09-26). See the archived
-[`task-list-health-propagation-2026-09-25.md`](../docs/archive/task-list-health-propagation-2026-09-25.md).
+[`task-list-health-propagation-2026-10-21.md`](../docs/archive/task-list-health-propagation-2026-10-21.md).
 The replicated model, the server health API, local check
 execution, client publication, leader-owned expiry, and end-to-end verification are
 done. The end-to-end tests cover servers and a client started from configuration
@@ -2064,7 +2081,7 @@ includes a client container that runs health checks.
 ### Tranche 7: Multi-node container acceptance
 
 Status: complete (2026-09-27). See the archived
-[`task-list-multi-node-container-acceptance-2026-09-26.md`](../docs/archive/task-list-multi-node-container-acceptance-2026-09-26.md).
+[`task-list-multi-node-container-acceptance-2026-10-21.md`](../docs/archive/task-list-multi-node-container-acceptance-2026-10-21.md).
 The tests fall into two classes:
 
 - `DockerClientHealthTest` covers items 1 to 3, and a client partitioned from
@@ -2137,7 +2154,7 @@ Evidence as of 2026-09-27, except where a row gives a later date:
   primary client behavior.
 - Whether the server can trust a caller's claim to a node. Proposed 2026-10-05,
   not yet decided: ACL tokens on Consul's model, in
-  [`task-list-acl-and-tokens-2026-10-12.md`](task-list-acl-and-tokens-2026-10-12.md).
+  [`task-list-acl-and-tokens-2026-10-21.md`](task-list-acl-and-tokens-2026-10-21.md).
   Until it is built, any caller can claim any node name and node ID.
 - How long legacy command and snapshot readers remain supported.
 
@@ -2150,7 +2167,7 @@ implementations do, and the opinion recorded before the decision.
 Resolved on 2026-10-04, recorded here on 2026-10-05: how a node's identity is
 made and kept, which was half of the open item "how client identity is
 established". It is decision 8 of
-[`task-list-consul-style-client-2026-10-12.md`](task-list-consul-style-client-2026-10-12.md)
+[`task-list-consul-style-client-2026-10-21.md`](task-list-consul-style-client-2026-10-21.md)
 and is not yet built; section 7.3 changes when it is. It follows Consul: a node
 ID generated at first start and kept in the client's data directory, a node name
 that defaults to the host name, a catalog keyed by name, and a registration
