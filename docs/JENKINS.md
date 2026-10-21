@@ -233,7 +233,7 @@ followed by the retained-log audit. These results are separate from Jenkins
 build 26 below, which verified the earlier future-wrapper removal at `9851987`.
 This document records no newer Jenkins run for the later commits; see
 [TESTING.md](TESTING.md#phase-7-verification-record-2026-10-13) for the local
-captures and [the task plan](archive/task-list-single-pom-and-quorus-removal-2026-10-12.md#phase-7-replace-the-vertx-shaped-async-layer)
+captures and [the task plan](archive/task-list-single-pom-and-quorus-removal-2026-10-21.md#phase-7-replace-the-vertx-shaped-async-layer)
 for the detailed evidence. The pipeline commands and archival policy above
 continue to apply to these changes.
 
@@ -257,7 +257,7 @@ recovery case remained red:
 timed out after 90 seconds while waiting for the restarted follower to install and expose the leader's
 snapshot state. This is a test/product integration result rather than a Jenkins configuration failure.
 Finding its cause is a task in Phase 6 of
-[the single-POM task list](archive/task-list-single-pom-and-quorus-removal-2026-10-12.md).
+[the single-POM task list](archive/task-list-single-pom-and-quorus-removal-2026-10-21.md).
 It was analysed on 2026-10-10. This build archived no container logs, so its cause cannot be proven
 from it. Build 8 failed the same way with the logs kept: the test had killed the follower while it wrote
 its first snapshot, and a server then refused to start on an unpublished first snapshot, by design. An earlier

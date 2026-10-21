@@ -1,11 +1,12 @@
 # Task List: Catalog Identity and Registration Protocol
 
 **Date:** 2026-09-22
+**Last updated:** 2026-10-21 (dated document links refreshed and file renamed; historical findings and completion dates retained)
 **Archive status:** Closed and archived on 2026-09-24.
 **Status:** Complete (verified 2026-09-24)
 **Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), Tranches 1 and 2
 **Predecessor:** [`task-list-22-sep-2026.md`](task-list-22-sep-2026.md) (Tranche 8, complete)
-**Successor:** [`task-list-agent-catalog-client-2026-09-24.md`](task-list-agent-catalog-client-2026-09-24.md)
+**Successor:** [`task-list-agent-catalog-client-2026-10-21.md`](task-list-agent-catalog-client-2026-10-21.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
 ## Why this is next

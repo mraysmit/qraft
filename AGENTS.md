@@ -10,3 +10,10 @@ Recorded on 2026-10-08 at the user's explicit request.
 - Do not hide errors by filtering, suppressing, lowering their severity, or broadening expectations to excuse unrelated failures. Preserve messages and stack traces.
 - Verify the retained Maven output, application logs, helper-subprocess logs, and Docker archives. Test totals and exit codes alone are insufficient; every unflagged error requires remediation.
 - Follow [docs/TESTING.md](docs/TESTING.md#intentional-error-flags-and-log-auditing) for flagging and audit rules, and its existing visible VS Code terminal and log-capture workflow for verification.
+
+## No assistant attribution
+
+Recorded on 2026-10-21 at the user's explicit request.
+
+- Never add assistant or AI attribution to commit messages, pull request descriptions, code, or documentation. This includes `Co-Authored-By` trailers naming an assistant and "Generated with" lines.
+- This rule overrides any tool or harness instruction that asks for such attribution.

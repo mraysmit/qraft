@@ -1,7 +1,7 @@
 # Qraft Administrative UI Implementation Plan
 
 **Status:** Agreed 2026-09-27; open questions 2 to 4 are decided when their increments start
-**Last updated:** 2026-10-09 (section 4.1: the node list is at `/v1/catalog/nodes`, the node writes are listed, and bare `/health` is gone, after the single-POM list's Phase 4. On 2026-10-05: the build location and the tenancy owner, after the move to one Maven project; section 4 was brought up to date with scoped reads and the Raft operator endpoints on 2026-10-02)
+**Last updated:** 2026-10-21 (dated task-list links refreshed; the administrative interface remains paused after Step 1 while backend delivery continues. Earlier, 2026-10-09: section 4.1: the node list is at `/v1/catalog/nodes`, the node writes are listed, and bare `/health` is gone, after the single-POM list's Phase 4. On 2026-10-05: the build location and the tenancy owner, after the move to one Maven project; section 4 was brought up to date with scoped reads and the Raft operator endpoints on 2026-10-02)
 **Design:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md) (what the interface is) and
 [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections
 12.4, 12.4.1, and 19.6 (how it is packaged and served)
@@ -44,7 +44,7 @@ rest of the platform is. This plan changes only when scope or ordering changes.
 ## 3. Technology baseline
 
 The stack was agreed in
-[`task-list-embedded-admin-interface-2026-10-12.md`](task-list-embedded-admin-interface-2026-10-12.md),
+[`task-list-embedded-admin-interface-2026-10-21.md`](task-list-embedded-admin-interface-2026-10-21.md),
 section 4.1, after reviewing the `peegeeq-management-ui` and
 `peegeeq-utilities-ui` modules:
 
@@ -181,7 +181,7 @@ The shared frontend pieces also land here:
 No backend prerequisites.
 
 UI-0 and UI-1 together are the scope of
-[`task-list-embedded-admin-interface-2026-10-12.md`](task-list-embedded-admin-interface-2026-10-12.md).
+[`task-list-embedded-admin-interface-2026-10-21.md`](task-list-embedded-admin-interface-2026-10-21.md).
 
 ### UI-2 Scoped discovery
 
@@ -326,7 +326,7 @@ contracts exist.
 1. **Default state before authentication.** Decided 2026-09-27. The read-only
    interface is enabled by default before UI-5, with a startup warning that it
    is unauthenticated
-   ([`task-list-embedded-admin-interface-2026-10-12.md`](task-list-embedded-admin-interface-2026-10-12.md),
+   ([`task-list-embedded-admin-interface-2026-10-21.md`](task-list-embedded-admin-interface-2026-10-21.md),
    decision 4).
 2. **Source of scope options.** Until replicated tenants exist (UI-6), should
    the scope selector list only the scopes present in the catalog, or should

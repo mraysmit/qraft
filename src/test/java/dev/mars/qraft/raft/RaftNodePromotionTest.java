@@ -303,6 +303,7 @@ class RaftNodePromotionTest {
         transport.vote("b").complete(VoteResponse.newBuilder()
                 .setTerm(1).setVoteGranted(true).setVoterServerId(serverIdOf("b")).build());
         awaitTrue(() -> leader.getState() == RaftNode.State.LEADER, "a leads");
+        barrier(); // Leadership is announced before its no-op is appended; settle it before choosing a command index.
     }
 
     /** Commits a command with b's acknowledgement, so the leader has committed an entry in its term. */

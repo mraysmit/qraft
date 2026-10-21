@@ -6,12 +6,14 @@ Qraft will evolve into a Consul-like distributed service with Raft-backed state,
 
 **Delivery status.** This plan defines the target feature set. What is built is
 recorded in
-[`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md)
+[`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md)
 and in the dated task lists in this directory and in `docs/archive/`. The checklist
 at the end of this plan was last reconciled with the code on 2026-09-27; its
 membership items were updated on 2026-10-02. Later updates recorded node-model
 removal on 2026-10-09, deployment cleanup on 2026-10-11, and the single-POM
-plan's Phase 7 runtime and diagnostic close-out on 2026-10-14. Sections 3 and 4
+plan's Phase 7 runtime and diagnostic close-out on 2026-10-14. The 2026-10-21
+update records membership Step 5 complete, with Steps 6 to 8 still open.
+Sections 3 and 4
 reflect the one-project layout and explicit executor ownership. The open
 feature items in the checklist remain delivery gaps.
 
@@ -355,7 +357,7 @@ then 42 runtime tests on the fresh jar and rebuilt image. Five consecutive
 affected Raft/HTTP runs passed 293 tests each; the recorded final retained-log
 audit found no unflagged errors or exception headers in the accepted output.
 [TESTING.md](../docs/TESTING.md#phase-7-verification-record-2026-10-13) records
-the captures, tests and audit; [the cleanup task list](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-12.md#phase-7-replace-the-vertx-shaped-async-layer)
+the captures, tests and audit; [the cleanup task list](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md#phase-7-replace-the-vertx-shaped-async-layer)
 holds the TDD evidence and earlier failed-run remediation. These local results
 are separate from Jenkins build 26. No new build was run for this checklist
 update. Cluster-wide status, broader metrics, security, tenancy and the other
@@ -398,7 +400,7 @@ unchecked features below remain open.
 - [x] Remove the job-system concepts from the active build.
 - [x] Replace the inherited node model with a Consul-shaped node, and move the node
   routes to the catalog's write paths (2026-10-09, Phase 4 of
-  [`task-list-single-pom-and-quorus-removal-2026-10-12.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-12.md)).
+  [`task-list-single-pom-and-quorus-removal-2026-10-21.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md)).
   Removed with it: a node's capabilities and the command that replaced them, its
   host name and port, the job-system statuses, and the routes `/api/v1/clients*`,
   `/api/v1/info`, `/status`, and bare `/health`. A node's deregistration now
@@ -423,15 +425,18 @@ unchecked features below remain open.
 - [ ] Implement ACL tokens, policies, token validation, and audit events
   (phase 7; item 9).
 - [ ] Implement server membership change. Decided 2026-09-29, and in progress
-  in [`task-list-raft-membership-changes-2026-10-12.md`](task-list-raft-membership-changes-2026-10-12.md):
+  in [`task-list-raft-membership-changes-2026-10-21.md`](task-list-raft-membership-changes-2026-10-21.md):
   server IDs, the configuration in the log, non-voter promotion, joining, and
   operator list/remove are done. The Step 4 close-out gate closed on 2026-10-11
-  when the owner removed the mutation requirement. Failed-server cleanup and
-  lost-quorum recovery remain open; Step 5 resumed on 2026-10-14 after the
+  when the owner removed the mutation requirement. Lost-quorum recovery and
+  the final membership container scenarios remain open; Step 5 resumed on 2026-10-14 after the
   completed single-POM list was archived. Membership configuration parsing,
   validation, defaults and getters were implemented on 2026-10-15; 64 focused
-  parser tests passed after the recorded failing baseline. Full verification,
-  server wiring and automatic cleanup remain pending; the membership list
-  records the captures and scope of verification.
+  parser tests passed after the recorded failing baseline. On 2026-10-21,
+  runtime wiring, effective-policy logging, safe duration conversion and
+  leader-only automatic cleanup were implemented. Step 5's five consecutive
+  affected runs, clean build/coverage, fresh-image runtime gate and log audit
+  passed. The membership list records the captures and the remaining Steps 6
+  to 8; the overall membership feature is still partial.
 - [ ] Decide on and implement DNS discovery and persisted generated node
   identity (item 10).

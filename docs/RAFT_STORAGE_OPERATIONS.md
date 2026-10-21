@@ -157,14 +157,18 @@ and starts from the WAL. No action is needed. Do not rename either file to
 A server whose storage directory is empty starts with a new server ID. The
 cluster still records the old server ID under its name and address, and that
 entry still counts as a voter. A join from the new server ID is refused while
-the old entry is there: only an operator can remove a member. Until then the
-new server keeps asking, once a second, and takes nothing from the leader.
+the old entry is there. Authenticated operator removal is the procedure for a
+replacement that reuses a name or address. Automatic cleanup may remove a failed
+entry only when its own limits permit; with the default minimum of three voters,
+it cannot remove one from a three-voter cluster before a replacement joins.
+Until removal commits, the new server keeps asking, once a second, and takes
+nothing from the leader. A join never evicts a member.
 
 Use this procedure for a wiped or rebuilt directory, and as the last steps of
 recovering a corrupt replica. The other servers must be healthy and hold a
 quorum without the server being replaced. Every server needs the same
-`server.operator.token` in its configuration; without one, removals are
-refused.
+`server.operator.token` in its configuration; without one, operator removals
+are refused. Automatic cleanup is controlled independently by membership policy.
 
 1. Stop the server being replaced, if it is running, and confirm its process
    has exited.
@@ -218,6 +222,59 @@ Notes:
   removal cannot commit. Preserve surviving storage and backups. There is no
   supported lost-quorum recovery procedure yet; restoring an older directory
   under an existing voter ID is not a substitute.
+
+## Automatic failed-voter cleanup
+
+The leader evaluates continuous absence of valid peer replies and removes failed
+voters through committed membership entries. Only applied heartbeat rounds count;
+a delayed loop does not invent elapsed failure rounds. Every new leadership
+starts a fresh failure grace. Replies from an old leadership or a different
+durable server ID do not refresh that grace.
+
+The optional `membership` object inside `server.raft` has these defaults:
+
+```json
+{
+  "promotionStabilizationMs": 10000,
+  "promotionMaxTrailingEntries": 250,
+  "cleanup": {
+    "enabled": true,
+    "failureTimeoutMs": 60000,
+    "intervalMs": 10000,
+    "minVoters": 3
+  }
+}
+```
+
+Omitted failure and interval values increase to the configured election timeout
+and heartbeat interval respectively when those exceed the usual defaults.
+Explicit failure timeouts must be at least the election timeout; intervals must
+be at least the heartbeat interval. Both and `minVoters` must be positive.
+Promotion settings may be zero. Unknown settings and malformed values fail
+configuration validation. Disabling cleanup does not relax validation or
+disable operator removal.
+
+A pass freezes its committed voter count `N`, eligible IDs and removal budget
+`floor((N - 1) / 2)`. It rechecks eligibility, the minimum and recent contact with
+quorums of both the current and proposed configurations before each proposal.
+It changes one voter at a time and waits for commitment. Recovered candidates
+are skipped; a failed proposal, unrelated membership change or leadership loss
+abandons the pass. Cleanup does not remove non-voters or the leader, and does
+not recover a cluster that has lost quorum. Failure history itself is never
+persisted as voting membership.
+
+A committed promotion requests an early cleanup pass, using the same safety
+checks. For automatic replacement, join a server with a distinct name and
+address, let it catch up and promote, then let cleanup evaluate failed voters.
+For a replacement reusing a name or address, use the authenticated remove-first
+procedure above. An operator can remove a member below the automatic minimum
+when the existing operator quorum checks permit it.
+
+Startup logs `Raft membership policy` with the effective settings and rounded
+heartbeat durations. The leader logs eligible IDs, proposed removals and
+committed removals at INFO; DEBUG logs report deferral and pass cancellation
+reasons. The Step 5 record documents focused/manual-timer and real-WAL evidence;
+the broader real replacement and cleanup container matrix remains Step 8 work.
 
 ## Directory-lock failures
 

@@ -1,27 +1,33 @@
 # Task List: Raft Membership Changes
 
 **Date:** 2026-09-29
-**Active work:** Step 5, failed-server cleanup, resumed on 2026-10-14 after
-the single-POM list was archived. Membership configuration parsing, defaults
-and getters are implemented and passed 64 focused tests on 2026-10-15.
-Heartbeat-round conversion and election jitter were fixed and verified by
-Jenkins replay build 30 on 2026-10-19. Server wiring is implemented; automatic
-failed-voter cleanup is next. The wiring verification is recorded under Step 5.
-Jenkins build 27 verified the committed parser slice on 2026-10-17. Step 4, joining,
+**Active work:** Step 7, recovery from lost quorum, is next. Step 6,
+disruptive-server validation, completed on 2026-10-21: five manual-timer
+scenarios were added; after correcting the first run's incorrect expected-error
+declaration, the focused rerun and five consecutive affected runs each passed
+64 tests, and `mvn install` passed 1,056 tests and every coverage gate. The
+retained-log audit is complete. Desktop automation is disabled
+at the owner's request; verification must use the owner's VS Code terminal.
+Step 5,
+failed-server cleanup, completed on 2026-10-21: runtime wiring, effective policy
+logging, safe heartbeat-round conversion and leader-only cleanup are implemented
+and verified. Five consecutive affected runs passed 332 tests each; the clean
+default build passed 1,051 tests and coverage, and the runtime gate passed 42.
+The retained-log audit is complete. Step 4, joining,
 and operator list and remove, is built, and its close-out gate was closed on
 2026-10-11, when the owner removed the mutation rule that the gate had waited
 on. Steps 1 to 3 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
-**Last updated:** 2026-10-19 (server wiring implemented and verified: RED build 31 retained; build 32 passed five 115-test focused runs, 1,059 default, 10 end-to-end and 32 Docker tests, coverage and the retained-log audit. The immutable local policy reaches the node, promotion uses it, effective settings log excludes secrets, and seven real-server lifecycle cases cover HTTP startup and WAL release. Automatic cleanup remains next. Earlier today, timing slice complete: promotion/quorum ceiling division and election jitter fixed, command-helper race fixed, RED builds 28 and 29 retained; replay build 30 passed five 74-test focused runs, 1,028 default tests, coverage, 42 runtime tests and the full retained-log audit. The next task at that timing checkpoint was server wiring, followed by failed-voter cleanup. On 2026-10-17: Jenkins build 27 verified the committed parser slice at `bef4637`: 1,024 default, 10 end-to-end and 32 Docker tests passed, with all coverage gates and the retained-log audit; uncommitted boundary tests and runtime work remain pending. Earlier: prepared manual-timer tests for partial-round stabilization and the largest representable stabilization duration; no build or test was run, and production is unchanged. On 2026-10-15: membership parser implemented with defaults, validation and getters; 64 focused tests passed, full verification and runtime wiring pending. Earlier: merge reconciled the 2026-10-14 archival with the newer parser tests; the focused RED run and retained output are recorded under Step 5. On 2026-10-14: single-POM cleanup list archived and its links repaired; Step 5 resumed as the active task, with implementation pending. On 2026-10-11: the mutation rule removed at the owner's decision, from the rules and from the exits of Steps 5 to 8; the Step 4 gate, which had waited on it, closed, after PIT was tried for it and put on ice; the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
-**Interruption completed:** [`task-list-single-pom-and-quorus-removal-2026-10-12.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-12.md),
+**Last updated:** 2026-10-21 (Step 6 completed: five consecutive affected runs passed 64 tests each, `mvn install` passed 1,056 tests and every coverage gate, and the retained-log audit of 38 logs passed; Step 7 is next. Earlier today: Step 6 corrected focused run: all 64 tests and retained-log audits passed; desktop automation disabled at the owner's request. Earlier today: Step 5 runtime policy and failed-voter cleanup completed; five repeated runs, clean build/coverage, fresh-image runtime gate and retained-log audits passed; Step 6 is next. On 2026-10-19: server wiring implemented and verified: RED build 31 retained; build 32 passed five 115-test focused runs, 1,059 default, 10 end-to-end and 32 Docker tests, coverage and the retained-log audit. The immutable local policy reaches the node, promotion uses it, effective settings log excludes secrets, and seven real-server lifecycle cases cover HTTP startup and WAL release. Automatic cleanup remains next. Earlier today, timing slice complete: promotion/quorum ceiling division and election jitter fixed, command-helper race fixed, RED builds 28 and 29 retained; replay build 30 passed five 74-test focused runs, 1,028 default tests, coverage, 42 runtime tests and the full retained-log audit. The next task at that timing checkpoint was server wiring, followed by failed-voter cleanup. On 2026-10-17: Jenkins build 27 verified the committed parser slice at `bef4637`: 1,024 default, 10 end-to-end and 32 Docker tests passed, with all coverage gates and the retained-log audit; uncommitted boundary tests and runtime work remain pending. Earlier: prepared manual-timer tests for partial-round stabilization and the largest representable stabilization duration; no build or test was run, and production is unchanged. Earlier, 2026-10-15: membership parser implemented with defaults, validation and getters; 64 focused tests passed, full verification and runtime wiring pending. Earlier: merge reconciled the 2026-10-14 archival with the newer parser tests; the focused RED run and retained output are recorded under Step 5. On 2026-10-14: single-POM cleanup list archived and its links repaired; Step 5 resumed as the active task, with implementation pending. On 2026-10-11: the mutation rule removed at the owner's decision, from the rules and from the exits of Steps 5 to 8; the Step 4 gate, which had waited on it, closed, after PIT was tried for it and put on ice; the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
+**Interruption completed:** [`task-list-single-pom-and-quorus-removal-2026-10-21.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md),
 started 2026-10-04 before the Step 4 close-out gate. The gate was closed on
 2026-10-11, as the first task of that list's Phase 7. That list was completed
-and archived on 2026-10-14. Step 5 is now active, and this list runs to its
+and archived on 2026-10-14. Step 5 completed on 2026-10-21, and this list runs to its
 end before the Consul-style client list starts (decided 2026-10-05).
-**Predecessor:** [`task-list-test-suite-remediation-2026-09-27.md`](../docs/archive/task-list-test-suite-remediation-2026-09-27.md),
+**Predecessor:** [`task-list-test-suite-remediation-2026-10-21.md`](../docs/archive/task-list-test-suite-remediation-2026-10-21.md),
 archived 2026-10-02. Its packaged-artifact test waits for the admin interface.
-**Paused:** [`task-list-embedded-admin-interface-2026-10-12.md`](task-list-embedded-admin-interface-2026-10-12.md), after its Step 1
+**Paused:** [`task-list-embedded-admin-interface-2026-10-21.md`](task-list-embedded-admin-interface-2026-10-21.md), after its Step 1
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), principle 8 (section 3), sections 4.2, 14.4, 14.5 and 16
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
@@ -804,7 +810,7 @@ unchanged final source/dependency state covered by the existing full-suite
 evidence. Passing ordinary suites alone does not close the outstanding gate.
 
 **Scheduled (2026-10-05).** This gate is the first task of Phase 7 in
-[`task-list-single-pom-and-quorus-removal-2026-10-12.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-12.md).
+[`task-list-single-pom-and-quorus-removal-2026-10-21.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md).
 By then the source has its final packages and its tests declare their
 intentional errors, and Phase 7 has not yet changed `RaftNode`'s async code.
 
@@ -856,11 +862,13 @@ single-POM list was completed and archived, as recorded at the head of this list
 
 ### Step 5. Failed-server cleanup
 
-**Status: Active from 2026-10-14; parser, timing and server wiring implemented; automatic cleanup pending.**
+**Status: Complete, 2026-10-21; all Step 5 verification gates passed.**
 The contract below was specified during the document review on 2026-10-03.
-`AppConfig` accepts and validates the membership settings. Server wiring now
-passes them to the node's effective local policy, which controls promotion.
-Automatic cleanup is not implemented.
+`AppConfig` accepts and validates the membership settings. `QraftServerService`
+wires all six values into `RaftMembershipPolicy`, and the node logs the effective
+policy and its safely rounded heartbeat durations. Automatic cleanup is
+implemented and verified. The expanded real replacement and cleanup container
+matrix remains mandatory in Step 8 before the overall membership list closes.
 
 **Parser-test record, 2026-10-15.** The cleanup archival and membership
 resumption were committed on 2026-10-14 in `217e28c`. Local commit `88457d1`
@@ -906,7 +914,107 @@ execution-data/class mismatches from earlier builds; this focused test result
 does not establish coverage. A clean default build and the runtime suites
 remain pending; no full-suite result is claimed. Lifecycle wiring, effective
 settings logging, overflow-safe round conversion and automatic cleanup follow
-in the next slice. The overall Step 5 exit gate remains open.
+in the next slice. At that date the overall Step 5 exit gate remained open.
+
+**Runtime implementation and verification, 2026-10-21.** A clean baseline on
+`bef4637` passed 1,024 tests and every coverage gate. Its capture is
+`logs/qraft-membership-baseline-2026-10-21_11-47-15-990.log`. The audit of its
+25 retained Maven/application/helper logs found 337 flagged ERROR headers and
+288 exception headers with no unflagged header or ANSI escape. These are counts
+including duplicate captures. The earlier baseline,
+`qraft-membership-baseline-2026-10-21_11-44-36-970.log`, failed test compilation:
+main classes disappeared while VS Code was also rebuilding `target/classes`.
+Java auto-build was disabled in local `.vscode/settings.json` before the clean
+rerun; no compiler or generated-source error was excused as test noise.
+
+The first new behavioral RED run,
+`qraft-cleanup-red-2026-10-21_11-50-37-689.log`, showed missing default cleanup
+and overflow into immediate promotion, plus a timeout in the existing promotion
+test helper. That helper chose a command index before the leadership no-op had
+been appended and could acknowledge the wrong request. It now awaits a sequenced
+barrier after leadership. The corrected RED run,
+`qraft-cleanup-red-2026-10-21_11-51-59-210.log`, had exactly those two assertion
+failures among eight tests, with no error or skip.
+
+`RaftMembershipPolicy` holds the local settings; node construction validates
+timing and uses `Math.ceilDiv` for promotion, cleanup and check-quorum durations.
+`RaftNode` tracks continuous absence by durable server ID, resets it per
+leadership, and freezes eligible IDs and the committed voter budget per pass.
+Each proposal rechecks its leadership and configuration revision, eligibility,
+both quorums, minimum and the existing configuration-change guards inside the
+sequencer. Only commitment schedules the next proposal. An unrelated change,
+lost leadership or failed proposal abandons the pass. Promotion-triggered
+cleanup begins only after promotion commits. Only replicated configuration
+persists; failure eligibility and pass decisions are local.
+
+The expanded RED capture,
+`qraft-cleanup-policy-red-2026-10-21_11-55-17-053.log`, recorded missing runtime
+wiring and cleanup. It also exposed a new test-fixture readback race: a public
+membership call dispatches to the loop before admitting its sequenced append.
+The cleanup fixture now drains both boundaries before reading the pending
+index. Production errors were not broadly permitted or suppressed.
+
+The first GREEN capture,
+`qraft-cleanup-green-2026-10-21_11-57-54-657.log`, passed 97 cases. After adding
+promotion, cancellation, real-WAL reopen, rejection and sync-failure scenarios,
+`qraft-cleanup-green-2026-10-21_12-00-37-500.log` passed 104. The deliberately
+ambiguous sync failure is attributed through `TestRaftStorageFixture`'s
+`RAFT_WAL_TRANSITION_FAILURE` injection to
+`RaftNodeCleanupTest#anAmbiguousCleanupSyncFailureFencesTheNodeAndAbandonsThePass`.
+All four ERROR headers and four exception headers in those four retained logs
+were flagged; no unflagged header or ANSI escape remained. Focused JaCoCo
+mismatch warnings reflect changed classes with retained execution data; only
+the forthcoming clean build establishes final coverage. Additional boundary
+tests were included in five consecutive broader runs, each passing 332 tests
+with no failure, error or skip:
+
+- `qraft-cleanup-repeat-2026-10-21_12-02-45-486.log`
+- `qraft-cleanup-repeat-2026-10-21_12-05-18-893.log`
+- `qraft-cleanup-repeat-2026-10-21_12-07-13-964.log`
+- `qraft-cleanup-repeat-2026-10-21_12-09-40-986.log`
+- `qraft-cleanup-repeat-2026-10-21_12-12-02-273.log`
+
+The repeat audit covered 115 Maven/application/helper logs: 1,070 ERROR headers
+and 990 exception headers, including duplicates, all attributed. No unflagged
+header, orphaned stack frame, Maven error or ANSI escape remained in those runs.
+The final clean default build passed 1,051 tests, all coverage gates and
+packaging, with no failure, error or skip. Its capture is
+`qraft-cleanup-final-install-2026-10-21_12-14-06-286.log`. The default audit
+covered 25 Maven/application/helper logs: 343 flagged ERROR headers and 292
+exception headers, no unflagged header or frame, no ANSI escape, and no JaCoCo
+class/data mismatch. The packaged jar includes `RaftMembershipPolicy` and
+contains no test fixtures, test Logback configuration or generated logs.
+Its SHA-256 is
+`953AAA601CCA511BEBFE7A6B1788A173EEE2845C5A0C0266CD3644EC7E033148`.
+The complete `docker,e2e,slow` gate on that jar passed 42 tests, with no failure,
+error or skip, in `qraft-cleanup-final-runtime-2026-10-21_12-17-32-605.log`.
+The image was rebuilt from that jar before the container scenarios. The initial
+runtime image was `sha256:f87ecc8b118d834da0670221f2c78621390ae8dad0c0012988a828e2128a29c5`,
+created at `2026-10-21T04:18:11Z` (12:18:11 local). A final jar hash check matched
+the value above.
+
+The runtime audit read all 113 newly retained files: 107 `.log` files, four
+JSON files and two support files, including 98 Docker archives. All 272 ERROR
+headers and 99 exception headers were attributed; 2,430 stack frames were
+covered by their flagged headers. No unflagged error, exception header or frame,
+Maven error, fatal-JVM header or ANSI escape remained. The default and runtime
+audits together covered 138 retained files, including duplicate captures, with
+615 attributed ERROR headers and 391 exception headers. ERROR counts use the
+event's severity; flagged WARN events and their traces were also audited.
+Earlier failed RED
+and baseline captures remain retained with their causes and fixes above.
+
+Source-header/attribution, prohibited-framework, environment-configuration,
+timeout-API and whitespace audits passed. The jar contains no test fixtures,
+test Logback configuration or generated logs. Step 5 is closed. Steps 6 to 8
+remain open, including the expanded cleanup/replacement container matrix and
+the unsupported lost-quorum recovery procedure; the current runtime pass does
+not claim those future scenarios were implemented. No commit was made.
+
+Docker preflight initially found a stopped engine with a cached "WSL update
+required" startup reason. Installed WSL was already 3.0.4. Restarting the
+existing Docker Desktop cleared that state; its engine API then answered as
+29.9.1. No WSL installation, data reset or container-test bypass was used.
 
 **Runtime-boundary test preparation, 2026-10-17.** The initial
 `RaftNodePromotionTest` additions specified that a stabilization duration just
@@ -1012,11 +1120,11 @@ list's Phase 5 was done on 2026-10-10, and this is what it left:
 
 #### Configuration contract
 
-Add the following settings under `server.raft.membership`, validated before any
-runtime resource opens. Existing files without this object retain the current
-promotion defaults and receive the cleanup defaults when Step 5 is implemented.
+The settings under `server.raft.membership` are validated before any runtime
+resource opens. Existing files without this object retain the promotion defaults
+and receive the timing-aware cleanup defaults.
 
-| Setting | Planned default | Validation and meaning |
+| Setting | Default | Validation and meaning |
 |---|---|---|
 | `promotionStabilizationMs` | 10000 | Integer, nonnegative; maps to the existing builder option |
 | `promotionMaxTrailingEntries` | 250 | Integer, nonnegative; maps to the existing builder option |
@@ -1025,8 +1133,8 @@ promotion defaults and receive the cleanup defaults when Step 5 is implemented.
 | `cleanup.intervalMs` | `max(10000, heartbeatIntervalMs)` | Positive integer, at least `server.raft.heartbeatIntervalMs`; periodic cleanup cadence |
 | `cleanup.minVoters` | 3 | Positive integer; automatic cleanup must not leave fewer voters; a smaller existing cluster remains valid and is not expanded automatically |
 
-Unknown fields, wrong JSON types, and values whose conversion to heartbeat
-rounds would overflow are refused. Durations use ceiling division by the
+Unknown fields, wrong JSON types and integers outside their representation
+bounds are refused. All representable durations use overflow-safe ceiling division by the
 heartbeat interval and are measured in applied heartbeat rounds, as promotion
 and check-quorum already are. A delayed loop must not turn elapsed wall-clock
 time into fictitious missed rounds. Expose parsed values through `AppConfig`
@@ -1101,10 +1209,126 @@ environment overrides. Record the effective settings without secrets.
 
 ### Step 6. Protection from disruptive servers
 
+**Status: Done, 2026-10-21; focused, five-repeat and install gates and their log audits passed. Container validation remains in Step 8.**
+
 Leader stickiness was built on 2026-10-02 (see "Review remediation" under
 Step 4), with unit tests for a removed server and for the contact-expiry
-boundary. Still open: the test of a server rejoining after a partition, and the
-container scenarios.
+boundary. `RaftNodeDisruptionTest` now adds five scenarios using the existing
+manual-timer cluster and in-memory transport:
+
+- Twenty actual election campaigns from a removed server that retains its old
+  voter configuration. Held vote requests are delivered after fresh leader
+  contact; both retained voters refuse without changing their term, and a
+  subsequent write still commits.
+- Heartbeat renewal and refusal one millisecond before the renewed contact
+  lease expires, followed by voting at its exact minimum-timeout boundary.
+- A higher-term stale-log candidate remains refused after lease expiry; the
+  observed higher term still advances, preserving the log freshness rule.
+- A partitioned server campaigns to a higher term while missing committed
+  entries. After healing, fresh leader contact protects the live voters from
+  its campaign. Releasing a genuine higher-term AppendEntries response then
+  advances the leader's term; an up-to-date server elects above it, brings the
+  returning server up to date and commits another write.
+- An isolated leader steps down at the check-quorum boundary without raising
+  its term, fails its pending write with an unknown outcome, and the retained
+  majority elects a successor. Healing preserves acknowledged writes and
+  replaces the isolated leader's uncommitted tail.
+
+The local transport gates retain original requests and futures and release
+them through the existing simulator. They control ordering rather than forge
+peer answers. No production election behavior or logging allowance has changed.
+These are tests of existing behavior. The first focused run, its test-setup
+correction, the successful focused rerun, the five consecutive affected runs
+and `mvn install` are recorded below. The owner
+stopped desktop automation and requested no further desktop control; the owner
+ran the documented visible-terminal commands in
+[TESTING.md](../docs/TESTING.md#disruptive-server-validation), and all retained
+output was inspected before any gate was recorded as passed. Step 8's real
+transport disruption and partition-healing scenarios remain open.
+
+**First focused run and correction, 2026-10-21.** The owner ran the documented
+seven-class selector. Capture
+`logs/qraft-disruption-focused-2026-10-21_17-27-16-405.log` records 64 tests,
+one failure, zero errors and zero skips. Four new cases passed. The removed-server
+case completed all twenty real campaigns and its functional assertions, then
+failed the strict audit: its declared `RAFT_PEER_UNREACHABLE` for `c` occurred
+zero times. The retained case output and `recordIfConfiguration`/`peers` show
+why: the removal changes the active replication targets before the next send,
+so no RPC crosses that partition. The partition preserves the removed server's
+old configuration; this scenario does not deliberately cause a transport error.
+The incorrect declaration was removed and that ordering is documented in the
+test. No error is suppressed and no expectation or failure definition is widened.
+
+The Maven capture and application log
+`logs/qraft-maven-tests-2026-10-21_17-27-38.log` are the two retained logs from
+this run; no helper or Docker logs were generated. Each holds 31 application
+ERROR headers, all explicitly attributed. Each holds 25 attributed exception
+headers; the Maven capture additionally holds the test framework's unflagged
+`java.lang.AssertionError` for the missing expected occurrence. That audit failure
+is the defect corrected above, not accepted noise. Neither capture has ANSI
+escapes. The application log has no other unflagged error or exception. The
+failed capture remains retained. At that point the corrected focused run and
+the completion gates were pending; the focused rerun is recorded next.
+
+**Corrected focused run, 2026-10-21.** Capture
+`logs/qraft-disruption-focused-2026-10-21_17-43-47-201.log` records BUILD SUCCESS:
+64 tests, zero failures, errors or skips. All five `RaftNodeDisruptionTest`
+cases passed, alongside 16 membership, seven check-quorum, three candidate,
+two transport-generation, five timer-sequencing and 26 general node tests.
+The test source was unchanged after the correction at 17:29; this run finished
+at 17:44:57. The application capture is
+`logs/qraft-maven-tests-2026-10-21_17-44-41.log`. These are the only two retained
+logs from this run; no helper subprocess or Docker archives were generated.
+
+Both captures were read and audited. Each has 31 attributed application ERROR
+headers: 25 `RAFT_PEER_UNREACHABLE` and six injected
+`RAFT_METADATA_PERSISTENCE_FAILURE` events. Each has 25 attributed exception
+headers and 251 associated stack frames, with no unflagged error, exception or
+stack frame, no ANSI escape and no JaCoCo execution-data/class mismatch. The
+corrected focused gate is verified.
+
+**Five consecutive runs and `mvn install`, 2026-10-21.** The owner ran the
+same seven-class selector five consecutive times on unchanged source; no file
+under `src/` or `pom.xml` changed after the 17:29 correction. Each run passed
+64 tests with zero failures, errors or skips:
+
+- `qraft-disruption-repeat-2026-10-21_18-05-05-813.log`
+- `qraft-disruption-repeat-2026-10-21_18-05-26-911.log`
+- `qraft-disruption-repeat-2026-10-21_18-05-46-794.log`
+- `qraft-disruption-repeat-2026-10-21_18-06-06-741.log`
+- `qraft-disruption-repeat-2026-10-21_18-06-31-463.log`
+
+Their application captures are `qraft-maven-tests-2026-10-21_18-05-14.log`,
+`_18-05-36`, `_18-05-55`, `_18-06-19` and `_18-06-47`. Each of the ten logs
+matches the focused run's audit exactly: 31 attributed ERROR headers (25
+`RAFT_PEER_UNREACHABLE`, six injected `RAFT_METADATA_PERSISTENCE_FAILURE`),
+31 attributed exception headers (25 `RuntimeException` and six
+`InjectedFaultFixture`; the earlier count of 25 covered only the former) and
+251 stack frames, with no unflagged header or orphaned frame, no Maven error,
+no ANSI escape and no JaCoCo mismatch.
+
+`mvn install`, captured in `qraft-tests-2026-10-21_18-07-13-319.log`, then
+passed 1,056 tests (Step 5's 1,051 plus the five disruption scenarios) with
+zero failures, errors or skips. All coverage checks were met, and the build
+finished with BUILD SUCCESS at 18:09:17. Its application capture
+`qraft-maven-tests-2026-10-21_18-07-35.log` and the Maven capture each hold
+181 attributed ERROR headers across 24 definitions, 170 attributed exception
+headers and 4,249 stack frames. The declared
+`GRPC_CONNECTION_ACCEPTED_AS_SERVER_STOPS` WARN appears once, flagged for
+`GrpcRaftServerTest#aConnectionPreparedInTheInstantTheServerStopsIsClosedWithOneWarning`.
+The default suite's 22 helper-JVM application logs (`_18-08-04` to
+`_18-08-38`, 10 of them empty) hold one flagged `WAL_DIRECTORY_ALREADY_LOCKED`
+contender error and nothing else at ERROR. The two runtime-process directories
+`phase3-runtime-process-client-b1619c04-1b8a-4037-bc96-932aacf433d7` and
+`phase3-runtime-process-server-cfccfacb-d02a-4c28-8666-a3ec1941d000` hold
+console and configured logs with no error. No Docker archive was written.
+
+The audit read all 38 retained logs from these runs: 673 ERROR headers and 650
+exception headers, including duplicates, all attributed, covering 11,008 stack
+frames. No unflagged error, exception header or frame, Maven error, ANSI escape
+or JaCoCo class/data mismatch remained. Step 6 changed only test code, so its
+exit gate needs no fresh-image runtime gate; Step 8 repeats these scenarios over
+real transport in containers.
 
 Leader stickiness is the selected protection (thesis section 4.2.3). Do not add
 a second election protocol merely to close this validation step.
@@ -1209,7 +1433,7 @@ text is otherwise unchanged.
 ### RaftLog 1.5.0 (2026-10-11)
 
 Recorded here beside the upgrade before it. The work is Phase 6 of
-[`task-list-single-pom-and-quorus-removal-2026-10-12.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-12.md),
+[`task-list-single-pom-and-quorus-removal-2026-10-21.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md),
 which has the whole record.
 
 - **Change.** The root POM pins `raftlog.version` 1.5.0, up from 1.4.1. The

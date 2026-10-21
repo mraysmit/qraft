@@ -17,9 +17,15 @@ package dev.mars.qraft.raft;
 
 /**
  * Immutable local membership policy, distinct from the replicated cluster configuration.
- * Cleanup settings describe configured intent; they do not schedule automatic removal by themselves.
+ * The policy does not itself change the replicated voting configuration.
  * Durations count complete heartbeat rounds and round up without overflowing.
  *
+ * @param promotionStabilizationMs continuous health required before promotion
+ * @param promotionMaxTrailingEntries maximum permitted log lag for promotion
+ * @param cleanupEnabled whether automatic failed-voter removal is enabled
+ * @param cleanupFailureTimeoutMs continuous absence required for removal eligibility
+ * @param cleanupIntervalMs interval between periodic cleanup passes
+ * @param cleanupMinVoters minimum number of voters automatic cleanup must preserve
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-10-19
  * @version 1.0

@@ -1,15 +1,15 @@
 # Task List: Embedded Administrative Interface
 
 **Date:** 2026-09-27
-**Last updated:** 2026-10-14 (current-task pointer updated to membership Step 5 after cleanup archival. On 2026-10-11: renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: the read APIs, the development proxy, and the reserved segments, after the single-POM list's Phase 4. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: the log audit added to Step 6)
-**Active work:** Paused after Step 1 on 2026-09-27, until the backend features in [`QRAFT_FEATURE_VALIDATION_2026-09-27.md`](QRAFT_FEATURE_VALIDATION_2026-09-27.md) are delivered; Step 2 is next when it resumes
+**Last updated:** 2026-10-21 (current-task pointer updated to membership Step 6 after Step 5 completion; this list remains paused after Step 1; renamed with linked documents. Earlier, 2026-10-14: current-task pointer updated to membership Step 5 after cleanup archival. On 2026-10-11: renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: the read APIs, the development proxy, and the reserved segments, after the single-POM list's Phase 4. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: the log audit added to Step 6)
+**Active work:** Paused after Step 1 on 2026-09-27, until the backend features in [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md) are delivered; Step 2 is next when it resumes
 **Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increments UI-0 and UI-1
 **Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 12.4, 12.4.1, 19.6, and 21; [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md), sections 14 and 15
-**Predecessor:** [`archive/task-list-multi-node-container-acceptance-2026-09-26.md`](../docs/archive/task-list-multi-node-container-acceptance-2026-09-26.md)
+**Predecessor:** [`archive/task-list-multi-node-container-acceptance-2026-10-21.md`](../docs/archive/task-list-multi-node-container-acceptance-2026-10-21.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
 This list is paused; the current task list is
-[`task-list-raft-membership-changes-2026-10-12.md`](task-list-raft-membership-changes-2026-10-12.md), resumed at Step 5 after the single-POM cleanup list was archived on 2026-10-14.
+[`task-list-raft-membership-changes-2026-10-21.md`](task-list-raft-membership-changes-2026-10-21.md). Step 5 completed on 2026-10-21; Step 6 is next, with Steps 6 to 8 remaining before the client list starts.
 When this list's work is complete, add a completion summary and move this file
 to `docs/archive/`.
 

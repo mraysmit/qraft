@@ -202,7 +202,7 @@ public class QraftServerService {
             logger.info("Raft membership policy: promotionStabilizationMs={}, promotionMaxTrailingEntries={}, "
                             + "cleanup.enabled={}, cleanup.failureTimeoutMs={}, cleanup.intervalMs={}, "
                             + "cleanup.minVoters={}, promotionStabilizationRounds={}, cleanup.failureTimeoutRounds={}, "
-                            + "cleanup.intervalRounds={}, cleanup.active=false",
+                            + "cleanup.intervalRounds={}",
                     effective.promotionStabilizationMs(), effective.promotionMaxTrailingEntries(),
                     effective.cleanupEnabled(), effective.cleanupFailureTimeoutMs(), effective.cleanupIntervalMs(),
                     effective.cleanupMinVoters(), effective.promotionStabilizationRounds(heartbeatMs),
@@ -372,6 +372,12 @@ public class QraftServerService {
         GrpcRaftServer raft = raftGrpcServer.orElseThrow(() -> new IllegalStateException("the server is not running"));
         GrpcServiceServer api = apiGrpcServer.orElseThrow(() -> new IllegalStateException("the server is not running"));
         return Map.of("http", http.port(), "raft", raft.port(), "apiGrpc", api.port());
+    }
+
+    /** Effective policy of the constructed Raft node, for startup diagnostics and lifecycle inspection. */
+    public RaftMembershipPolicy membershipPolicy() {
+        return raftNode.orElseThrow(() -> new IllegalStateException("the Raft node has not been constructed"))
+                .getMembershipPolicy();
     }
 
     public CompletableFuture<Void> stop() {

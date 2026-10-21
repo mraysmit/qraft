@@ -25,6 +25,7 @@ import dev.mars.qraft.common.async.BlockingTaskExecutor;
 import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.common.async.RaftStateLoop;
 import dev.mars.qraft.raft.storage.RaftStorageFactory;
+import dev.mars.qraft.raft.RaftMembershipPolicy;
 import dev.mars.qraft.server.config.AppConfig;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -79,6 +80,53 @@ class QraftServerLifecycleTest {
     /** {@code launch} sets the process-wide log directory; it is restored so later tests do not log to a deleted directory. */
     private final String previousLogDirectory = System.getProperty("qraft.log.dir");
     private final String previousLogMode = System.getProperty("qraft.log.mode");
+
+    @Test
+    void startupWiresNonDefaultMembershipSettingsIntoTheActualRaftNode() throws Exception {
+        assertStartedPolicy("""
+                "membership":{"promotionStabilizationMs":12501,"promotionMaxTrailingEntries":17,
+                  "cleanup":{"enabled":false,"failureTimeoutMs":75001,"intervalMs":12501,"minVoters":5}}
+                """, new RaftMembershipPolicy(12501, 17, false, 75001, 12501, 5));
+    }
+
+    @Test
+    void startupPreservesTimingAwareMembershipDefaultsForAnAbsentObject() throws Exception {
+        assertStartedPolicy("\"electionTimeoutMs\":90000,\"heartbeatIntervalMs\":20000",
+                new RaftMembershipPolicy(10000, 250, true, 90000, 20000, 3));
+    }
+
+    @Test
+    void startupAcceptsTheLargestRepresentableMembershipDurations() throws Exception {
+        assertStartedPolicy("""
+                "membership":{"promotionStabilizationMs":9223372036854775807,
+                  "promotionMaxTrailingEntries":9223372036854775807,
+                  "cleanup":{"failureTimeoutMs":9223372036854775807,"intervalMs":9223372036854775807,
+                             "minVoters":2147483647}}
+                """, new RaftMembershipPolicy(Long.MAX_VALUE, Long.MAX_VALUE, true,
+                Long.MAX_VALUE, Long.MAX_VALUE, Integer.MAX_VALUE));
+    }
+
+    private void assertStartedPolicy(String raftSettings, RaftMembershipPolicy expected) throws Exception {
+        AppConfig configuration = AppConfig.fromJson("""
+                {"version":1,"server":{"id":"policy-server","http":{"port":0},"apiGrpcPort":0,
+                  "telemetry":{"enabled":false},"raft":{"port":0,"snapshot":{"enabled":false},
+                  "storage":{"path":"%s"},%s}}}
+                """.formatted(temporaryDirectory.resolve("raft").toString().replace('\\', '/'), raftSettings));
+        configuration.validate();
+        RaftStateLoop loop = RaftStateLoop.create();
+        BlockingTaskExecutor workers = new BlockingTaskExecutor("policy-startup-test", 1, 8, loop);
+        QraftServerService service = new QraftServerService(loop, workers, configuration);
+        try {
+            service.start().get(10, TimeUnit.SECONDS);
+            assertEquals(expected, service.membershipPolicy(), "the policy is read from the constructed node");
+        } finally {
+            try {
+                service.stop().get(10, TimeUnit.SECONDS);
+            } finally {
+                QraftServerApplication.shutdownExecutors(workers, loop).get(10, TimeUnit.SECONDS);
+            }
+        }
+    }
 
     @Test
     void blockingWorkCompletesOnTheStateLoopBeforeTheOwnerStopsThatLoop() throws Exception {
@@ -385,8 +433,7 @@ class QraftServerLifecycleTest {
                 + ", promotionMaxTrailingEntries=" + lag + ", cleanup.enabled=" + enabled
                 + ", cleanup.failureTimeoutMs=" + failure + ", cleanup.intervalMs=" + interval
                 + ", cleanup.minVoters=" + minimum + ", promotionStabilizationRounds=" + stabilizationRounds
-                + ", cleanup.failureTimeoutRounds=" + failureRounds + ", cleanup.intervalRounds=" + intervalRounds
-                + ", cleanup.active=false";
+                + ", cleanup.failureTimeoutRounds=" + failureRounds + ", cleanup.intervalRounds=" + intervalRounds;
     }
 
     /** Test log capture helper; copies service events without filtering or changing existing appenders. */
