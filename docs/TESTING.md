@@ -209,10 +209,16 @@ capture is `logs/qraft-disruption-focused-2026-10-21_17-43-47-201.log`; its
 application capture is `logs/qraft-maven-tests-2026-10-21_17-44-41.log`.
 Both were audited: each has 31 attributed ERROR headers, 25 attributed exception
 headers and 251 associated stack frames, with no unflagged error or exception,
-no ANSI escape and no JaCoCo mismatch. Five consecutive affected runs and
-`mvn install`, including their log audits, remain pending. Desktop
-automation is disabled at the owner's request. Run verification in the visible
-VS Code integrated terminal and retain the output for inspection.
+no ANSI escape and no JaCoCo mismatch. Five consecutive affected runs on
+unchanged source then each passed 64 tests (`logs/qraft-disruption-repeat-2026-10-21_18-05-05-813.log`
+to `_18-06-31-463.log`), and `mvn install` passed 1,056 tests and every
+coverage gate (`logs/qraft-tests-2026-10-21_18-07-13-319.log`). The audit of
+all 38 retained Maven, application and helper logs from those runs found 673
+ERROR headers and 650 exception headers, including duplicates, all attributed,
+with no unflagged error, exception or frame, no ANSI escape and no JaCoCo
+mismatch. Step 6 is complete. Desktop automation is disabled at the owner's
+request. Run verification in the visible VS Code integrated terminal and
+retain the output for inspection.
 
 Start with the affected election, quorum, membership and sequencing tests:
 
