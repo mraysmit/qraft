@@ -3,6 +3,161 @@
 The [Qraft job](http://192.168.137.32:8080/job/Qraft/) runs every test suite. Select **Build Now**
 to run the pipeline; it has no recurring trigger.
 
+## Readiness verified, 2026-10-17
+
+The existing job was checked on the live Jenkins server at the user's request.
+It is enabled, buildable and idle, loads `Jenkinsfile` from this repository's
+`main` branch, and has no recurring trigger. Jenkins's declarative pipeline
+validator accepted the current `Jenkinsfile`. No job or global server settings
+needed changing, and no build was started for this readiness check.
+
+The online Linux x64 built-in worker has the required `linux` label. Read-only
+tool checks under the Jenkins account confirmed cached SapMachine JDK 27+35,
+`javac` 27, Maven 3.9.16 using that JDK, Git 2.43.0, Bash, curl, Docker client
+and engine 29.1.3, and Docker Compose 2.40.3. The workspace is
+`/var/lib/jenkins/workspace/Qraft`; its existing JDK and Maven caches match the
+paths configured by the pipeline.
+
+To run a build, select **Build Now** on the job page. On this workstation, the
+existing local helper can also be run in the visible VS Code terminal:
+
+```powershell
+.\.env\qraft-jenkins-build.ps1
+```
+
+The helper reads the existing API token without printing it, starts the job
+with mutation testing off, follows its status, and retains its console and
+archived artifacts under `logs/jenkins/Qraft-<build>/`. The helper and token
+are local files, not part of the repository; the job page is available without
+that helper. Audit the retained Maven, application, subprocess and Docker logs
+under the project's logging policy before accepting a run.
+
+Jenkins checks out pushed `main`, not this workstation's working tree. At this
+check, GitHub `main` and local `HEAD` both pointed to `bef4637`; the uncommitted
+promotion-boundary tests and documentation edits were not published and would
+not be included in a Jenkins build.
+
+## Build 27 verification, 2026-10-17
+
+[Build 27](http://192.168.137.32:8080/job/Qraft/27/) ran at the user's request
+against pushed `main`, commit `bef4637`, and succeeded in 10 minutes 12 seconds.
+The default suite passed 1,024 tests and every coverage gate; end-to-end passed
+10 tests; Docker passed 32 tests on the newly built jar and rebuilt image.
+Jenkins and the retained Surefire XML agree on 1,066 results, with zero failures,
+errors or skips. All 64 membership-parser cases passed. The two uncommitted
+promotion-boundary tests prepared on this workstation were not included.
+
+All 860 Jenkins artifacts were downloaded under `logs/jenkins/Qraft-27/archive/`,
+with the complete console retained beside that directory. The final audit
+reviewed 133 log files, 145 Surefire text reports and four JSON configuration
+documents. All 648 error headers and 480 exception headers were attributed,
+including one explicitly flagged lock-contender uncaught exception. Counts
+include duplicate captures. The flagged native Tempo WAL startup event had a
+later recovery with the same tenant, remote name and endpoint. No unflagged
+error, unattributed exception trace or ANSI escape remained. Candidate
+classification details and the file inventory are retained in
+`logs/jenkins/Qraft-27/log-audit.json`; suite totals, revision and artifact
+verification are in `logs/jenkins/Qraft-27/verification.json`.
+
+This verifies the committed parser slice and the source at `bef4637`. Membership
+runtime wiring, automatic cleanup and the uncommitted duration-boundary tests
+remain separate work.
+
+## Duration-boundary replay verification, 2026-10-19
+
+The duration-conversion work was tested without committing or pushing the
+working tree. Replays of build 27 checked out `bef4637`, verified that base
+revision, and applied an archived patch containing only production and test
+source changes. The normal job definition still loads the repository's
+`Jenkinsfile` from `main`; no recurring trigger was added. A later ordinary
+**Build Now** uses pushed source and will not include this patch until committed
+and published.
+
+- [Build 28](http://192.168.137.32:8080/job/Qraft/28/): 72 focused tests, one
+  promotion-overflow assertion failure and one timeout. Investigation found
+  the command helper could read the next log index before the leadership
+  no-op appended and acknowledge that no-op instead of the submitted command.
+  A state-loop barrier now drains the queued no-op before the index is read.
+  No timeout was increased and no error allowance was added.
+- [Build 29](http://192.168.137.32:8080/job/Qraft/29/): 74 focused tests, exactly
+  three RED assertions and zero test errors. They demonstrated promotion and
+  quorum-grace ceiling-division overflow, plus election-jitter overflow into a
+  negative scheduled delay. Production was unchanged for this run.
+- [Build 30](http://192.168.137.32:8080/job/Qraft/30/): successful in 11 minutes
+  25 seconds. Five consecutive focused runs passed 74 tests each, then the
+  default suite passed 1,028 tests and every coverage gate; end-to-end passed
+  10 and fresh-image Docker passed 32. The three full suites total 1,070 tests;
+  Jenkins publishes 1,440 results including the 370 focused repeat executions.
+  There were zero failures, errors or skips in this successful run.
+
+Build 30's verified source patch SHA-256 is
+`efd9946afd383132a141cb1ec4d7cad95a86145c83ad06c8d18a3c0aae10c33d`.
+The patch and individual source checksums are archived as
+`logs/verification-source.patch` and `logs/verification-source.sha256`.
+At completion of that slice, local source matched those checksums after CRLF normalization.
+The production change replaces the two overflow-prone ceiling divisions with
+`Math.ceilDiv` and limits election jitter to the available `long` headroom.
+
+All 892 artifacts are retained locally under `logs/jenkins/Qraft-30/archive/`,
+with console, test totals and the final audit beside that directory. The audit
+reviewed 143 log files, 155 Surefire text reports and four JSON configuration
+documents. All 645 error headers and 468 exception headers were attributed,
+including the explicitly flagged lock-contender uncaught exception. Counts
+include duplicate captures. The flagged native Tempo startup event had a later
+WAL recovery matching its tenant, remote name and endpoint. No unflagged error,
+unattributed trace or ANSI escape remained. Earlier failed captures are retained
+separately as diagnosed failure evidence, not included in the successful audit.
+
+Replay pipelines and source snapshots are retained in
+`logs/jenkins/membership-rounds-2026-10-19/`. This completes the timing slice;
+membership settings wiring and automatic failed-voter cleanup were still open
+at that checkpoint. The subsequent wiring slice is recorded below.
+
+## Membership-wiring replay verification, 2026-10-19
+
+The wiring slice was verified through a source-patch replay of build 27 on
+`bef4637`, including the earlier timing changes. No commit or push was made.
+
+- [Build 31](http://192.168.137.32:8080/job/Qraft/31/) established RED: 91 cases,
+  exactly seven missing-policy-log assertion failures, zero test errors, and
+  no unrelated application-log errors. The failed console, reports, source
+  snapshot and diagnosis are retained separately.
+- [Build 32](http://192.168.137.32:8080/job/Qraft/32/) succeeded in 11 minutes
+  22 seconds. Five consecutive focused runs passed 115 cases each. The default
+  suite passed 1,059 tests and every coverage gate; end-to-end passed 10 and
+  fresh-image Docker passed 32. The full suites total 1,101 executions;
+  Jenkins publishes 1,676 results including the 575 focused repeats. There
+  were zero failures, test errors or skips.
+
+The tested source patch SHA-256 is
+`23a70bff66e1e3a3abc9f1778447e389ea8b034a6237d23ea29897727403da54`.
+All seven production/test source files match the archived source checksums
+after CRLF normalization, including the two new policy files. The patch and
+manifest are archived under `logs/verification-source.*`. Replay pipelines,
+source snapshots and local verification helpers are retained in
+`logs/jenkins/membership-wiring-2026-10-19/`.
+
+All 916 artifacts are retained under `logs/jenkins/Qraft-32/archive/`, with
+the console, verification summary and final audit alongside it. The audit
+reviewed 141 textual log streams, including four JSON logs, 166 Surefire text
+reports and four JSON configuration documents. Two binary `raft.log` files
+are WAL data, not diagnostic streams. All 849 error headers, 518 exception
+headers and one uncaught-exception header were attributed. Counts include
+duplicate captures. The single native Tempo startup error in its original
+capture was explicitly flagged and followed by matching WAL recovery at
+line 56 after the error at line 52. No unflagged error, unattributed trace or
+ANSI escape remained.
+
+`QraftServerService` now passes all six values into the node's immutable
+`RaftMembershipPolicy`, and logs its effective values without the operator
+token. Promotion uses that policy. Seven real-server cases verify HTTP
+liveness, policy logging and WAL release after shutdown. Cleanup settings
+are retained, but startup explicitly reports `cleanup.active=false` until
+automatic removal is implemented. That is the next task; the overall Step 5
+exit gate remains open. The normal SCM job still reads `Jenkinsfile` from
+pushed `main`, so an ordinary **Build Now** does not include these uncommitted
+changes.
+
 ## Job configuration
 
 The job loads its pipeline from the repository's default branch using the following SCM configuration.

@@ -196,6 +196,7 @@ public class RaftNode {
     private final long snapshotCheckIntervalMs;
     private final long logHardLimit;
     /** Heartbeat rounds a non-voter must stay healthy before it is promoted. */
+    private final RaftMembershipPolicy membershipPolicy;
     private final long promotionStabilizationRounds;
     private final long promotionMaxTrailingEntries;
 
@@ -292,6 +293,7 @@ public class RaftNode {
         private long logHardLimit = 100000;
         private long promotionStabilizationMs = 10_000;
         private long promotionMaxTrailingEntries = 250;
+        private RaftMembershipPolicy membershipPolicy;
         private RaftTimerScheduler timerScheduler;
         private int transitionQueueCapacity = 1024;
 
@@ -391,6 +393,14 @@ public class RaftNode {
             return this;
         }
 
+        /** Local membership policy. Later promotion setters override its corresponding promotion values. */
+        public Builder membershipPolicy(RaftMembershipPolicy policy) {
+            this.membershipPolicy = requireNonNull(policy, "membershipPolicy");
+            this.promotionStabilizationMs = policy.promotionStabilizationMs();
+            this.promotionMaxTrailingEntries = policy.promotionMaxTrailingEntries();
+            return this;
+        }
+
         Builder timerScheduler(RaftTimerScheduler timerScheduler) {
             this.timerScheduler = requireNonNull(timerScheduler, "timerScheduler");
             return this;
@@ -430,11 +440,17 @@ public class RaftNode {
             }
             Map<String, String> listed = new TreeMap<>();
             for (String name : clusterNodes) listed.put(name, addresses.getOrDefault(name, name));
+            RaftMembershipPolicy cleanup = membershipPolicy != null ? membershipPolicy
+                    : RaftMembershipPolicy.defaults(electionTimeoutMs, heartbeatIntervalMs);
+            RaftMembershipPolicy resolvedPolicy = new RaftMembershipPolicy(
+                    promotionStabilizationMs, promotionMaxTrailingEntries, cleanup.cleanupEnabled(),
+                    cleanup.cleanupFailureTimeoutMs(), cleanup.cleanupIntervalMs(), cleanup.cleanupMinVoters());
+            resolvedPolicy.validateFor(electionTimeoutMs, heartbeatIntervalMs);
             return new RaftNode(runtime, blockingTasks, nodeId, resolvedServerId, initialConfiguration, listed,
                     clusterNodes, transport, stateMachine,
                     commandCodec, mode, electionTimeoutMs, heartbeatIntervalMs, snap,
-                    snapshotThreshold, snapshotCheckIntervalMs, logHardLimit, promotionStabilizationMs,
-                    promotionMaxTrailingEntries, timerScheduler, transitionQueueCapacity);
+                    snapshotThreshold, snapshotCheckIntervalMs, logHardLimit, resolvedPolicy,
+                    timerScheduler, transitionQueueCapacity);
         }
     }
 
@@ -446,7 +462,7 @@ public class RaftNode {
             RaftLogApplicator stateMachine, CommandCodec<RaftCommand> commandCodec,
             RaftNodeMode mode, long electionTimeoutMs, long heartbeatIntervalMs,
             boolean snapshotEnabled, long snapshotThreshold, long snapshotCheckIntervalMs,
-            long logHardLimit, long promotionStabilizationMs, long promotionMaxTrailingEntries,
+            long logHardLimit, RaftMembershipPolicy membershipPolicy,
             RaftTimerScheduler configuredTimerScheduler,
             int transitionQueueCapacity) {
         this.runtime = runtime;
@@ -473,14 +489,15 @@ public class RaftNode {
             @Override public boolean cancelTimer(long id) { return runtime.cancelTimer(id); }
         } : configuredTimerScheduler;
         this.electionTimeoutMs = electionTimeoutMs;
-        this.quorumContactRounds = Math.max(1, (electionTimeoutMs + heartbeatIntervalMs - 1) / heartbeatIntervalMs);
+        this.quorumContactRounds = Math.max(1, Math.ceilDiv(electionTimeoutMs, heartbeatIntervalMs));
         this.heartbeatIntervalMs = heartbeatIntervalMs;
         this.snapshotEnabled = snapshotEnabled && this.persistence.isDurable();
         this.snapshotThreshold = snapshotThreshold;
         this.snapshotCheckIntervalMs = snapshotCheckIntervalMs;
         this.logHardLimit = logHardLimit;
-        this.promotionStabilizationRounds = (promotionStabilizationMs + heartbeatIntervalMs - 1) / heartbeatIntervalMs;
-        this.promotionMaxTrailingEntries = promotionMaxTrailingEntries;
+        this.membershipPolicy = membershipPolicy;
+        this.promotionStabilizationRounds = membershipPolicy.promotionStabilizationRounds(heartbeatIntervalMs);
+        this.promotionMaxTrailingEntries = membershipPolicy.promotionMaxTrailingEntries();
 
         // Initialize log with a dummy entry
         log.add(new LogEntry(0, 0, null));
@@ -1243,6 +1260,11 @@ public class RaftNode {
     }
 
     // ... Getters ...
+    /** The immutable effective local policy used by this node. */
+    public RaftMembershipPolicy membershipPolicy() {
+        return membershipPolicy;
+    }
+
     public boolean isRunning() {
         return running;
     }
@@ -1598,7 +1620,8 @@ public class RaftNode {
         // A transition applied while stopping must not re-arm the timer that shutdown cancelled.
         if (!running) return;
 
-        long timeout = electionTimeoutMs + (long) (Math.random() * electionTimeoutMs);
+        long jitterBound = Math.min(electionTimeoutMs, Long.MAX_VALUE - electionTimeoutMs);
+        long timeout = electionTimeoutMs + (long) (Math.random() * jitterBound);
         long timerGeneration = electionTimerGeneration;
 
         electionTimerId = setTimer(timeout, id -> onElectionTimer(id, timerGeneration));

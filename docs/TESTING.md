@@ -134,6 +134,76 @@ builds; coverage and full-suite verification remain pending. See the
 [Step 5 record](../docs-design/task-list-raft-membership-changes-2026-10-12.md#step-5-failed-server-cleanup)
 for the retained output and remaining runtime work.
 
+### Membership heartbeat-round boundaries
+
+`RaftNodePromotionTest` covers partial-round stabilization, the largest
+representable stabilization and quorum-grace durations, and election jitter
+at `Long.MAX_VALUE`. The tests drive manual heartbeats, assert membership and
+leadership through the node API, and inspect the delay requested from the
+manual scheduler. They do not wait for a wall-clock duration. The command
+helper drains the queued leadership no-op before choosing the command index
+to acknowledge, avoiding the race found in the first RED run.
+
+Run the parser and promotion tests together in the visible VS Code terminal:
+
+```powershell
+New-Item -ItemType Directory -Force .\logs | Out-Null
+mvn -B "-Dstyle.color=never" clean test "-Dtest=AppConfigRaftMembershipTest,RaftNodePromotionTest" 2>&1 | Tee-Object -FilePath ".\logs\qraft-membership-rounds-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
+$qraftBuildExitCode = $LASTEXITCODE
+if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
+```
+
+On 2026-10-19, Jenkins replay build 28 exposed promotion overflow and the helper
+race. After fixing the helper, build 29 ran 74 tests with exactly three RED
+assertion failures: early promotion, early quorum loss and a negative election
+delay. The production fix uses `Math.ceilDiv` and bounds jitter before addition.
+Build 30 passed five consecutive focused runs of 74 cases, then 1,028 default
+tests with every coverage gate, 10 end-to-end tests and 32 fresh-image Docker
+tests. Its retained-log audit found no unflagged errors or unattributed traces.
+See [the Jenkins replay record](JENKINS.md#duration-boundary-replay-verification-2026-10-19)
+for the source patch, artifacts and distinction between repeats and full suites.
+
+Keep failing output and audit Maven and application logs before accepting a
+RED baseline; assertion failures do not excuse unrelated errors. `clean`
+prevents stale JaCoCo data from being reused. The focused command alone still
+does not establish coverage or the full Step 5 exit gate. Runtime wiring and
+automatic cleanup remain pending at that timing-only checkpoint.
+
+### Membership policy wiring
+
+`QraftServerLifecycleTest` starts a real server from a JSON file and verifies
+all six effective membership values in the startup log, the rounded durations,
+and exclusion of the configured operator token. Its seven cases cover defaults,
+partial settings, custom enabled and disabled cleanup, timing-dependent defaults,
+exact bounds, zero promotion values and `Long.MAX_VALUE`. Each case calls the
+real HTTP liveness endpoint, awaits shutdown, and reopens the WAL directory.
+`RaftNodePromotionTest` drives manual heartbeat rounds to prove the policy
+actually controls promotion lag and stabilization. `RaftMembershipPolicyTest`
+checks invalid fields, timing relationships and safe round conversion.
+
+Run these together when verifying membership wiring:
+
+```powershell
+New-Item -ItemType Directory -Force .\logs | Out-Null
+mvn -B "-Dstyle.color=never" clean test "-Dtest=AppConfigRaftMembershipTest,RaftNodePromotionTest,QraftServerLifecycleTest,RaftMembershipPolicyTest" 2>&1 | Tee-Object -FilePath ".\logs\qraft-membership-wiring-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
+$qraftBuildExitCode = $LASTEXITCODE
+if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
+```
+
+Jenkins replay build 31 established the RED baseline: 91 cases, exactly seven
+missing-policy-log assertion failures and zero test errors. Its application log
+had no unrelated errors. The failed console and Surefire reports are retained
+as failure evidence. Automatic cleanup stays inactive in this wiring slice;
+startup reports `cleanup.active=false` explicitly.
+
+Replay build 32 passed five consecutive 115-case focused runs, 1,059 default
+tests with every coverage gate, 10 end-to-end and 32 fresh-image Docker tests.
+The retained-log audit found no unflagged errors or unattributed traces, and
+all seven source checksums matched the working tree. See
+[the wiring replay record](JENKINS.md#membership-wiring-replay-verification-2026-10-19)
+for the patch, artifacts and audit. This verifies the wiring slice; automatic
+failed-voter cleanup and the overall Step 5 exit gate remain pending.
+
 ### State-loop and blocking-executor changes
 
 Start with the executor, ownership and package-boundary tests:
