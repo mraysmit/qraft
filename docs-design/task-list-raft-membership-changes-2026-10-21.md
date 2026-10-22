@@ -1755,8 +1755,68 @@ which classifies the new package in the server layer.
   no ERROR or WARN event. The Maven capture's unflagged exceptions are these 23
   red failures and nothing else.
 
-Separate-JVM locking, the crash boundaries and the CLI follow once these pass.
-Write failing tests first that show:
+**Implementation, 2026-10-22.** `RecoveryInput`, `inspect` and `recover` are
+implemented; the focused green run is pending in the owner's terminal.
+- `ServerIdentity` gains three public methods: `existing`, which reads an ID
+  without creating one; `replace`, an atomic write used only on the recovery's
+  staging directory; and `forceDirectory`, which was already there and is now
+  public.
+- `SourceLock` opens the source's `raft.lock` without creating or writing it,
+  and holds its exclusive lock for the whole run. A lock held by another process
+  and one held by storage open in this JVM are both refused as "is locked".
+- `DirectoryCopy` copies, forces and verifies every file by SHA-256. It
+  recreates `raft.lock` empty and refuses any entry that is neither a file nor
+  a directory.
+- `RecoveryExamination` reads the copy's storage for the report, then starts a
+  real `RaftNode` on the copy and stops it before any election. The node uses
+  the directory's own server ID, an offline transport that refuses every send,
+  and a one-hour election timeout, so its checks are exactly those of ordinary
+  startup. A directory with no Raft state is refused without starting a node,
+  because a node would bootstrap it.
+- `RecoveryClaim` writes the claim with create-new and replaces it atomically
+  at each step: claimed, then prepared with the new ID, index and term, then
+  published.
+- The staging directory is `.<output name>.qraft-recovering` beside the output.
+  Its name is the marker; a rerun deletes it, and a refusal removes it.
+- The read-only checks run first, so a plan they refuse makes no claim: overlap,
+  source server ID, the claim's state, and an existing output. Then the source
+  lock is taken, the claim is created, and the copy, examination, recovery
+  entry, new ID and atomic rename follow.
+- An unrecorded publication from an interrupted run is recognised by the
+  output's server ID matching the claim, and returns `PUBLICATION_RECORDED`.
+  The separate-JVM crash tests will exercise that path.
+
+**First green run and correction, 2026-10-22.** Capture
+`logs/qraft-recovery-green-2026-10-22_14-15-15-395.log` records 38 tests,
+zero failures and four errors. `RecoveryInputTest` (8), `ServerIdentityTest`
+(6) and `PackageDependencyTest` (9) passed, as did 11 of the 15
+`OfflineRecoveryTest` cases: every refusal and both `inspect` cases.
+- The four errors are the four cases in which recovery completes. Each was
+  refused with "Writing the recovery entry failed: Log tail is unknown: call
+  replayLog() before writing".
+- The cause: RaftLog refuses an append to an existing WAL until `replayLog()`
+  has run, and `appendRecoveryEntry` appended straight after opening the
+  staging WAL.
+- The correction: it now replays first and checks that the tail is the index
+  the examination reported. If it isn't, recovery is refused with nothing
+  written.
+- The audit read both logs.
+  - The application log `logs/qraft-maven-tests-2026-10-22_14-16-15.log` holds
+    six attributed ERROR headers:
+    - `RAFT_STATE_WITHOUT_CONFIGURATION` twice, from the two ordinary-startup
+      refusals;
+    - `WAL_AMBIGUOUS_CORRUPTION` twice and `RAFT_RECOVERY_AMBIGUOUS_CORRUPTION`
+      twice, because the corrupt-source copy is replayed once for the report
+      and once by the node.
+  - It also holds four unflagged RaftLog `Refused append: LOG_STATE_UNKNOWN`
+    errors. They are the defect corrected here.
+  - Two WARN events without stack traces, "Record at position 0 cannot be
+    decoded", are RaftLog detecting the deliberately flipped byte in each
+    replay.
+  - The Maven capture's only unflagged exceptions are the four refusals above.
+
+The rerun is pending. Separate-JVM locking, the crash boundaries and the CLI
+follow once these pass. Write failing tests first that show:
 - followers and joining servers accept the recovery entry by replication and by
   installed snapshot, although a running leader would refuse that change;
 - the seed's first start elects it and commits its whole log;

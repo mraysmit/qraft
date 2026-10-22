@@ -16,6 +16,12 @@
 
 package dev.mars.qraft.server.recovery;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import dev.mars.qraft.common.config.JsonSettings;
+import dev.mars.qraft.server.config.AppConfig;
+
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
@@ -34,6 +40,36 @@ public final class RecoveryInput {
 
     /** Reads {@code inputFile}; an invalid input or server JSON is refused with {@link IllegalArgumentException}. */
     public static RecoveryPlan read(Path inputFile) {
-        throw new UnsupportedOperationException("Recovery input parsing is not implemented yet");
+        String document;
+        try {
+            document = Files.readString(inputFile);
+        } catch (IOException unreadable) {
+            throw new IllegalArgumentException("Could not read the recovery input " + inputFile, unreadable);
+        }
+        JsonNode root = JsonSettings.readDocument(document, "Recovery input");
+        JsonSettings.rejectUnknown(root, "recovery input", "version", "source", "serverConfig");
+        JsonSettings.requireFormatVersion(root);
+        JsonNode source = JsonSettings.requiredObject(root, "source");
+        JsonSettings.rejectUnknown(source, "source", "path", "serverId");
+        Path sourcePath = Path.of(requiredText(source, "path", "source.path"));
+        String sourceServerId = requiredText(source, "serverId", "source.serverId");
+        Path serverConfigPath = Path.of(requiredText(root, "serverConfig", "serverConfig"));
+
+        AppConfig server = AppConfig.fromFile(serverConfigPath);
+        String name = server.getNodeId();
+        String address = server.getClusterMembers().get(name);
+        if (address == null || address.isBlank()) {
+            throw new IllegalArgumentException("The server configuration " + serverConfigPath + " does not list "
+                    + "server " + name + " in server.raft.nodes, so the seed's Raft address is unknown");
+        }
+        return new RecoveryPlan(sourcePath, sourceServerId, Path.of(server.getRaftStoragePath()), name, address);
+    }
+
+    private static String requiredText(JsonNode parent, String field, String label) {
+        JsonNode value = parent.get(field);
+        if (value == null || !value.isTextual() || value.asText().isBlank()) {
+            throw new IllegalArgumentException(label + " must be a non-empty string");
+        }
+        return value.asText();
     }
 }

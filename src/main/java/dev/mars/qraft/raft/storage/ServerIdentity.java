@@ -26,6 +26,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -74,6 +75,49 @@ public final class ServerIdentity {
         return id;
     }
 
+    /**
+     * Returns the server ID kept in {@code directory} without creating one, or empty if there is no ID file.
+     *
+     * @throws IllegalStateException if the ID file exists but does not hold a server ID
+     */
+    public static Optional<String> existing(Path directory) throws IOException {
+        Path file = directory.resolve(FILE);
+        return Files.exists(file) ? Optional.of(read(file)) : Optional.empty();
+    }
+
+    /**
+     * Gives {@code directory} the server ID {@code serverId}, durably and atomically, replacing any it holds. Only
+     * offline lost-quorum recovery calls this, on the new directory it builds before publishing it; it never
+     * changes the identity of a directory a server has used under its own ID.
+     */
+    public static void replace(Path directory, String serverId) throws IOException {
+        if (!UUID.fromString(serverId).toString().equals(serverId)) {
+            throw new IllegalArgumentException("A server ID is a canonical UUID: " + serverId);
+        }
+        Path temporary = directory.resolve(TEMPORARY_FILE);
+        try (FileChannel channel = FileChannel.open(temporary,
+                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
+            ByteBuffer bytes = ByteBuffer.wrap(serverId.getBytes(StandardCharsets.UTF_8));
+            while (bytes.hasRemaining()) channel.write(bytes);
+            channel.force(true);
+        }
+        Files.move(temporary, directory.resolve(FILE), StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING);
+        forceDirectory(directory);
+    }
+
+    /** Forces {@code directory}'s entries to disk, where the platform allows a directory to be opened for it. */
+    public static void forceDirectory(Path directory) throws IOException {
+        try (FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ)) {
+            channel.force(true);
+        } catch (AccessDeniedException denied) {
+            // Windows cannot open a directory for forcing; its rename is already durable there.
+            if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("windows")) {
+                throw denied;
+            }
+        }
+    }
+
     private static String read(Path file) throws IOException {
         String content = Files.readString(file, StandardCharsets.UTF_8);
         try {
@@ -86,16 +130,5 @@ public final class ServerIdentity {
         throw new IllegalStateException("The server ID in " + file + " cannot be read. It is not replaced, "
                 + "because that would change this server's identity; restore the file, or remove the whole "
                 + "data directory to start this server as a new one");
-    }
-
-    private static void forceDirectory(Path directory) throws IOException {
-        try (FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ)) {
-            channel.force(true);
-        } catch (AccessDeniedException denied) {
-            // Windows cannot open a directory for forcing; its rename is already durable there.
-            if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("windows")) {
-                throw denied;
-            }
-        }
     }
 }
