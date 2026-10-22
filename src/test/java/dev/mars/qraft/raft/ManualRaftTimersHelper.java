@@ -114,6 +114,14 @@ public final class ManualRaftTimersHelper implements RaftTimerScheduler {
         return valueOnStateLoop(oneShots::size);
     }
 
+    /** The delay requested for the earliest armed one-shot timer, after queued state-loop work. */
+    public long nextOneShotDelayMs() {
+        return valueOnStateLoop(() -> oneShots.entrySet().stream()
+                .min(Map.Entry.comparingByKey())
+                .orElseThrow(() -> new IllegalStateException("no one-shot timer is armed"))
+                .getValue().periodMs());
+    }
+
     /** Runs {@code fire} behind the tasks already queued on the state loop and waits for it. */
     private void onStateLoop(Runnable fire) {
         valueOnStateLoop(() -> {

@@ -30,8 +30,8 @@ import dev.mars.qraft.common.async.BlockingTaskExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import dev.mars.qraft.raft.RaftNode;
-import dev.mars.qraft.raft.RaftNodeMode;
 import dev.mars.qraft.raft.RaftMembershipPolicy;
+import dev.mars.qraft.raft.RaftNodeMode;
 import dev.mars.qraft.raft.RaftTransport;
 import dev.mars.qraft.raft.GrpcServiceServer;
 import dev.mars.qraft.raft.GrpcRaftTransport;
@@ -105,6 +105,11 @@ public class QraftServerService {
         logger.info("Starting QraftServerService...");
 
         try {
+            RaftMembershipPolicy membershipPolicy = new RaftMembershipPolicy(
+                    config.getPromotionStabilizationMs(), config.getPromotionMaxTrailingEntries(),
+                    config.isRaftCleanupEnabled(), config.getRaftCleanupFailureTimeoutMs(),
+                    config.getRaftCleanupIntervalMs(), config.getRaftCleanupMinVoters());
+            membershipPolicy.validateFor(config.getElectionTimeoutMs(), config.getHeartbeatIntervalMs());
             // 1. The configuration this server was started with
             String nodeId = config.getNodeId();
 
@@ -142,7 +147,7 @@ public class QraftServerService {
                         storage -> {
                             this.raftStorage = storage;
                             continueStartup(startPromise, nodeId, raftPort, apiGrpcPort, clusterNodeIds,
-                                    listedAddresses);
+                                    listedAddresses, membershipPolicy);
                         },
                         err -> {
                             logger.error("Failed to initialize Raft storage: {}", err.getMessage(), err);
@@ -159,7 +164,8 @@ public class QraftServerService {
      */
     private void continueStartup(CompletableFuture<Void> startPromise,
                                  String nodeId, int raftPort, int apiGrpcPort,
-                                 Set<String> clusterNodeIds, Map<String, String> listedAddresses) {
+                                 Set<String> clusterNodeIds, Map<String, String> listedAddresses,
+                                 RaftMembershipPolicy membershipPolicy) {
         try {
             // 5. Load the server's durable identity. The open WAL holds the data directory's lock, so no other
             //    process can create a competing identity there.
@@ -184,16 +190,23 @@ public class QraftServerService {
                     .mode(RaftNodeMode.durable(raftStorage.wal(), raftStorage.snapshots()))
                     .electionTimeout(config.getElectionTimeoutMs())
                     .heartbeatInterval(config.getHeartbeatIntervalMs())
-                    .membershipPolicy(new RaftMembershipPolicy(config.getPromotionStabilizationMs(),
-                            config.getPromotionMaxTrailingEntries(), config.isRaftCleanupEnabled(),
-                            config.getRaftCleanupFailureTimeoutMs(), config.getRaftCleanupIntervalMs(),
-                            config.getRaftCleanupMinVoters()))
+                    .membershipPolicy(membershipPolicy)
                     .snapshotEnabled(config.isSnapshotEnabled())
                     .snapshotThreshold(config.getSnapshotThreshold())
                     .snapshotCheckInterval(config.getSnapshotCheckIntervalMs())
                     .logHardLimit(config.getLogHardLimit())
                     .build();
             this.raftNode = Optional.of(node);
+            RaftMembershipPolicy effective = node.membershipPolicy();
+            long heartbeatMs = config.getHeartbeatIntervalMs();
+            logger.info("Raft membership policy: promotionStabilizationMs={}, promotionMaxTrailingEntries={}, "
+                            + "cleanup.enabled={}, cleanup.failureTimeoutMs={}, cleanup.intervalMs={}, "
+                            + "cleanup.minVoters={}, promotionStabilizationRounds={}, cleanup.failureTimeoutRounds={}, "
+                            + "cleanup.intervalRounds={}",
+                    effective.promotionStabilizationMs(), effective.promotionMaxTrailingEntries(),
+                    effective.cleanupEnabled(), effective.cleanupFailureTimeoutMs(), effective.cleanupIntervalMs(),
+                    effective.cleanupMinVoters(), effective.promotionStabilizationRounds(heartbeatMs),
+                    effective.cleanupFailureTimeoutRounds(heartbeatMs), effective.cleanupIntervalRounds(heartbeatMs));
 
             transport.setRaftNode(node);
 

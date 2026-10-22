@@ -16,27 +16,48 @@
 
 package dev.mars.qraft.server;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.AppenderBase;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.mars.qraft.common.async.BlockingTaskExecutor;
+import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.common.async.RaftStateLoop;
+import dev.mars.qraft.raft.storage.RaftStorageFactory;
 import dev.mars.qraft.raft.RaftMembershipPolicy;
 import dev.mars.qraft.server.config.AppConfig;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.slf4j.LoggerFactory;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -51,6 +72,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 class QraftServerLifecycleTest {
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final String OPERATOR_TOKEN = "membership-wiring-test-secret-keep-out-of-logs";
     @TempDir
     Path temporaryDirectory;
 
@@ -306,6 +329,122 @@ class QraftServerLifecycleTest {
 
         assertTrue(telemetryClosed.get());
         assertArrayEquals(new Throwable[]{runtimeFailure}, startupFailure.getSuppressed());
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("membershipPolicies")
+    void aRealServerReportsItsEffectiveMembershipPolicyAndReleasesItsWal(
+            String description, long electionMs, long heartbeatMs, String membershipJson,
+            String expectedPolicy) throws Exception {
+        Path storage = temporaryDirectory.resolve("raft");
+        Map<String, Object> raft = new HashMap<>();
+        raft.put("port", 0);
+        raft.put("electionTimeoutMs", electionMs);
+        raft.put("heartbeatIntervalMs", heartbeatMs);
+        raft.put("storage", Map.of("path", storage.toString()));
+        if (membershipJson != null) raft.put("membership", JSON.readTree(membershipJson));
+        Path configuration = temporaryDirectory.resolve("membership-server.json");
+        JSON.writeValue(configuration.toFile(), Map.of("version", 1, "server", Map.of(
+                "id", "membership-wiring", "http", Map.of("port", 0), "apiGrpcPort", 0,
+                "raft", raft, "operator", Map.of("token", OPERATOR_TOKEN),
+                "telemetry", Map.of("enabled", false))));
+        AppConfig config = AppConfig.fromFile(configuration);
+        config.validate();
+
+        Logger logger = (Logger) LoggerFactory.getLogger(QraftServerService.class);
+        MembershipLogCaptureHelper capture = new MembershipLogCaptureHelper();
+        capture.start();
+        logger.addAppender(capture);
+        RaftExecutorsFixture executors = RaftExecutorsFixture.create();
+        QraftServerService service = new QraftServerService(
+                executors.stateLoop(), executors.blockingTasks(), config);
+        try {
+            service.start().get(30, TimeUnit.SECONDS);
+            try (HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()) {
+                HttpResponse<String> response = client.send(HttpRequest.newBuilder(URI.create(
+                        "http://127.0.0.1:" + service.boundPorts().get("http") + "/health/live"))
+                        .timeout(Duration.ofSeconds(5)).GET().build(), HttpResponse.BodyHandlers.ofString());
+                assertEquals(200, response.statusCode(), response.body());
+            }
+            List<ILoggingEvent> policies = capture.events.stream()
+                    .filter(event -> event.getFormattedMessage().startsWith("Raft membership policy:"))
+                    .toList();
+            assertEquals(List.of(expectedPolicy), policies.stream().map(ILoggingEvent::getFormattedMessage).toList(),
+                    "the running node must report its policy once, including rounded durations");
+            assertEquals(Level.INFO, policies.getFirst().getLevel());
+            assertFalse(capture.events.stream().anyMatch(event -> event.getFormattedMessage().contains(OPERATOR_TOKEN)),
+                    "effective membership settings must not disclose the operator token");
+        } finally {
+            try {
+                try {
+                    service.stop().get(30, TimeUnit.SECONDS);
+                } finally {
+                    executors.close().get(30, TimeUnit.SECONDS);
+                }
+            } finally {
+                logger.detachAppender(capture);
+                capture.stop();
+            }
+        }
+
+        // A successful reopen proves the real service released the WAL directory's exclusive lock.
+        RaftStorageFactory.DurableStorage reopened = RaftStorageFactory.createDurable(storage, true)
+                .get(30, TimeUnit.SECONDS);
+        try {
+            reopened.snapshots().closeAsync().toCompletableFuture().get(30, TimeUnit.SECONDS);
+        } finally {
+            reopened.wal().closeAsync().toCompletableFuture().get(30, TimeUnit.SECONDS);
+        }
+    }
+
+    private static Stream<Arguments> membershipPolicies() {
+        return Stream.of(
+                Arguments.of("absent defaults", 5000L, 1000L, null,
+                        policy(10_000, 250, true, 60_000, 10_000, 3, 10, 60, 10)),
+                Arguments.of("non-default disabled cleanup", 5000L, 1000L, """
+                        {"promotionStabilizationMs":12501,"promotionMaxTrailingEntries":17,
+                         "cleanup":{"enabled":false,"failureTimeoutMs":75001,"intervalMs":12501,"minVoters":5}}
+                        """, policy(12_501, 17, false, 75_001, 12_501, 5, 13, 76, 13)),
+                Arguments.of("non-default enabled cleanup", 5000L, 1000L, """
+                        {"promotionStabilizationMs":2001,"promotionMaxTrailingEntries":3,
+                         "cleanup":{"enabled":true,"failureTimeoutMs":6001,"intervalMs":1001,"minVoters":7}}
+                        """, policy(2001, 3, true, 6001, 1001, 7, 3, 7, 2)),
+                Arguments.of("defaults follow configured timing", 90_000L, 20_000L, null,
+                        policy(10_000, 250, true, 90_000, 20_000, 3, 1, 5, 1)),
+                Arguments.of("zero promotion and exact cleanup boundaries", 5000L, 1000L, """
+                        {"promotionStabilizationMs":0,"promotionMaxTrailingEntries":0,
+                         "cleanup":{"enabled":false,"failureTimeoutMs":5000,"intervalMs":1000,"minVoters":1}}
+                        """, policy(0, 0, false, 5000, 1000, 1, 0, 5, 1)),
+                Arguments.of("partial membership retains defaults", 5000L, 1000L,
+                        "{\"promotionMaxTrailingEntries\":7}",
+                        policy(10_000, 7, true, 60_000, 10_000, 3, 10, 60, 10)),
+                Arguments.of("largest representable policy", 5000L, 1000L, """
+                        {"promotionStabilizationMs":9223372036854775807,
+                         "promotionMaxTrailingEntries":9223372036854775807,
+                         "cleanup":{"failureTimeoutMs":9223372036854775807,
+                                    "intervalMs":9223372036854775807,"minVoters":2147483647}}
+                        """, policy(Long.MAX_VALUE, Long.MAX_VALUE, true, Long.MAX_VALUE, Long.MAX_VALUE,
+                        Integer.MAX_VALUE, 9_223_372_036_854_776L, 9_223_372_036_854_776L, 9_223_372_036_854_776L)));
+    }
+
+    private static String policy(long stabilization, long lag, boolean enabled, long failure, long interval,
+                                 int minimum, long stabilizationRounds, long failureRounds, long intervalRounds) {
+        return "Raft membership policy: promotionStabilizationMs=" + stabilization
+                + ", promotionMaxTrailingEntries=" + lag + ", cleanup.enabled=" + enabled
+                + ", cleanup.failureTimeoutMs=" + failure + ", cleanup.intervalMs=" + interval
+                + ", cleanup.minVoters=" + minimum + ", promotionStabilizationRounds=" + stabilizationRounds
+                + ", cleanup.failureTimeoutRounds=" + failureRounds + ", cleanup.intervalRounds=" + intervalRounds;
+    }
+
+    /** Test log capture helper; copies service events without filtering or changing existing appenders. */
+    private static final class MembershipLogCaptureHelper extends AppenderBase<ILoggingEvent> {
+        private final List<ILoggingEvent> events = new CopyOnWriteArrayList<>();
+
+        @Override
+        protected void append(ILoggingEvent event) {
+            event.prepareForDeferredProcessing();
+            events.add(event);
+        }
     }
 
     private static boolean awaitQuietly(CountDownLatch latch) {

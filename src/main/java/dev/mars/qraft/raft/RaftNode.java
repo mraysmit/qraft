@@ -225,9 +225,9 @@ public class RaftNode {
     private final long snapshotCheckIntervalMs;
     private final long logHardLimit;
     /** Heartbeat rounds a non-voter must stay healthy before it is promoted. */
+    private final RaftMembershipPolicy membershipPolicy;
     private final long promotionStabilizationRounds;
     private final long promotionMaxTrailingEntries;
-    private final RaftMembershipPolicy membershipPolicy;
     private final long cleanupFailureRounds;
     private final long cleanupIntervalRounds;
 
@@ -473,14 +473,14 @@ public class RaftNode {
             for (String name : clusterNodes) listed.put(name, addresses.getOrDefault(name, name));
             RaftMembershipPolicy cleanup = membershipPolicy != null ? membershipPolicy
                     : RaftMembershipPolicy.defaults(electionTimeoutMs, heartbeatIntervalMs);
-            RaftMembershipPolicy policy = new RaftMembershipPolicy(promotionStabilizationMs,
-                    promotionMaxTrailingEntries, cleanup.cleanupEnabled(), cleanup.cleanupFailureTimeoutMs(),
-                    cleanup.cleanupIntervalMs(), cleanup.cleanupMinVoters());
-            policy.validateTiming(electionTimeoutMs, heartbeatIntervalMs);
+            RaftMembershipPolicy resolvedPolicy = new RaftMembershipPolicy(
+                    promotionStabilizationMs, promotionMaxTrailingEntries, cleanup.cleanupEnabled(),
+                    cleanup.cleanupFailureTimeoutMs(), cleanup.cleanupIntervalMs(), cleanup.cleanupMinVoters());
+            resolvedPolicy.validateFor(electionTimeoutMs, heartbeatIntervalMs);
             return new RaftNode(runtime, blockingTasks, nodeId, resolvedServerId, initialConfiguration, listed,
                     clusterNodes, transport, stateMachine,
                     commandCodec, mode, electionTimeoutMs, heartbeatIntervalMs, snap,
-                    snapshotThreshold, snapshotCheckIntervalMs, logHardLimit, policy,
+                    snapshotThreshold, snapshotCheckIntervalMs, logHardLimit, resolvedPolicy,
                     timerScheduler, transitionQueueCapacity);
         }
     }
@@ -520,19 +520,17 @@ public class RaftNode {
             @Override public boolean cancelTimer(long id) { return runtime.cancelTimer(id); }
         } : configuredTimerScheduler;
         this.electionTimeoutMs = electionTimeoutMs;
-        this.quorumContactRounds = Math.ceilDiv(electionTimeoutMs, heartbeatIntervalMs);
+        this.quorumContactRounds = Math.max(1, Math.ceilDiv(electionTimeoutMs, heartbeatIntervalMs));
         this.heartbeatIntervalMs = heartbeatIntervalMs;
         this.snapshotEnabled = snapshotEnabled && this.persistence.isDurable();
         this.snapshotThreshold = snapshotThreshold;
         this.snapshotCheckIntervalMs = snapshotCheckIntervalMs;
         this.logHardLimit = logHardLimit;
         this.membershipPolicy = membershipPolicy;
-        this.promotionStabilizationRounds = Math.ceilDiv(membershipPolicy.promotionStabilizationMs(), heartbeatIntervalMs);
+        this.promotionStabilizationRounds = membershipPolicy.promotionStabilizationRounds(heartbeatIntervalMs);
         this.promotionMaxTrailingEntries = membershipPolicy.promotionMaxTrailingEntries();
-        this.cleanupFailureRounds = Math.ceilDiv(membershipPolicy.cleanupFailureTimeoutMs(), heartbeatIntervalMs);
-        this.cleanupIntervalRounds = Math.ceilDiv(membershipPolicy.cleanupIntervalMs(), heartbeatIntervalMs);
-        logger.info("Raft membership policy: {}; promotionStabilizationRounds={}, cleanupFailureRounds={}, cleanupIntervalRounds={}",
-                membershipPolicy, promotionStabilizationRounds, cleanupFailureRounds, cleanupIntervalRounds);
+        this.cleanupFailureRounds = membershipPolicy.cleanupFailureTimeoutRounds(heartbeatIntervalMs);
+        this.cleanupIntervalRounds = membershipPolicy.cleanupIntervalRounds(heartbeatIntervalMs);
 
         // Initialize log with a dummy entry
         log.add(new LogEntry(0, 0, null));
@@ -1287,6 +1285,11 @@ public class RaftNode {
     }
 
     // ... Getters ...
+    /** The immutable effective local policy used by this node. */
+    public RaftMembershipPolicy membershipPolicy() {
+        return membershipPolicy;
+    }
+
     public boolean isRunning() {
         return running;
     }
@@ -1657,7 +1660,8 @@ public class RaftNode {
         // A transition applied while stopping must not re-arm the timer that shutdown cancelled.
         if (!running) return;
 
-        long timeout = electionTimeoutMs + (long) (Math.random() * electionTimeoutMs);
+        long jitterBound = Math.min(electionTimeoutMs, Long.MAX_VALUE - electionTimeoutMs);
+        long timeout = electionTimeoutMs + (long) (Math.random() * jitterBound);
         long timerGeneration = electionTimerGeneration;
 
         electionTimerId = setTimer(timeout, id -> onElectionTimer(id, timerGeneration));
