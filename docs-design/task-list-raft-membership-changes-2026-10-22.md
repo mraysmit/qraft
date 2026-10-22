@@ -23,7 +23,7 @@ and operator list and remove, is built, and its close-out gate was closed on
 on. Steps 1 to 3 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
-**Last updated:** 2026-10-22 (Step 7: contract approved as decision 8 (single-seed recovery, whole-cluster backup restore, server-ID fence); `RaftNode` confirmation tests green on unchanged production code; offline command API stubbed in `dev.mars.qraft.server.recovery` and its 23 red tests recorded, with the `raft.lock` copy rule added to the contract; implementation next. Earlier: Step 7 contract proposed for review and the exit gate revised to match. On 2026-10-21: Step 6 completed: five consecutive affected runs passed 64 tests each, `mvn install` passed 1,056 tests and every coverage gate, and the retained-log audit of 38 logs passed; Step 7 is next. Earlier today: Step 6 corrected focused run: all 64 tests and retained-log audits passed; desktop automation disabled at the owner's request. Earlier today: Step 5 runtime policy and failed-voter cleanup completed; five repeated runs, clean build/coverage, fresh-image runtime gate and retained-log audits passed; Step 6 is next. On 2026-10-19: server wiring implemented and verified: RED build 31 retained; build 32 passed five 115-test focused runs, 1,059 default, 10 end-to-end and 32 Docker tests, coverage and the retained-log audit. The immutable local policy reaches the node, promotion uses it, effective settings log excludes secrets, and seven real-server lifecycle cases cover HTTP startup and WAL release. Automatic cleanup remains next. Earlier today, timing slice complete: promotion/quorum ceiling division and election jitter fixed, command-helper race fixed, RED builds 28 and 29 retained; replay build 30 passed five 74-test focused runs, 1,028 default tests, coverage, 42 runtime tests and the full retained-log audit. The next task at that timing checkpoint was server wiring, followed by failed-voter cleanup. On 2026-10-17: Jenkins build 27 verified the committed parser slice at `bef4637`: 1,024 default, 10 end-to-end and 32 Docker tests passed, with all coverage gates and the retained-log audit; uncommitted boundary tests and runtime work remain pending. Earlier: prepared manual-timer tests for partial-round stabilization and the largest representable stabilization duration; no build or test was run, and production is unchanged. Earlier, 2026-10-15: membership parser implemented with defaults, validation and getters; 64 focused tests passed, full verification and runtime wiring pending. Earlier: merge reconciled the 2026-10-14 archival with the newer parser tests; the focused RED run and retained output are recorded under Step 5. On 2026-10-14: single-POM cleanup list archived and its links repaired; Step 5 resumed as the active task, with implementation pending. On 2026-10-11: the mutation rule removed at the owner's decision, from the rules and from the exits of Steps 5 to 8; the Step 4 gate, which had waited on it, closed, after PIT was tried for it and put on ice; the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
+**Last updated:** 2026-10-22 (Step 7: claim released when a run refuses before publishing, found in review of `885f92e` and fixed test-first; contract approved as decision 8 (single-seed recovery, whole-cluster backup restore, server-ID fence); `RaftNode` confirmation tests green on unchanged production code; offline command API stubbed in `dev.mars.qraft.server.recovery` and its 23 red tests recorded, with the `raft.lock` copy rule added to the contract; implementation next. Earlier: Step 7 contract proposed for review and the exit gate revised to match. On 2026-10-21: Step 6 completed: five consecutive affected runs passed 64 tests each, `mvn install` passed 1,056 tests and every coverage gate, and the retained-log audit of 38 logs passed; Step 7 is next. Earlier today: Step 6 corrected focused run: all 64 tests and retained-log audits passed; desktop automation disabled at the owner's request. Earlier today: Step 5 runtime policy and failed-voter cleanup completed; five repeated runs, clean build/coverage, fresh-image runtime gate and retained-log audits passed; Step 6 is next. On 2026-10-19: server wiring implemented and verified: RED build 31 retained; build 32 passed five 115-test focused runs, 1,059 default, 10 end-to-end and 32 Docker tests, coverage and the retained-log audit. The immutable local policy reaches the node, promotion uses it, effective settings log excludes secrets, and seven real-server lifecycle cases cover HTTP startup and WAL release. Automatic cleanup remains next. Earlier today, timing slice complete: promotion/quorum ceiling division and election jitter fixed, command-helper race fixed, RED builds 28 and 29 retained; replay build 30 passed five 74-test focused runs, 1,028 default tests, coverage, 42 runtime tests and the full retained-log audit. The next task at that timing checkpoint was server wiring, followed by failed-voter cleanup. On 2026-10-17: Jenkins build 27 verified the committed parser slice at `bef4637`: 1,024 default, 10 end-to-end and 32 Docker tests passed, with all coverage gates and the retained-log audit; uncommitted boundary tests and runtime work remain pending. Earlier: prepared manual-timer tests for partial-round stabilization and the largest representable stabilization duration; no build or test was run, and production is unchanged. Earlier, 2026-10-15: membership parser implemented with defaults, validation and getters; 64 focused tests passed, full verification and runtime wiring pending. Earlier: merge reconciled the 2026-10-14 archival with the newer parser tests; the focused RED run and retained output are recorded under Step 5. On 2026-10-14: single-POM cleanup list archived and its links repaired; Step 5 resumed as the active task, with implementation pending. On 2026-10-11: the mutation rule removed at the owner's decision, from the rules and from the exits of Steps 5 to 8; the Step 4 gate, which had waited on it, closed, after PIT was tried for it and put on ice; the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
 **Interruption completed:** [`task-list-single-pom-and-quorus-removal-2026-10-21.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md),
 started 2026-10-04 before the Step 4 close-out gate. The gate was closed on
 2026-10-11, as the first task of that list's Phase 7. That list was completed
@@ -1779,7 +1779,9 @@ implemented; the focused green run is pending in the owner's terminal.
 - The staging directory is `.<output name>.qraft-recovering` beside the output.
   Its name is the marker; a rerun deletes it, and a refusal removes it.
 - The read-only checks run first, so a plan they refuse makes no claim: overlap,
-  source server ID, the claim's state, and an existing output. Then the source
+  source server ID, the claim's state, and an existing output. (The
+  claim-release correction below also covers a source the examination refuses.)
+  Then the source
   lock is taken, the claim is created, and the copy, examination, recovery
   entry, new ID and atomic rename follow.
 - An unrecorded publication from an interrupted run is recognised by the
@@ -1814,6 +1816,36 @@ zero failures and four errors. `RecoveryInputTest` (8), `ServerIdentityTest`
     decoded", are RaftLog detecting the deliberately flipped byte in each
     replay.
   - The Maven capture's only unflagged exceptions are the four refusals above.
+
+**Claim release on refusal, 2026-10-22.** A review of commit `885f92e` found
+that the claim was created before the copy was examined, so a source that
+ordinary startup refuses, a removed source, or a corrupt one was left claimed
+for its output. A retry with another output was then refused as "already
+claimed", although nothing had been published and the claim file must not be
+deleted by hand. The contract's "Before step 1" claim stands; the claim is now
+released again when the run that made it refuses before the claim records a new
+server ID (after that, the output may exist, and the claim stays).
+- Tests first. `aRemovedSourceIsRefused`,
+  `aSourceThatOrdinaryStartupWouldRefuseIsRefused` and
+  `aCorruptSourceIsRefusedAndKeptAsEvidence` now assert that no claim remains;
+  `aSourceRefusedAfterCopyingMayStillSeedAnotherOutput` retries with another
+  output; `aRefusedRunReleasesOnlyTheClaimItMade` pins that a claim from an
+  earlier run is left as it was. Red run
+  `logs/qraft-claim-release-red-2026-10-22_17-28-38-430.log`: 17 tests, four
+  failures, the guard test passing.
+- Then `OfflineRecovery.publish` releases the claim on a refusal when
+  `madeHere` and it is not yet recorded, through the new
+  `RecoveryClaim.release()`.
+- Green: `logs/qraft-claim-release-green-2026-10-22_17-30-00-547.log` records 40
+  focused tests (`OfflineRecoveryTest` 17, `RecoveryInputTest` 8,
+  `ServerIdentityTest` 6, `PackageDependencyTest` 9), zero failures. The
+  application log `logs/qraft-maven-tests-2026-10-22_17-30-05.log` and the
+  console capture hold six ERROR events, all flagged intentional and naming
+  their test, and two stackless RaftLog WARN events for the deliberately
+  flipped byte. The earlier capture `qraft-claim-release-green-2026-10-22_17-29-31-983.log` is
+  incomplete (its output filter closed the pipeline) and counts for nothing. This was a small local
+  check, not the verification run: `mvn
+  install` and Jenkins follow.
 
 The rerun is pending. Separate-JVM locking, the crash boundaries and the CLI
 follow once these pass. Write failing tests first that show:

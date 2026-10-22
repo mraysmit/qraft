@@ -106,6 +106,13 @@ record RecoveryClaim(Path source, String sourceServerId, Path output, Optional<S
         ServerIdentity.forceDirectory(file.getParent());
     }
 
+    /** Deletes the claim file, durably; only for a claim made by a run that refused before recording a new ID. */
+    void release() throws IOException {
+        Path file = fileOf(source);
+        Files.deleteIfExists(file);
+        ServerIdentity.forceDirectory(file.getParent());
+    }
+
     private void write(FileChannel channel) throws IOException {
         ObjectNode root = JSON.createObjectNode();
         root.put("version", VERSION);

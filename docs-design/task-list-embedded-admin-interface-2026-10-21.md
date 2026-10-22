@@ -9,7 +9,7 @@
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
 This list is paused; the current task list is
-[`task-list-raft-membership-changes-2026-10-21.md`](task-list-raft-membership-changes-2026-10-21.md). Step 5 completed on 2026-10-21; Step 6 is next, with Steps 6 to 8 remaining before the client list starts.
+[`task-list-raft-membership-changes-2026-10-22.md`](task-list-raft-membership-changes-2026-10-22.md). Step 5 completed on 2026-10-21; Step 6 is next, with Steps 6 to 8 remaining before the client list starts.
 When this list's work is complete, add a completion summary and move this file
 to `docs/archive/`.
 

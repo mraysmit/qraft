@@ -120,8 +120,9 @@ public final class OfflineRecovery {
             }
             try (var _ = SourceLock.acquire(source)) {
                 RecoveryClaim claimed = claim.orElseGet(() -> RecoveryClaim.claimed(source, sourceServerId, output));
-                if (claim.isEmpty()) claimed.create();
-                return publish(plan, source, output, claimed);
+                boolean madeHere = claim.isEmpty();
+                if (madeHere) claimed.create();
+                return publish(plan, source, output, claimed, madeHere);
             }
         } catch (IOException failure) {
             throw new RecoveryRefusedException("Recovering " + source + " into " + output + " failed: "
@@ -156,11 +157,17 @@ public final class OfflineRecovery {
                 RecoveryResult.Outcome.PUBLICATION_RECORDED));
     }
 
-    private static RecoveryResult publish(RecoveryPlan plan, Path source, Path output, RecoveryClaim claimed)
-            throws RecoveryRefusedException, IOException {
+    /**
+     * Copies, examines and publishes. A source the examination refuses seeds nothing, so a refusal before the claim
+     * records a new server ID releases the claim this run made ({@code madeHere}); a claim from an earlier run is
+     * left as it was.
+     */
+    private static RecoveryResult publish(RecoveryPlan plan, Path source, Path output, RecoveryClaim claimed,
+                                          boolean madeHere) throws RecoveryRefusedException, IOException {
         Path staging = output.resolveSibling("." + output.getFileName() + ".qraft-recovering");
         Files.createDirectories(output.getParent());
         DirectoryCopy.deleteTree(staging); // only ever an unpublished copy from an interrupted run
+        boolean recorded = false;
         try {
             DirectoryCopy.copy(source, staging);
             RecoveryExamination examined = RecoveryExamination.examine(staging, claimed.sourceServerId());
@@ -181,13 +188,18 @@ public final class OfflineRecovery {
             ServerIdentity.replace(staging, newServerId);
             RecoveryClaim prepared = claimed.prepared(newServerId, index, term);
             prepared.replace();
+            recorded = true;
             Files.move(staging, output, StandardCopyOption.ATOMIC_MOVE);
             ServerIdentity.forceDirectory(output.getParent());
             prepared.publishedClaim().replace();
             logger.info("Recovered {} into {}: sole voter {} ({}) at index {} term {}", source, output,
                     plan.name(), newServerId, index, term);
             return new RecoveryResult(newServerId, index, term, output, RecoveryResult.Outcome.RECOVERED);
-        } catch (RecoveryRefusedException | IOException | RuntimeException failure) {
+        } catch (RecoveryRefusedException refused) {
+            DirectoryCopy.deleteTree(staging);
+            if (madeHere && !recorded) claimed.release();
+            throw refused;
+        } catch (IOException | RuntimeException failure) {
             DirectoryCopy.deleteTree(staging);
             throw failure;
         }

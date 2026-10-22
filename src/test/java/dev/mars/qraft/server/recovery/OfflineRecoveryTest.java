@@ -227,7 +227,7 @@ class OfflineRecoveryTest {
         SurvivorDirectoryFixture.write(source, serverIdOf("a"), 1, Optional.of("a"), List.of(
                 ManualRaftClusterFixture.bootstrapEntry(MEMBERS), put(2, 1, "k1", "v1"),
                 SurvivorDirectoryFixture.configuration(3, 1, Set.of("b", "c"))));
-        assertRefused(source, plan(source, output()), "is not a member");
+        assertRefusedBeforeClaim(source, plan(source, output()), "is not a member");
     }
 
     @Test
@@ -236,7 +236,7 @@ class OfflineRecoveryTest {
         IntentionalErrorsHelper.expect(RAFT_STATE_WITHOUT_CONFIGURATION);
         Path source = directory.resolve("survivors").resolve("a");
         SurvivorDirectoryFixture.write(source, serverIdOf("a"), 1, Optional.empty(), List.of(put(1, 1, "k", "v")));
-        assertRefused(source, plan(source, output()), "no cluster configuration");
+        assertRefusedBeforeClaim(source, plan(source, output()), "no cluster configuration");
     }
 
     @Test
@@ -249,7 +249,7 @@ class OfflineRecoveryTest {
         byte[] bytes = Files.readAllBytes(log);
         bytes[bytes.length / 2] ^= 0x01;
         Files.write(log, bytes);
-        assertRefused(source, plan(source, output()), "corrupt");
+        assertRefusedBeforeClaim(source, plan(source, output()), "corrupt");
     }
 
     @Test
@@ -283,6 +283,36 @@ class OfflineRecoveryTest {
         assertEquals(sourceBefore, digest(source));
     }
 
+    @Test
+    void aRefusedRunReleasesOnlyTheClaimItMade() throws Exception {
+        Path source = directory.resolve("survivors").resolve("a");
+        SurvivorDirectoryFixture.write(source, serverIdOf("a"), 1, Optional.of("a"), List.of(
+                ManualRaftClusterFixture.bootstrapEntry(MEMBERS), put(2, 1, "k1", "v1"),
+                SurvivorDirectoryFixture.configuration(3, 1, Set.of("b", "c"))));
+        RecoveryClaim.claimed(source, serverIdOf("a"), output()).create();
+        String earlier = Files.readString(claim(source));
+
+        assertRefused(source, plan(source, output()), "is not a member");
+
+        assertEquals(earlier, Files.readString(claim(source)), "a claim from an earlier run is left as it was");
+    }
+
+    @Test
+    void aSourceRefusedAfterCopyingMayStillSeedAnotherOutput() throws Exception {
+        Path source = directory.resolve("survivors").resolve("a");
+        SurvivorDirectoryFixture.write(source, serverIdOf("a"), 1, Optional.of("a"), List.of(
+                ManualRaftClusterFixture.bootstrapEntry(MEMBERS), put(2, 1, "k1", "v1"),
+                SurvivorDirectoryFixture.configuration(3, 1, Set.of("b", "c"))));
+        assertRefused(source, plan(source, output()), "is not a member");
+        Path other = directory.resolve("elsewhere").resolve("a");
+
+        RecoveryRefusedException refused = assertThrows(RecoveryRefusedException.class,
+                () -> OfflineRecovery.recover(plan(source, other)));
+
+        assertTrue(refused.getMessage().contains("is not a member"), refused.getMessage());
+        assertFalse(refused.getMessage().contains("already claimed"), refused.getMessage());
+    }
+
     private Path output() {
         return directory.resolve("recovered").resolve("a");
     }
@@ -295,7 +325,10 @@ class OfflineRecoveryTest {
         return source.resolveSibling(source.getFileName() + ".qraft-recovery.json");
     }
 
-    /** Refused by a check that reads the source and changes nothing, so no claim is made and nothing staged. */
+    /**
+     * Refused by a check that only reads the source, before anything is published: the refused run leaves no claim
+     * (it makes none, or releases the one it made) and nothing staged.
+     */
     private static void assertRefusedBeforeClaim(Path source, RecoveryPlan plan, String reason) throws Exception {
         assertRefused(source, plan, reason);
         assertFalse(Files.exists(claim(source)), "a plan refused before copying makes no claim");

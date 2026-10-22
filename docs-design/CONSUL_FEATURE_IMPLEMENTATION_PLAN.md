@@ -428,7 +428,7 @@ unchecked features below remain open.
 - [ ] Implement ACL tokens, policies, token validation, and audit events
   (phase 7; item 9).
 - [ ] Implement server membership change. Decided 2026-09-29, and in progress
-  in [`task-list-raft-membership-changes-2026-10-21.md`](task-list-raft-membership-changes-2026-10-21.md):
+  in [`task-list-raft-membership-changes-2026-10-22.md`](task-list-raft-membership-changes-2026-10-22.md):
   server IDs, the configuration in the log, non-voter promotion, joining, and
   operator list/remove are done. The Step 4 close-out gate closed on 2026-10-11
   when the owner removed the mutation requirement. Lost-quorum recovery and
