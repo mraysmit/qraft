@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-10-21 (Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; Step 6 is next; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
+**Last updated:** 2026-10-21 (Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
 
 ## 1. Purpose
 
@@ -1989,7 +1989,7 @@ not expose the administrative routes.
 Current progress, the active tranche's detailed steps, and the backlog are
 tracked in the current dated task list in `docs-design/`
 ([`task-list-raft-membership-changes-2026-10-21.md`](task-list-raft-membership-changes-2026-10-21.md),
-Step 5 complete on 2026-10-21 and Step 6 next;
+Steps 5 and 6 complete on 2026-10-21 and Step 7 next;
 its predecessor, [`task-list-test-suite-remediation-2026-10-21.md`](../docs/archive/task-list-test-suite-remediation-2026-10-21.md),
 was archived on 2026-10-02 with its packaged-artifact test carried forward; the
 administrative interface list is paused, see [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md)).

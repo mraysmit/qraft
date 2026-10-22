@@ -1,7 +1,11 @@
 # Task List: Raft Membership Changes
 
 **Date:** 2026-09-29
-**Active work:** Step 7, recovery from lost quorum, is next. Step 6,
+**Active work:** Step 7, recovery from lost quorum. Its contract was approved
+on 2026-10-22. Decision 8 records it: a single seed rebuilt offline under a
+new server ID, with backup restore included. The `RaftNode` confirmation tests
+passed on unchanged production code. The offline command's failing tests are
+next. Step 6,
 disruptive-server validation, completed on 2026-10-21: five manual-timer
 scenarios were added; after correcting the first run's incorrect expected-error
 declaration, the focused rerun and five consecutive affected runs each passed
@@ -19,7 +23,7 @@ and operator list and remove, is built, and its close-out gate was closed on
 on. Steps 1 to 3 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
-**Last updated:** 2026-10-21 (Step 6 completed: five consecutive affected runs passed 64 tests each, `mvn install` passed 1,056 tests and every coverage gate, and the retained-log audit of 38 logs passed; Step 7 is next. Earlier today: Step 6 corrected focused run: all 64 tests and retained-log audits passed; desktop automation disabled at the owner's request. Earlier today: Step 5 runtime policy and failed-voter cleanup completed; five repeated runs, clean build/coverage, fresh-image runtime gate and retained-log audits passed; Step 6 is next. Earlier, 2026-10-15: membership parser implemented with defaults, validation and getters; 64 focused tests passed, full verification and runtime wiring pending. Earlier: merge reconciled the 2026-10-14 archival with the newer parser tests; the focused RED run and retained output are recorded under Step 5. On 2026-10-14: single-POM cleanup list archived and its links repaired; Step 5 resumed as the active task, with implementation pending. On 2026-10-11: the mutation rule removed at the owner's decision, from the rules and from the exits of Steps 5 to 8; the Step 4 gate, which had waited on it, closed, after PIT was tried for it and put on ice; the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
+**Last updated:** 2026-10-22 (Step 7 contract proposed for review: decision 8 records the single-seed recovery model, whole-cluster backup restore and the server-ID fence; the exit gate is revised to match. On 2026-10-21: Step 6 completed: five consecutive affected runs passed 64 tests each, `mvn install` passed 1,056 tests and every coverage gate, and the retained-log audit of 38 logs passed; Step 7 is next. Earlier today: Step 6 corrected focused run: all 64 tests and retained-log audits passed; desktop automation disabled at the owner's request. Earlier today: Step 5 runtime policy and failed-voter cleanup completed; five repeated runs, clean build/coverage, fresh-image runtime gate and retained-log audits passed; Step 6 is next. Earlier, 2026-10-15: membership parser implemented with defaults, validation and getters; 64 focused tests passed, full verification and runtime wiring pending. Earlier: merge reconciled the 2026-10-14 archival with the newer parser tests; the focused RED run and retained output are recorded under Step 5. On 2026-10-14: single-POM cleanup list archived and its links repaired; Step 5 resumed as the active task, with implementation pending. On 2026-10-11: the mutation rule removed at the owner's decision, from the rules and from the exits of Steps 5 to 8; the Step 4 gate, which had waited on it, closed, after PIT was tried for it and put on ice; the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
 **Interruption completed:** [`task-list-single-pom-and-quorus-removal-2026-10-21.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md),
 started 2026-10-04 before the Step 4 close-out gate. The gate was closed on
 2026-10-11, as the first task of that list's Phase 7. That list was completed
@@ -126,7 +130,25 @@ are listed at the end of this section.
 - **Lost quorum.** On the surviving servers, the operator writes
   `raft/peers.json` listing their node IDs and addresses, then restarts them.
   The guide warns that this "most likely involves data loss". A stale entry can
-  be removed with `consul operator raft remove-peer`.
+  be removed with `consul operator raft remove-peer`. Checked again on
+  2026-10-22:
+  - Each entry has `id`, the server's node ID; `address`; and an optional
+    `non_voter`.
+  - The server reads the file at startup and deletes it after a successful
+    recovery. It refuses the file on an empty data directory.
+  - One survivor is enough, and it need not have been the leader. The
+    tutorial recovers a single survivor and rebuilds the lost servers with
+    empty data directories, and they rejoin. With several survivors, the file
+    must list all of them.
+  - Listing a lost server fails with "refused to recover cluster with no
+    initial state".
+  - Recovery "implicitly commits all outstanding Raft log entries". Running it
+    on more than one server, or on the wrong one, risks split-brain.
+- **Restore from backup.** `consul snapshot restore` (`PUT /v1/snapshot`)
+  loads a snapshot into a fresh, running cluster that has a leader. The
+  snapshot holds key/value entries, the service catalog, prepared queries,
+  sessions and ACLs. The new cluster's servers have their own identities. The
+  guide prefers this to `peers.json` whenever a usable backup exists.
 
 **Forming the first cluster** (`maybeBootstrap` in Consul's `server_serf.go`):
 1. Every server has the same `bootstrap_expect = N`, and a `retry_join` list
@@ -173,6 +195,8 @@ caught up.
 Sources:
 - [Consul Autopilot](https://developer.hashicorp.com/consul/docs/manage/scale/autopilot)
 - [Disaster recovery for Consul clusters](https://developer.hashicorp.com/consul/tutorials/operate-consul/recovery-outage)
+- [Commands: Snapshot Restore](https://developer.hashicorp.com/consul/commands/snapshot/restore)
+- [Backup and restore a Consul datacenter](https://developer.hashicorp.com/consul/docs/manage/disaster-recovery/backup-restore)
 - [Commands: Operator Raft](https://developer.hashicorp.com/consul/commands/operator/raft)
 - [Raft Operator HTTP API](https://developer.hashicorp.com/consul/api-docs/operator/raft)
 - [Node parameters (`node_id`)](https://developer.hashicorp.com/consul/docs/reference/agent/configuration-file/node)
@@ -263,6 +287,37 @@ Decisions 1, 2, 4, and 5 follow from this. Decision 3 was made the same day.
    there: a removal needs the operator token, and listing stays open.
 7. **Forwarding. Decided 2026-09-29** for Step 4, and recorded there: any
    server forwards a join or a removal to the leader, once.
+8. **Lost-quorum recovery. Decided 2026-10-22** for Step 7, whose contract
+   is recorded there. Design section 22 requires an architecture decision
+   record for a change to durable identity; this entry is that record.
+   - The nearest Consul equivalent is its single-survivor `peers.json`
+     recovery (section 3). Qraft departs from it by never editing the
+     survivor's directory and by giving the seed a new server ID. Step 7
+     compares the two in detail.
+   - One stopped survivor, or an offline backup, becomes the **seed**. An
+     offline command copies it into a new data directory and appends one
+     recovery configuration entry. That entry makes the seed the sole voter
+     under a new server ID. The source is never changed.
+   - Every other directory is excluded. Other survivors are not recovered in
+     place: they are wiped and rejoin through the existing join and promotion
+     path, under new server IDs.
+   - Whole-cluster restore from an older backup uses the same command and
+     has its own scenario.
+   - The old cluster is kept out by server IDs, with no wire or format change:
+     - The existing target-server-ID and configured-ID checks refuse traffic
+       between the seed's new identity and the old configuration.
+     - Leader stickiness ignores campaigns while a leader is live.
+     - The runbook's mandatory quarantine keeps excluded directories from
+       starting.
+   - The recovery entry is the only configuration entry exempt from the change
+     rules of design section 4.2: one server at a time, new servers as
+     non-voters, and a change only after a current-term commit. It is written
+     offline and never submitted to a running cluster.
+   - Rejected alternatives:
+     - Consul-style multi-survivor `peers.json`. It needs identical inputs on
+       every survivor, reconciliation between survivors and a separate fence.
+     - A recovery epoch carried in every RPC. It is a wire and
+       durable-format change.
 
 ## 6. Steps
 
@@ -1251,7 +1306,7 @@ containers before the list closes.
 
 ### Step 7. Recovery from lost quorum
 
-**Status: Planned; no supported recovery procedure exists today.** An older
+**Status: In progress, 2026-10-22. The owner approved the contract (decision 8). The `RaftNode` confirmation tests passed and their logs were audited. Next are the offline command's failing tests. No production code has changed, and no supported recovery procedure exists today.** An older
 backup must not be restarted under its former voter ID in an existing cluster.
 Offline backup consistency does not prove that later votes and acknowledged
 entries can be rolled back safely.
@@ -1270,23 +1325,325 @@ backups, and identify the selected survivors before rewriting membership. It
 must state which data can be lost and how the operator checks recovered state.
 Restarting intact current directories is different from rolling them back to
 older backups; whole-cluster backup restore stays unsupported unless this step
-explicitly implements and tests it.
+explicitly implements and tests it. Decision 8 delivers it.
+
+#### Contract (proposed 2026-10-22)
+
+The contract follows the single-seed model of decision 8. These facts about
+the current code shape it:
+- Membership lives only in WAL configuration entries and the snapshot envelope.
+  The latest configuration in the log is in force, committed or not.
+- The commit index is not persisted. A sole voter treats its whole recovered
+  log as committed (`RaftNode` recovery).
+- AppendEntries and InstallSnapshot that name another server ID are refused
+  before term, log or leader change. Replies count only from the server ID the
+  configuration records.
+- A leader ignores every vote request. A follower ignores vote requests while
+  it has live leader contact.
+- Opening RaftLog or the snapshot store can repair a torn tail and set aside
+  interrupted files. That is a change to the directory.
+- Ordinary startup gives a populated directory without `server-id` a new ID.
+- There is no offline command today. `qraft operator raft` only calls a
+  running server over HTTP.
+
+**Against Consul.** The procedure follows Consul's single-survivor recovery
+(section 3), with these differences:
+
+| Concern | Consul | Qraft |
+|---|---|---|
+| Recovery input | `raft/peers.json` placed in the survivor's data directory | `recovery.json` passed to an offline command; nothing is placed in a data directory |
+| Surviving servers recovered | One or more, all listed in the file | Exactly one seed; the others rejoin empty |
+| Survivor's directory | Rewritten in place at startup | Copied; the source is never changed |
+| Seed's identity | Keeps its node ID | Gets a new server ID |
+| One-time use | File deleted after a successful recovery | Claim file beside the source; ordinary startup reads neither |
+| Uncommitted entries | Implicitly committed | Committed by the sole voter at first start |
+| Lost servers | Rebuilt empty and rejoin | The same, under new server IDs |
+| Keeping the old cluster out | The lost servers are destroyed and redeployed | Server-ID checks and leader stickiness, plus mandatory quarantine |
+| Restore from backup | Fresh cluster, then `consul snapshot restore` over HTTP | The backup becomes the seed, through the same offline command |
+
+Two reasons drive the departures:
+- The runbook forbids editing files inside a data directory.
+- An older copy must not return under its former voter ID.
+
+The new server ID is also what fences off the old cluster. Qraft has no API to
+import a snapshot into a running cluster, so Consul's backup path has no direct
+counterpart.
+
+**Commands.** Two offline subcommands of `qraft operator raft` use its exit
+codes: 0 done, 1 refused, 2 misuse.
+- Neither contacts a server.
+- Ordinary `qraft server` startup never reads their inputs or outputs.
+- `inspect --dir <path>` reports on a stopped directory without changing it:
+  - server ID, term and vote;
+  - last log index and term;
+  - snapshot index and term;
+  - compaction boundary;
+  - the configuration in force and where it came from;
+  - whether ordinary startup would refuse the directory, and why.
+
+  It works on a byte copy in a temporary directory and refuses a directory
+  whose lock is held.
+- `recover --input <recovery.json>` performs the recovery below.
+
+**Recovery input.** A versioned JSON file, passed explicitly and never
+discovered:
+
+```json
+{
+  "version": 1,
+  "source": { "path": "/backup/node-a-2026-10-22", "serverId": "<the source's server-id>" },
+  "serverConfig": "/etc/qraft/server.json"
+}
+```
+
+- It is read with the server JSON rules. `version` must be 1. Unknown or
+  duplicate keys, placeholders and missing values are refused.
+- `source.serverId` must equal the source's `server-id`, so the wrong
+  directory cannot be chosen by mistake.
+- The output directory, name and Raft address come from `serverConfig`: its
+  `server.raft.storage.path`, `server.id` and `server.raft.nodes[server.id]`.
+  The recovered server then starts with that same file, so they cannot
+  disagree. Relative paths resolve as the server resolves them.
+- Server JSON gains no recovery setting.
+
+**Selecting the seed.** The operator stops every surviving process, runs
+`inspect` on each surviving directory and usable backup, and picks the
+most up-to-date log by Raft's rule: highest last log term, then highest last
+log index.
+
+`recover` refuses a source when:
+- its lock is held;
+- its `server-id` is missing or unreadable. Unlike ordinary startup, recovery
+  cannot establish whose history the directory holds;
+- ordinary startup would refuse it: a corrupt or unsupported WAL or metadata,
+  a damaged snapshot envelope, compaction past the published snapshot, no
+  configuration, or an unpublished rewrite;
+- its server ID is not a member of its own configuration in force, as with a
+  removed server;
+- the source and the output are the same directory, or one contains the
+  other;
+- the output already exists (see repeat invocation).
+
+**Authoritative history and what is lost.** The seed's history becomes the
+recovered cluster's history.
+- Every entry in the seed's log is kept, including entries it never learned
+  were committed. The seed cannot tell those apart, so as sole voter it
+  commits all of them at its first start. A write whose client saw an unknown
+  outcome may therefore appear.
+- Entries that only the excluded servers held are lost, even if the old
+  cluster committed and acknowledged them.
+- With a backup as seed, everything after the backup is lost.
+- The catalog is the state machine at the seed's last entry. The container
+  scenarios record what clients observe afterwards.
+
+**The rewritten directory.** The command never changes the source. It works in
+a staging directory beside the output, on the same filesystem, in this order:
+1. It holds the source's `raft.lock` for the whole copy, so no server can start
+   on the source meanwhile.
+2. It copies every file byte for byte, forces the copies and compares checksums
+   with the source.
+3. It opens the copy with the ordinary storage and recovery checks, and refuses
+   on any failure.
+4. It appends one configuration entry at the next index, in term
+   T = max(current term, last log term) + 1. The entry lists a single voter:
+   a newly generated server ID, with the name and address from `serverConfig`.
+   The ID must differ from every server ID in the retained configurations.
+5. It syncs the WAL, then sets the persistent metadata to term T with no vote.
+6. It replaces `server-id` with the new ID: temp file, force, atomic move,
+   directory force.
+7. It closes the storage. It then publishes by renaming the staging directory
+   to the output and forcing the parent directory.
+
+The index-1 bootstrap entry and every earlier entry stay as they were. No WAL,
+snapshot, metadata or wire format changes.
+
+**One-time use.** Before step 1, the command creates a claim file beside the
+source, `<source>.qraft-recovery.json`. It is created new, never overwritten,
+and forced to disk.
+- The claim records the source server ID and the output path. Once they exist,
+  it also records the new server ID and the recovery index and term.
+- A later `recover` from the same source with a different output is refused,
+  so one source cannot seed two clusters.
+- The claim never enters a data directory, and startup never reads it.
+- A source on read-only media is first copied to writable storage as an
+  offline backup copy, under the runbook's backup rules.
+
+**Interruption and repeat invocation.**
+- **Interrupted before publication:** the output does not exist. The staging
+  directory carries a marker and is never a valid data directory. The next
+  `recover` with the same input removes its own marked staging directory and
+  starts again from the unchanged source, with a new server ID, since the old
+  one was never published.
+- **Interrupted after the rename, before the claim records publication:** the
+  next run finds the output and checks that its `server-id` matches the claim.
+  It then records publication and exits 0 without other changes.
+- **After a complete recovery:** `recover` with the same input exits 1 and
+  changes nothing.
+- No partial staging directory is ever accepted as a recovered directory.
+
+**Excluded servers and the other survivors.**
+- Every directory except the seed's output is excluded: the seed's source, the
+  other survivors and the lost servers. They are kept as evidence and never
+  started again under their server IDs.
+- To return, a server starts on an empty directory with its usual server JSON.
+  It gets a new server ID, joins through the existing path, and is promoted
+  under Step 5's policy. The recovered configuration names only the seed, so no
+  name or address collision blocks it.
+- Quarantine is mandatory. Server IDs keep the two clusters apart:
+  - the seed and the rejoined servers refuse AppendEntries and InstallSnapshot
+    meant for the old IDs;
+  - the old configuration counts no reply from the new IDs;
+  - the recovered leader ignores old campaigns.
+
+  But excluded directories that hold an old majority could still start and
+  serve their own clients as the old cluster. The runbook therefore requires
+  every excluded server to stay stopped until it is wiped. A wiped server must
+  not list a still-running excluded server among its contacts.
+- One seed is enough. The recovered cluster starts below `cleanup.minVoters`
+  and grows by joins. Cleanup never takes it below that minimum.
+
+**Checking the recovered state.**
+- Before start, `inspect` on the output shows the new server ID and the
+  recovery entry's index and term.
+- After start, `/raft/status` shows the seed as sole voter and leader, with a
+  commit index at or above the recovery index.
+- `list-peers` lists only the seed, then each rejoined server as a non-voter
+  and later a voter.
+- The operator checks known registrations and makes a test write.
+- The runbook publishes its commands and observed results only after the exit
+  gate.
+
+**Red tests before code.** `RaftNodeLostQuorumRecoveryTest` (2026-10-22)
+builds the seed's directory as the command will, in its `seedFrom` helper,
+with these steps:
+1. a byte copy of a stopped survivor's real WAL directory;
+2. the recovery entry at the next index, in term T;
+3. the persistent term set to T with no vote.
+
+Its five cases cover the three points below, and one more: a running leader
+refuses the recovery configuration as a change. They test existing `RaftNode`
+behaviour, so they may pass at once. A failure shows that the contract needs a
+production change before the command is built. The command's own failing
+tests follow, once these results are recorded.
+
+**First confirmation run and correction, 2026-10-22.** Capture
+`logs/qraft-recovery-confirm-2026-10-22_11-29-53-657.log` records five tests
+and four failures. Only `aRunningLeaderRefusesTheRecoveryConfigurationAsAChange`
+passed.
+- All four failures came from the test's own setup, at the check "no quorum
+  remains to commit the tail" in `loseTheMajority`. None reached the behaviour
+  under test.
+- The cause: `loseTheMajority` read a's last log index after
+  `cluster.settle()`. The leader adds the entry to its log only once the WAL
+  append completes, and `settle()` drains the network and the state loop, not
+  storage writes. So the read saw index 3, equal to the commit index. The log
+  then shows "Command submitted at index 4", followed at once by the teardown
+  stop.
+- The correction: the helper now waits until the tail is in a's log, then
+  settles so the failed sends to b and c are logged. No production code,
+  expectation or failure definition changed.
+- The audit read both retained logs. The application log
+  `logs/qraft-maven-tests-2026-10-22_11-30-32.log` holds two attributed
+  `RAFT_PEER_UNREACHABLE` headers and nothing unflagged. The Maven capture
+  additionally holds the four `AssertionFailedError`s and Maven's `[ERROR]`
+  summary of them. Those are the defect corrected here, not accepted noise.
+  Neither log has ANSI escapes.
+
+**Second confirmation run and correction, 2026-10-22.** Capture
+`logs/qraft-recovery-confirm-2026-10-22_11-37-53-807.log` records five tests,
+zero failures and one error. Four tests passed:
+- the leader refusal;
+- the seed's first start, which commits its whole log and elects itself;
+- both joins, by replication and by installed snapshot.
+
+The error came from the old-majority test's setup:
+`IllegalStateException: no election timer is armed`, raised on old b's second
+campaign.
+- The cause is the same storage race as the first run. A durable node persists
+  its campaign term on the WAL thread, then sends its votes and re-arms its
+  election timer. `settle()` returned before that write finished, so the next
+  fire found no timer. `RaftNodeDisruptionTest` fires campaigns the same way,
+  but on volatile storage.
+- The correction: the loop now waits until b's term has advanced and its next
+  election timeout is armed. `RaftNode` does both in one state-loop
+  continuation after the durable write.
+- The audit read both retained logs. The application log
+  `logs/qraft-maven-tests-2026-10-22_11-38-44.log` holds ten attributed
+  `RAFT_PEER_UNREACHABLE` headers and nothing unflagged. Two lost peers in each
+  of four tests account for eight. In the erroring test, b's campaign toward
+  the stopped c accounts for one. The last comes from that test's teardown:
+  b's own transport stopped before the seed's vote reply arrived. The Maven
+  capture additionally holds the `IllegalStateException` and Maven's summary
+  of it, which is the defect corrected here.
+
+**Green confirmation runs, 2026-10-22.** The owner ran the corrected class
+twice. Each run passed five tests, with zero failures, errors or skips:
+- `logs/qraft-recovery-confirm-2026-10-22_12-47-04-903.log`, with application
+  log `qraft-maven-tests-2026-10-22_12-48-31.log`;
+- `logs/qraft-recovery-confirm-2026-10-22_13-14-06-940.log`, with application
+  log `qraft-maven-tests-2026-10-22_13-14-29.log`.
+
+All three behaviours below hold on unchanged production code. The contract
+needs no `RaftNode` change.
+
+The audit read all four logs. Each has 12 attributed ERROR headers, all
+`RAFT_PEER_UNREACHABLE`, with 60 stack frames, and none unflagged:
+- 8 come from the two lost peers in each of the four tests that lose the
+  majority;
+- 3 are old b's deliberate campaigns while c is down;
+- 1 is old b's write toward the stopped c.
+
+The 13 WARN events, without stack traces, are the server-ID fence working.
+Both messages come from `fromConfiguredServer`, and only old b logs them,
+since its configuration records "a" under the old server ID:
+- 4 × "Ignoring a vote response from a with server ID recovered-a";
+- 9 × "Ignoring an AppendEntries response from a with server ID recovered-a".
+
+The one Maven `[WARNING]` is the protobuf plugin's existing `binaryMavenPlugins`
+deprecation, already present in the 2026-10-21 install capture. No ANSI escape,
+JaCoCo mismatch or Maven error remains.
+
+Next come the offline command's own failing tests. Write failing tests first that show:
+- followers and joining servers accept the recovery entry by replication and by
+  installed snapshot, although a running leader would refuse that change;
+- the seed's first start elects it and commits its whole log;
+- old-cluster isolation holds. A returned old majority's AppendEntries,
+  InstallSnapshot and campaigns neither change the recovered cluster nor gain a
+  counted reply.
 
 **Exit gate.**
 
-- Real-storage/process tests reject malformed or duplicate identities,
-  incompatible data, conflicting recovery inputs, and ordinary startup that
-  would silently recover without the explicit offline action.
-- Crash/interruption tests cover each durable publication boundary, exclusive
-  locking, and safe repeat invocation; no partial rewrite is accepted as a
-  successful recovery.
-- A container scenario loses the majority, fences the excluded servers,
-  recovers selected survivors, elects one leader, and verifies the documented
-  retained catalog state and subsequent writes. Excluded servers return only
-  through the documented replacement/join path.
-- If whole-cluster backup restore is delivered, its own scenario uses backups
-  that predate later participation and proves the recovered history and voter
-  isolation. Otherwise both the design and runbook keep that feature open.
+- Real-storage tests in separate JVMs refuse:
+  - a malformed input or one with duplicate keys;
+  - a mismatched source server ID;
+  - a missing or unreadable `server-id`;
+  - incompatible or corrupt data;
+  - a locked source;
+  - a removed source;
+  - conflicting recovery inputs: the same source with another output, or
+    overlapping source and output;
+  - an existing output.
+
+  They also prove that ordinary startup never acts on a claim, a staging
+  directory or a recovery input.
+- Crash tests stop the command at each numbered boundary above, and between
+  publication and the claim update. A rerun either completes or refuses
+  without change. No partial staging directory is accepted, and the source's
+  bytes are unchanged throughout.
+- A container scenario from current directories:
+  1. It loses the majority and quarantines the excluded servers.
+  2. It inspects the survivors and recovers the most up-to-date one as seed.
+  3. It elects one leader.
+  4. It verifies the retained catalog state and later writes.
+  5. It rejoins wiped servers under new IDs and promotes them to the original
+     size.
+  6. It restarts an excluded old-majority directory and shows that it neither
+     changes the recovered cluster nor counts the new servers' replies.
+- A container scenario from backups:
+  1. It recovers from a backup that predates later participation.
+  2. It shows that entries after the backup are absent and those before it are
+     present.
+  3. It shows the same isolation of the old voters.
 - Focused concurrency tests pass five
   consecutive runs, and the full default, end-to-end, and fresh-image Docker
   suites pass. Publish executable operator commands and their observed results

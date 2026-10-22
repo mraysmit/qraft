@@ -393,7 +393,10 @@ unchecked features below remain open.
   whole-node upgrade compatibility.
 - [ ] Add lost-quorum recovery and a tested whole-cluster restore contract.
   Rejoining an existing cluster from an older backup under the same voter ID
-  is unsupported (membership Step 7).
+  is unsupported (membership Step 7). Consul's equivalents are `peers.json`
+  outage recovery and `consul snapshot restore`. Step 7's proposed contract
+  (decision 8) follows the single-survivor `peers.json` procedure, but it
+  copies the survivor into a new directory under a new server ID.
 - [x] Add multi-node integration and failure-injection coverage, including
   container crash, partition, and whole-cluster restart tests.
 - [x] Run the complete reactor test suite and review the resulting log.
