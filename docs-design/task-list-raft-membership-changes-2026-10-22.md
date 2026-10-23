@@ -1560,6 +1560,13 @@ and forced to disk.
 - A later `recover` from the same source with a different output is refused,
   so one source cannot seed two clusters.
 - The claim never enters a data directory, and startup never reads it.
+- The source's parent directory must be persistent and writable, because the
+  claim lives there. In containers, a source volume mounted at a mount root
+  such as `/app/data` would put the claim in the throwaway container layer,
+  and it would vanish when the container exits. So the source volume is
+  mounted inside a persistent recovery volume, at `/recovery/source`, and the
+  claim, staging directory and output (`/recovery/seed`) all live on that
+  volume. Decided 2026-10-23.
 - A source on read-only media is first copied to writable storage as an
   offline backup copy, under the runbook's backup rules.
 
@@ -1968,7 +1975,67 @@ The implementation:
 
 From the jar, the recovery's own logs use the production Logback defaults:
 `./logs` under the `server` mode name, plus the console. A separate operator
-log mode is noted for the runbook stage. The green run is pending.
+log mode is noted for the runbook stage.
+
+**CLI green run, 2026-10-23.** Capture
+`logs/qraft-recovery-cli-green-2026-10-23_13-10-45-788.log`, on `13bfd90`,
+records 32 tests with zero failures, errors or skips:
+`RaftOperatorRecoveryCommandTest` 7, `RaftOperatorCommandTest` 7,
+`QraftRuntimeApplicationTest` 9 and `PackageDependencyTest` 9.
+- The application log `logs/qraft-maven-tests-2026-10-23_13-11-05.log` and
+  the Maven capture each hold one attributed ERROR header and nothing
+  unflagged. It is `RAFT_STATE_WITHOUT_CONFIGURATION` from
+  `inspectSaysWhyOrdinaryStartupWouldRefuseADirectory`.
+- The Maven warnings are the stale JaCoCo data recorded above and the protobuf
+  `binaryMavenPlugins` deprecation. No ANSI escape or Maven error remains.
+
+**Container scenarios written, 2026-10-23.** `DockerLostQuorumRecoveryTest`
+(`@Tag("docker")`) runs the offline commands from the `qraft-runtime:test`
+image, whose entrypoint passes `operator ...` to the jar.
+- Layout: the source volume is mounted inside a new recovery volume, at
+  `/recovery/source`, so the claim, the staging directory and the seed
+  (`/recovery/seed`) persist (contract, one-time use).
+- The seed runs as a detached container with the network alias `server1` and
+  server1's acceptance configuration, with its storage path changed to
+  `/recovery/seed`. The compose `server1`, the recovery's source, stays
+  stopped.
+- From current directories:
+  1. Commit a write and wait for first snapshots, then stop server2 and
+     server3, losing the majority, and stop server1.
+  2. `inspect` the stopped directory, which ordinary startup accepts, then
+     `recover` it into a seed with a new server ID.
+  3. The seed leads as the sole voter and keeps the committed write.
+- From a backup:
+  1. Commit a write, stop server1 and copy its complete directory to a backup
+     volume, then restart it and commit a second write.
+  2. Lose the whole cluster and recover from the backup.
+  3. The seed holds the first write and not the second.
+- In both, quarantine is then broken on purpose. The old server2 and server3
+  restart on their own volumes, elect a leader and commit their own write. The
+  test waits until an old server's log shows the seed's AppendEntries answers
+  ignored under the new server ID, then shows the seed's state, term,
+  configuration and data unchanged.
+- Then server2 and server3 are wiped and restarted. They join the seed through
+  the ordinary path, are promoted, and leave three voters under new server IDs
+  with no old ID among them. A new write reaches all three, and the old
+  cluster's write is gone.
+- The declared errors are `RAFT_PEER_UNREACHABLE` and
+  `RAFT_PEER_NAME_UNRESOLVED`, for stopped servers. Anything else the audit
+  finds is investigated.
+- `SharedDockerClusterFixture` gains `startDetachedServer`, with a published
+  loopback HTTP port and its logs captured on close, plus `volumeName`,
+  `createVolume`, `removeVolume`, `runAlpine` and `runQraftCommand`, which
+  captures its output for the audit.
+
+The first run follows the clean `mvn install`, so the image uses a current jar.
+
+The offline command is complete: `RecoveryInput`, `inspect`, `recover`, the
+crash boundaries, separate-JVM locking and the CLI. Still open in Step 7:
+- the clean `mvn install` with coverage;
+- five consecutive focused runs;
+- the two container scenarios, from current directories and from backups;
+- the full default, end-to-end and fresh-image Docker suites;
+- the runbook and the design update.
 
 Then the CLI. Write failing tests first that show:
 - followers and joining servers accept the recovery entry by replication and by

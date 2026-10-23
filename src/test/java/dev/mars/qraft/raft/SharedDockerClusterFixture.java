@@ -319,9 +319,7 @@ public final class SharedDockerClusterFixture {
      */
     public static DetachedClient startDetachedClient(ComposeContainer cluster, String alias, String clientJson)
             throws Exception {
-        String network = cluster.getContainerByServiceName("server1")
-                .orElseThrow(() -> new IllegalStateException("the cluster has no server1"))
-                .getContainerInfo().getNetworkSettings().getNetworks().keySet().iterator().next();
+        String network = networkOf(cluster);
         Path config = Files.createTempFile("qraft-client-", ".json");
         String name = "qraft-client-" + alias + "-" + java.util.UUID.randomUUID();
         try {
@@ -336,6 +334,144 @@ public final class SharedDockerClusterFixture {
             throw failed;
         }
         return new DetachedClient(name, config);
+    }
+
+    /**
+     * A server container started beside a compose cluster, such as a seed recovered from a lost quorum, reachable
+     * on the cluster's network as its alias and from the host at {@code endpoint}. {@link #close()} captures its
+     * logs for the audit and removes it and its configuration; its volumes are left to the test.
+     */
+    public record DetachedServer(String name, Path config, String endpoint) implements AutoCloseable {
+        /** Stops the server gracefully and waits for it to exit; its container and volumes remain. */
+        public void stop() throws Exception {
+            runCommand(List.of("docker", "stop", "--time", "20", name));
+        }
+
+        @Override
+        public void close() throws Exception {
+            try {
+                captureDetachedContainer(name);
+                new ProcessBuilder("docker", "rm", "-f", name).redirectErrorStream(true).start()
+                        .waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
+            } finally {
+                Files.deleteIfExists(config);
+            }
+        }
+    }
+
+    /**
+     * Starts a server on {@code cluster}'s network, reachable there as {@code alias}, with {@code serverJson} as its
+     * configuration and {@code dockerArgs} adding its mounts, and publishes its HTTP port on the host loopback.
+     */
+    public static DetachedServer startDetachedServer(ComposeContainer cluster, String alias, String serverJson,
+                                                     String... dockerArgs) throws Exception {
+        String network = networkOf(cluster);
+        Path config = Files.createTempFile("qraft-server-", ".json");
+        String name = "qraft-server-" + alias + "-" + java.util.UUID.randomUUID();
+        try {
+            Files.writeString(config, serverJson);
+            makeContainerConfigReadable(config);
+            List<String> command = new ArrayList<>(List.of("docker", "run", "-d", "--name", name,
+                    "--network", network, "--network-alias", alias, "--label", "org.testcontainers=true",
+                    "-p", "127.0.0.1::8080",
+                    "--mount", "type=bind,source=" + config.toAbsolutePath() + ",target=/etc/qraft/server.json,readonly"));
+            command.addAll(List.of(dockerArgs));
+            command.addAll(List.of("qraft-runtime:test", "server", "--config", "/etc/qraft/server.json"));
+            runCommand(command);
+            String published = commandOutput(List.of("docker", "port", name, "8080/tcp")).lines()
+                    .filter(line -> line.startsWith("127.0.0.1:")).findFirst()
+                    .orElseThrow(() -> new IllegalStateException(name + " published no loopback HTTP port"));
+            return new DetachedServer(name, config, "http://" + published.trim());
+        } catch (Exception failed) {
+            new ProcessBuilder("docker", "rm", "-f", name).redirectErrorStream(true).start()
+                    .waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
+            Files.deleteIfExists(config);
+            throw failed;
+        }
+    }
+
+    /** The named volume that {@code serviceName} mounts at {@code destination}, such as {@code /app/data}. */
+    public static String volumeName(ComposeContainer cluster, String serviceName, String destination) {
+        return cluster.getContainerByServiceName(serviceName)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown compose service: " + serviceName))
+                .getContainerInfo().getMounts().stream()
+                .filter(mount -> mount.getDestination() != null
+                        && destination.equals(mount.getDestination().getPath()) && mount.getName() != null)
+                .map(com.github.dockerjava.api.command.InspectContainerResponse.Mount::getName)
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(serviceName + " mounts no named volume at "
+                        + destination));
+    }
+
+    /** Creates a named volume for one test and returns its name; the test removes it with {@link #removeVolume}. */
+    public static String createVolume(String purpose) throws Exception {
+        String name = "qraft-" + purpose + "-" + java.util.UUID.randomUUID();
+        runCommand(List.of("docker", "volume", "create", "--label", "org.testcontainers=true", name));
+        return name;
+    }
+
+    /** Removes a volume made by {@link #createVolume}, if it still exists. */
+    public static void removeVolume(String name) throws Exception {
+        new ProcessBuilder("docker", "volume", "rm", "-f", name).redirectErrorStream(true).start()
+                .waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
+    }
+
+    /** Runs {@code script} as root in a disposable Alpine container with {@code dockerArgs}, such as volume mounts. */
+    public static void runAlpine(String script, String... dockerArgs) {
+        List<String> command = new ArrayList<>(List.of("docker", "run", "--rm"));
+        command.addAll(List.of(dockerArgs));
+        command.addAll(List.of("alpine:3.20", "sh", "-c", script));
+        try {
+            runCommand(command);
+        } catch (Exception error) {
+            throw new IllegalStateException("Could not run " + script, error);
+        }
+    }
+
+    /**
+     * Runs the Qraft image once with {@code dockerArgs} and the command line {@code arguments}, such as an offline
+     * {@code operator raft} command, waits for it within a bound, and captures its output for the audit under
+     * {@code sourceName}.
+     */
+    public static DockerCommandResult runQraftCommand(String sourceName, List<String> dockerArgs,
+                                                      String... arguments) {
+        Path output = null;
+        String name = "qraft-" + sourceName + "-" + java.util.UUID.randomUUID();
+        try {
+            List<String> command = new ArrayList<>(List.of("docker", "run", "--rm", "--name", name));
+            command.addAll(dockerArgs);
+            command.add("qraft-runtime:test");
+            command.addAll(List.of(arguments));
+            output = Files.createTempFile("qraft-" + sourceName + "-", ".log");
+            Process process = new ProcessBuilder(command).redirectErrorStream(true)
+                    .redirectOutput(output.toFile()).start();
+            boolean exited = process.waitFor(120, java.util.concurrent.TimeUnit.SECONDS);
+            if (!exited) {
+                new ProcessBuilder("docker", "rm", "-f", name).redirectErrorStream(true).start()
+                        .waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
+                process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
+            }
+            String text = Files.readString(output, java.nio.charset.StandardCharsets.UTF_8);
+            DockerLogCaptureHelper.capture(name, sourceName, text);
+            return new DockerCommandResult(exited, exited ? process.exitValue() : -1, text);
+        } catch (Exception error) {
+            throw new IllegalStateException("Could not run the Qraft command " + String.join(" ", arguments), error);
+        } finally {
+            if (output != null) {
+                try {
+                    Files.deleteIfExists(output);
+                } catch (IOException ignored) {
+                    // Temporary output is best-effort cleanup after Docker releases it.
+                }
+            }
+        }
+    }
+
+    /** The first Docker network of {@code cluster}'s server1, which every compose service shares. */
+    private static String networkOf(ComposeContainer cluster) {
+        return cluster.getContainerByServiceName("server1")
+                .orElseThrow(() -> new IllegalStateException("the cluster has no server1"))
+                .getContainerInfo().getNetworkSettings().getNetworks().keySet().iterator().next();
     }
 
     /** Makes a non-secret test configuration readable by the image's non-root user on POSIX hosts. */
@@ -433,6 +569,11 @@ public final class SharedDockerClusterFixture {
     }
 
     private static void runCommand(List<String> command) throws Exception {
+        commandOutput(command);
+    }
+
+    /** Runs {@code command}, failing if it exits non-zero, and returns its combined output. */
+    private static String commandOutput(List<String> command) throws Exception {
         ProcessBuilder processBuilder = new ProcessBuilder(command);
         processBuilder.redirectErrorStream(true);
         Process process = processBuilder.start();
@@ -449,6 +590,7 @@ public final class SharedDockerClusterFixture {
             throw new IllegalStateException(String.join(" ", command)
                     + " exited with " + exitCode + ": " + output.toString().trim());
         }
+        return output.toString();
     }
 
     /** Captures every registered container's output without stopping it. */
