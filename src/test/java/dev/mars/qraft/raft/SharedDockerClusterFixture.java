@@ -410,10 +410,9 @@ public final class SharedDockerClusterFixture {
         return name;
     }
 
-    /** Removes a volume made by {@link #createVolume}, if it still exists. */
+    /** Removes a volume made by {@link #createVolume}, if it still exists, and fails if Docker cannot remove it. */
     public static void removeVolume(String name) throws Exception {
-        new ProcessBuilder("docker", "volume", "rm", "-f", name).redirectErrorStream(true).start()
-                .waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
+        runCommand(List.of("docker", "volume", "rm", "-f", name));
     }
 
     /** Runs {@code script} as root in a disposable Alpine container with {@code dockerArgs}, such as volume mounts. */

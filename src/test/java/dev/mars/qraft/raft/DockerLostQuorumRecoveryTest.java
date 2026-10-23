@@ -76,9 +76,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE,
         dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_NAME_UNRESOLVED
 })
-// Each test waits only on bounded conditions; the method budget exceeds their sum, so a failure reports the
-// condition that was not met rather than the module's default method timeout.
-@Timeout(value = 10, unit = TimeUnit.MINUTES)
+// Each test waits only on bounded conditions. Their worst-case sum is about twelve minutes before cluster startup,
+// snapshots and shutdown, so the method budget is twenty-five: a failure reports the condition that was not met
+// rather than the module's default method timeout.
+@Timeout(value = 25, unit = TimeUnit.MINUTES)
 @Execution(ExecutionMode.SAME_THREAD)
 @ResourceLock("shared-docker-clusters")
 class DockerLostQuorumRecoveryTest {
@@ -124,9 +125,7 @@ class DockerLostQuorumRecoveryTest {
             assertOldMajorityIsIsolated(cluster, endpoints, seed, seedId, "after-recovery");
             rejoinEmpty(cluster, endpoints, seed, seedId, sourceId, "after-recovery");
         } finally {
-            if (seed != null) seed.close();
-            SharedDockerClusterFixture.stopAndCapture(cluster);
-            SharedDockerClusterFixture.removeVolume(recovery);
+            cleanUp(cluster, seed, recovery);
         }
     }
 
@@ -165,19 +164,45 @@ class DockerLostQuorumRecoveryTest {
             seed = startSeed(cluster, recovery);
             assertRecoveredSeed(seed, seedId);
             assertTrue(everyNodeHas(List.of(seed.endpoint()), "before-backup"), "what preceded the backup is kept");
-            assertFalse(anyNodeHas(List.of(seed.endpoint()), "after-backup"), "what followed the backup is lost");
+            assertNoNodeHas(List.of(seed.endpoint()), "after-backup", "what followed the backup is lost");
             register(List.of(seed.endpoint()), "after-restore");
 
             assertOldMajorityIsIsolated(cluster, endpoints, seed, seedId, "after-restore");
             rejoinEmpty(cluster, endpoints, seed, seedId, sourceId, "after-restore");
             List<String> recoveredCluster = List.of(seed.endpoint(), endpoints.get(1), endpoints.get(2));
-            assertFalse(anyNodeHas(recoveredCluster, "after-backup"), "the rejoined servers took the seed's history");
+            assertNoNodeHas(recoveredCluster, "after-backup", "the rejoined servers took the seed's history");
         } finally {
-            if (seed != null) seed.close();
-            SharedDockerClusterFixture.stopAndCapture(cluster);
-            SharedDockerClusterFixture.removeVolume(recovery);
-            SharedDockerClusterFixture.removeVolume(backup);
+            cleanUp(cluster, seed, recovery, backup);
         }
+    }
+
+    /**
+     * Closes the seed, captures and stops the cluster and removes the volumes. Every step runs even if an earlier
+     * one fails, so no container or volume is left behind, and the first failure is then reported.
+     */
+    private static void cleanUp(ComposeContainer cluster, SharedDockerClusterFixture.DetachedServer seed,
+                                String... volumes) throws Exception {
+        Exception failure = null;
+        try {
+            if (seed != null) seed.close();
+        } catch (Exception error) {
+            failure = error;
+        }
+        try {
+            SharedDockerClusterFixture.stopAndCapture(cluster);
+        } catch (Exception | AssertionError error) {
+            if (failure == null) failure = error instanceof Exception e ? e : new IllegalStateException(error);
+            else failure.addSuppressed(error);
+        }
+        for (String volume : volumes) {
+            try {
+                SharedDockerClusterFixture.removeVolume(volume);
+            } catch (Exception error) {
+                if (failure == null) failure = error;
+                else failure.addSuppressed(error);
+            }
+        }
+        if (failure != null) throw failure;
     }
 
     /** Runs {@code operator raft inspect} on the stopped {@code source} volume and returns its printed fields. */
@@ -276,7 +301,7 @@ class DockerLostQuorumRecoveryTest {
         assertEquals("LEADER", seedStatus.path("state").asText(), "the seed ignores the old cluster's campaigns");
         assertEquals(seedTerm, seedStatus.path("term").asLong(), "appends meant for server1's old ID are refused");
         assertEquals(Map.of(seedId, true), configuration(seed.endpoint()));
-        assertFalse(anyNodeHas(List.of(seed.endpoint()), "old-cluster"), "the old cluster's write never reaches it");
+        assertNoNodeHas(List.of(seed.endpoint()), "old-cluster", "the old cluster's write never reaches it");
         assertTrue(everyNodeHas(List.of(seed.endpoint()), seedWrite));
     }
 
@@ -309,7 +334,7 @@ class DockerLostQuorumRecoveryTest {
         await().atMost(Duration.ofSeconds(60)).until(() -> everyNodeHas(recovered, seedWrite));
         register(recovered, "after-rejoin");
         await().atMost(Duration.ofSeconds(30)).until(() -> everyNodeHas(recovered, "after-rejoin"));
-        assertFalse(anyNodeHas(recovered, "old-cluster"), "the old cluster's write was wiped with its directories");
+        assertNoNodeHas(recovered, "old-cluster", "the old cluster's write was wiped with its directories");
     }
 
     /**
@@ -351,8 +376,18 @@ class DockerLostQuorumRecoveryTest {
         return endpoints.stream().allMatch(endpoint -> catalogHas(endpoint, serviceName) == Boolean.TRUE);
     }
 
-    private static boolean anyNodeHas(List<String> endpoints, String serviceName) {
-        return endpoints.stream().anyMatch(endpoint -> catalogHas(endpoint, serviceName) != Boolean.FALSE);
+    /**
+     * Waits until every endpoint has answered that its catalog lacks {@code serviceName}. An endpoint that cannot
+     * answer is not evidence of absence, so it is retried within the bound rather than counted either way.
+     */
+    private static void assertNoNodeHas(List<String> endpoints, String serviceName, String message) {
+        try {
+            await().atMost(Duration.ofSeconds(30)).until(() -> endpoints.stream()
+                    .allMatch(endpoint -> catalogHas(endpoint, serviceName) == Boolean.FALSE));
+        } catch (org.awaitility.core.ConditionTimeoutException unanswered) {
+            throw new AssertionError(message + ": " + serviceName + " is present or unanswered on " + endpoints,
+                    unanswered);
+        }
     }
 
     /** Whether {@code endpoint}'s catalog holds an instance of {@code serviceName}, or null if it cannot say. */
