@@ -49,9 +49,9 @@ import static dev.mars.qraft.raft.ManualRaftClusterFixture.serverIdOf;
  * @since 2026-10-22
  * @version 1.0
  */
-final class SurvivorDirectoryFixture {
-    static final Set<String> MEMBERS = Set.of("a", "b", "c");
-    static final ProtobufRaftCommandCodec CODEC = new ProtobufRaftCommandCodec();
+public final class SurvivorDirectoryFixture {
+    public static final Set<String> MEMBERS = Set.of("a", "b", "c");
+    public static final ProtobufRaftCommandCodec CODEC = new ProtobufRaftCommandCodec();
 
     private SurvivorDirectoryFixture() { }
 
@@ -59,14 +59,14 @@ final class SurvivorDirectoryFixture {
      * Member a of {a, b, c} after its peers were lost: the bootstrap entry, two writes in term 1 (k1 and k2), and
      * term 1 with its vote for itself.
      */
-    static Path survivor(Path directory) throws Exception {
+    public static Path survivor(Path directory) throws Exception {
         write(directory, serverIdOf("a"), 1, Optional.of("a"), List.of(
                 ManualRaftClusterFixture.bootstrapEntry(MEMBERS), put(2, 1, "k1", "v1"), put(3, 1, "k2", "v2")));
         return directory;
     }
 
     /** Writes {@code entries} and the metadata through real storage, and {@code serverId} unless it is null. */
-    static void write(Path directory, String serverId, long term, Optional<String> vote,
+    public static void write(Path directory, String serverId, long term, Optional<String> vote,
                       List<LogEntryData> entries) throws Exception {
         Files.createDirectories(directory);
         if (serverId != null) Files.writeString(directory.resolve("server-id"), serverId);
@@ -82,13 +82,13 @@ final class SurvivorDirectoryFixture {
         }
     }
 
-    static LogEntryData put(long index, long term, String key, String value) {
+    public static LogEntryData put(long index, long term, String key, String value) {
         return new LogEntryData(index, term,
                 CODEC.serialize(new DistributedStateRaftCommand(DistributedStateCommand.put(key, value))));
     }
 
     /** A configuration entry making {@code members} the voters, with the server IDs the cluster fixture gives. */
-    static LogEntryData configuration(long index, long term, Set<String> members) {
+    public static LogEntryData configuration(long index, long term, Set<String> members) {
         return new LogEntryData(index, term,
                 CODEC.serialize(new ConfigurationCommand(ManualRaftClusterFixture.configurationOf(members))));
     }
@@ -98,7 +98,7 @@ final class SurvivorDirectoryFixture {
      * {@code raft.lock} holds no data and, on Windows, cannot be read through another handle while a lock is
      * held, so only its size is recorded.
      */
-    static Map<String, String> digest(Path directory) throws IOException {
+    public static Map<String, String> digest(Path directory) throws IOException {
         Map<String, String> digests = new TreeMap<>();
         if (!Files.exists(directory)) return digests;
         try (Stream<Path> paths = Files.walk(directory)) {

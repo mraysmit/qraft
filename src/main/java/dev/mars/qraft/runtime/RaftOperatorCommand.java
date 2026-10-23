@@ -18,6 +18,13 @@ package dev.mars.qraft.runtime;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.mars.qraft.raft.RaftConfiguration;
+import dev.mars.qraft.server.recovery.DirectoryReport;
+import dev.mars.qraft.server.recovery.OfflineRecovery;
+import dev.mars.qraft.server.recovery.RecoveryInput;
+import dev.mars.qraft.server.recovery.RecoveryPlan;
+import dev.mars.qraft.server.recovery.RecoveryRefusedException;
+import dev.mars.qraft.server.recovery.RecoveryResult;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -37,17 +44,25 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The {@code qraft operator raft} commands, after Consul's {@code consul operator raft}. They call a server's
+ * The {@code qraft operator raft} commands, after Consul's {@code consul operator raft}. Two call a server's
  * HTTP API, and any server will do: it forwards a removal to the leader.
  * <ul>
  *   <li>{@code list-peers} prints each server in the Raft configuration: name, server ID, address, whether it
  *       leads, and whether it votes;</li>
  *   <li>{@code remove-peer --id <server-id> | --name <name>} removes a server. It needs the operator token.</li>
  * </ul>
+ * Two act offline on stopped data directories and contact no server, for lost-quorum recovery (membership
+ * Step 7):
+ * <ul>
+ *   <li>{@code inspect --dir <path>} prints a directory's server ID, term and vote, log and snapshot boundaries,
+ *       configuration in force, and whether ordinary startup would accept it, without changing it;</li>
+ *   <li>{@code recover --input <recovery.json>} rebuilds a stopped survivor or backup into the seed's directory
+ *       and prints its new server ID and recovery entry; the source is never changed.</li>
+ * </ul>
  * The server's HTTP address is {@code --http-addr}, else {@code 127.0.0.1:8080}. The token is {@code --token},
  * or the contents of {@code --token-file}, which keeps it out of the shell's history and the process list. As
  * everywhere in Qraft, nothing is read from environment variables. Exit codes: 0 done, 1 refused or unreachable,
- * 2 misuse.
+ * 2 misuse, including an invalid recovery input.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-29
@@ -58,7 +73,12 @@ final class RaftOperatorCommand {
             Usage: qraft operator raft list-peers [--http-addr <host:port>]
                    qraft operator raft remove-peer (--id <server-id> | --name <name>) [--http-addr <host:port>] \
             (--token <token> | --token-file <path>)
-            The HTTP address defaults to 127.0.0.1:8080.""";
+                   qraft operator raft inspect --dir <path>
+                   qraft operator raft recover --input <recovery.json>
+            The HTTP address defaults to 127.0.0.1:8080. inspect and recover act on stopped data directories \
+            and contact no server.""";
+    /** Wide enough for the longest label, so each value starts after at least two spaces. */
+    private static final int LABEL_WIDTH = 20;
     private static final String DEFAULT_ADDRESS = "127.0.0.1:8080";
     /** Longer than a server waits for a removal to commit, so the server's own answer arrives first. */
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
@@ -76,6 +96,8 @@ final class RaftOperatorCommand {
             Set<String> allowed = switch (subcommand) {
                 case "list-peers" -> Set.of("--http-addr");
                 case "remove-peer" -> Set.of("--http-addr", "--token", "--token-file", "--id", "--name");
+                case "inspect" -> Set.of("--dir");
+                case "recover" -> Set.of("--input");
                 default -> throw new IllegalArgumentException("Unknown command: " + subcommand);
             };
             for (int i = 2; i < args.length; i += 2) {
@@ -83,17 +105,14 @@ final class RaftOperatorCommand {
                 if (i + 1 >= args.length) throw new IllegalArgumentException(args[i] + " needs a value");
                 options.put(args[i], args[i + 1]);
             }
-            if (subcommand.equals("remove-peer") && options.containsKey("--id") == options.containsKey("--name")) {
-                throw new IllegalArgumentException("Name the server to remove with --id or --name");
-            }
-            if (options.containsKey("--token") && options.containsKey("--token-file")) {
-                throw new IllegalArgumentException("Give the token with --token or --token-file, not both");
-            }
+            requireOptions(subcommand, options);
         } catch (IllegalArgumentException misuse) {
             err.println(misuse.getMessage());
             err.println(USAGE);
             return 2;
         }
+        if (subcommand.equals("inspect")) return inspect(Path.of(options.get("--dir")), out, err);
+        if (subcommand.equals("recover")) return recover(Path.of(options.get("--input")), out, err);
         String base = baseUri(options.getOrDefault("--http-addr", DEFAULT_ADDRESS));
         HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
         try {
@@ -107,6 +126,22 @@ final class RaftOperatorCommand {
             Thread.currentThread().interrupt();
             err.println("Interrupted");
             return 1;
+        }
+    }
+
+    /** Refuses a command line missing what {@code subcommand} needs, or giving it two ways at once. */
+    private static void requireOptions(String subcommand, Map<String, String> options) {
+        if (subcommand.equals("remove-peer") && options.containsKey("--id") == options.containsKey("--name")) {
+            throw new IllegalArgumentException("Name the server to remove with --id or --name");
+        }
+        if (options.containsKey("--token") && options.containsKey("--token-file")) {
+            throw new IllegalArgumentException("Give the token with --token or --token-file, not both");
+        }
+        if (subcommand.equals("inspect") && !options.containsKey("--dir")) {
+            throw new IllegalArgumentException("Name the stopped data directory to inspect with --dir");
+        }
+        if (subcommand.equals("recover") && !options.containsKey("--input")) {
+            throw new IllegalArgumentException("Name the recovery input file with --input");
         }
     }
 
@@ -124,7 +159,78 @@ final class RaftOperatorCommand {
                     server.path("address").asText(), server.path("leader").asBoolean() ? "leader" : "follower",
                     String.valueOf(server.path("voter").asBoolean())});
         }
-        int[] widths = new int[5];
+        printTable(rows, out);
+        return 0;
+    }
+
+    /** Prints the stopped {@code directory}'s report; 1 if it is refused, as when a server holds its lock. */
+    private static int inspect(Path directory, PrintStream out, PrintStream err) {
+        DirectoryReport report;
+        try {
+            report = OfflineRecovery.inspect(directory);
+        } catch (RecoveryRefusedException refused) {
+            err.println("Refused: " + refused.getMessage());
+            return 1;
+        }
+        printField(out, "Server ID", report.serverId());
+        printField(out, "Term", report.currentTerm());
+        printField(out, "Voted for", report.votedFor().orElse("(none)"));
+        printField(out, "Last log index", report.lastLogIndex());
+        printField(out, "Last log term", report.lastLogTerm());
+        printField(out, "Snapshot index", report.snapshotIndex());
+        printField(out, "Snapshot term", report.snapshotTerm());
+        printField(out, "Compacted through", report.compactedThrough());
+        printField(out, "Configuration from", report.configurationSource());
+        printField(out, "Ordinary startup", report.startupRefusal().map(reason -> "refused: " + reason)
+                .orElse("accepted"));
+        report.configuration().ifPresent(configuration -> {
+            List<String[]> rows = new ArrayList<>();
+            rows.add(new String[] {"Name", "ID", "Address", "Voter"});
+            for (RaftConfiguration.Server server : configuration.servers()) {
+                rows.add(new String[] {server.name(), server.serverId(), server.address(),
+                        String.valueOf(server.voter())});
+            }
+            out.println();
+            printTable(rows, out);
+        });
+        return 0;
+    }
+
+    /** Performs the recovery in {@code inputFile}; 2 if the input is invalid, 1 if the recovery is refused. */
+    private static int recover(Path inputFile, PrintStream out, PrintStream err) {
+        RecoveryPlan plan;
+        try {
+            plan = RecoveryInput.read(inputFile);
+        } catch (IllegalArgumentException invalid) {
+            err.println(invalid.getMessage());
+            return 2;
+        }
+        RecoveryResult result;
+        try {
+            result = OfflineRecovery.recover(plan);
+        } catch (RecoveryRefusedException refused) {
+            err.println("Refused: " + refused.getMessage());
+            return 1;
+        }
+        printField(out, "Outcome", result.outcome() == RecoveryResult.Outcome.RECOVERED
+                ? "recovered" : "publication recorded");
+        printField(out, "Output", result.output());
+        printField(out, "Server ID", result.newServerId());
+        printField(out, "Recovery index", result.recoveryIndex());
+        printField(out, "Recovery term", result.recoveryTerm());
+        out.println();
+        out.println("Start " + plan.name() + " with its server configuration: it is the sole voter. Keep the source "
+                + plan.source() + " and every excluded server stopped; they rejoin only empty, through a join.");
+        return 0;
+    }
+
+    private static void printField(PrintStream out, String label, Object value) {
+        out.println(String.format("%-" + LABEL_WIDTH + "s%s", label, value));
+    }
+
+    /** Prints {@code rows} in columns, each two spaces wider than its widest cell. */
+    private static void printTable(List<String[]> rows, PrintStream out) {
+        int[] widths = new int[rows.getFirst().length];
         for (String[] row : rows) {
             for (int i = 0; i < row.length; i++) widths[i] = Math.max(widths[i], row[i].length());
         }
@@ -135,7 +241,6 @@ final class RaftOperatorCommand {
             }
             out.println(line);
         }
-        return 0;
     }
 
     private static int removePeer(HttpClient client, String base, Map<String, String> options,

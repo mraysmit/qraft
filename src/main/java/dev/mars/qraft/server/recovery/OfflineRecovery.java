@@ -36,6 +36,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
+import java.util.function.Consumer;
 
 import static dev.mars.qraft.server.recovery.RecoveryExamination.await;
 import static dev.mars.qraft.server.recovery.RecoveryExamination.describe;
@@ -97,6 +98,12 @@ public final class OfflineRecovery {
      * completes on the next run or is refused without change.
      */
     public static RecoveryResult recover(RecoveryPlan plan) throws RecoveryRefusedException {
+        return recover(plan, _ -> { });
+    }
+
+    /** As {@link #recover(RecoveryPlan)}, telling {@code checkpoints} of each durable step as it completes. */
+    static RecoveryResult recover(RecoveryPlan plan, Consumer<RecoveryCheckpoint> checkpoints)
+            throws RecoveryRefusedException {
         Path source = plan.source().toAbsolutePath().normalize();
         Path output = plan.output().toAbsolutePath().normalize();
         if (output.startsWith(source) || source.startsWith(output)) {
@@ -122,7 +129,8 @@ public final class OfflineRecovery {
                 RecoveryClaim claimed = claim.orElseGet(() -> RecoveryClaim.claimed(source, sourceServerId, output));
                 boolean madeHere = claim.isEmpty();
                 if (madeHere) claimed.create();
-                return publish(plan, source, output, claimed, madeHere);
+                checkpoints.accept(RecoveryCheckpoint.CLAIM_CREATED);
+                return publish(plan, source, output, claimed, madeHere, checkpoints);
             }
         } catch (IOException failure) {
             throw new RecoveryRefusedException("Recovering " + source + " into " + output + " failed: "
@@ -163,14 +171,17 @@ public final class OfflineRecovery {
      * left as it was.
      */
     private static RecoveryResult publish(RecoveryPlan plan, Path source, Path output, RecoveryClaim claimed,
-                                          boolean madeHere) throws RecoveryRefusedException, IOException {
+                                          boolean madeHere, Consumer<RecoveryCheckpoint> checkpoints)
+            throws RecoveryRefusedException, IOException {
         Path staging = output.resolveSibling("." + output.getFileName() + ".qraft-recovering");
         Files.createDirectories(output.getParent());
         DirectoryCopy.deleteTree(staging); // only ever an unpublished copy from an interrupted run
         boolean recorded = false;
         try {
             DirectoryCopy.copy(source, staging);
+            checkpoints.accept(RecoveryCheckpoint.SOURCE_COPIED);
             RecoveryExamination examined = RecoveryExamination.examine(staging, claimed.sourceServerId());
+            checkpoints.accept(RecoveryCheckpoint.EXAMINED);
             if (examined.startupRefusal().isPresent()) {
                 throw new RecoveryRefusedException("The source " + source + " would be refused by ordinary "
                         + "startup: " + examined.startupRefusal().get());
@@ -184,14 +195,19 @@ public final class OfflineRecovery {
             long index = examined.lastLogIndex() + 1;
             long term = Math.max(examined.metadata().currentTerm(), examined.lastLogTerm()) + 1;
             appendRecoveryEntry(staging, index, term, new RaftConfiguration(List.of(
-                    new RaftConfiguration.Server(newServerId, plan.name(), plan.address(), true))));
+                    new RaftConfiguration.Server(newServerId, plan.name(), plan.address(), true))), checkpoints);
+            checkpoints.accept(RecoveryCheckpoint.METADATA_UPDATED);
             ServerIdentity.replace(staging, newServerId);
+            checkpoints.accept(RecoveryCheckpoint.SERVER_ID_REPLACED);
             RecoveryClaim prepared = claimed.prepared(newServerId, index, term);
             prepared.replace();
             recorded = true;
+            checkpoints.accept(RecoveryCheckpoint.CLAIM_PREPARED);
             Files.move(staging, output, StandardCopyOption.ATOMIC_MOVE);
             ServerIdentity.forceDirectory(output.getParent());
+            checkpoints.accept(RecoveryCheckpoint.PUBLISHED);
             prepared.publishedClaim().replace();
+            checkpoints.accept(RecoveryCheckpoint.CLAIM_PUBLISHED);
             logger.info("Recovered {} into {}: sole voter {} ({}) at index {} term {}", source, output,
                     plan.name(), newServerId, index, term);
             return new RecoveryResult(newServerId, index, term, output, RecoveryResult.Outcome.RECOVERED);
@@ -205,7 +221,8 @@ public final class OfflineRecovery {
         }
     }
 
-    private static void appendRecoveryEntry(Path staging, long index, long term, RaftConfiguration configuration)
+    private static void appendRecoveryEntry(Path staging, long index, long term, RaftConfiguration configuration,
+                                            Consumer<RecoveryCheckpoint> checkpoints)
             throws RecoveryRefusedException {
         try {
             RaftStorageFactory.DurableStorage storage = await(RaftStorageFactory.createDurable(staging, true));
@@ -220,6 +237,7 @@ public final class OfflineRecovery {
                 await(storage.wal().appendEntries(List.of(new LogEntryData(index, term,
                         CODEC.serialize(new ConfigurationCommand(configuration))))));
                 await(storage.wal().sync());
+                checkpoints.accept(RecoveryCheckpoint.RECOVERY_ENTRY_SYNCED);
                 await(storage.wal().updateMetadata(term, Optional.empty()));
             } finally {
                 await(storage.snapshots().closeAsync());

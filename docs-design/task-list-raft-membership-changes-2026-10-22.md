@@ -1847,8 +1847,130 @@ server ID (after that, the output may exist, and the claim stays).
   check, not the verification run: `mvn
   install` and Jenkins follow.
 
-The rerun is pending. Separate-JVM locking, the crash boundaries and the CLI
-follow once these pass. Write failing tests first that show:
+**Focused green run in this workspace, 2026-10-23.** The 2026-10-22 captures
+cited in "Claim release on refusal" above are not retained in this
+workspace's `logs/`, so the owner reran the focused classes on `960290d`.
+- Capture `logs/qraft-recovery-green-2026-10-23_10-56-48-538.log` records 40
+  tests with zero failures, errors or skips: `OfflineRecoveryTest` 17,
+  `RecoveryInputTest` 8, `ServerIdentityTest` 6 and `PackageDependencyTest` 9.
+  This confirms both the `replayLog` correction and the claim release.
+- The application log `logs/qraft-maven-tests-2026-10-23_10-57-28.log` and
+  the Maven capture each hold six attributed ERROR headers and nothing
+  unflagged:
+  - `RAFT_STATE_WITHOUT_CONFIGURATION` twice, from
+    `aSourceThatOrdinaryStartupWouldRefuseIsRefused` and
+    `inspectReportsWhyOrdinaryStartupWouldRefuseADirectory`;
+  - `WAL_AMBIGUOUS_CORRUPTION` twice and `RAFT_RECOVERY_AMBIGUOUS_CORRUPTION`
+    twice, from `aCorruptSourceIsRefusedAndKeptAsEvidence`.
+- The two stackless WARN events, "Record at position 0 cannot be decoded", are
+  RaftLog detecting the flipped byte in each replay.
+- The Maven capture's 17 JaCoCo "Execution data … does not match" warnings all
+  name `RaftNode` inner classes. The cause is that `target/jacoco.exec` is
+  appended to across runs and still holds data recorded before the merge
+  changed `RaftNode`. As with Step 5's focused runs, only the clean build
+  establishes coverage.
+- The other two `[WARNING]` lines are JaCoCo's bundle summary of those
+  mismatches and the existing protobuf `binaryMavenPlugins` deprecation.
+- No ANSI escape or Maven error remains.
+
+**Separate-JVM tests, 2026-10-23.** These follow `FileSnapshotStore`'s
+pattern.
+- `RecoveryCheckpoint` names each durable step of `recover`, in order:
+  `CLAIM_CREATED`, `SOURCE_COPIED`, `EXAMINED`, `RECOVERY_ENTRY_SYNCED`,
+  `METADATA_UPDATED`, `SERVER_ID_REPLACED`, `CLAIM_PREPARED`, `PUBLISHED` and
+  `CLAIM_PUBLISHED`.
+- A package-private `recover(plan, checkpoints)` overload tells a listener of
+  each step. The public `recover(plan)` passes one that does nothing, so
+  behaviour is unchanged.
+- `RecoveryCrashWriterFixture` runs `recover` in a separate JVM and halts it at
+  the chosen checkpoint.
+- `OfflineRecoveryProcessTest`, 11 cases, audits each halted JVM's whole output
+  with `SubprocessOutputAuditHelper`:
+  - a halt at each of the seven steps before publication leaves no output, an
+    unchanged source and a surviving claim, and the next run publishes a valid
+    seed;
+  - a halt at `PUBLISHED` is completed by the next run as
+    `PUBLICATION_RECORDED`, with the claimed server ID, index 4 and term 2, and
+    the output byte-identical;
+  - a halt at `CLAIM_PUBLISHED` is refused as "already recovered", with nothing
+    changed;
+  - a source locked by `DirectoryLockProcessFixture` in another JVM is refused
+    by both `recover` and `inspect`, with no claim made;
+  - after a halt at `SERVER_ID_REPLACED`, `ServerIdentity` and a `RaftNode`
+    started on the source as ordinary startup does keep its own ID, old
+    configuration and log, and leave the claim and the staging directory
+    byte-identical.
+
+The behaviour these tests cover is already implemented, so they may pass at
+once. A failure is a defect in `recover`.
+
+**Separate-JVM run, 2026-10-23.** Capture
+`logs/qraft-recovery-process-2026-10-23_11-09-55-517.log` records 28 tests
+with zero failures, errors or skips: `OfflineRecoveryProcessTest` 11 and
+`OfflineRecoveryTest` 17. `recover` needed no change.
+- The audit read all 13 logs from the run.
+  - The main application log `logs/qraft-maven-tests-2026-10-23_11-10-36.log`
+    and the Maven capture each hold the same six attributed ERROR headers from
+    `OfflineRecoveryTest` as the previous run, and the two stackless RaftLog
+    WARN events for the flipped byte. `OfflineRecoveryProcessTest` logged no
+    error.
+  - The 11 helper-JVM logs, `_11-10-37` to `_11-10-49` (ten crash writers and
+    one lock owner), hold no ERROR or WARN event.
+  - Two of those logs are empty: a JVM halted at `CLAIM_CREATED` or
+    `SOURCE_COPIED` stops before any storage or node code has logged. The
+    six-line log is the lock owner, which only opens and closes its WAL.
+  - The tests themselves audited each halted JVM's console output, with
+    `SubprocessOutputAuditHelper`.
+- The Maven capture's 17 JaCoCo mismatch warnings have the same cause as
+  before: `jacoco.exec` still holds data from before the merge changed
+  `RaftNode`. No ANSI escape or Maven error remains.
+
+**CLI red tests, 2026-10-23.** The offline commands join `list-peers` and
+`remove-peer` in `RaftOperatorCommand`, with the same exit codes: 0 done,
+1 refused, 2 misuse.
+- `qraft operator raft inspect --dir <path>` prints `name  value` lines, then
+  a table of the configuration's servers. Its exit code is 0 even when the
+  report says ordinary startup would refuse the directory.
+- `qraft operator raft recover --input <recovery.json>` prints the outcome,
+  the output path, the new server ID and the recovery index and term.
+- An invalid recovery input is misuse.
+
+`RaftOperatorRecoveryCommandTest` has seven cases:
+- the `inspect` report and its table;
+- `inspect` explaining a refusal;
+- a locked directory refused with 1;
+- a published seed and its printed identity;
+- a refused recovery with 1, nothing published and the source unchanged;
+- an invalid or missing input with 2;
+- command-line misuse printing the usage.
+
+`SurvivorDirectoryFixture` is now public, for use from the `runtime` tests.
+
+**CLI red run and implementation, 2026-10-23.** Capture
+`logs/qraft-recovery-cli-red-2026-10-23_11-58-51-314.log` records 14 tests
+and seven failures.
+- `RaftOperatorCommandTest` passed 7 of 7.
+- Every `RaftOperatorRecoveryCommandTest` case failed at the old command's
+  response, "Unknown command: inspect" or "Unknown command: recover", or with
+  exit code 2 where 1 was expected. The one declaration reported "occurred 0
+  time(s)", as expected.
+- The application log `logs/qraft-maven-tests-2026-10-23_11-59-24.log` holds
+  no ERROR or WARN event. The Maven capture's only unflagged exceptions are the
+  seven `AssertionFailedError`s.
+
+The implementation:
+- `RaftOperatorCommand` accepts `inspect --dir` and `recover --input` and runs
+  them before any HTTP client is created.
+- The per-subcommand option checks move to `requireOptions`.
+- `list-peers` and the `inspect` table share `printTable`.
+- An invalid recovery input prints its message and exits 2; a refusal prints
+  "Refused: …" and exits 1.
+
+From the jar, the recovery's own logs use the production Logback defaults:
+`./logs` under the `server` mode name, plus the console. A separate operator
+log mode is noted for the runbook stage. The green run is pending.
+
+Then the CLI. Write failing tests first that show:
 - followers and joining servers accept the recovery entry by replication and by
   installed snapshot, although a running leader would refuse that change;
 - the seed's first start elects it and commits its whole log;
