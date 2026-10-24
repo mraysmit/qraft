@@ -568,6 +568,24 @@ tests:
   nothing, the `remove-peer` command with the right token removes the old entry,
   and the replacement joins, is promoted, is ready and unfenced, holds the
   catalog, and keeps its identity and vote across a restart.
+- `DockerLeaderRemovalTest`: the authenticated removal of the current leader
+  in containers. It commits its own removal and steps down, reports `removed`
+  and is not ready, the two retained voters elect one leader, and registrations
+  from before the removal survive and new ones are accepted.
+- `DockerFailedVoterCleanupTest`: automatic cleanup in containers with the
+  default policy. A voter that has failed past the grace is found eligible but
+  kept while its removal would leave fewer than three voters, and it is removed
+  as soon as a replacement's promotion commits. The removal outlives restarts of
+  the retained servers.
+- `SnapshotRetryBackoffTest` and `RaftNodeSnapshotRetryBackoffTest`: the delay
+  before a leader retries a snapshot to a peer that did not take one, from 250
+  ms doubling to 5 seconds, measured on the injected clock.
+- `DockerMembershipResizeTest`: a three-server cluster grown to five and shrunk
+  back to three in containers while a client registers continuously. Each
+  added server joins as a non-voter and is promoted, every acknowledged
+  registration is on all five servers and survives the shrink, and the three
+  that remain keep one leader and an unchanged term although the removed
+  servers, which keep their old configuration, go on campaigning.
 - `RecoveryInputTest`, `OfflineRecoveryTest`, `OfflineRecoveryProcessTest`,
   `RaftOperatorRecoveryCommandTest` and `DockerLostQuorumRecoveryTest`: the offline `inspect` and `recover` commands,
   their crash boundaries and one-time claim, separate-JVM lock refusal, and the

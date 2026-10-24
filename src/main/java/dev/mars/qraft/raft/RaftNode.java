@@ -238,10 +238,15 @@ public class RaftNode {
     private final Map<String, SnapshotChunkAssembler> pendingInstalls = new HashMap<>();
     /** Tracks uniquely owned snapshot sends to followers (leader side). */
     private final Map<String, OutboundSnapshotTransfer> outboundSnapshotTransfers = new HashMap<>();
-    /** Prevents heartbeat-driven retry loops after a follower rejects snapshot persistence. */
-    private final Map<String, Long> outboundSnapshotRetryAfterNanos = new HashMap<>();
+    /**
+     * Prevents heartbeat-driven retry loops after a snapshot to a peer fails or is rejected: the delay starts at
+     * {@link #SNAPSHOT_RETRY_BASE_NANOS} and doubles with each consecutive failure to that peer, to
+     * {@link #SNAPSHOT_RETRY_CAP_NANOS}.
+     */
+    private final SnapshotRetryBackoff snapshotRetryBackoff;
     private long outboundSnapshotTransferSequence = 0;
-    private static final long SNAPSHOT_RETRY_BACKOFF_NANOS = TimeUnit.MILLISECONDS.toNanos(250);
+    private static final long SNAPSHOT_RETRY_BASE_NANOS = TimeUnit.MILLISECONDS.toNanos(250);
+    private static final long SNAPSHOT_RETRY_CAP_NANOS = TimeUnit.SECONDS.toNanos(5);
 
     // ========== SNAPSHOT METRICS ==========
     private LongCounter snapshotCounter;
@@ -519,6 +524,8 @@ public class RaftNode {
             }
             @Override public boolean cancelTimer(long id) { return runtime.cancelTimer(id); }
         } : configuredTimerScheduler;
+        this.snapshotRetryBackoff = new SnapshotRetryBackoff(
+                SNAPSHOT_RETRY_BASE_NANOS, SNAPSHOT_RETRY_CAP_NANOS, this.timerScheduler::nanoTime);
         this.electionTimeoutMs = electionTimeoutMs;
         this.quorumContactRounds = Math.max(1, Math.ceilDiv(electionTimeoutMs, heartbeatIntervalMs));
         this.heartbeatIntervalMs = heartbeatIntervalMs;
@@ -1633,6 +1640,7 @@ public class RaftNode {
         cancelElectionTimer();
         cancelHeartbeatTimer();
         outboundSnapshotTransfers.clear();
+        snapshotRetryBackoff.clear();
         abandonCleanup("the leadership ended");
         cleanupExpedited = false;
     }
@@ -1849,6 +1857,7 @@ public class RaftNode {
             if (state != State.CANDIDATE || stopPromise != null) return;
 
             outboundSnapshotTransfers.clear();
+            snapshotRetryBackoff.clear();
             leadershipGeneration++;
             currentLeaderId = nodeId;
             MDC.put("raftRole", "LEADER");
@@ -3193,12 +3202,10 @@ public class RaftNode {
      * @param target the follower node ID
      */
     private void sendInstallSnapshot(String target) {
-        long retryAfter = outboundSnapshotRetryAfterNanos.getOrDefault(target, 0L);
-        if (System.nanoTime() < retryAfter) {
+        if (snapshotRetryBackoff.inBackoff(target)) {
             logger.debug("InstallSnapshot retry for {} is in backoff", target);
             return;
         }
-        outboundSnapshotRetryAfterNanos.remove(target);
         // Prevent concurrent snapshot installs to the same follower
         if (outboundSnapshotTransfers.containsKey(target)) {
             logger.debug("InstallSnapshot already in progress for {}, skipping", target);
@@ -3428,8 +3435,7 @@ public class RaftNode {
             if (retryChunk == 0) {
                 logger.warn("InstallSnapshot persistence rejected by {}; abandoning transfer and backing off",
                         transfer.target());
-                outboundSnapshotRetryAfterNanos.put(transfer.target(),
-                        System.nanoTime() + SNAPSHOT_RETRY_BACKOFF_NANOS);
+                snapshotRetryBackoff.failed(transfer.target());
                 removeOutboundSnapshotTransfer(transfer);
                 return null;
             }
@@ -3445,6 +3451,7 @@ public class RaftNode {
             long snapshotIndex = decision.snapshot().lastIncludedIndex();
             nextIndex.put(transfer.target(), snapshotIndex + 1);
             matchIndex.put(transfer.target(), snapshotIndex);
+            snapshotRetryBackoff.succeeded(transfer.target());
             removeOutboundSnapshotTransfer(transfer);
             logger.info("InstallSnapshot to {} complete: nextIndex={}, matchIndex={}",
                     transfer.target(), snapshotIndex + 1, snapshotIndex);
@@ -3480,8 +3487,7 @@ public class RaftNode {
         logger.error("Failed to send InstallSnapshot chunk {}/{} to {}: {}",
                 decision.chunkIndex() + 1, decision.totalChunks(), transfer.target(),
                 decision.error().getMessage(), decision.error());
-        outboundSnapshotRetryAfterNanos.put(transfer.target(),
-                System.nanoTime() + SNAPSHOT_RETRY_BACKOFF_NANOS);
+        snapshotRetryBackoff.failed(transfer.target());
         removeOutboundSnapshotTransfer(transfer);
         return null;
     }

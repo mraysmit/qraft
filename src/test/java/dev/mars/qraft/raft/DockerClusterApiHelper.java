@@ -24,6 +24,10 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -167,6 +171,104 @@ final class DockerClusterApiHelper {
         HttpResponse<String> response = send(endpoint + "/raft/status", "GET", null, Map.of());
         assertEquals(200, response.statusCode(), response.body());
         return JSON.readTree(response.body());
+    }
+
+    /**
+     * Closes the detached {@code servers}, captures and stops the cluster and removes the volumes. Every step runs
+     * even if an earlier one fails, so no container or volume is left behind, and the first failure is then
+     * reported with the others suppressed.
+     */
+    static void cleanUp(ComposeContainer cluster, List<SharedDockerClusterFixture.DetachedServer> servers,
+                        String... volumes) throws Exception {
+        Exception failure = null;
+        for (SharedDockerClusterFixture.DetachedServer server : servers) {
+            try {
+                server.close();
+            } catch (Exception error) {
+                failure = failure == null ? error : suppress(failure, error);
+            }
+        }
+        try {
+            SharedDockerClusterFixture.stopAndCapture(cluster);
+        } catch (Exception | AssertionError error) {
+            Exception wrapped = error instanceof Exception e ? e : new IllegalStateException(error);
+            failure = failure == null ? wrapped : suppress(failure, wrapped);
+        }
+        for (String volume : volumes) {
+            try {
+                SharedDockerClusterFixture.removeVolume(volume);
+            } catch (Exception error) {
+                failure = failure == null ? error : suppress(failure, error);
+            }
+        }
+        if (failure != null) throw failure;
+    }
+
+    private static Exception suppress(Exception first, Exception later) {
+        first.addSuppressed(later);
+        return first;
+    }
+
+    /**
+     * Runs {@code operator raft remove-peer --name <name>} against {@code via}, from the cluster's network, with
+     * {@code token} written to {@code tokenFile} and mounted into the one-off container.
+     */
+    static SharedDockerClusterFixture.DockerCommandResult removePeer(
+            ComposeContainer cluster, String name, String via, Path tokenFile, String token) throws Exception {
+        Files.writeString(tokenFile, token);
+        var permissions = Files.getFileAttributeView(tokenFile, PosixFileAttributeView.class);
+        if (permissions != null) {
+            permissions.setPermissions(PosixFilePermissions.fromString("rw-r--r--"));
+        }
+        return SharedDockerClusterFixture.runQraftCommand("remove-peer-" + name,
+                List.of("--network", SharedDockerClusterFixture.networkOf(cluster),
+                        "--mount", "type=bind,source=" + tokenFile.toAbsolutePath()
+                                + ",target=/etc/qraft/operator-token,readonly"),
+                "operator", "raft", "remove-peer", "--name", name, "--http-addr", via + ":8080",
+                "--token-file", "/etc/qraft/operator-token");
+    }
+
+    /**
+     * A server JSON for server {@code number}, derived from the acceptance configuration of server1 and listing
+     * servers 1 to {@code number}, as a server that joins an existing three-server cluster is configured.
+     */
+    static String joinerConfiguration(int number) throws Exception {
+        String threeServers =
+                "{\"server1\":\"server1:9080\",\"server2\":\"server2:9080\",\"server3\":\"server3:9080\"}";
+        String base = Files.readString(Path.of("docker/config/three-node-acceptance/server1.json"));
+        StringBuilder listed = new StringBuilder("{");
+        for (int i = 1; i <= number; i++) {
+            listed.append(i > 1 ? "," : "").append("\"server").append(i).append("\":\"server").append(i)
+                    .append(":9080\"");
+        }
+        String json = base.replace("\"id\":\"server1\"", "\"id\":\"server" + number + "\"")
+                .replace(threeServers, listed.append('}').toString());
+        if (json.equals(base) || !json.contains("\"id\":\"server" + number + "\"")
+                || !json.contains("\"server" + number + "\":\"server" + number + ":9080\"")) {
+            throw new AssertionError("the acceptance configuration for server1 has not the layout this rewrites");
+        }
+        return json;
+    }
+
+    /** The logs of the three compose servers together, as they stand now. */
+    static String composeLogs(ComposeContainer cluster) {
+        return logsOf(cluster, "server1") + logsOf(cluster, "server2") + logsOf(cluster, "server3");
+    }
+
+    /**
+     * Starts server4 and server5, each on its own volume and listing the cluster, adds them to {@code added} as
+     * they start so the caller's cleanup closes them, and waits until {@code observer} lists five voters.
+     */
+    static void growToFiveVoters(ComposeContainer cluster, String volume4, String volume5, String observer,
+                                 List<SharedDockerClusterFixture.DetachedServer> added) throws Exception {
+        added.add(SharedDockerClusterFixture.startDetachedServer(
+                cluster, "server4", joinerConfiguration(4), "-v", volume4 + ":/app/data"));
+        added.add(SharedDockerClusterFixture.startDetachedServer(
+                cluster, "server5", joinerConfiguration(5), "-v", volume5 + ":/app/data"));
+        await().atMost(Duration.ofSeconds(240)).until(() -> {
+            Map<String, Boolean> now = configurationOrEmpty(observer);
+            return now.size() == 5 && now.values().stream().allMatch(Boolean::booleanValue);
+        });
     }
 
     static HttpResponse<String> send(String uri, String method, String body, Map<String, String> headers)

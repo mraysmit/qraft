@@ -24,7 +24,7 @@ and operator list and remove, is built, and its close-out gate was closed on
 on. Steps 1 to 3 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
-**Last updated:** 2026-10-24 (Step 8: scenario 2, wipe and replace at the same name and address, built and passed six consecutive runs; the other seven scenarios remain. Earlier today, Step 7: the container scenarios verified: review fixes to `DockerLostQuorumRecoveryTest` and `SharedDockerClusterFixture` (`55fbb1c`), clean `mvn install`, five consecutive focused runs, and Jenkins build 33 with 1,138 default, 10 end-to-end and 34 Docker tests; the runbook, the design section 14.5 and the feature validation record then updated, so Step 7 is complete and Step 8 is next. Earlier, 2026-10-22: Step 7: claim released when a run refuses before publishing, found in review of `885f92e` and fixed test-first; contract approved as decision 8 (single-seed recovery, whole-cluster backup restore, server-ID fence); `RaftNode` confirmation tests green on unchanged production code; offline command API stubbed in `dev.mars.qraft.server.recovery` and its 23 red tests recorded, with the `raft.lock` copy rule added to the contract; implementation next. Earlier: Step 7 contract proposed for review and the exit gate revised to match. On 2026-10-21: Step 6 completed: five consecutive affected runs passed 64 tests each, `mvn install` passed 1,056 tests and every coverage gate, and the retained-log audit of 38 logs passed; Step 7 is next. Earlier today: Step 6 corrected focused run: all 64 tests and retained-log audits passed; desktop automation disabled at the owner's request. Earlier today: Step 5 runtime policy and failed-voter cleanup completed; five repeated runs, clean build/coverage, fresh-image runtime gate and retained-log audits passed; Step 6 is next. On 2026-10-19: server wiring implemented and verified: RED build 31 retained; build 32 passed five 115-test focused runs, 1,059 default, 10 end-to-end and 32 Docker tests, coverage and the retained-log audit. The immutable local policy reaches the node, promotion uses it, effective settings log excludes secrets, and seven real-server lifecycle cases cover HTTP startup and WAL release. Automatic cleanup remains next. Earlier today, timing slice complete: promotion/quorum ceiling division and election jitter fixed, command-helper race fixed, RED builds 28 and 29 retained; replay build 30 passed five 74-test focused runs, 1,028 default tests, coverage, 42 runtime tests and the full retained-log audit. The next task at that timing checkpoint was server wiring, followed by failed-voter cleanup. On 2026-10-17: Jenkins build 27 verified the committed parser slice at `bef4637`: 1,024 default, 10 end-to-end and 32 Docker tests passed, with all coverage gates and the retained-log audit; uncommitted boundary tests and runtime work remain pending. Earlier: prepared manual-timer tests for partial-round stabilization and the largest representable stabilization duration; no build or test was run, and production is unchanged. Earlier, 2026-10-15: membership parser implemented with defaults, validation and getters; 64 focused tests passed, full verification and runtime wiring pending. Earlier: merge reconciled the 2026-10-14 archival with the newer parser tests; the focused RED run and retained output are recorded under Step 5. On 2026-10-14: single-POM cleanup list archived and its links repaired; Step 5 resumed as the active task, with implementation pending. On 2026-10-11: the mutation rule removed at the owner's decision, from the rules and from the exits of Steps 5 to 8; the Step 4 gate, which had waited on it, closed, after PIT was tried for it and put on ice; the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
+**Last updated:** 2026-10-24 (Step 8: scenarios 4 and 6 built and passing (leader removal five runs, cleanup after promotion four); snapshot retry backoff added test-first and checked locally, red run and Jenkins pending; scenario 3, grow 3 to 5 and shrink back while a client publishes, built and passed five consecutive runs after a test race was fixed; scenario 2, wipe and replace at the same name and address, built and passed six consecutive runs; five scenarios remain. Earlier today, Step 7: the container scenarios verified: review fixes to `DockerLostQuorumRecoveryTest` and `SharedDockerClusterFixture` (`55fbb1c`), clean `mvn install`, five consecutive focused runs, and Jenkins build 33 with 1,138 default, 10 end-to-end and 34 Docker tests; the runbook, the design section 14.5 and the feature validation record then updated, so Step 7 is complete and Step 8 is next. Earlier, 2026-10-22: Step 7: claim released when a run refuses before publishing, found in review of `885f92e` and fixed test-first; contract approved as decision 8 (single-seed recovery, whole-cluster backup restore, server-ID fence); `RaftNode` confirmation tests green on unchanged production code; offline command API stubbed in `dev.mars.qraft.server.recovery` and its 23 red tests recorded, with the `raft.lock` copy rule added to the contract; implementation next. Earlier: Step 7 contract proposed for review and the exit gate revised to match. On 2026-10-21: Step 6 completed: five consecutive affected runs passed 64 tests each, `mvn install` passed 1,056 tests and every coverage gate, and the retained-log audit of 38 logs passed; Step 7 is next. Earlier today: Step 6 corrected focused run: all 64 tests and retained-log audits passed; desktop automation disabled at the owner's request. Earlier today: Step 5 runtime policy and failed-voter cleanup completed; five repeated runs, clean build/coverage, fresh-image runtime gate and retained-log audits passed; Step 6 is next. On 2026-10-19: server wiring implemented and verified: RED build 31 retained; build 32 passed five 115-test focused runs, 1,059 default, 10 end-to-end and 32 Docker tests, coverage and the retained-log audit. The immutable local policy reaches the node, promotion uses it, effective settings log excludes secrets, and seven real-server lifecycle cases cover HTTP startup and WAL release. Automatic cleanup remains next. Earlier today, timing slice complete: promotion/quorum ceiling division and election jitter fixed, command-helper race fixed, RED builds 28 and 29 retained; replay build 30 passed five 74-test focused runs, 1,028 default tests, coverage, 42 runtime tests and the full retained-log audit. The next task at that timing checkpoint was server wiring, followed by failed-voter cleanup. On 2026-10-17: Jenkins build 27 verified the committed parser slice at `bef4637`: 1,024 default, 10 end-to-end and 32 Docker tests passed, with all coverage gates and the retained-log audit; uncommitted boundary tests and runtime work remain pending. Earlier: prepared manual-timer tests for partial-round stabilization and the largest representable stabilization duration; no build or test was run, and production is unchanged. Earlier, 2026-10-15: membership parser implemented with defaults, validation and getters; 64 focused tests passed, full verification and runtime wiring pending. Earlier: merge reconciled the 2026-10-14 archival with the newer parser tests; the focused RED run and retained output are recorded under Step 5. On 2026-10-14: single-POM cleanup list archived and its links repaired; Step 5 resumed as the active task, with implementation pending. On 2026-10-11: the mutation rule removed at the owner's decision, from the rules and from the exits of Steps 5 to 8; the Step 4 gate, which had waited on it, closed, after PIT was tried for it and put on ice; the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
 **Interruption completed:** [`task-list-single-pom-and-quorus-removal-2026-10-21.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md),
 started 2026-10-04 before the Step 4 close-out gate. The gate was closed on
 2026-10-11, as the first task of that list's Phase 7. That list was completed
@@ -2160,11 +2160,129 @@ address, is built and passed: `DockerServerReplacementTest` (`@Tag("docker")`).
   holds 12 ERROR headers across the six runs, all `RAFT_PEER_UNREACHABLE`
   flagged to the test, with 12 matching stack traces. `RAFT_PEER_NAME_UNRESOLVED`
   never appeared, so the test does not declare it.
-- Not asserted, so the row stays partly open: a second bootstrap, and a
-  snapshot meant for the old ID, offered to the replacement. The ignored
-  replies show the old ID is not counted, but not those two refusals directly.
-- The other seven scenarios are not started. Three consecutive runs against a
-  fresh image from the final jar, and the full suites, remain the exit gate.
+- **The two missing observations, added the same day.** While the join is
+  refused, the empty replacement must keep `lastLogIndex`, `commitIndex` and
+  `snapshotLastIndex` at 0, hold no configuration and never lead. That shows it
+  bootstrapped no second cluster and accepted no AppendEntries or snapshot that
+  the leader sent to the old ID at its name. The leader's log must also show
+  the replacement's replies ignored under the new ID. Five consecutive runs
+  passed (40 to 44 s) with the added assertions.
+
+Scenario 3, grow 3 to 5 and shrink 5 to 3 while a client publishes, is built and
+passed five consecutive runs with the concurrent changes (40 to 45 s each): `DockerMembershipResizeTest` (`@Tag("docker")`).
+- A client registers a new service every 200 ms from the first leader to the end.
+- server4, then server5, start empty as detached containers on the cluster's
+  network, each on its own volume, listing the cluster. Each first appears in
+  the configuration as a non-voter, polled every 100 ms, and the leader logs its
+  promotion; five voters follow. Every registration acknowledged by then is on
+  all five servers.
+- `operator raft remove-peer` removes server5 and then server4, each through
+  server1. The configuration returns to the original three server IDs, all
+  voters, on every retained server. The client's acknowledged registrations are
+  all present on the three, and the client never failed to register.
+- **A removed follower never learns of its removal.** In the second run of the
+  test the removed servers were expected to report `removed`; they did not,
+  and server5 was campaigning at term 31 after 30 seconds. That is the design
+  of Step 6, not a defect: the leader stops replicating to a server once it is
+  outside the configuration, so a removed follower keeps its old configuration.
+  The test therefore asserts what the design promises: the three that remain
+  keep one leader and an unchanged term for 10 seconds while the removed
+  servers campaign. The campaigning servers' failed vote requests against each
+  other at teardown are the one declared error, `RAFT_PEER_UNREACHABLE`; it was
+  logged once in the five repeats and not in the others. An undeclared
+  occurrence of it is what failed that second run, through the Docker-log audit.
+- **A flake, found and fixed in the test.** In the third repeat of the first
+  passing sequence, the assertion that the leader logged "Promoted server5 to
+  a voter" failed although the archive holds the line (05:27:49.604 on server1).
+  The leader logs a promotion when its commit completes, a moment after the
+  configuration shows it, and the test read the container log once. It now
+  waits up to 30 seconds. The same review made the final "every retained server
+  agrees on three servers" check a bounded wait, since a follower may still be
+  applying the second removal. No production code was involved.
+- Verification: passed on its third version in 52 s; two further runs of the
+  earlier version passed; the corrected version passed five consecutive runs
+  (54 to 56 s each), with no unflagged error in any capture. Alongside it, the
+  refactored `DockerServerReplacementTest` (42 s) and `DockerLostQuorumRecoveryTest`
+  (2 tests, 90 s) passed again.
+- **One change at a time, added the same day.** Sampled configurations cannot
+  show it, because two quick commits can fall between two samples. The test now
+  meets the rule head on: server4 and server5 start together, so the leader sees
+  the second join and promotion while the first change may be uncommitted, and
+  both removals are issued at once through different servers. A request refused
+  as "already in progress" must say so and is repeated; any other refusal fails.
+  Afterwards neither removal may have undone the other: the configuration stays
+  the original three for 10 seconds. One such refusal occurred in the five
+  passing runs, and the end state was right whether or not one occurred.
+
+Scenario 6, a leader removes itself, is built and passed five consecutive runs:
+`DockerLeaderRemovalTest` (`@Tag("docker")`, 27 to 29 s each).
+- `operator raft remove-peer`, sent through a follower, names the current leader.
+  The command exits 0, the former leader logs "stepping down ... its removal from
+  the configuration has committed", and within 30 seconds it reports
+  `removed: true`, is not ready and is no longer the leader.
+- The two retained voters elect one leader between them, every retained server
+  lists exactly those two, a registration made before the removal is on both,
+  and a new one is accepted and replicated. For 10 further seconds the former
+  leader does not lead again and the retained configuration does not change.
+- No ERROR header was logged in any of the five runs' Docker archives.
+
+Scenario 4, automatic cleanup of a failed voter after its replacement is
+promoted, is built and passed four runs: `DockerFailedVoterCleanupTest`
+(`@Tag("docker")`, 121 to 133 s each). A fifth run is still to do.
+- With the acceptance servers' default policy (60 seconds of absence, a pass
+  every 10 seconds, at least three voters), a follower is stopped. After the
+  grace the leader logs `eligibleServerIds=[<id>], voters=3, removalBudget=1,
+  minVoters=3` on each pass, yet for 25 further seconds the failed voter stays
+  in the configuration, the cluster keeps one leader, and a write is accepted
+  with two of three voters.
+- server4, with its own name and address, joins as a non-voter, and the failed
+  voter is still listed beside it. When the leader logs "Promoted server4 to a
+  voter", the promotion's early pass finds `voters=4` and logs "Automatic
+  cleanup committed removal of failed voter <id>: removals=1/1". The
+  configuration is the two retained servers and server4, all voters, on every
+  server.
+- Both retained compose servers are then stopped and started in turn. The
+  configuration does not change, and registrations from before the failure,
+  during it and after the restarts are on all three.
+- The first run failed its Docker-log audit, not its assertions: the leader's
+  repeated `Failed to send InstallSnapshot chunk ... Unable to resolve host`
+  errors to the stopped follower were not declared. The stopped follower is the
+  deliberate cause, and the existing `RAFT_SNAPSHOT_TRANSFER_INTERRUPTED` entry
+  matches the message, so the test declares it. Every ERROR header in the
+  archives is flagged.
+
+**Snapshot retry backoff, 2026-10-24.** The cleanup test showed a leader
+sending a snapshot to a stopped lagging peer every 250 ms and logging an ERROR
+with a stack trace each time. The delay was fixed. The logging was not changed,
+at the owner's instruction; only the spacing of retries is. `SnapshotRetryBackoff`
+now starts a peer's delay at 250 ms and doubles it with each consecutive
+failure to that peer, to a cap of 5 seconds. A delivered snapshot, or the start
+or end of a leadership, starts it over, and a snapshot rejected for persistence
+backs off the same way. The assertion that a lost assembler restarts at chunk
+zero at once is unchanged.
+- Tests were written first. `SnapshotRetryBackoffTest` (9 tests, injected clock)
+  covers the exact boundaries, the doubling and cap, reset on success and on
+  clear, isolation between peers, 100,000 failures without overflow, and the
+  argument checks. `RaftNodeSnapshotRetryBackoffTest` drives a leader with a
+  peer whose snapshots fail, on the manual timer's clock: nothing is sent one
+  millisecond before 250, 500 and 1000 ms have passed, one is sent when each
+  has, and real time passing between opportunities does not count.
+- Local check, 2026-10-24: those two classes, plus `InstallSnapshotTest`,
+  `RaftNodeInstalledSnapshotRealRecoveryTest` and
+  `RaftNodeOutboundSnapshotGenerationTest`, passed 32 tests; no unflagged error
+  in the Maven capture or the application log.
+- Gaps, stated plainly. The red run was not observed: the tests were not run
+  against the old code, because the change would have had to be reverted in
+  the working tree. The node-level test's first version could not have failed
+  against the old fixed delay, since it only moved the manual clock, and was
+  strengthened before its green run. The change has not run in `mvn install` or
+  on Jenkins.
+
+- Still to build: the part of the periodic-cleanup row that needs a cluster of
+  five voters (a failed voter removed with no join, and a returning peer
+  restarting its failure clock), and scenario 7, removed-server campaigns with
+  partition healing. Three consecutive runs against a fresh image from the final
+  jar, and the full suites, remain the exit gate.
 
 **Exit gate.** Every scenario above passes three consecutive runs against a
 fresh image from the final runtime JAR. Default,

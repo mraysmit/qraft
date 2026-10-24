@@ -32,11 +32,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+import static dev.mars.qraft.raft.DockerClusterApiHelper.cleanUp;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.configuration;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.configurationOrEmpty;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.everyNodeHas;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.exactlyOneLeader;
+import static dev.mars.qraft.raft.DockerClusterApiHelper.logsOf;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.ready;
+import static dev.mars.qraft.raft.DockerClusterApiHelper.removePeer;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.register;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.status;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.statusOrNull;
@@ -90,7 +93,9 @@ class DockerServerReplacementTest {
             DockerHealthApiHelper.awaitFirstSnapshotOnEveryServer(endpoints);
 
             // A follower is replaced, so the leader keeps the cluster running while it is wiped.
-            int victimIndex = (DockerHealthApiHelper.leaderIndex(endpoints) + 1) % 3;
+            int leaderIndex = DockerHealthApiHelper.leaderIndex(endpoints);
+            String leaderService = "server" + (leaderIndex + 1);
+            int victimIndex = (leaderIndex + 1) % 3;
             String victim = "server" + (victimIndex + 1);
             String victimEndpoint = endpoints.get(victimIndex);
             String survivor = "server" + ((victimIndex + 1) % 3 + 1);
@@ -107,11 +112,21 @@ class DockerServerReplacementTest {
             String newId = status(victimEndpoint).path("serverId").asText();
             assertNotEquals(oldId, newId, "an empty directory gives the server a new ID");
 
-            // The old entry still holds the name, so the join is refused for as long as it is observed.
+            // The old entry still holds the name, so the join is refused for as long as it is observed. Meanwhile
+            // the empty server bootstraps nothing and accepts nothing meant for the old ID: the leader's
+            // replication to that name reaches it, yet its log, commit index and snapshot stay empty, it holds
+            // no configuration and it never leads.
             await().during(Duration.ofSeconds(8)).atMost(Duration.ofSeconds(20)).until(() -> {
                 Map<String, Boolean> now = configurationOrEmpty(survivorEndpoint);
-                return Boolean.TRUE.equals(now.get(oldId)) && !now.containsKey(newId);
+                return Boolean.TRUE.equals(now.get(oldId)) && !now.containsKey(newId)
+                        && "0".equals(statusOrNull(victimEndpoint, "lastLogIndex"))
+                        && "0".equals(statusOrNull(victimEndpoint, "commitIndex"))
+                        && "0".equals(statusOrNull(victimEndpoint, "snapshotLastIndex"))
+                        && !"LEADER".equals(statusOrNull(victimEndpoint, "state"))
+                        && configurationOrEmpty(victimEndpoint).isEmpty();
             });
+            String ignoredReplies = "Ignoring an AppendEntries response from " + victim + " with server ID " + newId;
+            await().atMost(Duration.ofSeconds(30)).until(() -> logsOf(cluster, leaderService).contains(ignoredReplies));
 
             // A removal needs the operator token.
             SharedDockerClusterFixture.DockerCommandResult wrong = removePeer(cluster, victim, survivor,
@@ -154,23 +169,7 @@ class DockerServerReplacementTest {
                     everyNodeHas(endpoints, "before-replace") && everyNodeHas(endpoints, "after-replace"));
         } finally {
             Files.deleteIfExists(tokenFile);
-            SharedDockerClusterFixture.stopAndCapture(cluster);
+            cleanUp(cluster, List.of());
         }
-    }
-
-    /** Runs {@code operator raft remove-peer} for {@code name} against {@code via}, from the cluster's network. */
-    private static SharedDockerClusterFixture.DockerCommandResult removePeer(
-            ComposeContainer cluster, String name, String via, Path tokenFile, String token) throws Exception {
-        Files.writeString(tokenFile, token);
-        var permissions = Files.getFileAttributeView(tokenFile, java.nio.file.attribute.PosixFileAttributeView.class);
-        if (permissions != null) {
-            permissions.setPermissions(java.nio.file.attribute.PosixFilePermissions.fromString("rw-r--r--"));
-        }
-        return SharedDockerClusterFixture.runQraftCommand("replacement-remove-peer",
-                List.of("--network", SharedDockerClusterFixture.networkOf(cluster),
-                        "--mount", "type=bind,source=" + tokenFile.toAbsolutePath()
-                                + ",target=/etc/qraft/operator-token,readonly"),
-                "operator", "raft", "remove-peer", "--name", name, "--http-addr", via + ":8080",
-                "--token-file", "/etc/qraft/operator-token");
     }
 }

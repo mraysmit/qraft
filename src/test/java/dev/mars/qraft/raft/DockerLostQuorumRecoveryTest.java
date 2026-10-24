@@ -38,6 +38,7 @@ import java.util.concurrent.TimeUnit;
 
 import static dev.mars.qraft.raft.DockerClusterApiHelper.allReady;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.assertNoNodeHas;
+import static dev.mars.qraft.raft.DockerClusterApiHelper.cleanUp;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.configuration;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.configurationOrEmpty;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.everyNodeHas;
@@ -125,7 +126,7 @@ class DockerLostQuorumRecoveryTest {
             assertOldMajorityIsIsolated(cluster, endpoints, seed, seedId, "after-recovery");
             rejoinEmpty(cluster, endpoints, seed, seedId, sourceId, "after-recovery");
         } finally {
-            cleanUp(cluster, seed, recovery);
+            cleanUp(cluster, seedAsList(seed), recovery);
         }
     }
 
@@ -174,37 +175,13 @@ class DockerLostQuorumRecoveryTest {
             List<String> recoveredCluster = List.of(seed.endpoint(), endpoints.get(1), endpoints.get(2));
             assertNoNodeHas(recoveredCluster, "after-backup", "the rejoined servers took the seed's history");
         } finally {
-            cleanUp(cluster, seed, recovery, backup);
+            cleanUp(cluster, seedAsList(seed), recovery, backup);
         }
     }
 
-    /**
-     * Closes the seed, captures and stops the cluster and removes the volumes. Every step runs even if an earlier
-     * one fails, so no container or volume is left behind, and the first failure is then reported.
-     */
-    private static void cleanUp(ComposeContainer cluster, SharedDockerClusterFixture.DetachedServer seed,
-                                String... volumes) throws Exception {
-        Exception failure = null;
-        try {
-            if (seed != null) seed.close();
-        } catch (Exception error) {
-            failure = error;
-        }
-        try {
-            SharedDockerClusterFixture.stopAndCapture(cluster);
-        } catch (Exception | AssertionError error) {
-            if (failure == null) failure = error instanceof Exception e ? e : new IllegalStateException(error);
-            else failure.addSuppressed(error);
-        }
-        for (String volume : volumes) {
-            try {
-                SharedDockerClusterFixture.removeVolume(volume);
-            } catch (Exception error) {
-                if (failure == null) failure = error;
-                else failure.addSuppressed(error);
-            }
-        }
-        if (failure != null) throw failure;
+    private static List<SharedDockerClusterFixture.DetachedServer> seedAsList(
+            SharedDockerClusterFixture.DetachedServer seed) {
+        return seed == null ? List.of() : List.of(seed);
     }
 
     /** Runs {@code operator raft inspect} on the stopped {@code source} volume and returns its printed fields. */
