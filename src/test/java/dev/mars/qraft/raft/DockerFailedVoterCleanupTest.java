@@ -34,12 +34,12 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import static dev.mars.qraft.raft.DockerClusterApiHelper.cleanUp;
+import static dev.mars.qraft.raft.DockerClusterApiHelper.clusterLogs;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.configuration;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.configurationOrEmpty;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.everyNodeHas;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.exactlyOneLeader;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.joinerConfiguration;
-import static dev.mars.qraft.raft.DockerClusterApiHelper.logsOf;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.ready;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.register;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.status;
@@ -111,11 +111,11 @@ class DockerFailedVoterCleanupTest {
 
             // Past the grace the leader finds it eligible, but three voters is the minimum: it is not removed.
             String considered = "eligibleServerIds=[" + victimId + "], voters=3, removalBudget=1, minVoters=3";
-            await().atMost(Duration.ofSeconds(150)).until(() -> clusterLogs(cluster).contains(considered));
+            await().atMost(Duration.ofSeconds(150)).until(() -> clusterLogs(cluster, added).contains(considered));
             String removalOfVictim = "Automatic cleanup committed removal of failed voter " + victimId;
             await().during(Duration.ofSeconds(25)).atMost(Duration.ofSeconds(60)).until(() ->
                     Boolean.TRUE.equals(configurationOrEmpty(retained.get(0)).get(victimId))
-                            && !clusterLogs(cluster).contains(removalOfVictim)
+                            && !clusterLogs(cluster, added).contains(removalOfVictim)
                             && exactlyOneLeader(retained));
             assertEquals(200, register(retained, "while-failed"), "the cluster carries on with two of three voters");
             await().atMost(Duration.ofSeconds(30)).until(() -> everyNodeHas(retained, "while-failed"));
@@ -136,8 +136,8 @@ class DockerFailedVoterCleanupTest {
                 Map<String, Boolean> now = configurationOrEmpty(retained.get(0));
                 return !now.containsKey(victimId) && Boolean.TRUE.equals(now.get(id4));
             });
-            await().atMost(Duration.ofSeconds(30)).until(() -> clusterLogs(cluster).contains(removalOfVictim)
-                    && clusterLogs(cluster).contains("Promoted server4 to a voter"));
+            await().atMost(Duration.ofSeconds(30)).until(() -> clusterLogs(cluster, added).contains(removalOfVictim)
+                    && clusterLogs(cluster, added).contains("Promoted server4 to a voter"));
             Set<String> expected = new HashSet<>(retainedIds);
             expected.add(id4);
             List<String> everyServer = new ArrayList<>(retained);
@@ -166,9 +166,5 @@ class DockerFailedVoterCleanupTest {
         } finally {
             cleanUp(cluster, added, volume4);
         }
-    }
-
-    private static String clusterLogs(ComposeContainer cluster) {
-        return logsOf(cluster, "server1") + logsOf(cluster, "server2") + logsOf(cluster, "server3");
     }
 }

@@ -34,7 +34,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import static dev.mars.qraft.raft.DockerClusterApiHelper.cleanUp;
-import static dev.mars.qraft.raft.DockerClusterApiHelper.composeLogs;
+import static dev.mars.qraft.raft.DockerClusterApiHelper.clusterLogs;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.configurationOrEmpty;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.everyNodeHas;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.exactlyOneLeader;
@@ -119,7 +119,7 @@ class DockerPeriodicCleanupTest {
                 SharedDockerClusterFixture.startContainer(cluster, returning);
                 await().atMost(Duration.ofSeconds(90)).until(() -> ready(endpoints.get(returningIndex)));
             }
-            assertFalse(eligible(composeLogs(cluster), returningId),
+            assertFalse(eligible(clusterLogs(cluster, added), returningId),
                     "the returning peer was never absent for the whole grace");
             assertEquals(fiveIds, configurationOrEmpty(endpoints.get(leaderIndex)).keySet());
 
@@ -128,7 +128,7 @@ class DockerPeriodicCleanupTest {
             await().during(Duration.ofSeconds(30)).atMost(Duration.ofSeconds(60)).until(() ->
                     Boolean.TRUE.equals(configurationOrEmpty(endpoints.get(leaderIndex)).get(failedId)));
             String removal = "Automatic cleanup committed removal of failed voter " + failedId;
-            await().atMost(Duration.ofSeconds(150)).until(() -> composeLogs(cluster).contains(removal));
+            await().atMost(Duration.ofSeconds(150)).until(() -> clusterLogs(cluster, added).contains(removal));
             Set<String> fourIds = new HashSet<>(fiveIds);
             fourIds.remove(failedId);
             List<String> retained = new ArrayList<>(everyServer);
@@ -137,7 +137,7 @@ class DockerPeriodicCleanupTest {
                     .allMatch(endpoint -> configurationOrEmpty(endpoint).keySet().equals(fourIds)));
             Map<String, Boolean> voters = configurationOrEmpty(endpoints.get(leaderIndex));
             assertTrue(voters.values().stream().allMatch(Boolean::booleanValue), "four voters remain: " + voters);
-            assertTrue(composeLogs(cluster).contains("eligibleServerIds=[" + failedId + "], voters=5, "
+            assertTrue(clusterLogs(cluster, added).contains("eligibleServerIds=[" + failedId + "], voters=5, "
                     + "removalBudget=2, minVoters=3"), "the pass saw five voters, a budget of two and a minimum of three");
 
             assertEquals(200, register(retained, "after-removal"));

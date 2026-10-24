@@ -256,6 +256,22 @@ final class DockerClusterApiHelper {
     }
 
     /**
+     * The logs of every server in the cluster, the compose servers and the detached ones together. Any voter can
+     * win an election, so a line the leader logs may be in any of them.
+     */
+    static String clusterLogs(ComposeContainer cluster, List<SharedDockerClusterFixture.DetachedServer> detached) {
+        StringBuilder logs = new StringBuilder(composeLogs(cluster));
+        for (SharedDockerClusterFixture.DetachedServer server : detached) {
+            try {
+                logs.append(server.logs());
+            } catch (Exception unreadable) {
+                throw new IllegalStateException("Could not read the logs of " + server.name(), unreadable);
+            }
+        }
+        return logs.toString();
+    }
+
+    /**
      * Starts server4 and server5, each on its own volume and listing the cluster, adds them to {@code added} as
      * they start so the caller's cleanup closes them, and waits until {@code observer} lists five voters.
      */

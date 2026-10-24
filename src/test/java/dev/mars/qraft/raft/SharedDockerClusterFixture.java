@@ -347,6 +347,11 @@ public final class SharedDockerClusterFixture {
             runCommand(List.of("docker", "stop", "--time", "20", name));
         }
 
+        /** Everything the server has logged so far, standard output and error together. */
+        public String logs() throws Exception {
+            return commandOutput(List.of("docker", "logs", name));
+        }
+
         @Override
         public void close() throws Exception {
             try {
