@@ -173,6 +173,22 @@ under an unflagged header at any level. The job needs the `MUTATION_TESTING`
 parameter, so a plain `POST /job/Qraft/build` answers 400; `.env/qraft-jenkins-build.ps1`
 starts it with `buildWithParameters`.
 
+## Builds 34 and 35, 2026-10-24
+
+[Build 34](http://192.168.137.32:8080/job/Qraft/34/) failed in 91 seconds on one
+default-suite test, the guard that a Docker test class which makes a peer
+unreachable also declares that its name may not resolve. The end-to-end and
+Docker stages were skipped. [Build 35](http://192.168.137.32:8080/job/Qraft/35/)
+ran every stage in 1,288 seconds: default 1,148 and end-to-end 10 passed, and
+Docker passed 38 of 40.
+
+One of the two Docker errors came from the host: the image build failed with
+"failed to prepare extraction snapshot ... parent snapshot ... does not exist:
+not found", and the next class built the same image a second later. No other job
+was running and the pipeline does not prune images, so the cause was not found;
+the fixture now tries that one failure once more. If it recurs, check the Docker
+daemon's version, storage driver and image store on the node.
+
 ## Job configuration
 
 The job loads its pipeline from the repository's default branch using the following SCM configuration.

@@ -2278,11 +2278,54 @@ zero at once is unchanged.
   strengthened before its green run. The change has not run in `mvn install` or
   on Jenkins.
 
-- Still to build: the part of the periodic-cleanup row that needs a cluster of
-  five voters (a failed voter removed with no join, and a returning peer
-  restarting its failure clock), and scenario 7, removed-server campaigns with
-  partition healing. Three consecutive runs against a fresh image from the final
-  jar, and the full suites, remain the exit gate.
+Scenarios 5 and 7 are built and passed their first local runs. They are
+`DockerPeriodicCleanupTest` (a returning peer restarts its failure clock; a
+failed voter is then removed by a periodic pass with no join: five voters,
+`removalBudget=2`, `minVoters=3`, four voters remain) and
+`DockerRemovedServerCampaignTest` (a partitioned follower is removed, campaigns
+at higher terms, and on return changes nothing; killing the leader still lets
+the other three elect another).
+- **Leadership churn when a stopped voter returns (found by the first
+  periodic run, not acted on).** The leader's channel to the restarted voter was
+  in gRPC reconnect backoff, so the voter heard no heartbeat and ran four
+  elections (terms 2 to 5). Stickiness ignored its campaigns, but the next
+  AppendEntries that reached it was answered with term 5 and the leader stepped
+  down on that higher term; two more elections followed. This is the cost of
+  choosing stickiness over Pre-Vote (section 5): a brief leadership change, no
+  data loss. Options are Pre-Vote, or a shorter channel reconnect backoff; the
+  owner has not asked for either.
+- Because any voter can win an election, the cleanup tests now read the logs of
+  every server, compose and detached (`DetachedServer.logs()`,
+  `DockerClusterApiHelper.clusterLogs`), not only the three compose servers'.
+
+**Jenkins builds 34 and 35, 2026-10-24.**
+- Build 34 (91 s) failed one default-suite test, the guard that every Docker
+  class declaring `RAFT_PEER_UNREACHABLE` also declares
+  `RAFT_PEER_NAME_UNRESOLVED`. I had removed the second from two classes because
+  it had not been observed; it is restored in both. The end-to-end and Docker
+  stages were skipped.
+- Build 35 (1,288 s): default 1,148 passed, end-to-end 10 passed, Docker 38 of
+  40 passed. The two errors: `DockerPeriodicCleanupTest` timed out reading the
+  wrong logs (server5, a detached server, was the leader; fixed as above), and
+  `DockerLeaderRemovalTest` failed at 3.5 s because the daemon's image build
+  failed: "failed to prepare extraction snapshot ... parent snapshot ... does
+  not exist: not found". The next class built the same image one second later.
+- Root cause of the image build failure: not found. No other Jenkins job was
+  running (PeeGeeQ last ran 2026-10-11, PeeGeeQ-Cache 2026-09-25, no executor
+  busy), and the pipeline never prunes images. The failing step shows buildkit
+  marking a layer `CACHED` while the snapshot it needs is gone, which is a
+  daemon cache fault. It cannot be removed from the repository, so
+  `buildImageRetryingAMissingSnapshot` tries that one failure once more, logs the
+  first failure as a warning, keeps it as suppressed if the second also fails,
+  and rethrows anything else at once. Written test first
+  (`SharedDockerClusterImageBuildTest`, 5 tests): red against a stub with the
+  two retry tests failing on behaviour, then green; 61 tests with the fixture
+  guards. If the same failure recurs, look at the daemon (Docker version,
+  storage driver, containerd image store), not at the tests.
+
+- Still to do: three consecutive runs of every Step 8 scenario against a fresh
+  image from the final jar, a green Jenkins run with all stages, and the full
+  suites. This is the exit gate.
 
 **Exit gate.** Every scenario above passes three consecutive runs against a
 fresh image from the final runtime JAR. Default,
