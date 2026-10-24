@@ -1033,12 +1033,7 @@ public class RaftNode {
                         () -> prepareAndPersistLeaderAppend(command),
                         decision -> applyLeaderAppend(decision, promise))
                 .whenComplete(Completions.onFailure(error -> {
-                    if (error instanceof RaftTransitionSequencer.DrainingException) {
-                        logger.debug("Command rejected while Raft transitions are draining: {}",
-                                error.getMessage());
-                    } else {
-                        logger.error("Failed to persist command to WAL: {}", error.getMessage(), error);
-                    }
+                    TransitionFailureLog.log(logger, "Failed to persist command to WAL: {}", error);
                     promise.completeExceptionally(error);
                 }));
 
@@ -1809,9 +1804,8 @@ public class RaftNode {
                         RaftTransitionSequencer.FailurePolicy.FENCE,
                         () -> prepareVoteResponse(peerId, response),
                         decision -> applyVoteResponse(decision, electionTerm, granted))
-                .whenComplete(Completions.onFailure(error -> logger.error(
-                        "Failed to process vote response for election term {}: {}",
-                        electionTerm, error.getMessage(), error)));
+                .whenComplete(Completions.onFailure(error -> TransitionFailureLog.log(logger,
+                        "Failed to process vote response for election term {}: {}", error, electionTerm)));
     }
 
     private CompletableFuture<VoteResponseDecision> prepareVoteResponse(String peerId, VoteResponse response) {
@@ -1918,9 +1912,8 @@ public class RaftNode {
                             updateCommitIndex();
                             return null;
                         })
-                .whenComplete(Completions.onFailure(error -> logger.error(
-                        "Failed to establish leadership no-op for term {}: {}",
-                        leadershipTerm, error.getMessage(), error)));
+                .whenComplete(Completions.onFailure(error -> TransitionFailureLog.log(logger,
+                        "Failed to establish leadership no-op for term {}: {}", error, leadershipTerm)));
     }
 
     private void initializeLeaderState() {
@@ -2088,11 +2081,7 @@ public class RaftNode {
                             return applyLeaderAppend(decision, removal);
                         })
                 .whenComplete(Completions.onFailure(failure -> {
-                    if (failure instanceof RaftTransitionSequencer.DrainingException) {
-                        logger.debug("Failed-voter cleanup stopped while transitions drain: {}", failure.getMessage());
-                    } else {
-                        logger.error("Failed to persist automatic failed-voter removal: {}", failure.getMessage(), failure);
-                    }
+                    TransitionFailureLog.log(logger, "Failed to persist automatic failed-voter removal: {}", failure);
                     removal.completeExceptionally(failure);
                 }));
     }
@@ -2387,12 +2376,7 @@ public class RaftNode {
                         this::applyFollowerAppend);
         onStateLoopComplete(transition, (appended, error) -> {
             if (error != null) {
-                if (error instanceof RaftTransitionSequencer.DrainingException) {
-                    logger.debug("AppendEntries rejected while draining: {}", error.getMessage());
-                } else {
-                    logger.error("AppendEntries failed during durable transition: {}",
-                            error.getMessage(), error);
-                }
+                TransitionFailureLog.log(logger, "AppendEntries failed during durable transition: {}", error);
                 response.complete(AppendEntriesResponse.newBuilder()
                         .setTerm(currentTerm)
                         .setSuccess(false)
@@ -2759,15 +2743,8 @@ public class RaftNode {
                         () -> prepareAppendEntriesResponse(
                                 peerId, response, originatingTerm, originatingGeneration),
                         this::applyAppendEntriesResponse)
-                .whenComplete(Completions.onFailure(error -> {
-                    if (error instanceof RaftTransitionSequencer.DrainingException) {
-                        logger.debug("Ignoring AppendEntries response from {} while draining: {}",
-                                peerId, error.getMessage());
-                    } else {
-                        logger.error("Failed to process AppendEntries response from {}: {}",
-                                peerId, error.getMessage(), error);
-                    }
-                }));
+                .whenComplete(Completions.onFailure(error -> TransitionFailureLog.log(logger,
+                        "Failed to process AppendEntries response from {}: {}", error, peerId)));
     }
 
     private CompletableFuture<AppendResponseDecision> prepareAppendEntriesResponse(
@@ -3015,8 +2992,7 @@ public class RaftNode {
                         if (Completions.unwrap(resultError) instanceof RaftTransitionSequencer.FencedException) {
                             logger.debug("Scheduled snapshot rejected because the sequencer is fenced");
                         } else {
-                            logger.error("Scheduled snapshot failed: {}",
-                                    Completions.unwrap(resultError).getMessage(), Completions.unwrap(resultError));
+                            TransitionFailureLog.log(logger, "Scheduled snapshot failed: {}", resultError);
                         }
                     } else if (resultValue.failure() != null) {
                         logger.error("Scheduled snapshot failed: {}",
@@ -3063,7 +3039,7 @@ public class RaftNode {
                 .thenCompose(result -> result.failure() == null
                         ? CompletableFuture.<Void>completedFuture(null)
                         : CompletableFuture.<Void>failedFuture(result.failure()))
-                .whenComplete(Completions.onFailure(err -> logger.error("Snapshot failed: {}", err.getMessage(), err)));
+                .whenComplete(Completions.onFailure(err -> TransitionFailureLog.log(logger, "Snapshot failed: {}", err)));
     }
 
     private CompletableFuture<LocalSnapshotDecision> preparePublishAndCompactLocalSnapshot() {
@@ -3380,9 +3356,8 @@ public class RaftNode {
                         () -> prepareOutboundSnapshotResponse(
                                 transfer, snapshot, data, chunkIndex, totalChunks, last, response),
                         this::applyOutboundSnapshotResponse)
-                .whenComplete(Completions.onFailure(error -> logger.error(
-                        "Failed to process InstallSnapshot response from {}: {}",
-                        transfer.target(), error.getMessage(), error)));
+                .whenComplete(Completions.onFailure(error -> TransitionFailureLog.log(logger,
+                        "Failed to process InstallSnapshot response from {}: {}", error, transfer.target())));
     }
 
     private CompletableFuture<OutboundSnapshotResponseDecision> prepareOutboundSnapshotResponse(
@@ -3547,12 +3522,7 @@ public class RaftNode {
             if (error == null) {
                 promise.complete(installed);
             } else {
-                if (error instanceof RaftTransitionSequencer.DrainingException) {
-                    logger.debug("InstallSnapshot rejected while draining: {}", error.getMessage());
-                } else {
-                    logger.error("InstallSnapshot durable transition failed: {}",
-                            error.getMessage(), error);
-                }
+                TransitionFailureLog.log(logger, "InstallSnapshot durable transition failed: {}", error);
                 promise.complete(InstallSnapshotResponse.newBuilder()
                         .setTerm(currentTerm)
                         .setSuccess(false)

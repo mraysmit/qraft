@@ -2347,16 +2347,50 @@ the other three elect another).
   shutdown race that `RAFT_SNAPSHOT_TRANSFER_INTERRUPTED` already covers for
   InstallSnapshot responses. It is intermittent because it needs an election
   to be in flight at the moment of the stop.
-- Fix, test-first: `RAFT_ELECTION_INTERRUPTED_BY_SHUTDOWN` in
-  `IntentionalErrorFixture`, with a pattern that names only this refusal
-  ("Failed to process vote response for election term N: Raft transition
-  sequencer is draining"), declared in `DockerClientTopologyTest`. The new
-  `DockerLogCaptureTest` case failed first against a pattern that matched
-  nothing (expected 1, was 0), then passed, and also requires that a vote
-  response failing for any other reason is still a problem. The production log
-  level and message are unchanged, at the owner's instruction. Other Docker
-  classes that stop a server during an election can meet the same race; they
-  declare nothing for it yet because it has not been seen there.
+- First fix, replaced the same day (see the review below): a fault definition
+  `RAFT_ELECTION_INTERRUPTED_BY_SHUTDOWN`, declared in `DockerClientTopologyTest`.
+  The owner required the underlying inconsistency to be resolved, not excused, so
+  that definition and its declaration were removed.
+- **Production review of that race (owner: a race in production is a sign of
+  larger problems).** Read first, then the inconsistency
+  it exposed was fixed (below).
+  - A response that reaches the sequencer once it is draining is refused in
+    `admit()` before any prepare, persist or apply step. It does not fence the
+    sequencer and writes nothing.
+  - `beginShutdown` cancels the timers and then drains, so no election starts
+    after the stop. A response to an RPC the node sent earlier can still arrive,
+    which no ordering can prevent.
+  - The server stops its inbound gRPC servers and HTTP before it stops the Raft
+    node (`QraftServerService.setupShutdownCoordinator`), so the window holds
+    only outbound responses, as in the log.
+  - One inconsistency, now resolved (owner: no inconsistency may be left, clean
+    code is required). `submitCommand` and five other handlers treated a drain
+    refusal as expected (debug); the vote-response, leadership no-op,
+    InstallSnapshot-response, scheduled-snapshot and `takeSnapshot` handlers
+    logged the same refusal as an error with a stack trace. One class,
+    `TransitionFailureLog`, now decides for every handler: a drain refusal is
+    logged at debug with the handler's own message and no stack trace, and any
+    other failure, including a fenced sequencer, stays an error with its stack
+    trace. Ten call sites use it (the five that were errors and the five plain
+    if/else branches that duplicated the rule). The election-start handler keeps
+    its own branch because it also treats a fenced sequencer as expected, which
+    is a different condition. Only the severity of a drain refusal changed; the
+    messages and the other failures did not.
+  - Test-first. Red run (7 failures, the rest passing): `TransitionFailureLogTest`
+    (5 tests, a logger of its own so the provoked error is read there and not by
+    the suite's audit), `RaftNodeShutdownVoteResponseTest` (4 tests: a higher-term
+    refusal and a granted vote arriving after the stop change nothing, win no
+    leadership and fence nothing; `takeSnapshot` after the stop fails with the
+    draining refusal; the same refusal before the stop does move the node to
+    term 5 and writes it, so the others are not passing for want of an effect),
+    a late InstallSnapshot response in `RaftNodeOutboundSnapshotGenerationTest`,
+    and `DockerLogCaptureTest`, whose drain line is now a problem that no
+    declaration excuses. Green after the change: 348 tests in 39 classes
+    (`RaftNode*Test`, `RaftTransitionSequencer*Test`, `InstallSnapshotTest`,
+    the fault and fixture guards), no unflagged error in the capture or the
+    application log. Not covered at node level: the leadership no-op and the
+    scheduled snapshot, whose refusal cannot be provoked deterministically;
+    the shared class is tested instead.
 - The count of consecutive green Jenkins runs starts again after build 37.
 - Still to do: three consecutive green Jenkins runs of the Step 8 scenarios, the final review of the design, feature validation and runbook against
   the evidence, and the audits the exit gate lists (prohibited frameworks,

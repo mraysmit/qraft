@@ -198,8 +198,9 @@ unflagged stack trace.
 seconds. Default (1,153) and end-to-end (10) passed and all six Step 8 classes
 passed, but `DockerClientTopologyTest` failed its Docker-log audit on one
 undeclared error: a vote response refused while a stopped server's transition
-sequencer was draining. The test stops that server on purpose, so the error is
-now declared by `RAFT_ELECTION_INTERRUPTED_BY_SHUTDOWN`.
+sequencer was draining. Handlers disagreed about such a refusal (six logged it at
+debug, five at error). One class now treats it the same everywhere: debug, and
+any other failure stays an error. No declaration excuses it any more.
 
 ## Job configuration
 

@@ -214,6 +214,24 @@ class RaftNodeOutboundSnapshotGenerationTest {
     }
 
     @Test
+    void aSnapshotResponseThatArrivesAfterShutdownBeganIsRefusedWithoutChangingThePeersIndexes() throws Exception {
+        triggerSnapshotTransfer();
+        PendingSnapshot sent = transport.takeSnapshot();
+        long nextIndexBefore = node.getNextIndex("peer-1");
+        await(node.stop());
+
+        sent.response().complete(InstallSnapshotResponse.newBuilder()
+                .setTerm(sent.request().getTerm())
+                .setFollowerServerId(PEER_SERVER_ID)
+                .setSuccess(true)
+                .build());
+        settle();
+
+        assertEquals(nextIndexBefore, node.getNextIndex("peer-1"),
+                "a response turned away at admission does not move the peer's next index");
+    }
+
+    @Test
     void persistenceRejectionAbandonsTransferInsteadOfRetryingChunkZeroImmediately() throws Exception {
         triggerSnapshotTransfer();
         PendingSnapshot rejected = transport.takeSnapshot();

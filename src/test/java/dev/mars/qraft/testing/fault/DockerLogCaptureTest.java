@@ -375,7 +375,6 @@ class DockerLogCaptureTest {
     void dockerRecoveryErrorsHaveNarrowIntentionalSignatures() {
         String log = """
                 2026-10-06 14:00:00.000 [qraft-state-loop] ERROR dev.mars.qraft.raft.RaftNode [n1] - Failed to send InstallSnapshot chunk 1/1 to n2: UNAVAILABLE: io exception
-                2026-10-06 14:00:01.000 [qraft-state-loop] ERROR dev.mars.qraft.raft.RaftNode [n1] - Failed to process InstallSnapshot response from n2: Raft transition sequencer is draining
                 2026-10-06 14:00:02.000 [wal-executor] ERROR dev.mars.qraft.server.QraftServerService - Raft recovery failed; node remains live but unready and will not participate. Preserve the node directory for diagnosis, then replace it from a healthy peer and restart: WAL /app/data/raft.log is corrupt at byte 0 of 510; 0 entries precede the damage. Not repaired: restore this node from its peers.
                 2026-10-06 14:00:03.000 [wal-executor] ERROR dev.mars.raftlog.storage.FileRaftStorage - Cannot acquire exclusive lock at /app/data/raft.lock: another process holds the lock
                 2026-10-06 14:00:04.000 [main] ERROR dev.mars.qraft.server.QraftServerService - Failed to initialize Raft storage: Cannot acquire exclusive lock on WAL directory: /app/data. Another process may be using this storage.
@@ -387,27 +386,22 @@ class DockerLogCaptureTest {
                 IntentionalErrorFixture.WAL_DIRECTORY_ALREADY_LOCKED,
                 IntentionalErrorFixture.SERVER_STORAGE_ALREADY_LOCKED));
 
-        assertEquals(5, audit.recognised().size());
+        assertEquals(4, audit.recognised().size());
         assertTrue(audit.problems().isEmpty());
     }
 
     @Test
-    void aVoteResponseRefusedWhileTheSequencerDrainsHasANarrowIntentionalSignature() {
-        String drained = "2026-10-24 12:15:50.470 [qraft-state-loop] ERROR dev.mars.qraft.raft.RaftNode [server2]"
-                + " [CANDIDATE/2] [8b33b78a-c938-4eda-b80c-5801d5f2c6e5] [AppendEntries] - Failed to process vote"
-                + " response for election term 2: Raft transition sequencer is draining\n";
-        String other = "2026-10-24 12:15:51.000 [qraft-state-loop] ERROR dev.mars.qraft.raft.RaftNode [server2]"
-                + " [CANDIDATE/2] - Failed to process vote response for election term 2: java.io.IOException: boom\n";
+    void aDrainRefusalLoggedAsAnErrorIsAProblemNoDeclarationExcuses() {
+        String log = """
+                2026-10-24 12:15:50.470 [qraft-state-loop] ERROR dev.mars.qraft.raft.RaftNode [n1] - Failed to process InstallSnapshot response from n2: Raft transition sequencer is draining
+                2026-10-24 12:15:50.480 [qraft-state-loop] ERROR dev.mars.qraft.raft.RaftNode [n1] - Failed to process vote response for election term 2: Raft transition sequencer is draining
+                """;
 
-        DockerLogCaptureHelper.Audit expected = DockerLogCaptureHelper.audit(drained,
-                Set.of(IntentionalErrorFixture.RAFT_ELECTION_INTERRUPTED_BY_SHUTDOWN));
-        DockerLogCaptureHelper.Audit unexpected = DockerLogCaptureHelper.audit(drained + other,
-                Set.of(IntentionalErrorFixture.RAFT_ELECTION_INTERRUPTED_BY_SHUTDOWN));
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(log, Set.of(
+                IntentionalErrorFixture.RAFT_SNAPSHOT_TRANSFER_INTERRUPTED, IntentionalErrorFixture.RAFT_PEER_UNREACHABLE));
 
-        assertEquals(1, expected.recognised().size(), "the drain refusal is the declared error");
-        assertTrue(expected.problems().isEmpty());
-        assertEquals(1, unexpected.recognised().size(), "only the drain refusal is recognised");
-        assertEquals(1, unexpected.problems().size(), "a vote response that fails for any other reason is still a problem");
+        assertTrue(audit.recognised().isEmpty(), "a refusal at admission is logged at debug, so no error excuses it");
+        assertEquals(2, audit.problems().size());
     }
 
     @Test

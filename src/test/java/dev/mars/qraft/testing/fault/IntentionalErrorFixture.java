@@ -147,19 +147,10 @@ public enum IntentionalErrorFixture {
     GRPC_CONNECTION_ACCEPTED_AS_SERVER_STOPS("io.netty.channel.ChannelInitializer", Level.WARN,
             "Failed to initialize a channel\\. Closing: \\[id: 0x[0-9a-f]+, L:\\S+ [-!] R:\\S+]"),
 
-    /** A stopped Docker peer interrupts an in-progress snapshot transfer or its completion callback. */
+    /** A stopped Docker peer interrupts an in-progress snapshot transfer. */
     RAFT_SNAPSHOT_TRANSFER_INTERRUPTED("dev.mars.qraft.raft.RaftNode", Level.ERROR,
-            "(?:Failed to send InstallSnapshot chunk \\d+/\\d+ to \\S+: UNAVAILABLE:"
-                    + " (?:io exception|Unable to resolve host \\S+)"
-                    + "|Failed to process InstallSnapshot response from \\S+:"
-                    + " Raft transition sequencer is draining)"),
-
-    /**
-     * A test deliberately stops a Docker server that is campaigning, and the vote response that arrives after its
-     * transition sequencer began to drain is refused.
-     */
-    RAFT_ELECTION_INTERRUPTED_BY_SHUTDOWN("dev.mars.qraft.raft.RaftNode", Level.ERROR,
-            "Failed to process vote response for election term \\d+: Raft transition sequencer is draining"),
+            "Failed to send InstallSnapshot chunk \\d+/\\d+ to \\S+: UNAVAILABLE:"
+                    + " (?:io exception|Unable to resolve host \\S+)"),
 
     /** A test deliberately fences the transition sequencer and then exercises a rejected operation. */
     RAFT_FENCED_OPERATION("dev.mars.qraft.raft.RaftNode", Level.ERROR,
