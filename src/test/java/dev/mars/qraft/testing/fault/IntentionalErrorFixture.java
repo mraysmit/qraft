@@ -183,11 +183,6 @@ public enum IntentionalErrorFixture {
                     + " (?<failure>Cannot acquire exclusive lock on WAL directory: .*\\."
                     + " Another process may be using this storage\\.)"),
 
-    /** Stopping during recovery deliberately makes already-scheduled startup work encounter the drain. */
-    RAFT_STARTUP_DRAINING("dev.mars.qraft.raft.RaftNode", Level.ERROR,
-            "Failed to (?:establish leadership no-op for term \\d+|recover Raft state from storage):"
-                    + " Raft transition sequencer is draining"),
-
     /** Used only by the tests of this package, which test the labelling and checks themselves. */
     SELF_TEST_INTENTIONAL_ERROR("dev.mars.qraft.testing.fault.selftest", Level.ERROR,
             "Self-test intentional error \\d+");

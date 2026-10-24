@@ -657,8 +657,7 @@ public class RaftNode {
         Throwable startupFailure = null;
         try {
             if (recoveryFailure != null) {
-                logger.error("Failed to recover Raft state from storage: {}",
-                        recoveryFailure.getMessage(), recoveryFailure);
+                TransitionFailureLog.log(logger, "Failed to recover Raft state from storage: {}", recoveryFailure);
                 startupFailure = recoveryFailure;
             } else if (ownedAsyncDraining) {
                 completion.completeExceptionally(new RaftTransitionSequencer.DrainingException());
@@ -907,7 +906,7 @@ public class RaftNode {
         recovered.whenComplete(Completions.outcome(
                 v -> logger.info("Recovery complete: term={}, logSize={}, lastApplied={}, snapshotLastIndex={}",
                         currentTerm, log.size(), lastApplied, snapshotLastIndex),
-                err -> logger.error("Recovery failed: {}", err.getMessage(), err)));
+                err -> TransitionFailureLog.log(logger, "Recovery failed: {}", err)));
         return recovered;
     }
 

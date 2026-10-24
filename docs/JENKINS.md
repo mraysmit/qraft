@@ -202,6 +202,11 @@ sequencer was draining. Handlers disagreed about such a refusal (six logged it a
 debug, five at error). One class now treats it the same everywhere: debug, and
 any other failure stays an error. No declaration excuses it any more.
 
+[Build 38](http://192.168.137.32:8080/job/Qraft/38/), on `adecfbc`, passed every stage
+in 1,178 seconds: default 1,164, end-to-end 10 and Docker 40, every coverage gate
+met, 675 error headers in the archived logs all flagged and no unflagged stack
+trace. It is the first green run after build 37.
+
 ## Job configuration
 
 The job loads its pipeline from the repository's default branch using the following SCM configuration.

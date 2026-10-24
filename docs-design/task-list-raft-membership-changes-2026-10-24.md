@@ -2371,8 +2371,12 @@ the other three elect another).
     `TransitionFailureLog`, now decides for every handler: a drain refusal is
     logged at debug with the handler's own message and no stack trace, and any
     other failure, including a fenced sequencer, stays an error with its stack
-    trace. Ten call sites use it (the five that were errors and the five plain
-    if/else branches that duplicated the rule). The election-start handler keeps
+    trace. Twelve call sites use it: the five that were errors, the five plain
+    if/else branches that duplicated the rule, and the two recovery log sites
+    (`finishStart` and `recoverFromStorage`) that Jenkins build 38's audit showed
+    still logged the refusal as an error, excused by a fault definition
+    `RAFT_STARTUP_DRAINING`, which is removed together with its second alternative
+    (the leadership no-op) that was already dead. The election-start handler keeps
     its own branch because it also treats a fenced sequencer as expected, which
     is a different condition. Only the severity of a drain refusal changed; the
     messages and the other failures did not.
@@ -2385,12 +2389,22 @@ the other three elect another).
     term 5 and writes it, so the others are not passing for want of an effect),
     a late InstallSnapshot response in `RaftNodeOutboundSnapshotGenerationTest`,
     and `DockerLogCaptureTest`, whose drain line is now a problem that no
-    declaration excuses. Green after the change: 348 tests in 39 classes
-    (`RaftNode*Test`, `RaftTransitionSequencer*Test`, `InstallSnapshotTest`,
-    the fault and fixture guards), no unflagged error in the capture or the
-    application log. Not covered at node level: the leadership no-op and the
+    declaration excuses. A further red run took `RAFT_STARTUP_DRAINING` out of
+    `RaftNodeShutdownSequencingTest` (one failure: the recovery drain refusal
+    logged as an error), then green: 377 tests in 41 classes (`RaftNode*Test`,
+    `RaftTransitionSequencer*Test`, `InstallSnapshotTest`, `QraftServer*Test`,
+    `ClusterBootstrapTest`, the fault and fixture guards), no unflagged error in
+    the capture or the application log. A sweep of the production code found no
+    other place that handles a drain refusal differently; the other `logger.error`
+    calls in `RaftNode` are transport, fence and snapshot-load failures. Not covered at node level: the leadership no-op and the
     scheduled snapshot, whose refusal cannot be provoked deterministically;
     the shared class is tested instead.
+- **Build 38 (commit adecfbc), green on every stage, 1,178 s:** default 1,164,
+  end-to-end 10 and Docker 40 passed, every coverage gate met; 675 ERROR headers
+  in the archived logs, all flagged, no stack trace under an unflagged header. It
+  is the first of the three consecutive green runs after build 37. Its only
+  drain-related ERROR was the flagged `RAFT_STARTUP_DRAINING` event described
+  above.
 - The count of consecutive green Jenkins runs starts again after build 37.
 - Still to do: three consecutive green Jenkins runs of the Step 8 scenarios, the final review of the design, feature validation and runbook against
   the evidence, and the audits the exit gate lists (prohibited frameworks,

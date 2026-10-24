@@ -31,7 +31,6 @@ import dev.mars.qraft.state.distributed.DistributedStateCommand;
 import dev.mars.qraft.raft.api.SnapshotStore;
 import dev.mars.raftlog.storage.RaftStorage;
 import dev.mars.qraft.testing.fault.InjectedFaultFixture;
-import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,7 +50,6 @@ import static dev.mars.qraft.raft.RaftAwaitHelper.awaitStateLoop;
 import static dev.mars.qraft.raft.RaftAwaitHelper.await;
 import static dev.mars.qraft.raft.RaftAwaitHelper.logEnd;
 import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_RESOURCE_SHUTDOWN_FAILURE;
-import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_STARTUP_DRAINING;
 import static dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_TRANSPORT_FAILURE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -263,7 +261,6 @@ class RaftNodeShutdownSequencingTest {
 
     @Test
     void stopDuringRecoveryWaitsAndPreventsLateStartup() {
-        IntentionalErrorsHelper.expect(RAFT_STARTUP_DRAINING);
         await(node.stop());
         storage = new ShutdownStorageFixture(closeEvents);
         storage.open(null).join();
