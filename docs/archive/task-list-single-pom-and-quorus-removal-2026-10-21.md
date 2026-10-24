@@ -12,7 +12,7 @@
 - This list is archived. The membership list resumed at Step 5 on the new layout; Step 5 completed on 2026-10-21, leaving Steps 6 to 8 before the client list starts.
 - [`task-list-consul-style-client-2026-10-21.md`](../../docs-design/task-list-consul-style-client-2026-10-21.md) follows the membership list. Decided 2026-10-05.
 
-**Related:** [`task-list-raft-membership-changes-2026-10-22.md`](../../docs-design/task-list-raft-membership-changes-2026-10-22.md) (resumed at Step 5 on 2026-10-14), [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md)
+**Related:** [`task-list-raft-membership-changes-2026-10-24.md`](../../docs-design/task-list-raft-membership-changes-2026-10-24.md) (resumed at Step 5 on 2026-10-14), [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md), section 2.4: inherited components must not remain without a clear role
 
 ## 1. Goal

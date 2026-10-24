@@ -158,6 +158,21 @@ exit gate remains open. The normal SCM job still reads `Jenkinsfile` from
 pushed `main`, so an ordinary **Build Now** does not include these uncommitted
 changes.
 
+## Lost-quorum recovery verification, 2026-10-24
+
+[Build 33](http://192.168.137.32:8080/job/Qraft/33/) built pushed `main` at
+`55fbb1c` with `MUTATION_TESTING=off` and succeeded in 718 seconds. The default
+suite passed 1,138 tests and every coverage gate, end-to-end passed 10 and
+fresh-image Docker passed 34, which includes the two scenarios of
+`DockerLostQuorumRecoveryTest` (recovery from current directories and from a
+backup). There were no failures, errors or skips.
+
+The retained archive is under `logs/jenkins/Qraft-33/`. Its `logs/` folder holds
+664 error headers, all flagged as intentional or injected, and no stack trace
+under an unflagged header at any level. The job needs the `MUTATION_TESTING`
+parameter, so a plain `POST /job/Qraft/build` answers 400; `.env/qraft-jenkins-build.ps1`
+starts it with `buildWithParameters`.
+
 ## Job configuration
 
 The job loads its pipeline from the repository's default branch using the following SCM configuration.

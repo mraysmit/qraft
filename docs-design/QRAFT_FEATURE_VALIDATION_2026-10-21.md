@@ -47,7 +47,7 @@ Status key:
 | Raft | Election, replication, check-quorum, fencing | Done | `RaftNode*Test`, `RaftNodeCheckQuorumTest` |
 | Raft | Durable WAL, snapshots in every role, installation, recovery | Done | `RaftNodeFollowerLogTest`, `DockerDurableRestartTest`, `DockerClientRecoveryTest` |
 | Raft | Replica determinism; follower match index limited to verified entries | Done | `ReplicaDeterminismTest`, `RaftNodeFollowerLogTest` |
-| Raft | Adding or removing servers (membership change) | Partial | Updated 2026-10-21. Durable server IDs, replicated configuration, bootstrapping, non-voter promotion, joining, operator list/remove and leader stickiness are built. Membership parsing and all six runtime settings are wired and logged. `RaftNodeCleanupTest` covers automatic failed-voter cleanup, grace/interval boundaries, contact and leadership resets, quorum/minimum/budget limits, promotion triggers, cancellation, injected WAL failure and real-WAL reopening. Step 5 passed five consecutive 332-test affected runs, 1,051 default tests with coverage, 42 runtime tests and retained-log audits. Further disruptive-server validation, lost-quorum recovery and the expanded cleanup/replacement container scenarios remain open. See [`task-list-raft-membership-changes-2026-10-22.md`](task-list-raft-membership-changes-2026-10-22.md) |
+| Raft | Adding or removing servers (membership change) | Partial | Updated 2026-10-24. Lost-quorum recovery (Step 7) is built and verified: the offline `inspect` and `recover` commands, their crash boundaries and one-time claim, and `DockerLostQuorumRecoveryTest` from current directories and from a backup, five consecutive runs and Jenkins build 33 (1,138 default, 10 end-to-end, 34 Docker tests). Its runbook is in `RAFT_STORAGE_OPERATIONS.md`. Earlier, 2026-10-21. Durable server IDs, replicated configuration, bootstrapping, non-voter promotion, joining, operator list/remove and leader stickiness are built. Membership parsing and all six runtime settings are wired and logged. `RaftNodeCleanupTest` covers automatic failed-voter cleanup, grace/interval boundaries, contact and leadership resets, quorum/minimum/budget limits, promotion triggers, cancellation, injected WAL failure and real-WAL reopening. Step 5 passed five consecutive 332-test affected runs, 1,051 default tests with coverage, 42 runtime tests and retained-log audits. The expanded cleanup/replacement container scenarios (Step 8) remain open. See [`task-list-raft-membership-changes-2026-10-24.md`](task-list-raft-membership-changes-2026-10-24.md) |
 | Catalog | Register and deregister through Raft; composite identity; idempotence | Done | `HttpApiServerTest`, `ClientEndToEndTest` |
 | Catalog | Catalog and health queries with deterministic ordering | Done | `ServiceCatalog` sorts names and instances |
 | Catalog | Registration and modification indexes on instances (design 7.5) | Missing | `ServiceInstance` has no index fields |
@@ -117,8 +117,9 @@ Status key:
 
   Snapshot, restore, upgrade, and recovery workflows are partly done. Server
   configuration and bootstrap are done; membership remains partial because
-  further disruptive-server validation, lost-quorum recovery and the final
-  membership container scenarios are still open. Failed-server cleanup was
+  the final membership container scenarios (Step 8) are still open.
+  Disruptive-server validation was completed on 2026-10-21 and lost-quorum
+  recovery on 2026-10-24. Failed-server cleanup was
   implemented on 2026-10-21; its verification record is in the membership list.
 
 ### Phase 7 runtime and diagnostic close-out, recorded 2026-10-14
@@ -193,7 +194,7 @@ need:
 10. **Deferred until decided.** DNS discovery, and persisted generated node
     identity. Server membership change was decided on 2026-09-29 and is in
     progress in
-    [`task-list-raft-membership-changes-2026-10-22.md`](task-list-raft-membership-changes-2026-10-22.md).
+    [`task-list-raft-membership-changes-2026-10-24.md`](task-list-raft-membership-changes-2026-10-24.md).
 
 Items 3 to 5 complete the Consul plan's target feature set. Items 6 to 9 are
 the prerequisites of the interface's increments UI-2 to UI-6.

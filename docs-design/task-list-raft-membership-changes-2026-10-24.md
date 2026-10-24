@@ -4,8 +4,9 @@
 **Active work:** Step 7, recovery from lost quorum. Its contract was approved
 on 2026-10-22. Decision 8 records it: a single seed rebuilt offline under a
 new server ID, with backup restore included. The `RaftNode` confirmation tests
-passed on unchanged production code. The offline command's failing tests are
-next. Step 6,
+passed on unchanged production code. The offline command and both container
+scenarios are built and verified (2026-10-24, Jenkins build 33); the runbook
+and the design update are written; Step 8 is next. Step 6,
 disruptive-server validation, completed on 2026-10-21: five manual-timer
 scenarios were added; after correcting the first run's incorrect expected-error
 declaration, the focused rerun and five consecutive affected runs each passed
@@ -23,7 +24,7 @@ and operator list and remove, is built, and its close-out gate was closed on
 on. Steps 1 to 3 were done
 2026-09-29. Qraft adopts Consul's membership model; every decision in section
 5 is made.
-**Last updated:** 2026-10-22 (Step 7: claim released when a run refuses before publishing, found in review of `885f92e` and fixed test-first; contract approved as decision 8 (single-seed recovery, whole-cluster backup restore, server-ID fence); `RaftNode` confirmation tests green on unchanged production code; offline command API stubbed in `dev.mars.qraft.server.recovery` and its 23 red tests recorded, with the `raft.lock` copy rule added to the contract; implementation next. Earlier: Step 7 contract proposed for review and the exit gate revised to match. On 2026-10-21: Step 6 completed: five consecutive affected runs passed 64 tests each, `mvn install` passed 1,056 tests and every coverage gate, and the retained-log audit of 38 logs passed; Step 7 is next. Earlier today: Step 6 corrected focused run: all 64 tests and retained-log audits passed; desktop automation disabled at the owner's request. Earlier today: Step 5 runtime policy and failed-voter cleanup completed; five repeated runs, clean build/coverage, fresh-image runtime gate and retained-log audits passed; Step 6 is next. On 2026-10-19: server wiring implemented and verified: RED build 31 retained; build 32 passed five 115-test focused runs, 1,059 default, 10 end-to-end and 32 Docker tests, coverage and the retained-log audit. The immutable local policy reaches the node, promotion uses it, effective settings log excludes secrets, and seven real-server lifecycle cases cover HTTP startup and WAL release. Automatic cleanup remains next. Earlier today, timing slice complete: promotion/quorum ceiling division and election jitter fixed, command-helper race fixed, RED builds 28 and 29 retained; replay build 30 passed five 74-test focused runs, 1,028 default tests, coverage, 42 runtime tests and the full retained-log audit. The next task at that timing checkpoint was server wiring, followed by failed-voter cleanup. On 2026-10-17: Jenkins build 27 verified the committed parser slice at `bef4637`: 1,024 default, 10 end-to-end and 32 Docker tests passed, with all coverage gates and the retained-log audit; uncommitted boundary tests and runtime work remain pending. Earlier: prepared manual-timer tests for partial-round stabilization and the largest representable stabilization duration; no build or test was run, and production is unchanged. Earlier, 2026-10-15: membership parser implemented with defaults, validation and getters; 64 focused tests passed, full verification and runtime wiring pending. Earlier: merge reconciled the 2026-10-14 archival with the newer parser tests; the focused RED run and retained output are recorded under Step 5. On 2026-10-14: single-POM cleanup list archived and its links repaired; Step 5 resumed as the active task, with implementation pending. On 2026-10-11: the mutation rule removed at the owner's decision, from the rules and from the exits of Steps 5 to 8; the Step 4 gate, which had waited on it, closed, after PIT was tried for it and put on ice; the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
+**Last updated:** 2026-10-24 (Step 7: the container scenarios verified: review fixes to `DockerLostQuorumRecoveryTest` and `SharedDockerClusterFixture` (`55fbb1c`), clean `mvn install`, five consecutive focused runs, and Jenkins build 33 with 1,138 default, 10 end-to-end and 34 Docker tests; the runbook, the design section 14.5 and the feature validation record then updated, so Step 7 is complete and Step 8 is next. Earlier, 2026-10-22: Step 7: claim released when a run refuses before publishing, found in review of `885f92e` and fixed test-first; contract approved as decision 8 (single-seed recovery, whole-cluster backup restore, server-ID fence); `RaftNode` confirmation tests green on unchanged production code; offline command API stubbed in `dev.mars.qraft.server.recovery` and its 23 red tests recorded, with the `raft.lock` copy rule added to the contract; implementation next. Earlier: Step 7 contract proposed for review and the exit gate revised to match. On 2026-10-21: Step 6 completed: five consecutive affected runs passed 64 tests each, `mvn install` passed 1,056 tests and every coverage gate, and the retained-log audit of 38 logs passed; Step 7 is next. Earlier today: Step 6 corrected focused run: all 64 tests and retained-log audits passed; desktop automation disabled at the owner's request. Earlier today: Step 5 runtime policy and failed-voter cleanup completed; five repeated runs, clean build/coverage, fresh-image runtime gate and retained-log audits passed; Step 6 is next. On 2026-10-19: server wiring implemented and verified: RED build 31 retained; build 32 passed five 115-test focused runs, 1,059 default, 10 end-to-end and 32 Docker tests, coverage and the retained-log audit. The immutable local policy reaches the node, promotion uses it, effective settings log excludes secrets, and seven real-server lifecycle cases cover HTTP startup and WAL release. Automatic cleanup remains next. Earlier today, timing slice complete: promotion/quorum ceiling division and election jitter fixed, command-helper race fixed, RED builds 28 and 29 retained; replay build 30 passed five 74-test focused runs, 1,028 default tests, coverage, 42 runtime tests and the full retained-log audit. The next task at that timing checkpoint was server wiring, followed by failed-voter cleanup. On 2026-10-17: Jenkins build 27 verified the committed parser slice at `bef4637`: 1,024 default, 10 end-to-end and 32 Docker tests passed, with all coverage gates and the retained-log audit; uncommitted boundary tests and runtime work remain pending. Earlier: prepared manual-timer tests for partial-round stabilization and the largest representable stabilization duration; no build or test was run, and production is unchanged. Earlier, 2026-10-15: membership parser implemented with defaults, validation and getters; 64 focused tests passed, full verification and runtime wiring pending. Earlier: merge reconciled the 2026-10-14 archival with the newer parser tests; the focused RED run and retained output are recorded under Step 5. On 2026-10-14: single-POM cleanup list archived and its links repaired; Step 5 resumed as the active task, with implementation pending. On 2026-10-11: the mutation rule removed at the owner's decision, from the rules and from the exits of Steps 5 to 8; the Step 4 gate, which had waited on it, closed, after PIT was tried for it and put on ice; the record of RaftLog 1.5.0 in section 7; the file renamed to the date of its last change. On 2026-10-10: Step 5: what `AppConfig` became in the single-POM list's Phase 5; the file renamed with the task lists it links to. On 2026-10-09: the Step 4 gate: one more change to `RaftNode` for it to cover. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: review with the other task lists: the Step 4 gate after the single-POM list's Phase 3, the class name in Step 5, decisions 6 and 7 listed in section 5, and the log audit in the rules)
 **Interruption completed:** [`task-list-single-pom-and-quorus-removal-2026-10-21.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md),
 started 2026-10-04 before the Step 4 close-out gate. The gate was closed on
 2026-10-11, as the first task of that list's Phase 7. That list was completed
@@ -2029,13 +2030,51 @@ image, whose entrypoint passes `operator ...` to the jar.
 
 The first run follows the clean `mvn install`, so the image uses a current jar.
 
-The offline command is complete: `RecoveryInput`, `inspect`, `recover`, the
-crash boundaries, separate-JVM locking and the CLI. Still open in Step 7:
-- the clean `mvn install` with coverage;
-- five consecutive focused runs;
-- the two container scenarios, from current directories and from backups;
-- the full default, end-to-end and fresh-image Docker suites;
-- the runbook and the design update.
+**Container scenarios reviewed and verified, 2026-10-24.** Review of `bbbc385`
+found three defects in the tests, fixed in `55fbb1c` with no production change:
+- the method timeout of 10 minutes was below the worst-case sum of the
+  bounded waits (about 12 minutes), and its comment claimed otherwise; it is
+  now 25 minutes and the comment gives the figure;
+- `anyNodeHas` counted an endpoint that could not answer as one that had the
+  write, so a transient HTTP failure could fail a negative assertion. It is
+  replaced by `assertNoNodeHas`, which waits up to 30 seconds for every
+  endpoint to answer that the write is absent;
+- the `finally` blocks stopped at the first failing cleanup step, and
+  `removeVolume` ignored a failed removal. A `cleanUp` helper now runs every
+  step and reports the first failure with the others suppressed, and
+  `removeVolume` fails if Docker cannot remove the volume.
+
+Verification, on JDK 27:
+- The first focused run, before `mvn install`, was refused by the fixture
+  because the runtime jar was older than `RecoveryCheckpoint.java`, which is
+  its intended guard; no scenario started.
+- `mvn clean install`: 1,138 tests, no failures, errors or skips, every
+  JaCoCo gate met, and no unflagged error in the Maven capture.
+- `DockerLostQuorumRecoveryTest`, both scenarios, passed once (115 s) and then
+  in five consecutive runs (80 to 115 s each), 2 tests per run. The captures
+  and the Docker archive hold 28 ERROR headers, all
+  `RAFT_PEER_UNREACHABLE` flagged to the test, and 28 stack traces that match
+  them one for one. The only warnings are the expected "Ignoring an
+  AppendEntries/vote response from server1 with server ID ..." lines of the
+  quarantine break and the existing unauthenticated admin-interface notice.
+  The risks noted in review, host ports changing on restart and unflagged
+  errors from the seed refusing the old cluster, did not occur.
+- Jenkins build 33 on `55fbb1c` (`MUTATION_TESTING=off`) succeeded in 718 s:
+  1,138 default, 10 end-to-end and 34 Docker tests (32 before, plus these
+  two), no failures, errors or skips. The retained archive under
+  `logs/jenkins/Qraft-33/` holds 664 ERROR headers, all flagged, and no stack
+  trace under an unflagged header at any level.
+
+The offline command and both container scenarios are complete and verified:
+`RecoveryInput`, `inspect`, `recover`, the crash boundaries, separate-JVM
+locking, the CLI, and recovery from current directories and from backups.
+The runbook and the design update were written on 2026-10-24 from the
+observed results above: "Recover a cluster that lost its quorum" in
+`docs/RAFT_STORAGE_OPERATIONS.md` (procedure, rules, observed output, limits,
+and the three "no supported lost-quorum recovery" statements replaced),
+section 14.5 of the design, and the feature validation record. Step 7's exit
+gate is met, subject to your review of those documents. Step 8, the container
+scenarios, is next.
 
 Then the CLI. Write failing tests first that show:
 - followers and joining servers accept the recovery entry by replication and by

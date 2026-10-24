@@ -265,7 +265,7 @@ Server mode currently owns:
     Every new leader appends a no-op so an idle cluster can commit an entry
     in that leader's term before changing membership.
   - Steps 5 to 8 of
-    [`task-list-raft-membership-changes-2026-10-22.md`](task-list-raft-membership-changes-2026-10-22.md)
+    [`task-list-raft-membership-changes-2026-10-24.md`](task-list-raft-membership-changes-2026-10-24.md)
     cover automatic removal of failed servers, further disruptive-server
     validation, recovery from lost quorum, and container scenarios.
     Step 5's membership settings are parsed and validated by `AppConfig` and,
@@ -1560,8 +1560,21 @@ predates later participation cannot replace that state under the same voter ID:
 it may erase persisted votes or acknowledged entries. The supported same-identity
 restore restriction and healthy-quorum replacement procedure are in
 [`RAFT_STORAGE_OPERATIONS.md`](../docs/RAFT_STORAGE_OPERATIONS.md#restoring-storage-without-rolling-back-a-voter).
-Lost-quorum recovery and whole-cluster backup restore remain unsupported until
-membership Step 7 establishes and tests their offline recovery contract.
+Lost-quorum recovery and whole-cluster backup restore are supported only through
+the offline `qraft operator raft inspect` and `recover` commands (membership
+Step 7, verified 2026-10-24). `recover` copies a stopped source directory,
+appends one configuration entry that lists a single voter under a newly generated
+server ID in a term above the source's, replaces `server-id` and publishes the
+copy by rename; the WAL, snapshot, metadata and wire formats do not change. A
+claim file beside the source makes the recovery one-time, and an interrupted run
+is repeated safely. Server-ID fencing keeps the recovered cluster apart from an
+old majority that is restarted: the seed and the servers that join it refuse
+appends and snapshots meant for old IDs, the old configuration counts no reply
+from the new IDs, and the recovered leader ignores old campaigns. Other servers
+rejoin empty through the ordinary join path under new IDs. A restore from a
+backup keeps what preceded the backup and nothing after it. The procedure and its
+observed results are in
+[`RAFT_STORAGE_OPERATIONS.md`](../docs/RAFT_STORAGE_OPERATIONS.md#recover-a-cluster-that-lost-its-quorum).
 
 ### 14.6 Concurrency and ownership
 
@@ -1988,8 +2001,8 @@ not expose the administrative routes.
 
 Current progress, the active tranche's detailed steps, and the backlog are
 tracked in the current dated task list in `docs-design/`
-([`task-list-raft-membership-changes-2026-10-22.md`](task-list-raft-membership-changes-2026-10-22.md),
-Steps 5 and 6 complete on 2026-10-21 and Step 7 next;
+([`task-list-raft-membership-changes-2026-10-24.md`](task-list-raft-membership-changes-2026-10-24.md),
+Steps 5 and 6 complete on 2026-10-21 and Step 7 built and verified on 2026-10-24, with Step 8 next;
 its predecessor, [`task-list-test-suite-remediation-2026-10-21.md`](../docs/archive/task-list-test-suite-remediation-2026-10-21.md),
 was archived on 2026-10-02 with its packaged-artifact test carried forward; the
 administrative interface list is paused, see [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md)).

@@ -131,7 +131,7 @@ assertions, all 64 focused cases passed. The captured Maven output has no
 ERROR entry, exception trace or ANSI escape, and the application log is empty.
 The focused run reported JaCoCo execution-data/class mismatches from earlier
 builds; at that date coverage and full-suite verification remained pending. See the
-[Step 5 record](../docs-design/task-list-raft-membership-changes-2026-10-22.md#step-5-failed-server-cleanup)
+[Step 5 record](../docs-design/task-list-raft-membership-changes-2026-10-24.md#step-5-failed-server-cleanup)
 for the retained output and the completed 2026-10-21 runtime verification below.
 
 ### Membership runtime policy and failed-voter cleanup
@@ -202,7 +202,7 @@ part of membership Step 8.
 the removed-server test declared an intentional peer error that never occurred.
 Removal stops replication to that server before another RPC, so the incorrect
 declaration was removed. The successful rerun and remaining gates are recorded below;
-the [Step 6 record](../docs-design/task-list-raft-membership-changes-2026-10-22.md#step-6-protection-from-disruptive-servers)
+the [Step 6 record](../docs-design/task-list-raft-membership-changes-2026-10-24.md#step-6-protection-from-disruptive-servers)
 retains the failed capture, cause, correction and audit. The corrected focused
 run then passed all 64 tests with zero failures, errors or skips. Its Maven
 capture is `logs/qraft-disruption-focused-2026-10-21_17-43-47-201.log`; its

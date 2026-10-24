@@ -89,9 +89,9 @@ If the backup predates later participation, or its provenance is uncertain:
   under a new server ID, after authenticated removal of the old member. Do not
   transplant backup files or its `server-id` into the replacement.
 - Without quorum, preserve all surviving directories and backups and keep
-  failed servers stopped. Qraft currently has no supported lost-quorum recovery
-  or whole-cluster backup-restore procedure. Membership Step 7 must deliver and
-  test that procedure before backups can be used to rebuild a lost cluster.
+  failed servers stopped. Use "Recover a cluster that lost its quorum" below,
+  which rebuilds a single seed under a new server ID from a surviving directory
+  or from a backup. Never restore an older directory under its old server ID.
 
 ## Detecting corruption and fencing
 
@@ -134,9 +134,8 @@ required state, and retain quorum.
    does not take it back until its old entry is removed.
 
 Recover only one replica at a time. If no healthy quorum remains, preserve all
-storage and stop this procedure. The lost-quorum limitation under "Restoring
-storage without rolling back a voter" applies; wiping another node can destroy
-the remaining recovery evidence.
+storage and stop this procedure; use "Recover a cluster that lost its quorum"
+below. Wiping another node can destroy the remaining recovery evidence.
 
 A server fenced because its WAL is compacted further than its published
 snapshot reaches is handled the same way. The entries between the two indexes
@@ -219,9 +218,177 @@ Notes:
   server ID, asks to rejoin from its new address at startup, has its recorded
   address updated, and keeps its vote. No removal is needed.
 - **Two servers lost at once in a cluster of three** leaves no quorum, so the
-  removal cannot commit. Preserve surviving storage and backups. There is no
-  supported lost-quorum recovery procedure yet; restoring an older directory
+  removal cannot commit. Preserve surviving storage and backups and follow
+  "Recover a cluster that lost its quorum" below; restoring an older directory
   under an existing voter ID is not a substitute.
+
+## Recover a cluster that lost its quorum
+
+Use this only when too few voters remain to elect a leader and none can be
+brought back with its own directory (for a cluster of three, two are lost for
+good). It rebuilds **one seed** from a stopped directory, under a **new server
+ID**, in which the old configuration is replaced by a single voter. Every other
+server then joins the seed empty. The same procedure restores a whole lost
+cluster from a backup.
+
+What it does and does not give you:
+
+- The seed holds every entry in the source directory. From a surviving
+  directory that is everything the survivor had. From a backup it is exactly
+  what preceded the copy; later writes are lost, and the procedure cannot
+  recover them.
+- The old server IDs never return. The seed and the servers that join it refuse
+  appends, snapshots and campaigns meant for old IDs, and the old configuration
+  counts no reply from the new ones.
+- Nothing is edited inside a data directory by hand. The command copies the
+  source, appends one configuration entry and publishes the copy.
+
+### Rules before you start
+
+1. **Keep every excluded server stopped.** That is the seed's source, the other
+   survivors and the lost servers. Server IDs keep the two clusters apart, but
+   an excluded directory that holds an old majority can still start and serve
+   its own clients as the old cluster. Each excluded server stays stopped until
+   its directory is wiped.
+2. **Preserve everything.** Do not wipe, move or repair an excluded directory
+   until the recovered cluster is healthy again; they are the evidence.
+3. **Pick the source.** With surviving directories, use the one with the highest
+   last log index and term (`inspect` shows both). With none, use the newest
+   backup that was taken from a stopped server and copied completely.
+4. **A source on read-only media** is first copied to writable storage, as a
+   complete offline backup copy.
+5. **The source's parent directory must be persistent and writable.** The
+   command creates a one-time claim file beside the source,
+   `<source>.qraft-recovery.json`, and stages and publishes the seed in the
+   output directory. In containers, mount the source volume inside a persistent
+   recovery volume, for example at `/recovery/source`, and keep the claim, the
+   staging copy and the output (`/recovery/seed`) on that volume. A source
+   mounted at a mount root such as `/app/data` would put the claim in the
+   container's throwaway layer.
+6. **The commands are offline.** Nothing may hold the source directory's lock;
+   a running server makes both commands refuse.
+
+### Procedure
+
+1. **Inspect the source.** The command prints the directory's state and whether
+   ordinary startup would accept it, and changes nothing.
+
+   ```text
+   qraft operator raft inspect --dir /recovery/source
+   ```
+
+   Observed in the container scenario, for a stopped survivor:
+
+   ```text
+   Server ID           03648846-07ab-4d0b-9b94-2ea1d62547fe
+   Term                1
+   Last log index      9
+   Snapshot index      8
+   Configuration from  SNAPSHOT
+   Ordinary startup    accepted
+   ```
+
+   Record the server ID: the recovery input must repeat it. If ordinary startup
+   is refused, the report says why; recovery proceeds only from a directory the
+   ordinary storage and recovery checks accept.
+
+2. **Write the recovery input.** It is a version 1 JSON file; unknown keys are
+   refused. `source.serverId` must equal the ID `inspect` printed, and
+   `serverConfig` is the server JSON the seed will start with. That file
+   supplies the output directory (`server.raft.storage.path`), the seed's name
+   (`server.id`) and its Raft address, so point its storage path at a new
+   directory on the persistent volume.
+
+   ```json
+   {"version":1,
+    "source":{"path":"/recovery/source","serverId":"03648846-07ab-4d0b-9b94-2ea1d62547fe"},
+    "serverConfig":"/etc/qraft/server.json"}
+   ```
+
+3. **Recover.**
+
+   ```text
+   qraft operator raft recover --input /etc/qraft/recovery.json
+   ```
+
+   Exit codes: 0 done, 1 refused, 2 invalid input. Observed:
+
+   ```text
+   Outcome             recovered
+   Output              /recovery/seed
+   Server ID           287be963-4fe3-4304-92c6-1eda38229cba
+   Recovery index      10
+   Recovery term       2
+   ```
+
+   The command holds the source's lock, copies it byte for byte and compares
+   checksums, opens the copy with the ordinary checks, appends one entry that
+   lists the seed as sole voter, in a term above the source's, and publishes the
+   copy with the new server ID. The source is never changed.
+
+   **One-time use.** A second `recover` from the same source with a different
+   output is refused, so one source cannot seed two clusters. After a complete
+   recovery, the same input exits 1 and changes nothing. If the command was
+   interrupted, run the same input again: before publication it starts again
+   from the unchanged source with a new ID; after publication it records the
+   result and exits 0. A staging directory is never accepted as a data
+   directory.
+
+4. **Start the seed** with the server JSON used above, keeping the same name
+   and address the old server had. Check that:
+   - `/raft/status` shows it as leader, with its new server ID;
+   - `list-peers` and `/v1/operator/raft/configuration` list only the seed, as
+     a voter;
+   - the registrations you expect are present, and a test write commits.
+
+5. **Rejoin the others empty.** For each remaining server, wipe its data
+   directory (the old one is evidence you may now discard), then start it with
+   its usual server JSON. It gets a new server ID, joins the seed through the
+   ordinary path and is promoted under the automatic promotion policy. Do not
+   list a still-running excluded server among a wiped server's contacts. Watch
+   the configuration until all servers are voters under new IDs and none of the
+   old IDs is among them.
+
+   The recovered cluster starts below `cleanup.minVoters` and grows by joins;
+   cleanup never takes it below that minimum.
+
+### What has been observed
+
+`DockerLostQuorumRecoveryTest` runs the procedure on a real three-server
+cluster in containers, from the `qraft-runtime:test` image:
+
+- **From current directories.** A write is committed and snapshotted, two
+  servers are stopped and then the survivor. `inspect` accepts the survivor's
+  directory, `recover` publishes a seed with a new ID, the seed leads alone and
+  holds the write. The two old servers are then restarted on their own
+  directories on purpose: they elect a leader and commit their own write, and
+  the seed's replies are logged as ignored under its new server ID. The
+  seed's state, term, configuration and data are unchanged, and the old
+  cluster's write never reaches it. After the old servers are wiped they join
+  the seed, are promoted, and leave three voters under new IDs, none of them
+  old. A new write reaches all three and the old cluster's write is gone.
+- **From a backup.** A stopped server is copied completely, a second write is
+  committed, and the whole cluster is stopped. The seed recovered from the
+  backup holds the first write and not the second, and the same isolation and
+  rejoin results follow.
+
+Both scenarios passed in five consecutive runs and in Jenkins build 33. Their
+only logged errors are the peer-unreachable errors of the stopped servers,
+declared by the test.
+
+### Limits
+
+- The procedure restores the **durable state of one directory**. Anything
+  committed only on servers that are lost, or after a backup, is gone. Check
+  registrations before returning clients to the cluster.
+- A registration that a client was told succeeded may be absent after a
+  restore from a backup; clients must register again.
+- It is not an upgrade or migration tool, and it is not a way to change
+  membership while a quorum remains; use the join and removal procedures
+  above for that.
+- The command's own logs use the production Logback defaults (`./logs` under
+  the `server` mode name, plus the console). A separate operator log mode is
+  not provided.
 
 ## Automatic failed-voter cleanup
 
@@ -393,6 +560,11 @@ tests:
   is removed, the removal's quorum rule and token, and a server refusing a log
   or snapshot meant for another server ID. The replacement procedure as a
   whole has no container test yet.
+- `RecoveryInputTest`, `OfflineRecoveryTest`, `OfflineRecoveryProcessTest`,
+  `RaftOperatorRecoveryCommandTest` and `DockerLostQuorumRecoveryTest`: the offline `inspect` and `recover` commands,
+  their crash boundaries and one-time claim, separate-JVM lock refusal, and the
+  two container scenarios (from current directories and from a backup),
+  including the old majority restarted on purpose and the empty rejoin.
 - `HttpApiServerTest`: fenced liveness/readiness, the status reason for a
   transition or startup failure, and corruption evidence.
 - `RaftTransitionSequencerTest`: first-cause retention, one fence announcement,
