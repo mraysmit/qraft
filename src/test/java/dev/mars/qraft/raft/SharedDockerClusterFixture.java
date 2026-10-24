@@ -467,7 +467,7 @@ public final class SharedDockerClusterFixture {
     }
 
     /** The first Docker network of {@code cluster}'s server1, which every compose service shares. */
-    private static String networkOf(ComposeContainer cluster) {
+    public static String networkOf(ComposeContainer cluster) {
         return cluster.getContainerByServiceName("server1")
                 .orElseThrow(() -> new IllegalStateException("the cluster has no server1"))
                 .getContainerInfo().getNetworkSettings().getNetworks().keySet().iterator().next();

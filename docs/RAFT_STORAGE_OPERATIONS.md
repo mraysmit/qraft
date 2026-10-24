@@ -561,8 +561,13 @@ tests:
 - `RaftNodeMembershipTest`, `MembershipServiceTest`, and
   `RaftNodeServerIdentityTest`: a colliding join is refused until the old entry
   is removed, the removal's quorum rule and token, and a server refusing a log
-  or snapshot meant for another server ID. The replacement procedure as a
-  whole has no container test yet.
+  or snapshot meant for another server ID.
+- `DockerServerReplacementTest`: the replacement procedure as a whole, in
+  containers: a wiped follower takes a new server ID, its join is refused while
+  the old entry holds the name, a removal with the wrong operator token changes
+  nothing, the `remove-peer` command with the right token removes the old entry,
+  and the replacement joins, is promoted, is ready and unfenced, holds the
+  catalog, and keeps its identity and vote across a restart.
 - `RecoveryInputTest`, `OfflineRecoveryTest`, `OfflineRecoveryProcessTest`,
   `RaftOperatorRecoveryCommandTest` and `DockerLostQuorumRecoveryTest`: the offline `inspect` and `recover` commands,
   their crash boundaries and one-time claim, separate-JVM lock refusal, and the
