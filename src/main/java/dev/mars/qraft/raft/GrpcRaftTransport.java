@@ -27,6 +27,8 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.JoinRequest;
 import dev.mars.qraft.raft.grpc.MembershipResponse;
+import dev.mars.qraft.raft.grpc.PreVoteRequest;
+import dev.mars.qraft.raft.grpc.PreVoteResponse;
 import dev.mars.qraft.raft.grpc.RemoveServerRequest;
 import dev.mars.qraft.raft.grpc.RaftServiceGrpc;
 import dev.mars.qraft.raft.grpc.VoteRequest;
@@ -35,6 +37,8 @@ import dev.mars.qraft.raft.metrics.RaftMetrics;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.Metadata;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import io.grpc.stub.MetadataUtils;
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
@@ -241,6 +245,49 @@ public class GrpcRaftTransport implements RaftTransport {
         try (MDC.MDCCloseable ignoredMdc = MDC.putCloseable("requestId", requestId);
              Scope ignoredSpan = span.makeCurrent()) {
             CompletableFuture<VoteResponse> response = toFuture(correlatedStub(targetId, requestId).requestVote(request));
+            response.whenComplete(Completions.outcome(
+                    r -> {
+                        span.setAttribute("raft.vote_granted", r.getVoteGranted());
+                        span.end();
+                    },
+                    e -> {
+                        span.setStatus(StatusCode.ERROR, e.getMessage());
+                        span.recordException(e);
+                        span.end();
+                    }));
+            return response;
+        } catch (Throwable error) {
+            finishSpanWithError(span, error);
+            return CompletableFuture.failedFuture(error);
+        }
+    }
+
+    @Override
+    public CompletableFuture<PreVoteResponse> sendPreVote(String targetId, PreVoteRequest request) {
+        requireKnownTarget(targetId);
+        if (stopped) {
+            // The callback executor is shut down, so the reply to a call made now would be discarded.
+            return CompletableFuture.failedFuture(new IllegalStateException("Transport for " + selfId + " is stopped"));
+        }
+        String requestId = requestId();
+        Span span = tracer.spanBuilder("raft.PreVote")
+                .setSpanKind(SpanKind.CLIENT)
+                .setAttribute("rpc.system", "grpc")
+                .setAttribute("rpc.method", "PreVote")
+                .setAttribute("raft.target", targetId)
+                .setAttribute("raft.term", request.getTerm())
+                .setAttribute("raft.candidate", request.getCandidateId())
+                .startSpan();
+        try (MDC.MDCCloseable ignoredMdc = MDC.putCloseable("requestId", requestId);
+             Scope ignoredSpan = span.makeCurrent()) {
+            // A server of an older version has no PreVote. Its UNIMPLEMENTED answer becomes the unsupported failure
+            // that a transport without the capability gives, so the caller counts that peer as willing.
+            CompletableFuture<PreVoteResponse> response = toFuture(correlatedStub(targetId, requestId).preVote(request))
+                    .exceptionallyCompose(failure -> CompletableFuture.failedFuture(
+                            Completions.unwrap(failure) instanceof StatusRuntimeException status
+                                    && status.getStatus().getCode() == Status.Code.UNIMPLEMENTED
+                                    ? new UnsupportedOperationException(targetId + " does not implement PreVote", status)
+                                    : failure));
             response.whenComplete(Completions.outcome(
                     r -> {
                         span.setAttribute("raft.vote_granted", r.getVoteGranted());

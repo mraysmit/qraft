@@ -252,6 +252,7 @@ public final class IntentionalErrorsHelper {
 
     private static boolean matchesStoppedPeer(String message, String stoppedPeer) {
         return message.equals("Failed to retrieve vote from " + stoppedPeer)
+                || message.equals("Failed to retrieve pre-vote from " + stoppedPeer)
                 || message.equals("Raft peer " + stoppedPeer + " became unreachable during AppendEntries");
     }
 

@@ -23,6 +23,8 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.JoinRequest;
 import dev.mars.qraft.raft.grpc.MembershipResponse;
+import dev.mars.qraft.raft.grpc.PreVoteRequest;
+import dev.mars.qraft.raft.grpc.PreVoteResponse;
 import dev.mars.qraft.raft.grpc.RemoveServerRequest;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
@@ -53,6 +55,16 @@ public interface RaftTransport {
     void stop();
 
     CompletableFuture<VoteResponse> sendVoteRequest(String targetId, VoteRequest request);
+
+    /**
+     * Asks {@code targetId} whether it would vote for this server in a real election at the term in the request,
+     * without either side changing any state. A transport that cannot fails, and the caller counts that peer as
+     * willing, so a cluster of servers with and without this capability still elects a leader.
+     */
+    default CompletableFuture<PreVoteResponse> sendPreVote(String targetId, PreVoteRequest request) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException(
+                getClass().getSimpleName() + " cannot ask " + targetId + " for a pre-vote"));
+    }
 
     CompletableFuture<AppendEntriesResponse> sendAppendEntries(String targetId, AppendEntriesRequest request);
 

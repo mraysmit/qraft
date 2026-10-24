@@ -391,6 +391,21 @@ class DockerLogCaptureTest {
     }
 
     @Test
+    void aFailedPreVoteRequestIsAnUnreachablePeerLikeAFailedVoteRequest() {
+        String log = """
+                2026-10-24 12:00:00.000 [qraft-state-loop] ERROR dev.mars.qraft.raft.RaftNode [n1] - Failed to retrieve pre-vote from n2
+                2026-10-24 12:00:00.100 [qraft-state-loop] ERROR dev.mars.qraft.raft.RaftNode [n1] - Failed to retrieve vote from n2
+                2026-10-24 12:00:00.200 [qraft-state-loop] ERROR dev.mars.qraft.raft.RaftNode [n1] - Failed to retrieve pre-vote
+                """;
+
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(log,
+                Set.of(IntentionalErrorFixture.RAFT_PEER_UNREACHABLE));
+
+        assertEquals(2, audit.recognised().size(), "both requests name the peer they could not reach");
+        assertEquals(1, audit.problems().size(), "a line that names no peer is not the declared error");
+    }
+
+    @Test
     void aDrainRefusalLoggedAsAnErrorIsAProblemNoDeclarationExcuses() {
         String log = """
                 2026-10-24 12:15:50.470 [qraft-state-loop] ERROR dev.mars.qraft.raft.RaftNode [n1] - Failed to process InstallSnapshot response from n2: Raft transition sequencer is draining

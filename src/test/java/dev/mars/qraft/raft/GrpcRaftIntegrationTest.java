@@ -24,6 +24,8 @@ import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 
 import dev.mars.qraft.raft.grpc.JoinRequest;
 import dev.mars.qraft.raft.grpc.MembershipResponse;
+import dev.mars.qraft.raft.grpc.PreVoteRequest;
+import dev.mars.qraft.raft.grpc.PreVoteResponse;
 import dev.mars.qraft.raft.grpc.RemoveServerRequest;
 import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.DistributedStateRaftCommand;
@@ -272,6 +274,25 @@ class GrpcRaftIntegrationTest {
 
         assertEquals(MembershipResponse.Status.REMOVED, answer.getStatus(), answer.getMessage());
         assertTrue(leader.node().getConfiguration().orElseThrow().serverNamed("node3").isEmpty());
+    }
+
+    @Test
+    void aPreVoteIsAnsweredOverGrpcByTheServerAskedAndChangesNothingThere() throws Exception {
+        List<Member> cluster = startCluster("node1", "node2", "node3");
+        Member candidate = cluster.get(0);
+        Member peer = cluster.get(1);
+        long termBefore = peer.node().getCurrentTerm();
+
+        PreVoteResponse answer = candidate.transport().sendPreVote("node2", PreVoteRequest.newBuilder()
+                .setTerm(termBefore + 1).setCandidateId("node1")
+                .setCandidateServerId(ManualRaftClusterFixture.serverIdOf("node1"))
+                .setLastLogIndex(1).setLastLogTerm(0).build()).get(10, TimeUnit.SECONDS);
+
+        assertEquals(ManualRaftClusterFixture.serverIdOf("node2"), answer.getVoterServerId(),
+                "the answer comes from the server that was asked");
+        assertEquals(termBefore, answer.getTerm(), "and carries that server's own term");
+        assertEquals(termBefore, peer.node().getCurrentTerm(), "asking it adopted nothing");
+        assertEquals(RaftNode.State.FOLLOWER, peer.node().getState());
     }
 
     @Test

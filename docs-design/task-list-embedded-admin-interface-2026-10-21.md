@@ -8,8 +8,10 @@
 **Predecessor:** [`archive/task-list-multi-node-container-acceptance-2026-10-21.md`](../docs/archive/task-list-multi-node-container-acceptance-2026-10-21.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
-This list is paused; the current task list is
-[`task-list-raft-membership-changes-2026-10-24.md`](task-list-raft-membership-changes-2026-10-24.md). Step 5 completed on 2026-10-21; Step 6 is next, with Steps 6 to 8 remaining before the client list starts.
+This list is paused. The membership list it waited for,
+[`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md),
+was completed and archived on 2026-10-24; the current task list is
+[`task-list-raft-pre-vote-2026-10-24.md`](task-list-raft-pre-vote-2026-10-24.md).
 When this list's work is complete, add a completion summary and move this file
 to `docs/archive/`.
 

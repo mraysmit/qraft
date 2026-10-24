@@ -21,9 +21,15 @@ import dev.mars.qraft.state.DistributedStateRaftCommand;
 import dev.mars.qraft.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.raft.grpc.JoinRequest;
+import dev.mars.qraft.raft.grpc.PreVoteRequest;
+import dev.mars.qraft.raft.grpc.PreVoteResponse;
+import dev.mars.qraft.raft.grpc.RaftServiceGrpc;
 import dev.mars.qraft.raft.grpc.RemoveServerRequest;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
+import io.grpc.Server;
+import io.grpc.ServerBuilder;
+import io.grpc.stub.StreamObserver;
 
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -197,6 +203,44 @@ class GrpcRaftTransportTest {
         assertEquals(1, response.getTerm());
         assertEquals(0, response.getMatchIndex());
         assertEquals("client", targetNode.getLeaderId(), "the peer itself now follows the sender");
+    }
+
+    @Test
+    @DisplayName("A pre-vote reaches the peer, and the peer's answer comes back without changing the peer")
+    void aPreVoteReachesThePeerAndItsAnswerComesBackWithoutChangingThePeer() throws Exception {
+        GrpcRaftTransport transport = startedTransport(Map.of("target", "localhost:" + targetPort));
+
+        PreVoteResponse response = decided(transport.sendPreVote("target", PreVoteRequest.newBuilder()
+                .setTerm(1).setCandidateId("client").setCandidateServerId("client-server-id")
+                .setLastLogIndex(1).setLastLogTerm(0).build()));
+
+        assertEquals(targetNode.getServerId(), response.getVoterServerId(), "the answer comes from the peer");
+        assertEquals(0, response.getTerm(), "and carries the peer's own term");
+        assertFalse(response.getVoteGranted(), "the sender is not a voter in the peer's configuration");
+        assertEquals(0, targetNode.getCurrentTerm(), "asking changed nothing");
+    }
+
+    @Test
+    @DisplayName("A peer that does not implement PreVote fails the call as unsupported, not as a failed RPC")
+    void aPeerThatDoesNotImplementPreVoteFailsTheCallAsUnsupported() throws Exception {
+        Server olderServer = ServerBuilder.forPort(0).addService(new RaftServiceGrpc.RaftServiceImplBase() {
+            @Override
+            public void requestVote(VoteRequest request, StreamObserver<VoteResponse> responseObserver) {
+                responseObserver.onNext(VoteResponse.getDefaultInstance());
+                responseObserver.onCompleted();
+            }
+        }).build().start();
+        try {
+            GrpcRaftTransport transport = startedTransport(Map.of("older", "localhost:" + olderServer.getPort()));
+
+            ExecutionException failed = assertThrows(ExecutionException.class, () -> transport.sendPreVote("older",
+                    PreVoteRequest.newBuilder().setTerm(1).setCandidateId("client").build()).get(10, TimeUnit.SECONDS));
+
+            assertInstanceOf(UnsupportedOperationException.class, failed.getCause(), failed.getCause().toString());
+            assertTrue(failed.getCause().getMessage().contains("older"), failed.getCause().getMessage());
+        } finally {
+            olderServer.shutdownNow().awaitTermination(10, TimeUnit.SECONDS);
+        }
     }
 
     // ========== CONNECTION FAILURE TESTS ==========

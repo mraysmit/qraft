@@ -24,6 +24,8 @@ import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.JoinRequest;
 import dev.mars.qraft.raft.grpc.MembershipResponse;
+import dev.mars.qraft.raft.grpc.PreVoteRequest;
+import dev.mars.qraft.raft.grpc.PreVoteResponse;
 import dev.mars.qraft.raft.grpc.RemoveServerRequest;
 import dev.mars.qraft.raft.grpc.RaftServiceGrpc;
 import dev.mars.qraft.raft.grpc.VoteRequest;
@@ -225,6 +227,40 @@ public class GrpcRaftServer {
                             }));
             } catch (Throwable error) {
                 failRpc("RequestVote", span, error, responseObserver);
+            }
+            }
+        }
+
+        @Override
+        public void preVote(PreVoteRequest request, StreamObserver<PreVoteResponse> responseObserver) {
+            try (Scope remoteContext = telemetryContext().makeCurrent();
+                 MDC.MDCCloseable nodeContext = MDC.putCloseable("nodeId", raftNode.getNodeId());
+                 MDC.MDCCloseable rpcContext = MDC.putCloseable("rpcType", "PreVote");
+                 MDC.MDCCloseable requestContext = MDC.putCloseable("requestId", requestId())) {
+            Span span = tracer.spanBuilder("raft.PreVote")
+                    .setSpanKind(SpanKind.SERVER)
+                    .setAttribute("rpc.system", "grpc")
+                    .setAttribute("rpc.method", "PreVote")
+                    .setAttribute("raft.candidate", request.getCandidateId())
+                    .setAttribute("raft.term", request.getTerm())
+                    .startSpan();
+            try (Scope ignored = span.makeCurrent()) {
+            logger.debug("Received PreVote from {} for term {}", request.getCandidateId(), request.getTerm());
+            raftNode.handlePreVoteRequest(request)
+                    .whenComplete(Completions.outcome(
+                            response -> {
+                                span.setAttribute("raft.vote_granted", response.getVoteGranted());
+                                span.end();
+                                logger.debug("Responding to PreVote: granted={}, term={}",
+                                        response.getVoteGranted(), response.getTerm());
+                                responseObserver.onNext(response);
+                                responseObserver.onCompleted();
+                            },
+                            e -> {
+                                failRpc("PreVote", span, e, responseObserver);
+                            }));
+            } catch (Throwable error) {
+                failRpc("PreVote", span, error, responseObserver);
             }
             }
         }

@@ -8,6 +8,7 @@ package qraft.raft;
 
 service RaftService {
   rpc RequestVote (VoteRequest) returns (VoteResponse) {}
+  rpc PreVote (PreVoteRequest) returns (PreVoteResponse) {}
   rpc AppendEntries (AppendEntriesRequest) returns (AppendEntriesResponse) {}
   rpc InstallSnapshot (InstallSnapshotRequest) returns (InstallSnapshotResponse) {}
   rpc Describe (DescribeRequest) returns (DescribeResponse) {}
@@ -70,6 +71,22 @@ message VoteRequest {
 message VoteResponse {
   int64 term = 1;
   bool vote_granted = 2;
+  string voter_server_id = 3;       // The responding server's durable server ID
+}
+
+// Asks whether the receiver would vote for the sender in a real election. Neither side changes any state: the
+// receiver records no vote, adopts no term and does not count the sender as a leader (Raft thesis, section 9.6).
+message PreVoteRequest {
+  int64 term = 1;                   // The term the sender would campaign in: its current term plus one
+  string candidate_id = 2;          // The sender's name
+  int64 last_log_index = 3;
+  int64 last_log_term = 4;
+  string candidate_server_id = 5;   // The sender's durable server ID
+}
+
+message PreVoteResponse {
+  int64 term = 1;                   // The responder's current term
+  bool vote_granted = 2;            // Whether the responder would grant a vote at the requested term
   string voter_server_id = 3;       // The responding server's durable server ID
 }
 

@@ -21,6 +21,8 @@ import dev.mars.qraft.raft.grpc.DescribeResponse;
 import dev.mars.qraft.raft.grpc.AppendEntriesResponse;
 import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
 import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
+import dev.mars.qraft.raft.grpc.PreVoteRequest;
+import dev.mars.qraft.raft.grpc.PreVoteResponse;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
 import dev.mars.raftlog.storage.RaftStorage;
@@ -1677,7 +1679,98 @@ public class RaftNode {
             logger.debug("Election timer stopped because the Raft transition sequencer is fenced");
             return;
         }
-        startElection(timerGeneration);
+        if (asksForPreVotes()) {
+            startPreVote();
+        } else {
+            startElection(timerGeneration);
+        }
+    }
+
+    /**
+     * Whether an election timeout leads to a pre-vote round. Only a voter with another voter to ask does: a server
+     * that does not campaign, and a sole voter, go straight to the election transition, which handles both.
+     */
+    private boolean asksForPreVotes() {
+        return running && state != State.LEADER && isVoter() && !isSoleVoter();
+    }
+
+    /**
+     * Asks every other voter whether it would vote for this server in an election at the next term, without taking
+     * that term (Raft thesis, section 9.6). A quorum of willing voters, this server included, starts the election; a
+     * denial, a failure or silence leaves the next election timeout to ask again. The timer is re-armed first, and
+     * its generation tells a late answer whether anything has happened since: a heartbeat that resets the timer
+     * cancels the round.
+     */
+    private void startPreVote() {
+        resetElectionTimer();
+        PreVoteRound round = new PreVoteRound(electionTimerGeneration);
+        round.willing.add(serverId);
+        long proposedTerm = currentTerm + 1;
+        long lastLogIdx = lastLogIndex();
+        long lastLogTrm = lastLogTermAt(lastLogIdx);
+        logger.info("Asking for pre-votes for node {} at term {}", nodeId, proposedTerm);
+        for (RaftConfiguration.Server peer : peers()) {
+            if (!peer.voter()) continue;
+            String peerName = peer.name();
+            PreVoteRequest request = PreVoteRequest.newBuilder()
+                    .setTerm(proposedTerm)
+                    .setCandidateId(nodeId)
+                    .setCandidateServerId(serverId)
+                    .setLastLogIndex(lastLogIdx)
+                    .setLastLogTerm(lastLogTrm)
+                    .build();
+            onStateLoopComplete(transport.sendPreVote(peerName, request),
+                    (response, failure) -> onPreVoteAnswer(round, peerName, response, failure));
+            rpcCounter.add(1, Attributes.of(
+                    AttributeKey.stringKey("source"), nodeId,
+                    AttributeKey.stringKey("target"), peerName,
+                    AttributeKey.stringKey("type"), "pre_vote"
+            ));
+        }
+    }
+
+    private void onPreVoteAnswer(PreVoteRound round, String peerName, PreVoteResponse response, Throwable failure) {
+        if (failure instanceof UnsupportedOperationException) {
+            // A peer that cannot pre-vote is counted as willing, so a cluster of servers with and without
+            // the capability still elects a leader.
+            logger.debug("{} cannot pre-vote and is counted as willing: {}", peerName, failure.getMessage());
+            countWillingPreVoter(round, peerName);
+        } else if (failure != null) {
+            logger.error("Failed to retrieve pre-vote from {}", peerName, failure);
+        } else if (!fromConfiguredServer(peerName, response.getVoterServerId())) {
+            logger.warn("Ignoring a pre-vote answer from {} with server ID {}, which is not the configured server",
+                    peerName, response.getVoterServerId());
+        } else if (response.getVoteGranted()) {
+            countWillingPreVoter(round, peerName);
+        }
+    }
+
+    private void countWillingPreVoter(PreVoteRound round, String peerName) {
+        if (!running || state == State.LEADER || round.generation != electionTimerGeneration || round.started) return;
+        RaftConfiguration current = configuration;
+        if (current == null) return;
+        current.serverNamed(peerName).ifPresent(server -> round.willing.add(server.serverId()));
+        if (current.hasQuorum(round.willing)) {
+            round.started = true;
+            logger.info("A quorum would vote for node {} at term {}; starting the election", nodeId, currentTerm + 1);
+            startElection(round.generation);
+        }
+    }
+
+    /** One pre-vote round: the servers that said yes, the timer generation it belongs to, and whether it elected. */
+    private static final class PreVoteRound {
+        final long generation;
+        final Set<String> willing = new java.util.HashSet<>();
+        boolean started;
+
+        PreVoteRound(long generation) {
+            this.generation = generation;
+        }
+    }
+
+    /** The term of the log entry at {@code index}, or of the snapshot that replaced it. */
+    private long lastLogTermAt(long index) {
+        return index > 0 && hasLogEntry(index) ? log.get(toArrayIndex(index)).getTerm() : snapshotLastTerm;
     }
 
     private void startElection(long timerGeneration) {
@@ -1758,9 +1851,7 @@ public class RaftNode {
     private void requestVotes() {
         long term = currentTerm;
         long lastLogIdx = lastLogIndex();
-        long lastLogTrm = lastLogIdx > 0 && hasLogEntry(lastLogIdx)
-                ? log.get(toArrayIndex(lastLogIdx)).getTerm()
-                : snapshotLastTerm;
+        long lastLogTrm = lastLogTermAt(lastLogIdx);
 
         Set<String> granted = ConcurrentHashMap.newKeySet();
         granted.add(serverId); // Self vote
@@ -2248,6 +2339,51 @@ public class RaftNode {
                 this::applyVoteDecision);
     }
 
+    /**
+     * Answers whether this server would vote for the sender in a real election, changing nothing: no vote is
+     * recorded, no term adopted and no leader contact noted (Raft thesis, section 9.6). The decision is taken on the
+     * state loop.
+     */
+    public CompletableFuture<PreVoteResponse> handlePreVoteRequest(PreVoteRequest request) {
+        requireNonNull(request, "request");
+        CompletableFuture<PreVoteResponse> answer = new CompletableFuture<>();
+        try {
+            runtime.execute(() -> answer.complete(PreVoteResponse.newBuilder()
+                    .setTerm(currentTerm).setVoterServerId(serverId)
+                    .setVoteGranted(wouldGrantPreVote(request)).build()));
+        } catch (java.util.concurrent.RejectedExecutionException stopped) {
+            answer.completeExceptionally(stopped);
+        }
+        return answer;
+    }
+
+    /**
+     * Whether this server would vote for the sender in an election at the proposed term. It would if it is running,
+     * the sender is a voter in its configuration (when it has one), it knows no live leader, the proposed term is
+     * ahead of its own and the sender's log is at least as up to date as its own. Deciding records nothing.
+     */
+    private boolean wouldGrantPreVote(PreVoteRequest request) {
+        if (!running) return false;
+        // A server that has not yet joined a cluster has no configuration to check the sender against, and must
+        // still answer, or a cluster whose first server bootstrapped alone could never elect a leader.
+        RaftConfiguration current = configuration;
+        if (current != null && !current.isVoter(request.getCandidateServerId())) return false;
+        if (liveLeaderKnown()) return false;
+        return request.getTerm() > currentTerm
+                && isCandidateLogUpToDate(request.getLastLogTerm(), request.getLastLogIndex());
+    }
+
+    /**
+     * Whether this server is a leader, or has heard from one within an election timeout. Votes and pre-votes are
+     * refused meanwhile: a removed or returning server must not unseat a live leader. The election timeout releases
+     * followers; check-quorum releases leaders.
+     */
+    private boolean liveLeaderKnown() {
+        return state == State.LEADER || (leaderContactActive
+                && timerScheduler.nanoTime() - lastLeaderContactNanos
+                < TimeUnit.MILLISECONDS.toNanos(electionTimeoutMs));
+    }
+
     private CompletableFuture<VoteDecision> prepareAndPersistVote(VoteRequest request) {
         if (!running) {
             // Before recovery completes, term and vote are defaults, not durable state; after stop they are
@@ -2260,9 +2396,7 @@ public class RaftNode {
         // A removed server may retain an old configuration and campaign indefinitely.
         // Ignore campaigns while a leader is live, before adopting even a higher term.
         // The election timeout releases followers; check-quorum releases leaders.
-        if (state == State.LEADER || (leaderContactActive
-                && timerScheduler.nanoTime() - lastLeaderContactNanos
-                < TimeUnit.MILLISECONDS.toNanos(electionTimeoutMs))) {
+        if (liveLeaderKnown()) {
             return CompletableFuture.completedFuture(new VoteDecision(currentTerm, votedFor, false, false));
         }
         logger.debug("Handling vote request: candidateId={}, requestTerm={}, localTerm={}, localVotedFor={}, candidateLastLogTerm={}, candidateLastLogIndex={}",

@@ -128,7 +128,8 @@ public enum IntentionalErrorFixture {
 
     /** A stopped or partitioned Raft peer is deliberately made unreachable. */
     RAFT_PEER_UNREACHABLE("dev.mars.qraft.raft.RaftNode", Level.ERROR,
-            "(?:Raft peer \\S+ became unreachable during AppendEntries|Failed to retrieve vote from \\S+)"),
+            "(?:Raft peer \\S+ became unreachable during AppendEntries"
+                    + "|Failed to retrieve (?:pre-)?vote from \\S+)"),
 
     /**
      * A stopped or disconnected Docker peer's name no longer resolves. gRPC reports each failed lookup as a

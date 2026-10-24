@@ -148,11 +148,12 @@ class IntentionalErrorsTest {
     }
 
     @Test
-    void aStoppedPeerDeclarationLabelsBothRpcFailuresOnlyForThatPeer() {
+    void aStoppedPeerDeclarationLabelsEveryRpcFailureOnlyForThatPeer() {
         Logger raft = (Logger) LoggerFactory.getLogger("dev.mars.qraft.raft.RaftNode");
         List<String> problems = inWindow("SelfTest#stoppedPeer", () -> {
             IntentionalErrorsHelper.expect(RAFT_PEER_UNREACHABLE, "node.b");
             for (String message : List.of("Failed to retrieve vote from node.b",
+                    "Failed to retrieve pre-vote from node.b",
                     "Raft peer node.b became unreachable during AppendEntries")) {
                 ILoggingEvent failure = event(raft, Level.ERROR, message, null);
                 assertEquals("*** INTENTIONAL ERROR: RAFT_PEER_UNREACHABLE, caused by SelfTest#stoppedPeer *** ",
@@ -160,8 +161,10 @@ class IntentionalErrorsTest {
                 IntentionalErrorsHelper.record(failure);
             }
             for (String message : List.of("Failed to retrieve vote from node-b",
+                    "Failed to retrieve pre-vote from node-b",
                     "Raft peer node-c became unreachable during AppendEntries",
-                    "Failed to retrieve vote from node.b and more")) {
+                    "Failed to retrieve vote from node.b and more",
+                    "Failed to retrieve pre-vote from node.b and more")) {
                 ILoggingEvent failure = event(raft, Level.ERROR, message, null);
                 assertEquals("", IntentionalErrorsHelper.label(failure));
                 IntentionalErrorsHelper.record(failure);
@@ -171,7 +174,7 @@ class IntentionalErrorsTest {
                     new IOException("unexpected warning")));
         });
 
-        assertEquals(5, problems.size(), problems.toString());
+        assertEquals(7, problems.size(), problems.toString());
         problems.forEach(problem -> assertTrue(problem.startsWith("unlabelled "), problem));
     }
 
