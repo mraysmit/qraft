@@ -381,8 +381,11 @@ declared by the test.
 - The procedure restores the **durable state of one directory**. Anything
   committed only on servers that are lost, or after a backup, is gone. Check
   registrations before returning clients to the cluster.
-- A registration that a client was told succeeded may be absent after a
-  restore from a backup; clients must register again.
+- A registration that a client was told succeeded is absent after a restore
+  from a backup if it followed the backup. `DockerLostQuorumRecoveryTest`
+  shows it: a write acknowledged with status 200 and committed on all three
+  servers after the backup is missing from the recovered seed and from the
+  rejoined servers. Clients must register again.
 - It is not an upgrade or migration tool, and it is not a way to change
   membership while a quorum remains; use the join and removal procedures
   above for that.

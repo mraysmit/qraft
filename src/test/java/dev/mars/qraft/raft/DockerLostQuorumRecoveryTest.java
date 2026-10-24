@@ -149,7 +149,9 @@ class DockerLostQuorumRecoveryTest {
                     "--volumes-from", containerId(cluster, "server1"), "-v", backup + ":/backup");
             SharedDockerClusterFixture.startContainer(cluster, "server1");
             await().atMost(Duration.ofSeconds(60)).until(() -> allReady(endpoints) && exactlyOneLeader(endpoints));
-            register(endpoints, "after-backup");
+            // This write is acknowledged to its client and committed on all three servers, yet it follows the
+            // backup, so the recovered cluster must not hold it: an acknowledged write can be lost by a restore.
+            assertEquals(200, register(endpoints, "after-backup"), "the client is told the write succeeded");
             await().atMost(Duration.ofSeconds(30)).until(() -> everyNodeHas(endpoints, "after-backup"));
 
             // The whole cluster is lost; only the backup is used.
@@ -351,7 +353,8 @@ class DockerLostQuorumRecoveryTest {
         return fields;
     }
 
-    private static void register(List<String> endpoints, String serviceName) throws Exception {
+    /** Registers {@code serviceName} on whichever endpoint leads, and returns the status that acknowledged it. */
+    private static int register(List<String> endpoints, String serviceName) throws Exception {
         String body = """
                 {"serviceId":"%s-1","serviceName":"%s","address":"127.0.0.1","port":8100,
                  "tags":["recovery"],"metadata":{"scenario":"lost-quorum"},"health":"PASSING"}
@@ -359,9 +362,10 @@ class DockerLostQuorumRecoveryTest {
         for (int attempt = 0; attempt < 30; attempt++) {
             for (String endpoint : endpoints) {
                 try {
-                    if (send(endpoint + "/v1/client/service/register", "PUT", body, REGISTRATION_HEADERS)
-                            .statusCode() == 200) {
-                        return;
+                    int status = send(endpoint + "/v1/client/service/register", "PUT", body, REGISTRATION_HEADERS)
+                            .statusCode();
+                    if (status == 200) {
+                        return status;
                     }
                 } catch (java.io.IOException unavailable) {
                     // A follower or a starting server answers later or not at all; the next endpoint is tried.
