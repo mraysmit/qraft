@@ -47,7 +47,7 @@ Status key:
 | Raft | Election, replication, check-quorum, fencing | Done | `RaftNode*Test`, `RaftNodeCheckQuorumTest` |
 | Raft | Durable WAL, snapshots in every role, installation, recovery | Done | `RaftNodeFollowerLogTest`, `DockerDurableRestartTest`, `DockerClientRecoveryTest` |
 | Raft | Replica determinism; follower match index limited to verified entries | Done | `ReplicaDeterminismTest`, `RaftNodeFollowerLogTest` |
-| Raft | Adding or removing servers (membership change) | Partial | Updated 2026-10-24. Lost-quorum recovery (Step 7) is built and verified: the offline `inspect` and `recover` commands, their crash boundaries and one-time claim, and `DockerLostQuorumRecoveryTest` from current directories and from a backup, five consecutive runs and Jenkins build 33 (1,138 default, 10 end-to-end, 34 Docker tests). Its runbook is in `RAFT_STORAGE_OPERATIONS.md`. Earlier, 2026-10-21. Durable server IDs, replicated configuration, bootstrapping, non-voter promotion, joining, operator list/remove and leader stickiness are built. Membership parsing and all six runtime settings are wired and logged. `RaftNodeCleanupTest` covers automatic failed-voter cleanup, grace/interval boundaries, contact and leadership resets, quorum/minimum/budget limits, promotion triggers, cancellation, injected WAL failure and real-WAL reopening. Step 5 passed five consecutive 332-test affected runs, 1,051 default tests with coverage, 42 runtime tests and retained-log audits. The expanded cleanup/replacement container scenarios (Step 8) remain open. See [`task-list-raft-membership-changes-2026-10-24.md`](task-list-raft-membership-changes-2026-10-24.md) |
+| Raft | Adding or removing servers (membership change) | Partial | Updated 2026-10-24. Lost-quorum recovery (Step 7) is built and verified: the offline `inspect` and `recover` commands, their crash boundaries and one-time claim, and `DockerLostQuorumRecoveryTest` from current directories and from a backup, five consecutive runs and Jenkins build 33 (1,138 default, 10 end-to-end, 34 Docker tests). Its runbook is in `RAFT_STORAGE_OPERATIONS.md`. Earlier, 2026-10-21. Durable server IDs, replicated configuration, bootstrapping, non-voter promotion, joining, operator list/remove and leader stickiness are built. Membership parsing and all six runtime settings are wired and logged. `RaftNodeCleanupTest` covers automatic failed-voter cleanup, grace/interval boundaries, contact and leadership resets, quorum/minimum/budget limits, promotion triggers, cancellation, injected WAL failure and real-WAL reopening. Step 5 passed five consecutive 332-test affected runs, 1,051 default tests with coverage, 42 runtime tests and retained-log audits. Step 8's container scenarios are built and verified (replacement, grow and shrink, leader removal, cleanup, removed-server campaigns): three consecutive green Jenkins runs, builds 39 to 41. One limitation is recorded in design section 14.9: a long-stopped voter that returns can briefly depose the leader, since Pre-Vote is not implemented. See [`task-list-raft-membership-changes-2026-10-24.md`](task-list-raft-membership-changes-2026-10-24.md) |
 | Catalog | Register and deregister through Raft; composite identity; idempotence | Done | `HttpApiServerTest`, `ClientEndToEndTest` |
 | Catalog | Catalog and health queries with deterministic ordering | Done | `ServiceCatalog` sorts names and instances |
 | Catalog | Registration and modification indexes on instances (design 7.5) | Missing | `ServiceInstance` has no index fields |
@@ -116,10 +116,11 @@ Status key:
   - multi-node integration and failure-injection coverage.
 
   Snapshot, restore, upgrade, and recovery workflows are partly done. Server
-  configuration and bootstrap are done; membership remains partial because
-  the final membership container scenarios (Step 8) are still open.
-  Disruptive-server validation was completed on 2026-10-21 and lost-quorum
-  recovery on 2026-10-24. Failed-server cleanup was
+  configuration and bootstrap are done; the membership work is built and verified through
+  Step 8, and the list stays open for the owner to close. Disruptive-server
+  validation was completed on 2026-10-21, lost-quorum recovery on 2026-10-24 and
+  the container scenarios on 2026-10-24, with one recorded limitation (design
+  section 14.9). Failed-server cleanup was
   implemented on 2026-10-21; its verification record is in the membership list.
 
 ### Phase 7 runtime and diagnostic close-out, recorded 2026-10-14

@@ -2182,7 +2182,8 @@ passed five consecutive runs with the concurrent changes (40 to 45 s each): `Doc
   all present on the three, and the client never failed to register.
 - **A removed follower never learns of its removal.** In the second run of the
   test the removed servers were expected to report `removed`; they did not,
-  and server5 was campaigning at term 31 after 30 seconds. That is the design
+  and server5 was campaigning at term 31 when its container was stopped
+  at the end of the test. That is the design
   of Step 6, not a defect: the leader stops replicating to a server once it is
   outside the configuration, so a removed follower keeps its old configuration.
   The test therefore asserts what the design promises: the three that remain
@@ -2413,7 +2414,27 @@ the other three elect another).
   build 37 on this code (build 38 was green on the code before the recovery sites
   were fixed, so it does not count).
 - The count of consecutive green Jenkins runs starts again after build 37.
-- Still to do: three consecutive green Jenkins runs of the Step 8 scenarios, the final review of the design, feature validation and runbook against
+- **Exit gate, 2026-10-24: three consecutive green Jenkins runs on the final
+  code.** Builds 39 and 40 on `ffdec45` and build 41 on `03fefa9` (documents only
+  after `ffdec45`): each passed default 1,164, end-to-end 10 and Docker 40 with
+  every coverage gate met (1,199, 1,163 and 1,182 s), and their archived logs hold
+  643, 644 and 634 ERROR headers, all flagged, with no unflagged trace and no ERROR
+  that mentions a draining sequencer.
+- **Audits, 2026-10-24**, over the 35 files changed since `bbbc385^` (21 Java, 15
+  of them new): no Vert.x or Mockito; no `System.getenv` or `getProperty` in
+  changed main code; no `orTimeout` or `completeOnTimeout`; Apache header,
+  `@author`, `@since` and `@version` on all 15 new Java files; no assistant
+  attribution in files or commit messages; `git diff --check` clean; no nested test
+  helper without a `Helper` or `Fixture` suffix (one, `Publisher`, was renamed).
+- **Documents updated with the evidence and the limitation:** runbook (a section
+  "What to expect when servers return, leave or stop"), design section 14.9,
+  and the feature validation record.
+- **Open for the owner:** adding Pre-Vote (research: Raft thesis section 9.6,
+  etcd, HashiCorp raft 1.7, Kafka KRaft); the leftover Docker volume
+  `qraft-recovery-05e4d6b6-...`; closing and archiving this list, which is not
+  done without the owner's agreement.
+- Previously open, now done: three consecutive Jenkins runs of the Step 8
+  scenarios, the final review of the design, feature validation and runbook against
   the evidence, and the audits the exit gate lists (prohibited frameworks,
   environment configuration, timeout API, source headers, `git diff --check`).
 

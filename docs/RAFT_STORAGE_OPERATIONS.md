@@ -490,6 +490,45 @@ io.netty.util.IllegalReferenceCountException: refCnt: 0, increment: 1
   Two tests of `GrpcRaftServerTest` place a connection in the window and after
   it, so a change in the library's behaviour is seen.
 
+## What to expect when servers return, leave or stop
+
+These behaviours were observed in the container scenarios (membership Step 8)
+and are not faults.
+
+- **A voter that returns after a long stop can briefly replace the leader.** While
+  it was down it heard no heartbeats and kept raising its term. The leader's
+  connection to it may still be backing off, so it can campaign for some seconds
+  after it starts. Leader stickiness makes the other voters ignore its
+  campaigns, but when the leader's next AppendEntries reaches it, its answer
+  carries the higher term and the leader steps down. Elections follow, and the
+  cluster has a new leader within seconds. Nothing committed is lost. The
+  Pre-Vote extension (Raft thesis section 9.6) would prevent it and is not
+  implemented. Expect extra elections, and a leader that is not the one you
+  had, after restarting a long-stopped voter.
+- **A removed server never learns of its removal and keeps campaigning.** Once a
+  server is outside the configuration the leader stops replicating to it, so it
+  keeps its old configuration, does not report `removed`, and raises its term
+  every election timeout (one test run found it at term 31). The voters ignore
+  it and the cluster keeps its leader and term. Stop it and wipe its directory;
+  do not leave it running. A leader that removes itself does step down and
+  reports `removed`.
+- **The failure grace belongs to the current leader.** Automatic cleanup counts
+  absence in the leader's memory, so a leadership change restarts every grace. A
+  voter that comes back and is stopped again is never found eligible unless a
+  single absence lasts the whole grace.
+- **Cleanup waits for the minimum.** With three voters and `minVoters` of 3, a
+  failed voter is found eligible on every pass and kept. It is removed when a
+  replacement's promotion commits, which requests an early pass.
+- **A snapshot to an unreachable lagging peer is retried less often.** The leader
+  waits 250 ms after the first failed attempt, doubling with each consecutive
+  failure to the same peer up to 5 seconds, and starts again after a delivered
+  snapshot or a new leadership. Each failed attempt is still logged as an error
+  with its stack trace.
+- **A transition refused because the node is shutting down is logged at debug.**
+  A vote or snapshot response, a leadership no-op or a snapshot request that
+  reaches a stopping node is turned away before anything is written. Any other
+  failure of such a transition is an error.
+
 ## Upgrade and migration
 
 Current Qraft supports only the external `raftlog` backend. The former `file`

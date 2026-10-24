@@ -1623,6 +1623,38 @@ Compatibility rules:
 Before changing catalog identity, tests must capture legacy snapshots and command
 bytes as immutable fixtures.
 
+### 14.9 Membership and restart behaviour verified in containers
+
+Membership Step 8 ran each scenario below against a real three-server cluster in
+containers, with the operator command run from the image. The task list holds
+the evidence and the build numbers.
+
+| Scenario | What was shown |
+|---|---|
+| Wipe and replace at the same name and address | The empty server takes a new ID. Its join is refused while the old entry holds the name; it bootstraps nothing and accepts nothing meant for the old ID. A wrong-token removal changes nothing; the right token removes the entry, and the replacement joins, is promoted, and keeps its identity and vote across a restart. |
+| Grow 3 to 5 and shrink 5 to 3 with a client publishing | Servers join as non-voters and are promoted; changes meet the single-change rule under concurrent joins and removals; every acknowledged registration survives. |
+| Leader removes itself | It commits its removal, steps down, reports `removed` and is not ready; the other two elect one leader. |
+| Failed-voter cleanup | Blocked at the voter minimum, removed when a replacement's promotion commits, persisting across restarts. A returning peer restarts its failure clock; a failed voter is removed by a periodic pass with no join. |
+| Removed server that keeps campaigning | Cut off, removed, then restored, it changes nothing for the live voters; killing the leader still lets the rest elect another. |
+| Lost-quorum recovery | See 14.5. |
+
+Limitations recorded by that work:
+
+- A voter that returns after a long stop can depose a healthy leader for a few
+  seconds. Leader stickiness ignores its vote requests, but the higher term it
+  reached in an AppendEntries response is accepted, as the Raft thesis
+  (section 9.6) describes. Pre-Vote would prevent it and is not implemented.
+- A removed server does not learn it was removed and campaigns indefinitely
+  with a rising term. The live voters ignore it, so it is harmless to the
+  cluster but should be stopped.
+- Automatic cleanup's failure clocks are the current leader's, so a leadership
+  change restarts the grace.
+- A refused transition at shutdown (a sequencer that is draining) is expected and
+  logged at debug by one class, `TransitionFailureLog`, used by every handler that
+  logs a sequenced failure except the election start, which also treats a fenced
+  sequencer as expected. Snapshot sends to an unreachable lagging peer back off
+  from 250 ms to 5 seconds.
+
 ## 15. Security and tenancy
 
 Tenant and namespace identity must be carried through authentication context,
