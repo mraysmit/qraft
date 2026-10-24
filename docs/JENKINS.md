@@ -194,6 +194,13 @@ stage in 1,196 seconds: default 1,153, end-to-end 10 and Docker 40, with every
 coverage gate met. Its archived logs hold 631 error headers, all flagged, and no
 unflagged stack trace.
 
+[Build 37](http://192.168.137.32:8080/job/Qraft/37/), on `888892e`, failed in 1,156
+seconds. Default (1,153) and end-to-end (10) passed and all six Step 8 classes
+passed, but `DockerClientTopologyTest` failed its Docker-log audit on one
+undeclared error: a vote response refused while a stopped server's transition
+sequencer was draining. The test stops that server on purpose, so the error is
+now declared by `RAFT_ELECTION_INTERRUPTED_BY_SHUTDOWN`.
+
 ## Job configuration
 
 The job loads its pipeline from the repository's default branch using the following SCM configuration.

@@ -101,7 +101,7 @@ class DockerMembershipResizeTest {
         Path secondTokenFile = Files.createTempFile("qraft-operator-token-", ".txt");
         List<SharedDockerClusterFixture.DetachedServer> added = new ArrayList<>();
         List<String> endpoints = SharedDockerClusterFixture.getNodeEndpoints(cluster, 3);
-        Publisher publisher = new Publisher(endpoints);
+        PublisherHelper publisher = new PublisherHelper(endpoints);
         try {
             await().atMost(Duration.ofSeconds(60)).until(() -> exactlyOneLeader(endpoints));
             // A follower answers "not configured" until the leader has replicated the configuration to it.
@@ -239,15 +239,19 @@ class DockerMembershipResizeTest {
         return names.stream().allMatch(name -> everyNodeHas(servers, name));
     }
 
-    /** A client that registers one new service at a time, and records those the cluster acknowledged. */
-    private static final class Publisher {
+    /**
+     * Test support: a client that registers one new service at a time, and records those the cluster acknowledged.
+     * {@link DockerMembershipResizeTest} starts it before the cluster grows and stops it after the shrink; the
+     * assertions on what it recorded are in that test.
+     */
+    private static final class PublisherHelper {
         private final List<String> endpoints;
         private final List<String> acknowledged = new CopyOnWriteArrayList<>();
         private final AtomicBoolean running = new AtomicBoolean(true);
         private final AtomicReference<Throwable> failure = new AtomicReference<>();
         private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
-        Publisher(List<String> endpoints) {
+        PublisherHelper(List<String> endpoints) {
             this.endpoints = endpoints;
         }
 

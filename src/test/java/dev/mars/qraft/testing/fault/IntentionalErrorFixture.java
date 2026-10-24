@@ -154,6 +154,13 @@ public enum IntentionalErrorFixture {
                     + "|Failed to process InstallSnapshot response from \\S+:"
                     + " Raft transition sequencer is draining)"),
 
+    /**
+     * A test deliberately stops a Docker server that is campaigning, and the vote response that arrives after its
+     * transition sequencer began to drain is refused.
+     */
+    RAFT_ELECTION_INTERRUPTED_BY_SHUTDOWN("dev.mars.qraft.raft.RaftNode", Level.ERROR,
+            "Failed to process vote response for election term \\d+: Raft transition sequencer is draining"),
+
     /** A test deliberately fences the transition sequencer and then exercises a rejected operation. */
     RAFT_FENCED_OPERATION("dev.mars.qraft.raft.RaftNode", Level.ERROR,
             "(?:Failed to persist command to WAL|AppendEntries failed during durable transition"

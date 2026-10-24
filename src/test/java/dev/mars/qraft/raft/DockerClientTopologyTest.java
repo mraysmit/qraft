@@ -63,7 +63,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 @ExpectedDockerErrorsHelper({
         dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE,
         dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_NAME_UNRESOLVED,
-        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_SNAPSHOT_TRANSFER_INTERRUPTED
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_SNAPSHOT_TRANSFER_INTERRUPTED,
+        // The test stops a server (stopContainer) that can be campaigning at that moment; its sequencer is then
+        // draining when a vote response arrives (Jenkins build 37, server2 at term 2).
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_ELECTION_INTERRUPTED_BY_SHUTDOWN
 })
 // Each test starts its own cluster and then waits on bounded conditions; the method budget exceeds their sum.
 @Timeout(value = 10, unit = TimeUnit.MINUTES)

@@ -392,6 +392,25 @@ class DockerLogCaptureTest {
     }
 
     @Test
+    void aVoteResponseRefusedWhileTheSequencerDrainsHasANarrowIntentionalSignature() {
+        String drained = "2026-10-24 12:15:50.470 [qraft-state-loop] ERROR dev.mars.qraft.raft.RaftNode [server2]"
+                + " [CANDIDATE/2] [8b33b78a-c938-4eda-b80c-5801d5f2c6e5] [AppendEntries] - Failed to process vote"
+                + " response for election term 2: Raft transition sequencer is draining\n";
+        String other = "2026-10-24 12:15:51.000 [qraft-state-loop] ERROR dev.mars.qraft.raft.RaftNode [server2]"
+                + " [CANDIDATE/2] - Failed to process vote response for election term 2: java.io.IOException: boom\n";
+
+        DockerLogCaptureHelper.Audit expected = DockerLogCaptureHelper.audit(drained,
+                Set.of(IntentionalErrorFixture.RAFT_ELECTION_INTERRUPTED_BY_SHUTDOWN));
+        DockerLogCaptureHelper.Audit unexpected = DockerLogCaptureHelper.audit(drained + other,
+                Set.of(IntentionalErrorFixture.RAFT_ELECTION_INTERRUPTED_BY_SHUTDOWN));
+
+        assertEquals(1, expected.recognised().size(), "the drain refusal is the declared error");
+        assertTrue(expected.problems().isEmpty());
+        assertEquals(1, unexpected.recognised().size(), "only the drain refusal is recognised");
+        assertEquals(1, unexpected.problems().size(), "a vote response that fails for any other reason is still a problem");
+    }
+
+    @Test
     void aDeclaredWarningThatCarriesAStackTraceIsFlaggedWithItsTracePreserved() {
         String cached = UNRESOLVED_PEER.replace(": Try again", "");
         String info = "2026-10-10 06:03:33.000 [main] INFO  example.Container - still serving\n";
