@@ -2405,6 +2405,13 @@ the other three elect another).
   is the first of the three consecutive green runs after build 37. Its only
   drain-related ERROR was the flagged `RAFT_STARTUP_DRAINING` event described
   above.
+- **Build 39 (commit ffdec45, the final code of the drain work), green on every
+  stage, 1,199 s:** default 1,164, end-to-end 10 and Docker 40 passed, every
+  coverage gate met; 643 ERROR headers in the archived logs, all flagged, no stack
+  trace under an unflagged header, and no ERROR line anywhere that mentions
+  "sequencer is draining". It is run 1 of the three consecutive green runs after
+  build 37 on this code (build 38 was green on the code before the recovery sites
+  were fixed, so it does not count).
 - The count of consecutive green Jenkins runs starts again after build 37.
 - Still to do: three consecutive green Jenkins runs of the Step 8 scenarios, the final review of the design, feature validation and runbook against
   the evidence, and the audits the exit gate lists (prohibited frameworks,
