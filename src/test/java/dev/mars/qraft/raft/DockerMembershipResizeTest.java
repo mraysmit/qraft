@@ -79,8 +79,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Tag("docker")
 @ExpectedDockerErrorsHelper({
         // A server removed from the cluster keeps campaigning with its old configuration, and its vote requests fail
-        // against the removed server beside it once that one is stopped at the end of the test.
-        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE
+        // against the removed server beside it once that one is stopped at the end of the test, and the name of a
+        // stopped server may then fail to resolve.
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE,
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_NAME_UNRESOLVED
 })
 // Each wait is bounded; their worst-case sum is about fourteen minutes, so the method budget is twenty-five and a
 // failure reports the condition that was not met rather than the module's default method timeout.
