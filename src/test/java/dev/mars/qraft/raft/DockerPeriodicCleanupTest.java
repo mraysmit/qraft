@@ -97,7 +97,10 @@ class DockerPeriodicCleanupTest {
             register(endpoints, "before-failures");
             await().atMost(Duration.ofSeconds(60)).until(() -> everyNodeHas(everyServer, "before-failures"));
 
-            // Both failures are followers, so the leader keeps running the passes.
+            // Both failures are followers at the start. Leadership may still change when one returns: a restarted
+            // voter that has not yet heard a heartbeat campaigns, and the leader steps down on the higher term in its
+            // answer. The failure clocks are the current leader's, so this test reads the configuration from a server
+            // that is never stopped and does not assume that the leader stays the same.
             int leaderIndex = DockerHealthApiHelper.leaderIndex(endpoints);
             int returningIndex = (leaderIndex + 1) % 3;
             int failedIndex = (leaderIndex + 2) % 3;
@@ -112,9 +115,7 @@ class DockerPeriodicCleanupTest {
             for (int absence = 1; absence <= 2; absence++) {
                 SharedDockerClusterFixture.stopContainer(cluster, returning);
                 await().during(Duration.ofSeconds(40)).atMost(Duration.ofSeconds(60)).until(() ->
-                        exactlyOneLeader(List.of(endpoints.get(leaderIndex)))
-                                && Boolean.TRUE.equals(configurationOrEmpty(endpoints.get(leaderIndex))
-                                .get(returningId)));
+                        Boolean.TRUE.equals(configurationOrEmpty(endpoints.get(leaderIndex)).get(returningId)));
                 SharedDockerClusterFixture.startContainer(cluster, returning);
                 await().atMost(Duration.ofSeconds(90)).until(() -> ready(endpoints.get(returningIndex)));
             }
