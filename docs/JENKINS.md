@@ -189,6 +189,11 @@ was running and the pipeline does not prune images, so the cause was not found;
 the fixture now tries that one failure once more. If it recurs, check the Docker
 daemon's version, storage driver and image store on the node.
 
+[Build 36](http://192.168.137.32:8080/job/Qraft/36/), on `3b3fe38`, passed every
+stage in 1,196 seconds: default 1,153, end-to-end 10 and Docker 40, with every
+coverage gate met. Its archived logs hold 631 error headers, all flagged, and no
+unflagged stack trace.
+
 ## Job configuration
 
 The job loads its pipeline from the repository's default branch using the following SCM configuration.
