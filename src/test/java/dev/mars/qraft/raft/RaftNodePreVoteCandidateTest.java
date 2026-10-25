@@ -164,6 +164,24 @@ class RaftNodePreVoteCandidateTest {
     }
 
     @Test
+    void aLeaderThatHasBeenSilentForAWholeElectionTimeoutIsNoLongerReportedUntilItIsHeardAgain() throws Exception {
+        start(MEMBERS);
+        assertTrue(heartbeatFrom("peer-2", 1).getSuccess());
+        assertEquals("peer-2", status().leaderId());
+
+        timers.fireElectionTimeout();
+        await(() -> transport.preVotes.size() == 2, "pre-votes held");
+        settle();
+
+        RaftStatus silent = status();
+        assertNull(silent.leaderId(), "a server cut off from its leader must not go on reporting it, or it is 'ready'");
+        assertEquals(RaftNode.State.FOLLOWER, silent.state(), "it is still a follower and has taken no term");
+        assertEquals(1, silent.term());
+        assertTrue(heartbeatFrom("peer-2", 1).getSuccess());
+        assertEquals("peer-2", status().leaderId(), "and the next heartbeat makes the leader known again");
+    }
+
+    @Test
     void aVoterWithNoOtherVoterElectsAtOnceWithoutAskingAnyone() throws Exception {
         start(Set.of("node-1"));
 
@@ -265,6 +283,13 @@ class RaftNodePreVoteCandidateTest {
     }
 
     // ---------------------------------------------------------------------------------------------------
+
+    /** A heartbeat from {@code leader}, whose log, like every member's, begins with the bootstrap configuration. */
+    private AppendEntriesResponse heartbeatFrom(String leader, long term) throws Exception {
+        return node.handleAppendEntriesRequest(AppendEntriesRequest.newBuilder()
+                .setTerm(term).setLeaderId(leader).setPrevLogIndex(1).setPrevLogTerm(0).setLeaderCommit(1)
+                .build()).get(10, TimeUnit.SECONDS);
+    }
 
     private static PreVoteResponse answer(String peer, long term, boolean granted) {
         return PreVoteResponse.newBuilder().setTerm(term).setVoteGranted(granted)

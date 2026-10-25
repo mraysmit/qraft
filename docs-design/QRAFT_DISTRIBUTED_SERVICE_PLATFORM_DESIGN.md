@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-10-21 (Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
+**Last updated:** 2026-10-25 (Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
 
 ## 1. Purpose
 
@@ -1635,18 +1635,18 @@ the evidence and the build numbers.
 | Grow 3 to 5 and shrink 5 to 3 with a client publishing | Servers join as non-voters and are promoted; changes meet the single-change rule under concurrent joins and removals; every acknowledged registration survives. |
 | Leader removes itself | It commits its removal, steps down, reports `removed` and is not ready; the other two elect one leader. |
 | Failed-voter cleanup | Blocked at the voter minimum, removed when a replacement's promotion commits, persisting across restarts. A returning peer restarts its failure clock; a failed voter is removed by a periodic pass with no join. |
-| Removed server that keeps campaigning | Cut off, removed, then restored, it changes nothing for the live voters; killing the leader still lets the rest elect another. |
+| Removed server that keeps asking for pre-votes | Cut off, removed, then restored, it asks without taking a term and changes nothing for the live voters; killing the leader still lets the rest elect another. |
 | Lost-quorum recovery | See 14.5. |
 
 Limitations recorded by that work:
 
-- A voter that returns after a long stop can depose a healthy leader for a few
-  seconds. Leader stickiness ignores its vote requests, but the higher term it
-  reached in an AppendEntries response is accepted, as the Raft thesis
-  (section 9.6) describes. Pre-Vote would prevent it and is not implemented.
-- A removed server does not learn it was removed and campaigns indefinitely
-  with a rising term. The live voters ignore it, so it is harmless to the
-  cluster but should be stopped.
+- A voter that returned after a long stop used to depose a healthy leader for a
+  few seconds: leader stickiness ignored its vote requests, but the higher term it
+  had reached was accepted from its AppendEntries response (Raft thesis, section
+  9.6). Pre-Vote, added on 2026-10-25, prevents it (section 14.10).
+- A removed server does not learn it was removed and asks for pre-votes
+  indefinitely. The live voters refuse, so it takes no term and is harmless to the
+  cluster, but it should be stopped.
 - Automatic cleanup's failure clocks are the current leader's, so a leadership
   change restarts the grace.
 - A refused transition at shutdown (a sequencer that is draining) is expected and
@@ -1654,6 +1654,59 @@ Limitations recorded by that work:
   logs a sequenced failure except the election start, which also treats a fenced
   sequencer as expected. Snapshot sends to an unreachable lagging peer back off
   from 250 ms to 5 seconds.
+
+### 14.10 Pre-Vote
+
+An election timeout no longer raises a term. A voter with at least one other voter
+first sends each of them a `PreVote` request for the next term (its current term
+plus one) and starts the real election only when a quorum, itself included, would
+vote for it. The rules, from the Raft thesis section 9.6 and etcd:
+
+- **A receiver changes nothing.** It records no vote, adopts no term and does not
+  count the sender as a leader.
+- **A receiver says yes only if** it is running; the sender is a voter in its
+  configuration (a server with no configuration yet cannot check, and answers by
+  the other rules, or a first server that bootstrapped alone could never be
+  elected); it is not a leader and has heard from none within an election timeout
+  (the test the real vote uses, one method); the proposed term is strictly ahead of
+  its own; and the sender's log is at least as up to date as its own.
+- **A round forgets a silent leader.** A follower whose election timeout fires has not
+  heard its leader for a whole timeout, so it stops reporting that leader (and its
+  readiness fails) as it does when it becomes a candidate. A heartbeat restores it.
+  Without this a cut-off follower would keep claiming readiness, since it no longer
+  becomes a candidate.
+- **A round ends on a no, on silence, or on a heartbeat.** The election timer is
+  re-armed when the round starts and its generation is checked when an answer
+  arrives, so a heartbeat in the meantime cancels the round. The next election
+  timeout asks again. A higher term in an answer is not adopted; the leader's
+  heartbeat carries it.
+- **A sole voter skips the round**, as it skips voting.
+- **Compatibility.** `RaftTransport.sendPreVote` is a default that fails as
+  unsupported, like `describe` and `join`. `GrpcRaftTransport` turns a peer's
+  `UNIMPLEMENTED` into that failure, and the asking server counts such a peer as
+  willing, so a cluster of old and new servers still elects. Any other failure is
+  not a yes and is logged as a failed vote request is.
+- **Stickiness stays.** Pre-Vote does not stop a removed server from disrupting a
+  cluster (thesis section 4.2.3); stickiness does. CheckQuorum stays so that a
+  leader that cannot reach a quorum steps down.
+
+Verified by: the receiver and candidate tests with held transports and manual
+timers; a gRPC round trip and the old-server case; a deterministic reproduction of
+the incident (ten election timeouts cut off raise no term, where they reached term
+ten before; the test fails with `expected 0 but was 10` when the round is disabled);
+and a container scenario in which a follower stopped for 70 seconds and restarted
+leaves the leader and term unchanged on every server for 40 seconds. A partitioned
+follower is covered at both levels: a unit test that a leader silent for a whole
+timeout is forgotten, and a container test that the follower reports unready, never
+leads, never becomes a candidate and keeps its term.
+
+**Removing a transition.** Pre-Vote removed the term raise from the election
+timeout, and with it the candidate transition's other effect, clearing the known
+leader; the first container run on Jenkins found the cut-off follower still ready.
+A change that removes or alters a state transition therefore lists the old
+transition's observable effects first (term, role, known leader, timers, readiness),
+marks each removed or kept, and writes a test for every kept effect before changing
+code.
 
 ## 15. Security and tenancy
 
@@ -2022,7 +2075,10 @@ In-memory and real-transport clusters cover:
 Tagged tests build one image, start it in both modes, register a service, query it
 through multiple servers, change leadership, and verify graceful and automatic
 deregistration. These tests are separate from the fast default build but run in
-continuous integration with Docker available.
+continuous integration with Docker available. The shared fixture retries an image
+build once when the daemon reports "failed to prepare extraction snapshot ... parent
+snapshot ... does not exist", a host fault seen once; any other build failure fails
+at once.
 
 The packaged-artifact acceptance test starts the shaded runtime JAR without a
 frontend directory on disk, fetches `index.html` and a manifest-listed hashed
@@ -2033,7 +2089,7 @@ not expose the administrative routes.
 
 Current progress, the active tranche's detailed steps, and the backlog are
 tracked in the current dated task list in `docs-design/`
-([`task-list-raft-pre-vote-2026-10-24.md`](task-list-raft-pre-vote-2026-10-24.md), the Pre-Vote extension).
+([`task-list-raft-pre-vote-2026-10-25.md`](task-list-raft-pre-vote-2026-10-25.md), the Pre-Vote extension).
 The membership list that preceded it,
 [`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md),
 was completed and archived on 2026-10-24 (Steps 1 to 8 verified); its predecessor, [`task-list-test-suite-remediation-2026-10-21.md`](../docs/archive/task-list-test-suite-remediation-2026-10-21.md),

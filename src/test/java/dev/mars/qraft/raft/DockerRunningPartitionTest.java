@@ -35,8 +35,11 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
+import static dev.mars.qraft.raft.DockerClusterApiHelper.countOccurrences;
+import static dev.mars.qraft.raft.DockerClusterApiHelper.logsOf;
 import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -50,8 +53,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <ul>
  * <li>A partitioned leader steps down and refuses writes. Meanwhile the majority elects a leader and
  * commits. On heal every server converges on the majority's history, without the refused write.</li>
- * <li>A partitioned follower keeps campaigning but never leads, and reports unready. The majority keeps
- * serving, and the follower catches up on heal.</li>
+ * <li>A partitioned follower keeps asking for pre-votes (Raft thesis section 9.6) and is never granted one, so its
+ * term does not move and it never becomes a candidate or the leader, and it reports unready. The majority
+ * keeps serving, and the follower catches up on heal.</li>
  * </ul>
  *
  * <p>The partitioned server is observed from inside its own container, since its published port is cut
@@ -121,24 +125,30 @@ class DockerRunningPartitionTest {
     }
 
     @Test
-    void aPartitionedFollowerCampaignsButNeverLeadsWhileTheMajorityServes() throws Exception {
+    void aPartitionedFollowerAsksForPreVotesButNeverLeadsOrRaisesItsTermWhileTheMajorityServes() throws Exception {
         int leader = awaitSingleLeader();
         int follower = (leader + 1) % endpoints.size();
         String followerService = service(follower);
         List<String> majority = without(follower);
         long termBefore = insideStatus(followerService).path("term").asLong();
+        String asking = "Asking for pre-votes for node " + followerService + " ";
 
         SharedDockerClusterFixture.partitionContainer(cluster, followerService);
         String during = "while-partitioned-" + System.nanoTime();
         List<String> followerStates = new ArrayList<>();
+        List<Long> followerTerms = new ArrayList<>();
         try {
-            // Two elections of its own prove it is campaigning; every observation is recorded.
+            // Two rounds of pre-votes of its own prove it is campaigning. No quorum would vote for it, so it takes no
+            // term and never becomes a candidate; every observation is recorded.
             await().atMost(Duration.ofSeconds(60)).pollInterval(Duration.ofMillis(200)).until(() -> {
                 JsonNode status = insideStatus(followerService);
                 followerStates.add(status.path("state").asText());
-                return status.path("term").asLong() >= termBefore + 2;
+                followerTerms.add(status.path("term").asLong());
+                return countOccurrences(logsOf(cluster, followerService), asking) >= 2;
             });
-            assertFalse(followerStates.contains("LEADER"), "a single server is never a majority: " + followerStates);
+            assertFalse(followerStates.contains("LEADER") || followerStates.contains("CANDIDATE"),
+                    "a single server is never a majority, and takes no term without one: " + followerStates);
+            assertEquals(Set.of(termBefore), Set.copyOf(followerTerms), "its term never moved: " + followerTerms);
             assertNotEquals(200, insideReadiness(followerService));
 
             register(currentLeader(majority), during);

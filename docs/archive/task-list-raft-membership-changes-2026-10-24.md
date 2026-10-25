@@ -7,7 +7,7 @@ verified: three consecutive green Jenkins runs on the final code (builds 39 to 4
 feature validation updated with the evidence. One limitation is recorded rather
 than fixed here: a long-stopped voter that returns can briefly depose a healthy
 leader, which the Pre-Vote extension prevents. That work continues in
-[`task-list-raft-pre-vote-2026-10-24.md`](../../docs-design/task-list-raft-pre-vote-2026-10-24.md).
+[`task-list-raft-pre-vote-2026-10-25.md`](../../docs-design/task-list-raft-pre-vote-2026-10-25.md).
 Step 7, recovery from lost quorum, was approved on 2026-10-22 (decision 8: a
 single seed rebuilt offline under a new server ID, with backup restore
 included) and verified on 2026-10-24. Step 6,

@@ -1,7 +1,7 @@
 # Task List: Raft Pre-Vote
 
 **Date:** 2026-10-24
-**Last updated:** 2026-10-24 (created; design decided, nothing built)
+**Last updated:** 2026-10-25 (steps 1 to 7 built and checked locally; the Jenkins exit gate is next. Created 2026-10-24)
 **Status:** Active. Follows the completed membership list,
 [`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md).
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), section 14.9
@@ -45,6 +45,13 @@ disrupting a cluster; stickiness does, and stays.
 
 - Strict test-first: each behaviour has a failing test that was run and seen to
   fail for the right reason before any production code for it exists.
+- Removing or changing a state transition starts with its old effects. Read the old
+  code and list each observable effect (term, role, known leader, timers,
+  readiness); mark each removed on purpose or kept; write a failing test for every
+  kept effect before touching the code. (Build 42 found a cut-off follower still
+  reporting ready: the candidate transition used to clear the known leader, and
+  removing the term raise removed that too. Characterization before change is the
+  usual practice for this.)
 - Existing log levels and messages are not changed. A new message logs a
   condition the way its nearest existing sibling does.
 - No local build or suite beyond a small check: the verification runs on Jenkins,
@@ -128,12 +135,95 @@ Each step is red, then green, then a small local check of the classes it touches
 7. **Documents.** The runbook's "What to expect" section loses the returning-voter
    limitation and gains the Pre-Vote behaviour; design 14.9 and the feature
    validation record are updated.
-8. **Exit gate.** Three consecutive green Jenkins runs of all three stages on the
+8. **Exit gate (open).** Three consecutive green Jenkins runs of all three stages on the
    final code; every log audited (no unflagged error, no unflagged trace); the
    audits of the membership list's step 8 repeated; this list completed and
    archived.
 
-## 6. Out of scope
+## 6. Progress, 2026-10-25
+
+Each step below was written test first and its red run seen before the code.
+
+1. **Wire and transport.** `PreVote` RPC and messages in `raft.proto`;
+   `RaftTransport.sendPreVote` default (fails as unsupported);
+   `GrpcRaftTransport.sendPreVote` and `GrpcRaftServer.preVote`, with the same
+   telemetry as the vote RPC. Red: the gRPC round trip failed with "GrpcRaftTransport
+   cannot ask node2 for a pre-vote". Green: 61 tests.
+2. **Receiver.** `RaftNode.handlePreVoteRequest` and `wouldGrantPreVote`, with the
+   stickiness test now one method (`liveLeaderKnown`) that the real vote uses too.
+   `RaftNodePreVoteReceiverTest`, 10 tests, 7 failing first. Writing the tests
+   corrected decision 3: a pre-vote is granted only for a term strictly ahead of the
+   receiver's own (etcd's rule), which also makes the receiver's earlier vote
+   irrelevant.
+3. **Candidate.** `onElectionTimer` starts a round (`startPreVote`) for a voter with
+   another voter; answers are counted on the state loop; a quorum calls the existing
+   `startElection`. `RaftNodePreVoteCandidateTest`, 10 tests, 7 failing first. The
+   unreachable-peer fault definition and the stopped-peer matcher were extended
+   for the "Failed to retrieve pre-vote from ..." message, each with a failing test
+   first (`DockerLogCaptureTest`, `IntentionalErrorsTest`).
+4. **Compatibility.** An old server's `UNIMPLEMENTED` is turned into the unsupported
+   failure by `GrpcRaftTransport`; red: `GrpcRaftTransportTest` saw a
+   `StatusRuntimeException`. Counting such a peer as willing is covered in step 3.
+5. **The incident, deterministic.** A voter cut off through ten election timeouts
+   keeps term 0 and answers the leader's first heartbeat in the leader's term 7.
+   Mutation check: with `asksForPreVotes()` forced to false the test fails with
+   `expected: <0> but was: <10>`, the incident's term inflation; the line was
+   restored.
+6. **Container scenario.** `DockerReturningVoterTest`: a follower stopped for 70
+   seconds and restarted; for 40 seconds the leader and the term are unchanged on
+   every server. **Its first run found a defect no unit test had:** the cluster
+   never elected a leader at start-up. The first server bootstrapped alone, the
+   others tried to join it, it needed their votes, and they refused every
+   pre-vote because they had no configuration yet to check the sender against.
+   Fixed test first (a server with no configuration answers by the other rules);
+   red: `aServerThatHasNoConfigurationYetStillAnswersByLeaderTermAndLog`. The
+   second run was invalid (the machine was suspended; the test reported nine hours
+   elapsed); in its logs the restarted follower asked for pre-votes about every
+   2.5 seconds and stayed at term 1. The third run passed in 143.6 s with no
+   unflagged error: the returning follower asked for pre-votes six times, started
+   no election, and took only the leader's term from a heartbeat.
+   **Jenkins build 42 (2dcb2ec), the first run with Pre-Vote, failed on the Docker
+   stage** (default 1,189, end-to-end 10 passed; Docker 41 tests, 3 errors;
+   `DockerReturningVoterTest` passed there in 124 s). Two of the three were tests
+   that proved "it is campaigning" by a rising term, which Pre-Vote prevents:
+   `DockerRunningPartitionTest`'s partitioned follower and my own
+   `DockerRemovedServerCampaignTest`. Both now count "Asking for pre-votes for node
+   X" in the server's log and assert the term never moved and the server never
+   became a candidate. The third, the partitioned-leader test, failed before any
+   fault because the previous test had left a follower cut off for 60 seconds; it
+   passed once that test was fixed. The two unflagged traces in the audit were the
+   failing tests' own `ConditionTimeoutException` output.
+
+   **Fixing the partitioned-follower test found a second real defect:** a follower
+   cut off from its leader reported itself ready (HTTP 200) indefinitely, because it
+   used to forget its silent leader by becoming a candidate and now stays a
+   follower. Test first: `aLeaderThatHasBeenSilentForAWholeElectionTimeout...`
+   failed with `expected: <null> but was: <peer-2>`. The pre-vote round now calls
+   `forgetSilentLeader()` (its log message no longer says "does not campaign").
+   Local checks after both fixes: 451 tests in 45 classes, and the three affected
+   container classes (partition 18 s with both tests, removed-server 62 s,
+   returning voter 120 s) pass with no unflagged error.
+   **Effects audit of the removed candidate transition (the new Rules item applied
+   after the fact).** Reading `applyElection`, the old election timeout did: raise
+   the term (removed on purpose); record the vote for itself (removed, nothing is
+   voted); become CANDIDATE (removed); clear the known leader (kept: found missing by
+   build 42, now `forgetSilentLeader()` with a unit and a container test); notify
+   state-change listeners of CANDIDATE (removed; the only production listener,
+   `LeaderHealthExpiry`, reacts to LEADER alone, and `awaitState` is test-only);
+   re-arm the election timer (kept: `startPreVote` re-arms first, tested by the
+   heartbeat-cancels-the-round test); send vote requests (kept, after a quorum of
+   pre-votes). `leaderContactActive = false` is set before either path. No further
+   gap found, so no further code change.
+7. **Documents.** The runbook's "What to expect" section, design section 14.10 (and
+   14.9's limitation), and the feature validation record are updated.
+
+Local checks, 2026-10-25: after the receiver fix, `RaftNode*Test`, the pre-vote
+tests, `GrpcRaft*Test`, `ClusterBootstrapTest` and `QraftServer*Test`: 372 tests in
+38 classes pass; before it, 484 tests in 49 classes (those and the sequencer,
+transport, bootstrap, membership and fault-audit suites) passed. Not yet run: the
+full default, end-to-end and Docker suites, which run on Jenkins.
+
+## 7. Out of scope
 
 - Leadership transfer, and any change to how a leader steps down.
 - Adopting a term from a pre-vote answer.

@@ -287,6 +287,13 @@ final class DockerClusterApiHelper {
         });
     }
 
+    /** How many times {@code needle} occurs in {@code text}, without overlapping. */
+    static int countOccurrences(String text, String needle) {
+        int count = 0;
+        for (int from = text.indexOf(needle); from >= 0; from = text.indexOf(needle, from + needle.length())) count++;
+        return count;
+    }
+
     static HttpResponse<String> send(String uri, String method, String body, Map<String, String> headers)
             throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder().uri(URI.create(uri)).timeout(Duration.ofSeconds(5));

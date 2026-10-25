@@ -495,23 +495,33 @@ io.netty.util.IllegalReferenceCountException: refCnt: 0, increment: 1
 These behaviours were observed in the container scenarios (membership Step 8)
 and are not faults.
 
-- **A voter that returns after a long stop can briefly replace the leader.** While
-  it was down it heard no heartbeats and kept raising its term. The leader's
-  connection to it may still be backing off, so it can campaign for some seconds
-  after it starts. Leader stickiness makes the other voters ignore its
-  campaigns, but when the leader's next AppendEntries reaches it, its answer
-  carries the higher term and the leader steps down. Elections follow, and the
-  cluster has a new leader within seconds. Nothing committed is lost. The
-  Pre-Vote extension (Raft thesis section 9.6) would prevent it and is not
-  implemented. Expect extra elections, and a leader that is not the one you
-  had, after restarting a long-stopped voter.
-- **A removed server never learns of its removal and keeps campaigning.** Once a
+- **A voter that returns after a long stop does not replace the leader.** While
+  it was down it heard no heartbeats, and the leader's connection to it may
+  still be backing off, so after it starts it can run its election timeout
+  several times before a heartbeat reaches it. It does not raise its term when
+  it does: it first asks each other voter for a pre-vote (Raft thesis section
+  9.6), and a voter that has heard from a live leader within an election
+  timeout, or is that leader, refuses. Only a quorum of yes answers starts a real
+  election. You will see `Asking for pre-votes for node X at term N+1` in the
+  returning server's log every few seconds, with no election and no change of
+  term, until the leader's first heartbeat makes it a follower in the leader's
+  term. Before pre-votes, the same restart ran four elections and unseated the
+  leader. Pre-votes are logged at info, and a failed request to a stopped peer is
+  an error, as a failed vote request is.
+- **Servers of different versions still elect.** A server that predates pre-votes
+  answers `UNIMPLEMENTED`; the asking server counts it as willing, so a cluster
+  being upgraded one server at a time elects as before.
+- **A removed server never learns of its removal and keeps asking.** Once a
   server is outside the configuration the leader stops replicating to it, so it
-  keeps its old configuration, does not report `removed`, and raises its term
-  every election timeout (one test run found it at term 31). The voters ignore
-  it and the cluster keeps its leader and term. Stop it and wipe its directory;
-  do not leave it running. A leader that removes itself does step down and
-  reports `removed`.
+  keeps its old configuration, does not report `removed`, and asks for pre-votes
+  every election timeout. The voters refuse (it is not a voter in their
+  configuration, and they hear the leader), so it takes no term and stays where it
+  was; before pre-votes one test run found it at term 31. The cluster keeps its
+  leader and term. Stop it and wipe its directory; do not leave it running. A leader
+  that removes itself does step down and reports `removed`.
+- **A server cut off from its leader reports unready.** After an election timeout
+  of silence it forgets its leader, so its readiness check fails, although it
+  takes no new term. The next heartbeat makes the leader known again.
 - **The failure grace belongs to the current leader.** Automatic cleanup counts
   absence in the leader's memory, so a leadership change restarts every grace. A
   voter that comes back and is stopped again is never found eligible unless a
@@ -624,7 +634,7 @@ tests:
   added server joins as a non-voter and is promoted, every acknowledged
   registration is on all five servers and survives the shrink, and the three
   that remain keep one leader and an unchanged term although the removed
-  servers, which keep their old configuration, go on campaigning.
+  servers, which keep their old configuration, go on asking for pre-votes.
 - `RecoveryInputTest`, `OfflineRecoveryTest`, `OfflineRecoveryProcessTest`,
   `RaftOperatorRecoveryCommandTest` and `DockerLostQuorumRecoveryTest`: the offline `inspect` and `recover` commands,
   their crash boundaries and one-time claim, separate-JVM lock refusal, and the

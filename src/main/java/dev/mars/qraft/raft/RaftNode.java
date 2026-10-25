@@ -1702,6 +1702,7 @@ public class RaftNode {
      * cancels the round.
      */
     private void startPreVote() {
+        forgetSilentLeader();
         resetElectionTimer();
         PreVoteRound round = new PreVoteRound(electionTimerGeneration);
         round.willing.add(serverId);
@@ -1830,15 +1831,16 @@ public class RaftNode {
     }
 
     /**
-     * Forgets the leader of a server that does not campaign. Its election timer fired, so the leader has been
-     * silent for a whole election timeout. A campaigning server forgets its leader by becoming a candidate; one
-     * that does not would otherwise report that leader, and so report itself ready, for as long as it stayed cut
-     * off. The next message from a leader makes the leader known again.
+     * Forgets the leader of a follower whose election timer fired, so that the leader has been silent for a whole
+     * election timeout. A server that takes a term to campaign forgets its leader by becoming a candidate; one that
+     * does not, because it has no vote to cast or because its pre-vote round is refused while others still hear
+     * the leader, would otherwise report that leader, and so report itself ready, for as long as it stayed cut off.
+     * The next message from a leader makes the leader known again.
      */
     private void forgetSilentLeader() {
         if (state != State.FOLLOWER || currentLeaderId == null) return;
-        logger.info("Leader {} has been silent for an election timeout; this server does not campaign and now"
-                + " knows no leader", currentLeaderId);
+        logger.info("Leader {} has been silent for an election timeout; this server now knows no leader",
+                currentLeaderId);
         currentLeaderId = null;
     }
 

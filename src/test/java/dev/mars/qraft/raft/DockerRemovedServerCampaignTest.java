@@ -37,9 +37,11 @@ import java.util.concurrent.TimeUnit;
 
 import static dev.mars.qraft.raft.DockerClusterApiHelper.cleanUp;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.configurationOrEmpty;
+import static dev.mars.qraft.raft.DockerClusterApiHelper.countOccurrences;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.everyNodeHas;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.exactlyOneLeader;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.growToFiveVoters;
+import static dev.mars.qraft.raft.DockerClusterApiHelper.logsOf;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.register;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.removePeer;
 import static dev.mars.qraft.raft.DockerClusterApiHelper.status;
@@ -55,9 +57,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <ol>
  *   <li>a follower is cut off from every network and removed by the authenticated operator command through the
  *       servers that remain. It never hears of its removal, so it keeps its old configuration and, with no leader to
- *       hear from, campaigns in ever higher terms;</li>
- *   <li>its network is restored. Its campaigns now reach the four voters, yet the cluster keeps its leader and its
- *       term, accepts writes, and the removed server never leads;</li>
+ *       hear from, asks for pre-votes without end. No quorum would vote for it, so it takes no term: it stays in the
+ *       cluster's term;</li>
+ *   <li>its network is restored. Its pre-vote requests now reach the four voters, which refuse them, so the cluster
+ *       keeps its leader and its term, accepts writes, and the removed server never leads;</li>
  *   <li>the leader is killed. The three servers that remain, a majority of the four voters, elect another leader,
  *       the removed server still does not lead, and a new write reaches all three.</li>
  * </ol>
@@ -126,10 +129,14 @@ class DockerRemovedServerCampaignTest {
             await().atMost(Duration.ofSeconds(60)).until(() -> liveVoters.stream()
                     .allMatch(endpoint -> configurationOrEmpty(endpoint).keySet().equals(fourIds)));
 
-            // Cut off, it hears from no leader and campaigns in terms above the cluster's.
+            // Cut off, it hears from no leader and keeps asking for pre-votes. Nobody would vote for it, so it takes
+            // no term and stays in the cluster's.
             long clusterTerm = status(endpoints.get(leaderIndex)).path("term").asLong();
             String removedAtStart = removed;
-            await().atMost(Duration.ofSeconds(90)).until(() -> termInside(cluster, removedAtStart) >= clusterTerm + 3);
+            String asking = "Asking for pre-votes for node " + removedAtStart + " ";
+            await().atMost(Duration.ofSeconds(90)).until(() ->
+                    countOccurrences(logsOf(cluster, removedAtStart), asking) >= 2);
+            assertEquals(clusterTerm, termInside(cluster, removed), "it asks without taking a term");
             assertNotEquals("LEADER", stateInside(cluster, removed), "a server without a quorum never leads");
 
             // Its network returns, and its campaigns reach the four voters: nothing changes for them.
