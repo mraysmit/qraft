@@ -234,10 +234,19 @@ its header and `@author`, no assistant attribution in code, docs or commit
 messages, no `Thread.sleep`, environment or system-property configuration added,
 and `git diff --check` is clean.
 
-Open observation, not a defect found: a returning follower may lag until the
-leader's gRPC channel reconnects (up to about two minutes after a long outage).
-`resetConnectBackoff` on an inbound pre-vote from a peer could shorten it; measure
-before proposing it.
+Follow-up, 2026-10-25: a returning follower lagging until the leader's gRPC
+channel reconnects. Measured locally with `DockerReturningVoterTest`: ready 0.2 s
+after it first answered following a 70 s stop, but 54.6 s following a 200 s stop
+(gRPC backs off up to 120 s). Other Raft transports lower the backoff ceiling
+(brunoga/raft: 50 ms to 2 s); the fix here resets the backoff on proof of life.
+Test first: `RaftNodePreVoteReceiverTest` (four tests: a pre-vote or vote from a
+configured peer, granted or refused, calls `RaftTransport.peerHeardFrom`; an
+unknown server does not) and `GrpcRaftTransportTest` (a channel backing off from
+a restarted peer connects within 600 ms of `peerHeardFrom`; red with a timeout
+before the change). `DockerReturningVoterTest` now stops the follower for 200 s and
+requires it ready within 15 s of answering; it passed locally in 261 s, where the
+same scenario took 54.6 s to be ready before. The Jenkins exit gate must be
+repeated on the new code: three consecutive green runs, logs audited.
 
 ## 7. Out of scope
 

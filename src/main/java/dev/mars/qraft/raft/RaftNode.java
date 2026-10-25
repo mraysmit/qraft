@@ -2334,6 +2334,7 @@ public class RaftNode {
             // Granting it would record a blank vote and refuse every real candidate for the rest of the term.
             return CompletableFuture.failedFuture(new IllegalArgumentException("A vote request must name its candidate"));
         }
+        noteHeardFrom(request.getCandidateId());
         return transitionSequencer.submitEssential(
                 "request-vote:" + request.getCandidateId() + ":" + request.getTerm(),
                 RaftTransitionSequencer.FailurePolicy.FENCE,
@@ -2348,6 +2349,7 @@ public class RaftNode {
      */
     public CompletableFuture<PreVoteResponse> handlePreVoteRequest(PreVoteRequest request) {
         requireNonNull(request, "request");
+        noteHeardFrom(request.getCandidateId());
         CompletableFuture<PreVoteResponse> answer = new CompletableFuture<>();
         try {
             runtime.execute(() -> answer.complete(PreVoteResponse.newBuilder()
@@ -2357,6 +2359,18 @@ public class RaftNode {
             answer.completeExceptionally(stopped);
         }
         return answer;
+    }
+
+    /**
+     * Tells the transport that a configured peer has just contacted this server, whatever the answer to it: a server
+     * that asks for a vote is alive and reachable, and a transport still backing off from it can try it again at once.
+     * A server outside the configuration, such as a removed one, is not a peer to reconnect to.
+     */
+    private void noteHeardFrom(String peerName) {
+        RaftConfiguration current = configuration;
+        if (current != null && !peerName.equals(nodeId) && current.serverNamed(peerName).isPresent()) {
+            transport.peerHeardFrom(peerName);
+        }
     }
 
     /**

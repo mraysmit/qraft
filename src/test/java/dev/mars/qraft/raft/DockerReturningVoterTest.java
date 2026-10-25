@@ -41,10 +41,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * A voter that returns after a long stop cannot depose a healthy leader, in a real three-server cluster in
- * containers (Pre-Vote, Raft thesis section 9.6). A follower is stopped for 70 seconds, long enough for the leader's
- * connection to it to be backing off, which is how a restarted follower once went unheard long enough to run four
- * elections and unseat the leader (Jenkins build 35, and the periodic cleanup scenario). It is started again, and for
- * 40 seconds the cluster keeps its leader and its term, on every server, the returning one included.
+ * containers (Pre-Vote, Raft thesis section 9.6). A follower is stopped for 200 seconds, long enough for the leader's
+ * connection to it to be backing off as far as gRPC lets it (two minutes), which is how a restarted follower once went
+ * unheard long enough to run four elections and unseat the leader (Jenkins build 35, and the periodic cleanup
+ * scenario). It is started again. Its first pre-vote request tells the leader it is back, so the leader's channel
+ * reconnects at once and the follower is ready within seconds, not after the backoff (a local run measured 54.6
+ * seconds without that). For 40 seconds the cluster keeps its leader and its term, on every server, the returning
+ * one included.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-10-24
@@ -82,14 +85,17 @@ class DockerReturningVoterTest {
             String followerEndpoint = endpoints.get(followerIndex);
             List<String> live = endpoints.stream().filter(endpoint -> !endpoint.equals(followerEndpoint)).toList();
 
-            // Long enough for the leader's connection to the stopped follower to be backing off.
+            // Long enough for the leader's connection to the stopped follower to be at its longest backoff.
             SharedDockerClusterFixture.stopContainer(cluster, follower);
-            await().during(Duration.ofSeconds(70)).atMost(Duration.ofSeconds(110)).until(() ->
+            await().during(Duration.ofSeconds(200)).atMost(Duration.ofSeconds(260)).until(() ->
                     exactlyOneLeader(live) && "LEADER".equals(statusOrNull(leaderEndpoint, "state"))
                             && term.equals(statusOrNull(leaderEndpoint, "term")));
 
             SharedDockerClusterFixture.startContainer(cluster, follower);
-            await().atMost(Duration.ofSeconds(90)).until(() -> ready(followerEndpoint));
+            await().atMost(Duration.ofSeconds(90)).until(() -> statusOrNull(followerEndpoint, "state") != null);
+
+            // It is ready, so the leader has reached it, long before the leader's backoff would have allowed.
+            await().atMost(Duration.ofSeconds(15)).until(() -> ready(followerEndpoint));
 
             // It may ask for pre-votes, and every other voter refuses while the leader is live: nothing changes.
             await().during(Duration.ofSeconds(40)).atMost(Duration.ofSeconds(100)).until(() ->

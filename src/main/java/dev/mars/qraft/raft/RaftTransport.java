@@ -121,4 +121,14 @@ public interface RaftTransport {
      */
     default void setRaftNode(RaftNode node) {
     }
+
+    /**
+     * Tells the transport that the configured server named {@code peerName} has just sent this server a vote or
+     * pre-vote request, so it is alive and reachable. A transport that backs off from a peer it could not reach may
+     * stop waiting and try that peer again at once. The default does nothing.
+     *
+     * @param peerName the name of the configured server that sent the request
+     */
+    default void peerHeardFrom(String peerName) {
+    }
 }

@@ -49,6 +49,8 @@ final class HeldRaftTransportFixture implements RaftTransport {
     final List<Held<VoteRequest, VoteResponse>> votes = new CopyOnWriteArrayList<>();
     final List<Held<AppendEntriesRequest, AppendEntriesResponse>> appends = new CopyOnWriteArrayList<>();
     final List<Held<InstallSnapshotRequest, InstallSnapshotResponse>> snapshots = new CopyOnWriteArrayList<>();
+    /** The peers the node told the transport it had heard from, in order. */
+    final List<String> heardFrom = new CopyOnWriteArrayList<>();
 
     /** The first vote request sent to {@code target}. */
     CompletableFuture<VoteResponse> vote(String target) {
@@ -74,6 +76,11 @@ final class HeldRaftTransportFixture implements RaftTransport {
 
     @Override
     public void stop() {
+    }
+
+    @Override
+    public void peerHeardFrom(String peerName) {
+        heardFrom.add(peerName);
     }
 
     @Override

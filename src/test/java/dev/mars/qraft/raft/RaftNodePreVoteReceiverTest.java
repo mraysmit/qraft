@@ -123,6 +123,38 @@ class RaftNodePreVoteReceiverTest {
     }
 
     @Test
+    void aPreVoteFromAConfiguredPeerTellsTheTransportItHasBeenHeardFrom() throws Exception {
+        preVote("peer-2", 1, 1, 0);
+
+        assertEquals(java.util.List.of("peer-2"), transport.heardFrom);
+    }
+
+    @Test
+    void aRefusedPreVoteIsStillAProofOfLife() throws Exception {
+        assertTrue(heartbeatFrom("peer-2", 1).getSuccess());
+
+        assertFalse(preVote("peer-3", 2, 1, 0).getVoteGranted(), "a leader is live, so it is refused");
+
+        assertEquals(java.util.List.of("peer-3"), transport.heardFrom);
+    }
+
+    @Test
+    void aVoteRequestFromAConfiguredPeerTellsTheTransportItHasBeenHeardFrom() throws Exception {
+        vote("peer-3", 1, 1, 0);
+
+        assertEquals(java.util.List.of("peer-3"), transport.heardFrom);
+    }
+
+    @Test
+    void aRequestFromAServerOutsideTheConfigurationIsNotReported() throws Exception {
+        preVote("peer-9", 1, 1, 0);
+        vote("peer-9", 1, 1, 0);
+
+        assertTrue(transport.heardFrom.isEmpty(), "a removed or unknown server is not a peer to reconnect to: "
+                + transport.heardFrom);
+    }
+
+    @Test
     void aLeaderRefusesAndStaysLeader() throws Exception {
         becomeLeader();
 

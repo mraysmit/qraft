@@ -388,6 +388,17 @@ public class GrpcRaftTransport implements RaftTransport {
         }
     }
 
+    /**
+     * A channel that could not reach a peer waits out gRPC's reconnect backoff, which grows to two minutes, before it
+     * tries again. A peer that has just sent this server a request is reachable, so the wait is cut short and the
+     * channel to it reconnects now. A peer with no channel yet has no backoff to cut.
+     */
+    @Override
+    public void peerHeardFrom(String peerName) {
+        ManagedChannel channel = channels.get(peerName);
+        if (channel != null) channel.resetConnectBackoff();
+    }
+
     private String addressOf(String targetId) {
         String configured = configuredAddresses.get(targetId);
         return configured != null ? configured : clusterNodes.get(targetId);

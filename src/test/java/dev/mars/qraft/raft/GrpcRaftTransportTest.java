@@ -44,6 +44,7 @@ import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.net.ServerSocket;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -60,6 +61,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -269,6 +271,39 @@ class GrpcRaftTransportTest {
                 future.get(30, TimeUnit.SECONDS));
 
         transport.stop();
+    }
+
+    @Test
+    @DisplayName("A peer heard from while the channel backs off is tried again at once")
+    void aPeerHeardFromWhileTheChannelBacksOffIsTriedAgainAtOnce() throws Exception {
+        GrpcRaftTransport transport = startedTransport(Map.of("target", "localhost:" + targetPort));
+        VoteRequest request = vote(1, "client");
+        assertTrue(transport.sendVoteRequest("target", request).get(10, TimeUnit.SECONDS).getVoteGranted());
+        targetServer.stop().get(10, TimeUnit.SECONDS);
+        // The refused reconnection starts the channel's backoff, which gRPC begins at one second less a fifth.
+        assertThrows(ExecutionException.class, () -> transport.sendVoteRequest("target", request).get(10, TimeUnit.SECONDS));
+        targetServer = new GrpcRaftServer(runtime.blockingTasks(), targetPort, targetNode);
+        targetServer.start().get(10, TimeUnit.SECONDS);
+
+        transport.peerHeardFrom("target");
+
+        // Well inside the shortest backoff, so only the reset can have let the channel connect.
+        await().pollInterval(Duration.ofMillis(20)).atMost(Duration.ofMillis(600)).until(() -> {
+            try {
+                return transport.sendVoteRequest("target", request).get(5, TimeUnit.SECONDS).getTerm() >= 0;
+            } catch (ExecutionException stillBackingOff) {
+                return false;
+            }
+        });
+    }
+
+    @Test
+    @DisplayName("Hearing from a peer the transport has no channel to changes nothing")
+    void hearingFromAPeerWithNoChannelChangesNothing() {
+        GrpcRaftTransport transport = startedTransport(Map.of("target", "localhost:" + targetPort));
+
+        transport.peerHeardFrom("target");
+        transport.peerHeardFrom("nobody");
     }
 
     @Test

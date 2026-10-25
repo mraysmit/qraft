@@ -1686,6 +1686,18 @@ vote for it. The rules, from the Raft thesis section 9.6 and etcd:
   `UNIMPLEMENTED` into that failure, and the asking server counts such a peer as
   willing, so a cluster of old and new servers still elects. Any other failure is
   not a yes and is logged as a failed vote request is.
+- **A request from a peer ends its reconnect backoff.** gRPC waits between
+  attempts to a peer it could not reach, up to 120 seconds, so a follower that
+  came back after a long stop could go unheard by the leader for most of that
+  time (54.6 seconds in a local run after a 200 second stop, 0.2 seconds after 70).
+  `RaftNode` calls `RaftTransport.peerHeardFrom(name)` for every vote and pre-vote
+  request from a server in its configuration, answered or refused, and
+  `GrpcRaftTransport` answers with `ManagedChannel.resetConnectBackoff()` on its
+  channel to that peer. The default does nothing, so other transports are
+  unchanged; a server outside the configuration is not reported. Other Raft
+  transports meet the same problem by lowering the ceiling (brunoga/raft: 50 ms
+  to 2 s); resetting on proof of life keeps gRPC's backoff for peers that are
+  really down.
 - **Stickiness stays.** Pre-Vote does not stop a removed server from disrupting a
   cluster (thesis section 4.2.3); stickiness does. CheckQuorum stays so that a
   leader that cannot reach a quorum steps down.
@@ -1694,8 +1706,9 @@ Verified by: the receiver and candidate tests with held transports and manual
 timers; a gRPC round trip and the old-server case; a deterministic reproduction of
 the incident (ten election timeouts cut off raise no term, where they reached term
 ten before; the test fails with `expected 0 but was 10` when the round is disabled);
-and a container scenario in which a follower stopped for 70 seconds and restarted
-leaves the leader and term unchanged on every server for 40 seconds. A partitioned
+and a container scenario in which a follower stopped for 200 seconds and restarted
+leaves the leader and term unchanged on every server for 40 seconds (after a 200
+second stop, the longest backoff, and ready within 15 seconds of answering). A partitioned
 follower is covered at both levels: a unit test that a leader silent for a whole
 timeout is forgotten, and a container test that the follower reports unready, never
 leads, never becomes a candidate and keeps its term.

@@ -505,7 +505,12 @@ and are not faults.
   election. You will see `Asking for pre-votes for node X at term N+1` in the
   returning server's log every few seconds, with no election and no change of
   term, until the leader's first heartbeat makes it a follower in the leader's
-  term. Before pre-votes, the same restart ran four elections and unseated the
+  term. That heartbeat is not delayed by the leader's reconnect backoff: a
+  server that receives a vote or pre-vote request from a configured peer tells
+  its transport, and the gRPC channel to that peer reconnects at once. Without
+  that, a server that had been down for 200 seconds took 54.6 seconds to become
+  ready in one local run, since gRPC waits up to two minutes between attempts.
+  Before pre-votes, the same restart ran four elections and unseated the
   leader. Pre-votes are logged at info, and a failed request to a stopped peer is
   an error, as a failed vote request is.
 - **Servers of different versions still elect.** A server that predates pre-votes
