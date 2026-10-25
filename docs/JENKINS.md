@@ -213,6 +213,21 @@ met, 643 error headers in the archived logs all flagged, no unflagged stack trac
 and no error that mentions a draining sequencer. It is the first of the three
 consecutive green runs required on the final drain-handling code.
 
+[Build 42](http://192.168.137.32:8080/job/Qraft/42/), on `2dcb2ec`, the first run with
+Pre-Vote, failed on the Docker stage (default 1,189 and end-to-end 10 passed; Docker
+41 tests, 3 errors). Two Docker tests still proved a campaign by a rising term, and
+fixing them found a cut-off follower that kept reporting ready; the third was
+fallout from the first.
+
+Builds [43](http://192.168.137.32:8080/job/Qraft/43/),
+[44](http://192.168.137.32:8080/job/Qraft/44/) and
+[45](http://192.168.137.32:8080/job/Qraft/45/), all on `9c946ac`, are the three
+consecutive green runs of the Pre-Vote exit gate. Each passed every stage in about
+1,280 seconds: default 1,190, end-to-end 10 and Docker 41, every coverage gate met.
+Their archived logs hold 651, 627 and 722 ERROR lines; every one carries an
+intentional-error or injected-failure flag, no stack trace is unflagged, and no
+error mentions a draining sequencer.
+
 ## Job configuration
 
 The job loads its pipeline from the repository's default branch using the following SCM configuration.

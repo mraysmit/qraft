@@ -2088,9 +2088,10 @@ not expose the administrative routes.
 ## 20. Test-first delivery sequence
 
 Current progress, the active tranche's detailed steps, and the backlog are
-tracked in the current dated task list in `docs-design/`
-([`task-list-raft-pre-vote-2026-10-25.md`](task-list-raft-pre-vote-2026-10-25.md), the Pre-Vote extension).
-The membership list that preceded it,
+tracked in the current dated task list in `docs-design/`; no list is active now.
+The Pre-Vote extension,
+[`task-list-raft-pre-vote-2026-10-25.md`](../docs/archive/task-list-raft-pre-vote-2026-10-25.md),
+was completed and archived on 2026-10-25. The membership list that preceded it,
 [`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md),
 was completed and archived on 2026-10-24 (Steps 1 to 8 verified); its predecessor, [`task-list-test-suite-remediation-2026-10-21.md`](../docs/archive/task-list-test-suite-remediation-2026-10-21.md),
 was archived on 2026-10-02 with its packaged-artifact test carried forward; the
