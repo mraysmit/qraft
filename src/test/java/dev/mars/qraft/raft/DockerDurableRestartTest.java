@@ -230,7 +230,7 @@ class DockerDurableRestartTest {
         String serviceId = serviceName + "-1";
         String body = registrationBody(serviceId, serviceName, 8501);
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(endpoints.get(oldLeaderIndex) + "/v1/client/service/register"))
+                .uri(URI.create(endpoints.get(oldLeaderIndex) + "/v1/catalog/register"))
                 .timeout(Duration.ofSeconds(5))
                 .header("Content-Type", "application/json")
                 .header("X-Qraft-Tenant", TEST_TENANT)
@@ -302,7 +302,7 @@ class DockerDurableRestartTest {
             long commitBefore = status(leader).path("commitIndex").asLong();
             HttpResponse<String> write;
             try {
-                write = send(leader + "/v1/client/service/register", "PUT",
+                write = send(leader + "/v1/catalog/register", "PUT",
                         registrationBody(serviceName + "-during", serviceName, 8702), REGISTRATION_HEADERS);
             } catch (java.io.IOException timedOut) {
                 write = null;
@@ -453,7 +453,7 @@ class DockerDurableRestartTest {
         String body = registrationBody(serviceId, serviceName, port);
         for (String endpoint : endpoints) {
             try {
-                HttpResponse<String> response = send(endpoint + "/v1/client/service/register", "PUT", body,
+                HttpResponse<String> response = send(endpoint + "/v1/catalog/register", "PUT", body,
                         REGISTRATION_HEADERS);
                 if (response.statusCode() == 200) return;
                 assertEquals(503, response.statusCode(), response.body());
@@ -466,9 +466,9 @@ class DockerDurableRestartTest {
 
     private static String registrationBody(String serviceId, String serviceName, int port) {
         return """
-                {"serviceId":"%s","serviceName":"%s",
+                {"service":{"serviceId":"%s","serviceName":"%s",
                  "address":"127.0.0.1","port":%d,"tags":["restart"],
-                 "metadata":{"scenario":"whole-cluster-restart"},"health":"PASSING"}
+                 "metadata":{"scenario":"whole-cluster-restart"},"health":"PASSING"}}
                 """.formatted(serviceId, serviceName, port);
     }
 

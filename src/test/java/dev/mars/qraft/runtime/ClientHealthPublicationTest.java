@@ -48,6 +48,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -144,7 +145,7 @@ class ClientHealthPublicationTest {
 
         assertTrue(client.shutdown().get(10, TimeUnit.SECONDS));
 
-        int deregistration = proxiedRequests.indexOf("PUT /v1/client/service/deregister/web");
+        int deregistration = proxiedRequests.indexOf("PUT /v1/catalog/deregister {\"serviceId\":\"web\"}");
         int lastObservation = -1;
         for (int index = 0; index < proxiedRequests.size(); index++) {
             if (isObservation(proxiedRequests.get(index))) lastObservation = index;
@@ -185,21 +186,27 @@ class ClientHealthPublicationTest {
         return URI.create("http://127.0.0.1:" + workload.getAddress().getPort());
     }
 
-    /** Forwards every request to the server and records its method and path in arrival order. */
+    /**
+     * Forwards every request to the server and records its method and path in arrival order, with the body of a
+     * deregistration, which names the service it removes or, empty, the node.
+     */
     private URI startRecordingProxy(URI target) throws IOException {
         HttpClient forwarder = HttpClient.newHttpClient();
         proxy = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         proxy.createContext("/", exchange -> {
-            proxiedRequests.add(exchange.getRequestMethod() + " " + exchange.getRequestURI().getPath());
-            forward(forwarder, target, exchange);
+            byte[] body = exchange.getRequestBody().readAllBytes();
+            String path = exchange.getRequestURI().getPath();
+            proxiedRequests.add(exchange.getRequestMethod() + " " + path
+                    + (path.equals("/v1/catalog/deregister") ? " " + new String(body, StandardCharsets.UTF_8) : ""));
+            forward(forwarder, target, exchange, body);
         });
         proxy.start();
         return URI.create("http://127.0.0.1:" + proxy.getAddress().getPort());
     }
 
-    private static void forward(HttpClient forwarder, URI target, HttpExchange exchange) throws IOException {
+    private static void forward(HttpClient forwarder, URI target, HttpExchange exchange, byte[] body)
+            throws IOException {
         try (exchange) {
-            byte[] body = exchange.getRequestBody().readAllBytes();
             HttpRequest.Builder request = HttpRequest.newBuilder(target.resolve(exchange.getRequestURI().toString()))
                     .method(exchange.getRequestMethod(), body.length == 0
                             ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
@@ -219,7 +226,7 @@ class ClientHealthPublicationTest {
     }
 
     private boolean isObservation(String request) {
-        return request.equals("PUT /v1/client/check/observe");
+        return request.equals("PUT /v1/catalog/check/observe");
     }
 
     private Optional<HealthCheckState> check(String checkId) {

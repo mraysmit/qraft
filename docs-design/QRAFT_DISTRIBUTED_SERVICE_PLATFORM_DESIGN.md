@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-10-25 (Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
+**Last updated:** 2026-10-26 (client list Phase 1: the server's service and check write routes moved from `/v1/client/*` to `/v1/catalog/*` in sections 12.1, 12.1.1 and 12.1.2. Earlier, 2026-10-25: Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
 
 ## 1. Purpose
 
@@ -52,7 +52,8 @@ to domain commands. Protobuf Java packages follow ownership while the wire
 namespaces `qraft.raft` and `qraft.api` remain unchanged.
 
 The client configuration retains its `client` and `servers` objects;
-`/v1/client/*` paths move in the client implementation plan. Node models remain
+`/v1/client/*` paths left the server on 2026-10-26 for `/v1/catalog/*` (section 12.1) and now
+belong to the client's local API (the Consul-style client list). Node models remain
 in Common; Phase 4 removed their inherited fleet fields (section 7.3).
 
 Until 2026-10-04 the build had seven Maven modules. The unused `qraft-tenant`
@@ -333,7 +334,7 @@ the exact sequence and deadline. Catalog and health-check contents are included 
 snapshots, and the command codec can read legacy JSON log entries during
 migration.
 
-`PUT /v1/client/check/observe` stamps each observation with the receiving server's
+`PUT /v1/catalog/check/observe` stamps each observation with the receiving server's
 time before proposing it. `GET /v1/health/service/{serviceName}` returns each
 instance with its replicated checks and can be filtered to passing instances
 (section 12.1.1).
@@ -795,11 +796,9 @@ than a separate consensus mechanism.
 Initial HTTP endpoints are:
 
 ```text
-PUT /v1/client/service/register
-PUT /v1/client/service/deregister/{serviceId}
-PUT /v1/client/check/observe
 PUT /v1/catalog/register
 PUT /v1/catalog/deregister
+PUT /v1/catalog/check/observe
 PUT /v1/catalog/node/heartbeat
 GET /v1/catalog/nodes
 GET /v1/catalog/services
@@ -820,7 +819,8 @@ X-Qraft-Tenant: optional; defaults to default
 X-Qraft-Namespace: optional; defaults to default
 ```
 
-The registration body is:
+A service is registered under `service` in the body of `PUT /v1/catalog/register`,
+beside or instead of `node` (section 12.1.2). The service's own body is:
 
 ```json
 {
@@ -848,16 +848,21 @@ check ID. The client always declares the checks configured for the service. Unkn
 recognized but ignored; the stored health is always initialized to `UNKNOWN`.
 No aliases are currently accepted.
 
-A successful registration returns only the stable protocol fields:
+A successful registration names the node and, under `service`, returns only the stable
+protocol fields. `registered` appears at the top level only when the body also
+registered the node:
 
 ```json
 {
-  "serviceId": "web",
-  "serviceName": "frontend",
-  "nodeId": "node-a",
-  "tenantId": "default",
-  "namespace": "default",
-  "registered": true
+  "node": "node-a",
+  "service": {
+    "serviceId": "web",
+    "serviceName": "frontend",
+    "nodeId": "node-a",
+    "tenantId": "default",
+    "namespace": "default",
+    "registered": true
+  }
 }
 ```
 
@@ -865,14 +870,15 @@ A registration the replicated catalog does not accept answers 409
 `registration_rejected` in the error envelope; a success-shaped body is never
 returned for a failure.
 
-Deregistration uses the same three identity headers. It is idempotent and returns
-HTTP 200 with `{"serviceId":"web","deregistered":false}` when the composite
-instance is already absent.
+A service is removed with `PUT /v1/catalog/deregister` and the body
+`{"serviceId":"web"}`, which uses the same three identity headers. It is idempotent
+and returns HTTP 200 with `{"node":"node-a","serviceId":"web","deregistered":false}`
+when the composite instance is already absent.
 
 #### 12.1.1 Health observations and health discovery
 
 Clients report check results and TTL renewals with
-`PUT /v1/client/check/observe`, using the same identity headers as registration.
+`PUT /v1/catalog/check/observe`, using the same identity headers as registration.
 A renewal is simply a newer observation of the same check. The body is:
 
 ```json
@@ -970,9 +976,9 @@ are read by the same rules, although a node belongs to no tenant or namespace.
 A node route takes no path parameter: a longer path answers 404 `not_found`.
 
 **One body for nodes and services.** `PUT /v1/catalog/register` and
-`PUT /v1/catalog/deregister` serve nodes now, and services once the client
-task list moves them there. Their bodies are fixed here for both, so that
-adding services changes nothing that a node sends. A registration is:
+`PUT /v1/catalog/deregister` serve nodes and services (services since 2026-10-26).
+Their bodies were fixed for both when the node routes arrived, so that adding
+services changed nothing that a node sends. A registration is:
 
 ```json
 {
@@ -987,24 +993,35 @@ adding services changes nothing that a node sends. A registration is:
 
 - `node` describes the node. Each of its fields is optional, and `metadata`
   defaults to none. It cannot carry the node's name, its status, or its times.
-- A service will be registered under a second key, `service`, beside `node`,
-  holding the body of today's service registration. Until then `node` is
-  required and `service` is refused.
+- A service is registered under a second key, `service`, beside `node`, holding
+  the body of a service registration (section 12.1). The body must hold at least
+  one of the two; one that holds neither answers 400 `invalid_registration`, "node
+  or service is required".
+- The whole body is checked before anything is replicated, so a body that cannot
+  be accepted registers neither half. When it holds both, the node is committed
+  first, then the service. A service the catalog rejects after the node was
+  registered answers 409 `registration_rejected`; the node stays registered, and
+  the client's retry repeats both idempotently.
 - Unknown fields are rejected with `invalid_registration`, at both levels.
 
 A registration replaces the node's description, makes the node `registering`,
-and stamps its registration time. It answers 200:
+and stamps its registration time. A body that holds only a node answers 200:
 
 ```json
 {"node": "web-01", "registered": true}
 ```
 
+A body that holds a service adds `service` with the service's answer (section
+12.1); a body that holds only a service has no `registered` at the top level,
+because no node was registered.
+
 Deregistration follows Consul's rule: a body that names no service removes the
 node itself. For a node the body is the empty object, `{}`.
 
-- A service will be removed with `{"serviceId": "web"}`. Until then any field
-  is refused with `invalid_deregistration`. When the field arrives it must hold
-  a non-blank string, so that a missing value cannot remove the node instead.
+- A service is removed with `{"serviceId": "web"}`, which keeps the node and
+  answers `{"node":"web-01","serviceId":"web","deregistered":true}`. Any other field
+  is refused with `invalid_deregistration`. The field must hold a non-blank
+  string, so that a missing or blank value cannot remove the node instead.
 - It is idempotent, and answers 200 with
   `{"node":"web-01","deregistered":false}` when the node is already absent.
 - As in Consul, it removes the node's entry and every service and check
@@ -2270,7 +2287,7 @@ Evidence as of 2026-09-27, except where a row gives a later date:
   primary client behavior.
 - Whether the server can trust a caller's claim to a node. Proposed 2026-10-05,
   not yet decided: ACL tokens on Consul's model, in
-  [`task-list-acl-and-tokens-2026-10-21.md`](task-list-acl-and-tokens-2026-10-21.md).
+  [`task-list-acl-and-tokens-2026-10-26.md`](task-list-acl-and-tokens-2026-10-26.md).
   Until it is built, any caller can claim any node name and node ID.
 - How long legacy command and snapshot readers remain supported.
 
@@ -2283,7 +2300,7 @@ implementations do, and the opinion recorded before the decision.
 Resolved on 2026-10-04, recorded here on 2026-10-05: how a node's identity is
 made and kept, which was half of the open item "how client identity is
 established". It is decision 8 of
-[`task-list-consul-style-client-2026-10-21.md`](task-list-consul-style-client-2026-10-21.md)
+[`task-list-consul-style-client-2026-10-26.md`](task-list-consul-style-client-2026-10-26.md)
 and is not yet built; section 7.3 changes when it is. It follows Consul: a node
 ID generated at first start and kept in the client's data directory, a node name
 that defaults to the host name, a catalog keyed by name, and a registration

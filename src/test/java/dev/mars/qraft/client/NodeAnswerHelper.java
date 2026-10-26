@@ -16,14 +16,19 @@
 
 package dev.mars.qraft.client;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Test helper that answers the server's node routes, for tests that stand a plain HTTP server in for a Qraft
- * server. A node write succeeds only with the answer a server gives: the node's name and what happened to it.
+ * Test helper that answers the server's catalog write routes, for tests that stand a plain HTTP server in for a Qraft
+ * server. A node write succeeds only with the answer a server gives: the node's name and what happened to it. The
+ * register and deregister routes carry a node or a service, as the server's do, so {@link #dispatching} sends each
+ * request to the handler of the half it carries.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-10-09
@@ -34,7 +39,53 @@ public final class NodeAnswerHelper {
     public static final String DEREGISTER = "/v1/catalog/deregister";
     public static final String HEARTBEAT = "/v1/catalog/node/heartbeat";
 
+    private static final ObjectMapper JSON = new ObjectMapper();
+
     private NodeAnswerHelper() {
+    }
+
+    /** Answers the service half of a catalog write. */
+    @FunctionalInterface
+    public interface ServiceWrite {
+        void handle(HttpExchange exchange, JsonNode body) throws IOException;
+    }
+
+    /**
+     * A handler for {@link #REGISTER} or {@link #DEREGISTER}: a body that has {@code serviceField} ({@code service}
+     * to register, {@code serviceId} to deregister) goes to {@code service}, and any other body is the node's and
+     * goes to {@code node}.
+     */
+    public static HttpHandler dispatching(String serviceField, ServiceWrite service, HttpHandler node) {
+        return exchange -> {
+            JsonNode body = JSON.readTree(exchange.getRequestBody().readAllBytes());
+            if (body != null && body.has(serviceField)) {
+                service.handle(exchange, body);
+            } else {
+                node.handle(exchange);
+            }
+        };
+    }
+
+    /** Answers a service registration as a server does: the node, then what happened to the service. */
+    public static void serviceRegistered(HttpExchange exchange, String serviceId) throws IOException {
+        send(exchange, 200, "{\"node\":\"" + exchange.getRequestHeaders().getFirst("X-Qraft-Node")
+                + "\",\"service\":{\"serviceId\":\"" + serviceId + "\",\"registered\":true}}");
+    }
+
+    /** Answers a service deregistration as a server does: the node, the service and whether it was removed. */
+    public static void serviceDeregistered(HttpExchange exchange, String serviceId, boolean removed)
+            throws IOException {
+        send(exchange, 200, "{\"node\":\"" + exchange.getRequestHeaders().getFirst("X-Qraft-Node")
+                + "\",\"serviceId\":\"" + serviceId + "\",\"deregistered\":" + removed + "}");
+    }
+
+    /** Sends {@code json} with {@code status}. */
+    public static void send(HttpExchange exchange, int status, String json) throws IOException {
+        byte[] body = json.getBytes(StandardCharsets.UTF_8);
+        exchange.sendResponseHeaders(status, body.length);
+        try (var output = exchange.getResponseBody()) {
+            output.write(body);
+        }
     }
 
     /** Accepts a node write as a server does: the answer follows from the route the request was sent to. */

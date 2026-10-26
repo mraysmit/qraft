@@ -406,19 +406,13 @@ class QraftClientTest {
     void startsServiceReconciliationAfterNodeRegistration() throws Exception {
         AtomicInteger serviceRegistrations = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext(NodeAnswerHelper.REGISTER, exchange -> {
-            NodeAnswerHelper.answer(exchange, 200, "registered", true);
-        });
-        server.createContext("/v1/client/service/register", exchange -> {
+        server.createContext(NodeAnswerHelper.REGISTER, NodeAnswerHelper.dispatching("service", (exchange, body) -> {
             serviceRegistrations.incrementAndGet();
-            byte[] body = "{\"serviceId\":\"web\",\"registered\":true}"
-                    .getBytes(StandardCharsets.UTF_8);
-            exchange.sendResponseHeaders(200, body.length);
-            try (var output = exchange.getResponseBody()) { output.write(body); }
-        });
-        server.createContext(NodeAnswerHelper.DEREGISTER, exchange -> {
-            NodeAnswerHelper.answer(exchange, 200, "deregistered", true);
-        });
+            NodeAnswerHelper.serviceRegistered(exchange, "web");
+        }, exchange -> NodeAnswerHelper.answer(exchange, 200, "registered", true)));
+        server.createContext(NodeAnswerHelper.DEREGISTER, NodeAnswerHelper.dispatching("serviceId",
+                (exchange, body) -> NodeAnswerHelper.serviceDeregistered(exchange, body.path("serviceId").asText(), true),
+                exchange -> NodeAnswerHelper.answer(exchange, 200, "deregistered", true)));
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
                 .clientId("client-1")
@@ -449,19 +443,14 @@ class QraftClientTest {
     void remainsLiveButUnreadyWhenAnEnabledServiceIsRejected() throws Exception {
         AtomicInteger serviceRegistrations = new AtomicInteger();
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext(NodeAnswerHelper.REGISTER, exchange -> {
-            NodeAnswerHelper.answer(exchange, 200, "registered", true);
-        });
-        server.createContext("/v1/client/service/register", exchange -> {
+        server.createContext(NodeAnswerHelper.REGISTER, NodeAnswerHelper.dispatching("service", (exchange, body) -> {
             serviceRegistrations.incrementAndGet();
-            byte[] body = ("{\"code\":\"invalid_registration\",\"message\":\"bad service\","
-                    + "\"retryable\":false}").getBytes(StandardCharsets.UTF_8);
-            exchange.sendResponseHeaders(400, body.length);
-            try (var output = exchange.getResponseBody()) { output.write(body); }
-        });
-        server.createContext(NodeAnswerHelper.DEREGISTER, exchange -> {
-            NodeAnswerHelper.answer(exchange, 200, "deregistered", true);
-        });
+            NodeAnswerHelper.send(exchange, 400, "{\"code\":\"invalid_registration\",\"message\":\"bad service\","
+                    + "\"retryable\":false}");
+        }, exchange -> NodeAnswerHelper.answer(exchange, 200, "registered", true)));
+        server.createContext(NodeAnswerHelper.DEREGISTER, NodeAnswerHelper.dispatching("serviceId",
+                (exchange, body) -> NodeAnswerHelper.serviceDeregistered(exchange, body.path("serviceId").asText(), true),
+                exchange -> NodeAnswerHelper.answer(exchange, 200, "deregistered", true)));
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
                 .clientId("client-1").address("127.0.0.1")
@@ -524,36 +513,24 @@ class QraftClientTest {
         CountDownLatch servicesStarted = new CountDownLatch(1);
         CountDownLatch releaseServices = new CountDownLatch(1);
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext(NodeAnswerHelper.REGISTER, exchange -> {
-            NodeAnswerHelper.answer(exchange, 200, "registered", true);
-        });
-        server.createContext("/v1/client/service/register", exchange -> {
-            String id = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8)
-                    .contains("\"web\"") ? "web" : "api";
-            byte[] body = ("{\"serviceId\":\"" + id + "\",\"registered\":true}")
-                    .getBytes(StandardCharsets.UTF_8);
-            exchange.sendResponseHeaders(200, body.length);
-            try (var output = exchange.getResponseBody()) { output.write(body); }
-        });
-        server.createContext("/v1/client/service/deregister", exchange -> {
-            String serviceId = exchange.getRequestURI().getPath()
-                    .substring(exchange.getRequestURI().getPath().lastIndexOf('/') + 1);
+        server.createContext(NodeAnswerHelper.REGISTER, NodeAnswerHelper.dispatching("service", (exchange, body) -> {
+            String id = body.path("service").path("serviceId").asText().equals("web") ? "web" : "api";
+            NodeAnswerHelper.serviceRegistered(exchange, id);
+        }, exchange -> NodeAnswerHelper.answer(exchange, 200, "registered", true)));
+        server.createContext(NodeAnswerHelper.DEREGISTER, NodeAnswerHelper.dispatching("serviceId", (exchange, body) -> {
+            String serviceId = body.path("serviceId").asText();
             events.add("service:" + serviceId);
             servicesStarted.countDown();
             try {
                 releaseServices.await(30, TimeUnit.SECONDS);
-                byte[] body = ("{\"serviceId\":\"" + serviceId + "\",\"deregistered\":true}")
-                        .getBytes(StandardCharsets.UTF_8);
-                exchange.sendResponseHeaders(200, body.length);
-                try (var output = exchange.getResponseBody()) { output.write(body); }
+                NodeAnswerHelper.serviceDeregistered(exchange, serviceId, true);
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
             }
-        });
-        server.createContext(NodeAnswerHelper.DEREGISTER, exchange -> {
+        }, exchange -> {
             events.add("node");
             NodeAnswerHelper.answer(exchange, 200, "deregistered", true);
-        });
+        }));
         server.start();
         // The test releases deregistration itself, so the deadline must never be what ends shutdown.
         ClientConfiguration config = clientConfigWithServices(60_000);
@@ -582,23 +559,17 @@ class QraftClientTest {
     void unreachableServerCannotExtendShutdownPastDeadlineAndLogsOnce() throws Exception {
         CountDownLatch releaseDeregistration = new CountDownLatch(1);
         server = HttpServer.create(new InetSocketAddress(0), 0);
-        server.createContext(NodeAnswerHelper.REGISTER, exchange -> {
-            NodeAnswerHelper.answer(exchange, 200, "registered", true);
-        });
-        server.createContext("/v1/client/service/register", exchange -> {
-            byte[] body = "{\"serviceId\":\"web\",\"registered\":true}"
-                    .getBytes(StandardCharsets.UTF_8);
-            exchange.sendResponseHeaders(200, body.length);
-            try (var output = exchange.getResponseBody()) { output.write(body); }
-        });
-        server.createContext("/v1/client/service/deregister", exchange -> {
+        server.createContext(NodeAnswerHelper.REGISTER, NodeAnswerHelper.dispatching("service",
+                (exchange, body) -> NodeAnswerHelper.serviceRegistered(exchange, "web"),
+                exchange -> NodeAnswerHelper.answer(exchange, 200, "registered", true)));
+        server.createContext(NodeAnswerHelper.DEREGISTER, NodeAnswerHelper.dispatching("serviceId", (exchange, body) -> {
             try {
                 // Held until the test has asserted, so a shutdown that completes cannot have waited for it.
                 releaseDeregistration.await(30, TimeUnit.SECONDS);
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
             }
-        });
+        }, exchange -> NodeAnswerHelper.answer(exchange, 404, "deregistered", false)));
         server.start();
         ClientConfiguration config = clientConfigWithServices(100);
         QraftClient client = new QraftClient(config);

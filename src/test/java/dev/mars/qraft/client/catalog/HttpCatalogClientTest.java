@@ -83,9 +83,9 @@ class HttpCatalogClientTest {
         List<CapturedRequest> requests = new CopyOnWriteArrayList<>();
         URI endpoint = start(exchange -> {
             requests.add(capture(exchange));
-            respond(exchange, 200, "{\"serviceId\":\"payments-1\",\"serviceName\":\"payments\","
-                    + "\"nodeId\":\"node-a\",\"tenantId\":\"tenant-a\","
-                    + "\"namespace\":\"prod\",\"registered\":true}");
+            respond(exchange, 200, "{\"node\":\"node-a\",\"service\":{\"serviceId\":\"payments-1\","
+                    + "\"serviceName\":\"payments\",\"nodeId\":\"node-a\",\"tenantId\":\"tenant-a\","
+                    + "\"namespace\":\"prod\",\"registered\":true}}");
         });
         HttpCatalogClient client = client(Duration.ofSeconds(10));
         ServiceDefinition service = service();
@@ -96,11 +96,13 @@ class HttpCatalogClientTest {
         assertEquals(2, requests.size());
         CapturedRequest first = requests.getFirst();
         assertEquals("PUT", first.method());
-        assertEquals("/v1/client/service/register", first.path());
+        assertEquals("/v1/catalog/register", first.path());
         assertEquals("node-a", first.header("X-Qraft-Node"));
         assertEquals("tenant-a", first.header("X-Qraft-Tenant"));
         assertEquals("prod", first.header("X-Qraft-Namespace"));
-        JsonNode body = JSON.readTree(first.body());
+        JsonNode envelope = JSON.readTree(first.body());
+        assertEquals(1, envelope.size(), "a service registration carries the service under one key");
+        JsonNode body = envelope.path("service");
         assertEquals(10, body.size());
         assertEquals(List.of("http", "tcp"), JSON.convertValue(body.path("checks"), List.class));
         assertEquals("payments-1", body.path("serviceId").textValue());
@@ -122,21 +124,22 @@ class HttpCatalogClientTest {
         List<CapturedRequest> requests = new CopyOnWriteArrayList<>();
         URI endpoint = start(exchange -> {
             requests.add(capture(exchange));
-            respond(exchange, 200, "{\"serviceId\":\"payments-1\",\"deregistered\":false}");
+            respond(exchange, 200, "{\"node\":\"node-a\",\"serviceId\":\"payments-1\",\"deregistered\":false}");
         });
         HttpCatalogClient client = client(Duration.ofSeconds(10));
 
         CatalogOutcome.Success outcome = assertInstanceOf(CatalogOutcome.Success.class,
                 client.deregister(endpoint, "payments-1").get(10, TimeUnit.SECONDS));
         assertFalse(outcome.changed());
-        assertEquals("/v1/client/service/deregister/payments-1", requests.getFirst().path());
+        assertEquals("/v1/catalog/deregister", requests.getFirst().path());
+        assertEquals(JSON.readTree("{\"serviceId\":\"payments-1\"}"), JSON.readTree(requests.getFirst().body()));
         assertEquals("node-a", requests.getFirst().header("X-Qraft-Node"));
     }
 
     @Test
     void classifiesEnvelopeAndStatusOutcomesAndExposesLeaderHint() throws Exception {
         URI endpoint = start(exchange -> {
-            String id = exchange.getRequestURI().getPath().replaceFirst(".*/", "");
+            String id = JSON.readTree(exchange.getRequestBody()).path("serviceId").asText();
             switch (id) {
                 case "retry-envelope" -> respond(exchange, 400,
                         "{\"code\":\"draining\",\"message\":\"later\",\"retryable\":true,"
@@ -267,9 +270,9 @@ class HttpCatalogClientTest {
         AtomicInteger successfulAttempts = new AtomicInteger();
         URI successful = start(exchange -> {
             successfulAttempts.incrementAndGet();
-            respond(exchange, 200, "{\"serviceId\":\"payments-1\",\"serviceName\":\"payments\","
-                    + "\"nodeId\":\"node-a\",\"tenantId\":\"tenant-a\","
-                    + "\"namespace\":\"prod\",\"registered\":true}");
+            respond(exchange, 200, "{\"node\":\"node-a\",\"service\":{\"serviceId\":\"payments-1\","
+                    + "\"serviceName\":\"payments\",\"nodeId\":\"node-a\",\"tenantId\":\"tenant-a\","
+                    + "\"namespace\":\"prod\",\"registered\":true}}");
         });
         HttpCatalogClient client = selectedClient(List.of(refused, retryable, successful));
 
@@ -324,7 +327,7 @@ class HttpCatalogClientTest {
         AtomicInteger laterAttempts = new AtomicInteger();
         URI later = start(exchange -> {
             laterAttempts.incrementAndGet();
-            respond(exchange, 200, "{\"serviceId\":\"payments-1\",\"registered\":true}");
+            respond(exchange, 200, "{\"node\":\"node-a\",\"service\":{\"serviceId\":\"payments-1\",\"registered\":true}}");
         });
         HttpCatalogClient client = selectedClient(List.of(rejected, later));
 
@@ -381,7 +384,7 @@ class HttpCatalogClientTest {
         assertEquals(new ObservationOutcome.Accepted(7, Instant.parse("2026-09-26T10:00:30Z")), outcome);
         CapturedRequest request = requests.getFirst();
         assertEquals("PUT", request.method());
-        assertEquals("/v1/client/check/observe", request.path());
+        assertEquals("/v1/catalog/check/observe", request.path());
         assertEquals("node-a", request.header("X-Qraft-Node"));
         assertEquals("tenant-a", request.header("X-Qraft-Tenant"));
         assertEquals("prod", request.header("X-Qraft-Namespace"));

@@ -82,7 +82,7 @@ section 4.1, after reviewing the `peegeeq-management-ui` and
 | `GET /v1/catalog/services` | service names with their tags, in the scope of the `X-Qraft-Tenant` and `X-Qraft-Namespace` headers | No health or instance count; one request per service to learn more; no listing of the scopes that exist |
 | `GET /v1/catalog/service/{name}` | instances in the requested scope: identity, address, port, tags, metadata, health, tenant, namespace, datacenter, region, enabled | No registration source or last-change index |
 | `GET /v1/health/service/{name}` (`?passing`) | instances in the requested scope with their checks: status, sequence, observed, accepted, deadline, expired, output, deregistration delay | One service at a time; no cross-service check listing |
-| `PUT /v1/client/service/register`, `/deregister` | replicated service writes, scoped by `X-Qraft-Tenant`, `X-Qraft-Namespace`, and `X-Qraft-Node` headers | Unauthenticated |
+| `PUT /v1/catalog/register`, `/deregister` (service bodies) | replicated service writes, scoped by `X-Qraft-Tenant`, `X-Qraft-Namespace`, and `X-Qraft-Node` headers | Unauthenticated |
 | `PUT /v1/catalog/register`, `/deregister`, `/node/heartbeat` | replicated node writes for the node that `X-Qraft-Node` names; a deregistration removes the node's services and checks too | Unauthenticated. Mutations: not offered by the interface before UI-5 |
 | Response metadata | `X-Qraft-Index` (applied index) on catalog reads; `X-Qraft-Leader-Id` and a structured error envelope (`code`, `message`, `retryable`) on errors | No answering-node header; no consistency mode |
 | gRPC `DistributedStateService` | key/value `Put`, `Get`, `Delete`, `List` | Not reachable from a browser; no HTTP equivalent |

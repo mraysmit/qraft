@@ -60,13 +60,13 @@ final class DockerClusterApiHelper {
     /** Registers {@code serviceName} on whichever endpoint leads, and returns the status that acknowledged it. */
     static int register(List<String> endpoints, String serviceName) throws Exception {
         String body = """
-                {"serviceId":"%s-1","serviceName":"%s","address":"127.0.0.1","port":8100,
-                 "tags":["cluster-test"],"metadata":{"scenario":"docker"},"health":"PASSING"}
+                {"service":{"serviceId":"%s-1","serviceName":"%s","address":"127.0.0.1","port":8100,
+                 "tags":["cluster-test"],"metadata":{"scenario":"docker"},"health":"PASSING"}}
                 """.formatted(serviceName, serviceName);
         for (int attempt = 0; attempt < 30; attempt++) {
             for (String endpoint : endpoints) {
                 try {
-                    int status = send(endpoint + "/v1/client/service/register", "PUT", body, REGISTRATION_HEADERS)
+                    int status = send(endpoint + "/v1/catalog/register", "PUT", body, REGISTRATION_HEADERS)
                             .statusCode();
                     if (status == 200) {
                         return status;

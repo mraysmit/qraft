@@ -130,10 +130,10 @@ final class DockerHealthApiHelper {
      */
     static int registerFiller(String server, int number) {
         String body = """
-                {"serviceId":"filler-%d","serviceName":"filler","address":"127.0.0.1","port":%d}
+                {"service":{"serviceId":"filler-%d","serviceName":"filler","address":"127.0.0.1","port":%d}}
                 """.formatted(number, 10_000 + number);
         try {
-            return HTTP.send(HttpRequest.newBuilder(URI.create(server + "/v1/client/service/register"))
+            return HTTP.send(HttpRequest.newBuilder(URI.create(server + "/v1/catalog/register"))
                     .timeout(Duration.ofSeconds(5))
                     .header("Content-Type", "application/json")
                     .header("X-Qraft-Tenant", "filler").header("X-Qraft-Namespace", "filler")

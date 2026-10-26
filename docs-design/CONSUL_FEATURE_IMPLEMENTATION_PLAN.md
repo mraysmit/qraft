@@ -184,8 +184,8 @@ Introduce service registration with:
 
 Endpoints:
 
-- `PUT /v1/client/service/register`
-- `PUT /v1/client/service/deregister/:serviceId`
+- `PUT /v1/catalog/register` (a service under `service`, as of 2026-10-26)
+- `PUT /v1/catalog/deregister` (`{"serviceId": ...}`)
 - `GET /v1/catalog/services`
 - `GET /v1/catalog/service/:service`
 - `GET /v1/health/service/:service`

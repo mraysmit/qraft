@@ -147,8 +147,8 @@ class HttpApiServerTest {
         QraftStateStore store = startSingleNode();
         server = new HttpApiServer(0, node, store);
         server.start().join();
-        HttpResponse<String> invalid = request(client, "/v1/client/service/register", "PUT",
-                "{\"serviceId\":\"broken\"}", Map.of("X-Qraft-Node", "node-a"));
+        HttpResponse<String> invalid = request(client, "/v1/catalog/register", "PUT",
+                inService("{\"serviceId\":\"broken\"}"), Map.of("X-Qraft-Node", "node-a"));
         assertEquals(400, invalid.statusCode());
         assertErrorEnvelope(invalid, "invalid_registration", false);
 
@@ -194,13 +194,13 @@ class HttpApiServerTest {
                  "metadata":{"team":"platform"},"health":"PASSING"}
                 """;
 
-        HttpResponse<String> registered = request(client, "/v1/client/service/register", "PUT", registration,
+        HttpResponse<String> registered = request(client, "/v1/catalog/register", "PUT", inService(registration),
                 Map.of("X-Qraft-Node", "node-1"));
         HttpResponse<String> services = request(client, "/v1/catalog/services", "GET");
         HttpResponse<String> instances = request(client, "/v1/catalog/service/payments", "GET");
         HttpResponse<String> health = request(client, "/v1/health/service/payments", "GET");
         HttpResponse<String> deregistered = request(client,
-                "/v1/client/service/deregister/payments-1", "PUT", null,
+                "/v1/catalog/deregister", "PUT", "{\"serviceId\":\"payments-1\"}",
                 Map.of("X-Qraft-Node", "node-1"));
 
         assertEquals(200, registered.statusCode());
@@ -227,11 +227,11 @@ class HttpApiServerTest {
         server = new HttpApiServer(0, node, store);
         server.start().join();
 
-        HttpResponse<String> response = request(HttpClient.newHttpClient(), "/v1/client/service/register",
-                "PUT", """
+        HttpResponse<String> response = request(HttpClient.newHttpClient(), "/v1/catalog/register",
+                "PUT", inService("""
                         {"serviceId":"payments-1","serviceName":"payments",
                          "address":"127.0.0.1","port":8080}
-                        """, Map.of("X-Qraft-Node", "node-1"));
+                        """), Map.of("X-Qraft-Node", "node-1"));
 
         assertEquals(409, response.statusCode(), response.body());
         JsonNode body = assertErrorEnvelope(response, "registration_rejected", false);
@@ -251,7 +251,7 @@ class HttpApiServerTest {
                 """;
 
         HttpResponse<String> response = request(HttpClient.newHttpClient(),
-                "/v1/client/service/register", "PUT", registration,
+                "/v1/catalog/register", "PUT", inService(registration),
                 Map.of("X-Qraft-Node", "node-a", "X-Qraft-Tenant", "acme",
                         "X-Qraft-Namespace", "payments"));
 
@@ -264,9 +264,13 @@ class HttpApiServerTest {
         assertEquals(false, stored.enabled());
 
         JsonNode body = new ObjectMapper().readTree(response.body());
-        assertEquals(Set.of("serviceId", "serviceName", "nodeId", "tenantId", "namespace", "registered"),
+        assertEquals(Set.of("node", "service"),
                 body.properties().stream().map(Map.Entry::getKey).collect(java.util.stream.Collectors.toSet()));
-        assertTrue(body.get("registered").booleanValue());
+        assertEquals("node-a", body.get("node").textValue());
+        JsonNode service = body.get("service");
+        assertEquals(Set.of("serviceId", "serviceName", "nodeId", "tenantId", "namespace", "registered"),
+                service.properties().stream().map(Map.Entry::getKey).collect(java.util.stream.Collectors.toSet()));
+        assertTrue(service.get("registered").booleanValue());
     }
 
     @Test
@@ -327,9 +331,9 @@ class HttpApiServerTest {
                             String tag) throws Exception {
         Map<String, String> headers = new java.util.HashMap<>(scope);
         headers.put("X-Qraft-Node", "node-1");
-        HttpResponse<String> response = request(client, "/v1/client/service/register", "PUT", """
+        HttpResponse<String> response = request(client, "/v1/catalog/register", "PUT", inService("""
                 {"serviceId":"%s","serviceName":"%s","address":"127.0.0.1","port":8080,"tags":["%s"]}
-                """.formatted(serviceId, serviceName, tag), headers);
+                """.formatted(serviceId, serviceName, tag)), headers);
         assertEquals(200, response.statusCode(), response.body());
     }
 
@@ -350,13 +354,13 @@ class HttpApiServerTest {
                 """;
 
         HttpResponse<String> accepted = request(HttpClient.newHttpClient(),
-                "/v1/client/service/register", "PUT", valid, Map.of("X-Qraft-Node", "node-a"));
+                "/v1/catalog/register", "PUT", inService(valid), Map.of("X-Qraft-Node", "node-a"));
         String withUnknownField = """
                 {"serviceId":"web-2","serviceName":"frontend","address":"127.0.0.1","port":8080,
                  "tags":[],"metadata":{},"alias":"frontend"}
                 """;
         HttpResponse<String> rejected = request(HttpClient.newHttpClient(),
-                "/v1/client/service/register", "PUT", withUnknownField,
+                "/v1/catalog/register", "PUT", inService(withUnknownField),
                 Map.of("X-Qraft-Node", "node-b"));
 
         assertEquals(200, accepted.statusCode(), accepted.body());
@@ -377,15 +381,15 @@ class HttpApiServerTest {
                 {"serviceId":"web","serviceName":"frontend","address":"127.0.0.1","port":8080,
                  "tags":[],"metadata":{}}
                 """;
-        assertEquals(200, request(client, "/v1/client/service/register", "PUT", registration,
+        assertEquals(200, request(client, "/v1/catalog/register", "PUT", inService(registration),
                 Map.of("X-Qraft-Node", "node-a")).statusCode());
 
         HttpResponse<String> missingIdentity = request(client,
-                "/v1/client/service/deregister/web", "PUT");
+                "/v1/catalog/deregister", "PUT", "{\"serviceId\":\"web\"}");
         HttpResponse<String> removed = request(client,
-                "/v1/client/service/deregister/web", "PUT", null, Map.of("X-Qraft-Node", "node-a"));
+                "/v1/catalog/deregister", "PUT", "{\"serviceId\":\"web\"}", Map.of("X-Qraft-Node", "node-a"));
         HttpResponse<String> absent = request(client,
-                "/v1/client/service/deregister/web", "PUT", null, Map.of("X-Qraft-Node", "node-a"));
+                "/v1/catalog/deregister", "PUT", "{\"serviceId\":\"web\"}", Map.of("X-Qraft-Node", "node-a"));
 
         assertEquals(400, missingIdentity.statusCode(), missingIdentity.body());
         assertEquals(200, removed.statusCode(), removed.body());
@@ -471,9 +475,9 @@ class HttpApiServerTest {
         QraftStateStore store = startClientApi();
         HttpClient client = HttpClient.newHttpClient();
         assertEquals(200, registerNode(client).statusCode());
-        assertEquals(200, request(client, "/v1/client/service/register", "PUT", """
+        assertEquals(200, request(client, "/v1/catalog/register", "PUT", inService("""
                 {"serviceId":"web","serviceName":"frontend","address":"127.0.0.1","port":8080}
-                """, NODE).statusCode());
+                """), NODE).statusCode());
         assertEquals(1, store.getServiceCatalog().instances().size());
 
         assertEquals(200, request(client, "/v1/catalog/deregister", "PUT", "{}", NODE).statusCode());
@@ -527,7 +531,7 @@ class HttpApiServerTest {
         assertRejected(request(client, "/v1/catalog/deregister", "PUT", "{}"),
                 400, "invalid_deregistration", "X-Qraft-Node is required");
 
-        // A registration describes a node and nothing else, and cannot set what the servers own.
+        // A registration describes a node, a service or both, and cannot set what the servers own.
         for (String body : List.of("{", "null", "[]", "{}", "{\"node\":null}", "{\"node\":{\"name\":\"other\"}}",
                 "{\"node\":{\"status\":\"healthy\"}}", "{\"node\":{\"registrationTime\":\"2026-01-01T00:00:00Z\"}}",
                 "{\"node\":{\"port\":8080}}", "{\"node\":{},\"service\":{}}", "{\"node\":{\"metadata\":[]}}")) {
@@ -535,7 +539,7 @@ class HttpApiServerTest {
                     400, "invalid_registration", null);
         }
         assertRejected(request(client, "/v1/catalog/register", "PUT", "{}", NODE),
-                400, "invalid_registration", "node is required");
+                400, "invalid_registration", "node or service is required");
 
         // A heartbeat carries a sequence number and a registration identifier, and nothing else.
         for (String body : List.of("{", "null", "[]", "{\"sequenceNumber\":-1}", "{\"sequenceNumber\":\"x\"}",
@@ -544,8 +548,9 @@ class HttpApiServerTest {
             assertRejected(heartbeat(client, body), 400, "invalid_heartbeat", null);
         }
 
-        // Without a service the node itself is deregistered; a service is not deregistered here yet.
-        for (String body : List.of("{", "null", "[]", "{\"serviceId\":\"web\"}", "{\"node\":\"client-1\"}")) {
+        // A deregistration names a service or names nothing, which removes the node; any other body is refused. The
+        // forms that name a service are tested in HttpApiServerCatalogServiceRoutesTest.
+        for (String body : List.of("{", "null", "[]", "{\"node\":\"client-1\"}")) {
             assertRejected(request(client, "/v1/catalog/deregister", "PUT", body, NODE),
                     400, "invalid_deregistration", null);
         }
@@ -653,11 +658,11 @@ class HttpApiServerTest {
 
         for (String header : List.of("X-Qraft-Tenant", "X-Qraft-Namespace")) {
             Map<String, String> blank = Map.of("X-Qraft-Node", "node-1", header, " ");
-            assertRejected(request(client, "/v1/client/service/register", "PUT", registration, blank),
+            assertRejected(request(client, "/v1/catalog/register", "PUT", inService(registration), blank),
                     400, "invalid_registration", header);
-            assertRejected(request(client, "/v1/client/service/deregister/web", "PUT", null, blank),
-                    400, "invalid_registration", header);
-            assertRejected(request(client, "/v1/client/check/observe", "PUT",
+            assertRejected(request(client, "/v1/catalog/deregister", "PUT", "{\"serviceId\":\"web\"}", blank),
+                    400, "invalid_deregistration", header);
+            assertRejected(request(client, "/v1/catalog/check/observe", "PUT",
                     observation("web", "ttl", "passing", 1, 30_000, null), blank), 400, "invalid_observation", header);
         }
         assertTrue(store.getServiceCatalog().instances().isEmpty(), "no write with a blank scope reaches the catalog");
@@ -729,10 +734,10 @@ class HttpApiServerTest {
 
         HttpClient client = HttpClient.newHttpClient();
 
-        HttpResponse<String> missingField = request(client, "/v1/client/service/register", "PUT",
-                "{\"serviceId\":\"missing-fields\"}", Map.of("X-Qraft-Node", "node-1"));
-        HttpResponse<String> missingNode = request(client, "/v1/client/service/register", "PUT",
-                "{\"serviceId\":\"web\",\"serviceName\":\"web\",\"address\":\"127.0.0.1\",\"port\":80}");
+        HttpResponse<String> missingField = request(client, "/v1/catalog/register", "PUT",
+                inService("{\"serviceId\":\"missing-fields\"}"), Map.of("X-Qraft-Node", "node-1"));
+        HttpResponse<String> missingNode = request(client, "/v1/catalog/register", "PUT",
+                inService("{\"serviceId\":\"web\",\"serviceName\":\"web\",\"address\":\"127.0.0.1\",\"port\":80}"));
 
         assertEquals(400, missingField.statusCode());
         JsonNode fieldError = assertErrorEnvelope(missingField, "invalid_registration", false);
@@ -764,7 +769,7 @@ class HttpApiServerTest {
                 """;
 
         HttpResponse<String> response = request(HttpClient.newHttpClient(),
-                "/v1/client/service/register", "PUT", registration, Map.of("X-Qraft-Node", "node-1"));
+                "/v1/catalog/register", "PUT", inService(registration), Map.of("X-Qraft-Node", "node-1"));
         HttpResponse<String> clientResponse = registerNode(HttpClient.newHttpClient());
 
         assertEquals(503, response.statusCode());
@@ -866,15 +871,18 @@ class HttpApiServerTest {
 
         Map<String, String> node1 = Map.of("X-Qraft-Node", "node-1");
         assertEquals(405, request(client, "/v1/catalog/services", "POST").statusCode());
-        HttpResponse<String> noServiceId = request(client, "/v1/client/service/deregister", "PUT", null, node1);
+        HttpResponse<String> noServiceId = request(client, "/v1/catalog/deregister", "PUT",
+                "{\"serviceId\":\"\"}", node1);
         assertEquals(400, noServiceId.statusCode());
-        assertErrorEnvelope(noServiceId, "service_id_required", false);
-        HttpResponse<String> unknown = request(client, "/v1/client/service/deregister/unknown", "PUT", null, node1);
+        assertErrorEnvelope(noServiceId, "invalid_deregistration", false);
+        HttpResponse<String> unknown = request(client, "/v1/catalog/deregister", "PUT",
+                "{\"serviceId\":\"unknown\"}", node1);
         assertEquals(200, unknown.statusCode(), "deregistering an absent instance is idempotent");
         assertFalse(new ObjectMapper().readTree(unknown.body()).path("deregistered").booleanValue());
-        HttpResponse<String> noNode = request(client, "/v1/client/service/deregister/unknown", "PUT");
+        HttpResponse<String> noNode = request(client, "/v1/catalog/deregister", "PUT",
+                "{\"serviceId\":\"unknown\"}");
         assertEquals(400, noNode.statusCode());
-        assertTrue(assertErrorEnvelope(noNode, "invalid_registration", false)
+        assertTrue(assertErrorEnvelope(noNode, "invalid_deregistration", false)
                 .path("message").textValue().contains("X-Qraft-Node"), noNode.body());
 
         server.enterDrainMode().join();
@@ -985,7 +993,7 @@ class HttpApiServerTest {
         registerService(client, "web", "frontend", "node-a", "acme", "payments");
         long indexBefore = store.getLastAppliedIndex();
 
-        HttpResponse<String> response = request(client, "/v1/client/check/observe", "PUT",
+        HttpResponse<String> response = request(client, "/v1/catalog/check/observe", "PUT",
                 observation("web", "http", "passing", 1, 30_000, "200 OK"),
                 Map.of("X-Qraft-Node", "node-a", "X-Qraft-Tenant", "acme", "X-Qraft-Namespace", "payments"));
 
@@ -1026,10 +1034,10 @@ class HttpApiServerTest {
         registerService(client, "web", "frontend", "node-a");
         String body = observation("web", "ttl", "passing", 7, 10_000, null);
 
-        HttpResponse<String> first = request(client, "/v1/client/check/observe", "PUT", body,
+        HttpResponse<String> first = request(client, "/v1/catalog/check/observe", "PUT", body,
                 Map.of("X-Qraft-Node", "node-a"));
         clock.advance(Duration.ofSeconds(5));
-        HttpResponse<String> replay = request(client, "/v1/client/check/observe", "PUT", body,
+        HttpResponse<String> replay = request(client, "/v1/catalog/check/observe", "PUT", body,
                 Map.of("X-Qraft-Node", "node-a"));
 
         assertEquals(200, first.statusCode(), first.body());
@@ -1049,12 +1057,12 @@ class HttpApiServerTest {
         HttpClient client = HttpClient.newHttpClient();
         registerService(client, "web", "frontend", "node-a");
         Map<String, String> identity = Map.of("X-Qraft-Node", "node-a");
-        assertEquals(200, request(client, "/v1/client/check/observe", "PUT",
+        assertEquals(200, request(client, "/v1/catalog/check/observe", "PUT",
                 observation("web", "http", "warning", 5, 10_000, "slow"), identity).statusCode());
 
-        HttpResponse<String> older = request(client, "/v1/client/check/observe", "PUT",
+        HttpResponse<String> older = request(client, "/v1/catalog/check/observe", "PUT",
                 observation("web", "http", "passing", 4, 10_000, null), identity);
-        HttpResponse<String> conflictingReplay = request(client, "/v1/client/check/observe", "PUT",
+        HttpResponse<String> conflictingReplay = request(client, "/v1/catalog/check/observe", "PUT",
                 observation("web", "http", "critical", 5, 10_000, "down"), identity);
 
         assertEquals(409, older.statusCode(), older.body());
@@ -1074,9 +1082,9 @@ class HttpApiServerTest {
         HttpClient client = HttpClient.newHttpClient();
         registerService(client, "web", "frontend", "node-a");
 
-        HttpResponse<String> otherNode = request(client, "/v1/client/check/observe", "PUT",
+        HttpResponse<String> otherNode = request(client, "/v1/catalog/check/observe", "PUT",
                 observation("web", "http", "passing", 1, 10_000, null), Map.of("X-Qraft-Node", "node-b"));
-        HttpResponse<String> otherTenant = request(client, "/v1/client/check/observe", "PUT",
+        HttpResponse<String> otherTenant = request(client, "/v1/catalog/check/observe", "PUT",
                 observation("web", "http", "passing", 1, 10_000, null),
                 Map.of("X-Qraft-Node", "node-a", "X-Qraft-Tenant", "acme"));
 
@@ -1115,24 +1123,24 @@ class HttpApiServerTest {
 
         for (String invalid : invalidBodies) {
             assertNotEquals(valid, invalid, "invalid fixture must differ from the valid body");
-            HttpResponse<String> response = request(client, "/v1/client/check/observe", "PUT", invalid, identity);
+            HttpResponse<String> response = request(client, "/v1/catalog/check/observe", "PUT", invalid, identity);
             assertEquals(400, response.statusCode(), invalid + " -> " + response.body());
             assertErrorEnvelope(response, "invalid_observation", false);
         }
-        HttpResponse<String> missingNode = request(client, "/v1/client/check/observe", "PUT", valid);
+        HttpResponse<String> missingNode = request(client, "/v1/catalog/check/observe", "PUT", valid);
         assertEquals(400, missingNode.statusCode(), missingNode.body());
         assertErrorEnvelope(missingNode, "invalid_observation", false);
-        HttpResponse<String> wrongMethod = request(client, "/v1/client/check/observe", "POST", valid, identity);
+        HttpResponse<String> wrongMethod = request(client, "/v1/catalog/check/observe", "POST", valid, identity);
         assertEquals(405, wrongMethod.statusCode(), wrongMethod.body());
         assertErrorEnvelope(wrongMethod, "method_not_allowed", false);
         assertTrue(store.healthChecks().isEmpty());
 
-        HttpResponse<String> maximumOutput = request(client, "/v1/client/check/observe", "PUT",
+        HttpResponse<String> maximumOutput = request(client, "/v1/catalog/check/observe", "PUT",
                 observation("web", "http", "PASSING", 1, 10_000, "x".repeat(4096)), identity);
         assertEquals(200, maximumOutput.statusCode(), maximumOutput.body());
 
         server.enterDrainMode().join();
-        HttpResponse<String> draining = request(client, "/v1/client/check/observe", "PUT",
+        HttpResponse<String> draining = request(client, "/v1/catalog/check/observe", "PUT",
                 observation("web", "http", "passing", 2, 10_000, null), identity);
         assertEquals(503, draining.statusCode(), draining.body());
         assertErrorEnvelope(draining, "draining", true);
@@ -1146,13 +1154,13 @@ class HttpApiServerTest {
         registerService(client, "web-2", "frontend", "node-b");
         registerService(client, "web-3", "frontend", "node-c");
         registerService(client, "web-4", "frontend", "node-d");
-        assertEquals(200, request(client, "/v1/client/check/observe", "PUT",
+        assertEquals(200, request(client, "/v1/catalog/check/observe", "PUT",
                 observation("web-1", "http", "passing", 1, 10_000, "ok"),
                 Map.of("X-Qraft-Node", "node-a")).statusCode());
-        assertEquals(200, request(client, "/v1/client/check/observe", "PUT",
+        assertEquals(200, request(client, "/v1/catalog/check/observe", "PUT",
                 observation("web-2", "http", "warning", 1, 10_000, "slow"),
                 Map.of("X-Qraft-Node", "node-b")).statusCode());
-        assertEquals(200, request(client, "/v1/client/check/observe", "PUT",
+        assertEquals(200, request(client, "/v1/catalog/check/observe", "PUT",
                 observation("web-3", "tcp", "critical", 1, 10_000, "refused"),
                 Map.of("X-Qraft-Node", "node-c")).statusCode());
         long index = store.getLastAppliedIndex();
@@ -1207,10 +1215,10 @@ class HttpApiServerTest {
         registerService(client, "web", "frontend", "node-a");
         Map<String, String> identity = Map.of("X-Qraft-Node", "node-a");
 
-        HttpResponse<String> withDelay = request(client, "/v1/client/check/observe", "PUT",
+        HttpResponse<String> withDelay = request(client, "/v1/catalog/check/observe", "PUT",
                 observation("web", "ttl", "passing", 1, 10_000, null).replace("}", ",\"deregisterAfterMillis\":60000}"),
                 identity);
-        HttpResponse<String> withoutDelay = request(client, "/v1/client/check/observe", "PUT",
+        HttpResponse<String> withoutDelay = request(client, "/v1/catalog/check/observe", "PUT",
                 observation("web", "http", "passing", 1, 10_000, null), identity);
 
         assertEquals(200, withDelay.statusCode(), withDelay.body());
@@ -1232,16 +1240,16 @@ class HttpApiServerTest {
         HttpClient client = HttpClient.newHttpClient();
         Map<String, String> identity = Map.of("X-Qraft-Node", "node-a");
         registerService(client, "web", "frontend", "node-a");
-        assertEquals(200, request(client, "/v1/client/check/observe", "PUT",
+        assertEquals(200, request(client, "/v1/catalog/check/observe", "PUT",
                 observation("web", "http", "passing", 1, 10_000, null), identity).statusCode());
 
-        HttpResponse<String> reRegistered = request(client, "/v1/client/service/register", "PUT", """
+        HttpResponse<String> reRegistered = request(client, "/v1/catalog/register", "PUT", inService("""
                 {"serviceId":"web","serviceName":"frontend","address":"127.0.0.1","port":8080,
                  "checks":["tcp"]}
-                """, identity);
-        HttpResponse<String> late = request(client, "/v1/client/check/observe", "PUT",
+                """), identity);
+        HttpResponse<String> late = request(client, "/v1/catalog/check/observe", "PUT",
                 observation("web", "http", "critical", 2, 10_000, null), identity);
-        HttpResponse<String> declared = request(client, "/v1/client/check/observe", "PUT",
+        HttpResponse<String> declared = request(client, "/v1/catalog/check/observe", "PUT",
                 observation("web", "tcp", "passing", 1, 10_000, null), identity);
 
         assertEquals(200, reRegistered.statusCode(), reRegistered.body());
@@ -1254,10 +1262,10 @@ class HttpApiServerTest {
         assertTrue(store.findHealthCheck(new ServiceCheckId(instance, "tcp")).isPresent());
 
         for (String invalid : List.of("\"tcp\"", "[1]", "[\" \"]", "[null]")) {
-            HttpResponse<String> rejected = request(client, "/v1/client/service/register", "PUT", """
+            HttpResponse<String> rejected = request(client, "/v1/catalog/register", "PUT", inService("""
                     {"serviceId":"web","serviceName":"frontend","address":"127.0.0.1","port":8080,
                      "checks":%s}
-                    """.formatted(invalid), identity);
+                    """.formatted(invalid)), identity);
             assertEquals(400, rejected.statusCode(), invalid + " -> " + rejected.body());
             assertErrorEnvelope(rejected, "invalid_registration", false);
         }
@@ -1296,7 +1304,7 @@ class HttpApiServerTest {
         String registration = """
                 {"serviceId":"%s","serviceName":"%s","address":"127.0.0.1","port":8080}
                 """.formatted(serviceId, serviceName);
-        HttpResponse<String> response = request(client, "/v1/client/service/register", "PUT", registration,
+        HttpResponse<String> response = request(client, "/v1/catalog/register", "PUT", inService(registration),
                 Map.of("X-Qraft-Node", nodeId, "X-Qraft-Tenant", tenantId, "X-Qraft-Namespace", namespace));
         assertEquals(200, response.statusCode(), response.body());
     }
@@ -1523,6 +1531,11 @@ class HttpApiServerTest {
         return request(client, "/v1/catalog/node/heartbeat", "PUT", body, NODE);
     }
 
+    /** The body of a registration that carries only a service: the body of the service under {@code service}. */
+    private static String inService(String service) {
+        return "{\"service\":" + service + "}";
+    }
+
     private static JsonNode tree(String json) throws Exception {
         return new ObjectMapper().readTree(json);
     }
@@ -1554,12 +1567,12 @@ class HttpApiServerTest {
     }
 
     private HttpRequest serviceRegistrationRequest(String serviceId, String nodeId) {
-        String body = """
+        String body = inService("""
                 {"serviceId":"%s","serviceName":"pending",
                  "address":"127.0.0.1","port":8080,"tags":[],"metadata":{},"health":"PASSING"}
-                """.formatted(serviceId);
+                """.formatted(serviceId));
         return HttpRequest.newBuilder()
-                .uri(URI.create("http://localhost:" + server.port() + "/v1/client/service/register"))
+                .uri(URI.create("http://localhost:" + server.port() + "/v1/catalog/register"))
                 .header("Content-Type", "application/json")
                 .header("X-Qraft-Node", nodeId)
                 .PUT(HttpRequest.BodyPublishers.ofString(body))

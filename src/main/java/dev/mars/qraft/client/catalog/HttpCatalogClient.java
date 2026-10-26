@@ -137,9 +137,10 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         body.put("enabled", service.enabled());
         body.put("checks", service.checkIds());
         try {
-            HttpRequest request = request(server, "/v1/client/service/register")
+            HttpRequest request = request(server, "/v1/catalog/register")
                     .header("Content-Type", "application/json")
-                    .PUT(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
+                    .PUT(HttpRequest.BodyPublishers.ofString(
+                            objectMapper.writeValueAsString(Map.of("service", body))))
                     .build();
             return send(request, response -> classifyCatalog(response, CatalogOperation.REGISTER));
         } catch (IOException error) {
@@ -150,9 +151,16 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
     public CompletableFuture<CatalogOutcome> deregister(URI server, String serviceId) {
         ensureOpen();
         String id = required("serviceId", serviceId);
-        HttpRequest request = request(server, "/v1/client/service/deregister/" + encode(id))
-                .PUT(HttpRequest.BodyPublishers.noBody()).build();
-        return send(request, response -> classifyCatalog(response, CatalogOperation.DEREGISTER));
+        try {
+            HttpRequest request = request(server, "/v1/catalog/deregister")
+                    .header("Content-Type", "application/json")
+                    .PUT(HttpRequest.BodyPublishers.ofString(
+                            objectMapper.writeValueAsString(Map.of("serviceId", id))))
+                    .build();
+            return send(request, response -> classifyCatalog(response, CatalogOperation.DEREGISTER));
+        } catch (IOException error) {
+            return CompletableFuture.completedFuture(retryable("request_encoding", error));
+        }
     }
 
     @Override
@@ -268,7 +276,7 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
 
     private CompletableFuture<ObservationOutcome> observeAttempt(List<URI> cycle, int index, String body) {
         URI endpoint = cycle.get(index);
-        HttpRequest request = request(endpoint, "/v1/client/check/observe")
+        HttpRequest request = request(endpoint, "/v1/catalog/check/observe")
                 .header("Content-Type", "application/json")
                 .PUT(HttpRequest.BodyPublishers.ofString(body)).build();
         return sendObservation(request).thenCompose(outcome -> {
@@ -462,6 +470,11 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
 
     private CatalogOutcome parseCatalogSuccess(String body, CatalogOperation operation) {
         JsonNode parsed = parseObject(body);
+        // A registration answers with the node and, under "service", what happened to the service.
+        if (parsed != null && operation == CatalogOperation.REGISTER) {
+            JsonNode service = parsed.path("service");
+            parsed = service.isObject() ? service : null;
+        }
         String serviceId = parsed == null ? null : textOrNull(parsed.path("serviceId"));
         JsonNode changed = parsed == null ? null : parsed.path(operation.resultField);
         if (serviceId == null || changed == null || !changed.isBoolean()) {

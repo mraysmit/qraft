@@ -19,21 +19,23 @@ package dev.mars.qraft.server.http;
 import dev.mars.qraft.common.Node;
 
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * JSON body of {@code PUT /v1/catalog/register}: what the node named by the request's identity registers.
  *
- * <p>In this version the body describes the node, under {@code node}. A service is added beside it later, under
- * its own key, so what a node sends does not change then. The body cannot name the node, which the identity
+ * <p>The body describes the node under {@code node}, a service under {@code service}, or both, and must hold at
+ * least one. A service has the body of a service registration. The body cannot name the node, which the identity
  * header does, and cannot set the status or the times, which the servers own.
  *
- * @param node the node's description; required
+ * @param node    the node's description; absent when only a service is registered
+ * @param service the service to register on the node; absent when only the node is registered
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-10-09
  * @version 1.0
  */
-record CatalogRegistrationRequest(NodeDescription node) {
+record CatalogRegistrationRequest(NodeDescription node, ServiceRegistrationRequest service) {
 
     /**
      * What a client says about its node.
@@ -46,11 +48,17 @@ record CatalogRegistrationRequest(NodeDescription node) {
     record NodeDescription(String address, String datacenter, String region, Map<String, String> metadata) {
     }
 
-    /** The node this request registers, named by the request's identity. */
-    Node toNode(RequestContext context) {
-        if (node == null) {
-            throw new IllegalArgumentException("node is required");
+    /** The body must describe the node, a service, or both. */
+    void requireSomethingToRegister() {
+        if (node == null && service == null) {
+            throw new IllegalArgumentException("node or service is required");
         }
-        return Node.of(context.nodeId(), node.address(), node.datacenter(), node.region(), node.metadata());
+    }
+
+    /** The node this request registers, named by the request's identity; empty when only a service is registered. */
+    Optional<Node> toNode(RequestContext context) {
+        if (node == null) return Optional.empty();
+        return Optional.of(Node.of(context.nodeId(), node.address(), node.datacenter(), node.region(),
+                node.metadata()));
     }
 }

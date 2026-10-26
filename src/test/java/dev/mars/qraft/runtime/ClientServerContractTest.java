@@ -22,9 +22,13 @@ import com.sun.net.httpserver.HttpServer;
 import dev.mars.qraft.raft.PeerlessTransportFixture;
 import dev.mars.qraft.common.NodeStatus;
 import dev.mars.qraft.client.QraftClient;
+import dev.mars.qraft.client.catalog.CatalogLookupOutcome;
 import dev.mars.qraft.client.catalog.CatalogOutcome;
 import dev.mars.qraft.client.catalog.HttpCatalogClient;
 import dev.mars.qraft.client.config.ClientConfiguration;
+import dev.mars.qraft.client.health.CheckObservation;
+import dev.mars.qraft.client.health.CheckStatus;
+import dev.mars.qraft.client.health.ObservationOutcome;
 import dev.mars.qraft.common.ServiceDefinition;
 import dev.mars.qraft.server.http.HttpApiServer;
 import dev.mars.qraft.raft.RaftNode;
@@ -42,6 +46,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -124,6 +129,41 @@ class ClientServerContractTest {
         assertTrue(deregistered.changed());
         assertEquals(1, retryableAttempts.get(), "the successful server must be preferred next");
         assertTrue(readCatalog(endpoint, "payments").isEmpty());
+    }
+
+    @Test
+    void httpCatalogClientLooksUpAServiceItRegisteredAndNotOneItRemovedAgainstRealServer() throws Exception {
+        startServer();
+        URI endpoint = URI.create("http://127.0.0.1:" + server.port());
+        catalogClient = new HttpCatalogClient(HttpClient.newHttpClient(), new ObjectMapper(), List.of(endpoint),
+                "catalog-client", "default", "default", "dc-1", "eu-west", Duration.ofSeconds(2));
+        ServiceDefinition service = new ServiceDefinition("payments-1", "payments", "127.0.0.1", 9090,
+                List.of("blue"), Map.of("team", "platform"), true);
+
+        assertInstanceOf(CatalogLookupOutcome.Absent.class, catalogClient.lookup(service).get(10, TimeUnit.SECONDS));
+        assertInstanceOf(CatalogOutcome.Success.class, catalogClient.register(service).get(10, TimeUnit.SECONDS));
+        assertInstanceOf(CatalogLookupOutcome.Present.class, catalogClient.lookup(service).get(10, TimeUnit.SECONDS));
+        assertInstanceOf(CatalogOutcome.Success.class, catalogClient.deregister("payments-1").get(10, TimeUnit.SECONDS));
+        assertInstanceOf(CatalogLookupOutcome.Absent.class, catalogClient.lookup(service).get(10, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void httpCatalogClientPublishesACheckObservationAgainstRealServer() throws Exception {
+        QraftStateStore store = startServer();
+        URI endpoint = URI.create("http://127.0.0.1:" + server.port());
+        catalogClient = new HttpCatalogClient(HttpClient.newHttpClient(), new ObjectMapper(), List.of(endpoint),
+                "catalog-client", "default", "default", "dc-1", "eu-west", Duration.ofSeconds(2));
+        ServiceDefinition service = new ServiceDefinition("payments-1", "payments", "127.0.0.1", 9090,
+                List.of("blue"), Map.of("team", "platform"), true).withCheckIds(List.of("http"));
+        assertInstanceOf(CatalogOutcome.Success.class, catalogClient.register(service).get(10, TimeUnit.SECONDS));
+
+        ObservationOutcome outcome = catalogClient.observe(new CheckObservation("payments-1", "http",
+                CheckStatus.PASSING, 1, Instant.now(), Duration.ofSeconds(30), true, "200 OK", Duration.ofMinutes(2)))
+                .get(10, TimeUnit.SECONDS);
+
+        assertInstanceOf(ObservationOutcome.Accepted.class, outcome);
+        assertEquals(1, store.healthChecks().size());
+        assertEquals("http", store.healthChecks().getFirst().checkId().checkId());
     }
 
     @Test

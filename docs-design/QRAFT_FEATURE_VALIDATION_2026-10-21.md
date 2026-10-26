@@ -79,7 +79,7 @@ Status key:
 | Operations | Fenced-node reason and one-time transition failure diagnostic | Done | Done 2026-10-13 (`f737d6b`; recorded 2026-10-14). `/raft/status` exposes nullable `fenceReason`; the sequencer retains the first cause and logs one ERROR announcement with its original stack and caller context. Startup failures remain observable. `RaftTransitionSequencerTest`, `RaftNodeApplyFailureTest`, `RaftNodeConfigurationTest`, `RaftNodeMetadataSequencingTest`, `HttpApiServerTest`, `DockerDurableRestartTest`. Cluster-wide reachability, lag and quorum remain outside this completed diagnostic |
 | Operations | Health aggregation | Done | Derived service health; `?passing` filter |
 | Operations | Offline backup, corrupt-replica replacement, compatible-upgrade guidance | Done | [`RAFT_STORAGE_OPERATIONS.md`](../docs/RAFT_STORAGE_OPERATIONS.md); clarified 2026-10-03: lower-level legacy byte compatibility does not establish whole-node startup compatibility; an older backup cannot rejoin as the same voter |
-| Operations | Lost-quorum recovery and whole-cluster backup restore | Missing | No supported procedure yet. Membership Step 7 must establish and test it; clarified 2026-10-03 |
+| Operations | Lost-quorum recovery and whole-cluster backup restore | Done | Updated 2026-10-26. Built and verified in membership Step 7 on 2026-10-24: the offline `inspect` and `recover` commands, with `DockerLostQuorumRecoveryTest` recovering from current directories and from a backup (Jenkins build 33). The runbook is in `RAFT_STORAGE_OPERATIONS.md`, which also states what a restore cannot recover: a registration a client was told succeeded may be absent after a restore from a backup |
 | Operations | Event journal (design [`QRAFT_EVENT_ARCHITECTURE.md`](../docs/QRAFT_EVENT_ARCHITECTURE.md)) | Missing | No event code. `qraft-events` is to be a package of the one build, not a module (updated 2026-10-05) |
 | Operations | DNS discovery (optional) | Missing | — |
 
@@ -193,7 +193,7 @@ need:
 9. **Security.** Authentication, ACL tokens and policies, and audit events.
    The token and ACL core is proposed, as of 2026-10-05, to come earlier,
    straight after the client:
-   [`task-list-acl-and-tokens-2026-10-21.md`](task-list-acl-and-tokens-2026-10-21.md).
+   [`task-list-acl-and-tokens-2026-10-26.md`](task-list-acl-and-tokens-2026-10-26.md).
 10. **Deferred until decided.** DNS discovery, and persisted generated node
     identity. Server membership change was decided on 2026-09-29 and is in
     progress in

@@ -1,8 +1,8 @@
 # Task List: Consul-Style Client
 
 **Date:** 2026-10-04
-**Status:** Proposed. The `client` package and new node model and routes were delivered by [`task-list-single-pom-and-quorus-removal-2026-10-21.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md), completed and archived on 2026-10-14. This list starts after the remaining Steps 6 to 8 of [`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md); Step 5 completed on 2026-10-21. The sequencing decision remains the one made on 2026-10-05.
-**Last updated:** 2026-10-21 (membership Step 5 completed; Steps 6 to 8 remain the preceding work; this client list is still proposed; renamed with linked documents. Earlier, 2026-10-14: cleanup prerequisites completed and archived; membership Steps 5 to 8 remain the preceding work. On 2026-10-11: the rule that guards need mutation evidence removed at the owner's decision, from the rules and from one exit; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: decisions 5 and 8: what a node's deregistration removes, and the `client.hostname` setting; the file renamed to the date of its last change; the single-POM list's Phase 3A replaced Qraft's two retired words here and everywhere; decision 10 records the configuration names, and decision 3 the path of the local API. On 2026-10-08, the review with the other task lists: the request bodies of decision 5 and the log audit in the rules)
+**Status:** Active from 2026-10-26, with Phase 1. The `client` package and new node model and routes were delivered by [`task-list-single-pom-and-quorus-removal-2026-10-21.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md), completed and archived on 2026-10-14. The membership list ([`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md)) was completed and archived on 2026-10-24, and Pre-Vote followed on 2026-10-25 and 2026-10-26, so nothing precedes this list. The sequencing decision of 2026-10-05 stands: this list, then the ACL list. The owner confirmed it on 2026-10-26 when asked whether key/value completion should go first, and said the embedded administrative interface waits until the other outstanding work is done.
+**Last updated:** 2026-10-26 (Phase 1 built, with local checks only; the full suites run on Jenkins before it is closed. Earlier the same day: started, membership and Pre-Vote complete. Earlier, 2026-10-21: membership Step 5 completed; Steps 6 to 8 remain the preceding work; this client list is still proposed; renamed with linked documents. Earlier, 2026-10-14: cleanup prerequisites completed and archived; membership Steps 5 to 8 remain the preceding work. On 2026-10-11: the rule that guards need mutation evidence removed at the owner's decision, from the rules and from one exit; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: decisions 5 and 8: what a node's deregistration removes, and the `client.hostname` setting; the file renamed to the date of its last change; the single-POM list's Phase 3A replaced Qraft's two retired words here and everywhere; decision 10 records the configuration names, and decision 3 the path of the local API. On 2026-10-08, the review with the other task lists: the request bodies of decision 5 and the log audit in the rules)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 4.3, 5, 6.2, 7.3, 8, 12.1 and 16
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
@@ -58,7 +58,7 @@ decision 10 on 2026-10-09. Decisions 5 to 8 follow the Consul pattern.
      replicated step, as in Consul (decided by the user on 2026-10-09).
 6. **The local API binds to `127.0.0.1` by default,** like Consul's
    `client_addr`. It has no authentication until
-   [`task-list-acl-and-tokens-2026-10-21.md`](task-list-acl-and-tokens-2026-10-21.md),
+   [`task-list-acl-and-tokens-2026-10-26.md`](task-list-acl-and-tokens-2026-10-26.md),
    which is proposed to follow this list; liveness and readiness share the
    same listener.
 7. **Registrations follow Consul's rules.**
@@ -148,17 +148,44 @@ decision 10 on 2026-10-09. Decisions 5 to 8 follow the Consul pattern.
 
 ### Phase 1. Client-to-server protocol
 
-- [ ] Move the server's write endpoints off `/v1/client/` (decision 5). Keep the
+- [x] Move the server's write endpoints off `/v1/client/` (decision 5). Keep the
   identity headers, idempotence, error envelope, and `X-Qraft-Index`.
-- [ ] Point `HttpCatalogClient` and the health publisher at the new paths.
+  Done 2026-10-26, test first (`HttpApiServerCatalogServiceRoutesTest`, 12 tests,
+  six red before the change):
+  - `PUT /v1/catalog/register` takes `service` beside or instead of `node`, at
+    least one of the two. The whole body is checked before anything is
+    replicated, the node is committed first, then the service. A service the
+    catalog rejects after the node was registered answers 409
+    `registration_rejected`; the node stays and the client's retry repeats both
+    idempotently.
+  - `PUT /v1/catalog/deregister` with `{"serviceId": ...}` removes that service and
+    keeps the node; `{}` still removes the node and everything on it. The
+    service ID must be a non-blank string.
+  - `PUT /v1/catalog/check/observe` replaces `/v1/client/check/observe`, with the
+    same body and answers.
+  - The three `/v1/client/*` routes and their handlers are gone; a request to them
+    is a 404 from the HTTP server, tested.
+  - Design sections 12.1, 12.1.1 and 12.1.2, the Consul plan and the admin
+    interface plan are updated.
+- [x] Point `HttpCatalogClient` and the health publisher at the new paths.
   Node registration already uses its new paths, from the single-POM list's
   Phase 4. Extend `ClientServerContractTest` to cover every client call
   against a real server.
-- [ ] Make sure the server exposes every read the client forwards: catalog
-  services, a service, nodes, and service health.
+  Done 2026-10-26: `HttpCatalogClient` sends `{"service": ...}` and
+  `{"serviceId": ...}` and reads the service answer under `service`
+  (`HttpCatalogClientTest`, five red first). The contract test gained a lookup
+  and an observation against a real server, beside the register, deregister
+  and node lifecycle tests it had. Every client test stub that stood in for the
+  two shared routes now dispatches on the half the body carries
+  (`NodeAnswerHelper.dispatching`), and the Docker, end-to-end and recording-proxy
+  tests use the new paths and bodies.
+- [x] Make sure the server exposes every read the client forwards: catalog
+  services, a service, nodes, and service health. They were already served and
+  tested in `HttpApiServerTest` (`/v1/catalog/services`, `/v1/catalog/service/{name}`,
+  `/v1/catalog/nodes`, `/v1/health/service/{name}` with `?passing`).
 
 **Exit:** The contract test passes, along with the full default, end-to-end,
-and Docker suites.
+and Docker suites. Open: the three suites on Jenkins, with the logs audited.
 
 ### Phase 2. Data directory and node identity
 
@@ -281,7 +308,7 @@ consecutive runs; audits as in the other lists.
 - Authentication and ACLs, on the local API and on the server. Until they
   exist, decision 8 detects a conflicting node identity but cannot stop a
   caller from claiming one. Proposed in
-  [`task-list-acl-and-tokens-2026-10-21.md`](task-list-acl-and-tokens-2026-10-21.md).
+  [`task-list-acl-and-tokens-2026-10-26.md`](task-list-acl-and-tokens-2026-10-26.md).
 - Forwarding key/value, sessions, consistency modes, and blocking queries. Each
   is added when the corresponding server feature lands.
 - Response caching in the client, gossip, and configuration-file reload.

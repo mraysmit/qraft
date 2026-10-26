@@ -374,7 +374,7 @@ class HealthPropagationEndToEndTest {
         HttpServer proxy = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         proxy.setExecutor(executor);
         proxy.createContext("/", exchange -> {
-            boolean observation = "/v1/client/check/observe".equals(exchange.getRequestURI().getPath());
+            boolean observation = "/v1/catalog/check/observe".equals(exchange.getRequestURI().getPath());
             if (observation) observationsInFlight.incrementAndGet();
             try (exchange) {
                 byte[] body = exchange.getRequestBody().readAllBytes();

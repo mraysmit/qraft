@@ -165,9 +165,7 @@ public final class HttpApiServer implements AutoCloseable {
         server.createContext("/v1/catalog/deregister", requestAware(this::deregisterFromCatalog));
         server.createContext("/v1/catalog/node/heartbeat", requestAware(this::heartbeatNode));
         server.createContext("/v1/catalog/nodes", requestAware(this::listNodes));
-        server.createContext("/v1/client/service/register", requestAware(this::registerService));
-        server.createContext("/v1/client/service/deregister", requestAware(this::deregisterService));
-        server.createContext("/v1/client/check/observe", requestAware(this::observeHealth));
+        server.createContext("/v1/catalog/check/observe", requestAware(this::observeHealth));
         server.createContext("/v1/catalog/services", requestAware(this::listServices));
         server.createContext("/v1/catalog/service", requestAware(this::listServiceInstances));
         server.createContext("/v1/health/service", requestAware(this::listServiceHealth));
@@ -255,31 +253,6 @@ public final class HttpApiServer implements AutoCloseable {
         exchange.getResponseHeaders().set("Content-Type", "application/json");
         exchange.sendResponseHeaders(status, bytes.length);
         try (var output = exchange.getResponseBody()) { output.write(bytes); }
-    }
-
-    private void registerService(HttpExchange exchange) throws IOException {
-        if (!prepareCatalogRequest(exchange, "PUT")) return;
-        try {
-            RequestContext context = new HeaderRequestContext(exchange);
-            ServiceRegistrationRequest request = objectMapper.readerFor(ServiceRegistrationRequest.class)
-                    .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
-                    .readValue(exchange.getRequestBody());
-            ServiceInstance instance = request.toServiceInstance(context);
-            List<String> declaredCheckIds = request.declaredCheckIds();
-            RaftCommandResult<?> result = submit(declaredCheckIds == null
-                    ? CatalogCommand.register(instance)
-                    : CatalogCommand.register(instance, declaredCheckIds));
-            if (result instanceof RaftCommandResult.Success<?>) {
-                respondJson(exchange, 200, ServiceRegistrationResponse.from(instance, true));
-            } else {
-                respondError(exchange, 409, "registration_rejected",
-                        "The replicated catalog did not accept the registration", false);
-            }
-        } catch (IllegalArgumentException | com.fasterxml.jackson.core.JacksonException e) {
-            respondError(exchange, 400, "invalid_registration", safeMessage(e), false);
-        } catch (CompletionException e) {
-            respondUnavailable(exchange, e);
-        }
     }
 
     private void raftStatus(HttpExchange exchange) throws IOException {
@@ -420,7 +393,9 @@ public final class HttpApiServer implements AutoCloseable {
 
     /**
      * Registers what the body describes for the node that {@code X-Qraft-Node} names, after Consul's
-     * {@code PUT /v1/catalog/register}. In this version the body describes the node itself.
+     * {@code PUT /v1/catalog/register}: the node under {@code node}, a service under {@code service}, or both. The
+     * whole body is checked before anything is replicated, so a body that cannot be accepted registers neither half.
+     * The node is committed first, then the service.
      */
     private void registerInCatalog(HttpExchange exchange) throws IOException {
         if (!prepareNodeRequest(exchange, "PUT")) return;
@@ -430,10 +405,30 @@ public final class HttpApiServer implements AutoCloseable {
                     .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                     .readValue(exchange.getRequestBody());
             if (request == null) throw new IllegalArgumentException("The body must be a JSON object");
-            Node node = request.toNode(context);
-            submit(NodeCommand.register(node, clock.instant()));
+            request.requireSomethingToRegister();
+            Optional<Node> node = request.toNode(context);
+            ServiceInstance instance = request.service() == null ? null
+                    : request.service().toServiceInstance(context);
+            List<String> declaredCheckIds = request.service() == null ? null : request.service().declaredCheckIds();
+            Map<String, Object> answer = new LinkedHashMap<>();
+            answer.put("node", context.nodeId());
+            if (node.isPresent()) {
+                submit(NodeCommand.register(node.get(), clock.instant()));
+                answer.put("registered", true);
+            }
+            if (instance != null) {
+                RaftCommandResult<?> result = submit(declaredCheckIds == null
+                        ? CatalogCommand.register(instance)
+                        : CatalogCommand.register(instance, declaredCheckIds));
+                if (!(result instanceof RaftCommandResult.Success<?>)) {
+                    respondError(exchange, 409, "registration_rejected",
+                            "The replicated catalog did not accept the registration", false);
+                    return;
+                }
+                answer.put("service", ServiceRegistrationResponse.from(instance, true));
+            }
             setAppliedIndex(exchange);
-            respondJson(exchange, 200, nodeAnswer(node.name(), "registered", true));
+            respondJson(exchange, 200, answer);
         } catch (IllegalArgumentException | com.fasterxml.jackson.core.JacksonException e) {
             respondError(exchange, 400, "invalid_registration", safeMessage(e), false);
         } catch (CompletionException e) {
@@ -442,8 +437,10 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     /**
-     * Deregisters the node that {@code X-Qraft-Node} names, after Consul's {@code PUT /v1/catalog/deregister}:
-     * a body that names no service removes the node itself. It is idempotent.
+     * Deregisters from the node that {@code X-Qraft-Node} names, after Consul's {@code PUT /v1/catalog/deregister}:
+     * {@code {"serviceId": ...}} removes that service and keeps the node, and a body that names no service removes
+     * the node itself with everything registered on it. The service ID must be a non-blank string, so that a missing
+     * value cannot remove the node instead. Both are idempotent.
      */
     private void deregisterFromCatalog(HttpExchange exchange) throws IOException {
         if (!prepareNodeRequest(exchange, "PUT")) return;
@@ -454,7 +451,24 @@ public final class HttpApiServer implements AutoCloseable {
                 throw new IllegalArgumentException("The body must be a JSON object");
             }
             if (!body.isEmpty()) {
-                throw new IllegalArgumentException("Unsupported field: " + body.fieldNames().next());
+                String field = body.fieldNames().next();
+                if (body.size() > 1 || !field.equals("serviceId")) {
+                    throw new IllegalArgumentException("Unsupported field: " + field);
+                }
+                com.fasterxml.jackson.databind.JsonNode value = body.get("serviceId");
+                if (!value.isTextual() || value.textValue().isBlank()) {
+                    throw new IllegalArgumentException("serviceId must be a non-blank string");
+                }
+                String serviceId = value.textValue();
+                RaftCommandResult<?> removed = submit(CatalogCommand.deregister(
+                        new DeregistrationRequest(serviceId, context).identity()));
+                setAppliedIndex(exchange);
+                Map<String, Object> answer = new LinkedHashMap<>();
+                answer.put("node", context.nodeId());
+                answer.put("serviceId", serviceId);
+                answer.put("deregistered", removed instanceof RaftCommandResult.Success<?>);
+                respondJson(exchange, 200, answer);
+                return;
             }
             RaftCommandResult<?> result = submit(new NodeCommand.Deregister(context.nodeId(), clock.instant()));
             setAppliedIndex(exchange);
@@ -523,25 +537,6 @@ public final class HttpApiServer implements AutoCloseable {
         answer.put("node", node);
         answer.put(outcome, value);
         return answer;
-    }
-
-    private void deregisterService(HttpExchange exchange) throws IOException {
-        if (!prepareCatalogRequest(exchange, "PUT")) return;
-        String serviceId = pathParameter(exchange, "/v1/client/service/deregister/");
-        if (serviceId == null) {
-            respondError(exchange, 400, "service_id_required", "Service ID is required", false);
-            return;
-        }
-        try {
-            DeregistrationRequest request = new DeregistrationRequest(serviceId, new HeaderRequestContext(exchange));
-            RaftCommandResult<?> result = submit(CatalogCommand.deregister(request.identity()));
-            boolean deregistered = result instanceof RaftCommandResult.Success<?>;
-            respondJson(exchange, 200, Map.of("deregistered", deregistered, "serviceId", serviceId));
-        } catch (IllegalArgumentException e) {
-            respondError(exchange, 400, "invalid_registration", safeMessage(e), false);
-        } catch (CompletionException e) {
-            respondUnavailable(exchange, e);
-        }
     }
 
     private void listServices(HttpExchange exchange) throws IOException {

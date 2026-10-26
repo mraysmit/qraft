@@ -236,7 +236,7 @@ class DockerRunningPartitionTest {
 
     private static void register(String endpoint, String serviceName) throws Exception {
         HttpResponse<String> response = HTTP.send(HttpRequest.newBuilder()
-                .uri(URI.create(endpoint + "/v1/client/service/register"))
+                .uri(URI.create(endpoint + "/v1/catalog/register"))
                 .timeout(Duration.ofSeconds(10))
                 .header("Content-Type", "application/json")
                 .header("X-Qraft-Node", "partition-test")
@@ -246,8 +246,8 @@ class DockerRunningPartitionTest {
     }
 
     private static String registration(String serviceName) {
-        return "{\"serviceId\":\"" + serviceName + "-1\",\"serviceName\":\"" + serviceName
-                + "\",\"address\":\"127.0.0.1\",\"port\":8080}";
+        return "{\"service\":{\"serviceId\":\"" + serviceName + "-1\",\"serviceName\":\"" + serviceName
+                + "\",\"address\":\"127.0.0.1\",\"port\":8080}}";
     }
 
     private static HttpResponse<String> get(String uri) throws Exception {
@@ -270,6 +270,6 @@ class DockerRunningPartitionTest {
         return Integer.parseInt(SharedDockerClusterFixture.execInService(cluster, service,
                 "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "15",
                 "-X", "PUT", "-H", "Content-Type: application/json", "-H", "X-Qraft-Node: partition-test",
-                "--data", registration(serviceName), "http://localhost:8080/v1/client/service/register").trim());
+                "--data", registration(serviceName), "http://localhost:8080/v1/catalog/register").trim());
     }
 }

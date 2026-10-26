@@ -10,7 +10,7 @@
 **Order of work:**
 - The membership list's Step 4 close-out gate was the first task of Phase 7 here; it closed on 2026-10-11.
 - This list is archived. The membership list resumed at Step 5 on the new layout; Step 5 completed on 2026-10-21, leaving Steps 6 to 8 before the client list starts.
-- [`task-list-consul-style-client-2026-10-21.md`](../../docs-design/task-list-consul-style-client-2026-10-21.md) follows the membership list. Decided 2026-10-05.
+- [`task-list-consul-style-client-2026-10-26.md`](../../docs-design/task-list-consul-style-client-2026-10-26.md) follows the membership list. Decided 2026-10-05.
 
 **Related:** [`task-list-raft-membership-changes-2026-10-24.md`](task-list-raft-membership-changes-2026-10-24.md) (resumed at Step 5 on 2026-10-14), [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md), section 2.4: inherited components must not remain without a clear role
@@ -25,7 +25,7 @@ runtime layer, or its unused tooling.
 
 1. **Client mode stays and becomes a full Consul-style client.** Decided
    2026-10-04, for VMs and bare metal. That work is
-   [`task-list-consul-style-client-2026-10-21.md`](../../docs-design/task-list-consul-style-client-2026-10-21.md).
+   [`task-list-consul-style-client-2026-10-26.md`](../../docs-design/task-list-consul-style-client-2026-10-26.md).
    This list removes only the client's Quorus-era node model.
 2. **One POM, one artifact.** The root `pom.xml` is the only POM and builds
    `target/qraft.jar`. Module boundaries become package boundaries, enforced by
