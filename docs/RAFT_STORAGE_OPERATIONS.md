@@ -634,6 +634,20 @@ tests:
 - `SnapshotRetryBackoffTest` and `RaftNodeSnapshotRetryBackoffTest`: the delay
   before a leader retries a snapshot to a peer that did not take one, from 250
   ms doubling to 5 seconds, measured on the injected clock.
+- `RaftNodePreVoteReceiverTest`, `RaftNodePreVoteCandidateTest`,
+  `RaftTransportPreVoteTest` and the pre-vote cases of `GrpcRaftTransportTest`
+  and `GrpcRaftIntegrationTest`: how a server answers a pre-vote (it changes
+  nothing), how a follower asks before an election and forgets a silent leader,
+  the old-server `UNIMPLEMENTED` case, and a deterministic reproduction of the
+  term inflation a cut-off voter used to cause.
+- `GrpcRaftTransportTest` and `RaftNodePreVoteReceiverTest` also cover the
+  backoff reset: a request from a configured peer, granted or refused, calls
+  `RaftTransport.peerHeardFrom`, and a gRPC channel that is backing off from a
+  restarted peer connects within 600 ms of it.
+- `DockerReturningVoterTest`: a follower stopped for 200 seconds and restarted is
+  ready within 15 seconds and leaves the leader and the term unchanged.
+  `DockerRunningPartitionTest` and `DockerRemovedServerCampaignTest` show a
+  cut-off or removed server asking for pre-votes without taking a term.
 - `DockerMembershipResizeTest`: a three-server cluster grown to five and shrunk
   back to three in containers while a client registers continuously. Each
   added server joins as a non-voter and is promoted, every acknowledged

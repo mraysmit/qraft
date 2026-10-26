@@ -1,7 +1,7 @@
 # Qraft Feature Validation
 
 **Date:** 2026-09-27
-**Last updated:** 2026-10-21 (membership Step 5 completed with runtime policy wiring and automatic failed-voter cleanup; five 332-test affected runs, 1,051 default tests with coverage and 42 runtime tests passed; retained-log audits clean; Steps 6 to 8 remain open; dated links refreshed. Earlier, 2026-10-14: single-POM plan Phase 7: native futures, executor ownership, test-helper removal, fenced-node diagnostics and the closed membership Step 4 gate; existing feature gaps remain open)
+**Last updated:** 2026-10-26 (Pre-Vote and its backoff-reset follow-up complete, noted under Raft. Earlier, 2026-10-21: membership Step 5 completed with runtime policy wiring and automatic failed-voter cleanup; five 332-test affected runs, 1,051 default tests with coverage and 42 runtime tests passed; retained-log audits clean; Steps 6 to 8 remain open; dated links refreshed. Earlier, 2026-10-14: single-POM plan Phase 7: native futures, executor ownership, test-helper removal, fenced-node diagnostics and the closed membership Step 4 gate; existing feature gaps remain open)
 **Scope:** every server and client feature in
 [`CONSUL_FEATURE_IMPLEMENTATION_PLAN.md`](CONSUL_FEATURE_IMPLEMENTATION_PLAN.md) and
 [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md),
@@ -120,7 +120,9 @@ Status key:
   Step 8, and the list stays open for the owner to close. Disruptive-server
   validation was completed on 2026-10-21, lost-quorum recovery on 2026-10-24 and
   the container scenarios on 2026-10-24, and Pre-Vote (design section 14.10) on
-  2026-10-25, which closes the one limitation they recorded. Failed-server cleanup was
+  2026-10-25, which closes the one limitation they recorded; its backoff-reset
+  follow-up, so a returning follower is not left waiting for the leader's gRPC
+  reconnect, was verified on 2026-10-26 (Jenkins builds 46, 49 and 55). Failed-server cleanup was
   implemented on 2026-10-21; its verification record is in the membership list.
 
 ### Phase 7 runtime and diagnostic close-out, recorded 2026-10-14

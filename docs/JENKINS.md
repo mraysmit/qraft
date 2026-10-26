@@ -248,9 +248,10 @@ not reach Docker Hub (a token read timeout in 48; a DNS lookup of
 On the Jenkins host, 2 of 6 `git ls-remote` calls to github.com hung for 25 seconds
 and downloads from GitHub ran at 7 to 55 KB/s while Cloudflare ran at 16 MB/s; 1 of
 25 DNS lookups through the gateway (192.168.137.1) failed where none failed through
-1.1.1.1. The link itself showed no errors. The cause was not found; the checks were clean again when build 55 ran on
-2026-10-26. If it recurs, look at the gateway's DNS and its route to GitHub
-before suspecting the code.
+1.1.1.1. The link itself showed no errors. The checks were clean again when build 55 ran on 2026-10-26, and the owner then
+fixed the Jenkins host's network (what was changed was not recorded). If it
+recurs, look at the gateway's DNS and its route to GitHub before suspecting the
+code.
 
 ## Job configuration
 
