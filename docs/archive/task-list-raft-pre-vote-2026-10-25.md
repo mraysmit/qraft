@@ -245,8 +245,11 @@ unknown server does not) and `GrpcRaftTransportTest` (a channel backing off from
 a restarted peer connects within 600 ms of `peerHeardFrom`; red with a timeout
 before the change). `DockerReturningVoterTest` now stops the follower for 200 s and
 requires it ready within 15 s of answering; it passed locally in 261 s, where the
-same scenario took 54.6 s to be ready before. The Jenkins exit gate must be
-repeated on the new code: three consecutive green runs, logs audited.
+same scenario took 54.6 s to be ready before. The Jenkins exit gate was repeated on
+the new code (`7136209`): builds 46, 49 and 55 passed every stage with every log
+audited (no unflagged error or trace, none mentioning a draining sequencer); builds
+47, 48 and 50 to 54 were lost to the Jenkins host's network (see `docs/JENKINS.md`)
+and are not counted either way. Follow-up closed, 2026-10-26.
 
 ## 7. Out of scope
 

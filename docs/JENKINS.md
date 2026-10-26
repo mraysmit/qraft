@@ -228,6 +228,30 @@ Their archived logs hold 651, 627 and 722 ERROR lines; every one carries an
 intentional-error or injected-failure flag, no stack trace is unflagged, and no
 error mentions a draining sequencer.
 
+The follow-up that resets a peer's gRPC reconnect backoff when it sends a vote or
+pre-vote request (`RaftTransport.peerHeardFrom`, `7136209`) was verified by builds
+[46](http://192.168.137.32:8080/job/Qraft/46/),
+[49](http://192.168.137.32:8080/job/Qraft/49/) and
+[55](http://192.168.137.32:8080/job/Qraft/55/), all on `7136209`. Each passed every
+stage: default 1,196, end-to-end 10 and Docker 41, every coverage gate met. Their
+archived logs hold 705, 694 and 663 ERROR lines, all flagged; no stack trace is
+unflagged and none mentions a draining sequencer. `DockerReturningVoterTest`, which
+now stops a follower for 200 seconds and requires it ready within 15 seconds of
+answering, took 260 to 284 seconds.
+
+Builds 47, 48 and 50 to 54, on the same commit, are not results for the code. 47, 50,
+51, 52 and 53 failed before any test ran, in the checkout or the Jenkinsfile fetch
+(`git fetch` stalled or was reset by github.com). 48 and 54 passed the default and
+end-to-end suites and failed in the Docker stage only because the image build could
+not reach Docker Hub (a token read timeout in 48; a DNS lookup of
+`registry-1.docker.io` through the host's local stub in 54, which failed 7 tests).
+On the Jenkins host, 2 of 6 `git ls-remote` calls to github.com hung for 25 seconds
+and downloads from GitHub ran at 7 to 55 KB/s while Cloudflare ran at 16 MB/s; 1 of
+25 DNS lookups through the gateway (192.168.137.1) failed where none failed through
+1.1.1.1. The link itself showed no errors. The cause was not found; the checks were clean again when build 55 ran on
+2026-10-26. If it recurs, look at the gateway's DNS and its route to GitHub
+before suspecting the code.
+
 ## Job configuration
 
 The job loads its pipeline from the repository's default branch using the following SCM configuration.
