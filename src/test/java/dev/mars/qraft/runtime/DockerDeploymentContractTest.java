@@ -305,6 +305,27 @@ class DockerDeploymentContractTest {
                 .contains("*.sh text eol=lf"));
     }
 
+    /**
+     * The compose files build their images from the JAR the scripts have just packaged. Without {@code --build},
+     * {@code up} keeps an image that already exists, and a start command would run an older build.
+     */
+    @Test
+    void everyStartCommandRebuildsItsImagesBeforeStartingThem() throws IOException {
+        Path root = Path.of("").toAbsolutePath();
+        Pattern up = Pattern.compile("docker compose [^\\r\\n]*\\bup\\b[^\\r\\n]*");
+        for (String script : List.of("docker/start.ps1", "docker/start.sh", "docker/start-quick.ps1",
+                "docker/start-quick.sh", "docker/start-observability.ps1", "docker/start-observability.sh")) {
+            Matcher command = up.matcher(Files.readString(root.resolve(script)));
+            int starts = 0;
+            while (command.find()) {
+                starts++;
+                assertTrue(command.group().contains(" --build"), script + " starts an image it may not have"
+                        + " rebuilt: " + command.group());
+            }
+            assertTrue(starts > 0, script + " starts its services with docker compose up");
+        }
+    }
+
     @Test
     void documentedClientConfigurationIsAValidCompleteExample() {
         Path root = Path.of("").toAbsolutePath();

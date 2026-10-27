@@ -47,7 +47,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "[1/3] Starting observability stack..." -ForegroundColor Green
-docker compose -f $ComposeFile up -d
+docker compose -f $ComposeFile up -d --build
 
 Write-Host ""
 Write-Host "[2/3] Waiting for services to be healthy..." -ForegroundColor Green

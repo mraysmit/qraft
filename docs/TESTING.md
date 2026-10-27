@@ -482,7 +482,9 @@ Only one cluster runs at a time: they share container names, so stop one before 
 Each `cluster` or `multinode` command first runs `docker/build-runtime.ps1`. It packages the runtime
 jar with `package -DskipTests` when the POM or a production source is newer than the jar, and does
 nothing when the jar is current. The command then starts the containers with
-`docker compose ... up -d` and returns. Follow a cluster's logs with
+`docker compose ... up -d --build` and returns. `--build` rebuilds the images from that jar; without
+it, `up` keeps an image that already exists, and until 2026-10-27 the commands ran whatever build
+first created their images. Follow a cluster's logs with
 `docker compose -f compose/<file>.yml logs -f`. `start.sh` and `start-quick.sh` are the shell
 equivalents.
 

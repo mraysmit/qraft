@@ -160,8 +160,11 @@ use the same container names and ports, so stop one before starting the other:
 
 ```powershell
 .\build-runtime.ps1
-docker compose -f compose/docker-compose-observability-cluster.yml up -d
+docker compose -f compose/docker-compose-observability-cluster.yml up -d --build
 ```
+
+`--build` rebuilds the servers' image from the jar just packaged; without it,
+`up` keeps an image that already exists and runs the older build.
 
 ## Persistent state
 

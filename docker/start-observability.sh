@@ -16,7 +16,7 @@ case "$action" in
 esac
 
 docker info >/dev/null 2>&1 || { echo "Docker is not running." >&2; exit 1; }
-docker compose -f "$COMPOSE_FILE" up -d
+docker compose -f "$COMPOSE_FILE" up -d --build
 
 waited=0
 while [ "$waited" -lt 60 ]; do

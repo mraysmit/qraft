@@ -9,13 +9,13 @@ case "$service" in
   cluster)
     sh "$SCRIPT_DIR/build-runtime.sh"
     echo "Starting Qraft single-server development environment..."
-    docker compose -f compose/docker-compose-single-server.yml up -d
+    docker compose -f compose/docker-compose-single-server.yml up -d --build
     echo "Server with embedded HTTP API available at http://localhost:8080"
     ;;
   multinode)
     sh "$SCRIPT_DIR/build-runtime.sh"
     echo "Starting Qraft multi-node cluster..."
-    docker compose -f compose/docker-compose-cluster.yml up -d
+    docker compose -f compose/docker-compose-cluster.yml up -d --build
     echo "Servers available at http://localhost:8081, :8082, and :8083"
     ;;
   stop)

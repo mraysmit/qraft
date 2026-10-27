@@ -22,7 +22,7 @@ case "$action" in
       network-test) file=compose/docker-compose-network-test.yml ;;
       *) echo "Unknown cluster type: $cluster_type" >&2; exit 2 ;;
     esac
-    docker compose -f "$file" up -d
+    docker compose -f "$file" up -d --build
     ;;
   stop) down_services ;;
   clean) down_services -v ;;

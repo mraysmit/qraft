@@ -45,7 +45,7 @@ function Start-Cluster {
     }
     
     Write-Host "Starting $Type cluster..." -ForegroundColor Green
-    docker compose -f $composeFile up -d
+    docker compose -f $composeFile up -d --build
     
     if ($LASTEXITCODE -eq 0) {
         Write-Host "Cluster started successfully!" -ForegroundColor Green
