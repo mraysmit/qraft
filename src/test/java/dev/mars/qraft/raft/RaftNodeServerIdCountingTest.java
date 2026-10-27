@@ -46,8 +46,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Tests that a {@link RaftNode} counts votes and acknowledgements by server ID, as its configuration records them.
  * A peer that answers under its configured name with another server ID, as a server that lost its storage does,
  * is neither counted nor listened to, even when it reports a higher term; the configured server's answer to the
- * same request is counted. A non-voter's acknowledgement does not count towards a commit, and a server that is
- * not a voter in any configuration never campaigns.
+ * same request is counted. A snapshot answered by another server ID ends that transfer, and a removed server's
+ * transfer is forgotten, so neither stops a later snapshot to the name. A non-voter's acknowledgement does not
+ * count towards a commit, and a server that is not a voter in any configuration never campaigns.
  *
  * <p>The test answers each request by hand. Before asserting that something did not happen, it sends the node a
  * vote request, which the node's transition sequencer handles after every earlier transition, so the answer
@@ -199,6 +200,62 @@ class RaftNodeServerIdCountingTest {
     @Test
     void aSnapshotInstallAnswerFromAnotherServerIdIsIgnored() throws Exception {
         HeldRaftTransportFixture held = new HeldRaftTransportFixture();
+        RaftNode leader = leaderSendingCASnapshot(held);
+
+        held.snapshots.getFirst().response().complete(InstallSnapshotResponse.newBuilder()
+                .setTerm(99).setSuccess(false).setFollowerServerId(WIPED).build());
+        barrier(leader);
+
+        assertEquals(RaftNode.State.LEADER, leader.getState());
+        assertEquals(1, leader.getCurrentTerm(), "an unconfigured server cannot move the leader's term");
+    }
+
+    /**
+     * The server that answered is not the one the snapshot was for, so the transfer cannot go on. It ends and backs
+     * off like any other failed transfer; left in place, it would stop every later snapshot to that name for the
+     * rest of the term.
+     */
+    @Test
+    void aSnapshotInstallAnswerFromAnotherServerIdEndsTheTransferAndTheSnapshotIsSentAgainAfterTheBackoff()
+            throws Exception {
+        HeldRaftTransportFixture held = new HeldRaftTransportFixture();
+        RaftNode leader = leaderSendingCASnapshot(held);
+
+        held.snapshots.getFirst().response().complete(InstallSnapshotResponse.newBuilder()
+                .setTerm(1).setSuccess(false).setFollowerServerId(WIPED).build());
+        barrier(leader);
+        assertFalse(await(leader.isSendingSnapshotTo("c")), "the transfer to c has ended");
+        cluster.timers(leader).firePeriodic(ManualRaftClusterFixture.HEARTBEAT_MS);
+        barrier(leader);
+        assertEquals(1, held.snapshots.size(), "inside the first backoff of 250 ms, no snapshot is sent");
+
+        cluster.timers(leader).advanceTime(250);
+        cluster.timers(leader).firePeriodic(ManualRaftClusterFixture.HEARTBEAT_MS);
+        awaitTrue(() -> held.snapshots.size() == 2, "once the backoff has passed, c is sent the snapshot again");
+        assertEquals(serverIdOf("c"), held.snapshots.get(1).request().getTargetServerId());
+    }
+
+    /**
+     * A removed server's snapshot transfer is forgotten with the rest of its tracking, so a server later added under
+     * its name is sent a snapshot of its own instead of waiting on one its predecessor never answered.
+     */
+    @Test
+    void aRemovedServersSnapshotTransferIsForgottenSoANewServerUnderItsNameStartsAfresh() throws Exception {
+        HeldRaftTransportFixture held = new HeldRaftTransportFixture();
+        RaftNode leader = leaderSendingCASnapshot(held);
+        assertTrue(await(leader.isSendingSnapshotTo("c")), "c's snapshot is under way and unanswered");
+
+        long removal = leader.getLastLogIndex() + 1;
+        CompletableFuture<Void> removed = leader.removeServer(serverIdOf("c"));
+        awaitTrue(() -> held.appendCarrying(removal, "b") != null, "the removal is sent to b");
+        held.appendCarrying(removal, "b").complete(ack(1, removal, serverIdOf("b")));
+        await(removed);
+
+        assertFalse(await(leader.isSendingSnapshotTo("c")), "the removed server's transfer is forgotten");
+    }
+
+    /** Returns a leader of a, b and c that has compacted its log and is sending c, which never answered, a snapshot. */
+    private RaftNode leaderSendingCASnapshot(HeldRaftTransportFixture held) throws Exception {
         TestRaftStorageFixture storage = new TestRaftStorageFixture();
         storage.open(null).get(10, TimeUnit.SECONDS);
         RaftNode leader = cluster.add(cluster.builder("a", MEMBERS, held, new QraftStateStore(),
@@ -224,14 +281,7 @@ class RaftNodeServerIdCountingTest {
         // c never answered, so its next index is behind the snapshot and a heartbeat sends it the snapshot.
         cluster.timers(leader).firePeriodic(ManualRaftClusterFixture.HEARTBEAT_MS);
         awaitTrue(() -> !held.snapshots.isEmpty(), "the leader sends c its snapshot");
-
-        held.snapshots.getFirst().response().complete(InstallSnapshotResponse.newBuilder()
-                .setTerm(99).setSuccess(false).setFollowerServerId(WIPED).build());
-        await(leader.handleVoteRequest(VoteRequest.newBuilder()
-                .setTerm(0).setCandidateId("probe").setCandidateServerId("probe").build()));
-
-        assertEquals(RaftNode.State.LEADER, leader.getState());
-        assertEquals(1, leader.getCurrentTerm(), "an unconfigured server cannot move the leader's term");
+        return leader;
     }
 
     @Test
@@ -294,7 +344,11 @@ class RaftNodeServerIdCountingTest {
 
     /** Returns once every transition the node had queued has been applied. */
     private void barrier() throws Exception {
-        await(node.handleVoteRequest(VoteRequest.newBuilder()
+        barrier(node);
+    }
+
+    private static void barrier(RaftNode raftNode) throws Exception {
+        await(raftNode.handleVoteRequest(VoteRequest.newBuilder()
                 .setTerm(0).setCandidateId("probe").setCandidateServerId("probe").build()));
     }
 

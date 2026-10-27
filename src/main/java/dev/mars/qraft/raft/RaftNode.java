@@ -1396,12 +1396,14 @@ public class RaftNode {
     /**
      * Brings the leader's per-peer tracking in line with the configuration in force. A server no longer
      * configured is forgotten, so a server later added under the same name starts afresh rather than inheriting
-     * its predecessor's match index and contact round. A server just added gets no check-quorum credit until it
-     * answers: its last contact is set to round 0, long past.
+     * its predecessor's match index, contact round, snapshot transfer and snapshot backoff. A server just added
+     * gets no check-quorum credit until it answers: its last contact is set to round 0, long past.
      */
     private void trackNewPeers() {
         Set<String> configured = new HashSet<>();
         for (RaftConfiguration.Server peer : peers()) configured.add(peer.name());
+        outboundSnapshotTransfers.keySet().retainAll(configured);
+        snapshotRetryBackoff.retainOnly(configured);
         nextIndex.keySet().retainAll(configured);
         matchIndex.keySet().retainAll(configured);
         lastContactRound.keySet().retainAll(configured);
@@ -1512,6 +1514,11 @@ public class RaftNode {
      */
     public long getNextIndex(String peerId) {
         return nextIndex.getOrDefault(peerId, -1L);
+    }
+
+    /** Whether this leader has a snapshot transfer to {@code peerId} under way. Read on the state loop, for tests. */
+    CompletableFuture<Boolean> isSendingSnapshotTo(String peerId) {
+        return onStateLoop(() -> CompletableFuture.completedFuture(outboundSnapshotTransfers.containsKey(peerId)));
     }
 
     /**
@@ -3516,17 +3523,27 @@ public class RaftNode {
         if (!fromConfiguredServer(transfer.target(), response.getFollowerServerId())) {
             logger.warn("Ignoring an InstallSnapshot response from {} with server ID {}, which is not the "
                     + "configured server", transfer.target(), response.getFollowerServerId());
-            return CompletableFuture.completedFuture(null);
+            return CompletableFuture.completedFuture(new OutboundSnapshotResponseDecision(
+                    transfer, snapshot, data, chunkIndex, totalChunks, last, response, false, true));
         }
         OutboundSnapshotResponseDecision decision = new OutboundSnapshotResponseDecision(
                 transfer, snapshot, data, chunkIndex, totalChunks, last, response,
-                response.getTerm() > currentTerm);
+                response.getTerm() > currentTerm, false);
         if (!decision.higherTerm()) return CompletableFuture.completedFuture(decision);
         return persistMetadata(response.getTerm(), Optional.empty()).thenApply(persisted -> decision);
     }
 
     private Void applyOutboundSnapshotResponse(OutboundSnapshotResponseDecision decision) {
         if (decision == null) return null;
+        if (decision.fromAnotherServer()) {
+            // The server that answered is not the one the snapshot is for, so the transfer cannot go on. It ends and
+            // backs off like a failed one; left in place, it would stop every later snapshot to the name this term.
+            if (isCurrentOutboundTransfer(decision.transfer())) {
+                snapshotRetryBackoff.failed(decision.transfer().target());
+                removeOutboundSnapshotTransfer(decision.transfer());
+            }
+            return null;
+        }
         InstallSnapshotResponse response = decision.response();
         if (decision.higherTerm()) {
             applyDurableHigherTerm(response.getTerm(), null);
@@ -3640,7 +3657,8 @@ public class RaftNode {
             int totalChunks,
             boolean last,
             InstallSnapshotResponse response,
-            boolean higherTerm) {}
+            boolean higherTerm,
+            boolean fromAnotherServer) {}
 
     private record OutboundSnapshotFailureDecision(
             OutboundSnapshotTransfer transfer,

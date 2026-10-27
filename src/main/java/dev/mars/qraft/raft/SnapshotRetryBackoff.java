@@ -19,13 +19,15 @@ package dev.mars.qraft.raft;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.LongSupplier;
 
 /**
  * How long a leader waits before it tries again to send a snapshot to a peer that did not take the last one. The
  * delay starts at a base value for the first failure and doubles with each consecutive failure to the same peer,
  * up to a cap, so a stopped peer is tried less and less often instead of at every opportunity. A delivered
- * snapshot, or a new leadership, starts it over. Time comes from the injected clock, in nanoseconds.
+ * snapshot, or a new leadership, starts it over, and a peer that leaves the configuration is forgotten. Time comes
+ * from the injected clock, in nanoseconds.
  *
  * <p>Not thread-safe: the leader's state loop is its only caller.</p>
  *
@@ -71,6 +73,12 @@ final class SnapshotRetryBackoff {
     void succeeded(String peer) {
         consecutiveFailures.remove(peer);
         retryAfterNanos.remove(peer);
+    }
+
+    /** Forgets every peer not in {@code peers}, as when a server leaves the configuration. */
+    void retainOnly(Set<String> peers) {
+        consecutiveFailures.keySet().retainAll(peers);
+        retryAfterNanos.keySet().retainAll(peers);
     }
 
     /** Forgets every peer, as when this server's leadership begins or ends. */

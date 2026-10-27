@@ -18,6 +18,7 @@ package dev.mars.qraft.raft;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -99,6 +100,19 @@ class SnapshotRetryBackoffTest {
         assertEquals(250 * MILLIS, backoff.failed("peer-2"));
         backoff.succeeded("peer-2");
         assertTrue(backoff.inBackoff("peer-1"), "a success for peer-2 leaves peer-1 in backoff");
+    }
+
+    @Test
+    void aPeerNoLongerConfiguredIsForgottenSoANewPeerUnderItsNameStartsFromTheBase() {
+        backoff.failed("peer-1");
+        backoff.failed("peer-1");
+        backoff.failed("peer-2");
+
+        backoff.retainOnly(Set.of("peer-2"));
+
+        assertFalse(backoff.inBackoff("peer-1"), "a removed peer's backoff is forgotten");
+        assertEquals(250 * MILLIS, backoff.failed("peer-1"), "a new peer under that name starts from the base delay");
+        assertTrue(backoff.inBackoff("peer-2"), "a peer still configured keeps its backoff");
     }
 
     @Test
