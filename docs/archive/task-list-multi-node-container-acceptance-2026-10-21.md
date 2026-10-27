@@ -5,7 +5,7 @@
 **Completed:** 2026-09-27
 **Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), Tranche 7
 **Predecessor:** [`task-list-health-propagation-2026-10-21.md`](task-list-health-propagation-2026-10-21.md)
-**Successor:** [`task-list-embedded-admin-interface-2026-10-21.md`](../../docs-design/task-list-embedded-admin-interface-2026-10-21.md)
+**Successor:** [`task-list-embedded-admin-interface-2026-10-27.md`](../../docs-design/task-list-embedded-admin-interface-2026-10-27.md)
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
 This task list is complete and retained as the implementation record for
@@ -383,4 +383,4 @@ consecutive runs.
 - ACLs, certificate-derived identity, and TLS between containers.
 
 The next active work is the embedded administrative interface, tracked in
-[`task-list-embedded-admin-interface-2026-10-21.md`](../../docs-design/task-list-embedded-admin-interface-2026-10-21.md).
+[`task-list-embedded-admin-interface-2026-10-27.md`](../../docs-design/task-list-embedded-admin-interface-2026-10-27.md).

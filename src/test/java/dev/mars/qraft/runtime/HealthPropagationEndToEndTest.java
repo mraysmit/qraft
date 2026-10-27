@@ -588,7 +588,7 @@ class HealthPropagationEndToEndTest {
         Files.writeString(target, """
                 {
                   "version": 1,
-                  "client": {"id": "checks-client", "address": "127.0.0.1", "httpPort": %d,
+                  "client": {"nodeName": "checks-client", "dataDirectory": %s, "address": "127.0.0.1", "httpPort": %d,
                             "heartbeatIntervalMs": 50, "shutdownTimeoutMs": 5000},
                   "servers": {"urls": [%s], "requestTimeoutMs": 5000},
                   "catalog": {
@@ -604,7 +604,8 @@ class HealthPropagationEndToEndTest {
                   },
                   "logging": {"directory": %s}
                 }
-                """.formatted(0, JSON.writeValueAsString(serverUri.toString()), workloadUrl.getPort(),
+                """.formatted(JSON.writeValueAsString(temporaryDirectory.resolve("client-data").toString()),
+                0, JSON.writeValueAsString(serverUri.toString()), workloadUrl.getPort(),
                 JSON.writeValueAsString(workloadUrl.resolve("/health").toString()), tcpPort,
                 JSON.writeValueAsString(temporaryDirectory.resolve("client-logs").toString())));
     }
@@ -615,7 +616,7 @@ class HealthPropagationEndToEndTest {
         Files.writeString(target, """
                 {
                   "version": 1,
-                  "client": {"id": "cluster-client", "address": "127.0.0.1", "httpPort": %d,
+                  "client": {"nodeName": "cluster-client", "dataDirectory": %s, "address": "127.0.0.1", "httpPort": %d,
                             "heartbeatIntervalMs": 50, "shutdownTimeoutMs": 5000},
                   "servers": {"urls": %s, "requestTimeoutMs": 5000},
                   "catalog": {
@@ -629,7 +630,8 @@ class HealthPropagationEndToEndTest {
                   },
                   "logging": {"directory": %s}
                 }
-                """.formatted(0, JSON.writeValueAsString(urls), workloadUrl.getPort(),
+                """.formatted(JSON.writeValueAsString(temporaryDirectory.resolve("client-data").toString()),
+                0, JSON.writeValueAsString(urls), workloadUrl.getPort(),
                 JSON.writeValueAsString(workloadUrl.resolve("/health").toString()), CLUSTER_TTL.toMillis(),
                 JSON.writeValueAsString(temporaryDirectory.resolve("client-logs").toString())));
     }

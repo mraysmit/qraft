@@ -41,6 +41,8 @@ import dev.mars.qraft.client.service.ReadinessPolicy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.http.HttpClient;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -83,8 +85,9 @@ public final class QraftClient implements AutoCloseable {
     private final ReadinessPolicy readinessPolicy;
     private final ScheduledExecutorService scheduler;
     private final ScheduledExecutorService checkScheduler;
-    private final HttpClient checkHttpClient = HttpClient.newHttpClient();
-    private final HttpClient serverHttpClient = HttpClient.newHttpClient();
+    private final ClientDataDirectory dataDirectory;
+    private final HttpClient checkHttpClient;
+    private final HttpClient serverHttpClient;
     private final LocalHealthChecks localChecks;
     private final HealthPublisher healthPublisher;
     private final AtomicBoolean running = new AtomicBoolean();
@@ -113,8 +116,12 @@ public final class QraftClient implements AutoCloseable {
     /**
      * Creates a client on the given executors. The client owns both and shuts them down with itself.
      *
+     * <p>The client holds its data directory from here until its shutdown completes. The directory is opened
+     * before anything else, so a client refused it opens no thread, HTTP client, or listener.
+     *
      * @param scheduler      runs registration retry delays, heartbeats, and periodic reconciliation
      * @param checkScheduler runs local health checks and publication retries
+     * @throws IllegalStateException if another client holds the data directory, or its node ID cannot be read
      */
     QraftClient(ClientConfiguration config, ServerRetryPolicy retryPolicy, Clock clock,
                ScheduledExecutorService scheduler, ScheduledExecutorService checkScheduler) {
@@ -122,9 +129,18 @@ public final class QraftClient implements AutoCloseable {
         this.retryPolicy = retryPolicy;
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
         this.checkScheduler = Objects.requireNonNull(checkScheduler, "checkScheduler");
+        try {
+            this.dataDirectory = openDataDirectory(config.getDataDirectory());
+        } catch (RuntimeException refused) {
+            scheduler.shutdownNow();
+            checkScheduler.shutdownNow();
+            throw refused;
+        }
+        this.checkHttpClient = HttpClient.newHttpClient();
+        this.serverHttpClient = HttpClient.newHttpClient();
         ServerContactTracker contactTracker = new ServerContactTracker(clock);
         this.serverClient = new HttpCatalogClient(serverHttpClient, new ObjectMapper(),
-                config.getServerUrls(), config.getClientId(), config.getTenant(), config.getNamespace(),
+                config.getServerUrls(), config.getNodeName(), config.getTenant(), config.getNamespace(),
                 config.getDatacenter(), config.getRegion(), Duration.ofMillis(config.getRequestTimeoutMs()),
                 contactTracker);
         this.registrationClient = new RegistrationClient(serverClient);
@@ -145,13 +161,21 @@ public final class QraftClient implements AutoCloseable {
         this.healthService = new HealthService(config, readinessPolicy::isReady);
     }
 
+    private static ClientDataDirectory openDataDirectory(Path directory) {
+        try {
+            return ClientDataDirectory.open(directory);
+        } catch (IOException failure) {
+            throw new UncheckedIOException("Could not open the client data directory " + directory, failure);
+        }
+    }
+
     public CompletableFuture<Boolean> start() {
         if (!running.compareAndSet(false, true)) {
             return CompletableFuture.completedFuture(registrationClient.isRegistered());
         }
         healthService.start();
         // A node is a name, an address, and where it is; the version of the client's build travels in its metadata.
-        Node client = Node.of(config.getClientId(), config.getAddress(), config.getDatacenter(), config.getRegion(),
+        Node client = Node.of(config.getNodeName(), config.getAddress(), config.getDatacenter(), config.getRegion(),
                 java.util.Map.of(Node.VERSION_METADATA_KEY, QraftVersion.current()));
         return registrationClient.register(client).thenApply(registered -> {
             if (registered) activateHeartbeat(client);
@@ -250,7 +274,9 @@ public final class QraftClient implements AutoCloseable {
                         + "automatic expiry may be required");
             }
             return succeeded;
-        }).thenCompose(succeeded -> awaitQuiescence().thenApply(quiet -> succeeded && quiet));
+        }).thenCompose(succeeded -> awaitQuiescence().thenApply(quiet -> succeeded && quiet))
+                // Nothing of the client runs any more, so the directory can belong to the next one.
+                .whenComplete((succeeded, failure) -> dataDirectory.close());
         return shutdownFuture;
     }
 
@@ -284,6 +310,8 @@ public final class QraftClient implements AutoCloseable {
     }
 
     public boolean isRunning() { return running.get(); }
+    /** The node ID kept in the client's data directory. */
+    public String nodeId() { return dataDirectory.nodeId(); }
     public HealthService healthService() { return healthService; }
 
     /** Returns the process-local status input for a configured TTL check, or empty for any other check. */

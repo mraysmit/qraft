@@ -36,7 +36,7 @@ and archived on 2026-10-14. Step 5 completed on 2026-10-21, and this list runs t
 end before the Consul-style client list starts (decided 2026-10-05).
 **Predecessor:** [`task-list-test-suite-remediation-2026-10-21.md`](task-list-test-suite-remediation-2026-10-21.md),
 archived 2026-10-02. Its packaged-artifact test waits for the admin interface.
-**Paused:** [`task-list-embedded-admin-interface-2026-10-21.md`](../../docs-design/task-list-embedded-admin-interface-2026-10-21.md), after its Step 1
+**Paused:** [`task-list-embedded-admin-interface-2026-10-27.md`](../../docs-design/task-list-embedded-admin-interface-2026-10-27.md), after its Step 1
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), principle 8 (section 3), sections 4.2, 14.4, 14.5 and 16
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 

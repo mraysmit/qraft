@@ -240,7 +240,8 @@ class UnifiedRuntimeEndToEndTest {
                 {
                   "version": 1,
                   "client": {
-                    "id": "runtime-client",
+                    "nodeName": "runtime-client",
+                    "dataDirectory": %s,
                     "address": "127.0.0.1",
                     "httpPort": %d,
                     "heartbeatIntervalMs": 40,
@@ -267,7 +268,8 @@ class UnifiedRuntimeEndToEndTest {
                   },
                   "logging": {"directory": %s}
                 }
-                """.formatted(clientPort, serverPort,
+                """.formatted(JSON.writeValueAsString(temporaryDirectory.resolve("client-data").toString()),
+                clientPort, serverPort,
                 JSON.writeValueAsString(temporaryDirectory.resolve("logs").toString()));
         Files.writeString(target, document);
     }

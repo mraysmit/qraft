@@ -23,6 +23,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -42,11 +43,12 @@ class HealthServiceTest {
     @Test
     void tracksLocalClientHealth() {
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1").serverUrl("http://localhost").clientPort(0).build();
+                .nodeName("client-1").dataDirectory(Path.of("data"))
+                .serverUrl("http://localhost").clientPort(0).build();
         HealthService health = new HealthService(config, () -> false);
 
         assertFalse(health.isHealthy());
-        assertEquals("client-1", health.clientId());
+        assertEquals("client-1", health.nodeName());
         health.start();
         assertTrue(health.isHealthy());
         health.shutdown();
@@ -56,7 +58,8 @@ class HealthServiceTest {
     @Test
     void servesLivenessAndReadinessEndpoints() throws Exception {
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-health").serverUrl("http://localhost").clientPort(0).build();
+                .nodeName("client-health").dataDirectory(Path.of("data"))
+                .serverUrl("http://localhost").clientPort(0).build();
         AtomicBoolean ready = new AtomicBoolean();
         HealthService health = new HealthService(config, ready::get);
         HttpClient client = HttpClient.newHttpClient();
@@ -81,7 +84,8 @@ class HealthServiceTest {
     @Test
     void reportsThePortItBoundOnlyWhileRunning() throws Exception {
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-port").serverUrl("http://localhost").clientPort(0).build();
+                .nodeName("client-port").dataDirectory(Path.of("data"))
+                .serverUrl("http://localhost").clientPort(0).build();
         HealthService health = new HealthService(config, () -> true);
 
         assertThrows(IllegalStateException.class, health::port, "no port is bound before start");

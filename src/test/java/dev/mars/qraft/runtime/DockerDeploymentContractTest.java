@@ -311,7 +311,7 @@ class DockerDeploymentContractTest {
         ClientConfiguration configuration = ClientConfiguration.fromFile(
                 root.resolve("docker/config/client.json"));
 
-        assertEquals("client-example", configuration.getClientId());
+        assertEquals("client-example", configuration.getNodeName());
         assertTrue(configuration.getServerUrls().size() == 1);
         assertTrue(configuration.getServices().size() == 1);
         assertEquals("web", configuration.getServices().getFirst().id());

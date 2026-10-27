@@ -16,18 +16,11 @@
 
 package dev.mars.qraft.raft.storage;
 
+import dev.mars.qraft.common.storage.IdentityFile;
+
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.AccessDeniedException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
-import java.util.Locale;
 import java.util.Optional;
-import java.util.UUID;
 
 /**
  * A server's durable Raft identity: a UUID generated at its first start and kept in {@value #FILE} in the Raft
@@ -37,7 +30,7 @@ import java.util.UUID;
  * storage was wiped gets a new one, so it can never pass for the server whose votes and log it lost. A data
  * directory from before server IDs gets one at its next start, since its storage makes it the same server. A
  * file that exists but cannot be read stops the start: replacing it would silently change the server's
- * identity.
+ * identity. The file is an {@link IdentityFile}, which a client's node ID shares.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-29
@@ -45,7 +38,7 @@ import java.util.UUID;
  */
 public final class ServerIdentity {
     static final String FILE = "server-id";
-    private static final String TEMPORARY_FILE = FILE + ".tmp";
+    private static final IdentityFile IDENTITY = new IdentityFile(FILE, "server ID", "this server");
 
     private ServerIdentity() {
     }
@@ -57,22 +50,7 @@ public final class ServerIdentity {
      * @throws IllegalStateException if the ID file exists but does not hold a server ID
      */
     public static String loadOrCreate(Path directory) throws IOException {
-        Path file = directory.resolve(FILE);
-        if (Files.exists(file)) {
-            return read(file);
-        }
-        Files.createDirectories(directory);
-        String id = UUID.randomUUID().toString();
-        Path temporary = directory.resolve(TEMPORARY_FILE);
-        try (FileChannel channel = FileChannel.open(temporary,
-                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
-            ByteBuffer bytes = ByteBuffer.wrap(id.getBytes(StandardCharsets.UTF_8));
-            while (bytes.hasRemaining()) channel.write(bytes);
-            channel.force(true);
-        }
-        Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE);
-        forceDirectory(directory);
-        return id;
+        return IDENTITY.loadOrCreate(directory);
     }
 
     /**
@@ -81,8 +59,7 @@ public final class ServerIdentity {
      * @throws IllegalStateException if the ID file exists but does not hold a server ID
      */
     public static Optional<String> existing(Path directory) throws IOException {
-        Path file = directory.resolve(FILE);
-        return Files.exists(file) ? Optional.of(read(file)) : Optional.empty();
+        return IDENTITY.existing(directory);
     }
 
     /**
@@ -91,44 +68,11 @@ public final class ServerIdentity {
      * changes the identity of a directory a server has used under its own ID.
      */
     public static void replace(Path directory, String serverId) throws IOException {
-        if (!UUID.fromString(serverId).toString().equals(serverId)) {
-            throw new IllegalArgumentException("A server ID is a canonical UUID: " + serverId);
-        }
-        Path temporary = directory.resolve(TEMPORARY_FILE);
-        try (FileChannel channel = FileChannel.open(temporary,
-                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
-            ByteBuffer bytes = ByteBuffer.wrap(serverId.getBytes(StandardCharsets.UTF_8));
-            while (bytes.hasRemaining()) channel.write(bytes);
-            channel.force(true);
-        }
-        Files.move(temporary, directory.resolve(FILE), StandardCopyOption.ATOMIC_MOVE,
-                StandardCopyOption.REPLACE_EXISTING);
-        forceDirectory(directory);
+        IDENTITY.replace(directory, serverId);
     }
 
     /** Forces {@code directory}'s entries to disk, where the platform allows a directory to be opened for it. */
     public static void forceDirectory(Path directory) throws IOException {
-        try (FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ)) {
-            channel.force(true);
-        } catch (AccessDeniedException denied) {
-            // Windows cannot open a directory for forcing; its rename is already durable there.
-            if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("windows")) {
-                throw denied;
-            }
-        }
-    }
-
-    private static String read(Path file) throws IOException {
-        String content = Files.readString(file, StandardCharsets.UTF_8);
-        try {
-            if (UUID.fromString(content).toString().equals(content)) {
-                return content;
-            }
-        } catch (IllegalArgumentException notAUuid) {
-            // Reported below with the file named.
-        }
-        throw new IllegalStateException("The server ID in " + file + " cannot be read. It is not replaced, "
-                + "because that would change this server's identity; restore the file, or remove the whole "
-                + "data directory to start this server as a new one");
+        IdentityFile.forceDirectory(directory);
     }
 }

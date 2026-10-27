@@ -1,7 +1,7 @@
 # Qraft Administrative UI Implementation Plan
 
 **Status:** Agreed 2026-09-27; open questions 2 to 4 are decided when their increments start
-**Last updated:** 2026-10-21 (dated task-list links refreshed; the administrative interface remains paused after Step 1 while backend delivery continues. Earlier, 2026-10-09: section 4.1: the node list is at `/v1/catalog/nodes`, the node writes are listed, and bare `/health` is gone, after the single-POM list's Phase 4. On 2026-10-05: the build location and the tenancy owner, after the move to one Maven project; section 4 was brought up to date with scoped reads and the Raft operator endpoints on 2026-10-02)
+**Last updated:** 2026-10-27 (later the same day, after the review of the interface against the ACL list: access control moves from UI-6 to UI-5 with the security profile, sign-in, status, tokens, policies and explanations; server removal joins UI-5; section 4.2 gains the profile and the explanation endpoint; the client rows' data; open questions 5 and 6. Earlier that day: section 3: the asset manifest's file name in the Vite build; sections 4.2, 5 and 6: tokens and policies come from the ACL list, and roles and authentication methods are reserved; the embedded-interface task-list link refreshed. Earlier, 2026-10-26: section 4.1, the service writes are on `PUT /v1/catalog/register` and `/deregister` after the client list's Phase 1. Earlier, 2026-10-21: dated task-list links refreshed; the administrative interface remains paused after Step 1 while backend delivery continues. Earlier, 2026-10-09: section 4.1: the node list is at `/v1/catalog/nodes`, the node writes are listed, and bare `/health` is gone, after the single-POM list's Phase 4. On 2026-10-05: the build location and the tenancy owner, after the move to one Maven project; section 4 was brought up to date with scoped reads and the Raft operator endpoints on 2026-10-02)
 **Design:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md) (what the interface is) and
 [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections
 12.4, 12.4.1, and 19.6 (how it is packaged and served)
@@ -44,7 +44,7 @@ rest of the platform is. This plan changes only when scope or ordering changes.
 ## 3. Technology baseline
 
 The stack was agreed in
-[`task-list-embedded-admin-interface-2026-10-21.md`](task-list-embedded-admin-interface-2026-10-21.md),
+[`task-list-embedded-admin-interface-2026-10-27.md`](task-list-embedded-admin-interface-2026-10-27.md),
 section 4.1, after reviewing the `peegeeq-management-ui` and
 `peegeeq-utilities-ui` modules:
 
@@ -56,7 +56,9 @@ section 4.1, after reviewing the `peegeeq-management-ui` and
   - `npm ci` against a committed lock file;
   - the build runs in `generate-resources`;
   - output is staged under `META-INF/qraft/ui/` and never committed;
-  - Vite's asset manifest is on;
+  - Vite writes its asset manifest as `asset-manifest.json`
+    (`build.manifest: 'asset-manifest.json'`; with `true`, Vite names it
+    `.vite/manifest.json`);
   - no source maps are published.
 - **Serving.** Classpath resources on the existing JDK HTTP server, with a
   per-request `index.html` that carries bootstrap settings and a content
@@ -105,7 +107,13 @@ section 4.1, after reviewing the `peegeeq-management-ui` and
 | HTTP key/value API with indexes and compare-and-set | Key/Value browser | Server HTTP API over the existing replicated state |
 | Sessions and locks | Sessions, Locks | Platform design section 11, not started |
 | Replicated tenants and namespaces with an API | Tenants, Namespaces, scope selector options | Tenancy work; nothing exists today (`qraft-tenant` was removed on 2026-10-04) |
-| Authentication, authorization, and ACL resources | Any mutation; Tokens, Policies, Roles, Auth Methods; permission-shaped navigation | Security, not started |
+| Authentication, authorization, and the token and policy resources | Any mutation; Tokens, Policies; permission-shaped navigation; the token menu | [`task-list-acl-and-tokens-2026-10-27.md`](task-list-acl-and-tokens-2026-10-27.md), proposed to follow the client list |
+| The security profile and authentication mode in the bootstrap data; `installedFromFile` on the management token | Security status, banners, sign-in | ACL list, proposals 12 and 16; UI-0's bootstrap object |
+| Explaining a decision, `POST /v1/acl/explain`; the tokens linking to a policy, `GET /v1/acl/tokens?policy=` | Explanations; policy pages; policy deletion | ACL list, proposals 18 and 19 |
+| Lock-out and linked-policy refusals, `409 acl_lockout` and `409 policy_in_use` | Token and policy review steps | ACL list, proposals 17 and 18 |
+| Node ID and name conflicts | Client rows | Client list, Phase 2 |
+| A client's readiness, server endpoint, and last reconciliation | Client rows | None: only the client knows them (open question 6) |
+| Roles, authentication methods, and login | Roles, Auth Methods | None: out of the ACL list's scope (its section 7); reserved (UI/UX design section 2) |
 | Durable audit sink and query | Audit page | Events and security |
 | Topology, intentions, routing, gateways, peering, federation | Connect and Multi-cluster sections | No platform contract; reserved (UI/UX design section 2) |
 
@@ -125,7 +133,7 @@ Status key:
 | 1 | Services list (5.1) | Partial | Ready by calling the catalog and then health once per service. The summary endpoint removes that fan-out and adds last change. |
 | 1 | Service detail: Overview, Instances, Health Checks, Metadata (5.1) | Ready | Registration source and indexes need the catalog to record them. |
 | 1 | Service detail: Events tab | Blocked | Event journal |
-| 1 | Nodes and Clients: client rows (5.2) | Partial | Owned services and failing checks can be derived from the catalog; a summary field avoids that. Scope needs scoped reads. |
+| 1 | Nodes and Clients: client rows (5.2) | Partial | Owned services and failing checks can be derived from the catalog; a summary field avoids that. A node has no scope. The node ID needs the client list's Phase 2. Readiness, server endpoint, and last reconciliation need clients to report them (open question 6). |
 | 1 | Nodes and Clients: server rows (5.2) | Blocked | Membership; storage state |
 | 1 | Health Checks, cross-service (5.3) | Partial | Ready by iterating services; the listing endpoint makes it scale. |
 | 1 | Cluster Overview (9.1) | Partial | Answering-node Raft state and service and client totals are ready. Quorum, lag, queue, WAL, snapshot, and recent events are blocked. |
@@ -139,10 +147,13 @@ Status key:
 | 2 | Sessions and Locks (7.2) | Blocked | Sessions and locks |
 | 2 | Watches (7.3) | Blocked | Blocking queries or watches; event journal |
 | 2 | Mutation outcomes and audit display (11) | Blocked | Authentication; audit events |
+| 2 | Access: Status, sign-in, token menu, banners (10.2.1, 10.2.2) | Blocked | ACL list: the profile, the bootstrap data, `GET /v1/acl/token/self` |
+| 2 | Access: Tokens, Policies, Explain (10.2.3 to 10.2.6) | Blocked | ACL list: the token and policy API, explanations, the integrity refusals |
+| 2 | Server removal (9.2) | Partial | The API exists; authentication must come first |
 | 3 | Topology, Intentions, Routing, Gateways (6) | Reserved | Platform contracts |
 | 4 | Datacenters, Regions, Peers, Federation (8) | Reserved | Platform contracts |
 | 4 | Tenants and Namespaces (10.1) | Blocked | Replicated tenants and namespaces |
-| 4 | Tokens, Policies, Roles, Auth Methods (10.2) | Blocked | Authentication and ACL resources |
+| 4 | Roles, Auth Methods (10.2) | Reserved | Roles, authentication methods, and login |
 | 4 | Audit (10.3) | Blocked | Durable audit sink |
 | All | Live updates and pause (12) | Blocked | Blocking queries or watches |
 
@@ -181,7 +192,7 @@ The shared frontend pieces also land here:
 No backend prerequisites.
 
 UI-0 and UI-1 together are the scope of
-[`task-list-embedded-admin-interface-2026-10-21.md`](task-list-embedded-admin-interface-2026-10-21.md).
+[`task-list-embedded-admin-interface-2026-10-27.md`](task-list-embedded-admin-interface-2026-10-27.md).
 
 ### UI-2 Scoped discovery
 
@@ -236,17 +247,35 @@ Views:
 
 Backend first:
 
-- authentication and authorization for the HTTP API;
+- authentication and authorization for the HTTP API, from the ACL list:
+  tokens, policies, the anonymous token, and `GET /v1/acl/token/self`;
+- the ACL list's integrity and explanation features: the security profile in
+  the bootstrap data, the lock-out and linked-policy refusals, the management
+  token's file marker, and `POST /v1/acl/explain`;
 - audit events for every mutation.
 
 Views:
 
 - permission-shaped navigation;
+- access control, UI/UX design section 10.2: the security status page and
+  banners, sign-in and the token menu, and how the browser holds the token
+  secret; Tokens, including the one-time secret, revocation, replacement, and
+  the management token's revocation order; Policies, with linked tokens and
+  protected deletion; and explanations;
 - the mutation workflow of UI/UX design section 11: review step, structured
   outcomes, and unknown-outcome handling;
-- service register, update, and deregister.
+- service register, update, and deregister, within open question 5's answer;
+- server removal, with its quorum review (UI/UX design section 9.2).
 
-From this increment the interface is authenticated. Until then it is read-only.
+From this increment the interface signs in with a token, or, on a development
+server running without ACLs, works under the no-access-control banner. A
+production server always has ACLs on (ACL list, proposal 16). Until this
+increment the interface is read-only. If ACLs are enabled before it, the
+read-only interface's calls act as the anonymous token.
+
+Access control comes here, not with governance in UI-6, because every
+mutation depends on it and an operator needs to manage tokens from the first
+mutation onwards.
 
 ### UI-6 Coordination and governance
 
@@ -255,7 +284,8 @@ Backend first:
 - the HTTP key/value API with compare-and-set;
 - sessions and locks;
 - replicated tenants and namespaces;
-- the ACL resources.
+- the `key` and `session` rules, which the key/value and sessions lists add
+  to the ACL model.
 
 Views:
 
@@ -265,7 +295,6 @@ Views:
 - Watches;
 - Tenants;
 - Namespaces;
-- Tokens, Policies, Roles, and Auth Methods;
 - Audit, once a durable sink exists.
 
 This increment is large enough to be split into several task lists when it is
@@ -275,7 +304,8 @@ reached.
 
 Connect (topology, intentions, routing, gateways) and Multi-cluster remain
 reserved until the platform defines their contracts (UI/UX design section 2).
-They produce no navigation entries.
+So do Roles and Auth Methods, until a task list delivers them. They produce no
+navigation entries.
 
 ### Dependencies
 
@@ -326,7 +356,7 @@ contracts exist.
 1. **Default state before authentication.** Decided 2026-09-27. The read-only
    interface is enabled by default before UI-5, with a startup warning that it
    is unauthenticated
-   ([`task-list-embedded-admin-interface-2026-10-21.md`](task-list-embedded-admin-interface-2026-10-21.md),
+   ([`task-list-embedded-admin-interface-2026-10-27.md`](task-list-embedded-admin-interface-2026-10-27.md),
    decision 4).
 2. **Source of scope options.** Until replicated tenants exist (UI-6), should
    the scope selector list only the scopes present in the catalog, or should
@@ -336,3 +366,15 @@ contracts exist.
    to the leader, or with its own partial view clearly labelled?
 4. **Metrics.** Should the Metrics page stay a configured link to the external
    dashboard, or read bounded summaries from the API listener?
+5. **Services registered from the interface.** Raised 2026-10-27. A client
+   re-registers the services it owns, and removes only what it registered
+   itself (UI/UX design section 5.1). Should the interface register only
+   services on nodes that no client runs, or also on a client's node, with a
+   warning? A node registered without a client stops heartbeating and is
+   reaped (platform design section 9.2), so the first answer also needs a way
+   to keep such a node, which the platform does not have.
+6. **What clients report.** Raised 2026-10-27. A client's readiness, current
+   server endpoint, and last successful reconciliation are known only to the
+   client. Should clients report them to the servers, for example as node
+   metadata on each heartbeat, or should the client rows leave them out? The
+   first is a change to the client list.

@@ -649,44 +649,15 @@ public final class SharedDockerClusterFixture {
         }
 
         logger.info("Building Docker image via: " + buildComposeFile.getAbsolutePath());
-        buildImageRetryingAMissingSnapshot(() -> runImageBuild(buildComposeFile));
+        runImageBuild(buildComposeFile);
         imageBuilt = true;
         logger.info("Docker image built successfully: qraft-runtime:test");
     }
 
-    /** One attempt to build the runtime image, which throws the build's failure. */
-    @FunctionalInterface
-    interface ImageBuild {
-        void run();
-    }
-
     /**
-     * Builds the runtime image through {@code build}. The Docker daemon's cache can name a layer whose snapshot it has
-     * already removed, and then fails the build ("failed to prepare extraction snapshot ... parent snapshot ... does
-     * not exist"). The next attempt builds cleanly, so that one failure is tried again once; any other failure, or
-     * the same one twice, is thrown.
+     * Runs {@code docker compose build} for the runtime image once, and fails with the last of its output. A failure is
+     * never tried again: a daemon that loses a snapshot its build cache names is a fault to investigate.
      */
-    static void buildImageRetryingAMissingSnapshot(ImageBuild build) {
-        try {
-            build.run();
-        } catch (RuntimeException first) {
-            if (first.getMessage() == null || !MISSING_SNAPSHOT.matcher(first.getMessage()).find()) throw first;
-            logger.warning("The Docker daemon lost a snapshot that its build cache names; building the image once"
-                    + " more: " + first.getMessage());
-            try {
-                build.run();
-            } catch (RuntimeException second) {
-                second.addSuppressed(first);
-                throw second;
-            }
-        }
-    }
-
-    /** The daemon's report of a cached layer whose parent snapshot it no longer has. */
-    private static final java.util.regex.Pattern MISSING_SNAPSHOT = java.util.regex.Pattern.compile(
-            "failed to prepare extraction snapshot[^\\n]*parent snapshot \\S+ does not exist");
-
-    /** Runs {@code docker compose build} for the runtime image once, and fails with the last of its output. */
     private static void runImageBuild(File buildComposeFile) {
         try {
             ProcessBuilder pb = new ProcessBuilder(

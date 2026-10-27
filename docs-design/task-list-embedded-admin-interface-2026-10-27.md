@@ -1,7 +1,7 @@
 # Task List: Embedded Administrative Interface
 
 **Date:** 2026-09-27
-**Last updated:** 2026-10-21 (current-task pointer updated to membership Step 6 after Step 5 completion; this list remains paused after Step 1; renamed with linked documents. Earlier, 2026-10-14: current-task pointer updated to membership Step 5 after cleanup archival. On 2026-10-11: renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: the read APIs, the development proxy, and the reserved segments, after the single-POM list's Phase 4. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: the log audit added to Step 6)
+**Last updated:** 2026-10-27 (later the same day: Step 2's bootstrap object carries the security profile, from the ACL list's proposal 16. Earlier that day: decision 2 and Step 3: the asset manifest is written as `asset-manifest.json`, the name design section 12.4.1 gives; renamed to the date of its last change. Earlier, 2026-10-21: current-task pointer updated to membership Step 6 after Step 5 completion; this list remains paused after Step 1; renamed with linked documents. Earlier, 2026-10-14: current-task pointer updated to membership Step 5 after cleanup archival. On 2026-10-11: renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: the read APIs, the development proxy, and the reserved segments, after the single-POM list's Phase 4. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: the log audit added to Step 6)
 **Active work:** Paused after Step 1 on 2026-09-27, until the backend features in [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md) are delivered; Step 2 is next when it resumes
 **Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increments UI-0 and UI-1
 **Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 12.4, 12.4.1, 19.6, and 21; [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md), sections 14 and 15
@@ -104,8 +104,10 @@ and corrects the build and security weaknesses the review found.
      resources under `META-INF/qraft/ui/`. It is never committed and never
      written into another module's source tree. peegeeq's configuration
      empties a directory in `peegeeq-rest`.
-   - `build.manifest: true` produces the asset manifest that design section
-     12.4.1 requires.
+   - `build.manifest: 'asset-manifest.json'` writes the asset manifest that
+     design section 12.4.1 requires, at the root of the output and under the
+     name that section gives. With `true`, Vite would write it as
+     `.vite/manifest.json`.
    - Source maps are not published: they are off, or generated without a
      reference from the bundles. peegeeq commits and serves them.
 3. **Frontend tests.** Vitest with jsdom and Testing Library, run by
@@ -189,7 +191,10 @@ Until Step 3 packages assets, an enabled server answers the UI path with 404.
    - the API base path;
    - the UI path;
    - enabled feature flags;
-   - the authentication mode;
+   - the authentication mode, `none` until the ACL list's enforcement exists,
+     then `none` or `token`;
+   - the security profile, `production` or `development`, once the ACL list
+     adds it (its proposal 16);
    - a fresh content security policy nonce.
 
    It contains no secrets.
@@ -224,7 +229,7 @@ real HTTP, each shown failing first.
    sets out. Stage the output as generated resources under
    `META-INF/qraft/ui/`. The output contains:
    - `index.html`;
-   - Vite's asset manifest;
+   - Vite's asset manifest, `asset-manifest.json`;
    - `assets/<content-hashed files>`;
    - no source maps.
 

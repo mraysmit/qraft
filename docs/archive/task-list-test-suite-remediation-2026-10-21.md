@@ -6,7 +6,7 @@
 **Source review:** [`QRAFT_TEST_SUITE_REVIEW_2026-10-21.md`](../../docs-design/QRAFT_TEST_SUITE_REVIEW_2026-10-21.md), sections 3 to 7
 **Predecessor, run alongside:** [`task-list-platform-hygiene-and-readiness-2026-10-21.md`](task-list-platform-hygiene-and-readiness-2026-10-21.md), archived 2026-09-28
 **Successor:** [`task-list-raft-membership-changes-2026-10-24.md`](task-list-raft-membership-changes-2026-10-24.md)
-**Paused:** [`task-list-embedded-admin-interface-2026-10-21.md`](../../docs-design/task-list-embedded-admin-interface-2026-10-21.md), after its Step 1
+**Paused:** [`task-list-embedded-admin-interface-2026-10-27.md`](../../docs-design/task-list-embedded-admin-interface-2026-10-27.md), after its Step 1
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
 This was the current task list for the project until 2026-09-29. When the

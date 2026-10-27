@@ -48,12 +48,12 @@ class ClientConfigurationTest {
     @Test
     void buildsDiscoveryConfiguration() {
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1").address("127.0.0.1")
+                .nodeName("client-1").dataDirectory(Path.of("data")).address("127.0.0.1")
                 .clientPort(8081).region("eu").datacenter("dc1")
                 .serverUrl("http://localhost:9000").heartbeatInterval(1000)
                 .requestTimeoutMs(2500).build();
 
-        assertEquals("client-1", config.getClientId());
+        assertEquals("client-1", config.getNodeName());
         assertEquals(8081, config.getClientPort());
         assertEquals("eu", config.getRegion());
         assertEquals("dc1", config.getDatacenter());
@@ -66,23 +66,27 @@ class ClientConfigurationTest {
         assertThrows(IllegalArgumentException.class, () -> ClientConfiguration.builder()
                 .serverUrl("http://localhost").build());
         assertThrows(IllegalArgumentException.class, () -> ClientConfiguration.builder()
-                .clientId("client").build());
+                .nodeName("client").dataDirectory(Path.of("data")).build());
         assertThrows(IllegalArgumentException.class, () -> ClientConfiguration.builder()
-                .clientId("client").serverUrl("http://localhost").clientPort(-1).build());
+                .nodeName("client").dataDirectory(Path.of("data"))
+                .serverUrl("http://localhost").clientPort(-1).build());
         assertThrows(IllegalArgumentException.class, () -> ClientConfiguration.builder()
-                .clientId("client").serverUrl("http://localhost").clientPort(65_536).build());
+                .nodeName("client").dataDirectory(Path.of("data"))
+                .serverUrl("http://localhost").clientPort(65_536).build());
     }
 
     @Test
     void portZeroAsksForAnyFreePort() {
         assertEquals(0, ClientConfiguration.builder()
-                .clientId("client").serverUrl("http://localhost").clientPort(0).build().getClientPort());
+                .nodeName("client").dataDirectory(Path.of("data"))
+                .serverUrl("http://localhost").clientPort(0).build().getClientPort());
         assertEquals(0, ClientConfiguration.fromJson("""
-                {"version":1,"client":{"id":"a","httpPort":0},
+                {"version":1,"client":{"nodeName":"a","dataDirectory":"data","httpPort":0},
                  "servers":{"urls":["http://localhost:8080"]},"catalog":{}}
                 """).getClientPort());
         assertEquals(65_535, ClientConfiguration.builder()
-                .clientId("client").serverUrl("http://localhost").clientPort(65_535).build().getClientPort());
+                .nodeName("client").dataDirectory(Path.of("data"))
+                .serverUrl("http://localhost").clientPort(65_535).build().getClientPort());
     }
 
     @Test
@@ -91,7 +95,7 @@ class ClientConfigurationTest {
                 {
                   "version": 1,
                   "client": {
-                    "id": "node-a", "address": "10.0.0.4",
+                    "nodeName": "node-a", "dataDirectory": "/var/lib/qraft", "address": "10.0.0.4",
                     "httpPort": 8181, "heartbeatIntervalMs": 4000,
                     "shutdownTimeoutMs": 12000,
                     "datacenter": "dc1", "region": "eu-west"
@@ -113,7 +117,7 @@ class ClientConfigurationTest {
                 }
                 """);
 
-        assertEquals("node-a", config.getClientId());
+        assertEquals("node-a", config.getNodeName());
         assertEquals(List.of(URI.create("http://one:8080"), URI.create("http://two:8080")),
                 config.getServerUrls());
         assertEquals("tenant-a", config.getTenant());
@@ -141,7 +145,8 @@ class ClientConfigurationTest {
     @Test
     void aMinimalDocumentTakesEveryDocumentedDefault() {
         ClientConfiguration config = ClientConfiguration.fromJson("""
-                {"version":1,"client":{"id":"client-a"},"servers":{"urls":["http://localhost:8080"]}}
+                {"version":1,"client":{"nodeName":"client-a","dataDirectory":"data"},
+                 "servers":{"urls":["http://localhost:8080"]}}
                 """);
 
         assertEquals(8080, config.getClientPort());
@@ -168,7 +173,8 @@ class ClientConfigurationTest {
         assertRefused("\"text\"", "Client configuration must be a JSON object");
         for (int version : new int[] {0, 2}) {
             assertRefused("""
-                    {"version":%d,"client":{"id":"client-a"},"servers":{"urls":["http://localhost:8080"]}}
+                    {"version":%d,"client":{"nodeName":"client-a","dataDirectory":"data"},
+                     "servers":{"urls":["http://localhost:8080"]}}
                     """.formatted(version), "Unsupported configuration version: " + version);
         }
     }
@@ -192,8 +198,10 @@ class ClientConfigurationTest {
     @Test
     void anEnvironmentStylePlaceholderIsRefused() {
         for (String document : List.of(
-                "{\"version\":1,\"client\":{\"id\":\"${CLIENT_ID}\"},\"servers\":{\"urls\":[\"http://a:8080\"]}}",
-                "{\"version\":1,\"client\":{\"id\":\"a\"},\"servers\":{\"urls\":[\"http://${SERVER}:8080\"]}}",
+                "{\"version\":1,\"client\":{\"nodeName\":\"${NODE_NAME}\",\"dataDirectory\":\"data\"},"
+                        + "\"servers\":{\"urls\":[\"http://a:8080\"]}}",
+                "{\"version\":1,\"client\":{\"nodeName\":\"a\",\"dataDirectory\":\"data\"},"
+                        + "\"servers\":{\"urls\":[\"http://${SERVER}:8080\"]}}",
                 minimalJson("[\"http://localhost:8080\"]", """
                         "services":[{"id":"web","name":"web","address":"${WEB_HOST}","port":8080}]"""),
                 minimalJson("[\"http://localhost:8080\"]", """
@@ -240,30 +248,30 @@ class ClientConfigurationTest {
         assertThrows(IllegalArgumentException.class, () -> ClientConfiguration.fromJson(
                 minimalJson("[\"http://localhost:8080\"]", "\"tenant\": \" \"")));
         assertThrows(IllegalArgumentException.class, () -> ClientConfiguration.fromJson("""
-                {"version":1,"client":{"id":"a","httpPort":"invalid"},
+                {"version":1,"client":{"nodeName":"a","dataDirectory":"data","httpPort":"invalid"},
                  "servers":{"urls":["http://localhost:8080"]},"catalog":{}}
                 """));
         assertThrows(IllegalArgumentException.class, () -> ClientConfiguration.fromJson("""
-                {"version":1,"client":{"id":"a","httpPort":70000},
+                {"version":1,"client":{"nodeName":"a","dataDirectory":"data","httpPort":70000},
                  "servers":{"urls":["http://localhost:8080"]},"catalog":{}}
                 """));
         assertThrows(IllegalArgumentException.class, () -> ClientConfiguration.fromJson("""
-                {"version":1,"client":{"id":"a"},
+                {"version":1,"client":{"nodeName":"a","dataDirectory":"data"},
                  "servers":{"urls":["http://localhost:8080"],"requestTimeoutMs":0},
                  "catalog":{}}
                 """));
         assertThrows(IllegalArgumentException.class, () -> ClientConfiguration.fromJson("""
-                {"version":1,"client":{"id":"a"},
+                {"version":1,"client":{"nodeName":"a","dataDirectory":"data"},
                  "servers":{"urls":["http://localhost:8080"]},
                  "catalog":{"registrationRetryMinMs":1000,"registrationRetryMaxMs":100}}
                 """));
         assertThrows(IllegalArgumentException.class, () -> ClientConfiguration.fromJson("""
-                {"version":1,"client":{"id":"a"},
+                {"version":1,"client":{"nodeName":"a","dataDirectory":"data"},
                  "servers":{"urls":["http://localhost:8080"]},
                  "catalog":{"contactFreshnessMs":0}}
                 """));
         assertThrows(IllegalArgumentException.class, () -> ClientConfiguration.fromJson("""
-                {"version":1,"client":{"id":"a","shutdownTimeoutMs":0},
+                {"version":1,"client":{"nodeName":"a","dataDirectory":"data","shutdownTimeoutMs":0},
                  "servers":{"urls":["http://localhost:8080"]},"catalog":{}}
                 """));
     }
@@ -271,27 +279,86 @@ class ClientConfigurationTest {
     @Test
     void rejectsUnknownSettingsAndDuplicateJsonKeys() {
         assertThrows(IllegalArgumentException.class, () -> ClientConfiguration.fromJson("""
-                {"version":1,"client":{"id":"a","unexpected":true},
+                {"version":1,"client":{"nodeName":"a","dataDirectory":"data","unexpected":true},
                  "servers":{"urls":["http://localhost:8080"]}}
                 """));
         assertThrows(IllegalArgumentException.class, () -> ClientConfiguration.fromJson("""
-                {"version":1,"version":1,"client":{"id":"a"},
+                {"version":1,"version":1,"client":{"nodeName":"a","dataDirectory":"data"},
                  "servers":{"urls":["http://localhost:8080"]}}
                 """));
         IllegalArgumentException removed = assertThrows(IllegalArgumentException.class,
                 () -> ClientConfiguration.fromJson("""
-                {"version":1,"client":{"id":"a","hostname":"host-a"},
+                {"version":1,"client":{"nodeName":"a","dataDirectory":"data","hostname":"host-a"},
                  "servers":{"urls":["http://localhost:8080"]}}
                 """));
         assertEquals("Unknown client setting: hostname", removed.getMessage(),
                 "a node has no host name, so the setting that named one is gone");
         IllegalArgumentException versionSetting = assertThrows(IllegalArgumentException.class,
                 () -> ClientConfiguration.fromJson("""
-                {"version":1,"client":{"id":"a","version":"1.0.0"},
+                {"version":1,"client":{"nodeName":"a","dataDirectory":"data","version":"1.0.0"},
                  "servers":{"urls":["http://localhost:8080"]}}
                 """));
         assertEquals("Unknown client setting: version", versionSetting.getMessage(),
                 "a client reports the version of its build, so no setting names one");
+    }
+
+    @Test
+    void readsTheNodeNameAndTheDataDirectory() {
+        ClientConfiguration config = ClientConfiguration.fromJson("""
+                {"version":1,"client":{"nodeName":"web-01","dataDirectory":"/var/lib/qraft"},
+                 "servers":{"urls":["http://localhost:8080"]},"catalog":{}}
+                """);
+
+        assertEquals("web-01", config.getNodeName());
+        assertEquals(Path.of("/var/lib/qraft"), config.getDataDirectory());
+    }
+
+    @Test
+    void theNodeNameDefaultsToTheHostName() throws Exception {
+        String hostName = java.net.InetAddress.getLocalHost().getHostName();
+
+        assertEquals(hostName, ClientConfiguration.fromJson("""
+                {"version":1,"client":{"dataDirectory":"data"},
+                 "servers":{"urls":["http://localhost:8080"]},"catalog":{}}
+                """).getNodeName());
+        assertEquals(hostName, ClientConfiguration.builder().dataDirectory(Path.of("data"))
+                .serverUrl("http://localhost").build().getNodeName());
+    }
+
+    @Test
+    void aDataDirectoryIsRequiredAndMustBeAPath() {
+        IllegalArgumentException missing = assertThrows(IllegalArgumentException.class,
+                () -> ClientConfiguration.fromJson("""
+                {"version":1,"client":{"nodeName":"a"},"servers":{"urls":["http://localhost:8080"]}}
+                """));
+        assertEquals("dataDirectory must be a non-blank string", missing.getMessage());
+        IllegalArgumentException blank = assertThrows(IllegalArgumentException.class,
+                () -> ClientConfiguration.fromJson("""
+                {"version":1,"client":{"nodeName":"a","dataDirectory":"  "},
+                 "servers":{"urls":["http://localhost:8080"]}}
+                """));
+        assertEquals("dataDirectory must be a non-blank string", blank.getMessage());
+        IllegalArgumentException notAPath = assertThrows(IllegalArgumentException.class,
+                () -> ClientConfiguration.fromJson("""
+                {"version":1,"client":{"nodeName":"a","dataDirectory":"da\\u0000ta"},
+                 "servers":{"urls":["http://localhost:8080"]}}
+                """));
+        assertTrue(notAPath.getMessage().startsWith("client.dataDirectory is not a path: "),
+                notAPath.getMessage());
+        IllegalArgumentException builder = assertThrows(IllegalArgumentException.class,
+                () -> ClientConfiguration.builder().nodeName("a").serverUrl("http://localhost").build());
+        assertEquals("client.dataDirectory is required", builder.getMessage());
+    }
+
+    @Test
+    void theRetiredIdSettingIsRefusedLikeAnyUnknownSetting() {
+        IllegalArgumentException retired = assertThrows(IllegalArgumentException.class,
+                () -> ClientConfiguration.fromJson("""
+                {"version":1,"client":{"id":"a","dataDirectory":"data"},
+                 "servers":{"urls":["http://localhost:8080"]}}
+                """));
+
+        assertEquals("Unknown client setting: id", retired.getMessage(), "client.id became client.nodeName");
     }
 
     @Test
@@ -363,7 +430,8 @@ class ClientConfigurationTest {
         assertEquals(List.of(), parsed.getServices().get(1).checkIds());
 
         ServiceDefinition web = new ServiceDefinition("web", "web", "localhost", 8080, List.of(), Map.of(), true);
-        ClientConfiguration built = ClientConfiguration.builder().clientId("client").serverUrl("http://localhost")
+        ClientConfiguration built = ClientConfiguration.builder().nodeName("client").dataDirectory(Path.of("data"))
+                .serverUrl("http://localhost")
                 .services(List.of(web)).healthChecks(List.of(new TtlCheck("web", "app", Duration.ofSeconds(5), true)))
                 .build();
         assertEquals(List.of("app"), built.getServices().getFirst().checkIds(),
@@ -478,21 +546,21 @@ class ClientConfigurationTest {
         ServiceDefinition web = new ServiceDefinition("web", "web", "localhost", 8080, List.of(), Map.of(), true);
         TtlCheck check = new TtlCheck("web", "app", Duration.ofSeconds(10), true);
 
-        assertEquals(List.of(check), ClientConfiguration.builder().clientId("client")
+        assertEquals(List.of(check), ClientConfiguration.builder().nodeName("client").dataDirectory(Path.of("data"))
                 .serverUrl("http://localhost").services(List.of(web))
                 .healthChecks(List.of(check)).build().getHealthChecks());
-        assertThrows(IllegalArgumentException.class, () -> ClientConfiguration.builder().clientId("client")
-                .serverUrl("http://localhost").services(List.of(web))
+        assertThrows(IllegalArgumentException.class, () -> ClientConfiguration.builder().nodeName("client")
+                .dataDirectory(Path.of("data")).serverUrl("http://localhost").services(List.of(web))
                 .healthChecks(List.of(new TtlCheck("missing", "app", Duration.ofSeconds(10), true))).build());
-        assertThrows(IllegalArgumentException.class, () -> ClientConfiguration.builder().clientId("client")
-                .serverUrl("http://localhost").services(List.of(web))
+        assertThrows(IllegalArgumentException.class, () -> ClientConfiguration.builder().nodeName("client")
+                .dataDirectory(Path.of("data")).serverUrl("http://localhost").services(List.of(web))
                 .healthChecks(List.of(check, new TtlCheck("web", "app", Duration.ofSeconds(20), true))).build());
     }
 
     private static String minimalJson(String urls, String catalogFields) {
         String separator = catalogFields.isBlank() ? "" : catalogFields;
         return """
-                {"version":1,"client":{"id":"client-a"},
+                {"version":1,"client":{"nodeName":"client-a","dataDirectory":"data"},
                  "servers":{"urls":%s},"catalog":{%s}}
                 """.formatted(urls, separator);
     }

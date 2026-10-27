@@ -58,7 +58,7 @@ public final class RegistrationClient {
                 .thenApply(outcome -> {
                     registrationRetryable.set(outcome instanceof CatalogOutcome.Retryable);
                     if (outcome instanceof CatalogOutcome.Rejected rejected) {
-                        LOGGER.warn("Client registration rejected: clientId={}, code={}, message={}",
+                        LOGGER.warn("Client registration rejected: nodeName={}, code={}, message={}",
                                 client.name(), rejected.code(), rejected.message());
                     }
                     return outcome instanceof CatalogOutcome.Success;

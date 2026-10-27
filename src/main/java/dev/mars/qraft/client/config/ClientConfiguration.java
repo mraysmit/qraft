@@ -31,6 +31,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.UnknownHostException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -58,7 +59,8 @@ import static dev.mars.qraft.common.config.JsonSettings.requiredObject;
  */
 public final class ClientConfiguration {
 
-    private final String clientId;
+    private final String nodeName;
+    private final Path dataDirectory;
     private final String address;
     private final int clientPort;
     private final String region;
@@ -77,7 +79,8 @@ public final class ClientConfiguration {
     private final String loggingDirectory;
 
     private ClientConfiguration(Builder builder) {
-        clientId = builder.clientId.trim();
+        nodeName = builder.nodeName.trim();
+        dataDirectory = builder.dataDirectory;
         address = builder.address.trim();
         clientPort = builder.clientPort;
         region = builder.region.trim();
@@ -120,7 +123,7 @@ public final class ClientConfiguration {
         JsonNode servers = requiredObject(root, "servers");
         JsonNode catalog = optionalObject(root, "catalog");
         JsonNode logging = optionalObject(root, "logging");
-        rejectUnknown(client, "client", "id", "address", "httpPort",
+        rejectUnknown(client, "client", "nodeName", "dataDirectory", "address", "httpPort",
                 "heartbeatIntervalMs", "shutdownTimeoutMs", "datacenter", "region");
         rejectUnknown(servers, "servers", "urls", "requestTimeoutMs");
         rejectUnknown(catalog, "catalog", "tenant", "namespace", "registrationRetryMinMs",
@@ -129,7 +132,8 @@ public final class ClientConfiguration {
         List<HealthCheckDefinition> healthChecks = new ArrayList<>();
         List<ServiceDefinition> services = parseServices(catalog.get("services"), healthChecks);
         return builder()
-                .clientId(requiredText(client, "id"))
+                .nodeName(optionalText(client, "nodeName", null))
+                .dataDirectory(dataDirectory(requiredText(client, "dataDirectory")))
                 .address(optionalText(client, "address", localAddress()))
                 .clientPort(optionalInt(client, "httpPort", 8080))
                 .heartbeatInterval(optionalLong(client, "heartbeatIntervalMs", 30_000))
@@ -330,6 +334,25 @@ public final class ClientConfiguration {
         return value.textValue().trim();
     }
 
+    private static Path dataDirectory(String value) {
+        try {
+            return Path.of(value);
+        } catch (InvalidPathException notAPath) {
+            throw new IllegalArgumentException("client.dataDirectory is not a path: " + notAPath.getMessage(),
+                    notAPath);
+        }
+    }
+
+    /** The machine's host name, which a client is known by unless {@code client.nodeName} names it. */
+    private static String hostName() {
+        try {
+            return InetAddress.getLocalHost().getHostName();
+        } catch (UnknownHostException error) {
+            throw new IllegalArgumentException("client.nodeName is not set and the host name cannot be read: "
+                    + error.getMessage(), error);
+        }
+    }
+
     private static String localAddress() {
         try {
             return InetAddress.getLocalHost().getHostAddress();
@@ -339,7 +362,8 @@ public final class ClientConfiguration {
     }
 
     public static Builder builder() { return new Builder(); }
-    public String getClientId() { return clientId; }
+    public String getNodeName() { return nodeName; }
+    public Path getDataDirectory() { return dataDirectory; }
     public String getAddress() { return address; }
     public int getClientPort() { return clientPort; }
     public String getRegion() { return region; }
@@ -359,7 +383,8 @@ public final class ClientConfiguration {
     public String getLoggingDirectory() { return loggingDirectory; }
 
     public static final class Builder {
-        private String clientId;
+        private String nodeName;
+        private Path dataDirectory;
         private String address = "127.0.0.1";
         private int clientPort = 8080;
         private String region = "default";
@@ -377,7 +402,9 @@ public final class ClientConfiguration {
         private List<HealthCheckDefinition> healthChecks = List.of();
         private String loggingDirectory = "./logs";
 
-        public Builder clientId(String value) { clientId = value; return this; }
+        /** The node's name; unset, it is the machine's host name. */
+        public Builder nodeName(String value) { nodeName = value; return this; }
+        public Builder dataDirectory(Path value) { dataDirectory = value; return this; }
         public Builder address(String value) { address = value; return this; }
         public Builder clientPort(int value) { clientPort = value; return this; }
         public Builder region(String value) { region = value; return this; }
@@ -399,7 +426,9 @@ public final class ClientConfiguration {
         public Builder loggingDirectory(String value) { loggingDirectory = value; return this; }
 
         public ClientConfiguration build() {
-            requireNonBlank("client.id", clientId);
+            if (dataDirectory == null) throw new IllegalArgumentException("client.dataDirectory is required");
+            if (nodeName == null) nodeName = hostName();
+            requireNonBlank("client.nodeName", nodeName);
             requireNonBlank("client.address", address);
             requireNonBlank("client.region", region);
             requireNonBlank("client.datacenter", datacenter);

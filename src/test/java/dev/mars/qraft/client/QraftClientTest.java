@@ -30,10 +30,13 @@ import dev.mars.qraft.common.QraftVersion;
 import dev.mars.qraft.common.ServiceDefinition;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.LoggerFactory;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -53,6 +56,7 @@ import java.util.function.BooleanSupplier;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -67,6 +71,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class QraftClientTest {
     private HttpServer server;
+    @TempDir
+    Path dataDirectory;
     private final ManualScheduledExecutorHelper scheduler = new ManualScheduledExecutorHelper();
 
     @AfterEach
@@ -89,7 +95,7 @@ class QraftClientTest {
         server.createContext(NodeAnswerHelper.DEREGISTER, NodeAnswerHelper::accept);
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1").address("127.0.0.1").clientPort(0)
+                .nodeName("client-1").dataDirectory(dataDirectory).address("127.0.0.1").clientPort(0)
                 .datacenter("dc-1").region("eu-west")
                 .serverUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000)
@@ -131,7 +137,7 @@ class QraftClientTest {
         server.start();
 
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1")
+                .nodeName("client-1").dataDirectory(dataDirectory)
                 .address("127.0.0.1")
                 .clientPort(0)
                 .serverUrl("http://localhost:" + server.getAddress().getPort())
@@ -148,6 +154,38 @@ class QraftClientTest {
     }
 
     @Test
+    void aClientHoldsItsDataDirectoryFromConstructionUntilItsShutdownCompletes(@TempDir Path data) throws Exception {
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext(NodeAnswerHelper.REGISTER, exchange -> NodeAnswerHelper.answer(exchange, 200,
+                "registered", true));
+        server.createContext(NodeAnswerHelper.DEREGISTER, exchange -> NodeAnswerHelper.answer(exchange, 200,
+                "deregistered", true));
+        server.start();
+        ClientConfiguration config = ClientConfiguration.builder()
+                .nodeName("client-1").dataDirectory(data).address("127.0.0.1").clientPort(0)
+                .serverUrl("http://localhost:" + server.getAddress().getPort())
+                .heartbeatInterval(60_000)
+                .build();
+
+        QraftClient client = new QraftClient(config);
+        String nodeId = client.nodeId();
+        assertEquals(Files.readString(data.resolve("node-id"), StandardCharsets.UTF_8), nodeId);
+        IllegalStateException refused = assertThrows(IllegalStateException.class, () -> new QraftClient(config));
+        assertEquals(data + " is in use by another client in this process; a data directory belongs to one"
+                + " client at a time", refused.getMessage());
+        assertTrue(client.start().join());
+        assertTrue(client.shutdown().join());
+
+        QraftClient next = new QraftClient(config);
+        try {
+            assertEquals(nodeId, next.nodeId(), "the shut-down client let the directory go, with its node ID");
+            assertTrue(next.start().join());
+        } finally {
+            assertTrue(next.shutdown().join());
+        }
+    }
+
+    @Test
     void remainsLiveButUnreadyWhenInitialRegistrationFails() throws Exception {
         server = HttpServer.create(new InetSocketAddress(0), 0);
         server.createContext(NodeAnswerHelper.REGISTER, exchange -> {
@@ -156,7 +194,7 @@ class QraftClientTest {
         });
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1")
+                .nodeName("client-1").dataDirectory(dataDirectory)
                 .address("127.0.0.1")
                 .clientPort(0)
                 .serverUrl("http://localhost:" + server.getAddress().getPort())
@@ -189,7 +227,7 @@ class QraftClientTest {
         });
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1").address("127.0.0.1")
+                .nodeName("client-1").dataDirectory(dataDirectory).address("127.0.0.1")
                 .clientPort(0).serverUrl("http://localhost:" + server.getAddress().getPort())
                 .build();
         QraftClient client = manuallyTimedClient(config);
@@ -203,7 +241,7 @@ class QraftClientTest {
             assertEquals(0, scheduler.pendingCount(), "no registration retry may be scheduled");
             assertEquals(1, registrations.get());
             assertEquals(1, appender.list.stream().filter(event ->
-                    event.getFormattedMessage().contains("clientId=client-1")
+                    event.getFormattedMessage().contains("nodeName=client-1")
                             && event.getFormattedMessage().contains("invalid_registration")
                             && event.getFormattedMessage().contains("bad address")).count());
         } finally {
@@ -229,7 +267,7 @@ class QraftClientTest {
         });
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1")
+                .nodeName("client-1").dataDirectory(dataDirectory)
                 .address("127.0.0.1")
                 .clientPort(0)
                 .serverUrl("http://localhost:" + server.getAddress().getPort())
@@ -258,7 +296,7 @@ class QraftClientTest {
     @Test
     void checksOfADisabledServiceAreNeverRun() throws Exception {
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1").address("127.0.0.1").clientPort(0)
+                .nodeName("client-1").dataDirectory(dataDirectory).address("127.0.0.1").clientPort(0)
                 .serverUrl("http://localhost:1")
                 .services(List.of(
                         new ServiceDefinition("web", "web", "127.0.0.1", 8080, List.of(), Map.of(), true),
@@ -293,7 +331,7 @@ class QraftClientTest {
         });
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1").address("127.0.0.1")
+                .nodeName("client-1").dataDirectory(dataDirectory).address("127.0.0.1")
                 .clientPort(0).serverUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000)
                 .build();
@@ -333,7 +371,7 @@ class QraftClientTest {
         });
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1").address("127.0.0.1")
+                .nodeName("client-1").dataDirectory(dataDirectory).address("127.0.0.1")
                 .clientPort(0).serverUrl("http://localhost:" + server.getAddress().getPort())
                 .build();
         QraftClient client = manuallyTimedClient(config);
@@ -372,7 +410,7 @@ class QraftClientTest {
         });
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1")
+                .nodeName("client-1").dataDirectory(dataDirectory)
                 .address("127.0.0.1")
                 .clientPort(0)
                 .serverUrl("http://localhost:" + server.getAddress().getPort())
@@ -415,7 +453,7 @@ class QraftClientTest {
                 exchange -> NodeAnswerHelper.answer(exchange, 200, "deregistered", true)));
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1")
+                .nodeName("client-1").dataDirectory(dataDirectory)
                 .address("127.0.0.1")
                 .clientPort(0)
                 .serverUrl("http://localhost:" + server.getAddress().getPort())
@@ -453,7 +491,7 @@ class QraftClientTest {
                 exchange -> NodeAnswerHelper.answer(exchange, 200, "deregistered", true)));
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1").address("127.0.0.1")
+                .nodeName("client-1").dataDirectory(dataDirectory).address("127.0.0.1")
                 .clientPort(0).serverUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000)
                 .services(List.of(new ServiceDefinition("web", "web", "127.0.0.1", 8080,
@@ -486,7 +524,7 @@ class QraftClientTest {
         });
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1").address("127.0.0.1")
+                .nodeName("client-1").dataDirectory(dataDirectory).address("127.0.0.1")
                 .clientPort(0).serverUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000).contactFreshnessMs(1_000)
                 .build();
@@ -599,7 +637,7 @@ class QraftClientTest {
 
     private ClientConfiguration clientConfigWithServices(long shutdownTimeoutMs) throws Exception {
         return ClientConfiguration.builder()
-                .clientId("client-1").address("127.0.0.1")
+                .nodeName("client-1").dataDirectory(dataDirectory).address("127.0.0.1")
                 .clientPort(0).serverUrl("http://localhost:" + server.getAddress().getPort())
                 .heartbeatInterval(60_000).requestTimeoutMs(10_000)
                 .shutdownTimeoutMs(shutdownTimeoutMs)

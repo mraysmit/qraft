@@ -186,8 +186,12 @@ One of the two Docker errors came from the host: the image build failed with
 "failed to prepare extraction snapshot ... parent snapshot ... does not exist:
 not found", and the next class built the same image a second later. No other job
 was running and the pipeline does not prune images, so the cause was not found;
-the fixture now tries that one failure once more. If it recurs, check the Docker
-daemon's version, storage driver and image store on the node.
+the fixture then tried that one failure once more. That retry was removed on
+2026-10-27 at the owner's direction: a lost snapshot points to a deeper fault, which
+must fail the build and be investigated rather than be retried away. Its unit test
+had also left two unflagged `#13 ERROR` lines in every default run since build 36.
+If the failure recurs, check the Docker daemon's version, storage driver and image
+store on the node.
 
 [Build 36](http://192.168.137.32:8080/job/Qraft/36/), on `3b3fe38`, passed every
 stage in 1,196 seconds: default 1,153, end-to-end 10 and Docker 40, with every
@@ -252,6 +256,27 @@ and downloads from GitHub ran at 7 to 55 KB/s while Cloudflare ran at 16 MB/s; 1
 fixed the Jenkins host's network (what was changed was not recorded). If it
 recurs, look at the gateway's DNS and its route to GitHub before suspecting the
 code.
+
+## Local run in place of Jenkins, 2026-10-27
+
+On the `markr` workstation no Jenkins could run the job: 192.168.137.32 did not
+answer, and the local `jenkins/jenkins:lts-jdk21` container has no Qraft job, no
+`linux` label, no Docker CLI and no `mvn` on its path. At the owner's direction the
+three suites ran locally instead, against Docker Desktop, with JDK 27 and Maven
+3.9.16, each through `Tee-Object` in a visible console and with the Jenkinsfile's
+commands. The one difference: the Docker stage passed `-Dgroups=docker,slow`,
+because `mvn.cmd` runs through `cmd.exe`, which reads a `|` as a pipe. Surefire
+reads the comma list as "any of", so the same classes ran.
+
+The first run, on `7a1ed98` (client list Phase 1), passed every suite (default
+1,210, end-to-end 10, Docker 41) but its audit found two unflagged `#13 ERROR`
+lines, from the image-build retry's unit test (see builds 34 and 35). The retry
+and that test were removed. The second run, on `7a1ed98` with that removal in the
+working tree, passed default 1,205 with every coverage gate met, end-to-end 10 and
+Docker 41 (24 min 36 s, the image built once on a fresh build), with no failures,
+errors or skips. Its 223 retained logs, including 19 Docker archive folders, hold
+823 ERROR lines, all flagged, 559 stack traces, none under an unflagged header,
+and no JVM crash file.
 
 ## Job configuration
 

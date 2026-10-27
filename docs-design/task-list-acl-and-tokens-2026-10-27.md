@@ -1,11 +1,11 @@
 # Task List: ACLs and Tokens
 
 **Date:** 2026-10-05
-**Status:** Proposed. Section 4's items are recommendations to confirm or change, except the points marked "Decided 2026-10-09", in proposals 11, 12, and 14. No point is open. No code exists.
-**Proposed start:** after [`task-list-consul-style-client-2026-10-26.md`](task-list-consul-style-client-2026-10-26.md) (proposal 15).
-**Last updated:** 2026-10-26 (renamed with the client list, which became active; nothing else changed. Earlier, 2026-10-21: renamed with linked documents; this list remains proposed after the client list. Earlier, 2026-10-11: the rule that guards need recorded mutations removed at the owner's decision, from the rules and from four exits; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: proposal 11 brought in line with the node routes and with what a node's deregistration removes; the file renamed to the date of its last change; four points decided: the authorize call; revoking the management token; Consul's rule for registering a service, which needs `service:write` alone on a registered node; and a client certificate on the server's HTTP listener, for the transport security list)
+**Status:** Proposed. Section 4's items are recommendations to confirm or change, except the points marked "Decided 2026-10-09", in proposals 11, 12, and 14, and those marked "Decided 2026-10-27", in proposals 12 and 16 to 19. Proposal 16's default profile is a recommendation. No point is open. No code exists.
+**Proposed start:** after [`task-list-consul-style-client-2026-10-27.md`](task-list-consul-style-client-2026-10-27.md) (proposal 15).
+**Last updated:** 2026-10-27 (the review of the administrative interface against this list: four points decided by the owner: a security profile, proposal 16; a lock-out guard on the server, proposal 17; a policy that tokens link to cannot be deleted, proposal 18, which settles Phase 1's open item; and a server-side explanation of a decision, proposal 19. Proposal 12 gains the marker for a token installed from the file, and its revocation order follows from proposal 17. Phases 1, 2, 3, 5 and 9 gain the tasks. Renamed to the date of its last change, with the client list. Earlier, 2026-10-26: renamed with the client list, which became active; nothing else changed. Earlier, 2026-10-21: renamed with linked documents; this list remains proposed after the client list. Earlier, 2026-10-11: the rule that guards need recorded mutations removed at the owner's decision, from the rules and from four exits; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: proposal 11 brought in line with the node routes and with what a node's deregistration removes; the file renamed to the date of its last change; four points decided: the authorize call; revoking the management token; Consul's rule for registering a service, which needs `service:write` alone on a registered node; and a client certificate on the server's HTTP listener, for the transport security list)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 7.3, 12, 15, 16 and 22
-**Related:** the client list's decisions 6 and 8; decision 6 of [`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md), the operator token; item 9 of [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md); phase 7 of [`CONSUL_FEATURE_IMPLEMENTATION_PLAN.md`](CONSUL_FEATURE_IMPLEMENTATION_PLAN.md)
+**Related:** the client list's decisions 6 and 8; decision 6 of [`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md), the operator token; item 9 of [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md); phase 7 of [`CONSUL_FEATURE_IMPLEMENTATION_PLAN.md`](CONSUL_FEATURE_IMPLEMENTATION_PLAN.md); section 10.2 of [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md), the administrative interface's access control
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
 ## 1. Goal
@@ -253,6 +253,7 @@ so and why.
     | `GET /v1/operator/raft/configuration`, `/raft/status` | `operator:read` |
     | `DELETE /v1/operator/raft/peer` | `operator:write`, checked again by the leader |
     | The ACL API | `acl:read` or `acl:write` |
+    | `POST /v1/acl/explain` (proposal 19) | `acl:read` |
     | `GET /v1/acl/token/self`, `POST /v1/acl/authorize` | any token: each answers only for the token that presents it |
     | The client's own endpoints (`/v1/client/self`, `leave`, maintenance) | `client:read` or `client:write` on the node name |
     | `/health/live`, `/health/ready` | no token, ever: orchestrators call them |
@@ -315,8 +316,9 @@ so and why.
 
 12. **`server.acl` in the server configuration.**
     - `enabled`, defaulting to `false` in this list, so that existing
-      configurations and tests are unchanged until they are given tokens. The
-      close-out decides whether the default becomes `true`.
+      configurations and tests are unchanged until they are given tokens.
+      Proposal 16 makes the production profile refuse `false`, which replaces
+      the question of whether the default becomes `true`.
     - **When enabled, anything not allowed is refused.** There is no
       `allow` mode. This departs from Consul, whose `allow` default exists to
       migrate running clusters; Qraft has none to migrate.
@@ -342,6 +344,19 @@ so and why.
         that no file can install it again, was rejected: it departs from
         Consul and adds a set to the ACL state and its snapshot.
       - Phase 3 tests the rule, and Phase 9 puts the order in the runbook.
+
+    **Decided 2026-10-27, with proposal 17: the order gains a step.** While
+    the old management token is the only token that holds `acl:write` without
+    an expiry, the lock-out guard refuses its deletion. So the order is:
+    replace the secret in every server's file; change leadership, by
+    restarting the leader, so that the new secret is installed; check that
+    the new management token exists; then delete the old one.
+
+    **Decided 2026-10-27: a token installed from the file is marked so.** A
+    token read shows `installedFromFile: true` for it. The API, the command
+    line, and the administrative interface use the marker to warn, before a
+    deletion, that the token returns at the next leadership change while any
+    server's file still holds its secret.
     - With ACLs enabled, `server.operator.token` is refused as a conflicting
       setting, and `operator:write` replaces it. With ACLs disabled it guards
       removal as it does today.
@@ -395,6 +410,81 @@ so and why.
       core out of that item. The `key` and `session` rules, replicated
       tenants, and audit events stay with their own lists.
 
+### Integrity and the administrative interface
+
+Proposals 16 to 19 came from reviewing the administrative interface's design
+against this list on 2026-10-27. The owner decided each of them that day.
+
+16. **A security profile: `server.security.profile`, `production` or
+    `development`.**
+    - **Production refuses to run without ACLs.** A configuration with
+      `production` and `server.acl.enabled` `false` is refused before any
+      resource opens. The only superuser is the management token, from
+      `initialManagementTokenFile` (proposal 12).
+    - **Development may run without ACLs.** With ACLs disabled, every call
+      is allowed, as today, and the server logs one startup warning naming
+      the profile and saying that there is no access control. With ACLs
+      enabled, development behaves exactly as production. That is how a
+      development cluster tests ACL behaviour.
+    - **The management token is the superuser in both profiles.** There is
+      no second superuser mechanism. Development's only relaxation is that
+      ACLs may be off.
+    - **The profile is public.** The administrative interface's bootstrap
+      data carries the profile and the authentication mode, `none` or
+      `token` (design section 12.4.1), so the interface can show both. Neither
+      is a secret.
+    - **Client mode has no profile.** A client follows what the servers
+      enforce.
+    - **This departs from Consul,** which has no profile: its ACLs are off by
+      default, and running a production cluster with them on is a deployment
+      practice. Qraft makes it a startup check, so a production server cannot
+      run open by mistake.
+    - **Recommended, to confirm: the default is `production`.** A server that
+      names no profile is then secure, and every development and test
+      configuration says `development`: the `docker/config` files, the test
+      fixtures, and the examples. Phase 3 changes them.
+17. **The server refuses a lock-out.**
+    - A command after which no token would hold `acl:write` without an
+      expiry is refused with 409 `acl_lockout`. That covers deleting a token,
+      changing its policies or its expiry, changing a policy's rules, and
+      deleting a policy (proposal 18).
+    - A token with an expiry does not count, because it will lapse. Removing
+      `acl:write` from the caller's own token is allowed while another token
+      still holds it; the administrative interface warns about it.
+    - **The state machine applies the check,** when it applies the command,
+      not only the leader when it proposes. Every replica reaches the same
+      outcome, and two commands in flight cannot together remove the last
+      holder. This is a state invariant, not an authorization decision, so
+      it does not contradict proposal 10.
+    - The leader's deletion of expired tokens (Phase 8) is unaffected,
+      because an expiring token never counts.
+    - Recovery stays as in proposal 12: a new secret in the file and a
+      leader restart.
+18. **A policy that a token links to cannot be deleted.**
+    - `DELETE /v1/acl/policy/{name}` answers 409 `policy_in_use`, naming the
+      accessor IDs of the tokens that link to it. They are unlinked first. No
+      token loses permissions without its own change.
+    - `GET /v1/acl/tokens?policy={name}` lists the tokens that link to a
+      policy, for this message and for the interface's policy page.
+    - The built-in management policy cannot be deleted at all (Phase 1).
+    - This settles Phase 1's open item.
+19. **The server explains a decision: `POST /v1/acl/explain`,** needing
+    `acl:read`.
+    - It takes an accessor ID, a resource, a name, an access level, and for
+      `service` a tenant and namespace. It answers allow or deny and what
+      decided it: the policy and the rule, the identity, or that nothing
+      matched and anything not allowed is refused.
+    - Phase 2's function returns the deciding rule with the decision, and
+      both enforcement and this endpoint use it, so an explanation cannot
+      differ from what the server enforces. The administrative interface
+      uses this endpoint and never evaluates rules itself.
+    - It reads the answering server's applied state, like every other read;
+      proposal 10's limit applies.
+    - It is separate from `POST /v1/acl/authorize`, which answers only for
+      the presenting token and needs no grant (proposal 11).
+    - The reverse question, which tokens may do something, is out of scope
+      (section 7).
+
 ## 5. Rules
 
 - Red before green. (The rule that safety guards need recorded mutations was removed by the owner on 2026-10-11, from every task list. It stood here for every
@@ -433,8 +523,13 @@ so and why.
   snapshot carries a secret.
 - [ ] Build in the management policy and the anonymous token. Neither can be
   deleted.
-- [ ] Refuse the deletion of a policy that a token still links to, or define
-  that the link is dropped. Decide which before coding.
+- [ ] Refuse the deletion of a policy that a token still links to, with
+  409 `policy_in_use` (proposal 18, decided 2026-10-27).
+- [ ] Apply the lock-out guard in the state machine (proposal 17). Include a
+  determinism test of two commands in flight that would together remove the
+  last token holding `acl:write` without an expiry.
+- [ ] Record `installedFromFile` on the token the management file installs
+  (proposal 12).
 
 **Exit:** Codec, determinism, and legacy-fixture tests. A test shows that the
 store holds the secret's hash and not the secret.
@@ -442,7 +537,8 @@ store holds the secret's hash and not the secret.
 ### Phase 2. The authorizer
 
 - [ ] One pure function from a token's rules, a resource, a name, a scope,
-  and an access level to allow or deny.
+  and an access level to allow or deny, together with the rule or identity
+  that decided it (proposal 19).
 - [ ] Table-driven tests of exact against prefix, longer against shorter
   prefix, `deny` against allow, the scope match and its wildcard, and both
   identity templates.
@@ -458,9 +554,15 @@ check.
 - [ ] The leader installs the management token when it gains leadership and
   none with that hash exists. Installing twice changes nothing.
 - [ ] Log the effective settings without the secret.
+- [ ] Add `server.security.profile` (proposal 16). Refuse `production` with
+  ACLs disabled, before any resource opens. Log the one startup warning for
+  `development` with ACLs disabled. Set `development` in every development
+  and test configuration if the default is `production`.
 - [ ] Test how the management token is revoked (proposal 12, decided
   2026-10-09): a deleted token is installed again while a server's file
   still holds its secret, and is not once every file holds a new one.
+  While the old token is the only holder of `acl:write` without an expiry,
+  its deletion is refused with `acl_lockout` (proposals 12 and 17).
 
 **Exit:** Lifecycle tests on real storage: a restarted cluster keeps its
 tokens, and a new secret in the file is installed at the next leadership.
@@ -488,6 +590,10 @@ With ACLs disabled, every existing test passes unchanged.
 - [ ] `PUT /v1/acl/policy`, `GET /v1/acl/policies`, and `GET`, `PUT`, and
   `DELETE /v1/acl/policy/{name}`.
 - [ ] `POST /v1/acl/authorize`, for the client's own endpoints.
+- [ ] `GET /v1/acl/tokens?policy={name}` and `POST /v1/acl/explain`
+  (proposals 18 and 19), and `qraft acl explain`.
+- [ ] Answer 409 `acl_lockout` and 409 `policy_in_use` in the standard error
+  envelope, with the names that explain them.
 - [ ] `qraft acl token create|list|read|delete` and
   `qraft acl policy create|list|read|delete`, taking the caller's token from
   `--token-file` as `RaftOperatorCommand` does.
@@ -540,8 +646,9 @@ sufficient token, an insufficient one, and none.
 - [ ] Add to `RAFT_STORAGE_OPERATIONS.md`: backups hold token hashes, not
   secrets; the procedure for a lost management secret; and the order for
   revoking the management token (proposal 12): every server's file first,
-  then the old token.
-- [ ] Decide whether `server.acl.enabled` defaults to `true`, and whether
+  then a leadership change so the new token is installed, then the old
+  token.
+- [ ] Confirm the default profile (proposal 16), and decide whether
   `server.operator.token` is removed.
 
 **Exit:** Full suites on a fresh image; changed concurrency tests pass five
@@ -559,4 +666,5 @@ consecutive runs; audits as in the other lists.
 - Structured audit events and a durable audit sink, which need the event
   journal. This list logs ACL changes and denials with the accessor ID.
 - Client-side caching of decisions, a down policy, and a recovery token.
+- The reverse of proposal 19: which tokens may do a given thing.
 - More than one datacentre.

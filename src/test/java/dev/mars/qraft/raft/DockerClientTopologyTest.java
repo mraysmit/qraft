@@ -205,10 +205,10 @@ class DockerClientTopologyTest {
     }
 
     /** A client document like the acceptance client's: the same {@code web} service and checks. */
-    private static String clientJson(String clientId, String address, List<String> seeds) {
+    private static String clientJson(String nodeName, String address, List<String> seeds) {
         return """
                 {"version":1,
-                 "client":{"id":"%s","address":"%s","httpPort":8080,
+                 "client":{"nodeName":"%s","dataDirectory":"/app/data","address":"%s","httpPort":8080,
                           "heartbeatIntervalMs":1000,"shutdownTimeoutMs":8000},
                  "servers":{"urls":[%s],"requestTimeoutMs":3000},
                  "catalog":{"registrationRetryMinMs":100,"registrationRetryMaxMs":1000,"contactFreshnessMs":5000,
@@ -219,7 +219,7 @@ class DockerClientTopologyTest {
                        {"id":"tcp","type":"tcp","address":"127.0.0.1","intervalMs":1000,"timeoutMs":1000,
                         "ttlMs":5000}]}]},
                  "logging":{"directory":"/app/logs"}}
-                """.formatted(clientId, address,
+                """.formatted(nodeName, address,
                 String.join(",", seeds.stream().map(seed -> "\"" + seed + "\"").toList()), address);
     }
 }

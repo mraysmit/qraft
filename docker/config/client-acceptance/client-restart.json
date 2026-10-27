@@ -1,7 +1,8 @@
 {
   "version": 1,
   "client": {
-    "id": "docker-client",
+    "nodeName": "docker-client",
+    "dataDirectory": "/app/data",
     "address": "client",
     "httpPort": 8080,
     "heartbeatIntervalMs": 1000,

@@ -30,8 +30,10 @@ import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.QraftStateStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.net.URI;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -56,6 +58,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 2.0
  */
 class ClientEndToEndTest {
+    @TempDir
+    Path dataRoot;
+
     private final List<QraftClient> clients = new ArrayList<>();
     private ServerGroupFixture servers;
 
@@ -147,7 +152,7 @@ class ClientEndToEndTest {
     private QraftClient client(String id, List<URI> endpoints,
                              List<ServiceDefinition> services, long freshnessMs) throws Exception {
         QraftClient client = new QraftClient(ClientConfiguration.builder()
-                .clientId(id).address("127.0.0.1")
+                .nodeName(id).dataDirectory(dataRoot.resolve(id)).address("127.0.0.1")
                 .clientPort(0).serverUrls(endpoints)
                 .heartbeatInterval(40).requestTimeoutMs(5_000)
                 .registrationRetryMinMs(20).registrationRetryMaxMs(100)

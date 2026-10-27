@@ -59,7 +59,7 @@ class QraftClientApplicationTest {
     void validatesConfigurationBeforeOpeningClientResources() throws Exception {
         Path configuration = temporaryDirectory.resolve("invalid-client.json");
         Files.writeString(configuration, """
-                {"version":1,"client":{"id":"client-a","httpPort":-1},
+                {"version":1,"client":{"nodeName":"client-a","dataDirectory":"data","httpPort":-1},
                  "servers":{"urls":["http://127.0.0.1:8080"]}}
                 """);
         AtomicInteger opened = new AtomicInteger();
@@ -91,7 +91,7 @@ class QraftClientApplicationTest {
     private Path validConfiguration() throws Exception {
         Path configuration = temporaryDirectory.resolve("client.json");
         Files.writeString(configuration, """
-                {"version":1,"client":{"id":"client-a","httpPort":8500},
+                {"version":1,"client":{"nodeName":"client-a","dataDirectory":"data","httpPort":8500},
                  "servers":{"urls":["http://127.0.0.1:8080"]}}
                 """);
         return configuration;

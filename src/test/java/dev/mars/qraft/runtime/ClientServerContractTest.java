@@ -38,6 +38,7 @@ import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.net.ServerSocket;
 import java.net.InetSocketAddress;
@@ -45,6 +46,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -67,6 +69,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 class ClientServerContractTest {
+    @TempDir
+    Path dataRoot;
+
     private RaftExecutorsFixture runtime;
     private RaftNode node;
     private HttpApiServer server;
@@ -170,7 +175,8 @@ class ClientServerContractTest {
     void realClientCompletesRegistrationHeartbeatAndDeregistrationAgainstServer() throws Exception {
         QraftStateStore store = startServer();
         ClientConfiguration configuration = ClientConfiguration.builder()
-                .clientId("contract-client")
+                .nodeName("contract-client")
+                .dataDirectory(dataRoot)
                 .address("127.0.0.1")
                 .clientPort(0)
                 .serverUrl("http://localhost:" + server.port())

@@ -40,6 +40,7 @@ import dev.mars.qraft.state.QraftStateStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -49,6 +50,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -75,6 +77,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Tag("e2e")
 class ClientHealthPublicationTest {
     private static final String CLIENT_ID = "health-client";
+
+    @TempDir
+    Path dataRoot;
 
     private final AtomicInteger workloadStatus = new AtomicInteger(200);
     private final List<String> proxiedRequests = new CopyOnWriteArrayList<>();
@@ -168,7 +173,7 @@ class ClientHealthPublicationTest {
                         Duration.ofSeconds(1), Duration.ofSeconds(5), true),
                 new TtlCheck("web", "app", Duration.ofSeconds(30), false));
         return new QraftClient(ClientConfiguration.builder()
-                .clientId(CLIENT_ID).address("127.0.0.1")
+                .nodeName(CLIENT_ID).dataDirectory(dataRoot.resolve(CLIENT_ID)).address("127.0.0.1")
                 .clientPort(0).serverUrls(servers)
                 .heartbeatInterval(40).requestTimeoutMs(5_000)
                 .registrationRetryMinMs(20).registrationRetryMaxMs(100)

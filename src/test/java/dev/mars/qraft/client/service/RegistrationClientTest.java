@@ -170,7 +170,7 @@ class RegistrationClientTest {
             assertFalse(client.shouldRetryRegistration());
             assertEquals(1, registrations.get());
             assertEquals(1, appender.list.stream().filter(event ->
-                    event.getFormattedMessage().contains("clientId=client-1")
+                    event.getFormattedMessage().contains("nodeName=client-1")
                             && event.getFormattedMessage().contains("invalid_registration")
                             && event.getFormattedMessage().contains("bad address")).count());
         } finally {

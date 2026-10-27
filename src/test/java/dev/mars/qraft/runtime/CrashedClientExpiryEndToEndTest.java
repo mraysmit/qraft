@@ -174,7 +174,7 @@ class CrashedClientExpiryEndToEndTest {
         Files.writeString(target, """
                 {
                   "version": 1,
-                  "client": {"id": "crashing-client", "address": "127.0.0.1", "httpPort": %d,
+                  "client": {"nodeName": "crashing-client", "dataDirectory": %s, "address": "127.0.0.1", "httpPort": %d,
                             "heartbeatIntervalMs": 50, "shutdownTimeoutMs": 3000},
                   "servers": {"urls": ["http://127.0.0.1:%d"], "requestTimeoutMs": 5000},
                   "catalog": {
@@ -183,7 +183,8 @@ class CrashedClientExpiryEndToEndTest {
                   },
                   "logging": {"directory": %s}
                 }
-                """.formatted(clientPort, serverPort, serverPort,
+                """.formatted(JSON.writeValueAsString(temporaryDirectory.resolve("client-data").toString()),
+                clientPort, serverPort, serverPort,
                 JSON.writeValueAsString(temporaryDirectory.resolve("client-logs").toString())));
     }
 
@@ -262,7 +263,7 @@ class CrashedClientExpiryEndToEndTest {
         Files.writeString(target, """
                 {
                   "version": 1,
-                  "client": {"id": "crashing-client", "address": "127.0.0.1", "httpPort": %d,
+                  "client": {"nodeName": "crashing-client", "dataDirectory": %s, "address": "127.0.0.1", "httpPort": %d,
                             "heartbeatIntervalMs": 50, "shutdownTimeoutMs": 3000},
                   "servers": {"urls": ["http://127.0.0.1:%d"], "requestTimeoutMs": 5000},
                   "catalog": {
@@ -275,7 +276,8 @@ class CrashedClientExpiryEndToEndTest {
                   },
                   "logging": {"directory": %s}
                 }
-                """.formatted(clientPort, serverPort, serverPort,
+                """.formatted(JSON.writeValueAsString(temporaryDirectory.resolve("client-data").toString()),
+                clientPort, serverPort, serverPort,
                 JSON.writeValueAsString(temporaryDirectory.resolve("client-logs").toString())));
     }
 

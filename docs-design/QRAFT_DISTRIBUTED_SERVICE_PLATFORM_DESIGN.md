@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-10-26 (client list Phase 1: the server's service and check write routes moved from `/v1/client/*` to `/v1/catalog/*` in sections 12.1, 12.1.1 and 12.1.2. Earlier, 2026-10-25: Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
+**Last updated:** 2026-10-27 (section 12.4.1: how the Vite build names the asset manifest, and the security profile in the bootstrap data. Earlier, 2026-10-26: client list Phase 1: the server's service and check write routes moved from `/v1/client/*` to `/v1/catalog/*` in sections 12.1, 12.1.1 and 12.1.2. Earlier, 2026-10-25: Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
 
 ## 1. Purpose
 
@@ -561,7 +561,22 @@ the status and the times that the servers record for it:
   the first one.
 
 A node has no host name and no port: a port belongs to a service instance.
-The generated node ID is added by the client task list.
+
+A client keeps its node in `client.dataDirectory`, as decision 8 of the client
+task list sets out:
+
+- The client locks `client.lock` in the directory before it opens a thread, an
+  HTTP client or a listener, and holds the lock until its shutdown completes.
+  A directory belongs to one client at a time; a second client, in the same
+  process or another, is refused at its start.
+- The node ID is a UUID generated at the first start and kept in `node-id`
+  (written atomically and forced to disk, as a server's `server-id` is). A
+  restart keeps it. A wiped directory gives a new node. A `node-id` that cannot
+  be read stops the start and is never replaced.
+- The node's name is `client.nodeName`, the machine's host name by default.
+
+The servers do not yet store the node ID or use it to detect a conflicting
+name; that is the rest of the client list's Phase 2.
 
 Client state also includes:
 
@@ -1164,6 +1179,10 @@ server process
 `-- /ui/...   embedded administrative assets
 ```
 
+Vite writes the manifest under that name when its build sets
+`build.manifest: 'asset-manifest.json'`; its default, with `true`, is
+`.vite/manifest.json`.
+
 The `/ui/` handler strips only the configured administrative path prefix before
 performing a classpath lookup. A request for `/` may redirect to `/ui/` when the
 interface is enabled. An unknown extensionless `GET` below `/ui/` falls back to
@@ -1173,7 +1192,9 @@ metrics, health, and debugging paths must never fall back to the frontend.
 At request time, the server renders a small non-cacheable `index.html` template
 with a safely JSON-encoded bootstrap object containing public runtime settings,
 such as the API base path, administrative content path, enabled feature flags,
-and authentication mode. Secrets and bearer credentials are never included.
+authentication mode, and the security profile proposed by
+[`task-list-acl-and-tokens-2026-10-27.md`](task-list-acl-and-tokens-2026-10-27.md)
+(proposal 16). Secrets and bearer credentials are never included.
 Content-hashed assets are immutable and may receive long-lived cache headers;
 `index.html` and the asset manifest require revalidation so upgrades do not leave
 the browser pointing at removed bundles.
@@ -1781,7 +1802,8 @@ The path names one versioned JSON document. A client document has this shape:
 {
   "version": 1,
   "client": {
-    "id": "node-a",
+    "nodeName": "node-a",
+    "dataDirectory": "/var/lib/qraft",
     "httpPort": 8080,
     "heartbeatIntervalMs": 5000,
     "shutdownTimeoutMs": 30000,
@@ -1809,6 +1831,11 @@ The path names one versioned JSON document. A client document has this shape:
   }
 }
 ```
+
+`client.dataDirectory` is required. It is checked as a path when the document
+is read, and the client creates it at its first start. `client.nodeName`
+defaults to the machine's host name. The setting `client.id`, which named the
+node before 2026-10-27, is refused like any other unknown setting.
 
 Every `servers.urls` entry is an HTTP or HTTPS origin. Paths, queries,
 fragments, and user information are rejected. A root trailing slash is removed,
@@ -2105,10 +2132,10 @@ In-memory and real-transport clusters cover:
 Tagged tests build one image, start it in both modes, register a service, query it
 through multiple servers, change leadership, and verify graceful and automatic
 deregistration. These tests are separate from the fast default build but run in
-continuous integration with Docker available. The shared fixture retries an image
-build once when the daemon reports "failed to prepare extraction snapshot ... parent
-snapshot ... does not exist", a host fault seen once; any other build failure fails
-at once.
+continuous integration with Docker available. The shared fixture builds the image
+once and never retries a failed build: a daemon that loses a snapshot its build
+cache names ("failed to prepare extraction snapshot ... parent snapshot ... does not
+exist", seen once, in Jenkins build 35) is a fault to investigate, not to retry.
 
 The packaged-artifact acceptance test starts the shaded runtime JAR without a
 frontend directory on disk, fetches `index.html` and a manifest-listed hashed
@@ -2287,7 +2314,7 @@ Evidence as of 2026-09-27, except where a row gives a later date:
   primary client behavior.
 - Whether the server can trust a caller's claim to a node. Proposed 2026-10-05,
   not yet decided: ACL tokens on Consul's model, in
-  [`task-list-acl-and-tokens-2026-10-26.md`](task-list-acl-and-tokens-2026-10-26.md).
+  [`task-list-acl-and-tokens-2026-10-27.md`](task-list-acl-and-tokens-2026-10-27.md).
   Until it is built, any caller can claim any node name and node ID.
 - How long legacy command and snapshot readers remain supported.
 
@@ -2300,7 +2327,7 @@ implementations do, and the opinion recorded before the decision.
 Resolved on 2026-10-04, recorded here on 2026-10-05: how a node's identity is
 made and kept, which was half of the open item "how client identity is
 established". It is decision 8 of
-[`task-list-consul-style-client-2026-10-26.md`](task-list-consul-style-client-2026-10-26.md)
+[`task-list-consul-style-client-2026-10-27.md`](task-list-consul-style-client-2026-10-27.md)
 and is not yet built; section 7.3 changes when it is. It follows Consul: a node
 ID generated at first start and kept in the client's data directory, a node name
 that defaults to the host name, a catalog keyed by name, and a registration

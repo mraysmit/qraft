@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -66,7 +67,8 @@ class HeartbeatServiceTest {
         server.start();
 
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1").serverUrl("http://localhost:" + server.getAddress().getPort())
+                .nodeName("client-1").dataDirectory(Path.of("data"))
+                .serverUrl("http://localhost:" + server.getAddress().getPort())
                 .requestTimeoutMs(1000).build();
         RegistrationClient registration = registration(config);
         Node client = Node.of("client-1", "127.0.0.1", null, null, null);
@@ -87,7 +89,8 @@ class HeartbeatServiceTest {
         });
         server.start();
         ClientConfiguration config = ClientConfiguration.builder()
-                .clientId("client-1").serverUrl("http://localhost:" + server.getAddress().getPort()).build();
+                .nodeName("client-1").dataDirectory(Path.of("data"))
+                .serverUrl("http://localhost:" + server.getAddress().getPort()).build();
         RegistrationClient registration = registration(config);
 
         assertFalse(new HeartbeatService(registration).sendHeartbeat().join());
@@ -97,7 +100,7 @@ class HeartbeatServiceTest {
     private RegistrationClient registration(ClientConfiguration config) {
         serverClient = new HttpCatalogClient(HttpClient.newHttpClient(),
                 new com.fasterxml.jackson.databind.ObjectMapper(), config.getServerUrls(),
-                config.getClientId(), config.getTenant(), config.getNamespace(),
+                config.getNodeName(), config.getTenant(), config.getNamespace(),
                 config.getDatacenter(), config.getRegion(), Duration.ofMillis(config.getRequestTimeoutMs()));
         return new RegistrationClient(serverClient);
     }

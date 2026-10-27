@@ -90,7 +90,7 @@ public final class HealthService {
 
     public boolean isHealthy() { return running.get(); }
     public boolean isReady() { return running.get() && readiness.getAsBoolean(); }
-    public String clientId() { return config.getClientId(); }
+    public String nodeName() { return config.getNodeName(); }
 
     private static void respond(HttpExchange exchange, int status, String body) throws IOException {
         if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {

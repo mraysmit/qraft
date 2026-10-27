@@ -1,7 +1,8 @@
 {
   "version": 1,
   "client": {
-    "id": "client-example",
+    "nodeName": "client-example",
+    "dataDirectory": "/app/data",
     "address": "client-example",
     "httpPort": 8080,
     "heartbeatIntervalMs": 5000,
