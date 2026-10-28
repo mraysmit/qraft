@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-04
 **Status:** Active from 2026-10-26, with Phase 1. The `client` package and new node model and routes were delivered by [`task-list-single-pom-and-quorus-removal-2026-10-21.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md), completed and archived on 2026-10-14. The membership list ([`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md)) was completed and archived on 2026-10-24, and Pre-Vote followed on 2026-10-25 and 2026-10-26, so nothing precedes this list. The sequencing decision of 2026-10-05 stands: this list, then the ACL list. The owner confirmed it on 2026-10-26 when asked whether key/value completion should go first, and said the embedded administrative interface waits until the other outstanding work is done.
-**Last updated:** 2026-10-27 (Phase 1 closed on a local run of the three suites, no Jenkins being reachable; Phase 2 started. Earlier the same day: renamed with the ACL list, which changed. Earlier, 2026-10-26: Phase 1 built, with local checks only; the full suites run on Jenkins before it is closed. Earlier the same day: started, membership and Pre-Vote complete. Earlier, 2026-10-21: membership Step 5 completed; Steps 6 to 8 remain the preceding work; this client list is still proposed; renamed with linked documents. Earlier, 2026-10-14: cleanup prerequisites completed and archived; membership Steps 5 to 8 remain the preceding work. On 2026-10-11: the rule that guards need mutation evidence removed at the owner's decision, from the rules and from one exit; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: decisions 5 and 8: what a node's deregistration removes, and the `client.hostname` setting; the file renamed to the date of its last change; the single-POM list's Phase 3A replaced Qraft's two retired words here and everywhere; decision 10 records the configuration names, and decision 3 the path of the local API. On 2026-10-08, the review with the other task lists: the request bodies of decision 5 and the log audit in the rules)
+**Last updated:** 2026-10-28 (Phase 2's three client tasks recorded as done: the data directory and its lock, the node ID kept through a shared identity file, and `client.nodeName`; the server side remains. Earlier, 2026-10-27: Phase 1 closed on a local run of the three suites, no Jenkins being reachable; Phase 2 started. Earlier the same day: renamed with the ACL list, which changed. Earlier, 2026-10-26: Phase 1 built, with local checks only; the full suites run on Jenkins before it is closed. Earlier the same day: started, membership and Pre-Vote complete. Earlier, 2026-10-21: membership Step 5 completed; Steps 6 to 8 remain the preceding work; this client list is still proposed; renamed with linked documents. Earlier, 2026-10-14: cleanup prerequisites completed and archived; membership Steps 5 to 8 remain the preceding work. On 2026-10-11: the rule that guards need mutation evidence removed at the owner's decision, from the rules and from one exit; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: decisions 5 and 8: what a node's deregistration removes, and the `client.hostname` setting; the file renamed to the date of its last change; the single-POM list's Phase 3A replaced Qraft's two retired words here and everywhere; decision 10 records the configuration names, and decision 3 the path of the local API. On 2026-10-08, the review with the other task lists: the request bodies of decision 5 and the log audit in the rules)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 4.3, 5, 6.2, 7.3, 8, 12.1 and 16
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
@@ -58,7 +58,7 @@ decision 10 on 2026-10-09. Decisions 5 to 8 follow the Consul pattern.
      replicated step, as in Consul (decided by the user on 2026-10-09).
 6. **The local API binds to `127.0.0.1` by default,** like Consul's
    `client_addr`. It has no authentication until
-   [`task-list-acl-and-tokens-2026-10-27.md`](task-list-acl-and-tokens-2026-10-27.md),
+   [`task-list-acl-and-tokens-2026-10-28.md`](task-list-acl-and-tokens-2026-10-28.md),
    which is proposed to follow this list; liveness and readiness share the
    same listener.
 7. **Registrations follow Consul's rules.**
@@ -193,12 +193,35 @@ retained logs hold 823 ERROR lines, all flagged, and no unflagged stack trace.
 
 ### Phase 2. Data directory and node identity
 
-- [ ] Add a required `client.dataDirectory` setting, validated before any
+- [x] Add a required `client.dataDirectory` setting, validated before any
   resource opens. Allow one client per directory, enforced with a lock.
-- [ ] Generate and keep the node ID (decision 8). Share the code with the
+  Done 2026-10-27, test first, in `6680a67`. `ClientDataDirectory.open` creates
+  the directory and takes a `FileChannel.tryLock` on `client.lock` before the
+  node ID is read; a second client in the same process or in another process is
+  refused with a message naming the directory, and the lock is released if the
+  node ID cannot be read (`ClientDataDirectoryTest`, 5 tests;
+  `ClientDataDirectoryProcessLockTest`, 1 test, with an owner subprocess).
+  `QraftClient` opens it first, before either HTTP client, and releases it when
+  its shutdown completes (`QraftClientTest.aClientHoldsItsDataDirectoryFromConstructionUntilItsShutdownCompletes`).
+  A missing or invalid path is refused when the configuration is read
+  (`ClientConfigurationTest.aDataDirectoryIsRequiredAndMustBeAPath`).
+- [x] Generate and keep the node ID (decision 8). Share the code with the
   server's `ServerIdentity` through `common`.
-- [ ] Rename `client.id` to `client.nodeName`, defaulting to the host name.
+  Done 2026-10-27, test first, in `6680a67`. `common.storage.IdentityFile`
+  creates an ID once, writes it atomically through a temporary file and forces
+  the directory, and refuses to replace one it cannot read (`IdentityFileTest`,
+  5 tests). `ServerIdentity` keeps `server-id` through it; the client keeps
+  `node-id` in its data directory.
+- [x] Rename `client.id` to `client.nodeName`, defaulting to the host name.
   Update the configuration examples and the Docker configurations.
+  Done 2026-10-27, test first, in `6680a67`
+  (`ClientConfigurationTest.readsTheNodeNameAndTheDataDirectory`,
+  `theNodeNameDefaultsToTheHostName`, and
+  `theRetiredIdSettingIsRefusedLikeAnyUnknownSetting`). `docker/config/client.json`,
+  the acceptance client configurations and the design's section 16 example
+  carry `nodeName` and `dataDirectory`. The full suites passed on `14ded7d`, with
+  the snapshot-transfer fix later committed as `f991254`: default 1,225,
+  end-to-end 10 and Docker 41, and every ERROR line in the retained logs flagged.
 - [ ] Server side: store the node ID with the node, using a new optional
   protobuf field; older entries load without one.
   - Refuse a held name with `node_name_reserved`.
@@ -312,7 +335,7 @@ consecutive runs; audits as in the other lists.
 - Authentication and ACLs, on the local API and on the server. Until they
   exist, decision 8 detects a conflicting node identity but cannot stop a
   caller from claiming one. Proposed in
-  [`task-list-acl-and-tokens-2026-10-27.md`](task-list-acl-and-tokens-2026-10-27.md).
+  [`task-list-acl-and-tokens-2026-10-28.md`](task-list-acl-and-tokens-2026-10-28.md).
 - Forwarding key/value, sessions, consistency modes, and blocking queries. Each
   is added when the corresponding server feature lands.
 - Response caching in the client, gossip, and configuration-file reload.

@@ -278,6 +278,92 @@ errors or skips. Its 223 retained logs, including 19 Docker archive folders, hol
 823 ERROR lines, all flagged, 559 stack traces, none under an unflagged header,
 and no JVM crash file.
 
+The third run, with the client list's Phase 2 client slice in the working tree
+(later `6680a67`), passed default 1,221 and end-to-end 10 but failed two Docker
+classes, each a defect:
+
+- `DockerStartCommandsTest`: the start scripts ran `docker compose up -d` without
+  `--build`, so they started images left from an earlier build, whose client still
+  read `client.id`. The client never became ready, and its errors were unflagged.
+  Every start command now passes `--build` (`14ded7d`, test first,
+  `DockerDeploymentContractTest.everyStartCommandRebuildsItsImagesBeforeStartingThem`).
+- `DockerServerReplacementTest`: a check-quorum step-down moved leadership while
+  the leader was sending a snapshot to the old `server3`. The wiped server's answer
+  came from another server ID and was ignored, but the transfer was never ended,
+  and removing the old server did not forget it, so the leader never sent the new
+  `server3` anything for the rest of the term. Such an answer now ends the
+  transfer and backs off, and a server leaving the configuration takes its
+  snapshot transfer and backoff with it (`f991254`, test first,
+  `RaftNodeServerIdCountingTest` and `SnapshotRetryBackoffTest`). What starved
+  the leader of `server1`'s answers for the 1.5 seconds of check-quorum is not
+  explained: no Raft RPC has a deadline, so a stalled call logs nothing.
+
+The fourth run, on `14ded7d` with the snapshot fix in the working tree, passed
+default 1,225 with every coverage gate met, end-to-end 10 and Docker 41 (26 min
+5 s), with no failures, errors or skips. Its 234 retained logs hold 910 ERROR
+lines, all flagged, 588 stack traces, none under an unflagged header, and no JVM
+crash file. No leader stepped down, so the replacement test did not take the
+path the fix covers; the unit tests are its evidence.
+
+Where the Docker stage's time goes, from the fourth run's log: the classes run one
+at a time (`@ResourceLock("shared-docker-clusters")`, and no parallel execution is
+configured), and their times add up to the stage's (1,550 s of 1,565 s).
+
+| Part | Seconds |
+|---|---|
+| Five tests that wait for the cluster's timers: `DockerReturningVoterTest` (a follower stopped for 200 s, then a 40 s hold), `DockerPeriodicCleanupTest` (two 40 s absences, then the 60 s cleanup grace), `DockerLostQuorumRecoveryTest`, `DockerFailedVoterCleanupTest` (the 60 s grace) and `DockerRemovedServerCampaignTest` | 722 |
+| `DockerStartCommandsTest`, the real start scripts one after another, the longest being the observability cluster (63 s) and stack (43 s) | 300 |
+| Starting 23 compose clusters until ready (137 s) and removing them (44 s) | 181 |
+| The test bodies of the other ten classes | about 350 |
+
+Image builds take about 23 s of it (the fixture's one build, 7 s, and six cached
+builds from the start scripts' `--build`); container creation, server start
+(about 1 s) and server shutdown (under 0.3 s) are not where it goes. The four
+runs took 28 min 57 s, 24 min 36 s, 31 min 1 s (with the replacement test
+waiting out its limit) and 26 min 5 s. The records of builds 43 to 45 give whole
+pipelines of about 1,280 s, which looks short beside these figures for the same
+classes; without their stage times, the two cannot be compared.
+
+On 2026-10-28 two more runs, on `f991254`, verified deadlines on every Raft call
+(`GrpcRaftTransport`: 10 s for a vote, pre-vote or append, 30 s for a snapshot
+chunk). Without one, a call on a connection that died without a reset never
+failed and logged nothing, and a snapshot chunk stuck that way kept its transfer
+in place, so the leader sent that follower no snapshot for the rest of the term.
+`GrpcRaftTransportTest` shows an unanswered call failing with
+`DEADLINE_EXCEEDED` at its deadline (red first), and each call's deadline
+counting from when it is sent.
+
+The first run passed default 1,228 and end-to-end 10 and failed three Docker
+classes, none on the deadlines. Each failure was traced to its cause:
+
+- `DockerLostQuorumRecoveryTest` logged `Failed to send InstallSnapshot chunk 1/1
+  to server1: UNAVAILABLE: io exception` three times. Its offline backup stops
+  server1, and the new leader had compacted its log past server1's next entry, so
+  it sent snapshots, which failed while server1 was stopped. The class now
+  declares `RAFT_SNAPSHOT_TRANSFER_INTERRUPTED`.
+- `DockerDurableRestartTest` logged Netty's `Stream Error` warning with
+  `Http2Exception$StreamException: Stream closed before write could take place`.
+  The leader-crash test kills the leader straight after a write, and a follower
+  was answering its AppendEntries when it died. A definition can now name the
+  exception an event carries (`DockerLogCaptureTest`, red first), and the new
+  `GRPC_ANSWER_TO_KILLED_PEER` accepts this warning only with that exception.
+- `DockerStartCommandsTest`: the five-server start brought server4 up 23 s
+  before Docker Desktop started server3's container, so server3's name did not
+  resolve meanwhile. The class now declares `RAFT_PEER_NAME_UNRESOLVED`. Its
+  cleanup, four Docker commands, ran past JUnit's 15 s default for a lifecycle
+  method and now has 5 minutes. It left nothing running.
+
+In the same run, a call from server3 to a server1 that the test had taken down ended
+with `DEADLINE_EXCEEDED` after 10 s on an open connection, which before would have
+waited forever without a log line.
+
+The second run passed default 1,231 with every coverage gate met, end-to-end 10
+and Docker 41 (26 min 43 s), with no failures, errors or skips. Its 233 retained
+logs hold 886 ERROR lines, all flagged, 580 stack traces, none under an unflagged
+header, and no JVM crash file. Only `DockerDurableRestartTest`, which kills and
+stops servers, had a call end at its deadline. None of the three newly declared
+races recurred, so `DockerLogCaptureTest` is the evidence for their definitions.
+
 ## Job configuration
 
 The job loads its pipeline from the repository's default branch using the following SCM configuration.

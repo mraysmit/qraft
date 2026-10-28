@@ -195,12 +195,12 @@ public final class DockerLogCaptureHelper {
         ExternalError tempoStartup = recoveredTempoStartup(lines, expected);
         if (tempoStartup != null) recognised.add(tempoStartup);
         // Docker can merge stderr ahead of stdout. Discover matching events before auditing rethrows.
-        for (String line : lines) {
-            Matcher event = EVENT.matcher(line);
+        for (int index = 0; index < lines.length; index++) {
+            Matcher event = EVENT.matcher(lines[index]);
             if (!event.matches()) continue;
-            IntentionalErrorFixture match = matchDeclaredError(event, expected);
+            IntentionalErrorFixture match = matchDeclaredError(event, thrownBy(lines, index), expected);
             if (match != null) {
-                recognised.add(new ExternalError(match, event.group("logger"), event.group("message"), line));
+                recognised.add(new ExternalError(match, event.group("logger"), event.group("message"), lines[index]));
             }
         }
         List<ExternalError> rethrowCandidates = new ArrayList<>(recognised);
@@ -215,7 +215,7 @@ public final class DockerLogCaptureHelper {
             String line = lines[index];
             Matcher event = EVENT.matcher(line);
             if (event.matches()) {
-                IntentionalErrorFixture match = matchDeclaredError(event, expected);
+                IntentionalErrorFixture match = matchDeclaredError(event, thrownBy(lines, index), expected);
                 if (match != null) {
                     rawLine = labelLine(rawLine, event.start("logger"), match, classOwner);
                 } else if ("ERROR".equals(event.group("level"))) {
@@ -277,12 +277,23 @@ public final class DockerLogCaptureHelper {
         return null;
     }
 
-    /** The declared error with this event's logger, level, and message, or {@code null}. */
-    private static IntentionalErrorFixture matchDeclaredError(Matcher event, Set<IntentionalErrorFixture> expected) {
+    /** The declared error with this event's logger, level, message and exception, or {@code null}. */
+    private static IntentionalErrorFixture matchDeclaredError(Matcher event, String thrown,
+                                                              Set<IntentionalErrorFixture> expected) {
         Level level = Level.toLevel(event.group("level"));
         return expected.stream()
-                .filter(error -> error.matches(event.group("logger"), level, event.group("message")))
+                .filter(error -> error.matches(event.group("logger"), level, event.group("message"), thrown))
                 .findFirst().orElse(null);
+    }
+
+    /**
+     * The first line of the exception the event at {@code index} carries: the line after the event, or empty when
+     * its trace begins with a frame. {@code null} when it carries no stack trace.
+     */
+    private static String thrownBy(String[] lines, int index) {
+        if (!carriesStackTrace(lines, index)) return null;
+        String next = lines[index + 1];
+        return STACK_TRACE_LINE.matcher(next).matches() ? "" : next;
     }
 
     /** Whether a stack-trace line follows the event at {@code index} before the next event or uncaught exception. */

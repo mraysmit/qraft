@@ -18,6 +18,7 @@ package dev.mars.qraft.testing.fault;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.classic.spi.IThrowableProxy;
 import dev.mars.qraft.server.QraftServerService;
 
 import java.util.Objects;
@@ -34,7 +35,8 @@ import java.util.regex.Pattern;
  * in its cause or suppressed chain, is that {@link InjectedFaultFixture}.</li>
  * <li>An {@link Kind#INTENTIONAL_ERROR} is an error that production code logs because a test arranged the
  * situation, with no injected exception: a partitioned peer, a corrupted file, a refused configuration. It names
- * the exact logger, level, and complete message pattern, and labels an event only during a test that declares it
+ * the exact logger, level, and complete message pattern, and, where the message alone is too broad, the exception
+ * the event carries. It labels an event only during a test that declares it
  * with {@link IntentionalErrorsHelper#expect(IntentionalErrorFixture)}. A declared uncaught rethrow signature
  * also requires the exact failure to have been logged earlier in the same container output.</li>
  * </ul>
@@ -132,8 +134,9 @@ public enum IntentionalErrorFixture {
                     + "|Failed to retrieve (?:pre-)?vote from \\S+)"),
 
     /**
-     * A stopped or disconnected Docker peer's name no longer resolves. gRPC reports each failed lookup as a
-     * warning whose message holds the lookup's stack trace.
+     * A stopped or disconnected Docker peer's name no longer resolves, or a peer whose container a start script
+     * has not started yet has no name. gRPC reports each failed lookup as a warning whose message holds the
+     * lookup's stack trace.
      */
     RAFT_PEER_NAME_UNRESOLVED("io.grpc.internal.ManagedChannelImpl", Level.WARN,
             "\\[Channel<\\d+>: \\((?<host>[^:)]+):\\d+\\)] Failed to resolve name\\."
@@ -147,6 +150,15 @@ public enum IntentionalErrorFixture {
      */
     GRPC_CONNECTION_ACCEPTED_AS_SERVER_STOPS("io.netty.channel.ChannelInitializer", Level.WARN,
             "Failed to initialize a channel\\. Closing: \\[id: 0x[0-9a-f]+, L:\\S+ [-!] R:\\S+]"),
+
+    /**
+     * A test kills a server while a peer is answering one of its calls, so the stream is gone by the time the
+     * answer is written. Netty reports the answer it could not write as a warning carrying this exception; any
+     * other stream error stays undeclared.
+     */
+    GRPC_ANSWER_TO_KILLED_PEER("io.grpc.netty.NettyServerHandler", Level.WARN, "Stream Error", null,
+            "io\\.netty\\.handler\\.codec\\.http2\\.Http2Exception\\$StreamException:"
+                    + " Stream closed before write could take place"),
 
     /** A stopped Docker peer interrupts an in-progress snapshot transfer. */
     RAFT_SNAPSHOT_TRANSFER_INTERRUPTED("dev.mars.qraft.raft.RaftNode", Level.ERROR,
@@ -217,6 +229,7 @@ public enum IntentionalErrorFixture {
     private final Level level;
     private final Pattern message;
     private final Pattern uncaughtException;
+    private final Pattern exception;
 
     IntentionalErrorFixture() {
         this.kind = Kind.INJECTED_FAILURE;
@@ -224,6 +237,7 @@ public enum IntentionalErrorFixture {
         this.level = null;
         this.message = null;
         this.uncaughtException = null;
+        this.exception = null;
     }
 
     IntentionalErrorFixture(String loggerName, Level level, String messagePattern) {
@@ -231,11 +245,21 @@ public enum IntentionalErrorFixture {
     }
 
     IntentionalErrorFixture(String loggerName, Level level, String messagePattern, String uncaughtExceptionPattern) {
+        this(loggerName, level, messagePattern, uncaughtExceptionPattern, null);
+    }
+
+    /**
+     * @param exceptionPattern the exception an event carries, as its trace's first line reads
+     *     ({@code class: message}), or {@code null} when any exception will do
+     */
+    IntentionalErrorFixture(String loggerName, Level level, String messagePattern, String uncaughtExceptionPattern,
+                            String exceptionPattern) {
         this.kind = Kind.INTENTIONAL_ERROR;
         this.loggerName = Objects.requireNonNull(loggerName, "loggerName");
         this.level = Objects.requireNonNull(level, "level");
         this.message = Pattern.compile(Objects.requireNonNull(messagePattern, "messagePattern"));
         this.uncaughtException = uncaughtExceptionPattern == null ? null : Pattern.compile(uncaughtExceptionPattern);
+        this.exception = exceptionPattern == null ? null : Pattern.compile(exceptionPattern);
     }
 
     public Kind kind() {
@@ -252,15 +276,28 @@ public enum IntentionalErrorFixture {
      * pattern matches completely. Always false for an injected failure, which is recognised by its exception.
      */
     boolean matches(ILoggingEvent event) {
-        return matches(event.getLoggerName(), event.getLevel(), event.getFormattedMessage());
+        IThrowableProxy thrown = event.getThrowableProxy();
+        return matches(event.getLoggerName(), event.getLevel(), event.getFormattedMessage(), thrown == null ? null
+                : thrown.getMessage() == null ? thrown.getClassName() : thrown.getClassName() + ": " + thrown.getMessage());
     }
 
-    /** Whether an externally captured log event has this intentional error's exact signature. */
+    /** Whether an externally captured log event without an exception has this intentional error's exact signature. */
     boolean matches(String eventLogger, Level eventLevel, String eventMessage) {
+        return matches(eventLogger, eventLevel, eventMessage, null);
+    }
+
+    /**
+     * Whether a log event has this intentional error's exact signature. {@code thrown} is the first line of the
+     * exception the event carries ({@code class: message}, or empty when its trace has no such line), or
+     * {@code null} when it carries none. An error that names an exception matches an event carrying any other
+     * exception never, and an event carrying none on its message alone, as the capture reprints it.
+     */
+    boolean matches(String eventLogger, Level eventLevel, String eventMessage, String thrown) {
         return kind == Kind.INTENTIONAL_ERROR
                 && loggerName.equals(eventLogger)
                 && level.equals(eventLevel)
-                && message.matcher(eventMessage).matches();
+                && message.matcher(eventMessage).matches()
+                && (exception == null || thrown == null || exception.matcher(thrown).matches());
     }
 
     /** Matches an uncaught rethrow only when its exact failure was already reported by this intentional error. */

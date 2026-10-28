@@ -51,7 +51,7 @@ navigation entries until corresponding platform contracts and an approved
 delivery plan exist.
 
 Roles and Auth Methods, in Govern, are reserved in the same way. The ACL list
-([`task-list-acl-and-tokens-2026-10-27.md`](task-list-acl-and-tokens-2026-10-27.md))
+([`task-list-acl-and-tokens-2026-10-28.md`](task-list-acl-and-tokens-2026-10-28.md))
 delivers tokens and policies and leaves roles, authentication methods and login
 out (its section 7).
 
@@ -570,7 +570,7 @@ locks, routes, and peer exports before confirmation.
 
 Access control is part of the system's integrity, not a list of resources to
 browse. It follows Consul's token model, as the ACL list
-([`task-list-acl-and-tokens-2026-10-27.md`](task-list-acl-and-tokens-2026-10-27.md))
+([`task-list-acl-and-tokens-2026-10-28.md`](task-list-acl-and-tokens-2026-10-28.md))
 sets it out, including the decisions of 2026-10-27 in its proposals 16 to 19.
 The section contains Status, Tokens, Policies, and an explanation of
 decisions, and presents tokens and policies through their relationships

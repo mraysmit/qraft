@@ -107,7 +107,7 @@ section 4.1, after reviewing the `peegeeq-management-ui` and
 | HTTP key/value API with indexes and compare-and-set | Key/Value browser | Server HTTP API over the existing replicated state |
 | Sessions and locks | Sessions, Locks | Platform design section 11, not started |
 | Replicated tenants and namespaces with an API | Tenants, Namespaces, scope selector options | Tenancy work; nothing exists today (`qraft-tenant` was removed on 2026-10-04) |
-| Authentication, authorization, and the token and policy resources | Any mutation; Tokens, Policies; permission-shaped navigation; the token menu | [`task-list-acl-and-tokens-2026-10-27.md`](task-list-acl-and-tokens-2026-10-27.md), proposed to follow the client list |
+| Authentication, authorization, and the token and policy resources | Any mutation; Tokens, Policies; permission-shaped navigation; the token menu | [`task-list-acl-and-tokens-2026-10-28.md`](task-list-acl-and-tokens-2026-10-28.md), proposed to follow the client list |
 | The security profile and authentication mode in the bootstrap data; `installedFromFile` on the management token | Security status, banners, sign-in | ACL list, proposals 12 and 16; UI-0's bootstrap object |
 | Explaining a decision, `POST /v1/acl/explain`; the tokens linking to a policy, `GET /v1/acl/tokens?policy=` | Explanations; policy pages; policy deletion | ACL list, proposals 18 and 19 |
 | Lock-out and linked-policy refusals, `409 acl_lockout` and `409 policy_in_use` | Token and policy review steps | ACL list, proposals 17 and 18 |

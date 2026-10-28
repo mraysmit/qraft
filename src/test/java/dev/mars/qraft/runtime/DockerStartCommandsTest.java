@@ -67,7 +67,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 @Tag("docker")
-@ExpectedDockerErrorsHelper(IntentionalErrorFixture.TEMPO_METRICS_WAL_STARTUP)
+@ExpectedDockerErrorsHelper({
+        IntentionalErrorFixture.TEMPO_METRICS_WAL_STARTUP,
+        // A script starts every server at once and Docker starts their containers one at a time, so a server can
+        // dial a peer whose container has not started yet, and whose name does not resolve until it has.
+        IntentionalErrorFixture.RAFT_PEER_NAME_UNRESOLVED
+})
 @Timeout(value = 20, unit = TimeUnit.MINUTES)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @Execution(ExecutionMode.SAME_THREAD)
@@ -91,7 +96,10 @@ class DockerStartCommandsTest {
             "component=remote level=error .* msg=\"error tailing WAL\" err=\"failed to find segment for index\"$");
     private static final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
+    // Two scripts, the observability cleanup and a compose down. On Docker Desktop they have taken longer than the
+    // default 15 s for a lifecycle method, so their budget is set here, well inside the limits of their commands.
     @AfterAll
+    @Timeout(value = 5, unit = TimeUnit.MINUTES)
     static void removeWhatTheCommandsStarted() throws Exception {
         captureProjectLogs("left-running");
         script("start", "stop");

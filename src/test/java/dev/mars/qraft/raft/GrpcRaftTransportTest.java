@@ -20,6 +20,8 @@ import dev.mars.qraft.state.DistributedStateRaftCommand;
 
 import dev.mars.qraft.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.raft.grpc.AppendEntriesResponse;
+import dev.mars.qraft.raft.grpc.InstallSnapshotRequest;
+import dev.mars.qraft.raft.grpc.InstallSnapshotResponse;
 import dev.mars.qraft.raft.grpc.JoinRequest;
 import dev.mars.qraft.raft.grpc.PreVoteRequest;
 import dev.mars.qraft.raft.grpc.PreVoteResponse;
@@ -34,6 +36,7 @@ import io.grpc.stub.StreamObserver;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.common.async.RaftExecutorsFixture;
+import dev.mars.qraft.common.concurrent.Completions;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import org.junit.jupiter.api.AfterEach;
@@ -77,7 +80,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * - The callback pool running an overflowing callback on the delivering thread
  * - Concurrent vote and append requests
  * - Transport lifecycle and pool size configuration
- * Retries and timeouts are not tested here.
+ * - Deadlines: a call a peer never answers fails with DEADLINE_EXCEEDED, a snapshot chunk after its own longer
+ *   deadline, and each call's deadline starts when it is sent
+ * Retries are not tested here.
  *
  * <p>Every transport, executor, server and node a test creates is released after it, even when the test
  * fails.
@@ -96,6 +101,7 @@ class GrpcRaftTransportTest {
     private int targetPort;
     private final List<GrpcRaftTransport> transports = new ArrayList<>();
     private final List<ExecutorService> executors = new ArrayList<>();
+    private final List<Server> servers = new ArrayList<>();
 
     @BeforeEach
     void setUp() throws Exception {
@@ -115,6 +121,7 @@ class GrpcRaftTransportTest {
         try {
             executors.forEach(ExecutorService::shutdownNow);
             transports.forEach(GrpcRaftTransport::stop);
+            for (Server server : servers) server.shutdownNow().awaitTermination(10, TimeUnit.SECONDS);
         } finally {
             try {
                 if (targetServer != null) {
@@ -637,6 +644,98 @@ class GrpcRaftTransportTest {
 
         assertTrue(response.getVoteGranted());
         assertEquals(2, response.getTerm());
+    }
+
+    // ========== DEADLINE TESTS ==========
+
+    @Test
+    @DisplayName("A vote, pre-vote or append that is never answered fails at the round-trip deadline")
+    void aRoundTripThatIsNeverAnsweredFailsAtItsDeadlineWhileASnapshotChunkStillWaits() throws Exception {
+        GrpcRaftTransport transport = transportTo(silentServer(), Duration.ofMillis(200), Duration.ofMinutes(1));
+
+        CompletableFuture<InstallSnapshotResponse> chunk = transport.sendInstallSnapshot("silent", snapshotChunk());
+        assertDeadlineExceeded(transport.sendVoteRequest("silent", vote(1, "client")));
+        assertDeadlineExceeded(transport.sendPreVote("silent", PreVoteRequest.newBuilder()
+                .setTerm(1).setCandidateId("client").setLastLogIndex(1).setLastLogTerm(0).build()));
+        assertDeadlineExceeded(transport.sendAppendEntries("silent", AppendEntriesRequest.newBuilder()
+                .setTerm(1).setLeaderId("client").setPrevLogIndex(0).setPrevLogTerm(0).setLeaderCommit(0).build()));
+
+        assertFalse(chunk.isDone(), "a snapshot chunk waits for its own, longer deadline");
+    }
+
+    @Test
+    @DisplayName("A snapshot chunk that is never answered fails at its own deadline")
+    void aSnapshotChunkThatIsNeverAnsweredFailsAtItsDeadlineWhileARoundTripStillWaits() throws Exception {
+        GrpcRaftTransport transport = transportTo(silentServer(), Duration.ofMinutes(1), Duration.ofMillis(200));
+
+        CompletableFuture<VoteResponse> vote = transport.sendVoteRequest("silent", vote(1, "client"));
+        assertDeadlineExceeded(transport.sendInstallSnapshot("silent", snapshotChunk()));
+
+        assertFalse(vote.isDone(), "a round trip waits for its own deadline");
+    }
+
+    @Test
+    @DisplayName("Each call's deadline starts when it is sent, not when the channel to the peer was opened")
+    void aCallSentAfterAnEarlierCallsDeadlineHasPassedIsStillAnswered() throws Exception {
+        GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime.stateLoop(), "client",
+                Map.of("target", "localhost:" + targetPort), 10, 1000, Duration.ofMillis(500), Duration.ofMillis(500)));
+        assertTrue(decided(transport.sendVoteRequest("target", vote(1, "client"))).getVoteGranted());
+
+        await().pollDelay(Duration.ofSeconds(1)).atMost(Duration.ofSeconds(2)).until(() -> true);
+
+        assertEquals(1, decided(transport.sendVoteRequest("target", vote(1, "client"))).getTerm(),
+                "a call sent a second later still has the whole of its deadline");
+    }
+
+    /**
+     * A Raft service that takes every call and never answers, as a peer does behind a connection that died without
+     * a reset. It is shut down after the test, which ends the calls it still holds.
+     */
+    private Server silentServer() throws IOException {
+        Server server = ServerBuilder.forPort(0).addService(new RaftServiceGrpc.RaftServiceImplBase() {
+            @Override
+            public void requestVote(VoteRequest request, StreamObserver<VoteResponse> responseObserver) {
+                // Never answered.
+            }
+
+            @Override
+            public void preVote(PreVoteRequest request, StreamObserver<PreVoteResponse> responseObserver) {
+                // Never answered.
+            }
+
+            @Override
+            public void appendEntries(AppendEntriesRequest request,
+                                      StreamObserver<AppendEntriesResponse> responseObserver) {
+                // Never answered.
+            }
+
+            @Override
+            public void installSnapshot(InstallSnapshotRequest request,
+                                        StreamObserver<InstallSnapshotResponse> responseObserver) {
+                // Never answered.
+            }
+        }).build().start();
+        servers.add(server);
+        return server;
+    }
+
+    private GrpcRaftTransport transportTo(Server peer, Duration roundTripDeadline, Duration snapshotChunkDeadline) {
+        return track(new GrpcRaftTransport(runtime.stateLoop(), "client", Map.of("silent", "localhost:" + peer.getPort()),
+                10, 1000, roundTripDeadline, snapshotChunkDeadline));
+    }
+
+    private static InstallSnapshotRequest snapshotChunk() {
+        return InstallSnapshotRequest.newBuilder()
+                .setTerm(1).setLeaderId("client").setLastIncludedIndex(1).setLastIncludedTerm(1)
+                .setChunkIndex(0).setTotalChunks(1).setData(com.google.protobuf.ByteString.copyFromUtf8("state"))
+                .setDone(true).build();
+    }
+
+    private static void assertDeadlineExceeded(CompletableFuture<?> call) {
+        ExecutionException failed = assertThrows(ExecutionException.class, () -> call.get(10, TimeUnit.SECONDS));
+        StatusRuntimeException status = assertInstanceOf(StatusRuntimeException.class,
+                Completions.unwrap(failed.getCause()), failed.getCause().toString());
+        assertEquals(Status.Code.DEADLINE_EXCEEDED, status.getStatus().getCode());
     }
 
     // ========== EDGE CASE REQUEST TESTS ==========

@@ -81,7 +81,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @ExpectedDockerErrorsHelper({
         // Stopped servers are unreachable, and their names do not resolve while their containers are stopped.
         dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE,
-        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_NAME_UNRESOLVED
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_NAME_UNRESOLVED,
+        // The offline backup stops server1. A leader that compacts its log past server1's next entry meanwhile
+        // sends it a snapshot instead, which fails while server1 is stopped and is tried again after a backoff.
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_SNAPSHOT_TRANSFER_INTERRUPTED
 })
 // Each test waits only on bounded conditions. Their worst-case sum is about twelve minutes before cluster startup,
 // snapshots and shutdown, so the method budget is twenty-five: a failure reports the condition that was not met

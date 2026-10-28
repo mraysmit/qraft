@@ -61,7 +61,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_RECOVERY_AMBIGUOUS_CORRUPTION,
         dev.mars.qraft.testing.fault.IntentionalErrorFixture.SERVER_RECOVERY_AMBIGUOUS_CORRUPTION,
         dev.mars.qraft.testing.fault.IntentionalErrorFixture.WAL_DIRECTORY_ALREADY_LOCKED,
-        dev.mars.qraft.testing.fault.IntentionalErrorFixture.SERVER_STORAGE_ALREADY_LOCKED
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.SERVER_STORAGE_ALREADY_LOCKED,
+        // The leader-crash tests kill the leader straight after a write, so a follower can be answering the
+        // leader's AppendEntries when the leader dies, and finds the stream gone when it writes the answer.
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.GRPC_ANSWER_TO_KILLED_PEER
 })
 // Each test waits only on bounded conditions, up to about 270 s in all; the method budget exceeds that,
 // so a failure reports the condition that was not met rather than the module's default method timeout.

@@ -711,7 +711,12 @@ local, git-ignored logs; the extracts are included here so the examples remain a
 
 The definitions in
 [`IntentionalErrorFixture`](../src/test/java/dev/mars/qraft/testing/fault/IntentionalErrorFixture.java)
-specify the exact logger, level, and complete message pattern. A test declares its expected error with
+specify the exact logger, level, and complete message pattern. Where the message alone is too broad, a
+definition also names the exception the event carries, as the first line of its trace reads
+(`class: message`): `GRPC_ANSWER_TO_KILLED_PEER` accepts Netty's `Stream Error` warning only with
+`Http2Exception$StreamException: Stream closed before write could take place`, and any other stream error
+stays undeclared. An event without an exception, as the Docker capture reprints one, is matched on its
+message. A test declares its expected error with
 `IntentionalErrorsHelper.expect` before causing it. The declaration belongs to the current test's scope;
 it does not permit matching errors everywhere in the suite.
 

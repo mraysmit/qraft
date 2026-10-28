@@ -20,6 +20,8 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import io.netty.handler.codec.http2.Http2Error;
+import io.netty.handler.codec.http2.Http2Exception;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.LoggerFactory;
@@ -29,6 +31,7 @@ import java.nio.file.Path;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -569,5 +572,61 @@ class DockerLogCaptureTest {
         DockerLogCaptureHelper.capture("container-1", "server1", first + error);
         assertTrue(DockerLogCaptureHelper.finishClass(directory).isEmpty());
         assertEquals("", Files.readString(directory.resolve("QuietDockerClass/server1.log")));
+    }
+
+    private static final String STREAM_ERROR = "2026-10-28 06:39:42.847 [grpc-nio-worker-ELG-3-1] WARN  "
+            + "io.grpc.netty.NettyServerHandler - Stream Error";
+    private static final String STREAM_CLOSED = "\nio.netty.handler.codec.http2.Http2Exception$StreamException:"
+            + " Stream closed before write could take place";
+    private static final String STREAM_TRACE =
+            "\n\tat io.netty.handler.codec.http2.Http2Exception.streamError(Http2Exception.java:171)"
+            + "\n\tat io.netty.handler.codec.http2.DefaultHttp2RemoteFlowController$FlowState.cancel("
+            + "DefaultHttp2RemoteFlowController.java:479)\n";
+
+    @Test
+    void anAnswerToAKilledPeerIsRecognisedByTheExceptionUnderItsWarning() {
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(STREAM_ERROR + STREAM_CLOSED + STREAM_TRACE,
+                Set.of(IntentionalErrorFixture.GRPC_ANSWER_TO_KILLED_PEER), "DockerClass");
+
+        assertEquals(java.util.List.of(), audit.problems());
+        assertEquals(1, audit.recognised().size());
+        assertEquals(STREAM_ERROR.replace("WARN  ", "WARN  *** INTENTIONAL ERROR: GRPC_ANSWER_TO_KILLED_PEER, "
+                + "caused by DockerClass *** ") + STREAM_CLOSED + STREAM_TRACE, audit.archivedOutput());
+    }
+
+    @Test
+    void theAnswerToAKilledPeerExcusesNoOtherStreamError() {
+        Set<IntentionalErrorFixture> expected = Set.of(IntentionalErrorFixture.GRPC_ANSWER_TO_KILLED_PEER);
+        for (String exception : java.util.List.of(
+                "\nio.netty.handler.codec.http2.Http2Exception$StreamException: Received DATA frame for an unknown"
+                        + " stream 3",
+                STREAM_CLOSED.replace("Http2Exception$StreamException", "Http2Exception"),
+                STREAM_CLOSED + " now",
+                "")) {
+            String output = STREAM_ERROR + exception + STREAM_TRACE;
+            DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(output, expected, "DockerClass");
+            assertEquals(java.util.List.of("undeclared container event with a stack trace: " + STREAM_ERROR),
+                    audit.problems(), exception);
+            assertEquals(output, audit.archivedOutput());
+        }
+    }
+
+    @Test
+    void anEventInThisJvmMatchesAnExceptionSignatureOnlyWithThatException() {
+        IntentionalErrorFixture answer = IntentionalErrorFixture.GRPC_ANSWER_TO_KILLED_PEER;
+        assertTrue(answer.matches(nettyWarning(Http2Exception.streamError(
+                3, Http2Error.STREAM_CLOSED, "Stream closed before write could take place"))));
+        assertFalse(answer.matches(nettyWarning(Http2Exception.streamError(
+                3, Http2Error.STREAM_CLOSED, "Received DATA frame for an unknown stream 3"))));
+        assertFalse(answer.matches(nettyWarning(new IllegalStateException(
+                "Stream closed before write could take place"))));
+        assertTrue(answer.matches(nettyWarning(null)),
+                "a warning without an exception, as the capture reprints it, is matched on its message");
+    }
+
+    private static ILoggingEvent nettyWarning(Throwable exception) {
+        Logger netty = (Logger) LoggerFactory.getLogger("io.grpc.netty.NettyServerHandler");
+        return new ch.qos.logback.classic.spi.LoggingEvent(
+                Logger.class.getName(), netty, Level.WARN, "Stream Error", exception, null);
     }
 }

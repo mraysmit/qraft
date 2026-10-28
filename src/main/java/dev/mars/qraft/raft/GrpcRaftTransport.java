@@ -55,8 +55,10 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 
 import java.net.SocketAddress;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -72,7 +74,11 @@ import java.util.function.Consumer;
  * <p>
  * Uses a bounded ThreadPoolExecutor for gRPC callbacks instead of
  * an unbounded CachedThreadPool to prevent resource exhaustion.
- * 
+ * <p>
+ * Every call has a deadline, so one that is never answered fails with {@code DEADLINE_EXCEEDED} instead of
+ * waiting forever: a vote, pre-vote or append after {@link #ROUND_TRIP_DEADLINE}, a snapshot chunk after
+ * {@link #SNAPSHOT_CHUNK_DEADLINE}, and the membership and describe calls after their own.
+ *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @version 2.0 (T3.2: Bounded Thread Pools)
  * @since 2025-12-16
@@ -83,6 +89,18 @@ public class GrpcRaftTransport implements RaftTransport {
     private static final String THREAD_NAME_PREFIX = "raft-grpc-io-";
     /** A server that cannot describe itself this quickly is treated as unreachable for this bootstrap attempt. */
     private static final long DESCRIBE_DEADLINE_SECONDS = 5;
+    /**
+     * How long a vote, pre-vote or append waits for its answer. It ends a call whose connection died without a
+     * reset, which would otherwise wait forever and log nothing, and it is far longer than any answer on a working
+     * network takes, so it never cuts one short.
+     */
+    static final Duration ROUND_TRIP_DEADLINE = Duration.ofSeconds(10);
+    /**
+     * How long one snapshot chunk waits for its answer, longer than a round trip because the follower writes the
+     * chunk, and installs the snapshot with the last one, before it answers. The leader sends one transfer to a
+     * follower at a time, so a chunk that never failed would stop every later snapshot to it.
+     */
+    static final Duration SNAPSHOT_CHUNK_DEADLINE = Duration.ofSeconds(30);
     private static final Metadata.Key<String> REQUEST_ID_HEADER =
             Metadata.Key.of("x-request-id", Metadata.ASCII_STRING_MARSHALLER);
     private static final TextMapSetter<Metadata> METADATA_SETTER = (carrier, key, value) ->
@@ -99,6 +117,8 @@ public class GrpcRaftTransport implements RaftTransport {
     private final ExecutorService executor;
     private final int poolSize;
     private final int queueSize;
+    private final Duration roundTripDeadline;
+    private final Duration snapshotChunkDeadline;
     /** Set by {@link #stop()}; a send after it fails at once, since its reply could no longer be delivered. */
     private volatile boolean stopped;
 
@@ -126,12 +146,25 @@ public class GrpcRaftTransport implements RaftTransport {
      */
     public GrpcRaftTransport(RaftStateLoop runtime, String selfId, Map<String, String> clusterNodes,
                               int poolSize, int queueSize) {
+        this(runtime, selfId, clusterNodes, poolSize, queueSize, ROUND_TRIP_DEADLINE, SNAPSHOT_CHUNK_DEADLINE);
+    }
+
+    /**
+     * Creates a GrpcRaftTransport whose calls end after the given deadlines.
+     *
+     * @param roundTripDeadline how long a vote, pre-vote or append may wait for its answer
+     * @param snapshotChunkDeadline how long one snapshot chunk may wait for its answer
+     */
+    GrpcRaftTransport(RaftStateLoop runtime, String selfId, Map<String, String> clusterNodes,
+                      int poolSize, int queueSize, Duration roundTripDeadline, Duration snapshotChunkDeadline) {
         this.runtime = runtime;
         this.selfId = selfId;
         this.clusterNodes = clusterNodes;
         this.poolSize = poolSize;
         this.queueSize = queueSize;
-        
+        this.roundTripDeadline = Objects.requireNonNull(roundTripDeadline, "roundTripDeadline");
+        this.snapshotChunkDeadline = Objects.requireNonNull(snapshotChunkDeadline, "snapshotChunkDeadline");
+
         ThreadPoolExecutor threadPool = callbackExecutor(selfId, poolSize, queueSize);
         this.executor = threadPool;
         
@@ -244,7 +277,7 @@ public class GrpcRaftTransport implements RaftTransport {
                 .startSpan();
         try (MDC.MDCCloseable ignoredMdc = MDC.putCloseable("requestId", requestId);
              Scope ignoredSpan = span.makeCurrent()) {
-            CompletableFuture<VoteResponse> response = toFuture(correlatedStub(targetId, requestId).requestVote(request));
+            CompletableFuture<VoteResponse> response = toFuture(correlatedStub(targetId, requestId, roundTripDeadline).requestVote(request));
             response.whenComplete(Completions.outcome(
                     r -> {
                         span.setAttribute("raft.vote_granted", r.getVoteGranted());
@@ -282,7 +315,7 @@ public class GrpcRaftTransport implements RaftTransport {
              Scope ignoredSpan = span.makeCurrent()) {
             // A server of an older version has no PreVote. Its UNIMPLEMENTED answer becomes the unsupported failure
             // that a transport without the capability gives, so the caller counts that peer as willing.
-            CompletableFuture<PreVoteResponse> response = toFuture(correlatedStub(targetId, requestId).preVote(request))
+            CompletableFuture<PreVoteResponse> response = toFuture(correlatedStub(targetId, requestId, roundTripDeadline).preVote(request))
                     .exceptionallyCompose(failure -> CompletableFuture.failedFuture(
                             Completions.unwrap(failure) instanceof StatusRuntimeException status
                                     && status.getStatus().getCode() == Status.Code.UNIMPLEMENTED
@@ -323,7 +356,7 @@ public class GrpcRaftTransport implements RaftTransport {
                 .startSpan();
         try (MDC.MDCCloseable ignoredMdc = MDC.putCloseable("requestId", requestId);
              Scope ignoredSpan = span.makeCurrent()) {
-            CompletableFuture<AppendEntriesResponse> response = toFuture(correlatedStub(targetId, requestId).appendEntries(request));
+            CompletableFuture<AppendEntriesResponse> response = toFuture(correlatedStub(targetId, requestId, roundTripDeadline).appendEntries(request));
             response.whenComplete(Completions.outcome(
                     r -> {
                         span.setAttribute("raft.success", r.getSuccess());
@@ -435,7 +468,7 @@ public class GrpcRaftTransport implements RaftTransport {
                 .startSpan();
         try (MDC.MDCCloseable ignoredMdc = MDC.putCloseable("requestId", requestId);
              Scope ignoredSpan = span.makeCurrent()) {
-            CompletableFuture<InstallSnapshotResponse> response = toFuture(correlatedStub(targetId, requestId).installSnapshot(request));
+            CompletableFuture<InstallSnapshotResponse> response = toFuture(correlatedStub(targetId, requestId, snapshotChunkDeadline).installSnapshot(request));
             response.whenComplete(Completions.outcome(
                     r -> {
                         span.setAttribute("raft.success", r.getSuccess());
@@ -471,12 +504,17 @@ public class GrpcRaftTransport implements RaftTransport {
         });
     }
 
-    private RaftServiceGrpc.RaftServiceFutureStub correlatedStub(String targetId, String requestId) {
+    /**
+     * The stub for one call to {@code targetId}, carrying its request ID and trace context. Its deadline is counted
+     * from now, so the call has all of it.
+     */
+    private RaftServiceGrpc.RaftServiceFutureStub correlatedStub(String targetId, String requestId, Duration deadline) {
         Metadata headers = new Metadata();
         headers.put(REQUEST_ID_HEADER, requestId);
         GlobalOpenTelemetry.getPropagators().getTextMapPropagator()
                 .inject(Context.current(), headers, METADATA_SETTER);
-        return getStub(targetId).withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers));
+        return getStub(targetId).withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers))
+                .withDeadlineAfter(deadline.toNanos(), TimeUnit.NANOSECONDS);
     }
 
     private void requireKnownTarget(String targetId) {
