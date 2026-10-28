@@ -325,13 +325,25 @@ pipelines of about 1,280 s, which looks short beside these figures for the same
 classes; without their stage times, the two cannot be compared.
 
 On 2026-10-28 two more runs, on `f991254`, verified deadlines on every Raft call
-(`GrpcRaftTransport`: 10 s for a vote, pre-vote or append, 30 s for a snapshot
-chunk). Without one, a call on a connection that died without a reset never
+(`GrpcRaftTransport`: 10 s for a vote, pre-vote or append, first 30 s for a
+snapshot chunk). Without one, a call on a connection that died without a reset never
 failed and logged nothing, and a snapshot chunk stuck that way kept its transfer
 in place, so the leader sent that follower no snapshot for the rest of the term.
 `GrpcRaftTransportTest` shows an unanswered call failing with
 `DEADLINE_EXCEEDED` at its deadline (red first), and each call's deadline
 counting from when it is sent.
+
+A check against Consul's Raft transport (`hashicorp/raft`, with Consul's
+`Timeout: 10 * time.Second`) then brought two changes, each red first. A snapshot
+chunk now gets Consul's deadline, 10 s for every whole 256 KiB and never less, so
+40 s for a full 1 MiB chunk. And where Consul closes a connection whose call failed,
+gRPC ends only the call and keeps sending later calls into a dead connection, so
+the transport's connections now use keepalive: a ping after 10 s without a read,
+gRPC's minimum, and the connection is closed when it is not answered within 10 s.
+`GrpcRaftServer` permits those pings every 5 s, with or without a call; gRPC's
+default would close the connections with `too_many_pings`. `GrpcRaftKeepaliveTest`
+(tagged `slow`) shows a connection that stops answering being closed and the peer
+reached on a new one, and an idle connection staying up through its pings.
 
 The first run passed default 1,228 and end-to-end 10 and failed three Docker
 classes, none on the deadlines. Each failure was traced to its cause:

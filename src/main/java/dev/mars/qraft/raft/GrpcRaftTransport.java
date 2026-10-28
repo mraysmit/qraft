@@ -34,6 +34,7 @@ import dev.mars.qraft.raft.grpc.RaftServiceGrpc;
 import dev.mars.qraft.raft.grpc.VoteRequest;
 import dev.mars.qraft.raft.grpc.VoteResponse;
 import dev.mars.qraft.raft.metrics.RaftMetrics;
+import io.grpc.ConnectivityState;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.Metadata;
@@ -77,7 +78,8 @@ import java.util.function.Consumer;
  * <p>
  * Every call has a deadline, so one that is never answered fails with {@code DEADLINE_EXCEEDED} instead of
  * waiting forever: a vote, pre-vote or append after {@link #ROUND_TRIP_DEADLINE}, a snapshot chunk after
- * {@link #SNAPSHOT_CHUNK_DEADLINE}, and the membership and describe calls after their own.
+ * {@link #snapshotChunkDeadline}, and the membership and describe calls after their own. A connection that
+ * stops answering is closed by keepalive, so the next call dials the peer again.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @version 2.0 (T3.2: Bounded Thread Pools)
@@ -90,17 +92,21 @@ public class GrpcRaftTransport implements RaftTransport {
     /** A server that cannot describe itself this quickly is treated as unreachable for this bootstrap attempt. */
     private static final long DESCRIBE_DEADLINE_SECONDS = 5;
     /**
-     * How long a vote, pre-vote or append waits for its answer. It ends a call whose connection died without a
-     * reset, which would otherwise wait forever and log nothing, and it is far longer than any answer on a working
-     * network takes, so it never cuts one short.
+     * How long a vote, pre-vote or append waits for its answer: Consul's Raft transport timeout. It ends a call
+     * whose connection died without a reset, which would otherwise wait forever and log nothing, and it is far
+     * longer than any answer on a working network takes, so it never cuts one short.
      */
     static final Duration ROUND_TRIP_DEADLINE = Duration.ofSeconds(10);
+    /** A snapshot chunk waits one round-trip deadline for every this many bytes it carries; see below. */
+    static final int SNAPSHOT_DEADLINE_SCALE_BYTES = 256 * 1024;
     /**
-     * How long one snapshot chunk waits for its answer, longer than a round trip because the follower writes the
-     * chunk, and installs the snapshot with the last one, before it answers. The leader sends one transfer to a
-     * follower at a time, so a chunk that never failed would stop every later snapshot to it.
+     * How long a connection may go without reading anything before it is pinged: gRPC's minimum. With
+     * {@link #KEEPALIVE_TIMEOUT} it closes a connection that died without a reset, so the next call dials again;
+     * a deadline alone ends only the call, and gRPC would go on sending every later call into the dead connection.
      */
-    static final Duration SNAPSHOT_CHUNK_DEADLINE = Duration.ofSeconds(30);
+    static final Duration KEEPALIVE_TIME = Duration.ofSeconds(10);
+    /** How long a ping waits for its acknowledgement before the connection is closed. */
+    static final Duration KEEPALIVE_TIMEOUT = Duration.ofSeconds(10);
     private static final Metadata.Key<String> REQUEST_ID_HEADER =
             Metadata.Key.of("x-request-id", Metadata.ASCII_STRING_MARSHALLER);
     private static final TextMapSetter<Metadata> METADATA_SETTER = (carrier, key, value) ->
@@ -118,7 +124,7 @@ public class GrpcRaftTransport implements RaftTransport {
     private final int poolSize;
     private final int queueSize;
     private final Duration roundTripDeadline;
-    private final Duration snapshotChunkDeadline;
+    private final Duration keepAliveTimeout;
     /** Set by {@link #stop()}; a send after it fails at once, since its reply could no longer be delivered. */
     private volatile boolean stopped;
 
@@ -146,24 +152,25 @@ public class GrpcRaftTransport implements RaftTransport {
      */
     public GrpcRaftTransport(RaftStateLoop runtime, String selfId, Map<String, String> clusterNodes,
                               int poolSize, int queueSize) {
-        this(runtime, selfId, clusterNodes, poolSize, queueSize, ROUND_TRIP_DEADLINE, SNAPSHOT_CHUNK_DEADLINE);
+        this(runtime, selfId, clusterNodes, poolSize, queueSize, ROUND_TRIP_DEADLINE, KEEPALIVE_TIMEOUT);
     }
 
     /**
-     * Creates a GrpcRaftTransport whose calls end after the given deadlines.
+     * Creates a GrpcRaftTransport with the given deadline and keepalive timeout.
      *
-     * @param roundTripDeadline how long a vote, pre-vote or append may wait for its answer
-     * @param snapshotChunkDeadline how long one snapshot chunk may wait for its answer
+     * @param roundTripDeadline how long a vote, pre-vote or append may wait for its answer; a snapshot chunk's
+     *     deadline is scaled from it by {@link #snapshotChunkDeadline}
+     * @param keepAliveTimeout how long a keepalive ping waits before its connection is closed
      */
     GrpcRaftTransport(RaftStateLoop runtime, String selfId, Map<String, String> clusterNodes,
-                      int poolSize, int queueSize, Duration roundTripDeadline, Duration snapshotChunkDeadline) {
+                      int poolSize, int queueSize, Duration roundTripDeadline, Duration keepAliveTimeout) {
         this.runtime = runtime;
         this.selfId = selfId;
         this.clusterNodes = clusterNodes;
         this.poolSize = poolSize;
         this.queueSize = queueSize;
         this.roundTripDeadline = Objects.requireNonNull(roundTripDeadline, "roundTripDeadline");
-        this.snapshotChunkDeadline = Objects.requireNonNull(snapshotChunkDeadline, "snapshotChunkDeadline");
+        this.keepAliveTimeout = Objects.requireNonNull(keepAliveTimeout, "keepAliveTimeout");
 
         ThreadPoolExecutor threadPool = callbackExecutor(selfId, poolSize, queueSize);
         this.executor = threadPool;
@@ -468,7 +475,8 @@ public class GrpcRaftTransport implements RaftTransport {
                 .startSpan();
         try (MDC.MDCCloseable ignoredMdc = MDC.putCloseable("requestId", requestId);
              Scope ignoredSpan = span.makeCurrent()) {
-            CompletableFuture<InstallSnapshotResponse> response = toFuture(correlatedStub(targetId, requestId, snapshotChunkDeadline).installSnapshot(request));
+            CompletableFuture<InstallSnapshotResponse> response = toFuture(correlatedStub(targetId, requestId,
+                    snapshotChunkDeadline(roundTripDeadline, request.getData().size())).installSnapshot(request));
             response.whenComplete(Completions.outcome(
                     r -> {
                         span.setAttribute("raft.success", r.getSuccess());
@@ -496,8 +504,12 @@ public class GrpcRaftTransport implements RaftTransport {
             String host = parts[0];
             int port = Integer.parseInt(parts[1]);
 
+            // Pinged even with no call open, so a follower's idle connection is sound when it next campaigns.
             ManagedChannel channel = ManagedChannelBuilder.forAddress(host, port)
                     .usePlaintext()
+                    .keepAliveTime(KEEPALIVE_TIME.toNanos(), TimeUnit.NANOSECONDS)
+                    .keepAliveTimeout(keepAliveTimeout.toNanos(), TimeUnit.NANOSECONDS)
+                    .keepAliveWithoutCalls(true)
                     .build();
             channels.put(id, channel);
             return RaftServiceGrpc.newFutureStub(channel);
@@ -515,6 +527,22 @@ public class GrpcRaftTransport implements RaftTransport {
                 .inject(Context.current(), headers, METADATA_SETTER);
         return getStub(targetId).withInterceptors(MetadataUtils.newAttachHeadersInterceptor(headers))
                 .withDeadlineAfter(deadline.toNanos(), TimeUnit.NANOSECONDS);
+    }
+
+    /**
+     * The deadline of a snapshot chunk carrying {@code bytes}, by Consul's rule (hashicorp/raft's
+     * {@code TimeoutScale}): one round-trip deadline for every {@link #SNAPSHOT_DEADLINE_SCALE_BYTES} whole, and never
+     * less than one. A full chunk of {@link RaftNode#SNAPSHOT_CHUNK_SIZE} gets four. It is longer than a round trip
+     * because the follower writes the chunk, and installs the snapshot with the last one, before it answers.
+     */
+    static Duration snapshotChunkDeadline(Duration roundTripDeadline, int bytes) {
+        return roundTripDeadline.multipliedBy(Math.max(1, bytes / SNAPSHOT_DEADLINE_SCALE_BYTES));
+    }
+
+    /** The state of the connection to {@code peerName}, or {@code null} when the transport has none. */
+    ConnectivityState connectionState(String peerName) {
+        ManagedChannel channel = channels.get(peerName);
+        return channel == null ? null : channel.getState(false);
     }
 
     private void requireKnownTarget(String targetId) {

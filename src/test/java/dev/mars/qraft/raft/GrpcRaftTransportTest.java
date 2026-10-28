@@ -80,9 +80,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * - The callback pool running an overflowing callback on the delivering thread
  * - Concurrent vote and append requests
  * - Transport lifecycle and pool size configuration
- * - Deadlines: a call a peer never answers fails with DEADLINE_EXCEEDED, a snapshot chunk after its own longer
- *   deadline, and each call's deadline starts when it is sent
- * Retries are not tested here.
+ * - Deadlines: a call a peer never answers fails with DEADLINE_EXCEEDED, a snapshot chunk after one round-trip
+ *   deadline for every whole 256 KiB it carries (Consul's rule), and each call's deadline starts when it is sent
+ * Retries are not tested here, nor keepalive, which takes real time ({@code GrpcRaftKeepaliveTest}).
  *
  * <p>Every transport, executor, server and node a test creates is released after it, even when the test
  * fails.
@@ -650,35 +650,50 @@ class GrpcRaftTransportTest {
 
     @Test
     @DisplayName("A vote, pre-vote or append that is never answered fails at the round-trip deadline")
-    void aRoundTripThatIsNeverAnsweredFailsAtItsDeadlineWhileASnapshotChunkStillWaits() throws Exception {
-        GrpcRaftTransport transport = transportTo(silentServer(), Duration.ofMillis(200), Duration.ofMinutes(1));
+    void aRoundTripThatIsNeverAnsweredFailsAtItsDeadline() throws Exception {
+        GrpcRaftTransport transport = transportTo(silentServer(), Duration.ofMillis(200));
 
-        CompletableFuture<InstallSnapshotResponse> chunk = transport.sendInstallSnapshot("silent", snapshotChunk());
         assertDeadlineExceeded(transport.sendVoteRequest("silent", vote(1, "client")));
         assertDeadlineExceeded(transport.sendPreVote("silent", PreVoteRequest.newBuilder()
                 .setTerm(1).setCandidateId("client").setLastLogIndex(1).setLastLogTerm(0).build()));
         assertDeadlineExceeded(transport.sendAppendEntries("silent", AppendEntriesRequest.newBuilder()
                 .setTerm(1).setLeaderId("client").setPrevLogIndex(0).setPrevLogTerm(0).setLeaderCommit(0).build()));
-
-        assertFalse(chunk.isDone(), "a snapshot chunk waits for its own, longer deadline");
     }
 
     @Test
-    @DisplayName("A snapshot chunk that is never answered fails at its own deadline")
-    void aSnapshotChunkThatIsNeverAnsweredFailsAtItsDeadlineWhileARoundTripStillWaits() throws Exception {
-        GrpcRaftTransport transport = transportTo(silentServer(), Duration.ofMinutes(1), Duration.ofMillis(200));
+    @DisplayName("A full snapshot chunk that is never answered fails only after four round-trip deadlines")
+    void aFullSnapshotChunkThatIsNeverAnsweredFailsAfterFourRoundTripDeadlines() throws Exception {
+        GrpcRaftTransport transport = transportTo(silentServer(), Duration.ofMillis(100));
 
-        CompletableFuture<VoteResponse> vote = transport.sendVoteRequest("silent", vote(1, "client"));
-        assertDeadlineExceeded(transport.sendInstallSnapshot("silent", snapshotChunk()));
+        long sent = System.nanoTime();
+        assertDeadlineExceeded(transport.sendInstallSnapshot("silent", snapshotChunk(RaftNode.SNAPSHOT_CHUNK_SIZE)));
+        long waitedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - sent);
 
-        assertFalse(vote.isDone(), "a round trip waits for its own deadline");
+        // A deadline never fires early, so the lower bound holds on any machine.
+        assertTrue(waitedMillis >= 400, "a 1 MiB chunk waited " + waitedMillis + " ms, not the 400 ms of four deadlines");
+    }
+
+    @Test
+    @DisplayName("A snapshot chunk waits one round-trip deadline for every whole 256 KiB it carries, and never less")
+    void aSnapshotChunkWaitsOneRoundTripDeadlineForEveryWhole256KibAndNeverLess() {
+        Duration roundTrip = Duration.ofSeconds(10);
+        int scale = 256 * 1024;
+
+        assertEquals(roundTrip, GrpcRaftTransport.snapshotChunkDeadline(roundTrip, 0));
+        assertEquals(roundTrip, GrpcRaftTransport.snapshotChunkDeadline(roundTrip, scale - 1));
+        assertEquals(roundTrip, GrpcRaftTransport.snapshotChunkDeadline(roundTrip, scale));
+        assertEquals(Duration.ofSeconds(10), GrpcRaftTransport.snapshotChunkDeadline(roundTrip, 2 * scale - 1));
+        assertEquals(Duration.ofSeconds(20), GrpcRaftTransport.snapshotChunkDeadline(roundTrip, 2 * scale));
+        assertEquals(Duration.ofSeconds(40), GrpcRaftTransport.snapshotChunkDeadline(roundTrip,
+                RaftNode.SNAPSHOT_CHUNK_SIZE), "a full chunk, like Consul's 10 s for every 256 KiB of a snapshot");
     }
 
     @Test
     @DisplayName("Each call's deadline starts when it is sent, not when the channel to the peer was opened")
     void aCallSentAfterAnEarlierCallsDeadlineHasPassedIsStillAnswered() throws Exception {
         GrpcRaftTransport transport = track(new GrpcRaftTransport(runtime.stateLoop(), "client",
-                Map.of("target", "localhost:" + targetPort), 10, 1000, Duration.ofMillis(500), Duration.ofMillis(500)));
+                Map.of("target", "localhost:" + targetPort), 10, 1000, Duration.ofMillis(500),
+                GrpcRaftTransport.KEEPALIVE_TIMEOUT));
         assertTrue(decided(transport.sendVoteRequest("target", vote(1, "client"))).getVoteGranted());
 
         await().pollDelay(Duration.ofSeconds(1)).atMost(Duration.ofSeconds(2)).until(() -> true);
@@ -719,15 +734,16 @@ class GrpcRaftTransportTest {
         return server;
     }
 
-    private GrpcRaftTransport transportTo(Server peer, Duration roundTripDeadline, Duration snapshotChunkDeadline) {
+    private GrpcRaftTransport transportTo(Server peer, Duration roundTripDeadline) {
         return track(new GrpcRaftTransport(runtime.stateLoop(), "client", Map.of("silent", "localhost:" + peer.getPort()),
-                10, 1000, roundTripDeadline, snapshotChunkDeadline));
+                10, 1000, roundTripDeadline, GrpcRaftTransport.KEEPALIVE_TIMEOUT));
     }
 
-    private static InstallSnapshotRequest snapshotChunk() {
+    /** A whole one-chunk snapshot of {@code bytes} zero bytes. */
+    private static InstallSnapshotRequest snapshotChunk(int bytes) {
         return InstallSnapshotRequest.newBuilder()
                 .setTerm(1).setLeaderId("client").setLastIncludedIndex(1).setLastIncludedTerm(1)
-                .setChunkIndex(0).setTotalChunks(1).setData(com.google.protobuf.ByteString.copyFromUtf8("state"))
+                .setChunkIndex(0).setTotalChunks(1).setData(com.google.protobuf.ByteString.copyFrom(new byte[bytes]))
                 .setDone(true).build();
     }
 

@@ -55,6 +55,7 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -74,6 +75,12 @@ public class GrpcRaftServer {
     private static final Metadata.Key<String> REQUEST_ID_HEADER =
             Metadata.Key.of("x-request-id", Metadata.ASCII_STRING_MARSHALLER);
     private static final Context.Key<String> REQUEST_ID_CONTEXT = Context.key("qraft-request-id");
+    /**
+     * The shortest interval at which a peer may ping a connection, open call or not. It is below the transport's
+     * {@link GrpcRaftTransport#KEEPALIVE_TIME}; gRPC's default of five minutes, with no pings on a connection without
+     * a call, would close the transport's connections as sending too many pings.
+     */
+    static final Duration PERMITTED_KEEPALIVE_TIME = Duration.ofSeconds(5);
     private static final Context.Key<io.opentelemetry.context.Context> TELEMETRY_CONTEXT =
             Context.key("qraft-telemetry-context");
     private static final TextMapGetter<Metadata> METADATA_GETTER = new TextMapGetter<>() {
@@ -127,6 +134,8 @@ public class GrpcRaftServer {
         blockingTasks.execute(() -> {
             try {
             ServerBuilder<?> builder = ServerBuilder.forPort(port)
+                .permitKeepAliveTime(PERMITTED_KEEPALIVE_TIME.toNanos(), TimeUnit.NANOSECONDS)
+                .permitKeepAliveWithoutCalls(true)
                 .intercept(new CorrelationIdServerInterceptor())
                 .addService(new RaftServiceImpl());
 
