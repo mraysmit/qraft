@@ -57,6 +57,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE,
         dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_NAME_UNRESOLVED,
         dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_SNAPSHOT_TRANSFER_INTERRUPTED,
+        // The partitioned follower cannot answer the snapshot the leader sends it while its network is cut, so the
+        // chunk fails at its deadline, and the transfer is sent again after the network is restored.
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_SNAPSHOT_CHUNK_UNANSWERED,
         dev.mars.qraft.testing.fault.IntentionalErrorFixture.WAL_AMBIGUOUS_CORRUPTION,
         dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_RECOVERY_AMBIGUOUS_CORRUPTION,
         dev.mars.qraft.testing.fault.IntentionalErrorFixture.SERVER_RECOVERY_AMBIGUOUS_CORRUPTION,

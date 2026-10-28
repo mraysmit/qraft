@@ -165,6 +165,14 @@ public enum IntentionalErrorFixture {
             "Failed to send InstallSnapshot chunk \\d+/\\d+ to \\S+: UNAVAILABLE:"
                     + " (?:io exception|Unable to resolve host \\S+)"),
 
+    /**
+     * A partitioned Docker peer leaves a snapshot chunk unanswered, so the chunk fails at its deadline and the
+     * transfer is tried again after a backoff. A stopped peer refuses the connection instead; see above.
+     */
+    RAFT_SNAPSHOT_CHUNK_UNANSWERED("dev.mars.qraft.raft.RaftNode", Level.ERROR,
+            "Failed to send InstallSnapshot chunk \\d+/\\d+ to \\S+: DEADLINE_EXCEEDED:"
+                    + " CallOptions deadline exceeded after \\d+\\.\\d+s\\. .+"),
+
     /** A test deliberately fences the transition sequencer and then exercises a rejected operation. */
     RAFT_FENCED_OPERATION("dev.mars.qraft.raft.RaftNode", Level.ERROR,
             "(?:Failed to persist command to WAL|AppendEntries failed during durable transition"

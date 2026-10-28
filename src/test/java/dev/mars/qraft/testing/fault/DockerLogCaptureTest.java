@@ -583,6 +583,32 @@ class DockerLogCaptureTest {
             + "\n\tat io.netty.handler.codec.http2.DefaultHttp2RemoteFlowController$FlowState.cancel("
             + "DefaultHttp2RemoteFlowController.java:479)\n";
 
+    private static final String UNANSWERED_CHUNK = "2026-10-28 08:54:21.017 [qraft-state-loop] ERROR "
+            + "dev.mars.qraft.raft.RaftNode [server1] [LEADER/3] - Failed to send InstallSnapshot chunk 1/1 to server2: "
+            + "DEADLINE_EXCEEDED: CallOptions deadline exceeded after 9.999886174s. Name resolution delay 0.000000000 "
+            + "seconds. [closed=[], open=[[buffered_nanos=10001685872, waiting_for_connection]]]";
+
+    @Test
+    void aSnapshotChunkAPartitionedPeerLeavesUnansweredIsRecognisedOnlyByItsOwnSignature() {
+        Set<IntentionalErrorFixture> expected = Set.of(IntentionalErrorFixture.RAFT_SNAPSHOT_CHUNK_UNANSWERED);
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(UNANSWERED_CHUNK + "\n", expected, "DockerClass");
+        assertEquals(java.util.List.of(), audit.problems());
+        assertEquals(1, audit.recognised().size());
+
+        for (String line : java.util.List.of(
+                UNANSWERED_CHUNK.replace("DEADLINE_EXCEEDED", "CANCELLED"),
+                UNANSWERED_CHUNK.replace("CallOptions deadline exceeded", "Deadline exceeded"),
+                UNANSWERED_CHUNK.replace("chunk 1/1", "chunk 1"),
+                UNANSWERED_CHUNK.replace("Failed to send InstallSnapshot", "Failed to load InstallSnapshot"))) {
+            assertEquals(java.util.List.of("undeclared container " + line),
+                    DockerLogCaptureHelper.audit(line + "\n", expected, "DockerClass").problems());
+        }
+        assertEquals(java.util.List.of("undeclared container " + UNANSWERED_CHUNK),
+                DockerLogCaptureHelper.audit(UNANSWERED_CHUNK + "\n",
+                        Set.of(IntentionalErrorFixture.RAFT_SNAPSHOT_TRANSFER_INTERRUPTED), "DockerClass").problems(),
+                "a stopped peer's definition does not excuse an unanswered chunk");
+    }
+
     @Test
     void anAnswerToAKilledPeerIsRecognisedByTheExceptionUnderItsWarning() {
         DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(STREAM_ERROR + STREAM_CLOSED + STREAM_TRACE,
