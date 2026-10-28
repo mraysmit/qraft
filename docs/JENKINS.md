@@ -376,6 +376,25 @@ header, and no JVM crash file. Only `DockerDurableRestartTest`, which kills and
 stops servers, had a call end at its deadline. None of the three newly declared
 races recurred, so `DockerLogCaptureTest` is the evidence for their definitions.
 
+Two runs then verified the Consul alignment. The first, on `06a5210` with the
+keepalive change in the working tree (later `ee11971`), passed default 1,232 and
+end-to-end 10 and failed `DockerDurableRestartTest` on one undeclared error:
+`Failed to send InstallSnapshot chunk 1/1 to server2: DEADLINE_EXCEEDED`. Its
+partition test cuts server2's network, and the new leader's snapshot to it waited
+for a connection until its deadline; the retry after the network was restored
+took 0.45 s. Before the deadlines that call would have waited until the partition
+healed. The class now declares the new `RAFT_SNAPSHOT_CHUNK_UNANSWERED`, which
+accepts only that message (`DockerLogCaptureTest`, red first); the stopped-peer
+definition does not excuse it.
+
+The second, on `ee11971` with that declaration in the working tree (later
+`bc19492`), passed
+default 1,233 with every coverage gate met, end-to-end 10 and Docker 43, the two
+`GrpcRaftKeepaliveTest` tests among them (28 min 24 s), with no failures, errors
+or skips. Its 232 retained logs hold 833 ERROR lines, all flagged, 566 stack
+traces, none under an unflagged header, no JVM crash file, and no
+`too_many_pings`.
+
 ## Job configuration
 
 The job loads its pipeline from the repository's default branch using the following SCM configuration.
