@@ -55,6 +55,8 @@ message NodeProto {
   optional string region = 10;
   optional string datacenter = 11;
   map<string, string> metadata = 12;
+  // The node ID, the UUID its client keeps in its data directory. Absent from entries written before it.
+  optional string id = 13;
   reserved "client_id", "hostname", "port", "capabilities", "version";
 }
 

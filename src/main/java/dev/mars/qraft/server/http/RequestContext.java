@@ -28,5 +28,9 @@ interface RequestContext {
 
     String namespace();
 
+    /** The node's name, under which the catalog keys it and what it registers. */
     String nodeId();
+
+    /** The node's ID, the UUID its client keeps in its data directory, or {@code null} from a client without one. */
+    String nodeUuid();
 }

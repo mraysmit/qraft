@@ -49,7 +49,7 @@ class NodeCodecTest {
 
     @Test
     void roundTripsEveryNodeCommandVariant() {
-        Node node = new Node("node-1", "10.0.0.1", "dc-1", "eu-west", Map.of("rack", "r7"),
+        Node node = new Node("node-1", null, "10.0.0.1", "dc-1", "eu-west", Map.of("rack", "r7"),
                 NodeStatus.HEALTHY, TIMESTAMP.minusSeconds(60), TIMESTAMP.minusSeconds(5));
 
         List<NodeCommand> commands = List.of(
@@ -63,6 +63,18 @@ class NodeCodecTest {
         for (NodeCommand command : commands) {
             assertEquals(command, NodeCodec.fromProto(NodeCodec.toProto(command)), command.toString());
         }
+    }
+
+    @Test
+    void aRegistrationCarriesItsNodeId() {
+        Node identified = Node.of("node-1", "10.0.0.1", "dc-1", "eu-west", Map.of())
+                .withId("6f1c2b0e-8e2d-4c3a-9b7f-2d4e5a6b7c8d");
+
+        NodeCommand.Register decoded = assertInstanceOf(NodeCommand.Register.class,
+                NodeCodec.fromProto(NodeCodec.toProto(new NodeCommand.Register("node-1", identified, TIMESTAMP))));
+
+        assertEquals("6f1c2b0e-8e2d-4c3a-9b7f-2d4e5a6b7c8d", decoded.node().id());
+        assertEquals(identified, decoded.node());
     }
 
     @Test

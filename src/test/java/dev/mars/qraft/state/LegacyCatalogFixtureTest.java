@@ -91,7 +91,7 @@ class LegacyCatalogFixtureTest {
                         List.of("green"), Map.of("zone", "b"), ServiceHealth.WARNING)),
                 store.getServiceCatalog().instances(ServiceKey.inDefaultScope("web")));
 
-        assertEquals(new Node("agent-legacy", "192.0.2.10", "dc-legacy", "eu-west", Map.of("rack", "r1"),
+        assertEquals(new Node("agent-legacy", null, "192.0.2.10", "dc-legacy", "eu-west", Map.of("rack", "r1"),
                         NodeStatus.HEALTHY, Instant.ofEpochSecond(1_790_064_000L), null),
                 store.findNode("agent-legacy").orElseThrow(),
                 "the job system's active status restores as healthy, and the host name, the port, the version,"

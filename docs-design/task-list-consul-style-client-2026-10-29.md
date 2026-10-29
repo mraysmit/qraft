@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-04
 **Status:** Active from 2026-10-26, with Phase 1. The `client` package and new node model and routes were delivered by [`task-list-single-pom-and-quorus-removal-2026-10-21.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md), completed and archived on 2026-10-14. The membership list ([`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md)) was completed and archived on 2026-10-24, and Pre-Vote followed on 2026-10-25 and 2026-10-26, so nothing precedes this list. The sequencing decision of 2026-10-05 stands: this list, then the ACL list. The owner confirmed it on 2026-10-26 when asked whether key/value completion should go first, and said the embedded administrative interface waits until the other outstanding work is done.
-**Last updated:** 2026-10-28 (Phase 2's three client tasks recorded as done: the data directory and its lock, the node ID kept through a shared identity file, and `client.nodeName`; the server side remains. Earlier, 2026-10-27: Phase 1 closed on a local run of the three suites, no Jenkins being reachable; Phase 2 started. Earlier the same day: renamed with the ACL list, which changed. Earlier, 2026-10-26: Phase 1 built, with local checks only; the full suites run on Jenkins before it is closed. Earlier the same day: started, membership and Pre-Vote complete. Earlier, 2026-10-21: membership Step 5 completed; Steps 6 to 8 remain the preceding work; this client list is still proposed; renamed with linked documents. Earlier, 2026-10-14: cleanup prerequisites completed and archived; membership Steps 5 to 8 remain the preceding work. On 2026-10-11: the rule that guards need mutation evidence removed at the owner's decision, from the rules and from one exit; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: decisions 5 and 8: what a node's deregistration removes, and the `client.hostname` setting; the file renamed to the date of its last change; the single-POM list's Phase 3A replaced Qraft's two retired words here and everywhere; decision 10 records the configuration names, and decision 3 the path of the local API. On 2026-10-08, the review with the other task lists: the request bodies of decision 5 and the log audit in the rules)
+**Last updated:** 2026-10-29 (decision 8 checked against Consul's catalog code and four points decided by the owner: a rename follows Consul, removing the node under its old name with its services and checks; a node without an ID can be claimed by a registration that carries one; names conflict regardless of case; a `REGISTERING` node holds its name. Phase 2's server task and exit follow. Earlier, 2026-10-28: Phase 2's three client tasks recorded as done: the data directory and its lock, the node ID kept through a shared identity file, and `client.nodeName`; the server side remains. Earlier, 2026-10-27: Phase 1 closed on a local run of the three suites, no Jenkins being reachable; Phase 2 started. Earlier the same day: renamed with the ACL list, which changed. Earlier, 2026-10-26: Phase 1 built, with local checks only; the full suites run on Jenkins before it is closed. Earlier the same day: started, membership and Pre-Vote complete. Earlier, 2026-10-21: membership Step 5 completed; Steps 6 to 8 remain the preceding work; this client list is still proposed; renamed with linked documents. Earlier, 2026-10-14: cleanup prerequisites completed and archived; membership Steps 5 to 8 remain the preceding work. On 2026-10-11: the rule that guards need mutation evidence removed at the owner's decision, from the rules and from one exit; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: decisions 5 and 8: what a node's deregistration removes, and the `client.hostname` setting; the file renamed to the date of its last change; the single-POM list's Phase 3A replaced Qraft's two retired words here and everywhere; decision 10 records the configuration names, and decision 3 the path of the local API. On 2026-10-08, the review with the other task lists: the request bodies of decision 5 and the log audit in the rules)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 4.3, 5, 6.2, 7.3, 8, 12.1 and 16
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
@@ -58,7 +58,7 @@ decision 10 on 2026-10-09. Decisions 5 to 8 follow the Consul pattern.
      replicated step, as in Consul (decided by the user on 2026-10-09).
 6. **The local API binds to `127.0.0.1` by default,** like Consul's
    `client_addr`. It has no authentication until
-   [`task-list-acl-and-tokens-2026-10-28.md`](task-list-acl-and-tokens-2026-10-28.md),
+   [`task-list-acl-and-tokens-2026-10-29.md`](task-list-acl-and-tokens-2026-10-29.md),
    which is proposed to follow this list; liveness and readiness share the
    same listener.
 7. **Registrations follow Consul's rules.**
@@ -80,22 +80,39 @@ decision 10 on 2026-10-09. Decisions 5 to 8 follow the Consul pattern.
      `(tenant, namespace, node, serviceId)` does not change. The node ID is
      stored with the node and used to detect conflicts.
    - A registration under a name held by another node ID is refused while that
-     node is healthy, with 409 `node_name_reserved`. Once the old node is
-     unreachable or reaped, the new ID takes the name, as Consul lets a new ID
-     replace a dead node.
+     node holds it, with 409 `node_name_reserved`. A `REGISTERING` or
+     `HEALTHY` node holds its name; once it is `UNREACHABLE` or reaped, the new
+     ID takes the name, as Consul lets a new ID replace a node whose Serf check
+     is critical (decided 2026-10-29; a node that has not yet sent its first
+     heartbeat keeps its name, which is stricter than Consul).
+   - Names conflict regardless of case, as in Consul (`strings.EqualFold` in
+     `ensureNoNodeWithSimilarNameTxn`): `Web-1` and `web-1` are one name. A
+     name is stored as it was given (decided 2026-10-29).
+   - A node written before node IDs existed has none. A registration that
+     carries an ID claims such a node's name even while it holds it, and keeps
+     its services and checks: it is that machine after its upgrade. This is
+     Consul's rule for a node without an ID (decided 2026-10-29).
    - **A takeover removes what the old node registered** (decided 2026-10-05).
      The catalog is keyed by node name, so the old node's services and checks
      would otherwise pass to the new ID. The command that gives the name to
      the new ID deregisters them in the same replicated step. The new node
-     starts with nothing and registers its own.
+     starts with nothing and registers its own. Consul instead leaves them for
+     the new agent's anti-entropy, which deletes what it did not register;
+     Qraft's reconciler removes only what it registered itself, so the server
+     must.
    - An old node that comes back after a takeover is another node ID asking
      for a held name. The rule above applies to it: it is refused with
      `node_name_reserved` while the new holder is healthy.
-   - The same node ID under a new name renames the node. The rename moves the
-     node's services and checks to the new name in the same replicated step,
-     because their identity contains the node name. A rename to a name held by
-     another node ID follows the rule above: refused while that holder is
-     healthy, a takeover otherwise.
+   - The same node ID under a new name renames the node, as in Consul
+     (decided 2026-10-29, replacing the earlier plan to move the services): the
+     node is removed under its old name with its services and checks, and
+     inserted under the new one, in the same replicated step. The client's
+     reconciler looks up each of its services on every pass and registers again
+     those that are absent, so they return under the new name. A rename and a
+     takeover are then the same step: remove the name's old record and
+     everything on it, insert the node. A rename to a name held by another node
+     ID follows the rule above: refused while that holder holds it, a takeover
+     otherwise; a rename cannot claim a name held by a node without an ID.
 9. **The Docker scenario keeps the `127.0.0.1` bind and shares the client's
    network namespace.** Decided 2026-10-05.
    - Decision 1 targets VMs and bare metal, so a client container in the test
@@ -224,14 +241,18 @@ retained logs hold 823 ERROR lines, all flagged, and no unflagged stack trace.
   end-to-end 10 and Docker 41, and every ERROR line in the retained logs flagged.
 - [ ] Server side: store the node ID with the node, using a new optional
   protobuf field; older entries load without one.
-  - Refuse a held name with `node_name_reserved`.
+  - Refuse a held name with `node_name_reserved`, comparing names regardless
+    of case. A `REGISTERING` or `HEALTHY` node holds its name.
   - Allow the takeover once the holder is unreachable or reaped. The takeover
     command deregisters the old node's services and checks in the same step.
   - Refuse the old node ID when it returns after a takeover, while the new
-    holder is healthy.
-  - Rename a node when its ID returns under a new name, moving its services
-    and checks to the new name in the same step. Refuse a rename to a name
-    held by a healthy node.
+    holder holds the name.
+  - Let a registration with an ID claim the name of a node without one,
+    keeping its services and checks.
+  - Rename a node when its ID returns under a new name: remove it under the
+    old name with its services and checks, and insert it under the new one, in
+    the same step. Refuse a rename to a name another node holds, or that a
+    node without an ID holds.
 - [ ] Add fixtures: node entries and snapshots written without a node ID
   still load.
 - [ ] Add replica-determinism tests for the takeover and rename commands:
@@ -243,7 +264,8 @@ retained logs hold 823 ERROR lines, all flagged, and no unflagged stack trace.
 
 **Exit:** Red before green, with tests of the conflict, takeover, and
 rename guards, including a takeover that must not leave the old node's
-services in place and a rename that must not leave them under the old name. A wiped-directory
+services in place, a rename that must not leave them under the old name, and a
+claim of a node without an ID that must keep them. A wiped-directory
 restart scenario passes end to end.
 
 ### Phase 3. Local API listener
@@ -335,7 +357,7 @@ consecutive runs; audits as in the other lists.
 - Authentication and ACLs, on the local API and on the server. Until they
   exist, decision 8 detects a conflicting node identity but cannot stop a
   caller from claiming one. Proposed in
-  [`task-list-acl-and-tokens-2026-10-28.md`](task-list-acl-and-tokens-2026-10-28.md).
+  [`task-list-acl-and-tokens-2026-10-29.md`](task-list-acl-and-tokens-2026-10-29.md).
 - Forwarding key/value, sessions, consistency modes, and blocking queries. Each
   is added when the corresponding server feature lands.
 - Response caching in the client, gossip, and configuration-file reload.

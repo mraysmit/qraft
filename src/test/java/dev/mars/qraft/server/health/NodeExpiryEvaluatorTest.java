@@ -121,6 +121,6 @@ class NodeExpiryEvaluatorTest {
     }
 
     private static Node node(String name, Instant lastHeartbeat, NodeStatus status) {
-        return new Node(name, "127.0.0.1", null, null, Map.of(), status, REGISTERED, lastHeartbeat);
+        return new Node(name, null, "127.0.0.1", null, null, Map.of(), status, REGISTERED, lastHeartbeat);
     }
 }

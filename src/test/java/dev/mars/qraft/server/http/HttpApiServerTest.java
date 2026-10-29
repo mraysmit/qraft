@@ -439,7 +439,7 @@ class HttpApiServerTest {
         assertEquals(200, heartbeatAccepted.statusCode(), heartbeatAccepted.body());
         assertEquals(tree("{\"node\":\"client-1\",\"accepted\":true}"), tree(heartbeatAccepted.body()));
         Node stored = store.findNode("client-1").orElseThrow();
-        assertEquals(new Node("client-1", "127.0.0.1", "dc-1", "eu-west", Map.of("qraft.version", "1.0.0"),
+        assertEquals(new Node("client-1", null, "127.0.0.1", "dc-1", "eu-west", Map.of("qraft.version", "1.0.0"),
                 NodeStatus.HEALTHY, stored.registrationTime(), stored.lastHeartbeat()), stored,
                 "the name comes from the identity header, and the rest from the body");
         assertNotNull(stored.registrationTime());

@@ -37,6 +37,8 @@ import java.util.TreeMap;
  * the capabilities, are ignored.
  *
  * @param name             the node's name, which is its key in the registry
+ * @param id               the node's ID, the UUID its client keeps in its data directory, or {@code null} for a
+ *                         node registered before nodes had IDs
  * @param address          the address the node is reached at
  * @param datacenter       the datacenter the node is in
  * @param region           the region the node is in
@@ -52,6 +54,7 @@ import java.util.TreeMap;
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record Node(
         @JsonAlias({"clientId", "agentId"}) String name,
+        String id,
         String address,
         String datacenter,
         String region,
@@ -70,32 +73,37 @@ public record Node(
         metadata = metadata == null ? Map.of() : Collections.unmodifiableMap(new TreeMap<>(metadata));
     }
 
-    /** A node as a client describes it when it registers: without a status or times. */
+    /** A node as a client describes it when it registers: without an ID, a status or times. */
     public static Node of(String name, String address, String datacenter, String region,
                           Map<String, String> metadata) {
-        return new Node(name, address, datacenter, region, metadata, null, null, null);
+        return new Node(name, null, address, datacenter, region, metadata, null, null, null);
+    }
+
+    /** This node with another ID, or none. */
+    public Node withId(String newId) {
+        return new Node(name, newId, address, datacenter, region, metadata, status, registrationTime, lastHeartbeat);
     }
 
     /** This node with one more metadata entry. */
     public Node withMetadata(String key, String value) {
         Map<String, String> changed = new TreeMap<>(metadata);
         changed.put(key, value);
-        return new Node(name, address, datacenter, region, changed, status, registrationTime, lastHeartbeat);
+        return new Node(name, id, address, datacenter, region, changed, status, registrationTime, lastHeartbeat);
     }
 
     /** This node with another status. */
     public Node withStatus(NodeStatus newStatus) {
-        return new Node(name, address, datacenter, region, metadata, newStatus, registrationTime, lastHeartbeat);
+        return new Node(name, id, address, datacenter, region, metadata, newStatus, registrationTime, lastHeartbeat);
     }
 
     /** This node with another last heartbeat. */
     public Node withLastHeartbeat(Instant time) {
-        return new Node(name, address, datacenter, region, metadata, status, registrationTime, time);
+        return new Node(name, id, address, datacenter, region, metadata, status, registrationTime, time);
     }
 
     /** This node as the servers record a registration applied at {@code time}: registering, with no heartbeat. */
     public Node registeredAt(Instant time) {
-        return new Node(name, address, datacenter, region, metadata, NodeStatus.REGISTERING, time, null);
+        return new Node(name, id, address, datacenter, region, metadata, NodeStatus.REGISTERING, time, null);
     }
 
     /** The node's last contact: its last heartbeat, or its registration time before the first heartbeat. */

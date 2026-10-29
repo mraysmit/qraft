@@ -112,6 +112,7 @@ final class NodeCodec {
     private static NodeProto toProto(Node node) {
         NodeProto.Builder builder = NodeProto.newBuilder();
         Optional.ofNullable(node.name()).ifPresent(builder::setName);
+        Optional.ofNullable(node.id()).ifPresent(builder::setId);
         Optional.ofNullable(node.address()).ifPresent(builder::setAddress);
         Optional.ofNullable(node.status()).ifPresent(s -> builder.setStatus(toProto(s)));
         Optional.ofNullable(node.registrationTime()).ifPresent(t -> builder.setRegistrationTimeEpochMs(t.toEpochMilli()));
@@ -125,6 +126,7 @@ final class NodeCodec {
     private static Node fromProto(NodeProto proto) {
         return new Node(
                 proto.getName(),
+                proto.hasId() ? proto.getId() : null,
                 proto.hasAddress() ? proto.getAddress() : null,
                 proto.hasDatacenter() ? proto.getDatacenter() : null,
                 proto.hasRegion() ? proto.getRegion() : null,

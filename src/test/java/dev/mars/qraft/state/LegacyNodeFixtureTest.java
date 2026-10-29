@@ -56,11 +56,11 @@ class LegacyNodeFixtureTest {
     static final long HEARTBEAT_SEQUENCE = 7;
     static final long SNAPSHOT_INDEX = 9;
     /** The fully described node of the fixtures, as far as a node is still described. */
-    private static final Node RICH = new Node("node-rich", "192.0.2.21", "dc-1", "eu-west",
+    private static final Node RICH = new Node("node-rich", null, "192.0.2.21", "dc-1", "eu-west",
             Map.of("rack", "r7", Node.REGISTRATION_ID_METADATA_KEY, REGISTRATION_ID),
             NodeStatus.HEALTHY, REGISTERED, CONTACTED);
     /** The node of the fixtures that was written with a name, a status, and a registration time only. */
-    private static final Node MINIMAL = new Node("node-minimal", null, null, null, Map.of(),
+    private static final Node MINIMAL = new Node("node-minimal", null, null, null, null, Map.of(),
             NodeStatus.REGISTERING, REGISTERED, null);
     private static final Map<String, String> SHA_256 = Map.ofEntries(
             Map.entry("node-register-rich.bin", "09c7072673ccde332f74977a2e21b0a2062fdb877aeccb6e55197c80486fc870"),

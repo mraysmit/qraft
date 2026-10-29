@@ -85,7 +85,7 @@ class NodeTest {
 
     @Test
     void aRegistrationIsRecordedAsRegisteringAtItsTimeWithNoHeartbeat() {
-        Node claimed = new Node("web-01", "10.0.0.5", "dc-1", "eu-west", Map.of(),
+        Node claimed = new Node("web-01", null, "10.0.0.5", "dc-1", "eu-west", Map.of(),
                 NodeStatus.HEALTHY, CONTACTED, CONTACTED);
 
         Node recorded = claimed.registeredAt(REGISTERED);
@@ -115,15 +115,15 @@ class NodeTest {
     }
 
     @Test
-    void jsonHoldsExactlyTheEightFieldsOfANodeAndReadsBack() throws Exception {
-        Node node = new Node("web-01", "10.0.0.5", "dc-1", "eu-west", Map.of("rack", "r7"),
-                NodeStatus.HEALTHY, REGISTERED, CONTACTED);
+    void jsonHoldsExactlyTheNineFieldsOfANodeAndReadsBack() throws Exception {
+        Node node = new Node("web-01", "1b4e28ba-2fa1-4d2a-883f-0016d3cca427", "10.0.0.5", "dc-1", "eu-west",
+                Map.of("rack", "r7"), NodeStatus.HEALTHY, REGISTERED, CONTACTED);
 
         JsonNode json = JSON.readTree(JSON.writeValueAsString(node));
         Set<String> fields = new java.util.TreeSet<>();
         json.fieldNames().forEachRemaining(fields::add);
 
-        assertEquals(Set.of("name", "address", "datacenter", "region", "metadata", "status",
+        assertEquals(Set.of("name", "id", "address", "datacenter", "region", "metadata", "status",
                 "registrationTime", "lastHeartbeat"), fields);
         assertEquals("healthy", json.get("status").asText());
         assertEquals(node, JSON.readValue(JSON.writeValueAsString(node), Node.class));
@@ -137,7 +137,7 @@ class NodeTest {
                  "registrationTime":1790064000.000000000,"lastHeartbeat":null,"version":"2.9.0",
                  "region":"eu-west","datacenter":"dc-legacy","metadata":{"rack":"r1"}}
                 """;
-        Node expected = new Node("node-legacy", "192.0.2.10", "dc-legacy", "eu-west", Map.of("rack", "r1"),
+        Node expected = new Node("node-legacy", null, "192.0.2.10", "dc-legacy", "eu-west", Map.of("rack", "r1"),
                 NodeStatus.HEALTHY, Instant.ofEpochSecond(1_790_064_000L), null);
 
         // The node's name under each of the two names it had before.

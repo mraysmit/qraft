@@ -39,6 +39,7 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -230,6 +231,60 @@ public final class QraftStateStore implements RaftLogApplicator {
         return new RaftCommandResult.Success<>(current);
     }
 
+    /**
+     * Registers a node under its name by Consul's catalog rules (client list decision 8), deciding on what the
+     * replicated state holds, so that every replica decides the same:
+     * <ul>
+     *   <li>names are compared regardless of case;</li>
+     *   <li>a name held by another node, one with another ID or, for a registration without an ID, one with an ID,
+     *       is refused while that node holds it, answering {@code CasMismatch} with the holder; a node holds its
+     *       name until it is unreachable, and an unreachable holder is taken over, leaving with what it
+     *       registered;</li>
+     *   <li>a registration with an ID that no node has claims a node without an ID, keeping what it registered;</li>
+     *   <li>an ID registered under another name is a rename: the node leaves its old name with what it registered
+     *       there, and its client registers its services again under the new one.</li>
+     * </ul>
+     * The same node under its exact name keeps what it registered. Lifecycle status and times are server-owned; a
+     * registration cannot claim them.
+     */
+    private RaftCommandResult<?> applyNodeRegistration(NodeCommand.Register register) {
+        String name = register.name();
+        String id = register.node().id();
+        String holderName = nameHeldAs(name);
+        Node holder = holderName == null ? null : nodes.get(holderName);
+        String previousName = id == null ? null : nameRegisteredWith(id);
+        boolean sameNode = holder != null && (Objects.equals(holder.id(), id)
+                || (holder.id() == null && previousName == null));
+        if (holder != null && !sameNode && holder.status() != NodeStatus.UNREACHABLE) {
+            return new RaftCommandResult.CasMismatch<>(holder);
+        }
+        if (holder != null && (!sameNode || !holderName.equals(name))) removeNode(holderName);
+        if (previousName != null && !previousName.equals(holderName)) removeNode(previousName);
+        Node registered = register.node().registeredAt(register.timestamp());
+        nodes.put(name, registered);
+        heartbeatSequences.remove(name);
+        return new RaftCommandResult.Success<>(registered);
+    }
+
+    /** The name a node is registered under that matches {@code name} regardless of case: the exact one first. */
+    private String nameHeldAs(String name) {
+        if (nodes.containsKey(name)) return name;
+        return nodes.keySet().stream().filter(held -> held.equalsIgnoreCase(name)).sorted().findFirst().orElse(null);
+    }
+
+    /** The name of the node registered with {@code id}, or {@code null}; the first in name order, for determinism. */
+    private String nameRegisteredWith(String id) {
+        return nodes.entrySet().stream().filter(entry -> id.equals(entry.getValue().id()))
+                .map(Map.Entry::getKey).sorted().findFirst().orElse(null);
+    }
+
+    /** Removes the node registered under {@code name} with everything registered on it. */
+    private void removeNode(String name) {
+        nodes.remove(name);
+        heartbeatSequences.remove(name);
+        removeServicesOf(name);
+    }
+
     /** Removes every service instance registered on a node, in every tenant and namespace, with its checks. */
     private void removeServicesOf(String node) {
         for (ServiceInstance instance : serviceCatalog.instances()) {
@@ -253,13 +308,7 @@ public final class QraftStateStore implements RaftLogApplicator {
     private RaftCommandResult<?> applyNodeCommand(NodeCommand command) {
         return switch (command) {
             case NodeCommand.Expire expire -> applyNodeExpiry(expire);
-            case NodeCommand.Register register -> {
-                // Lifecycle status and times are server-owned; a registration cannot claim them.
-                Node registered = register.node().registeredAt(register.timestamp());
-                nodes.put(register.name(), registered);
-                heartbeatSequences.remove(register.name());
-                yield new RaftCommandResult.Success<>(registered);
-            }
+            case NodeCommand.Register register -> applyNodeRegistration(register);
             case NodeCommand.Deregister deregister -> {
                 // As in Consul, a node takes what is registered on it with it. That holds without a node entry
                 // too, so that services left under the node's name cannot outlive it.

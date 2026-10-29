@@ -187,7 +187,7 @@ class LeaderHealthExpiryTest {
     @Test
     void silentNodesAreExpiredOnlyByTheLeaderAndNeverProposedTwiceWhileInFlight() {
         AtomicReference<Node> silent = new AtomicReference<>(
-                new Node("client-1", "127.0.0.1", null, null, Map.of(), NodeStatus.HEALTHY, START, null));
+                new Node("client-1", null, "127.0.0.1", null, null, Map.of(), NodeStatus.HEALTHY, START, null));
         LeaderHealthExpiry withNodes = new LeaderHealthExpiry(checks::get, () -> List.of(silent.get()),
                 new NodeExpiryPolicy(Duration.ofSeconds(90), Duration.ofSeconds(60)), command -> {
                     proposed.add(command);
