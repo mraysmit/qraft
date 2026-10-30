@@ -23,6 +23,7 @@ import com.sun.net.httpserver.HttpServer;
 import dev.mars.qraft.client.health.CheckObservation;
 import dev.mars.qraft.client.health.CheckStatus;
 import dev.mars.qraft.client.health.ObservationOutcome;
+import dev.mars.qraft.common.Node;
 import dev.mars.qraft.common.ServiceDefinition;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -56,6 +57,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -117,6 +119,35 @@ class HttpCatalogClientTest {
         assertFalse(body.has("health"));
         assertFalse(first.header("X-Request-Id").isBlank());
         assertNotEquals(first.header("X-Request-Id"), requests.get(1).header("X-Request-Id"));
+    }
+
+    @Test
+    void everyRequestOfAClientWithANodeIdCarriesItAndAClientWithoutOneSendsNone() throws Exception {
+        String nodeUuid = "1b4e28ba-2fa1-4d2a-883f-0016d3cca427";
+        List<CapturedRequest> requests = new CopyOnWriteArrayList<>();
+        URI endpoint = start(exchange -> {
+            requests.add(capture(exchange));
+            respond(exchange, 200, "{\"node\":\"node-a\"}");
+        });
+        HttpCatalogClient identified = new HttpCatalogClient(HttpClient.newHttpClient(), JSON, List.of(endpoint),
+                "node-a", nodeUuid, "tenant-a", "prod", "dc-1", "eu-west", Duration.ofSeconds(10),
+                new ServerContactTracker(java.time.Clock.systemUTC()));
+        clients.add(identified);
+
+        identified.registerNode(Node.of("node-a", "127.0.0.1", "dc-1", "eu-west", Map.of()))
+                .get(10, TimeUnit.SECONDS);
+        identified.heartbeatNode(1, "reg-1").get(10, TimeUnit.SECONDS);
+        identified.register(service()).get(10, TimeUnit.SECONDS);
+        identified.deregisterNode().get(10, TimeUnit.SECONDS);
+        assertEquals(4, requests.size());
+        for (CapturedRequest request : requests) {
+            assertEquals(nodeUuid, request.header("X-Qraft-Node-ID"), request.path());
+        }
+
+        requests.clear();
+        client(Duration.ofSeconds(10)).register(endpoint, service()).get(10, TimeUnit.SECONDS);
+        assertEquals(1, requests.size());
+        assertNull(requests.getFirst().header("X-Qraft-Node-ID"), "a client without a node ID sends none");
     }
 
     @Test

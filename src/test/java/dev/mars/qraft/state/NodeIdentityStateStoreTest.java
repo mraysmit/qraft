@@ -223,6 +223,64 @@ class NodeIdentityStateStoreTest {
         assertFalse(hasService("web-1"), "services are keyed by the exact name, so they leave with it");
     }
 
+    @Test
+    void aServiceRegistrationFromAnotherIdIsRefusedOnANodeWithAnId() {
+        register("web-1", WEB_ID);
+
+        assertRefused(store.apply(CatalogCommand.register(service("web-1"), List.of("http"), OTHER_ID)),
+                "web-1", WEB_ID);
+        assertFalse(hasService("web-1"), "a node that lost the name cannot register on the one holding it");
+
+        assertInstanceOf(RaftCommandResult.Success.class,
+                store.apply(CatalogCommand.register(service("web-1"), List.of("http"), WEB_ID)));
+        assertTrue(hasService("web-1"), "the holder registers its own");
+    }
+
+    @Test
+    void aServiceDeregistrationAndAnObservationFromAnotherIdAreRefused() {
+        register("web-1", WEB_ID);
+        withServiceAndCheck("web-1");
+        ServiceCheckId check = new ServiceCheckId(service("web-1").identity(), "http");
+
+        assertRefused(store.apply(CatalogCommand.deregister(service("web-1").identity(), OTHER_ID)),
+                "web-1", WEB_ID);
+        assertRefused(store.apply(CatalogCommand.observe(new HealthObservation(check, ServiceHealth.CRITICAL, 2,
+                REGISTERED, 30_000, true, "down"), REGISTERED, OTHER_ID)), "web-1", WEB_ID);
+
+        assertTrue(hasService("web-1"));
+        assertEquals(ServiceHealth.PASSING, store.findHealthCheck(check).orElseThrow().observation().status(),
+                "the holder's check keeps its own observation");
+    }
+
+    @Test
+    void aNodeDeregistrationFromAnotherIdIsRefusedAndTheHolderStays() {
+        register("web-1", WEB_ID);
+        withServiceAndCheck("web-1");
+
+        assertRefused(store.apply(new NodeCommand.Deregister("web-1", REGISTERED, OTHER_ID)), "web-1", WEB_ID);
+
+        assertTrue(hasServiceAndCheck("web-1"), "a node that lost the name cannot remove the one holding it");
+        assertInstanceOf(RaftCommandResult.Success.class,
+                store.apply(new NodeCommand.Deregister("web-1", REGISTERED, WEB_ID)));
+        assertTrue(store.findNode("web-1").isEmpty(), "the holder deregisters itself");
+    }
+
+    @Test
+    void writesWithoutAnIdOrToANodeWithoutOneAreAcceptedAsBefore() {
+        register("web-1", WEB_ID);
+        register("web-2", null);
+
+        assertInstanceOf(RaftCommandResult.Success.class,
+                store.apply(CatalogCommand.register(service("web-1"), List.of("http"), null)),
+                "a client from before node IDs sends none, and is not refused for it");
+        assertInstanceOf(RaftCommandResult.Success.class,
+                store.apply(CatalogCommand.register(service("web-2"), List.of("http"), OTHER_ID)),
+                "a node without an ID is claimed when the client with an ID registers it");
+        assertInstanceOf(RaftCommandResult.Success.class,
+                store.apply(CatalogCommand.register(service("web-3"), List.of("http"), OTHER_ID)),
+                "a service can still be registered before its node, as before");
+    }
+
     private RaftCommandResult<?> register(String name, String id) {
         return store.apply(NodeCommand.register(node(name).withId(id), REGISTERED));
     }

@@ -139,24 +139,24 @@ public final class ProtobufCommandCodec {
     private static CatalogCommandProto toCatalogProto(CatalogCommand command) {
         var builder = CatalogCommandProto.newBuilder();
         return switch (command) {
-            case CatalogCommand.Register register -> builder
+            case CatalogCommand.Register register -> withNodeUuid(builder
                     .setType(CatalogCommandType.CATALOG_CMD_REGISTER)
                     .setServiceId(register.instance().serviceId())
                     .setInstance(toServiceInstanceProto(register.instance()))
                     .setChecksDeclared(register.declaresChecks())
                     .addAllDeclaredCheckIds(register.declaresChecks() ? register.declaredCheckIds() : java.util.List.of())
-                    .build();
-            case CatalogCommand.Deregister deregister -> builder
+                    .build(), register.nodeUuid());
+            case CatalogCommand.Deregister deregister -> withNodeUuid(builder
                     .setType(CatalogCommandType.CATALOG_CMD_DEREGISTER)
                     .setServiceId(deregister.serviceId())
                     .setNodeId(deregister.nodeId())
                     .setTenantId(deregister.tenantId())
                     .setNamespace(deregister.namespace())
-                    .build();
-            case CatalogCommand.ObserveHealth observe -> builder
+                    .build(), deregister.nodeUuid());
+            case CatalogCommand.ObserveHealth observe -> withNodeUuid(builder
                     .setType(CatalogCommandType.CATALOG_CMD_OBSERVE_HEALTH)
                     .setHealthObservation(toHealthObservationProto(observe))
-                    .build();
+                    .build(), observe.nodeUuid());
             case CatalogCommand.ExpireHealth expire -> builder
                     .setType(CatalogCommandType.CATALOG_CMD_EXPIRE_HEALTH)
                     .setHealthExpiry(toHealthExpiryProto(expire))
@@ -164,17 +164,22 @@ public final class ProtobufCommandCodec {
         };
     }
 
+    /** {@code proto} with the ID of the node that sent its command, when the command has one. */
+    private static CatalogCommandProto withNodeUuid(CatalogCommandProto proto, String nodeUuid) {
+        return nodeUuid == null ? proto : proto.toBuilder().setNodeUuid(nodeUuid).build();
+    }
+
     private static CatalogCommand fromCatalogProto(CatalogCommandProto proto) {
+        String nodeUuid = proto.hasNodeUuid() ? proto.getNodeUuid() : null;
         return switch (proto.getType()) {
-            case CATALOG_CMD_REGISTER -> proto.getChecksDeclared()
-                    ? CatalogCommand.register(fromServiceInstanceProto(proto.getInstance()), proto.getDeclaredCheckIdsList())
-                    : CatalogCommand.register(fromServiceInstanceProto(proto.getInstance()));
+            case CATALOG_CMD_REGISTER -> CatalogCommand.register(fromServiceInstanceProto(proto.getInstance()),
+                    proto.getChecksDeclared() ? proto.getDeclaredCheckIdsList() : null, nodeUuid);
             case CATALOG_CMD_DEREGISTER -> proto.getNodeId().isBlank()
                     ? CatalogCommand.deregister(proto.getServiceId())
                     : CatalogCommand.deregister(new dev.mars.qraft.state.catalog.ServiceInstanceId(
                             scopeOrDefault(proto.getTenantId()), scopeOrDefault(proto.getNamespace()),
-                            proto.getNodeId(), proto.getServiceId()));
-            case CATALOG_CMD_OBSERVE_HEALTH -> fromHealthObservationProto(proto.getHealthObservation());
+                            proto.getNodeId(), proto.getServiceId()), nodeUuid);
+            case CATALOG_CMD_OBSERVE_HEALTH -> fromHealthObservationProto(proto.getHealthObservation(), nodeUuid);
             case CATALOG_CMD_EXPIRE_HEALTH -> fromHealthExpiryProto(proto.getHealthExpiry());
             default -> throw new IllegalArgumentException("Unknown CatalogCommandType: " + proto.getType());
         };
@@ -202,14 +207,14 @@ public final class ProtobufCommandCodec {
                 .build();
     }
 
-    private static CatalogCommand fromHealthObservationProto(HealthObservationCommandProto proto) {
+    private static CatalogCommand fromHealthObservationProto(HealthObservationCommandProto proto, String nodeUuid) {
         ServiceCheckId check = checkId(proto.getTenantId(), proto.getNamespace(),
                 proto.getNodeId(), proto.getServiceId(), proto.getCheckId());
         HealthObservation observation = new HealthObservation(check,
                 ServiceHealth.valueOf(proto.getStatus()), proto.getSequenceNumber(),
                 Instant.ofEpochMilli(proto.getObservedAtEpochMs()), proto.getTtlMs(),
                 proto.getRequired(), proto.getOutput(), proto.getDeregisterAfterMs());
-        return CatalogCommand.observe(observation, Instant.ofEpochMilli(proto.getAcceptedAtEpochMs()));
+        return CatalogCommand.observe(observation, Instant.ofEpochMilli(proto.getAcceptedAtEpochMs()), nodeUuid);
     }
 
     private static HealthExpiryCommandProto toHealthExpiryProto(CatalogCommand.ExpireHealth command) {

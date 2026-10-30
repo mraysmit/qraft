@@ -83,16 +83,16 @@ class ClientEndToEndTest {
                 service("web", "web", 8080), service("api", "api", 8081)), 1_000);
 
         assertTrue(client.start().get(10, TimeUnit.SECONDS));
-        waitUntil(() -> client.healthService().isReady()
+        waitUntil(() -> client.localApi().isReady()
                 && servers.store(0).getServiceCatalog().instances().size() == 2);
 
         servers.close();
         servers = null;
-        waitUntil(() -> !client.healthService().isReady());
+        waitUntil(() -> !client.localApi().isReady());
 
         // The client knows the server by URL, so the restarted server must bind the same port.
         servers = ServerGroupFixture.single(serverPort);
-        waitUntil(() -> client.healthService().isReady()
+        waitUntil(() -> client.localApi().isReady()
                 && servers.store(0).getServiceCatalog().instances().size() == 2);
 
         assertTrue(client.shutdown().get(10, TimeUnit.SECONDS));
@@ -109,7 +109,7 @@ class ClientEndToEndTest {
 
         assertTrue(first.start().get(10, TimeUnit.SECONDS));
         assertTrue(second.start().get(10, TimeUnit.SECONDS));
-        waitUntil(() -> first.healthService().isReady() && second.healthService().isReady()
+        waitUntil(() -> first.localApi().isReady() && second.localApi().isReady()
                 && servers.store(0).getServiceCatalog().instances(ServiceKey.inDefaultScope("web")).size() == 2);
 
         var instances = servers.store(0).getServiceCatalog().instances(ServiceKey.inDefaultScope("web"));
@@ -138,7 +138,7 @@ class ClientEndToEndTest {
         QraftClient client = client("cluster-client", seeds,
                 List.of(service("web", "web", 8080)), 2_000);
         assertTrue(client.start().get(10, TimeUnit.SECONDS));
-        servers.replicateUntil(() -> client.healthService().isReady()
+        servers.replicateUntil(() -> client.localApi().isReady()
                 && servers.stores().stream().allMatch(store ->
                         store.getServiceCatalog().instances(ServiceKey.inDefaultScope("web")).size() == 1));
 

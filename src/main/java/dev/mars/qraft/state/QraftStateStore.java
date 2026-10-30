@@ -94,6 +94,8 @@ public final class QraftStateStore implements RaftLogApplicator {
     private RaftCommandResult<?> applyCatalogCommand(CatalogCommand command) {
         return switch (command) {
             case CatalogCommand.Register register -> {
+                Node holder = heldByAnotherNode(register.instance().nodeId(), register.nodeUuid());
+                if (holder != null) yield new RaftCommandResult.CasMismatch<>(holder);
                 ServiceInstanceId identity = register.instance().identity();
                 serviceCatalog.register(register.instance());
                 boolean pruned = false;
@@ -111,6 +113,9 @@ public final class QraftStateStore implements RaftLogApplicator {
                         serviceCatalog.find(register.instance().identity()).orElseThrow());
             }
             case CatalogCommand.Deregister deregister -> {
+                Node holder = deregister.isLegacy() ? null
+                        : heldByAnotherNode(deregister.nodeId(), deregister.nodeUuid());
+                if (holder != null) yield new RaftCommandResult.CasMismatch<>(holder);
                 boolean removed = deregister.isLegacy()
                         ? serviceCatalog.deregisterLegacy(deregister.serviceId())
                         : serviceCatalog.deregister(deregister.identity());
@@ -136,6 +141,8 @@ public final class QraftStateStore implements RaftLogApplicator {
     private RaftCommandResult<?> applyHealthObservation(CatalogCommand.ObserveHealth command) {
         HealthObservation observation = command.observation();
         ServiceCheckId checkId = observation.checkId();
+        Node holder = heldByAnotherNode(checkId.serviceInstanceId().nodeId(), command.nodeUuid());
+        if (holder != null) return new RaftCommandResult.CasMismatch<>(holder);
         if (serviceCatalog.find(checkId.serviceInstanceId()).isEmpty()) {
             return new RaftCommandResult.NotFound<>(checkId.serviceInstanceId().toString(), "ServiceInstance");
         }
@@ -278,6 +285,19 @@ public final class QraftStateStore implements RaftLogApplicator {
                 .map(Map.Entry::getKey).sorted().findFirst().orElse(null);
     }
 
+    /**
+     * The node registered under {@code name} when it has an ID other than {@code nodeUuid}, the ID of the node that
+     * sent a write: such a write is refused, as Consul refuses a registration from a node that does not hold the
+     * name, so a node that lost its name cannot change what the node holding it registered. {@code null} when the
+     * write may go ahead: it carries no ID, as clients from before node IDs send none, or the node is not
+     * registered, has no ID, or has this one.
+     */
+    private Node heldByAnotherNode(String name, String nodeUuid) {
+        if (nodeUuid == null) return null;
+        Node node = nodes.get(name);
+        return node != null && node.id() != null && !node.id().equals(nodeUuid) ? node : null;
+    }
+
     /** Removes the node registered under {@code name} with everything registered on it. */
     private void removeNode(String name) {
         nodes.remove(name);
@@ -310,6 +330,8 @@ public final class QraftStateStore implements RaftLogApplicator {
             case NodeCommand.Expire expire -> applyNodeExpiry(expire);
             case NodeCommand.Register register -> applyNodeRegistration(register);
             case NodeCommand.Deregister deregister -> {
+                Node holder = heldByAnotherNode(deregister.name(), deregister.nodeUuid());
+                if (holder != null) yield new RaftCommandResult.CasMismatch<>(holder);
                 // As in Consul, a node takes what is registered on it with it. That holds without a node entry
                 // too, so that services left under the node's name cannot outlive it.
                 Node removed = nodes.remove(deregister.name());

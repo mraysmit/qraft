@@ -22,6 +22,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import dev.mars.qraft.common.Node;
+import dev.mars.qraft.common.http.JsonApi;
 import dev.mars.qraft.state.catalog.HealthCheckState;
 import dev.mars.qraft.state.catalog.HealthObservation;
 import dev.mars.qraft.state.catalog.ServiceHealth;
@@ -46,7 +47,6 @@ import dev.mars.qraft.raft.RaftCommandResult;
 import dev.mars.qraft.state.QraftStateStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.slf4j.MDC;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -60,7 +60,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
@@ -79,7 +78,6 @@ import java.util.stream.Collectors;
  */
 public final class HttpApiServer implements AutoCloseable {
     private static final Logger LOG = LoggerFactory.getLogger(HttpApiServer.class);
-    private static final String REQUEST_ID_HEADER = "X-Request-Id";
     private final int port;
     private final AdminUiConfig adminUi;
     private final HttpServer server;
@@ -87,6 +85,8 @@ public final class HttpApiServer implements AutoCloseable {
     private final ObjectMapper objectMapper = new ObjectMapper()
             .findAndRegisterModules()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    /** The request handling this API shares with the client's local API: request IDs, body limits, errors. */
+    private final JsonApi api = new JsonApi(objectMapper);
     private final RaftNode raftNode;
     private final QraftStateStore stateStore;
     private final AtomicBoolean draining = new AtomicBoolean();
@@ -193,6 +193,8 @@ public final class HttpApiServer implements AutoCloseable {
 
     public boolean isDraining() { return draining.get(); }
     public int port() { return server.getAddress().getPort(); }
+    /** The address and port this server listens on. */
+    public java.net.InetSocketAddress address() { return server.getAddress(); }
     @Override public void close() {
         server.stop(0);
         executor.shutdown();
@@ -413,13 +415,14 @@ public final class HttpApiServer implements AutoCloseable {
             Map<String, Object> answer = new LinkedHashMap<>();
             answer.put("node", context.nodeId());
             if (node.isPresent()) {
-                submit(NodeCommand.register(node.get(), clock.instant()));
+                RaftCommandResult<?> registered = submit(NodeCommand.register(node.get(), clock.instant()));
+                if (refusedAsReserved(exchange, context.nodeId(), registered)) return;
                 answer.put("registered", true);
             }
             if (instance != null) {
-                RaftCommandResult<?> result = submit(declaredCheckIds == null
-                        ? CatalogCommand.register(instance)
-                        : CatalogCommand.register(instance, declaredCheckIds));
+                RaftCommandResult<?> result = submit(
+                        CatalogCommand.register(instance, declaredCheckIds, context.nodeUuid()));
+                if (refusedAsReserved(exchange, context.nodeId(), result)) return;
                 if (!(result instanceof RaftCommandResult.Success<?>)) {
                     respondError(exchange, 409, "registration_rejected",
                             "The replicated catalog did not accept the registration", false);
@@ -434,6 +437,30 @@ public final class HttpApiServer implements AutoCloseable {
         } catch (CompletionException e) {
             respondUnavailable(exchange, e);
         }
+    }
+
+    /** Answers {@code result} when it refuses a write because a node of another ID holds the name. */
+    private boolean refusedAsReserved(HttpExchange exchange, String name, RaftCommandResult<?> result)
+            throws IOException {
+        if (!(result instanceof RaftCommandResult.CasMismatch<?> refused && refused.entity() instanceof Node holder)) {
+            return false;
+        }
+        respondNameReserved(exchange, name, holder);
+        return true;
+    }
+
+    /**
+     * Refuses a registration under a name that {@code holder}, a node of another ID, holds, in the words of Consul's
+     * refusal. The name stays held until its holder is unreachable, so the refusal is not retryable.
+     */
+    private void respondNameReserved(HttpExchange exchange, String name, Node holder) throws IOException {
+        String heldBy = holder.id() == null ? "a node without an ID" : "node " + holder.id();
+        Map<String, Object> described = new LinkedHashMap<>();
+        described.put("name", holder.name());
+        described.put("id", holder.id());
+        respondError(exchange, 409, "node_name_reserved",
+                "Node name " + name + " is reserved by " + heldBy + " with name " + holder.name(), false,
+                Map.of("node", name, "holder", described));
     }
 
     /**
@@ -461,7 +488,8 @@ public final class HttpApiServer implements AutoCloseable {
                 }
                 String serviceId = value.textValue();
                 RaftCommandResult<?> removed = submit(CatalogCommand.deregister(
-                        new DeregistrationRequest(serviceId, context).identity()));
+                        new DeregistrationRequest(serviceId, context).identity(), context.nodeUuid()));
+                if (refusedAsReserved(exchange, context.nodeId(), removed)) return;
                 setAppliedIndex(exchange);
                 Map<String, Object> answer = new LinkedHashMap<>();
                 answer.put("node", context.nodeId());
@@ -470,7 +498,9 @@ public final class HttpApiServer implements AutoCloseable {
                 respondJson(exchange, 200, answer);
                 return;
             }
-            RaftCommandResult<?> result = submit(new NodeCommand.Deregister(context.nodeId(), clock.instant()));
+            RaftCommandResult<?> result = submit(
+                    new NodeCommand.Deregister(context.nodeId(), clock.instant(), context.nodeUuid()));
+            if (refusedAsReserved(exchange, context.nodeId(), result)) return;
             setAppliedIndex(exchange);
             respondJson(exchange, 200, nodeAnswer(context.nodeId(), "deregistered",
                     result instanceof RaftCommandResult.Success<?>));
@@ -498,7 +528,17 @@ public final class HttpApiServer implements AutoCloseable {
                         Map.of("node", context.nodeId()));
                 return;
             }
-            if (result instanceof RaftCommandResult.CasMismatch<?>) {
+            if (result instanceof RaftCommandResult.CasMismatch<?> refused) {
+                // A heartbeat of a registration that a later one replaced, a takeover among them, tells its client
+                // to register again; one that is only out of order does not. The current registration is not told.
+                if (refused.entity() instanceof Node current && heartbeat.registrationId() != null
+                        && !heartbeat.registrationId()
+                                .equals(current.metadata().get(Node.REGISTRATION_ID_METADATA_KEY))) {
+                    respondError(exchange, 409, "registration_superseded",
+                            "A later registration of the node replaced this one; register again", false,
+                            Map.of("node", context.nodeId()));
+                    return;
+                }
                 respondError(exchange, 409, "stale_heartbeat", "Heartbeat validation failed", false,
                         Map.of("node", context.nodeId(), "sequenceNumber", heartbeat.sequenceNumber()));
                 return;
@@ -596,7 +636,9 @@ public final class HttpApiServer implements AutoCloseable {
                     .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                     .readValue(exchange.getRequestBody());
             HealthObservation observation = request.toObservation(context);
-            RaftCommandResult<?> result = submit(CatalogCommand.observe(observation, clock.instant()));
+            RaftCommandResult<?> result = submit(
+                    CatalogCommand.observe(observation, clock.instant(), context.nodeUuid()));
+            if (refusedAsReserved(exchange, context.nodeId(), result)) return;
             if (result instanceof RaftCommandResult.NotFound<?> notFound) {
                 boolean undeclared = QraftStateStore.HEALTH_CHECK_ENTITY.equals(notFound.entityType());
                 respondError(exchange, 404, undeclared ? "check_not_declared" : "service_not_found",
@@ -711,7 +753,7 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     private void respondJson(HttpExchange exchange, int status, Object body) throws IOException {
-        respond(exchange, status, objectMapper.writeValueAsString(body));
+        api.json(exchange, status, body);
     }
 
     private void respondUnavailable(HttpExchange exchange, CompletionException error) throws IOException {
@@ -736,16 +778,11 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     private HttpHandler requestAware(HttpHandler delegate) {
-        return exchange -> {
-            String requestId = exchange.getRequestHeaders().getFirst(REQUEST_ID_HEADER);
-            if (requestId == null || requestId.isBlank()) requestId = UUID.randomUUID().toString();
-            exchange.getResponseHeaders().set(REQUEST_ID_HEADER, requestId);
-            try (MDC.MDCCloseable ignored = MDC.putCloseable("requestId", requestId)) {
-                LOG.debug("HTTP request: method={}, path={}", exchange.getRequestMethod(),
-                        exchange.getRequestURI().getPath());
-                delegate.handle(exchange);
-            }
-        };
+        return api.handle(exchange -> {
+            LOG.debug("HTTP request: method={}, path={}", exchange.getRequestMethod(),
+                    exchange.getRequestURI().getPath());
+            delegate.handle(exchange);
+        });
     }
 
     private void respondError(HttpExchange exchange, int status, String code, String message,
@@ -755,15 +792,7 @@ public final class HttpApiServer implements AutoCloseable {
 
     private void respondError(HttpExchange exchange, int status, String code, String message,
                               boolean retryable, Map<String, ?> details) throws IOException {
-        ErrorResponse error = new ErrorResponse(code, message, retryable, MDC.get("requestId"));
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("code", error.code());
-        body.put("error", error.code());
-        body.put("message", error.message());
-        body.put("retryable", error.retryable());
-        body.put("requestId", error.requestId());
-        body.putAll(details);
-        respondJson(exchange, status, body);
+        api.error(exchange, status, code, message, retryable, details);
     }
 
     private static String pathParameter(HttpExchange exchange, String prefix) {

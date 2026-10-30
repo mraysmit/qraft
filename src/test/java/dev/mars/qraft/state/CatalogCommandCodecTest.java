@@ -62,6 +62,23 @@ class CatalogCommandCodecTest {
     }
 
     @Test
+    void aClientsRegistrationDeregistrationAndObservationCarryItsNodeId() {
+        String nodeUuid = "1b4e28ba-2fa1-4d2a-883f-0016d3cca427";
+        ServiceInstance instance = new ServiceInstance("search-1", "search", "node-1", "10.0.0.4",
+                9090, List.of(), Map.of(), ServiceHealth.UNKNOWN, "tenant-a", "production", "dc-1", "eu-west", true);
+        var observation = new HealthObservation(new ServiceCheckId(instance.identity(), "http"),
+                ServiceHealth.PASSING, 1, OBSERVED_AT, 30_000, true, "ok");
+
+        for (CatalogCommand command : List.of(
+                CatalogCommand.register(instance, List.of("http"), nodeUuid),
+                CatalogCommand.register(instance, null, nodeUuid),
+                CatalogCommand.deregister(instance.identity(), nodeUuid),
+                CatalogCommand.observe(observation, ACCEPTED_AT, nodeUuid))) {
+            assertEquals(command, codec.deserialize(codec.serialize(command)), command.toString());
+        }
+    }
+
+    @Test
     void roundTripsHealthObservationAndExpiryWithoutRenumberingCatalogCommands() {
         var checkId = new ServiceCheckId(
                 new dev.mars.qraft.state.catalog.ServiceInstanceId(

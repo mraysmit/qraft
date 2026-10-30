@@ -32,6 +32,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -211,6 +212,42 @@ class ServiceReconcilerTest {
         pending.complete(new CatalogOutcome.Success("web", true));
         first.join();
         assertFalse(reconciler.isReconciling());
+    }
+
+    @Test
+    void aPassWhileTheNodeIsNotRegisteredSendsNothing() {
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
+        AtomicBoolean nodeRegistered = new AtomicBoolean(false);
+        ServiceReconciler reconciler = new ServiceReconciler(client,
+                () -> List.of(service("web", "web", 8080, true)), CLOCK, nodeRegistered::get);
+
+        // As Consul's agent syncs its node before its services and stops when that fails, nothing is sent for
+        // the services of a node that is not registered: a node another one took over among them.
+        reconciler.trigger().join();
+        assertEquals(List.of(), client.registrations);
+        assertEquals(List.of(), client.deregistrations);
+
+        nodeRegistered.set(true);
+        reconciler.trigger().join();
+        assertEquals(List.of("web"), client.registrations, "the services follow once the node is registered");
+    }
+
+    @Test
+    void aServiceRefusedBecauseAnotherNodeHoldsTheNameIsTriedAgainOnTheNextPass() {
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
+        client.registrationOutcomes.put("web", new CatalogOutcome.Rejected("node_name_reserved",
+                "Node name client-1 is reserved by node 9c5b94b1-35ad-49bb-b118-8e8fc24abf80 with name client-1", null));
+        ServiceReconciler reconciler = new ServiceReconciler(client,
+                () -> List.of(service("web", "web", 8080, true)), CLOCK);
+
+        assertEquals("node_name_reserved", reconciler.trigger().join().rejections().get("web").code());
+        client.registrationOutcomes.remove("web");
+        reconciler.trigger().join();
+
+        // The name is held for now, not the definition wrong: once the client holds its name again, the same
+        // definition must be registered, and not suppressed as a definition the catalog refused.
+        assertEquals(List.of("web", "web"), client.registrations);
+        assertEquals(1, reconciler.registeredCount());
     }
 
     @Test

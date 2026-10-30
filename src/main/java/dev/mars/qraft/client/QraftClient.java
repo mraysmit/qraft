@@ -35,7 +35,7 @@ import dev.mars.qraft.client.health.SocketTcpConnector;
 import dev.mars.qraft.common.ServiceDefinition;
 import dev.mars.qraft.common.concurrent.Deadlines;
 import dev.mars.qraft.client.service.RegistrationClient;
-import dev.mars.qraft.client.service.HealthService;
+import dev.mars.qraft.client.service.LocalApiServer;
 import dev.mars.qraft.client.service.HeartbeatService;
 import dev.mars.qraft.client.service.ReadinessPolicy;
 import org.slf4j.Logger;
@@ -79,7 +79,7 @@ public final class QraftClient implements AutoCloseable {
     private final HttpCatalogClient serverClient;
     private final RegistrationClient registrationClient;
     private final HeartbeatService heartbeatService;
-    private final HealthService healthService;
+    private final LocalApiServer localApi;
     private final ServerRetryPolicy retryPolicy;
     private final ServiceReconciler serviceReconciler;
     private final ReadinessPolicy readinessPolicy;
@@ -140,12 +140,13 @@ public final class QraftClient implements AutoCloseable {
         this.serverHttpClient = HttpClient.newHttpClient();
         ServerContactTracker contactTracker = new ServerContactTracker(clock);
         this.serverClient = new HttpCatalogClient(serverHttpClient, new ObjectMapper(),
-                config.getServerUrls(), config.getNodeName(), config.getTenant(), config.getNamespace(),
-                config.getDatacenter(), config.getRegion(), Duration.ofMillis(config.getRequestTimeoutMs()),
-                contactTracker);
+                config.getServerUrls(), config.getNodeName(), dataDirectory.nodeId(), config.getTenant(),
+                config.getNamespace(), config.getDatacenter(), config.getRegion(),
+                Duration.ofMillis(config.getRequestTimeoutMs()), contactTracker);
         this.registrationClient = new RegistrationClient(serverClient);
         this.heartbeatService = new HeartbeatService(registrationClient);
-        this.serviceReconciler = new ServiceReconciler(serverClient, config::getServices, clock);
+        this.serviceReconciler = new ServiceReconciler(serverClient, config::getServices, clock,
+                registrationClient::isRegistered);
         List<HealthCheckDefinition> checks = enabledServiceChecks(config);
         RequiredCheckReadiness checkReadiness = new RequiredCheckReadiness(checks);
         ExecutorCheckScheduler checkTimer = new ExecutorCheckScheduler(checkScheduler);
@@ -158,7 +159,7 @@ public final class QraftClient implements AutoCloseable {
         this.readinessPolicy = new ReadinessPolicy(running::get, registrationClient::isRegistered,
                 serviceReconciler::isConverged, checkReadiness::isSatisfied, contactTracker,
                 Duration.ofMillis(config.getContactFreshnessMs()), clock);
-        this.healthService = new HealthService(config, readinessPolicy::isReady);
+        this.localApi = new LocalApiServer(config, readinessPolicy::isReady);
     }
 
     private static ClientDataDirectory openDataDirectory(Path directory) {
@@ -173,7 +174,7 @@ public final class QraftClient implements AutoCloseable {
         if (!running.compareAndSet(false, true)) {
             return CompletableFuture.completedFuture(registrationClient.isRegistered());
         }
-        healthService.start();
+        localApi.start();
         // A node is a name, an address, and where it is; the version of the client's build travels in its metadata.
         Node client = Node.of(config.getNodeName(), config.getAddress(), config.getDatacenter(), config.getRegion(),
                 java.util.Map.of(Node.VERSION_METADATA_KEY, QraftVersion.current()));
@@ -248,6 +249,8 @@ public final class QraftClient implements AutoCloseable {
         if (shutdownFuture != null) return shutdownFuture;
 
         running.set(false);
+        // Applications' writes stop first, so that nothing is registered behind the deregistration below.
+        localApi.beginShutdown();
         // Checks and publications stop, and in-flight publications finish, before deregistration begins.
         localChecks.stop();
         CompletableFuture<Void> publicationsStopped = healthPublisher.stop();
@@ -305,14 +308,14 @@ public final class QraftClient implements AutoCloseable {
     private void finishShutdown() {
         checkScheduler.shutdownNow();
         checkHttpClient.shutdownNow();
-        healthService.shutdown();
+        localApi.shutdown();
         serverClient.closeNow();
     }
 
     public boolean isRunning() { return running.get(); }
     /** The node ID kept in the client's data directory. */
     public String nodeId() { return dataDirectory.nodeId(); }
-    public HealthService healthService() { return healthService; }
+    public LocalApiServer localApi() { return localApi; }
 
     /** Returns the process-local status input for a configured TTL check, or empty for any other check. */
     public Optional<LocalStatusReporter> statusReporter(String serviceId, String checkId) {
@@ -322,7 +325,7 @@ public final class QraftClient implements AutoCloseable {
     /** True once shutdown has completed and every client-owned thread, client, and listener has stopped. */
     public boolean isTerminated() {
         return scheduler.isTerminated() && checkScheduler.isTerminated() && checkHttpClient.isTerminated()
-                && serverHttpClient.isTerminated() && serverClient.isClosed() && !healthService.isHealthy();
+                && serverHttpClient.isTerminated() && serverClient.isClosed() && !localApi.isHealthy();
     }
     @Override public void close() { shutdown().join(); }
 

@@ -82,14 +82,20 @@ public sealed interface NodeCommand extends RaftCommand
      *
      * @param name      the node's name
      * @param timestamp the command timestamp
+     * @param nodeUuid  the ID of the node that asks, or {@code null} from a client without one; the servers refuse
+     *                  it when the node named is registered with another ID
      */
-    record Deregister(String name, Instant timestamp) implements NodeCommand {
+    record Deregister(String name, Instant timestamp, String nodeUuid) implements NodeCommand {
         private static final long serialVersionUID = 1L;
 
         public Deregister {
             Objects.requireNonNull(name, "name");
             Objects.requireNonNull(timestamp, "timestamp");
             timestamp = replicated(timestamp);
+        }
+
+        public Deregister(String name, Instant timestamp) {
+            this(name, timestamp, null);
         }
     }
 

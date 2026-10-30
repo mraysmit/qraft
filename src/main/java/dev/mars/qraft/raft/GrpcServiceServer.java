@@ -82,6 +82,13 @@ public class GrpcServiceServer {
         return current.getPort();
     }
 
+    /** The address and port this server listens on. */
+    public java.net.InetSocketAddress address() {
+        Server current = server;
+        if (current == null || current.isShutdown()) throw new IllegalStateException("the gRPC server is not running");
+        return (java.net.InetSocketAddress) current.getListenSockets().getFirst();
+    }
+
     public CompletableFuture<Void> stop() {
         CompletableFuture<Void> promise = new CompletableFuture<>();
 

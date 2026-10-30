@@ -188,7 +188,7 @@ class ClientServerContractTest {
         assertTrue(client.start().get(10, TimeUnit.SECONDS),
                 () -> "the real client rejected the server response; replicated state="
                         + store.findNode("contract-client"));
-        assertTrue(client.healthService().isReady());
+        assertTrue(client.localApi().isReady());
         waitUntil(() -> store.findNode("contract-client")
                 .filter(info -> info.status() == NodeStatus.HEALTHY && info.lastHeartbeat() != null)
                 .isPresent());

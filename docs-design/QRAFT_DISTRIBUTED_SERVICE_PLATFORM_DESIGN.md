@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-10-27 (section 12.4.1: how the Vite build names the asset manifest, and the security profile in the bootstrap data. Earlier, 2026-10-26: client list Phase 1: the server's service and check write routes moved from `/v1/client/*` to `/v1/catalog/*` in sections 12.1, 12.1.1 and 12.1.2. Earlier, 2026-10-25: Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
+**Last updated:** 2026-10-30 (client list Phase 2, the server side: the node ID and the rules for who may hold a name, after Consul's catalog, in sections 7.3 and 22, and the `X-Qraft-Node-ID` header, the 409 `node_name_reserved` refusal and the node listing's `id` in sections 12.1 and 12.1.2. Earlier, 2026-10-27: section 12.4.1: how the Vite build names the asset manifest, and the security profile in the bootstrap data. Earlier, 2026-10-26: client list Phase 1: the server's service and check write routes moved from `/v1/client/*` to `/v1/catalog/*` in sections 12.1, 12.1.1 and 12.1.2. Earlier, 2026-10-25: Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
 
 ## 1. Purpose
 
@@ -551,6 +551,9 @@ A node in the replicated registry has the shape of a Consul node, together with
 the status and the times that the servers record for it:
 
 - `name`: the node's name, which is its key in the registry.
+- `id`: the node ID, the UUID its client keeps in its data directory. A node
+  registered before node IDs existed, in an older log entry or snapshot or by an
+  older client, has none.
 - `address`, `datacenter`, and `region`.
 - `metadata`: free-form text entries. The client's version is the entry
   `qraft.version`, and the identifier of the node's current registration is
@@ -575,8 +578,52 @@ task list sets out:
   be read stops the start and is never replaced.
 - The node's name is `client.nodeName`, the machine's host name by default.
 
-The servers do not yet store the node ID or use it to detect a conflicting
-name; that is the rest of the client list's Phase 2.
+The servers keep the node ID with the node and use it to decide who may hold a
+name, by Consul's catalog rules (`ensureNodeTxn` and
+`ensureNoNodeWithSimilarNameTxn` in Consul's state store), checked against them
+on 2026-10-29. Each rule is decided when the registration is applied, from the
+replicated state alone, so every replica decides the same:
+
+- Names conflict regardless of case: `Web-1` and `web-1` are one name. A name is
+  stored as it was given.
+- A node holds its name while it is `registering` or `healthy`. A registration
+  under a name that a node of another ID holds is refused with 409
+  `node_name_reserved`, and so is a registration without an ID under the name of
+  a node with one. A node that has not yet sent its first heartbeat keeps its
+  name, which is stricter than Consul, where a node without a Serf check can be
+  replaced.
+- Once the holder is `unreachable`, or reaped, the new ID takes the name. A
+  takeover removes the old node's services and checks in the same replicated
+  step. Consul leaves them to the new agent's anti-entropy, which deletes what
+  it did not register; Qraft's reconciler removes only what it registered
+  itself, so the server must.
+- An old node that comes back after a takeover is another ID asking for a held
+  name, and is refused while the new holder holds it.
+- A registration with an ID that no node has claims a node without an ID, even
+  one that holds its name, and keeps its services and checks: it is that machine
+  after its upgrade. This is Consul's rule for a node without an ID.
+- The same ID under a new name, or under another spelling of its name, is a
+  rename, as in Consul: the node is removed under its old name with its services
+  and checks, and inserted under the new one in the same step. The client's
+  reconciler looks up each of its services on every pass and registers again
+  those that are absent. A rename into a name another node holds is refused,
+  even when that node has no ID; into an unreachable holder's name, it takes
+  that name over.
+- A service registration, a service deregistration, a check observation or a
+  node deregistration that carries an ID is refused when the node it names is
+  registered with another ID, so a node that lost its name cannot change what
+  the node now holding it registered. Heartbeats are already refused when they
+  name an earlier registration.
+
+A client refused with `node_name_reserved` logs the refusal and tries again
+after its registration backoff, so a host rebuilt with an empty directory takes
+its name over once its old node is unreachable. A client whose registration was
+superseded learns it from its next heartbeat (`registration_superseded`) and
+registers again the same way, so a node that lost its name to another takes it
+back once that one is unreachable, as Consul's agent keeps syncing. While its
+node is not registered, a client sends no service write, as Consul's agent syncs
+its node before its services; a service refused with `node_name_reserved` is sent
+again on the next pass, not suppressed as a refused definition.
 
 Client state also includes:
 
@@ -830,9 +877,23 @@ Registration identity is supplied through interim request-context headers:
 
 ```text
 X-Qraft-Node: required
+X-Qraft-Node-ID: optional; the node ID, a canonical lower-case UUID
 X-Qraft-Tenant: optional; defaults to default
 X-Qraft-Namespace: optional; defaults to default
 ```
+
+Every request has an ID: the one its `X-Request-Id` header gives, or a new one.
+The answer carries it back, and it is the `requestId` of the error envelope and
+of the logs written while the request is handled. A request body longer than
+512 KiB is refused with 413 `request_too_large` before the route runs, whether
+or not it declares its length, as Consul limits its request bodies to 512 KiB
+(since 2026-10-30). The client's local API shares this handling (section 16).
+
+A client sends its node ID on every request (since 2026-10-30); a client from
+before node IDs sends none and is served as before. A value that is not a
+canonical UUID is refused with 400. A registration, a deregistration or an
+observation that carries an ID is refused with 409 `node_name_reserved` when the
+node it names is registered with another ID (section 7.3).
 
 A service is registered under `service` in the body of `PUT /v1/catalog/register`,
 beside or instead of `node` (section 12.1.2). The service's own body is:
@@ -1020,7 +1081,25 @@ services changed nothing that a node sends. A registration is:
 - Unknown fields are rejected with `invalid_registration`, at both levels.
 
 A registration replaces the node's description, makes the node `registering`,
-and stamps its registration time. A body that holds only a node answers 200:
+and stamps its registration time. The node's ID comes from `X-Qraft-Node-ID`. A
+name that a node of another ID holds is refused, by the rules of section 7.3,
+with 409 and nothing in the body registered:
+
+```json
+{"code": "node_name_reserved", "error": "node_name_reserved",
+ "message": "Node name web-01 is reserved by node 1b4e28ba-... with name web-01",
+ "retryable": false, "requestId": "...", "node": "web-01",
+ "holder": {"name": "web-01", "id": "1b4e28ba-..."}}
+```
+
+The message follows Consul's ("Node name %s is reserved by node %s with name
+%s"); a holder without an ID is "a node without an ID". It is not retryable at
+another server, which would answer the same, but the client tries again later,
+as Consul's agent keeps syncing: the name is free once its holder is
+unreachable. `GET /v1/catalog/nodes` lists each node's `id` after its `name`,
+`null` for a node without one.
+
+A body that holds only a node answers 200:
 
 ```json
 {"node": "web-01", "registered": true}
@@ -1064,8 +1143,14 @@ A heartbeat is sent to `PUT /v1/catalog/node/heartbeat`:
 - It answers 200 with `{"node":"web-01","accepted":true}`.
 - A node that is not registered answers 404 `node_not_found` with `node`, and
   the client registers again.
-- An older sequence, or a heartbeat of another registration, answers 409
-  `stale_heartbeat` with `node` and `sequenceNumber`, and state is unchanged.
+- An older sequence of the node's registration answers 409 `stale_heartbeat`
+  with `node` and `sequenceNumber`, and state is unchanged.
+- A heartbeat of another registration than the node's, one that a later
+  registration of the name replaced, a takeover among them, answers 409
+  `registration_superseded` with `node` (since 2026-10-30), and state is
+  unchanged. The client registers again, and is refused while another node
+  holds the name. The current registration is not revealed: it is what a
+  heartbeat must name.
 
 `GET /v1/catalog/nodes` returns every node in name order and carries
 `X-Qraft-Index`:
@@ -1193,7 +1278,7 @@ At request time, the server renders a small non-cacheable `index.html` template
 with a safely JSON-encoded bootstrap object containing public runtime settings,
 such as the API base path, administrative content path, enabled feature flags,
 authentication mode, and the security profile proposed by
-[`task-list-acl-and-tokens-2026-10-29.md`](task-list-acl-and-tokens-2026-10-29.md)
+[`task-list-acl-and-tokens-2026-10-30.md`](task-list-acl-and-tokens-2026-10-30.md)
 (proposal 16). Secrets and bearer credentials are never included.
 Content-hashed assets are immutable and may receive long-lived cache headers;
 `index.html` and the asset manifest require revalidation so upgrades do not leave
@@ -1804,6 +1889,7 @@ The path names one versioned JSON document. A client document has this shape:
   "client": {
     "nodeName": "node-a",
     "dataDirectory": "/var/lib/qraft",
+    "bindAddress": "127.0.0.1",
     "httpPort": 8080,
     "heartbeatIntervalMs": 5000,
     "shutdownTimeoutMs": 30000,
@@ -1890,8 +1976,30 @@ Listening ports accept 1 to 65535, or 0 to bind any free port:
 - This covers `server.http.port`, `server.apiGrpcPort`, `server.raft.port`, and
   the client's `client.httpPort`.
 - A component reports the port it actually bound, and its startup log names that
-  port. The runtime lifecycle exposes the bound ports by name: `http`, `raft`,
-  and `apiGrpc` for a server, and `http` for a client.
+  port. The runtime lifecycle exposes the bound addresses, and their ports, by
+  name: `http`, `raft`, and `apiGrpc` for a server, and `http` for a client.
+
+The client's local API listens on `client.bindAddress`, `127.0.0.1` by default,
+as Consul's `client_addr` defaults to it (since 2026-10-30), so it is reached only
+from the client's own host. The setting is an IP address, IPv4 or IPv6, and a
+host name is refused rather than looked up; `0.0.0.0` listens on every
+interface. Its startup log names where it listens, as Consul's agent does when
+it starts its HTTP server: `Local API started: protocol=http,
+address=127.0.0.1:8080`. A container deployment whose applications do not share
+the client's network namespace sets the bind address, as Consul's `client_addr`
+is set for containers.
+
+The local API is one JDK `HttpServer` (`LocalApiServer`) serving `/health/live`,
+`/health/ready` and the API routes, which the later phases of the client list
+add under `/v1/client/*`. It shares its request handling with the server's API
+(`common.http.JsonApi`, section 12.1): request IDs, the body limit, the method
+check and the error envelope. Once the client's shutdown begins, before it
+deregisters anything, an API write (any method but `GET` and `HEAD`) is refused
+with 503 `shutting_down`, retryable, so that nothing is registered behind the
+deregistration; reads, liveness and readiness are served until the listener
+stops, last, as Consul's agent stops its HTTP servers after its services and
+checks. Consul's agent does not refuse writes while it leaves; this is
+stricter.
 - `server.raft.port` may be 0 only on a cluster's sole member, because peers dial
   the configured Raft address.
 
@@ -2314,7 +2422,7 @@ Evidence as of 2026-09-27, except where a row gives a later date:
   primary client behavior.
 - Whether the server can trust a caller's claim to a node. Proposed 2026-10-05,
   not yet decided: ACL tokens on Consul's model, in
-  [`task-list-acl-and-tokens-2026-10-29.md`](task-list-acl-and-tokens-2026-10-29.md).
+  [`task-list-acl-and-tokens-2026-10-30.md`](task-list-acl-and-tokens-2026-10-30.md).
   Until it is built, any caller can claim any node name and node ID.
 - How long legacy command and snapshot readers remain supported.
 
@@ -2327,16 +2435,22 @@ implementations do, and the opinion recorded before the decision.
 Resolved on 2026-10-04, recorded here on 2026-10-05: how a node's identity is
 made and kept, which was half of the open item "how client identity is
 established". It is decision 8 of
-[`task-list-consul-style-client-2026-10-29.md`](task-list-consul-style-client-2026-10-29.md)
-and is not yet built; section 7.3 changes when it is. It follows Consul: a node
-ID generated at first start and kept in the client's data directory, a node name
+[`task-list-consul-style-client-2026-10-30.md`](task-list-consul-style-client-2026-10-30.md)
+and was built on 2026-10-30; section 7.3 states it. It follows Consul: a node ID
+generated at first start and kept in the client's data directory, a node name
 that defaults to the host name, a catalog keyed by name, and a registration
-under a name held by another node ID refused unless that holder is dead. It
-departs from Consul in two ways. Qraft has no gossip, so a holder is dead when
-its node TTL has lapsed. A takeover removes the old node's services and checks
-in the same replicated step, where Consul leaves them to the new client's
-anti-entropy, which Qraft's reconciler does not have (D3 below). The other
-half, trusting the claim, is the open item above.
+under a name held by another node ID refused unless that holder is dead. On
+2026-10-29 it was checked against Consul's catalog code, and the owner decided
+four points: a rename follows Consul; a registration with an ID claims a node
+without one; names conflict regardless of case; a `registering` node holds its
+name. It departs from Consul in three ways. Qraft has no gossip, so a holder is
+dead when its node TTL has lapsed. A takeover removes the old node's services
+and checks in the same replicated step, where Consul leaves them to the new
+client's anti-entropy, which Qraft's reconciler does not have (D3 below). A node
+that has not yet sent its first heartbeat keeps its name. Upgrade fixtures
+written before the node ID (`fixtures/node-identity/`) show older entries and
+snapshots loading without one. The other half, trusting the claim, is the open
+item above.
 
 Resolved on 2026-09-22: the public registration schema uses the Qraft field names
 shown in section 12.1 and currently accepts no aliases. Unknown fields are

@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.runtime;
 
+import java.net.InetSocketAddress;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -32,7 +33,7 @@ import java.util.function.Supplier;
  */
 final class ManagedRuntimeLifecycle implements RuntimeLifecycle {
     private final Supplier<? extends CompletionStage<?>> shutdown;
-    private final Supplier<Map<String, Integer>> boundPorts;
+    private final Supplier<Map<String, InetSocketAddress>> boundAddresses;
     private final CompletableFuture<Void> completion = new CompletableFuture<>();
     private boolean closing;
 
@@ -41,14 +42,14 @@ final class ManagedRuntimeLifecycle implements RuntimeLifecycle {
     }
 
     ManagedRuntimeLifecycle(Supplier<? extends CompletionStage<?>> shutdown,
-                            Supplier<Map<String, Integer>> boundPorts) {
+                            Supplier<Map<String, InetSocketAddress>> boundAddresses) {
         this.shutdown = Objects.requireNonNull(shutdown, "shutdown");
-        this.boundPorts = Objects.requireNonNull(boundPorts, "boundPorts");
+        this.boundAddresses = Objects.requireNonNull(boundAddresses, "boundAddresses");
     }
 
     @Override
-    public Map<String, Integer> boundPorts() {
-        return boundPorts.get();
+    public Map<String, InetSocketAddress> boundAddresses() {
+        return boundAddresses.get();
     }
 
     @Override

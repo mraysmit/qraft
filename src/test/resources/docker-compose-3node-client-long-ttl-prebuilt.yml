@@ -60,14 +60,12 @@ services:
     image: qraft-runtime:test
     hostname: client
     command: ["client", "--config", "/etc/qraft/client.json"]
-    ports:
-      - "8080"
     volumes:
       - ../../../docker/config/client-acceptance/client-long-ttl.json:/etc/qraft/client.json:ro
     networks:
       - raft-cluster
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/health/live"]
       interval: 5s
       timeout: 3s
       retries: 5

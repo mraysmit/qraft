@@ -34,6 +34,7 @@ import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletionException;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 /**
@@ -45,9 +46,12 @@ import java.util.function.Supplier;
  */
 public final class ServiceReconciler {
     private static final Logger LOGGER = LoggerFactory.getLogger(ServiceReconciler.class);
+    /** The servers' refusal of a write from a node whose name a node of another ID holds. */
+    private static final String NODE_NAME_RESERVED = "node_name_reserved";
     private final CatalogClient client;
     private final Supplier<List<ServiceDefinition>> definitions;
     private final Clock clock;
+    private final BooleanSupplier nodeRegistered;
     private final Map<String, String> registered = new ConcurrentHashMap<>();
     private final Map<String, Rejection> rejected = new ConcurrentHashMap<>();
     private CompletableFuture<Result> inFlight;
@@ -56,14 +60,27 @@ public final class ServiceReconciler {
     private volatile Instant lastSuccessfulContact;
 
     public ServiceReconciler(CatalogClient client, Supplier<List<ServiceDefinition>> definitions, Clock clock) {
+        this(client, definitions, clock, () -> true);
+    }
+
+    /**
+     * A reconciler that sends nothing while {@code nodeRegistered} says the client's node is not registered, as
+     * Consul's agent syncs its node before its services and stops when that fails.
+     */
+    public ServiceReconciler(CatalogClient client, Supplier<List<ServiceDefinition>> definitions, Clock clock,
+                             BooleanSupplier nodeRegistered) {
         this.client = Objects.requireNonNull(client, "client");
         this.definitions = Objects.requireNonNull(definitions, "definitions");
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.nodeRegistered = Objects.requireNonNull(nodeRegistered, "nodeRegistered");
     }
 
-    /** Returns the current pass when a trigger overlaps an unfinished reconciliation. */
+    /**
+     * Returns the current pass when a trigger overlaps an unfinished reconciliation. While the node is not
+     * registered, no pass runs and nothing is sent.
+     */
     public synchronized CompletableFuture<Result> trigger() {
-        if (!acceptingTriggers) {
+        if (!acceptingTriggers || !nodeRegistered.getAsBoolean()) {
             return CompletableFuture.completedFuture(new Result(
                     0, 0, Map.of(), lastSuccessfulContact));
         }
@@ -148,8 +165,11 @@ public final class ServiceReconciler {
                 pass.registered++;
                 contacted();
             } else if (outcome instanceof CatalogOutcome.Rejected failure) {
-                Rejection rejection = new Rejection(fingerprint, failure);
-                rejected.put(definition.id(), rejection);
+                // A name another node holds is not a fault of the definition, so the same definition is sent
+                // again on the next pass rather than suppressed until it changes.
+                if (!NODE_NAME_RESERVED.equals(failure.code())) {
+                    rejected.put(definition.id(), new Rejection(fingerprint, failure));
+                }
                 pass.rejections.put(definition.id(), failure);
                 LOGGER.warn("Service registration rejected: serviceId={}, code={}, message={}",
                         definition.id(), failure.code(), failure.message());

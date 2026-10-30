@@ -123,6 +123,16 @@ class HttpApiServerCatalogServiceRoutesTest {
     }
 
     @Test
+    void aBodyOverTheSharedLimitIsRefusedWith413AndNothingIsRegistered() throws Exception {
+        String metadata = "\"padding\":\"" + "x".repeat(dev.mars.qraft.common.http.JsonApi.MAX_BODY_BYTES) + "\"";
+        HttpResponse<String> response = put("/v1/catalog/register",
+                "{\"node\":{\"address\":\"10.0.0.5\",\"metadata\":{" + metadata + "}}}");
+
+        assertRejected(response, 413, "request_too_large");
+        assertTrue(store.findNode("web-01").isEmpty());
+    }
+
+    @Test
     void aRegistrationCarryingNeitherIsRefused() throws Exception {
         HttpResponse<String> response = put("/v1/catalog/register", "{}");
 

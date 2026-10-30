@@ -104,7 +104,7 @@ class QraftClientTest {
 
         try {
             assertTrue(client.start().get(10, TimeUnit.SECONDS));
-            assertTrue(client.healthService().port() > 0, "port zero binds a port the client is reached on");
+            assertTrue(client.localApi().port() > 0, "port zero binds a port the client is reached on");
 
             assertEquals("PUT as client-1", identity.get(), "the identity header names the node");
             JsonNode body = new ObjectMapper().readTree(registration.get());
@@ -147,10 +147,10 @@ class QraftClientTest {
 
         assertTrue(client.start().join());
         assertTrue(client.isRunning());
-        assertTrue(client.healthService().isHealthy());
+        assertTrue(client.localApi().isHealthy());
         assertTrue(client.shutdown().join());
         assertFalse(client.isRunning());
-        assertFalse(client.healthService().isHealthy());
+        assertFalse(client.localApi().isHealthy());
     }
 
     @Test
@@ -204,8 +204,8 @@ class QraftClientTest {
         try {
             assertFalse(client.start().join());
             assertTrue(client.isRunning());
-            assertTrue(client.healthService().isHealthy());
-            assertFalse(client.healthService().isReady());
+            assertTrue(client.localApi().isHealthy());
+            assertFalse(client.localApi().isReady());
         } finally {
             client.shutdown().join();
         }
@@ -284,7 +284,7 @@ class QraftClientTest {
             scheduler.advance(RETRY_WINDOW);
             awaitTrue(() -> scheduler.pendingCount() == 2, "reconciliation and heartbeat are scheduled");
             assertEquals(2, registrations.get(), "registration is retried once");
-            assertTrue(client.healthService().isReady(), "successful retry must make the client ready");
+            assertTrue(client.localApi().isReady(), "successful retry must make the client ready");
 
             scheduler.advance(Duration.ofMillis(config.getHeartbeatInterval()));
             awaitTrue(() -> heartbeats.get() == 1, "heartbeats begin after recovery");
@@ -349,7 +349,7 @@ class QraftClientTest {
             scheduler.advance(scheduler.nextDelay());
             awaitTrue(() -> registrations.get() == 4 && scheduler.pendingCount() == 2,
                     "the fourth attempt registers and schedules heartbeats");
-            assertTrue(client.healthService().isReady());
+            assertTrue(client.localApi().isReady());
 
             scheduler.advance(Duration.ofMillis(config.getHeartbeatInterval()));
             awaitTrue(() -> scheduler.pendingCount() == 3, "the rejected heartbeat schedules a retry");
@@ -427,14 +427,76 @@ class QraftClientTest {
             awaitTrue(() -> scheduler.pendingCount() == 3,
                     "the rejected heartbeat schedules a registration retry");
             assertEquals(1, heartbeats.get());
-            assertFalse(client.healthService().isReady(), "a forgotten client is not ready");
+            assertFalse(client.localApi().isReady(), "a forgotten client is not ready");
 
             scheduler.advance(RETRY_WINDOW);
-            awaitTrue(() -> registrations.get() == 2 && client.healthService().isReady(),
+            awaitTrue(() -> registrations.get() == 2 && client.localApi().isReady(),
                     "the retry registers the client again");
             scheduler.advance(heartbeatInterval);
             awaitTrue(() -> heartbeats.get() == 2, "heartbeats resume after registration");
             assertEquals(2, registrations.get());
+        } finally {
+            client.shutdown().join();
+        }
+    }
+
+    @Test
+    void registersAgainWhenALaterRegistrationSupersedesItsOwnAndKeepsTryingWhileTheNameIsHeld() throws Exception {
+        AtomicInteger registrations = new AtomicInteger();
+        AtomicInteger heartbeats = new AtomicInteger();
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext(NodeAnswerHelper.REGISTER, exchange -> {
+            int attempt = registrations.incrementAndGet();
+            if (attempt == 2 || attempt == 3) {
+                NodeAnswerHelper.send(exchange, 409, "{\"code\":\"node_name_reserved\",\"message\":\"Node name "
+                        + "client-1 is reserved by node 9c5b94b1-35ad-49bb-b118-8e8fc24abf80 with name client-1\","
+                        + "\"retryable\":false}");
+            } else {
+                NodeAnswerHelper.answer(exchange, 200, "registered", true);
+            }
+        });
+        server.createContext(NodeAnswerHelper.HEARTBEAT, exchange -> {
+            if (heartbeats.incrementAndGet() == 1) {
+                NodeAnswerHelper.send(exchange, 409,
+                        "{\"code\":\"registration_superseded\",\"message\":\"replaced\",\"retryable\":false}");
+            } else {
+                NodeAnswerHelper.answer(exchange, 200, "accepted", true);
+            }
+        });
+        server.createContext(NodeAnswerHelper.DEREGISTER, exchange -> {
+            NodeAnswerHelper.answer(exchange, 200, "deregistered", true);
+        });
+        server.start();
+        ClientConfiguration config = ClientConfiguration.builder()
+                .nodeName("client-1").dataDirectory(dataDirectory)
+                .address("127.0.0.1")
+                .clientPort(0)
+                .serverUrl("http://localhost:" + server.getAddress().getPort())
+                .heartbeatInterval(60_000)
+                .build();
+        QraftClient client = manuallyTimedClient(config);
+        Duration heartbeatInterval = Duration.ofMillis(config.getHeartbeatInterval());
+
+        try {
+            assertTrue(client.start().get(10, TimeUnit.SECONDS));
+
+            // Another node took the name: its registration replaced this client's.
+            scheduler.advance(heartbeatInterval);
+            awaitTrue(() -> scheduler.pendingCount() == 3 && !client.localApi().isReady(),
+                    "the superseded client is no longer registered and schedules a registration");
+
+            // While the other node holds the name, each attempt is refused and the client tries again later.
+            for (int attempt = 2; attempt <= 3; attempt++) {
+                int expected = attempt;
+                scheduler.advance(RETRY_WINDOW);
+                awaitTrue(() -> registrations.get() == expected && scheduler.pendingCount() == 3,
+                        "refused attempt " + expected + " schedules another");
+                assertFalse(client.localApi().isReady());
+            }
+
+            scheduler.advance(RETRY_WINDOW);
+            awaitTrue(() -> registrations.get() == 4 && client.localApi().isReady(),
+                    "once the name is free again, the client registers and is ready");
         } finally {
             client.shutdown().join();
         }
@@ -471,7 +533,7 @@ class QraftClientTest {
 
             assertEquals(1, serviceRegistrations.get());
             assertEquals(1, client.serviceReconciler().registeredCount());
-            assertTrue(client.healthService().isReady());
+            assertTrue(client.localApi().isReady());
         } finally {
             client.shutdown().join();
         }
@@ -506,8 +568,8 @@ class QraftClientTest {
                     && System.nanoTime() < deadline) Thread.onSpinWait();
 
             assertEquals(1, serviceRegistrations.get());
-            assertTrue(client.healthService().isHealthy());
-            assertFalse(client.healthService().isReady());
+            assertTrue(client.localApi().isHealthy());
+            assertFalse(client.localApi().isReady());
         } finally {
             client.shutdown().join();
         }
@@ -534,12 +596,12 @@ class QraftClientTest {
 
         try {
             assertTrue(client.start().get(10, TimeUnit.SECONDS));
-            assertTrue(client.healthService().isReady());
+            assertTrue(client.localApi().isReady());
 
             clock.advance(Duration.ofMillis(1_001));
 
-            assertTrue(client.healthService().isHealthy());
-            assertFalse(client.healthService().isReady());
+            assertTrue(client.localApi().isHealthy());
+            assertFalse(client.localApi().isReady());
         } finally {
             client.shutdown().join();
         }
@@ -580,8 +642,10 @@ class QraftClientTest {
         CompletableFuture<Boolean> repeated = client.shutdown();
 
         assertSame(shutdown, repeated);
-        assertFalse(client.healthService().isReady(), "readiness must be withdrawn synchronously");
-        assertTrue(client.healthService().isHealthy(), "local health must remain live during deregistration");
+        assertFalse(client.localApi().isReady(), "readiness must be withdrawn synchronously");
+        assertFalse(client.localApi().acceptsWrites(),
+                "API writes are refused from the moment shutdown begins, before anything is deregistered");
+        assertTrue(client.localApi().isHealthy(), "local health must remain live during deregistration");
         assertTrue(servicesStarted.await(10, TimeUnit.SECONDS));
         assertFalse(events.contains("node"), "node deregistration must wait for every service");
         releaseServices.countDown();
@@ -589,7 +653,7 @@ class QraftClientTest {
         assertTrue(shutdown.get(10, TimeUnit.SECONDS));
         assertEquals(Set.of("service:web", "service:api"), Set.copyOf(events.subList(0, 2)));
         assertEquals("node", events.get(2));
-        assertFalse(client.healthService().isHealthy());
+        assertFalse(client.localApi().isHealthy());
         assertTrue(client.isTerminated());
     }
 
@@ -626,7 +690,7 @@ class QraftClientTest {
             assertEquals(1, appender.list.stream()
                     .filter(event -> event.getFormattedMessage().contains("shutdown incomplete"))
                     .count());
-            assertFalse(client.healthService().isHealthy());
+            assertFalse(client.localApi().isHealthy());
             assertTrue(client.isTerminated());
         } finally {
             releaseDeregistration.countDown();

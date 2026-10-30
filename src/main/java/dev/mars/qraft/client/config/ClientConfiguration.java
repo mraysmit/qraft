@@ -63,6 +63,7 @@ public final class ClientConfiguration {
     private final Path dataDirectory;
     private final String address;
     private final int clientPort;
+    private final InetAddress bindAddress;
     private final String region;
     private final String datacenter;
     private final List<URI> serverUrls;
@@ -83,6 +84,7 @@ public final class ClientConfiguration {
         dataDirectory = builder.dataDirectory;
         address = builder.address.trim();
         clientPort = builder.clientPort;
+        bindAddress = builder.bindAddress;
         region = builder.region.trim();
         datacenter = builder.datacenter.trim();
         serverUrls = List.copyOf(builder.serverUrls);
@@ -123,7 +125,7 @@ public final class ClientConfiguration {
         JsonNode servers = requiredObject(root, "servers");
         JsonNode catalog = optionalObject(root, "catalog");
         JsonNode logging = optionalObject(root, "logging");
-        rejectUnknown(client, "client", "nodeName", "dataDirectory", "address", "httpPort",
+        rejectUnknown(client, "client", "nodeName", "dataDirectory", "address", "bindAddress", "httpPort",
                 "heartbeatIntervalMs", "shutdownTimeoutMs", "datacenter", "region");
         rejectUnknown(servers, "servers", "urls", "requestTimeoutMs");
         rejectUnknown(catalog, "catalog", "tenant", "namespace", "registrationRetryMinMs",
@@ -136,6 +138,7 @@ public final class ClientConfiguration {
                 .dataDirectory(dataDirectory(requiredText(client, "dataDirectory")))
                 .address(optionalText(client, "address", localAddress()))
                 .clientPort(optionalInt(client, "httpPort", 8080))
+                .bindAddress(bindAddress(client.get("bindAddress")))
                 .heartbeatInterval(optionalLong(client, "heartbeatIntervalMs", 30_000))
                 .shutdownTimeoutMs(optionalLong(client, "shutdownTimeoutMs", 30_000))
                 .datacenter(optionalText(client, "datacenter", "default"))
@@ -334,6 +337,23 @@ public final class ClientConfiguration {
         return value.textValue().trim();
     }
 
+    /**
+     * The local API's bind address: an IP address, as Consul's {@code client_addr} is, and the loopback address
+     * when it is absent. A host name is refused rather than looked up, so the address never depends on DNS.
+     */
+    private static InetAddress bindAddress(JsonNode value) {
+        if (value == null || value.isNull()) return InetAddress.getLoopbackAddress();
+        if (value.isTextual()) {
+            try {
+                return InetAddress.ofLiteral(value.textValue().trim());
+            } catch (IllegalArgumentException notALiteral) {
+                // Reported below with what is expected.
+            }
+        }
+        throw new IllegalArgumentException("client.bindAddress must be an IP address, such as 127.0.0.1 or 0.0.0.0: "
+                + value);
+    }
+
     private static Path dataDirectory(String value) {
         try {
             return Path.of(value);
@@ -366,6 +386,8 @@ public final class ClientConfiguration {
     public Path getDataDirectory() { return dataDirectory; }
     public String getAddress() { return address; }
     public int getClientPort() { return clientPort; }
+    /** The address the local API listens on: the loopback address unless configured, as Consul's {@code client_addr}. */
+    public InetAddress getBindAddress() { return bindAddress; }
     public String getRegion() { return region; }
     public String getDatacenter() { return datacenter; }
     public String getServerUrl() { return serverUrls.getFirst().toString(); }
@@ -387,6 +409,7 @@ public final class ClientConfiguration {
         private Path dataDirectory;
         private String address = "127.0.0.1";
         private int clientPort = 8080;
+        private InetAddress bindAddress = InetAddress.getLoopbackAddress();
         private String region = "default";
         private String datacenter = "default";
         private List<URI> serverUrls = List.of();
@@ -407,6 +430,7 @@ public final class ClientConfiguration {
         public Builder dataDirectory(Path value) { dataDirectory = value; return this; }
         public Builder address(String value) { address = value; return this; }
         public Builder clientPort(int value) { clientPort = value; return this; }
+        public Builder bindAddress(InetAddress value) { bindAddress = value; return this; }
         public Builder region(String value) { region = value; return this; }
         public Builder datacenter(String value) { datacenter = value; return this; }
         public Builder serverUrl(String value) {

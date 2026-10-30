@@ -152,9 +152,75 @@ class HttpApiServerNodeIdentityTest {
         }
     }
 
+    @Test
+    void theNodeListingShowsEachNodesIdAsConsulsCatalogDoes() throws Exception {
+        register("web-01", WEB_ID, NODE);
+        register("web-02", null, NODE);
+
+        HttpResponse<String> response = client.send(HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + server.port() + "/v1/catalog/nodes")).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, response.statusCode(), response.body());
+        java.util.Map<String, JsonNode> byName = new java.util.HashMap<>();
+        JSON.readTree(response.body()).forEach(entry -> byName.put(entry.path("name").asText(), entry));
+        assertEquals(WEB_ID, byName.get("web-01").path("id").asText());
+        assertTrue(byName.get("web-02").has("id") && byName.get("web-02").path("id").isNull(),
+                "a node without an ID is listed with none: " + response.body());
+    }
+
+    @Test
+    void aServiceRegisteredFromAnotherIdOnAHeldNameIsRefusedAsReserved() throws Exception {
+        register("web-01", WEB_ID, NODE);
+
+        HttpResponse<String> response = register("web-01", OTHER_ID, """
+                {"service":{"serviceId":"web","serviceName":"frontend","address":"10.0.0.5","port":8080}}
+                """);
+
+        assertEquals(409, response.statusCode(), response.body());
+        assertEquals("node_name_reserved", JSON.readTree(response.body()).path("code").asText());
+        assertTrue(store.getServiceCatalog().instances().isEmpty());
+    }
+
+    @Test
+    void aNodeDeregisteredFromAnotherIdIsRefusedAsReservedAndStays() throws Exception {
+        register("web-01", WEB_ID, NODE);
+
+        HttpResponse<String> response = send("/v1/catalog/deregister", "web-01", OTHER_ID, "{}");
+
+        assertEquals(409, response.statusCode(), response.body());
+        assertEquals("node_name_reserved", JSON.readTree(response.body()).path("code").asText());
+        assertEquals(WEB_ID, store.findNode("web-01").orElseThrow().id());
+    }
+
+    @Test
+    void aHeartbeatOfARegistrationALaterOneReplacedIsSupersededAndAnOutOfOrderOneIsStale() throws Exception {
+        register("web-01", WEB_ID, "{\"node\":{\"metadata\":{\"qraft.registrationId\":\"reg-a\"}}}");
+        register("web-01", WEB_ID, "{\"node\":{\"metadata\":{\"qraft.registrationId\":\"reg-b\"}}}");
+
+        HttpResponse<String> superseded = send("/v1/catalog/node/heartbeat", "web-01", WEB_ID,
+                "{\"sequenceNumber\":1,\"registrationId\":\"reg-a\"}");
+        assertEquals(409, superseded.statusCode(), superseded.body());
+        assertEquals("registration_superseded", JSON.readTree(superseded.body()).path("code").asText(),
+                "the client must register again: its registration is no longer the node's");
+        assertFalse(superseded.body().contains("reg-b"), "the current registration is not revealed");
+
+        assertEquals(200, send("/v1/catalog/node/heartbeat", "web-01", WEB_ID,
+                "{\"sequenceNumber\":2,\"registrationId\":\"reg-b\"}").statusCode());
+        HttpResponse<String> stale = send("/v1/catalog/node/heartbeat", "web-01", WEB_ID,
+                "{\"sequenceNumber\":1,\"registrationId\":\"reg-b\"}");
+        assertEquals(409, stale.statusCode(), stale.body());
+        assertEquals("stale_heartbeat", JSON.readTree(stale.body()).path("code").asText(),
+                "an out-of-order heartbeat of the current registration is only stale");
+    }
+
     private HttpResponse<String> register(String name, String id, String body) throws Exception {
+        return send("/v1/catalog/register", name, id, body);
+    }
+
+    private HttpResponse<String> send(String path, String name, String id, String body) throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder()
-                .uri(URI.create("http://localhost:" + server.port() + "/v1/catalog/register"))
+                .uri(URI.create("http://localhost:" + server.port() + path))
                 .header("Content-Type", "application/json")
                 .header("X-Qraft-Node", name)
                 .PUT(HttpRequest.BodyPublishers.ofString(body));

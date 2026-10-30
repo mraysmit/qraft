@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-04
 **Status:** Active from 2026-10-26, with Phase 1. The `client` package and new node model and routes were delivered by [`task-list-single-pom-and-quorus-removal-2026-10-21.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md), completed and archived on 2026-10-14. The membership list ([`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md)) was completed and archived on 2026-10-24, and Pre-Vote followed on 2026-10-25 and 2026-10-26, so nothing precedes this list. The sequencing decision of 2026-10-05 stands: this list, then the ACL list. The owner confirmed it on 2026-10-26 when asked whether key/value completion should go first, and said the embedded administrative interface waits until the other outstanding work is done.
-**Last updated:** 2026-10-29 (decision 8 checked against Consul's catalog code and four points decided by the owner: a rename follows Consul, removing the node under its old name with its services and checks; a node without an ID can be claimed by a registration that carries one; names conflict regardless of case; a `REGISTERING` node holds its name. Phase 2's server task and exit follow. Earlier, 2026-10-28: Phase 2's three client tasks recorded as done: the data directory and its lock, the node ID kept through a shared identity file, and `client.nodeName`; the server side remains. Earlier, 2026-10-27: Phase 1 closed on a local run of the three suites, no Jenkins being reachable; Phase 2 started. Earlier the same day: renamed with the ACL list, which changed. Earlier, 2026-10-26: Phase 1 built, with local checks only; the full suites run on Jenkins before it is closed. Earlier the same day: started, membership and Pre-Vote complete. Earlier, 2026-10-21: membership Step 5 completed; Steps 6 to 8 remain the preceding work; this client list is still proposed; renamed with linked documents. Earlier, 2026-10-14: cleanup prerequisites completed and archived; membership Steps 5 to 8 remain the preceding work. On 2026-10-11: the rule that guards need mutation evidence removed at the owner's decision, from the rules and from one exit; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: decisions 5 and 8: what a node's deregistration removes, and the `client.hostname` setting; the file renamed to the date of its last change; the single-POM list's Phase 3A replaced Qraft's two retired words here and everywhere; decision 10 records the configuration names, and decision 3 the path of the local API. On 2026-10-08, the review with the other task lists: the request bodies of decision 5 and the log audit in the rules)
+**Last updated:** 2026-10-30 (Phase 3 closed: the local API on `client.bindAddress`, `127.0.0.1` by default as Consul's `client_addr`, request handling shared with the server through `common.http.JsonApi` with a 512 KiB body limit, and writes refused once shutdown begins. Earlier the same day: Phase 2 closed: the server side built test first, the node-identity fixtures, the determinism test and the design record, with writes from a node of another ID refused as Consul refuses them; its exit met on a local run. Earlier, 2026-10-29: decision 8 checked against Consul's catalog code and four points decided by the owner: a rename follows Consul, removing the node under its old name with its services and checks; a node without an ID can be claimed by a registration that carries one; names conflict regardless of case; a `REGISTERING` node holds its name. Phase 2's server task and exit follow. Earlier, 2026-10-28: Phase 2's three client tasks recorded as done: the data directory and its lock, the node ID kept through a shared identity file, and `client.nodeName`; the server side remains. Earlier, 2026-10-27: Phase 1 closed on a local run of the three suites, no Jenkins being reachable; Phase 2 started. Earlier the same day: renamed with the ACL list, which changed. Earlier, 2026-10-26: Phase 1 built, with local checks only; the full suites run on Jenkins before it is closed. Earlier the same day: started, membership and Pre-Vote complete. Earlier, 2026-10-21: membership Step 5 completed; Steps 6 to 8 remain the preceding work; this client list is still proposed; renamed with linked documents. Earlier, 2026-10-14: cleanup prerequisites completed and archived; membership Steps 5 to 8 remain the preceding work. On 2026-10-11: the rule that guards need mutation evidence removed at the owner's decision, from the rules and from one exit; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: decisions 5 and 8: what a node's deregistration removes, and the `client.hostname` setting; the file renamed to the date of its last change; the single-POM list's Phase 3A replaced Qraft's two retired words here and everywhere; decision 10 records the configuration names, and decision 3 the path of the local API. On 2026-10-08, the review with the other task lists: the request bodies of decision 5 and the log audit in the rules)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 4.3, 5, 6.2, 7.3, 8, 12.1 and 16
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
@@ -58,7 +58,7 @@ decision 10 on 2026-10-09. Decisions 5 to 8 follow the Consul pattern.
      replicated step, as in Consul (decided by the user on 2026-10-09).
 6. **The local API binds to `127.0.0.1` by default,** like Consul's
    `client_addr`. It has no authentication until
-   [`task-list-acl-and-tokens-2026-10-29.md`](task-list-acl-and-tokens-2026-10-29.md),
+   [`task-list-acl-and-tokens-2026-10-30.md`](task-list-acl-and-tokens-2026-10-30.md),
    which is proposed to follow this list; liveness and readiness share the
    same listener.
 7. **Registrations follow Consul's rules.**
@@ -239,7 +239,7 @@ retained logs hold 823 ERROR lines, all flagged, and no unflagged stack trace.
   carry `nodeName` and `dataDirectory`. The full suites passed on `14ded7d`, with
   the snapshot-transfer fix later committed as `f991254`: default 1,225,
   end-to-end 10 and Docker 41, and every ERROR line in the retained logs flagged.
-- [ ] Server side: store the node ID with the node, using a new optional
+- [x] Server side: store the node ID with the node, using a new optional
   protobuf field; older entries load without one.
   - Refuse a held name with `node_name_reserved`, comparing names regardless
     of case. A `REGISTERING` or `HEALTHY` node holds its name.
@@ -253,30 +253,116 @@ retained logs hold 823 ERROR lines, all flagged, and no unflagged stack trace.
     old name with its services and checks, and insert it under the new one, in
     the same step. Refuse a rename to a name another node holds, or that a
     node without an ID holds.
-- [ ] Add fixtures: node entries and snapshots written without a node ID
+
+  Done 2026-10-30, test first, red seen for each before the change:
+  - `Node.id` and `optional string id = 13` on `NodeProto`
+    (`NodeCodecTest.aRegistrationCarriesItsNodeId`); the snapshot keeps it.
+  - The rules are applied with the registration, from the replicated state
+    alone: `NodeIdentityStateStoreTest`, 19 tests (refusal while registering or
+    healthy, regardless of case; takeover of an unreachable holder with its
+    services and checks removed; the old ID refused after a takeover; a claim
+    of a node without an ID that keeps them; a rename that leaves nothing under
+    the old name, refused into a held name or an ID-less holder's, taking over
+    an unreachable one; a case-only change as a rename).
+  - Beyond the list, as Consul does: a service registration, a service
+    deregistration, a check observation and a node deregistration carry the
+    sender's node ID (`optional string node_uuid` on `CatalogCommandProto` and
+    `NodeCommandProto`) and are refused when the node they name has another
+    ID, so a node that lost its name, for instance after a partition, cannot
+    change or remove what the new holder registered.
+  - HTTP: the ID comes from `X-Qraft-Node-ID` (a canonical UUID, else 400),
+    and a refusal answers 409 `node_name_reserved` in Consul's words, naming
+    the holder, with nothing in the body registered
+    (`HttpApiServerNodeIdentityTest`, 8 tests). `GET /v1/catalog/nodes` lists
+    each node's `id`.
+  - Client: every request carries the node ID from the data directory
+    (`HttpCatalogClientTest.everyRequestOfAClientWithANodeIdCarriesItAndAClientWithoutOneSendsNone`),
+    and a `node_name_reserved` refusal is logged and tried again after the
+    registration backoff, as Consul's agent keeps syncing
+    (`RegistrationClientTest.aNameAnotherNodeHoldsIsLoggedAndTriedAgainLater`).
+  - A client that lost its name, as after a partition and a takeover, registers
+    again: a heartbeat of a registration a later one replaced answers 409
+    `registration_superseded`, where an out-of-order one still answers
+    `stale_heartbeat`, and the client goes back to registering
+    (`RegistrationClientTest`, `QraftClientTest`); while its node is not
+    registered it sends no service write, and a service refused with
+    `node_name_reserved` is sent again on the next pass, not suppressed
+    (`ServiceReconcilerTest`). Found while closing the phase and built the same
+    day.
+- [x] Add fixtures: node entries and snapshots written without a node ID
   still load.
-- [ ] Add replica-determinism tests for the takeover and rename commands:
+  Done 2026-10-30: `fixtures/node-identity/`, a registration and a snapshot
+  with nodes, a service and its check, written on `4c31c22` by the production
+  codec and state store before the node ID existed, pinned by digest in its
+  manifest (`NodeIdentityFixtureTest`).
+- [x] Add replica-determinism tests for the takeover and rename commands:
   every replica ends with the same nodes, services, and checks.
-- [ ] Record decision 8 in the design: section 7.3, which today says a host
+  Done 2026-10-30:
+  `ReplicaDeterminismTest.takeoverRenameAndClaimDecideTheSameOnEveryReplicaAndAfterASnapshot`,
+  over a log of refusals, a takeover, the old ID refused, a claim, a rename
+  and two spellings of a name, against a follower that installs a snapshot
+  halfway. It covers code already written, so it was not red first.
+- [x] Record decision 8 in the design: section 7.3, which today says a host
   name alone is not a sufficient identity, and section 22, which lists client
   identity as open and requires a decision record and fixture-based upgrade
   tests for a change to durable identity.
+  Done 2026-10-30: sections 7.3, 12.1, 12.1.2 and 22.
 
 **Exit:** Red before green, with tests of the conflict, takeover, and
 rename guards, including a takeover that must not leave the old node's
 services in place, a rename that must not leave them under the old name, and a
 claim of a node without an ID that must keep them. A wiped-directory
-restart scenario passes end to end.
+restart scenario passes end to end. The scenario is
+`WipedClientDirectoryEndToEndTest`: a second client with the same name and an
+empty directory is refused while the first holds the name, and once the first
+is killed and unreachable, takes it over with only its own services. Met
+2026-10-30, on `23278d7` with the rest of the server side in the working tree,
+locally against Docker Desktop: default 1,274 with every coverage gate met,
+end-to-end 11 and Docker 43 passed with no failures, errors or skips, and the
+229 retained logs hold 935 ERROR lines, all flagged, and no unflagged stack
+trace. This is the run after the lost-name fix recorded with the server task above; the one before it, without
+the fix, passed default 1,269 with the same clean audit.
 
 ### Phase 3. Local API listener
 
-- [ ] Grow `HealthService` into the client's local API server: one JDK
+- [x] Grow `HealthService` into the client's local API server: one JDK
   `HttpServer` serving `/health/live`, `/health/ready`, and the API routes.
-- [ ] Add a bind-address setting (decision 6). The startup log and the
+  Done 2026-10-30: `LocalApiServer` (renamed), with `route(path, handler)` for
+  the API routes of the later phases.
+- [x] Add a bind-address setting (decision 6). The startup log and the
   lifecycle report the bound address and port.
-- [ ] Share request handling with the server through `common`: error envelope,
+  Done 2026-10-30, test first, checked against Consul's agent
+  (`agent/config/default.go`: `client_addr = "127.0.0.1"`; `agent/apiserver.go`
+  logs each HTTP server's protocol and address). `client.bindAddress`, an IP
+  address and `127.0.0.1` by default; a host name is refused, not looked up
+  (`ClientConfigurationTest`). The listener binds it and logs `Local API
+  started: protocol=http, address=...` (`LocalApiServerTest`). The runtime
+  lifecycle reports every listener's address in both modes, its ports read
+  from them (`QraftRuntimeApplicationTest`, `UnifiedRuntimeEndToEndTest`). As
+  decision 9 asks, the Docker tests reach the client from inside its container
+  and no longer publish its port; every Docker client logged
+  `127.0.0.1:8080`.
+- [x] Share request handling with the server through `common`: error envelope,
   `X-Request-Id`, body limits, and method checks.
-- [ ] Refuse API writes once shutdown begins; keep reads until the listener stops.
+  Done 2026-10-30, test first: `common.http.JsonApi` (`JsonApiTest`, against a
+  real JDK server), used by the server's API and the local API. The body limit
+  is new on both: 512 KiB, Consul's, answered 413 `request_too_large`, counted
+  as read when no length is declared. The client's health routes now answer a
+  wrong method in the envelope and carry the request ID.
+- [x] Refuse API writes once shutdown begins; keep reads until the listener stops.
+  Done 2026-10-30, test first: after `beginShutdown()`, which the client's
+  shutdown calls first, a write is refused with 503 `shutting_down`,
+  retryable, and reads and health are served until the listener stops
+  (`LocalApiServerTest`, `QraftClientTest`). Consul's agent does not refuse
+  writes while it leaves; this is stricter, so nothing is registered behind
+  the deregistration.
+
+**Exit:** none of its own; the list's rules, with each endpoint tested over real
+HTTP. Met 2026-10-30, on `23278d7` with Phases 2 and 3 in the working tree,
+locally against Docker Desktop: default 1,286 with every coverage gate met,
+end-to-end 11 and Docker 43 passed with no failures, errors or skips, and the
+235 retained logs hold 925 ERROR lines, all flagged, and no unflagged stack
+trace.
 
 ### Phase 4. Services and checks through the API
 
@@ -357,7 +443,7 @@ consecutive runs; audits as in the other lists.
 - Authentication and ACLs, on the local API and on the server. Until they
   exist, decision 8 detects a conflicting node identity but cannot stop a
   caller from claiming one. Proposed in
-  [`task-list-acl-and-tokens-2026-10-29.md`](task-list-acl-and-tokens-2026-10-29.md).
+  [`task-list-acl-and-tokens-2026-10-30.md`](task-list-acl-and-tokens-2026-10-30.md).
 - Forwarding key/value, sessions, consistency modes, and blocking queries. Each
   is added when the corresponding server feature lands.
 - Response caching in the client, gossip, and configuration-file reload.

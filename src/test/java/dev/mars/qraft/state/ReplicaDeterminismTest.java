@@ -231,6 +231,77 @@ class ReplicaDeterminismTest {
                 """, Node.class);
     }
 
+    @Test
+    void takeoverRenameAndClaimDecideTheSameOnEveryReplicaAndAfterASnapshot() {
+        List<RaftCommand> log = nodeIdentityLog();
+
+        QraftStateStore replica = new QraftStateStore();
+        List<String> decisions = new ArrayList<>();
+        log.forEach(command -> decisions.add(outcome(replica.apply(codec.deserialize(codec.serialize(command))))));
+
+        // A follower that installs a snapshot halfway, as a lagging one does, and applies the rest from the log.
+        QraftStateStore leader = new QraftStateStore();
+        QraftStateStore follower = new QraftStateStore();
+        List<String> followerDecisions = new ArrayList<>();
+        int half = log.size() / 2;
+        for (RaftCommand command : log.subList(0, half)) {
+            followerDecisions.add(outcome(leader.apply(codec.deserialize(codec.serialize(command)))));
+        }
+        follower.restoreSnapshot(leader.takeSnapshot());
+        for (RaftCommand command : log.subList(half, log.size())) {
+            followerDecisions.add(outcome(follower.apply(codec.deserialize(codec.serialize(command)))));
+        }
+
+        assertEquals(decisions, followerDecisions, "every replica decides each registration the same");
+        assertEquals(snapshotText(replica), snapshotText(follower), "and ends with the same nodes, services and checks");
+        assertEquals(List.of("CasMismatch", "CasMismatch", "Success", "CasMismatch"),
+                List.of(decisions.get(3), decisions.get(8), decisions.get(10), decisions.get(11)),
+                "the log refuses another ID and its write, takes over, and refuses the old ID");
+        assertEquals(Set.of("web-1", "web-4", "api"), replica.getNodes().keySet());
+    }
+
+    /**
+     * A log of node registrations under the node-identity rules: a refusal, a takeover of an unreachable holder, the
+     * old ID refused, a claim of a node without an ID, a rename, a name refused regardless of case, and two
+     * spellings of an ID-less node's name.
+     */
+    private static List<RaftCommand> nodeIdentityLog() {
+        String a = "1b4e28ba-2fa1-4d2a-883f-0016d3cca427";
+        String b = "9c5b94b1-35ad-49bb-b118-8e8fc24abf80";
+        String c = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+        Instant registered = Instant.parse("2026-10-29T09:00:00Z");
+        ServiceInstance onWeb1 = new ServiceInstance("api", "api", "web-1", "10.0.0.1", 8080, List.of(), Map.of(),
+                ServiceHealth.UNKNOWN, "platform", "payments", "dc-1", "eu-west", true);
+        ServiceInstance onWeb3 = new ServiceInstance("api", "api", "web-3", "10.0.0.3", 8080, List.of(), Map.of(),
+                ServiceHealth.UNKNOWN, "platform", "payments", "dc-1", "eu-west", true);
+        return List.of(
+                NodeCommand.register(identified("web-1", a), registered),
+                CatalogCommand.register(onWeb1, List.of("http"), a),
+                CatalogCommand.observe(new HealthObservation(new ServiceCheckId(onWeb1.identity(), "http"),
+                        ServiceHealth.PASSING, 1, registered, 30_000, true, "ok"), registered, a),
+                NodeCommand.register(identified("web-1", b), registered),
+                NodeCommand.register(identified("web-3", null), registered),
+                CatalogCommand.register(onWeb3, List.of(), null),
+                NodeCommand.register(identified("Api", null), registered),
+                NodeCommand.register(identified("api", null), registered),
+                CatalogCommand.register(onWeb1, List.of("http"), b),
+                NodeCommand.expire("web-1", registered, false, registered.plusSeconds(30)),
+                NodeCommand.register(identified("web-1", b), registered.plusSeconds(31)),
+                NodeCommand.register(identified("web-1", a), registered.plusSeconds(32)),
+                NodeCommand.register(identified("web-3", c), registered.plusSeconds(33)),
+                NodeCommand.register(identified("web-4", c), registered.plusSeconds(34)),
+                NodeCommand.register(identified("WEB-4", a), registered.plusSeconds(35)),
+                CatalogCommand.register(onWeb1, List.of("http"), a));
+    }
+
+    private static Node identified(String name, String id) {
+        return Node.of(name, "10.0.0.1", "dc-1", "eu-west", Map.of()).withId(id);
+    }
+
+    private static String outcome(dev.mars.qraft.raft.RaftCommandResult<?> result) {
+        return result.getClass().getSimpleName();
+    }
+
     private static String snapshotText(QraftStateStore store) {
         return new String(store.takeSnapshot(), StandardCharsets.UTF_8);
     }

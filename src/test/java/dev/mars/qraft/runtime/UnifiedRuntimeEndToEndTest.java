@@ -105,6 +105,11 @@ class UnifiedRuntimeEndToEndTest {
         RuntimeLifecycle client = launch("client", clientConfig);
         int clientPort = client.boundPorts().get("http");
         assertEquals(Set.of("http"), client.boundPorts().keySet());
+        assertEquals(new java.net.InetSocketAddress(java.net.InetAddress.getLoopbackAddress(), clientPort),
+                client.boundAddresses().get("http"), "the client's local API listens on the loopback address");
+        assertEquals(serverPorts.keySet(), firstServer.boundAddresses().keySet());
+        firstServer.boundAddresses().forEach((listener, address) -> assertEquals(serverPorts.get(listener),
+                address.getPort(), listener));
         URI clientUri = URI.create("http://127.0.0.1:" + clientPort);
         await(() -> status(clientUri.resolve("/health/ready")) == 200
                 && serviceCount(server, "web") == 1

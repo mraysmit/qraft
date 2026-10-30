@@ -73,6 +73,8 @@ message NodeCommandProto {
   string registration_id = 9;
   int64 expected_last_contact_epoch_ms = 10;
   bool reap = 11;
+  // The ID of the node that sent a deregistration. Absent from older entries and from clients without one.
+  optional string node_uuid = 12;
   reserved "client_id", "client_info", "new_capabilities";
 }
 message SystemMetadataCommandProto {
@@ -117,6 +119,9 @@ message CatalogCommandProto {
   // A registration that declares its checks; false, including older entries, keeps existing checks.
   bool checks_declared = 9;
   repeated string declared_check_ids = 10;
+  // The ID of the node that sent a registration, deregistration or observation. Absent from older entries
+  // and from clients without one.
+  optional string node_uuid = 11;
 }
 
 message HealthObservationCommandProto {

@@ -193,7 +193,7 @@ need:
 9. **Security.** Authentication, ACL tokens and policies, and audit events.
    The token and ACL core is proposed, as of 2026-10-05, to come earlier,
    straight after the client:
-   [`task-list-acl-and-tokens-2026-10-29.md`](task-list-acl-and-tokens-2026-10-29.md).
+   [`task-list-acl-and-tokens-2026-10-30.md`](task-list-acl-and-tokens-2026-10-30.md).
 10. **Deferred until decided.** DNS discovery, and persisted generated node
     identity. Server membership change was decided on 2026-09-29 and is in
     progress in

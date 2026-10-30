@@ -55,10 +55,13 @@ record CatalogRegistrationRequest(NodeDescription node, ServiceRegistrationReque
         }
     }
 
-    /** The node this request registers, named by the request's identity; empty when only a service is registered. */
+    /**
+     * The node this request registers, named and identified by the request's identity; empty when only a service
+     * is registered.
+     */
     Optional<Node> toNode(RequestContext context) {
         if (node == null) return Optional.empty();
         return Optional.of(Node.of(context.nodeId(), node.address(), node.datacenter(), node.region(),
-                node.metadata()));
+                node.metadata()).withId(context.nodeUuid()));
     }
 }

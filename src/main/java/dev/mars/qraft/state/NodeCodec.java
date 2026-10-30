@@ -56,8 +56,9 @@ final class NodeCodec {
                 builder.setType(NodeCommandType.NODE_CMD_REGISTER);
                 builder.setNode(toProto(r.node()));
             }
-            case NodeCommand.Deregister ignored -> {
+            case NodeCommand.Deregister d -> {
                 builder.setType(NodeCommandType.NODE_CMD_DEREGISTER);
+                if (d.nodeUuid() != null) builder.setNodeUuid(d.nodeUuid());
             }
             case NodeCommand.UpdateStatus u -> {
                 builder.setType(NodeCommandType.NODE_CMD_UPDATE_STATUS);
@@ -93,7 +94,7 @@ final class NodeCodec {
             case NODE_CMD_REGISTER -> new NodeCommand.Register(
                     proto.getName(), fromProto(proto.getNode()), timestamp);
             case NODE_CMD_DEREGISTER -> new NodeCommand.Deregister(
-                    proto.getName(), timestamp);
+                    proto.getName(), timestamp, proto.hasNodeUuid() ? proto.getNodeUuid() : null);
             case NODE_CMD_UPDATE_STATUS -> new NodeCommand.UpdateStatus(
                     proto.getName(), fromProto(proto.getExpectedStatus()), newStatus, timestamp);
             // Qraft never issued this command, and a node no longer has capabilities: nothing to apply.

@@ -107,7 +107,7 @@ class ClientHealthPublicationTest {
 
         assertTrue(client.start().get(10, TimeUnit.SECONDS));
         waitUntil(() -> status("http").filter(ServiceHealth.PASSING::equals).isPresent()
-                && client.healthService().isReady());
+                && client.localApi().isReady());
         assertEquals(ServiceHealth.PASSING, serviceHealth());
 
         long firstSequence = check("http").orElseThrow().observation().sequenceNumber();
@@ -116,27 +116,27 @@ class ClientHealthPublicationTest {
 
         workloadStatus.set(503);
         waitUntil(() -> status("http").filter(ServiceHealth.CRITICAL::equals).isPresent()
-                && !client.healthService().isReady());
+                && !client.localApi().isReady());
         assertEquals(ServiceHealth.CRITICAL, serviceHealth());
-        assertTrue(client.healthService().isHealthy(), "a failing required check never affects liveness");
+        assertTrue(client.localApi().isHealthy(), "a failing required check never affects liveness");
 
         workloadStatus.set(200);
         waitUntil(() -> status("http").filter(ServiceHealth.PASSING::equals).isPresent()
-                && client.healthService().isReady());
+                && client.localApi().isReady());
 
         assertTrue(client.statusReporter("web", "app").orElseThrow().report(CheckStatus.WARNING, "cache cold"));
         waitUntil(() -> status("app").filter(ServiceHealth.WARNING::equals).isPresent());
         assertEquals("cache cold", check("app").orElseThrow().observation().output());
         assertEquals(ServiceHealth.WARNING, serviceHealth());
-        waitUntil(() -> client.healthService().isReady()); // an optional warning check keeps the client ready
+        waitUntil(() -> client.localApi().isReady()); // an optional warning check keeps the client ready
         assertTrue(client.statusReporter("web", "http").isEmpty());
 
         server.close();
-        waitUntil(() -> !client.healthService().isReady());
+        waitUntil(() -> !client.localApi().isReady());
         // The client knows the server by URL, so the restarted server must bind the same port.
         server = Server.start(serverPort);
         waitUntil(() -> status("http").filter(ServiceHealth.PASSING::equals).isPresent()
-                && client.healthService().isReady());
+                && client.localApi().isReady());
     }
 
     @Test

@@ -314,6 +314,39 @@ class ClientConfigurationTest {
     }
 
     @Test
+    void theLocalApiBindsToTheLoopbackAddressUnlessAnotherIsGiven() {
+        ClientConfiguration loopback = ClientConfiguration.fromJson("""
+                {"version":1,"client":{"nodeName":"web-01","dataDirectory":"data"},
+                 "servers":{"urls":["http://localhost:8080"]},"catalog":{}}
+                """);
+        ClientConfiguration everywhere = ClientConfiguration.fromJson("""
+                {"version":1,"client":{"nodeName":"web-01","dataDirectory":"data","bindAddress":"0.0.0.0"},
+                 "servers":{"urls":["http://localhost:8080"]},"catalog":{}}
+                """);
+        ClientConfiguration ipv6 = ClientConfiguration.fromJson("""
+                {"version":1,"client":{"nodeName":"web-01","dataDirectory":"data","bindAddress":"::1"},
+                 "servers":{"urls":["http://localhost:8080"]},"catalog":{}}
+                """);
+
+        // Consul's client_addr defaults to 127.0.0.1, so its HTTP API is reached only from the host itself.
+        assertEquals(java.net.InetAddress.getLoopbackAddress(), loopback.getBindAddress());
+        assertTrue(everywhere.getBindAddress().isAnyLocalAddress());
+        assertTrue(ipv6.getBindAddress().isLoopbackAddress());
+    }
+
+    @Test
+    void aBindAddressMustBeAnIpAddressAsConsulsClientAddrIs() {
+        for (String value : new String[]{"\"localhost\"", "\"client-example\"", "\"\"", "\"300.1.1.1\"", "8080"}) {
+            IllegalArgumentException refused = assertThrows(IllegalArgumentException.class, () ->
+                    ClientConfiguration.fromJson("""
+                            {"version":1,"client":{"nodeName":"web-01","dataDirectory":"data","bindAddress":%s},
+                             "servers":{"urls":["http://localhost:8080"]},"catalog":{}}
+                            """.formatted(value)));
+            assertTrue(refused.getMessage().contains("client.bindAddress"), value + ": " + refused.getMessage());
+        }
+    }
+
+    @Test
     void theNodeNameDefaultsToTheHostName() throws Exception {
         String hostName = java.net.InetAddress.getLocalHost().getHostName();
 

@@ -78,6 +78,14 @@ class NodeCodecTest {
     }
 
     @Test
+    void aDeregistrationCarriesTheNodeIdOfTheNodeThatAsks() {
+        NodeCommand.Deregister deregister = new NodeCommand.Deregister("node-1", TIMESTAMP,
+                "6f1c2b0e-8e2d-4c3a-9b7f-2d4e5a6b7c8d");
+
+        assertEquals(deregister, NodeCodec.fromProto(NodeCodec.toProto(deregister)));
+    }
+
+    @Test
     void aNodeWithOnlyANameRoundTripsWithItsAbsentFieldsAbsent() {
         Node bare = Node.of("node-bare", null, null, null, null);
 

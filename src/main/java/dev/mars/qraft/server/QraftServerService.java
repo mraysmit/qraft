@@ -368,10 +368,21 @@ public class QraftServerService {
      * @throws IllegalStateException when the server has not started its listeners, or has stopped them
      */
     public Map<String, Integer> boundPorts() {
+        Map<String, Integer> ports = new java.util.HashMap<>();
+        boundAddresses().forEach((listener, address) -> ports.put(listener, address.getPort()));
+        return Map.copyOf(ports);
+    }
+
+    /**
+     * The addresses this server's listeners bound: {@code http}, {@code raft}, and {@code apiGrpc}.
+     *
+     * @throws IllegalStateException when the server has not started its listeners, or has stopped them
+     */
+    public Map<String, java.net.InetSocketAddress> boundAddresses() {
         HttpApiServer http = httpApiServer.orElseThrow(() -> new IllegalStateException("the server is not running"));
         GrpcRaftServer raft = raftGrpcServer.orElseThrow(() -> new IllegalStateException("the server is not running"));
         GrpcServiceServer api = apiGrpcServer.orElseThrow(() -> new IllegalStateException("the server is not running"));
-        return Map.of("http", http.port(), "raft", raft.port(), "apiGrpc", api.port());
+        return Map.of("http", http.address(), "raft", raft.address(), "apiGrpc", api.address());
     }
 
     /** Effective policy of the constructed Raft node, for startup diagnostics and lifecycle inspection. */

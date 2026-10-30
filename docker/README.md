@@ -41,6 +41,19 @@ versioned file; it contains no environment-variable placeholders. Server URLs
 must be origins such as `http://server:8080`, without an API path, query, or
 fragment.
 
+The client's local API listens on `127.0.0.1` inside its container, as Consul's
+`client_addr` does, so the client publishes no port. Reach it from inside the
+container, as an application on its host does:
+
+```sh
+docker exec qraft-client-dev curl -fsS http://127.0.0.1:8080/health/ready
+```
+
+An application in a container of its own can share the client's network
+namespace with `network_mode: "service:client"`. A deployment whose applications
+cannot share it sets `client.bindAddress` instead, for example to `0.0.0.0`, as
+Consul's `client_addr` is set for containers.
+
 Mount the file read-only and select it explicitly when the container may use an
 arbitrary destination:
 

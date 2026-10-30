@@ -31,6 +31,11 @@ import java.util.TreeSet;
 /**
  * Mutations applied to the replicated service catalog.
  *
+ * <p>A registration, a deregistration and an observation that a client sends carry the client's node ID, or
+ * {@code null} from a client without one. The servers refuse such a command when the node it names is
+ * registered with another ID (client list decision 8), so a node that lost its name cannot change what the
+ * node now holding it registered.
+ *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-12
  * @version 1.0
@@ -45,7 +50,8 @@ public sealed interface CatalogCommand extends RaftCommand
      * observations for them are rejected. {@code null} means the registration declares nothing, as
      * older clients and log entries do, and existing checks are kept.
      */
-    record Register(ServiceInstance instance, List<String> declaredCheckIds) implements CatalogCommand {
+    record Register(ServiceInstance instance, List<String> declaredCheckIds, String nodeUuid)
+            implements CatalogCommand {
         public Register {
             Objects.requireNonNull(instance, "instance");
             if (declaredCheckIds != null) {
@@ -65,7 +71,7 @@ public sealed interface CatalogCommand extends RaftCommand
         }
     }
 
-    record Deregister(String serviceId, String nodeId, String tenantId, String namespace)
+    record Deregister(String serviceId, String nodeId, String tenantId, String namespace, String nodeUuid)
             implements CatalogCommand {
         public Deregister {
             if (serviceId == null || serviceId.isBlank()) {
@@ -83,7 +89,8 @@ public sealed interface CatalogCommand extends RaftCommand
         }
     }
 
-    record ObserveHealth(HealthObservation observation, Instant acceptedAt) implements CatalogCommand {
+    record ObserveHealth(HealthObservation observation, Instant acceptedAt, String nodeUuid)
+            implements CatalogCommand {
         public ObserveHealth {
             Objects.requireNonNull(observation, "observation");
             Objects.requireNonNull(acceptedAt, "acceptedAt");
@@ -104,25 +111,40 @@ public sealed interface CatalogCommand extends RaftCommand
     }
 
     static CatalogCommand register(ServiceInstance instance) {
-        return new Register(instance, null);
+        return new Register(instance, null, null);
     }
 
     static CatalogCommand register(ServiceInstance instance, Collection<String> declaredCheckIds) {
-        return new Register(instance, List.copyOf(Objects.requireNonNull(declaredCheckIds, "declaredCheckIds")));
+        return register(instance, Objects.requireNonNull(declaredCheckIds, "declaredCheckIds"), null);
+    }
+
+    /** A registration from the node with {@code nodeUuid}; {@code null} {@code declaredCheckIds} declares none. */
+    static CatalogCommand register(ServiceInstance instance, Collection<String> declaredCheckIds, String nodeUuid) {
+        return new Register(instance, declaredCheckIds == null ? null : List.copyOf(declaredCheckIds), nodeUuid);
     }
 
     static CatalogCommand deregister(String serviceId) {
-        return new Deregister(serviceId, "", "", "");
+        return new Deregister(serviceId, "", "", "", null);
     }
 
     static CatalogCommand deregister(ServiceInstanceId identity) {
+        return deregister(identity, null);
+    }
+
+    /** A deregistration from the node with {@code nodeUuid}. */
+    static CatalogCommand deregister(ServiceInstanceId identity, String nodeUuid) {
         Objects.requireNonNull(identity, "identity");
         return new Deregister(identity.serviceId(), identity.nodeId(),
-                identity.tenantId(), identity.namespace());
+                identity.tenantId(), identity.namespace(), nodeUuid);
     }
 
     static CatalogCommand observe(HealthObservation observation, Instant acceptedAt) {
-        return new ObserveHealth(observation, acceptedAt);
+        return observe(observation, acceptedAt, null);
+    }
+
+    /** An observation from the node with {@code nodeUuid}. */
+    static CatalogCommand observe(HealthObservation observation, Instant acceptedAt, String nodeUuid) {
+        return new ObserveHealth(observation, acceptedAt, nodeUuid);
     }
 
     static CatalogCommand expire(ServiceCheckId checkId, long expectedSequenceNumber,

@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static dev.mars.qraft.raft.SharedDockerClusterFixture.clientStatus;
 import static dev.mars.qraft.raft.DockerHealthApiHelper.httpSequence;
 import static dev.mars.qraft.raft.DockerHealthApiHelper.instanceCount;
 import static dev.mars.qraft.raft.DockerHealthApiHelper.leaderIndex;
@@ -131,7 +132,7 @@ class DockerClientHealthTest {
             List<String> servers = SharedDockerClusterFixture.getNodeEndpoints(cluster, 3);
             await().atMost(Duration.ofSeconds(60)).until(() ->
                     servers.stream().allMatch(DockerHealthApiHelper::passingWithBothChecks)
-                            && "200".equals(clientStatus(cluster, "/health/ready")));
+                            && clientStatus(cluster, "/health/ready") == 200);
 
             SharedDockerClusterFixture.partitionContainer(cluster, "client");
             partitioned = true;
@@ -140,15 +141,15 @@ class DockerClientHealthTest {
             await().atMost(Duration.ofSeconds(60)).until(() -> {
                 if (servers.stream().allMatch(DockerClientHealthTest::expiredAndCritical)) sawExpiry.set(true);
                 return sawExpiry.get() && servers.stream().allMatch(server -> instanceCount(server) == 0)
-                        && "503".equals(clientStatus(cluster, "/health/ready"));
+                        && clientStatus(cluster, "/health/ready") == 503;
             });
-            assertEquals("200", clientStatus(cluster, "/health/live"), "a partition never affects liveness");
+            assertEquals(200, clientStatus(cluster, "/health/live"), "a partition never affects liveness");
 
             SharedDockerClusterFixture.restoreContainerNetwork(cluster, "client");
             partitioned = false;
             await().atMost(Duration.ofSeconds(90)).until(() ->
                     servers.stream().allMatch(server -> passingWithBothChecks(server) && instanceCount(server) == 1)
-                            && "200".equals(clientStatus(cluster, "/health/ready")));
+                            && clientStatus(cluster, "/health/ready") == 200);
         } finally {
             if (partitioned) SharedDockerClusterFixture.restoreContainerNetwork(cluster, "client");
             SharedDockerClusterFixture.stopAndCapture(cluster);
@@ -156,11 +157,6 @@ class DockerClientHealthTest {
     }
 
     /** The client's own HTTP status for {@code path}, read inside its container because it may be partitioned. */
-    private static String clientStatus(ComposeContainer cluster, String path) throws Exception {
-        return SharedDockerClusterFixture.execInService(cluster, "client", "curl", "-s", "-o", "/dev/null",
-                "-w", "%{http_code}", "--max-time", "5", "http://127.0.0.1:8080" + path).trim();
-    }
-
     private static boolean anyCheckExpired(String endpoint) {
         JsonNode entry = webEntry(endpoint);
         if (entry == null) return false;

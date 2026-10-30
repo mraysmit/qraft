@@ -45,7 +45,7 @@ import static dev.mars.qraft.raft.DockerHealthApiHelper.passingWithBothChecks;
 import static dev.mars.qraft.raft.DockerHealthApiHelper.raftStatus;
 import static dev.mars.qraft.raft.DockerHealthApiHelper.registerFiller;
 import static dev.mars.qraft.raft.DockerHealthApiHelper.snapshotLastIndex;
-import static dev.mars.qraft.raft.DockerHealthApiHelper.status;
+import static dev.mars.qraft.raft.SharedDockerClusterFixture.clientStatus;
 import static dev.mars.qraft.raft.DockerHealthApiHelper.webEntry;
 import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -100,10 +100,9 @@ class DockerClientRecoveryTest {
         boolean clientPaused = false;
         try {
             List<String> servers = SharedDockerClusterFixture.getNodeEndpoints(cluster, 3);
-            String client = SharedDockerClusterFixture.getServiceEndpoint(cluster, "client");
             await().atMost(Duration.ofSeconds(60)).until(() ->
                     servers.stream().allMatch(DockerHealthApiHelper::passingWithBothChecks)
-                            && status(client + "/health/ready") == 200);
+                            && clientStatus(cluster, "/health/ready") == 200);
             await().atMost(Duration.ofSeconds(60)).until(() ->
                     servers.stream().allMatch(server -> snapshotLastIndex(server) > 0));
             JsonNode node = clientNode(servers.getFirst());
@@ -114,8 +113,8 @@ class DockerClientRecoveryTest {
             long crashedAt = System.nanoTime();
             for (String server : SERVERS) SharedDockerClusterFixture.killContainer(cluster, server);
 
-            await().atMost(Duration.ofSeconds(30)).until(() -> status(client + "/health/ready") == 503);
-            assertEquals(200, status(client + "/health/live"), "losing every server never affects liveness");
+            await().atMost(Duration.ofSeconds(30)).until(() -> clientStatus(cluster, "/health/ready") == 503);
+            assertEquals(200, clientStatus(cluster, "/health/live"), "losing every server never affects liveness");
 
             // Freeze the client: from here on, the servers can only learn what they recover from disk.
             SharedDockerClusterFixture.pauseContainer(cluster, "client");
@@ -138,7 +137,7 @@ class DockerClientRecoveryTest {
             clientPaused = false;
             await().atMost(Duration.ofSeconds(60)).until(() -> {
                 recordExpiry(servers, sawExpiry);
-                return status(client + "/health/ready") == 200
+                return clientStatus(cluster, "/health/ready") == 200
                         && servers.stream().allMatch(server -> passingWithBothChecks(server)
                                 && httpSequence(server) > recoveredSequence && instanceCount(server) == 1);
             });
@@ -204,12 +203,11 @@ class DockerClientRecoveryTest {
         ComposeContainer cluster = SharedDockerClusterFixture.startIsolatedThreeNodeClusterWithRestartClient();
         try {
             List<String> servers = SharedDockerClusterFixture.getNodeEndpoints(cluster, 3);
-            String client = SharedDockerClusterFixture.getServiceEndpoint(cluster, "client");
             // The identity is deliberately not pinned here: a restart under a new identity must show up as a
             // second node and instance, not as a failure to start.
             await().atMost(Duration.ofSeconds(60)).until(() ->
                     servers.stream().allMatch(DockerClientRecoveryTest::onePassingInstance)
-                            && status(client + "/health/ready") == 200);
+                            && clientStatus(cluster, "/health/ready") == 200);
 
             SharedDockerClusterFixture.killContainer(cluster, "client");
             // Record the committed sequence once every server agrees, so no observation from the killed process
@@ -223,7 +221,7 @@ class DockerClientRecoveryTest {
                     int instances = instanceCount(server);
                     if (instances == 0 || instances > 1) sawRemovedOrDuplicated.set(true);
                 }
-                return status(client + "/health/ready") == 200
+                return clientStatus(cluster, "/health/ready") == 200
                         && servers.stream().allMatch(server -> onePassingInstance(server)
                                 && httpSequence(server) > sequenceBeforeRestart
                                 && clientCount(server) == 1);

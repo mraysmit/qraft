@@ -16,6 +16,8 @@
 
 package dev.mars.qraft.runtime;
 
+import java.net.InetSocketAddress;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
@@ -32,12 +34,24 @@ public interface RuntimeLifecycle extends AutoCloseable {
     CompletableFuture<Void> closeAsync();
 
     /**
-     * The ports this runtime listens on, by listener: {@code http} in both modes, and {@code raft} and
-     * {@code apiGrpc} for a server. A port configured as 0 is reported as the port the system chose.
+     * The addresses this runtime listens on, by listener: {@code http} in both modes, and {@code raft} and
+     * {@code apiGrpc} for a server. Each is the address the listener bound, the loopback address for a client's
+     * local API unless configured otherwise, and a port configured as 0 is reported as the port the system chose.
      *
      * @throws IllegalStateException when the runtime is no longer listening
      */
-    Map<String, Integer> boundPorts();
+    Map<String, InetSocketAddress> boundAddresses();
+
+    /**
+     * The ports of {@link #boundAddresses()}, by listener.
+     *
+     * @throws IllegalStateException when the runtime is no longer listening
+     */
+    default Map<String, Integer> boundPorts() {
+        Map<String, Integer> ports = new HashMap<>();
+        boundAddresses().forEach((listener, address) -> ports.put(listener, address.getPort()));
+        return Map.copyOf(ports);
+    }
 
     @Override
     default void close() {

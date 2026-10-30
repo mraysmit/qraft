@@ -39,6 +39,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -176,6 +177,66 @@ class RegistrationClientTest {
         } finally {
             logger.detachAppender(appender);
         }
+    }
+
+    @Test
+    void aNameAnotherNodeHoldsIsLoggedAndTriedAgainLater() throws Exception {
+        server.removeContext("/v1/catalog");
+        AtomicInteger registrations = new AtomicInteger();
+        server.createContext("/v1/catalog", exchange -> {
+            registrations.incrementAndGet();
+            byte[] body = ("{\"code\":\"node_name_reserved\",\"message\":\"Node name client-1 is reserved by node "
+                    + "9c5b94b1-35ad-49bb-b118-8e8fc24abf80 with name client-1\",\"retryable\":false}")
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(409, body.length);
+            try (var output = exchange.getResponseBody()) { output.write(body); }
+        });
+        RegistrationClient client = client();
+        Logger logger = (Logger) LoggerFactory.getLogger(RegistrationClient.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            assertFalse(client.register(Node.of("client-1", "127.0.0.1", null, null, null)).join());
+
+            // As Consul's agent keeps syncing, the client asks again later: the name is free once its holder is
+            // unreachable. It is a rejection, so the attempt does not go on to the other servers, which would
+            // answer the same.
+            assertTrue(client.shouldRetryRegistration());
+            assertEquals(1, registrations.get());
+            assertEquals(1, appender.list.stream().filter(event ->
+                    event.getFormattedMessage().contains("nodeName=client-1")
+                            && event.getFormattedMessage().contains("node_name_reserved")
+                            && event.getFormattedMessage().contains("is reserved by node")).count());
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
+
+    @Test
+    void aSupersededRegistrationIsNoLongerRegisteredButAStaleHeartbeatChangesNothing() throws Exception {
+        server.removeContext("/v1/catalog");
+        AtomicReference<String> heartbeatAnswer = new AtomicReference<>();
+        server.createContext("/v1/catalog", exchange -> {
+            if (exchange.getRequestURI().getPath().endsWith("/heartbeat")) {
+                byte[] body = heartbeatAnswer.get().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                exchange.sendResponseHeaders(409, body.length);
+                try (var output = exchange.getResponseBody()) { output.write(body); }
+            } else {
+                NodeAnswerHelper.accept(exchange);
+            }
+        });
+        RegistrationClient client = client();
+        assertTrue(client.register(Node.of("client-1", "127.0.0.1", null, null, null)).join());
+
+        heartbeatAnswer.set("{\"code\":\"stale_heartbeat\",\"message\":\"late\",\"retryable\":false}");
+        assertFalse(client.heartbeat(1).join());
+        assertTrue(client.isRegistered(), "an out-of-order heartbeat leaves the registration in place");
+
+        heartbeatAnswer.set("{\"code\":\"registration_superseded\",\"message\":\"replaced\",\"retryable\":false}");
+        assertFalse(client.heartbeat(2).join());
+        assertFalse(client.isRegistered(),
+                "a later registration of the name, a takeover among them, means the client must register again");
     }
 
     @Test

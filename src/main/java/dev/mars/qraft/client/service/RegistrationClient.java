@@ -37,6 +37,8 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public final class RegistrationClient {
     private static final Logger LOGGER = LoggerFactory.getLogger(RegistrationClient.class);
+    /** The servers' refusal of a name that a node of another ID holds. */
+    static final String NODE_NAME_RESERVED = "node_name_reserved";
     private final HttpCatalogClient serverClient;
     private final AtomicBoolean registered = new AtomicBoolean();
     private final AtomicBoolean registrationRetryable = new AtomicBoolean();
@@ -56,7 +58,11 @@ public final class RegistrationClient {
         registrationId.set(attemptId);
         registrationInFlight = serverClient.registerNode(attempt)
                 .thenApply(outcome -> {
-                    registrationRetryable.set(outcome instanceof CatalogOutcome.Retryable);
+                    // A name another node holds is free once that node is unreachable, so the registration is
+                    // tried again later, as Consul's agent keeps syncing; any other rejection is final.
+                    registrationRetryable.set(outcome instanceof CatalogOutcome.Retryable
+                            || outcome instanceof CatalogOutcome.Rejected rejected
+                                    && NODE_NAME_RESERVED.equals(rejected.code()));
                     if (outcome instanceof CatalogOutcome.Rejected rejected) {
                         LOGGER.warn("Client registration rejected: nodeName={}, code={}, message={}",
                                 client.name(), rejected.code(), rejected.message());
@@ -72,8 +78,11 @@ public final class RegistrationClient {
         if (!registered.get()) return CompletableFuture.completedFuture(false);
         String heartbeatRegistrationId = registrationId.get();
         return serverClient.heartbeatNode(sequenceNumber, heartbeatRegistrationId).thenApply(outcome -> {
+            // A forgotten node, or a registration that a later one of the name replaced, a takeover among them,
+            // is no longer registered: the client registers again, and is refused while another node holds the name.
             if (outcome instanceof CatalogOutcome.Rejected rejected
-                    && ("node_not_found".equals(rejected.code()) || "http_404".equals(rejected.code()))) {
+                    && ("node_not_found".equals(rejected.code()) || "http_404".equals(rejected.code())
+                            || "registration_superseded".equals(rejected.code()))) {
                 recordOutcome(heartbeatRegistrationId, false);
                 return false;
             }

@@ -93,6 +93,11 @@ public class QraftServerApplication {
             return resources.server.boundPorts();
         }
 
+        /** The addresses the server's listeners bound; see {@link QraftServerService#boundAddresses()}. */
+        public java.util.Map<String, java.net.InetSocketAddress> boundAddresses() {
+            return resources.server.boundAddresses();
+        }
+
         @Override
         public void close() {
             closeAsync().join();

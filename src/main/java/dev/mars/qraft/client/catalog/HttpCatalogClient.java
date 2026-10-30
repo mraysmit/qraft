@@ -61,6 +61,8 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
     private final ObjectMapper objectMapper;
     private final ServerEndpoints endpoints;
     private final String nodeId;
+    /** The node's ID, or {@code null} for a client that speaks without one, as protocol fixtures do. */
+    private final String nodeUuid;
     private final String tenant;
     private final String namespace;
     private final String datacenter;
@@ -73,7 +75,7 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
     public HttpCatalogClient(HttpClient httpClient, ObjectMapper objectMapper,
                              String nodeId, String tenant, String namespace,
                              String datacenter, String region, Duration requestTimeout) {
-        this(httpClient, objectMapper, (ServerEndpoints) null, nodeId, tenant, namespace,
+        this(httpClient, objectMapper, (ServerEndpoints) null, nodeId, null, tenant, namespace,
                 datacenter, region, requestTimeout, new ServerContactTracker(Clock.systemUTC()));
     }
 
@@ -81,7 +83,7 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
     public HttpCatalogClient(HttpClient httpClient, ObjectMapper objectMapper, List<URI> servers,
                              String nodeId, String tenant, String namespace,
                              String datacenter, String region, Duration requestTimeout) {
-        this(httpClient, objectMapper, new ServerEndpoints(servers), nodeId, tenant, namespace,
+        this(httpClient, objectMapper, new ServerEndpoints(servers), nodeId, null, tenant, namespace,
                 datacenter, region, requestTimeout, new ServerContactTracker(Clock.systemUTC()));
     }
 
@@ -89,18 +91,34 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
                              String nodeId, String tenant, String namespace,
                              String datacenter, String region, Duration requestTimeout,
                              ServerContactTracker contactTracker) {
-        this(httpClient, objectMapper, new ServerEndpoints(servers), nodeId, tenant, namespace,
+        this(httpClient, objectMapper, new ServerEndpoints(servers), nodeId, null, tenant, namespace,
                 datacenter, region, requestTimeout, contactTracker);
     }
 
+    /**
+     * Production constructor for a client with a node ID, which every request carries in {@code X-Qraft-Node-ID}
+     * beside the node's name, so that the servers can tell this node from another of the same name.
+     *
+     * @param nodeId   the node's name
+     * @param nodeUuid the node's ID, the UUID kept in the client's data directory
+     */
+    public HttpCatalogClient(HttpClient httpClient, ObjectMapper objectMapper, List<URI> servers,
+                             String nodeId, String nodeUuid, String tenant, String namespace,
+                             String datacenter, String region, Duration requestTimeout,
+                             ServerContactTracker contactTracker) {
+        this(httpClient, objectMapper, new ServerEndpoints(servers), nodeId, required("nodeUuid", nodeUuid),
+                tenant, namespace, datacenter, region, requestTimeout, contactTracker);
+    }
+
     private HttpCatalogClient(HttpClient httpClient, ObjectMapper objectMapper, ServerEndpoints endpoints,
-                              String nodeId, String tenant, String namespace,
+                              String nodeId, String nodeUuid, String tenant, String namespace,
                               String datacenter, String region, Duration requestTimeout,
                               ServerContactTracker contactTracker) {
         this.httpClient = Objects.requireNonNull(httpClient, "httpClient");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper").findAndRegisterModules();
         this.endpoints = endpoints;
         this.nodeId = required("nodeId", nodeId);
+        this.nodeUuid = nodeUuid;
         this.tenant = required("tenant", tenant);
         this.namespace = required("namespace", namespace);
         this.datacenter = Objects.requireNonNullElse(datacenter, "");
@@ -411,13 +429,15 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         if (!"http".equalsIgnoreCase(server.getScheme()) && !"https".equalsIgnoreCase(server.getScheme())) {
             throw new IllegalArgumentException("server must use HTTP or HTTPS");
         }
-        return HttpRequest.newBuilder(server.resolve(path))
+        HttpRequest.Builder request = HttpRequest.newBuilder(server.resolve(path))
                 .timeout(requestTimeout)
                 .header("X-Qraft-Node", nodeId)
                 .header("X-Qraft-Tenant", tenant)
                 .header("X-Qraft-Namespace", namespace)
                 .header("X-Request-Id", UUID.randomUUID().toString())
                 .header("Accept", "application/json");
+        if (nodeUuid != null) request.header("X-Qraft-Node-ID", nodeUuid);
+        return request;
     }
 
     private CompletableFuture<CatalogOutcome> send(HttpRequest request,

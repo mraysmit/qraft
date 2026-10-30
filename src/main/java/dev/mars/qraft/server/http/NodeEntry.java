@@ -26,6 +26,7 @@ import java.util.Map;
  * value and each time as an ISO-8601 instant, as the other answers of the API write theirs.
  *
  * @param name             the node's name
+ * @param id               the node's ID, or {@code null} for a node registered before nodes had IDs
  * @param address          the address the node is reached at
  * @param datacenter       the datacenter the node is in
  * @param region           the region the node is in
@@ -38,11 +39,11 @@ import java.util.Map;
  * @since 2026-10-09
  * @version 1.0
  */
-record NodeEntry(String name, String address, String datacenter, String region, Map<String, String> metadata,
+record NodeEntry(String name, String id, String address, String datacenter, String region, Map<String, String> metadata,
                  String status, String registrationTime, String lastHeartbeat) {
 
     static NodeEntry from(Node node) {
-        return new NodeEntry(node.name(), node.address(), node.datacenter(), node.region(), node.metadata(),
+        return new NodeEntry(node.name(), node.id(), node.address(), node.datacenter(), node.region(), node.metadata(),
                 node.status() == null ? null : node.status().getValue(),
                 instant(node.registrationTime()), instant(node.lastHeartbeat()));
     }

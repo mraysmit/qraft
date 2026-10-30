@@ -452,7 +452,7 @@ class HttpApiServerTest {
         assertEquals(1, listed.size());
         List<String> fields = new ArrayList<>();
         listed.get(0).fieldNames().forEachRemaining(fields::add);
-        assertEquals(List.of("name", "address", "datacenter", "region", "metadata", "status",
+        assertEquals(List.of("name", "id", "address", "datacenter", "region", "metadata", "status",
                 "registrationTime", "lastHeartbeat"), fields);
         assertEquals("client-1", listed.get(0).path("name").textValue());
         assertEquals("healthy", listed.get(0).path("status").textValue());
@@ -721,7 +721,8 @@ class HttpApiServerTest {
         assertEquals("client-1", envelope.path("node").textValue());
         assertEquals(1, envelope.path("sequenceNumber").longValue());
         assertEquals(409, otherRegistration.statusCode(), "a heartbeat of another registration must be rejected");
-        assertErrorEnvelope(otherRegistration, "stale_heartbeat", false);
+        // Another registration than the node's: the client is told to register again, not that it is only late.
+        assertErrorEnvelope(otherRegistration, "registration_superseded", false);
         assertEquals(acceptedHeartbeat, store.findNode("client-1").orElseThrow().lastHeartbeat());
         assertEquals(NodeStatus.HEALTHY, store.findNode("client-1").orElseThrow().status());
     }

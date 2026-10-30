@@ -115,7 +115,7 @@ class DockerStartCommandsTest {
         awaitReady("qraft-server-dev");
         await().atMost(Duration.ofSeconds(120)).pollInterval(Duration.ofSeconds(1)).ignoreExceptions()
                 .until(() -> exitCode("docker", "exec", "qraft-client-dev", "curl", "-fsS",
-                        "http://localhost:8080/health/ready") == 0);
+                        "http://127.0.0.1:8080/health/ready") == 0);
 
         String status = script("start", "status");
         assertTrue(status.contains("qraft-server-dev") && status.contains("qraft-client-dev"), status);

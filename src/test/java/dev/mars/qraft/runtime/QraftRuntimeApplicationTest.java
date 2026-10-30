@@ -154,6 +154,19 @@ class QraftRuntimeApplicationTest {
     }
 
     @Test
+    void aLifecycleReportsTheAddressEachListenerBoundAndItsPortsAreThoseAddresses() {
+        java.net.InetSocketAddress http =
+                new java.net.InetSocketAddress(java.net.InetAddress.getLoopbackAddress(), 8500);
+        java.net.InetSocketAddress raft = new java.net.InetSocketAddress(9080);
+        RuntimeLifecycle lifecycle = new ManagedRuntimeLifecycle(() -> CompletableFuture.completedFuture(null),
+                () -> java.util.Map.of("http", http, "raft", raft));
+
+        assertEquals(java.util.Map.of("http", http, "raft", raft), lifecycle.boundAddresses());
+        assertEquals(java.util.Map.of("http", 8500, "raft", 9080), lifecycle.boundPorts(),
+                "the ports are read from the addresses, so the two reports cannot disagree");
+    }
+
+    @Test
     void concurrentCloseStartsShutdownOnlyOnce() throws Exception {
         AtomicInteger closeCalls = new AtomicInteger();
         CountDownLatch enteredClose = new CountDownLatch(1);

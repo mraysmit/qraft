@@ -149,7 +149,9 @@ public final class SharedDockerClusterFixture {
                 .withExposedService("server1", 8080, Wait.forHttp("/health/live").forStatusCode(200))
                 .withExposedService("server2", 8080, Wait.forHttp("/health/live").forStatusCode(200))
                 .withExposedService("server3", 8080, Wait.forHttp("/health/live").forStatusCode(200))
-                .withExposedService("client", 8080, Wait.forHttp("/health/live").forStatusCode(200))
+                // The client's local API listens on the loopback address, so its readiness is the compose healthcheck,
+                // run inside its container, and its port is not published.
+                .waitingFor("client", Wait.forHealthcheck())
                 .withStartupTimeout(Duration.ofSeconds(90));
         cluster.start();
         registerCluster(cluster, List.of("server1", "server2", "server3", "client"));
@@ -520,6 +522,20 @@ public final class SharedDockerClusterFixture {
     }
 
     /** Runs a command inside a running service's container and returns its standard output. */
+    /**
+     * The status code of {@code path} on the client's local API, asked from inside the client's container as an
+     * application on its host asks it: the local API listens on the loopback address, which nothing outside the
+     * container reaches (decision 9 of the client list). -1 when it cannot be asked; 0 when nothing answers.
+     */
+    public static int clientStatus(ComposeContainer cluster, String path) {
+        try {
+            return Integer.parseInt(execInService(cluster, "client", "curl", "-s", "-o", "/dev/null",
+                    "-w", "%{http_code}", "--max-time", "5", "http://127.0.0.1:8080" + path).trim());
+        } catch (Exception unavailable) {
+            return -1;
+        }
+    }
+
     public static String execInService(ComposeContainer cluster, String serviceName, String... command)
             throws Exception {
         return cluster.getContainerByServiceName(serviceName)
