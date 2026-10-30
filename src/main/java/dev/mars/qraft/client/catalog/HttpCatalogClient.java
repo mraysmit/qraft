@@ -35,11 +35,14 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -254,6 +257,56 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         CatalogOutcome.Rejected failure = (CatalogOutcome.Rejected) outcome;
         return new CatalogLookupOutcome.Rejected(
                 failure.code(), failure.message(), failure.leaderId());
+    }
+
+    @Override
+    public CompletableFuture<Optional<Set<String>>> nodeServices() {
+        ensureOpen();
+        if (endpoints == null) {
+            throw new IllegalStateException("No server seeds were configured for automatic selection");
+        }
+        return nodeServicesAttempt(endpoints.cycle(), 0);
+    }
+
+    private CompletableFuture<Optional<Set<String>>> nodeServicesAttempt(List<URI> cycle, int index) {
+        URI endpoint = cycle.get(index);
+        HttpRequest request = request(endpoint, "/v1/catalog/node-services/" + encode(nodeId)).GET().build();
+        CompletableFuture<Optional<Set<String>>> answer;
+        try {
+            answer = httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                    .handle((response, failure) -> failure == null ? ownServices(response) : Optional.empty());
+        } catch (RuntimeException failure) {
+            answer = CompletableFuture.completedFuture(Optional.empty());
+        }
+        return answer.thenCompose(services -> {
+            if (services.isPresent()) {
+                endpoints.markSuccessful(endpoint);
+                contactTracker.recordSuccessfulContact();
+                return CompletableFuture.completedFuture(services);
+            }
+            return index + 1 == cycle.size() ? CompletableFuture.completedFuture(services)
+                    : nodeServicesAttempt(cycle, index + 1);
+        });
+    }
+
+    /** The IDs of this node's services in this client's scope, or empty when the answer does not give them. */
+    private Optional<Set<String>> ownServices(HttpResponse<String> response) {
+        if (!isSuccess(response.statusCode())) return Optional.empty();
+        try {
+            JsonNode instances = objectMapper.readTree(response.body());
+            if (instances == null || !instances.isArray()) return Optional.empty();
+            Set<String> services = new HashSet<>();
+            for (JsonNode instance : instances) {
+                if (nodeId.equals(instance.path("nodeId").asText())
+                        && tenant.equals(instance.path("tenantId").asText())
+                        && namespace.equals(instance.path("namespace").asText())) {
+                    services.add(instance.path("serviceId").asText());
+                }
+            }
+            return Optional.of(services);
+        } catch (IOException error) {
+            return Optional.empty();
+        }
     }
 
     private static CatalogLookupOutcome.Retryable lookupRetryable(

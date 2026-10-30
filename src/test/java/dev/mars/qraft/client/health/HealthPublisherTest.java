@@ -254,6 +254,54 @@ class HealthPublisherTest {
      *
      * <p>Records observations and lets the test decide each outcome.
      */
+    @Test
+    void aForgottenCheckIsNoLongerRetried() {
+        publisher.onResult(HTTP, result(CheckStatus.PASSING, "HTTP 200"));
+        client.reject(0, "check_not_declared");
+        assertEquals(1, time.pendingTasks(), "an undeclared check is retried while registration converges");
+
+        publisher.forget(HTTP);
+
+        assertEquals(0, time.pendingTasks());
+        time.advance(Duration.ofMinutes(5));
+        assertEquals(1, client.sent().size());
+    }
+
+    @Test
+    void aPublicationInFlightWhenItsCheckIsForgottenLeadsToNothingMore() {
+        publisher.onResult(HTTP, result(CheckStatus.PASSING, "HTTP 200"));
+        publisher.onResult(HTTP, result(CheckStatus.CRITICAL, "HTTP 503"));
+
+        publisher.forget(HTTP);
+        client.retryable(0);
+
+        assertEquals(0, time.pendingTasks(), "no retry of what was in flight");
+        assertEquals(1, client.sent().size(), "and no publication of what was waiting");
+    }
+
+    @Test
+    void aCheckAddedAgainAfterBeingForgottenPublishesAfresh() {
+        publisher.onResult(HTTP, result(CheckStatus.PASSING, "HTTP 200"));
+        client.accept(0);
+
+        publisher.forget(HTTP);
+        publisher.onResult(HTTP, result(CheckStatus.PASSING, "HTTP 200"));
+
+        assertEquals(2, client.sent().size(), "the server forgot it too, so an unchanged result is not suppressed");
+    }
+
+    @Test
+    void stopWaitsForAPublicationInFlightOfAForgottenCheck() {
+        publisher.onResult(HTTP, result(CheckStatus.PASSING, "HTTP 200"));
+        publisher.forget(HTTP);
+
+        CompletableFuture<Void> stopped = publisher.stop();
+
+        assertFalse(stopped.isDone(), "nothing may land after shutdown goes on to deregister");
+        client.accept(0);
+        assertTrue(stopped.isDone());
+    }
+
     private static final class ScriptedClientFixture implements ObservationClient {
         private final List<CheckObservation> sent = new CopyOnWriteArrayList<>();
         private final List<CompletableFuture<ObservationOutcome>> replies = new CopyOnWriteArrayList<>();

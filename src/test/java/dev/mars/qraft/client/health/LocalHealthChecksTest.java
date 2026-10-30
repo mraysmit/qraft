@@ -146,4 +146,109 @@ class LocalHealthChecksTest {
         time.advance(Duration.ofMinutes(5));
         results.assertNoResult();
     }
+
+    @Test
+    void aCheckAddedBeforeStartRunsFromStart() throws Exception {
+        TtlCheck app = new TtlCheck("web", "app", Duration.ofSeconds(30), true);
+        checks = new LocalHealthChecks(List.of(), client, (host, port, timeout) -> new CompletableFuture<>(),
+                time, time, results);
+
+        checks.add(app);
+
+        LocalStatusReporter reporter = checks.reporter("web", "app").orElseThrow();
+        assertFalse(reporter.report(CheckStatus.PASSING, "before start"));
+        assertEquals(0, time.pendingTasks());
+        checks.start();
+        assertTrue(reporter.report(CheckStatus.PASSING, "after start"));
+        assertEquals(app, results.nextDelivery().check());
+    }
+
+    @Test
+    void aCheckAddedWhileRunningStartsAtOnce() throws Exception {
+        TtlCheck app = new TtlCheck("web", "app", Duration.ofSeconds(30), true);
+        checks = new LocalHealthChecks(List.of(), client, (host, port, timeout) -> new CompletableFuture<>(),
+                time, time, results);
+        checks.start();
+
+        checks.add(app);
+
+        assertEquals(1, time.pendingTasks(), "its TTL expiry is armed");
+        assertTrue(checks.reporter("web", "app").orElseThrow().report(CheckStatus.WARNING, "cold"));
+        assertEquals(CheckStatus.WARNING, results.next().status());
+    }
+
+    @Test
+    void aCheckRemovedStopsAndIsForgotten() {
+        TcpCheck tcp = new TcpCheck("db", "tcp", "127.0.0.1", 5432, Duration.ofSeconds(5),
+                Duration.ofSeconds(1), Duration.ofSeconds(15), true);
+        TtlCheck app = new TtlCheck("web", "app", Duration.ofSeconds(30), true);
+        CompletableFuture<Void> attempt = new CompletableFuture<>();
+        checks = new LocalHealthChecks(List.of(tcp, app), client, (host, port, timeout) -> attempt,
+                time, time, results);
+        checks.start();
+        time.runDue();
+        LocalStatusReporter reporter = checks.reporter("web", "app").orElseThrow();
+
+        checks.remove(tcp);
+        checks.remove(app);
+
+        assertEquals(0, time.pendingTasks());
+        assertTrue(attempt.isCancelled());
+        assertTrue(checks.reporter("web", "app").isEmpty());
+        assertFalse(reporter.report(CheckStatus.PASSING, "late"));
+        time.advance(Duration.ofMinutes(5));
+        results.assertNoResult();
+    }
+
+    @Test
+    void anIdenticalDefinitionLeavesItsCheckRunningAndAChangedOneReplacesIt() throws Exception {
+        TtlCheck app = new TtlCheck("web", "app", Duration.ofSeconds(30), true);
+        checks = new LocalHealthChecks(List.of(app), client, (host, port, timeout) -> new CompletableFuture<>(),
+                time, time, results);
+        checks.start();
+        LocalStatusReporter original = checks.reporter("web", "app").orElseThrow();
+        assertTrue(original.report(CheckStatus.PASSING, "up"));
+        assertEquals(CheckStatus.PASSING, results.next().status());
+
+        checks.add(new TtlCheck("web", "app", Duration.ofSeconds(30), true));
+
+        assertTrue(original.report(CheckStatus.PASSING, "still the same runner"));
+        assertEquals(CheckStatus.PASSING, checks.latest("web", "app").orElseThrow().status());
+        results.next();
+
+        checks.add(new TtlCheck("web", "app", Duration.ofSeconds(60), true));
+
+        assertFalse(original.report(CheckStatus.PASSING, "replaced"), "the old runner has stopped");
+        assertTrue(checks.latest("web", "app").isEmpty(), "the new definition has no result yet");
+        assertEquals(1, time.pendingTasks(), "only the new definition's expiry is armed");
+    }
+
+    @Test
+    void nothingRunsWhenACheckIsAddedAfterStop() {
+        checks = new LocalHealthChecks(List.of(), client, (host, port, timeout) -> new CompletableFuture<>(),
+                time, time, results);
+        checks.start();
+        checks.stop();
+
+        checks.add(new TtlCheck("web", "app", Duration.ofSeconds(30), true));
+
+        assertEquals(0, time.pendingTasks());
+        assertTrue(checks.reporter("web", "app").isEmpty());
+    }
+
+    @Test
+    void theLatestResultOfACheckIsKeptAndGoesWithIt() throws Exception {
+        TtlCheck app = new TtlCheck("web", "app", Duration.ofSeconds(30), true);
+        checks = new LocalHealthChecks(List.of(app), client, (host, port, timeout) -> new CompletableFuture<>(),
+                time, time, results);
+        checks.start();
+        assertTrue(checks.latest("web", "app").isEmpty(), "no result yet");
+
+        checks.reporter("web", "app").orElseThrow().report(CheckStatus.WARNING, "cold");
+        assertEquals("cold", checks.latest("web", "app").orElseThrow().output());
+        results.next();
+
+        checks.remove(app);
+        assertTrue(checks.latest("web", "app").isEmpty());
+    }
 }

@@ -153,6 +153,21 @@ class ClientServerContractTest {
     }
 
     @Test
+    void httpCatalogClientListsItsNodesServicesAgainstRealServer() throws Exception {
+        startServer();
+        URI endpoint = URI.create("http://127.0.0.1:" + server.port());
+        catalogClient = new HttpCatalogClient(HttpClient.newHttpClient(), new ObjectMapper(), List.of(endpoint),
+                "catalog-client", "default", "default", "dc-1", "eu-west", Duration.ofSeconds(2));
+
+        assertEquals(java.util.Optional.of(java.util.Set.of()), catalogClient.nodeServices().get(10, TimeUnit.SECONDS));
+        ServiceDefinition service = new ServiceDefinition("payments-1", "payments", "127.0.0.1", 9090,
+                List.of("blue"), Map.of("team", "platform"), true);
+        assertInstanceOf(CatalogOutcome.Success.class, catalogClient.register(service).get(10, TimeUnit.SECONDS));
+        assertEquals(java.util.Optional.of(java.util.Set.of("payments-1")),
+                catalogClient.nodeServices().get(10, TimeUnit.SECONDS));
+    }
+
+    @Test
     void httpCatalogClientPublishesACheckObservationAgainstRealServer() throws Exception {
         QraftStateStore store = startServer();
         URI endpoint = URI.create("http://127.0.0.1:" + server.port());

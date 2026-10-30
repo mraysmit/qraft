@@ -66,6 +66,35 @@ class RequiredCheckReadinessTest {
         assertTrue(readiness.isSatisfied(), "readiness returns when the check recovers");
     }
 
+    @Test
+    void aRequiredCheckAddedLaterHoldsReadinessBackUntilItReports() {
+        RequiredCheckReadiness readiness = new RequiredCheckReadiness(List.of());
+        assertTrue(readiness.isSatisfied());
+
+        readiness.add(REQUIRED);
+        assertFalse(readiness.isSatisfied());
+        readiness.onResult(REQUIRED, result(CheckStatus.PASSING));
+        assertTrue(readiness.isSatisfied());
+
+        readiness.add(OPTIONAL);
+        assertTrue(readiness.isSatisfied(), "an optional check never withholds readiness");
+    }
+
+    @Test
+    void aRemovedRequiredCheckNoLongerHoldsReadinessBackAndForgetsItsResult() {
+        RequiredCheckReadiness readiness = new RequiredCheckReadiness(List.of(REQUIRED));
+        readiness.onResult(REQUIRED, result(CheckStatus.CRITICAL));
+        assertFalse(readiness.isSatisfied());
+
+        readiness.remove(REQUIRED);
+        assertTrue(readiness.isSatisfied());
+        readiness.onResult(REQUIRED, result(CheckStatus.CRITICAL));
+        assertTrue(readiness.isSatisfied(), "a result that arrives late for a removed check counts for nothing");
+
+        readiness.add(REQUIRED);
+        assertFalse(readiness.isSatisfied(), "added again it has no result, so it is not yet satisfied");
+    }
+
     private static CheckResult result(CheckStatus status) {
         return new CheckResult(status, "", NOW);
     }

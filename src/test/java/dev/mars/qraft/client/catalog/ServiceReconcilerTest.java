@@ -31,6 +31,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -65,6 +67,72 @@ class ServiceReconcilerTest {
         assertEquals(1, result.registered());
         assertTrue(result.rejections().isEmpty());
         assertTrue(reconciler.isConverged());
+    }
+
+    @Test
+    void aServiceOnlyTheCatalogHoldsIsRemovedAsConsulsAntiEntropyRemovesIt() {
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
+        client.nodeServices = Optional.of(Set.of("web", "left-behind-by-a-crash"));
+        ServiceReconciler reconciler = new ServiceReconciler(client,
+                () -> List.of(service("web", "web", 8080, true)), CLOCK);
+
+        ServiceReconciler.Result result = reconciler.trigger().join();
+
+        assertEquals(List.of("left-behind-by-a-crash"), client.deregistrations);
+        assertEquals(1, result.deregistered());
+        assertEquals(List.of("web"), client.registrations);
+    }
+
+    @Test
+    void aDisabledDefinitionTheCatalogStillHoldsIsRemoved() {
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
+        client.nodeServices = Optional.of(Set.of("admin"));
+        ServiceReconciler reconciler = new ServiceReconciler(client,
+                () -> List.of(service("admin", "admin", 8081, false)), CLOCK);
+
+        reconciler.trigger().join();
+
+        assertEquals(List.of("admin"), client.deregistrations);
+    }
+
+    @Test
+    void aServiceBothRememberedAndListedIsRemovedOnce() {
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
+        AtomicReference<List<ServiceDefinition>> definitions = new AtomicReference<>(List.of(
+                service("web", "web", 8080, true)));
+        ServiceReconciler reconciler = new ServiceReconciler(client, definitions::get, CLOCK);
+        reconciler.trigger().join();
+        client.nodeServices = Optional.of(Set.of("web"));
+        definitions.set(List.of());
+
+        reconciler.trigger().join();
+
+        assertEquals(List.of("web"), client.deregistrations);
+    }
+
+    @Test
+    void aPassGoesOnWhenNoServerCanListTheNodesServices() {
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
+        client.nodeServices = Optional.empty();
+        ServiceReconciler reconciler = new ServiceReconciler(client,
+                () -> List.of(service("web", "web", 8080, true)), CLOCK);
+
+        reconciler.trigger().join();
+
+        assertEquals(List.of("web"), client.registrations);
+        assertEquals(List.of(), client.deregistrations);
+    }
+
+    @Test
+    void nothingIsListedWhileTheNodeIsNotRegistered() {
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
+        client.nodeServices = Optional.of(Set.of("somebody-elses"));
+        ServiceReconciler reconciler = new ServiceReconciler(client, List::of, CLOCK, () -> false);
+
+        reconciler.trigger().join();
+
+        assertEquals(0, client.nodeServicesReads);
+        assertEquals(List.of(), client.deregistrations);
     }
 
     @Test
@@ -386,6 +454,8 @@ class ServiceReconcilerTest {
         private final Map<String, CatalogOutcome> deregistrationOutcomes = new LinkedHashMap<>();
         private final Map<String, CatalogLookupOutcome> lookups = new LinkedHashMap<>();
         private CompletableFuture<CatalogOutcome> pendingRegistration;
+        private Optional<Set<String>> nodeServices = Optional.of(Set.of());
+        private int nodeServicesReads;
 
         @Override
         public CompletableFuture<CatalogOutcome> register(ServiceDefinition service) {
@@ -411,6 +481,12 @@ class ServiceReconcilerTest {
             lookupIds.add(service.id());
             return CompletableFuture.completedFuture(lookups.getOrDefault(service.id(),
                     new CatalogLookupOutcome.Present()));
+        }
+
+        @Override
+        public CompletableFuture<Optional<Set<String>>> nodeServices() {
+            nodeServicesReads++;
+            return CompletableFuture.completedFuture(nodeServices);
         }
 
         @Override public void close() { }

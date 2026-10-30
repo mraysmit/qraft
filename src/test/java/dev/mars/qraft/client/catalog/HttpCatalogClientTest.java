@@ -45,6 +45,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
@@ -365,6 +366,48 @@ class HttpCatalogClientTest {
         assertInstanceOf(CatalogOutcome.Rejected.class, client.register(service()).get(10, TimeUnit.SECONDS));
         assertEquals(1, rejectedAttempts.get());
         assertEquals(0, laterAttempts.get());
+    }
+
+    @Test
+    void nodeServicesReadsThisNodesServicesInItsScopeAndKeepsOnlyThoseThatAreItsOwn() throws Exception {
+        List<CapturedRequest> reads = new CopyOnWriteArrayList<>();
+        URI endpoint = start(exchange -> {
+            reads.add(capture(exchange));
+            respond(exchange, 200, "[{\"serviceId\":\"payments-1\",\"nodeId\":\"node-a\","
+                    + "\"tenantId\":\"tenant-a\",\"namespace\":\"prod\"},"
+                    + "{\"serviceId\":\"another-node\",\"nodeId\":\"node-b\","
+                    + "\"tenantId\":\"tenant-a\",\"namespace\":\"prod\"},"
+                    + "{\"serviceId\":\"another-scope\",\"nodeId\":\"node-a\","
+                    + "\"tenantId\":\"tenant-a\",\"namespace\":\"test\"}]");
+        });
+
+        Optional<Set<String>> services = selectedClient(List.of(endpoint)).nodeServices().get(10, TimeUnit.SECONDS);
+
+        assertEquals(Optional.of(Set.of("payments-1")), services);
+        assertEquals("GET", reads.getFirst().method());
+        assertEquals("/v1/catalog/node-services/node-a", reads.getFirst().path());
+        assertEquals("tenant-a", reads.getFirst().header("X-Qraft-Tenant"));
+        assertEquals("prod", reads.getFirst().header("X-Qraft-Namespace"));
+    }
+
+    @Test
+    void nodeServicesTriesTheNextSeedAndIsEmptyWhenNoSeedCanAnswer() throws Exception {
+        AtomicInteger firstAttempts = new AtomicInteger();
+        URI busy = start(exchange -> {
+            firstAttempts.incrementAndGet();
+            respond(exchange, 503, "{\"code\":\"busy\",\"message\":\"later\",\"retryable\":true}");
+        });
+        URI answering = start(exchange -> respond(exchange, 200, "[]"));
+
+        assertEquals(Optional.of(Set.of()),
+                selectedClient(List.of(busy, answering)).nodeServices().get(10, TimeUnit.SECONDS));
+        assertEquals(1, firstAttempts.get());
+
+        assertEquals(Optional.empty(),
+                selectedClient(List.of(busy)).nodeServices().get(10, TimeUnit.SECONDS));
+        URI malformed = start(exchange -> respond(exchange, 200, "{}"));
+        assertEquals(Optional.empty(),
+                selectedClient(List.of(malformed)).nodeServices().get(10, TimeUnit.SECONDS));
     }
 
     @Test

@@ -431,7 +431,7 @@ class ClientConfigurationTest {
                     {"id":"app","type":"ttl","ttlMs":15000}
                   ]},
                   {"id":"db","name":"db","address":"10.0.0.5","port":5432,"checks":[
-                    {"id":"tcp","type":"tcp","address":"db.local","port":6432,"intervalMs":1000}
+                    {"id":"db-tcp","type":"tcp","address":"db.local","port":6432,"intervalMs":1000}
                   ]},
                   {"id":"cache","name":"cache","address":"10.0.0.6","port":6379}
                 ]
@@ -443,7 +443,7 @@ class ClientConfigurationTest {
                 new TcpCheck("web", "tcp", "10.0.0.4", 9000, Duration.ofSeconds(5),
                         Duration.ofSeconds(2), Duration.ofSeconds(15), false),
                 new TtlCheck("web", "app", Duration.ofSeconds(15), true),
-                new TcpCheck("db", "tcp", "db.local", 6432, Duration.ofSeconds(1),
+                new TcpCheck("db", "db-tcp", "db.local", 6432, Duration.ofSeconds(1),
                         Duration.ofSeconds(1), Duration.ofSeconds(3), true)),
                 config.getHealthChecks());
         assertEquals(3, config.getServices().size());
@@ -588,6 +588,19 @@ class ClientConfigurationTest {
         assertThrows(IllegalArgumentException.class, () -> ClientConfiguration.builder().nodeName("client")
                 .dataDirectory(Path.of("data")).serverUrl("http://localhost").services(List.of(web))
                 .healthChecks(List.of(check, new TtlCheck("web", "app", Duration.ofSeconds(20), true))).build());
+    }
+
+    @Test
+    void aCheckIdIsUniqueAcrossTheClientsServicesAsConsulsIsPerAgent() {
+        ServiceDefinition web = new ServiceDefinition("web", "web", "localhost", 8080, List.of(), Map.of(), true);
+        ServiceDefinition db = new ServiceDefinition("db", "db", "localhost", 5432, List.of(), Map.of(), true);
+
+        IllegalArgumentException refused = assertThrows(IllegalArgumentException.class, () ->
+                ClientConfiguration.builder().nodeName("client").dataDirectory(Path.of("data"))
+                        .serverUrl("http://localhost").services(List.of(web, db))
+                        .healthChecks(List.of(new TtlCheck("web", "app", Duration.ofSeconds(10), true),
+                                new TtlCheck("db", "app", Duration.ofSeconds(10), true))).build());
+        assertTrue(refused.getMessage().contains("app"), refused.getMessage());
     }
 
     private static String minimalJson(String urls, String catalogFields) {

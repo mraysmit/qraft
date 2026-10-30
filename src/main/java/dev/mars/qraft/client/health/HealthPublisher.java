@@ -24,9 +24,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.IntToLongFunction;
 
@@ -54,6 +56,8 @@ public final class HealthPublisher implements CheckResultListener {
     private final Clock clock;
     private final IntToLongFunction retryDelayMillis;
     private final Map<CheckKey, Publication> publications = new HashMap<>();
+    /** Publications of forgotten checks that are still in flight. */
+    private final Set<Publication> leaving = new HashSet<>();
     private CompletableFuture<Void> stopped;
 
     /**
@@ -76,6 +80,19 @@ public final class HealthPublisher implements CheckResultListener {
     }
 
     /**
+     * Forgets a check that has been removed: its retry is cancelled and no result waiting to be published is sent, so
+     * a removed check is not retried as undeclared for ever. A publication in flight is left to finish, and
+     * {@link #stop()} still waits for it. If the check is added again it publishes afresh, as the server forgot it too.
+     */
+    public synchronized void forget(HealthCheckDefinition check) {
+        Publication publication = publications.remove(new CheckKey(check.serviceId(), check.checkId()));
+        if (publication == null) return;
+        publication.cancelRetry();
+        publication.forgotten = true;
+        if (publication.inFlight != null) leaving.add(publication);
+    }
+
+    /**
      * Refuses further results and cancels scheduled retries. The returned future completes once every
      * publication already in flight has finished; no observation is sent after this call.
      */
@@ -85,6 +102,9 @@ public final class HealthPublisher implements CheckResultListener {
         for (Publication publication : publications.values()) {
             publication.cancelRetry();
             if (publication.inFlight != null) inFlight.add(publication.inFlight.handle((outcome, failure) -> null));
+        }
+        for (Publication publication : leaving) {
+            inFlight.add(publication.inFlight.handle((outcome, failure) -> null));
         }
         stopped = CompletableFuture.allOf(inFlight.toArray(CompletableFuture[]::new));
         return stopped;
@@ -101,6 +121,7 @@ public final class HealthPublisher implements CheckResultListener {
         private CompletableFuture<ObservationOutcome> inFlight;
         private CheckScheduler.Cancellable retry;
         private int retryAttempt;
+        private boolean forgotten;
 
         private Publication(HealthCheckDefinition check) {
             this.check = check;
@@ -158,7 +179,8 @@ public final class HealthPublisher implements CheckResultListener {
         private void completed(CheckObservation observation, ObservationOutcome outcome) {
             synchronized (HealthPublisher.this) {
                 inFlight = null;
-                if (stopped != null) return;
+                if (forgotten) leaving.remove(this);
+                if (stopped != null || forgotten) return;
                 boolean current = observation == unconfirmed;
                 switch (outcome) {
                     case ObservationOutcome.Accepted ignored -> {

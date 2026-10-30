@@ -123,6 +123,33 @@ class HttpApiServerCatalogServiceRoutesTest {
     }
 
     @Test
+    void nodeServicesListsOneNodesServicesInTheReadScopeAsConsulsNodeServicesRouteDoes() throws Exception {
+        assertEquals(200, put("/v1/catalog/register", "{\"service\":" + SERVICE + "}").statusCode());
+        assertEquals(200, registerAs("web-02", "default",
+                SERVICE.replace("\"web\"", "\"other-node\"")).statusCode());
+        assertEquals(200, registerAs("web-01", "test",
+                SERVICE.replace("\"web\"", "\"other-scope\"")).statusCode());
+
+        HttpResponse<String> listed = get("/v1/catalog/node-services/web-01");
+
+        assertEquals(200, listed.statusCode(), listed.body());
+        JsonNode services = JSON.readTree(listed.body());
+        assertEquals(1, services.size(), listed.body());
+        assertEquals("web", services.get(0).path("serviceId").asText());
+        assertEquals("web-01", services.get(0).path("nodeId").asText());
+    }
+
+    @Test
+    void nodeServicesOfAnUnknownNodeIsEmptyAndANodeNameIsRequired() throws Exception {
+        HttpResponse<String> unknown = get("/v1/catalog/node-services/nobody");
+        assertEquals(200, unknown.statusCode(), unknown.body());
+        assertEquals(0, JSON.readTree(unknown.body()).size());
+
+        assertRejected(get("/v1/catalog/node-services/"), 400, "node_name_required");
+        assertRejected(put("/v1/catalog/node-services/web-01", "{}"), 405, "method_not_allowed");
+    }
+
+    @Test
     void aBodyOverTheSharedLimitIsRefusedWith413AndNothingIsRegistered() throws Exception {
         String metadata = "\"padding\":\"" + "x".repeat(dev.mars.qraft.common.http.JsonApi.MAX_BODY_BYTES) + "\"";
         HttpResponse<String> response = put("/v1/catalog/register",
@@ -245,6 +272,21 @@ class HttpApiServerCatalogServiceRoutesTest {
         assertEquals(404, put("/v1/client/service/deregister/web", "").statusCode());
         assertEquals(404, put("/v1/client/check/observe", "{}").statusCode());
         assertTrue(store.getServiceCatalog().instances().isEmpty());
+    }
+
+    private HttpResponse<String> registerAs(String node, String namespace, String service) throws Exception {
+        return client.send(HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + server.port() + "/v1/catalog/register"))
+                .header("Content-Type", "application/json")
+                .header("X-Qraft-Node", node).header("X-Qraft-Namespace", namespace)
+                .PUT(HttpRequest.BodyPublishers.ofString("{\"service\":" + service + "}")).build(),
+                HttpResponse.BodyHandlers.ofString());
+    }
+
+    private HttpResponse<String> get(String path) throws Exception {
+        return client.send(HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + server.port() + path)).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
     }
 
     private HttpResponse<String> put(String path, String body) throws Exception {

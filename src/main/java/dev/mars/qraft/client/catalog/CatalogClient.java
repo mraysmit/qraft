@@ -18,6 +18,8 @@ package dev.mars.qraft.client.catalog;
 
 import dev.mars.qraft.common.ServiceDefinition;
 
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -31,5 +33,10 @@ public interface CatalogClient extends AutoCloseable {
     CompletableFuture<CatalogOutcome> register(ServiceDefinition service);
     CompletableFuture<CatalogOutcome> deregister(String serviceId);
     CompletableFuture<CatalogLookupOutcome> lookup(ServiceDefinition service);
+    /**
+     * The IDs of the services the catalog holds for this node, as Consul's agent reads its node's services to find
+     * those it no longer has. Empty when no server could answer.
+     */
+    CompletableFuture<Optional<Set<String>>> nodeServices();
     @Override void close();
 }

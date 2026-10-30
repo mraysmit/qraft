@@ -166,6 +166,7 @@ public final class HttpApiServer implements AutoCloseable {
         server.createContext("/v1/catalog/node/heartbeat", requestAware(this::heartbeatNode));
         server.createContext("/v1/catalog/nodes", requestAware(this::listNodes));
         server.createContext("/v1/catalog/check/observe", requestAware(this::observeHealth));
+        server.createContext("/v1/catalog/node-services", requestAware(this::listNodeServices));
         server.createContext("/v1/catalog/services", requestAware(this::listServices));
         server.createContext("/v1/catalog/service", requestAware(this::listServiceInstances));
         server.createContext("/v1/health/service", requestAware(this::listServiceHealth));
@@ -591,6 +592,24 @@ public final class HttpApiServer implements AutoCloseable {
             services.put(service, tags);
         }
         respondJson(exchange, 200, services);
+    }
+
+    /** One node's services in the read's scope, as Consul's {@code /v1/catalog/node-services/:node}. */
+    private void listNodeServices(HttpExchange exchange) throws IOException {
+        if (!prepareCatalogRequest(exchange, "GET")) return;
+        String node = pathParameter(exchange, "/v1/catalog/node-services/");
+        if (node == null) {
+            respondError(exchange, 400, "node_name_required", "Node name is required", false);
+            return;
+        }
+        ReadScope scope = readScope(exchange);
+        if (scope == null) return;
+        setAppliedIndex(exchange);
+        respondJson(exchange, 200, stateStore.getServiceCatalog().instances().stream()
+                .filter(instance -> node.equals(instance.nodeId())
+                        && scope.tenantId().equals(instance.tenantId())
+                        && scope.namespace().equals(instance.namespace()))
+                .toList());
     }
 
     private void listServiceInstances(HttpExchange exchange) throws IOException {

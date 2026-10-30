@@ -19,9 +19,6 @@ package dev.mars.qraft.client.config;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import dev.mars.qraft.client.health.HealthCheckDefinition;
-import dev.mars.qraft.client.health.HttpCheck;
-import dev.mars.qraft.client.health.TcpCheck;
-import dev.mars.qraft.client.health.TtlCheck;
 import dev.mars.qraft.common.ServiceDefinition;
 import dev.mars.qraft.common.config.JsonSettings;
 
@@ -33,15 +30,16 @@ import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 
+import static dev.mars.qraft.client.config.DefinitionJson.optionalText;
+import static dev.mars.qraft.client.config.DefinitionJson.requiredText;
+import static dev.mars.qraft.client.config.DefinitionJson.stringList;
+import static dev.mars.qraft.client.config.DefinitionJson.stringMap;
 import static dev.mars.qraft.common.config.JsonSettings.optionalBoolean;
 import static dev.mars.qraft.common.config.JsonSettings.optionalInt;
 import static dev.mars.qraft.common.config.JsonSettings.optionalLong;
@@ -223,118 +221,9 @@ public final class ClientConfiguration {
                     stringList(service.get("tags"), "tags"), stringMap(service.get("metadata")),
                     optionalBoolean(service, "enabled", true));
             definitions.add(definition);
-            checks.addAll(parseChecks(service.get("checks"), definition));
+            checks.addAll(DefinitionJson.parseChecks(service.get("checks"), definition, "catalog.services[].checks"));
         }
         return List.copyOf(definitions);
-    }
-
-    private static List<HealthCheckDefinition> parseChecks(JsonNode checks, ServiceDefinition service) {
-        if (checks == null || checks.isNull()) return List.of();
-        if (!checks.isArray()) throw new IllegalArgumentException("catalog.services[].checks must be an array");
-        List<HealthCheckDefinition> definitions = new ArrayList<>();
-        Set<String> ids = new LinkedHashSet<>();
-        for (JsonNode check : checks) {
-            if (!check.isObject()) throw new IllegalArgumentException("Each health check must be an object");
-            String id = requiredText(check, "id");
-            if (!ids.add(id)) {
-                throw new IllegalArgumentException("Duplicate health check id " + id + " for service " + service.id());
-            }
-            definitions.add(parseCheck(check, id, service));
-        }
-        return definitions;
-    }
-
-    private static HealthCheckDefinition parseCheck(JsonNode check, String id, ServiceDefinition service) {
-        String location = "catalog.services[].checks[]";
-        String type = requiredText(check, "type");
-        boolean required = optionalBoolean(check, "required", true);
-        Duration deregisterAfter = Duration.ofMillis(optionalLong(check, "deregisterAfterMs", 0));
-        return switch (type) {
-            case "http" -> {
-                rejectUnknown(check, location, "id", "type", "required", "url",
-                        "intervalMs", "timeoutMs", "ttlMs", "deregisterAfterMs");
-                CheckTiming timing = CheckTiming.parse(check);
-                yield new HttpCheck(service.id(), id, checkUrl(requiredText(check, "url")),
-                        timing.interval(), timing.timeout(), timing.ttl(), required, deregisterAfter);
-            }
-            case "tcp" -> {
-                rejectUnknown(check, location, "id", "type", "required", "address", "port",
-                        "intervalMs", "timeoutMs", "ttlMs", "deregisterAfterMs", "warnAfterMs");
-                CheckTiming timing = CheckTiming.parse(check);
-                yield new TcpCheck(service.id(), id, optionalText(check, "address", service.address()),
-                        optionalInt(check, "port", service.port()),
-                        timing.interval(), timing.timeout(), timing.ttl(), required, deregisterAfter,
-                        Duration.ofMillis(optionalLong(check, "warnAfterMs", 0)));
-            }
-            case "ttl" -> {
-                rejectUnknown(check, location, "id", "type", "required", "ttlMs", "deregisterAfterMs");
-                if (!check.has("ttlMs")) throw new IllegalArgumentException("ttlMs is required for a ttl check");
-                yield new TtlCheck(service.id(), id, Duration.ofMillis(optionalLong(check, "ttlMs", 0)), required,
-                        deregisterAfter);
-            }
-            default -> throw new IllegalArgumentException("Unsupported health check type: " + type);
-        };
-    }
-
-    private static URI checkUrl(String value) {
-        try {
-            return new URI(value);
-        } catch (URISyntaxException error) {
-            throw new IllegalArgumentException("Malformed health check url: " + value, error);
-        }
-    }
-
-    /** Probe timing: interval defaults to 10s, timeout to min(2s, interval), and ttl to three intervals. */
-    private record CheckTiming(Duration interval, Duration timeout, Duration ttl) {
-        static CheckTiming parse(JsonNode check) {
-            long interval = optionalLong(check, "intervalMs", 10_000);
-            if (interval < 1) throw new IllegalArgumentException("intervalMs must be positive");
-            if (interval > Long.MAX_VALUE / 3) throw new IllegalArgumentException("intervalMs is too large");
-            long timeout = optionalLong(check, "timeoutMs", Math.min(2_000, interval));
-            long ttl = optionalLong(check, "ttlMs", interval * 3);
-            return new CheckTiming(Duration.ofMillis(interval), Duration.ofMillis(timeout), Duration.ofMillis(ttl));
-        }
-    }
-
-    private static List<String> stringList(JsonNode node, String field) {
-        if (node == null || node.isNull()) return List.of();
-        if (!node.isArray()) throw new IllegalArgumentException(field + " must be an array");
-        List<String> values = new ArrayList<>();
-        node.forEach(value -> {
-            if (!value.isTextual()) throw new IllegalArgumentException(field + " entries must be strings");
-            values.add(value.textValue());
-        });
-        return values;
-    }
-
-    private static Map<String, String> stringMap(JsonNode node) {
-        if (node == null || node.isNull()) return Map.of();
-        if (!node.isObject()) throw new IllegalArgumentException("metadata must be an object");
-        Map<String, String> values = new LinkedHashMap<>();
-        node.fields().forEachRemaining(entry -> {
-            if (!entry.getValue().isTextual()) {
-                throw new IllegalArgumentException("metadata values must be strings");
-            }
-            values.put(entry.getKey(), entry.getValue().textValue());
-        });
-        return values;
-    }
-
-    private static String requiredText(JsonNode parent, String field) {
-        JsonNode value = parent.get(field);
-        if (value == null || !value.isTextual() || value.textValue().isBlank()) {
-            throw new IllegalArgumentException(field + " must be a non-blank string");
-        }
-        return value.textValue().trim();
-    }
-
-    private static String optionalText(JsonNode parent, String field, String fallback) {
-        JsonNode value = parent.get(field);
-        if (value == null || value.isNull()) return fallback;
-        if (!value.isTextual() || value.textValue().isBlank()) {
-            throw new IllegalArgumentException(field + " must be a non-blank string");
-        }
-        return value.textValue().trim();
     }
 
     /**
@@ -484,9 +373,9 @@ public final class ClientConfiguration {
                     throw new IllegalArgumentException("Health check " + check.checkId()
                             + " refers to unknown catalog service " + check.serviceId());
                 }
-                if (!checkIds.add(check.serviceId() + "/" + check.checkId())) {
+                if (!checkIds.add(check.checkId())) {
                     throw new IllegalArgumentException("Duplicate health check id " + check.checkId()
-                            + " for service " + check.serviceId());
+                            + ": a check ID is unique on a client, as Consul's is per agent");
                 }
             }
             return new ClientConfiguration(this);

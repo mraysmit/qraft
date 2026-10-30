@@ -303,12 +303,12 @@ class QraftClientTest {
                         new ServiceDefinition("legacy", "legacy", "127.0.0.1", 8081, List.of(), Map.of(), false)))
                 .healthChecks(List.of(
                         new dev.mars.qraft.client.health.TtlCheck("web", "app", Duration.ofSeconds(30), true),
-                        new dev.mars.qraft.client.health.TtlCheck("legacy", "app", Duration.ofSeconds(30), true)))
+                        new dev.mars.qraft.client.health.TtlCheck("legacy", "legacy-app", Duration.ofSeconds(30), true)))
                 .build();
         QraftClient client = new QraftClient(config);
         try {
             assertTrue(client.statusReporter("web", "app").isPresent(), "an enabled service's check runs");
-            assertTrue(client.statusReporter("legacy", "app").isEmpty(),
+            assertTrue(client.statusReporter("legacy", "legacy-app").isEmpty(),
                     "a disabled service is not registered, so its checks are never run or reported");
         } finally {
             client.shutdown().get(10, TimeUnit.SECONDS);

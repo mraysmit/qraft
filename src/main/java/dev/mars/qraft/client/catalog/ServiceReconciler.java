@@ -27,9 +27,11 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -100,18 +102,26 @@ public final class ServiceReconciler {
         desiredDefinitions.stream().filter(ServiceDefinition::enabled)
                 .forEach(definition -> desired.put(definition.id(), definition));
         Pass pass = new Pass();
-        CompletableFuture<Void> sequence = CompletableFuture.completedFuture(null);
-
-        for (String serviceId : List.copyOf(registered.keySet())) {
-            if (!desired.containsKey(serviceId)) {
-                sequence = sequence.thenCompose(ignored -> deregister(serviceId, pass));
-            }
-        }
-        for (ServiceDefinition definition : desired.values()) {
-            sequence = sequence.thenCompose(ignored -> reconcile(definition, pass));
-        }
-        return sequence.thenApply(ignored -> new Result(pass.registered, pass.deregistered,
-                Map.copyOf(pass.rejections), lastSuccessfulContact));
+        return CompletableFuture.completedFuture(null)
+                .thenCompose(ignored -> client.nodeServices())
+                .thenCompose(listed -> {
+                    // As Consul's anti-entropy, a service the catalog holds for this node and the node does not want
+                    // is removed. What this process registered is not enough: a deregistration accepted just before
+                    // a crash, or a definition removed while the client was down, is known only to the catalog.
+                    Set<String> unwanted = new LinkedHashSet<>(registered.keySet());
+                    listed.ifPresent(unwanted::addAll);
+                    unwanted.removeAll(desired.keySet());
+                    CompletableFuture<Void> sequence = CompletableFuture.completedFuture(null);
+                    for (String serviceId : unwanted) {
+                        sequence = sequence.thenCompose(ignored -> deregister(serviceId, pass));
+                    }
+                    for (ServiceDefinition definition : desired.values()) {
+                        sequence = sequence.thenCompose(ignored -> reconcile(definition, pass));
+                    }
+                    return sequence;
+                })
+                .thenApply(ignored -> new Result(pass.registered, pass.deregistered,
+                        Map.copyOf(pass.rejections), lastSuccessfulContact));
     }
 
     private CompletableFuture<Void> deregister(String serviceId, Pass pass) {

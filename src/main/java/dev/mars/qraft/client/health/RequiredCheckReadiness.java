@@ -20,7 +20,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
 
 /**
  * Readiness input derived from local check results: satisfied only when every required check has
@@ -31,19 +30,29 @@ import java.util.stream.Collectors;
  * @version 1.0
  */
 public final class RequiredCheckReadiness implements CheckResultListener {
-    private final Set<CheckKey> required;
+    private final Set<CheckKey> required = ConcurrentHashMap.newKeySet();
     private final Map<CheckKey, CheckStatus> latest = new ConcurrentHashMap<>();
 
     public RequiredCheckReadiness(List<HealthCheckDefinition> checks) {
-        required = checks.stream().filter(HealthCheckDefinition::required)
-                .map(check -> new CheckKey(check.serviceId(), check.checkId()))
-                .collect(Collectors.toUnmodifiableSet());
+        checks.forEach(this::add);
     }
 
     @Override
     public void onResult(HealthCheckDefinition check, CheckResult result) {
         CheckKey key = new CheckKey(check.serviceId(), check.checkId());
         if (required.contains(key)) latest.put(key, result.status());
+    }
+
+    /** Counts a check added while the client runs: if it is required, it holds readiness back until it reports. */
+    public void add(HealthCheckDefinition check) {
+        if (check.required()) required.add(new CheckKey(check.serviceId(), check.checkId()));
+    }
+
+    /** Stops counting a removed check, and forgets its result. */
+    public void remove(HealthCheckDefinition check) {
+        CheckKey key = new CheckKey(check.serviceId(), check.checkId());
+        required.remove(key);
+        latest.remove(key);
     }
 
     public boolean isSatisfied() {
