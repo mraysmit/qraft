@@ -2,8 +2,8 @@
 
 **Date:** 2026-10-05
 **Status:** Proposed. Section 4's items are recommendations to confirm or change, except the points marked "Decided 2026-10-09", in proposals 11, 12, and 14, and those marked "Decided 2026-10-27", in proposals 12 and 16 to 19. Proposal 16's default profile is a recommendation. No point is open. No code exists.
-**Proposed start:** after [`task-list-consul-style-client-2026-10-30.md`](task-list-consul-style-client-2026-10-30.md) (proposal 15).
-**Last updated:** 2026-10-30 (renamed with the client list, which changed; nothing else changed that day. Earlier, 2026-10-29: renamed with the client list, which changed; nothing else changed. Earlier, 2026-10-28: renamed with the client list, which changed; nothing else changed. Earlier, 2026-10-27: the review of the administrative interface against this list: four points decided by the owner: a security profile, proposal 16; a lock-out guard on the server, proposal 17; a policy that tokens link to cannot be deleted, proposal 18, which settles Phase 1's open item; and a server-side explanation of a decision, proposal 19. Proposal 12 gains the marker for a token installed from the file, and its revocation order follows from proposal 17. Phases 1, 2, 3, 5 and 9 gain the tasks. Renamed to the date of its last change, with the client list. Earlier, 2026-10-26: renamed with the client list, which became active; nothing else changed. Earlier, 2026-10-21: renamed with linked documents; this list remains proposed after the client list. Earlier, 2026-10-11: the rule that guards need recorded mutations removed at the owner's decision, from the rules and from four exits; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: proposal 11 brought in line with the node routes and with what a node's deregistration removes; the file renamed to the date of its last change; four points decided: the authorize call; revoking the management token; Consul's rule for registering a service, which needs `service:write` alone on a registered node; and a client certificate on the server's HTTP listener, for the transport security list)
+**Proposed start:** after [`task-list-consul-style-client-2026-10-31.md`](task-list-consul-style-client-2026-10-31.md) (proposal 15).
+**Last updated:** 2026-10-31 (renamed with the client list; the token for the client's anti-entropy removals read in Consul's source and recommended to follow it, in proposal 11 and Phase 6; Consul's anti-entropy moved from the recalled items to what has been read. Earlier, 2026-10-30: proposal 11's planted instance corrected: the client's reconciler has had anti-entropy since `c33a2f2`, which opens the point of the token its removals use, added to Phase 6; the rule on who runs builds corrected. Earlier the same day: renamed with the client list, which changed; nothing else changed. Earlier, 2026-10-29: renamed with the client list, which changed; nothing else changed. Earlier, 2026-10-28: renamed with the client list, which changed; nothing else changed. Earlier, 2026-10-27: the review of the administrative interface against this list: four points decided by the owner: a security profile, proposal 16; a lock-out guard on the server, proposal 17; a policy that tokens link to cannot be deleted, proposal 18, which settles Phase 1's open item; and a server-side explanation of a decision, proposal 19. Proposal 12 gains the marker for a token installed from the file, and its revocation order follows from proposal 17. Phases 1, 2, 3, 5 and 9 gain the tasks. Renamed to the date of its last change, with the client list. Earlier, 2026-10-26: renamed with the client list, which became active; nothing else changed. Earlier, 2026-10-21: renamed with linked documents; this list remains proposed after the client list. Earlier, 2026-10-11: the rule that guards need recorded mutations removed at the owner's decision, from the rules and from four exits; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: proposal 11 brought in line with the node routes and with what a node's deregistration removes; the file renamed to the date of its last change; four points decided: the authorize call; revoking the management token; Consul's rule for registering a service, which needs `service:write` alone on a registered node; and a client certificate on the server's HTTP listener, for the transport security list)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 7.3, 12, 15, 16 and 22
 **Related:** the client list's decisions 6 and 8; decision 6 of [`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md), the operator token; item 9 of [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md); phase 7 of [`CONSUL_FEATURE_IMPLEMENTATION_PLAN.md`](CONSUL_FEATURE_IMPLEMENTATION_PLAN.md); section 10.2 of [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md), the administrative interface's access control
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
@@ -117,6 +117,12 @@ the end of this section.
   Reading and listing need `acl:read`, which sees secrets redacted.
   `/acl/token/self` needs no privilege. An expiry set through the API must be
   between one minute and 24 hours ahead.
+- **Anti-entropy.** Read on 2026-10-31 in `updateSyncState`, in Consul's
+  `agent/local/state.go`: "Mark a remote service that does not exist locally as
+  deleted so that it will be removed on the server later." Its removal uses the
+  agent's token: "Always use the agent token to delete without trying the service
+  token." A denial is logged as a warning, "Service deregistration blocked by
+  ACLs", and the service is not tried again until the next full sync.
 
 Recalled, and not found in the pages read. Verify each before relying on it:
 
@@ -127,10 +133,6 @@ Recalled, and not found in the pages read. Verify each before relying on it:
 - A registration under a name held by another node ID is refused unless the
   holder's gossip health is failing. This is the rule the client list's
   decision 8 follows.
-- A Consul agent removes from the catalog a service on its node that it does
-  not know. The anti-entropy page, read on 2026-10-09, says only that the
-  Consul agent's view is authoritative and that differences are settled in
-  its favour.
 
 Sources:
 - [ACL tokens](https://developer.hashicorp.com/consul/docs/secure/acl/token)
@@ -148,6 +150,7 @@ Sources:
   write calls to listed networks
 - [Consul `catalog_endpoint.go`](https://github.com/hashicorp/consul/blob/main/agent/consul/catalog_endpoint.go)
 - [Anti-entropy](https://developer.hashicorp.com/consul/docs/architecture/anti-entropy)
+- [Consul `agent/local/state.go`](https://github.com/hashicorp/consul/blob/main/agent/local/state.go)
 
 ## 4. Proposed decisions
 
@@ -301,12 +304,19 @@ so and why.
       clients reach them over the HTTP API (client list, decision 2). So
       Qraft takes the second: proposal 14's transport security list makes
       the server's HTTP listener require a client certificate.
-    - **A planted instance** stays until someone deregisters it: the client's
-      `ServiceReconciler` deregisters only what it registered itself. Making
-      the client remove the services on its node that it did not register is
-      left for later, if it is wanted. Since 2026-10-09 a planted instance
-      also goes when its node is deregistered or reaped: both remove every
-      service on the node.
+    - **A planted instance** in the client's tenant and namespace goes at the
+      client's next pass: since 2026-10-30 `ServiceReconciler` removes what the
+      catalog holds for its node and its source does not want (client list,
+      Phase 4). In another scope it stays until someone deregisters it. Since
+      2026-10-09 a planted instance also goes when its node is deregistered or
+      reaped: both remove every service on the node.
+    - **The token for those removals: the client's own, as in Consul** (section
+      3). Removing a service needs `service:write` on its name, and proposal 13's
+      client token holds that only for the client's configured services. So with
+      ACLs a planted instance the client's token cannot write stays. The client
+      logs a warning and tries again on its next pass, without stopping the pass
+      or reporting not ready for it. An operator who wants these removed gives
+      the client's token `service:write` on them.
     - **Rejected: two credentials on a synced service write,** the client's
       own token for the node and the registration's for the service. It
       would have tied a registration to a node, at the cost of a second
@@ -508,7 +518,8 @@ against this list on 2026-10-27. The owner decided each of them that day.
 - A phase without its own exit line exits on these rules, with each of its
   endpoints and commands tested over real HTTP. Added 2026-10-08, for
   Phases 5 and 8.
-- The user runs the builds and commits.
+- The owner commits. The main verification runs on Jenkins
+  ([`docs/JENKINS.md`](../docs/JENKINS.md)).
 
 ## 6. Tasks
 
@@ -609,6 +620,9 @@ With ACLs disabled, every existing test passes unchanged.
 - [ ] Keep each API registration's token with it in the data directory, and
   sync that service under it.
 - [ ] Authorize the client's own endpoints through the server.
+- [ ] Remove a service the client does not know under the client's own token. A
+  denial is a warning, not a rejected outcome: it does not make the client not
+  ready (proposal 11).
 
 **Exit:** `ClientServerContractTest` covers every client call with a
 sufficient token, an insufficient one, and none.

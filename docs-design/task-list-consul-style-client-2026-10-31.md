@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-04
 **Status:** Active from 2026-10-26, with Phase 1. The `client` package and new node model and routes were delivered by [`task-list-single-pom-and-quorus-removal-2026-10-21.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md), completed and archived on 2026-10-14. The membership list ([`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md)) was completed and archived on 2026-10-24, and Pre-Vote followed on 2026-10-25 and 2026-10-26, so nothing precedes this list. The sequencing decision of 2026-10-05 stands: this list, then the ACL list. The owner confirmed it on 2026-10-26 when asked whether key/value completion should go first, and said the embedded administrative interface waits until the other outstanding work is done.
-**Last updated:** 2026-10-30 (Phase 3 closed: the local API on `client.bindAddress`, `127.0.0.1` by default as Consul's `client_addr`, request handling shared with the server through `common.http.JsonApi` with a 512 KiB body limit, and writes refused once shutdown begins. Earlier the same day: Phase 2 closed: the server side built test first, the node-identity fixtures, the determinism test and the design record, with writes from a node of another ID refused as Consul refuses them; its exit met on a local run. Earlier, 2026-10-29: decision 8 checked against Consul's catalog code and four points decided by the owner: a rename follows Consul, removing the node under its old name with its services and checks; a node without an ID can be claimed by a registration that carries one; names conflict regardless of case; a `REGISTERING` node holds its name. Phase 2's server task and exit follow. Earlier, 2026-10-28: Phase 2's three client tasks recorded as done: the data directory and its lock, the node ID kept through a shared identity file, and `client.nodeName`; the server side remains. Earlier, 2026-10-27: Phase 1 closed on a local run of the three suites, no Jenkins being reachable; Phase 2 started. Earlier the same day: renamed with the ACL list, which changed. Earlier, 2026-10-26: Phase 1 built, with local checks only; the full suites run on Jenkins before it is closed. Earlier the same day: started, membership and Pre-Vote complete. Earlier, 2026-10-21: membership Step 5 completed; Steps 6 to 8 remain the preceding work; this client list is still proposed; renamed with linked documents. Earlier, 2026-10-14: cleanup prerequisites completed and archived; membership Steps 5 to 8 remain the preceding work. On 2026-10-11: the rule that guards need mutation evidence removed at the owner's decision, from the rules and from one exit; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: decisions 5 and 8: what a node's deregistration removes, and the `client.hostname` setting; the file renamed to the date of its last change; the single-POM list's Phase 3A replaced Qraft's two retired words here and everywhere; decision 10 records the configuration names, and decision 3 the path of the local API. On 2026-10-08, the review with the other task lists: the request bodies of decision 5 and the log audit in the rules)
+**Last updated:** 2026-10-31 (Phase 4's five tasks built, test first, checked against Consul's agent; its exit waits for the full suites. Earlier, 2026-10-30: Phase 4 started: `c33a2f2` recorded, with client anti-entropy, a check ID unique across a client, and the groundwork for each task, none of them complete, verified by Jenkins build 56; decision 8's reason for the server's removal corrected to match; the rule on who runs builds corrected. Earlier the same day: Phase 3 closed: the local API on `client.bindAddress`, `127.0.0.1` by default as Consul's `client_addr`, request handling shared with the server through `common.http.JsonApi` with a 512 KiB body limit, and writes refused once shutdown begins. Earlier the same day: Phase 2 closed: the server side built test first, the node-identity fixtures, the determinism test and the design record, with writes from a node of another ID refused as Consul refuses them; its exit met on a local run. Earlier, 2026-10-29: decision 8 checked against Consul's catalog code and four points decided by the owner: a rename follows Consul, removing the node under its old name with its services and checks; a node without an ID can be claimed by a registration that carries one; names conflict regardless of case; a `REGISTERING` node holds its name. Phase 2's server task and exit follow. Earlier, 2026-10-28: Phase 2's three client tasks recorded as done: the data directory and its lock, the node ID kept through a shared identity file, and `client.nodeName`; the server side remains. Earlier, 2026-10-27: Phase 1 closed on a local run of the three suites, no Jenkins being reachable; Phase 2 started. Earlier the same day: renamed with the ACL list, which changed. Earlier, 2026-10-26: Phase 1 built, with local checks only; the full suites run on Jenkins before it is closed. Earlier the same day: started, membership and Pre-Vote complete. Earlier, 2026-10-21: membership Step 5 completed; Steps 6 to 8 remain the preceding work; this client list is still proposed; renamed with linked documents. Earlier, 2026-10-14: cleanup prerequisites completed and archived; membership Steps 5 to 8 remain the preceding work. On 2026-10-11: the rule that guards need mutation evidence removed at the owner's decision, from the rules and from one exit; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: decisions 5 and 8: what a node's deregistration removes, and the `client.hostname` setting; the file renamed to the date of its last change; the single-POM list's Phase 3A replaced Qraft's two retired words here and everywhere; decision 10 records the configuration names, and decision 3 the path of the local API. On 2026-10-08, the review with the other task lists: the request bodies of decision 5 and the log audit in the rules)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 4.3, 5, 6.2, 7.3, 8, 12.1 and 16
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
@@ -58,7 +58,7 @@ decision 10 on 2026-10-09. Decisions 5 to 8 follow the Consul pattern.
      replicated step, as in Consul (decided by the user on 2026-10-09).
 6. **The local API binds to `127.0.0.1` by default,** like Consul's
    `client_addr`. It has no authentication until
-   [`task-list-acl-and-tokens-2026-10-30.md`](task-list-acl-and-tokens-2026-10-30.md),
+   [`task-list-acl-and-tokens-2026-10-31.md`](task-list-acl-and-tokens-2026-10-31.md),
    which is proposed to follow this list; liveness and readiness share the
    same listener.
 7. **Registrations follow Consul's rules.**
@@ -68,6 +68,12 @@ decision 10 on 2026-10-09. Decisions 5 to 8 follow the Consul pattern.
      including for a service defined in the configuration file.
    - At startup, the configuration file's services are registered again and
      take precedence over a kept API registration with the same ID.
+   - Checked against Consul's `agent/agent.go` on 2026-10-31, and built in
+     Phase 4. The kept copy of an ID the file defines is purged (`loadServices`:
+     "service exists, not restoring from file"), and a kept check that cannot
+     be restored is purged (`loadChecks`: "Failed to restore check"). One
+     departure: Consul logs a file it cannot decode and goes on, and a client
+     stops, as Phase 4 asks.
 8. **Node identity follows Consul.**
    - `client.dataDirectory` is required.
    - A node ID (UUID) is generated at the first start and kept in
@@ -97,9 +103,10 @@ decision 10 on 2026-10-09. Decisions 5 to 8 follow the Consul pattern.
      would otherwise pass to the new ID. The command that gives the name to
      the new ID deregisters them in the same replicated step. The new node
      starts with nothing and registers its own. Consul instead leaves them for
-     the new agent's anti-entropy, which deletes what it did not register;
-     Qraft's reconciler removes only what it registered itself, so the server
-     must.
+     the new agent's anti-entropy, which deletes what it did not register.
+     Qraft's reconciler has done the same since 2026-10-30 (Phase 4), but only
+     in its own tenant and namespace and not before its first pass, so the
+     server still removes them.
    - An old node that comes back after a takeover is another node ID asking
      for a held name. The rule above applies to it: it is refused with
      `node_name_reserved` while the new holder is healthy.
@@ -159,7 +166,8 @@ decision 10 on 2026-10-09. Decisions 5 to 8 follow the Consul pattern.
   `docs/TESTING.md`, "Intentional error flags and log auditing"). A test that
   causes an error on purpose declares it. Added 2026-10-08: this list predates
   the logging policy.
-- The user runs the builds and commits.
+- The owner commits. The main verification runs on Jenkins
+  ([`docs/JENKINS.md`](../docs/JENKINS.md)).
 
 ## 4. Tasks
 
@@ -366,17 +374,71 @@ trace.
 
 ### Phase 4. Services and checks through the API
 
-- [ ] Services: `PUT /v1/client/service/register` (optionally with checks),
+Groundwork came with `c33a2f2` on 2026-10-30, which Jenkins build 56 passed with
+clean logs ([`docs/JENKINS.md`](../docs/JENKINS.md)); nothing records whether its
+tests were seen red first. The five tasks were built on 2026-10-31, test first:
+53 of the 104 tests in the affected classes were seen red on stubs, each on an
+assertion or on what a stub left empty. Checked against Consul's
+`agent/agent_endpoint.go`, `agent/agent.go` and `agent/local/state.go`.
+
+- [x] Services: `PUT /v1/client/service/register` (optionally with checks),
   `PUT /v1/client/service/deregister/{serviceId}`, `GET /v1/client/services`, and
   `GET /v1/client/service/{serviceId}`.
-- [ ] Checks: `PUT /v1/client/check/register`,
+  Done 2026-10-31 (`LocalRegistrationRoutes`, `LocalRegistrationRoutesTest`, over
+  real HTTP). As in Consul: the ID defaults to the name and the address to the
+  client's; a registration keeps the service's other checks unless
+  `replace-existing-checks` is given with no value or `true`; an unknown service
+  reads as 404 (`service_not_found`); removing one that is not registered is not an
+  error, answering `deregistered: false`.
+- [x] Checks: `PUT /v1/client/check/register`,
   `PUT /v1/client/check/deregister/{checkId}`, and `GET /v1/client/checks`.
-- [ ] Feed the reconciler one definition source, file plus API definitions,
+  Done 2026-10-31. A check for a service that is not registered is a 404, as
+  Consul's "ServiceID does not exist". A check always names a service: Consul's
+  node-level checks are not in this list. The listing carries each check's latest
+  status, output and time once it has reported.
+- [x] Feed the reconciler one definition source, file plus API definitions,
   through its existing `Supplier` contract, with the rules of decision 7.
-- [ ] Keep API registrations atomically in the data directory, restore them at
+  Done 2026-10-31 (`LocalDefinitions`, `LocalDefinitionsTest`). Beyond the task: the
+  reconciler is told of a change (`ServiceReconciler.definitionsChanged`), as
+  Consul's agent triggers a sync. A pass that is running read the old definitions,
+  so one more runs after it, and none once shutdown has begun
+  (`ServiceReconcilerTest`). Reads of the source take no lock, because the reconciler
+  reads it under its own lock and a change tells the reconciler under the source's.
+- [x] Keep API registrations atomically in the data directory, restore them at
   startup, and fail startup on an unreadable file.
-- [ ] Start and stop local checks with registration and deregistration. The
+  Done 2026-10-31 (`RegistrationStore`, `RegistrationStoreTest`): one versioned file,
+  `registrations.json`, written through `common.storage.DurableFile`, which
+  `IdentityFile` now shares. A change is kept before it takes effect, so one that
+  cannot be kept answers 500 `registration_not_kept`, retryable, with nothing
+  changed. A file that cannot be read stops the client before it opens a listener
+  and lets the directory go (`QraftClientTest`).
+- [x] Start and stop local checks with registration and deregistration. The
   published declared-check set follows the change.
+  Done 2026-10-31 (`QraftClientTest`): readiness counts a required check from when
+  it is registered until it is removed, publication forgets a removed check, and a
+  service is sent again declaring its new set of checks. A check that changed is
+  removed and added, so it starts afresh; registering the same again disturbs
+  nothing.
+- [x] Beyond the list, as Consul's anti-entropy: the reconciler removes what the
+  catalog holds for its node and its source does not want, whoever registered it.
+  Done 2026-10-30, in `c33a2f2`. A pass reads
+  `GET /v1/catalog/node-services/{nodeName}`, a new server route named after
+  Consul's (`HttpApiServerCatalogServiceRoutesTest`, `ClientServerContractTest`),
+  and keeps what is in the client's tenant and namespace (`HttpCatalogClientTest`).
+  A disabled definition still held is removed, a service both remembered and listed
+  is removed once, a pass goes on when no server can list, and nothing is read while
+  the node is not registered (`ServiceReconcilerTest`). Design section 8.2. Read in
+  Consul's `agent/local/state.go` on 2026-10-31: "Mark a remote service that does
+  not exist locally as deleted so that it will be removed on the server later."
+- [x] Beyond the list, as Consul's rule per agent: a check ID is unique across a
+  client, not only within its service. Done 2026-10-30, in `c33a2f2`
+  (`ClientConfigurationTest.aCheckIdIsUniqueAcrossTheClientsServicesAsConsulsIsPerAgent`).
+  Design section 16.
+
+**Exit:** none of its own; the list's rules, with each endpoint tested over real
+HTTP. Not met yet: local checks only, the 352 tests of the client and common
+packages with the contract tests, and the changed classes five times in a row. The
+full suites run on Jenkins once the owner has pushed this.
 
 ### Phase 5. TTL status and maintenance
 
@@ -431,8 +493,9 @@ trace.
 - [ ] Check that the design's sections 4.3, 5, 6.2, 7.3, 8, 12.1 and 16 were
   updated in their phases: applications talk to their local client, node
   identity, and the path split.
-- [ ] Update the feature validation (persisted generated node identity is now
-  delivered), the Consul plan checklist, and the Docker client example.
+- [ ] Update the feature validation and the Consul plan checklist for what this
+  list delivers, and the Docker client example. Their node identity entries were
+  updated on 2026-10-30.
 
 **Exit:** Full suites on a fresh image; changed concurrency tests pass five
 consecutive runs; audits as in the other lists.
@@ -443,7 +506,7 @@ consecutive runs; audits as in the other lists.
 - Authentication and ACLs, on the local API and on the server. Until they
   exist, decision 8 detects a conflicting node identity but cannot stop a
   caller from claiming one. Proposed in
-  [`task-list-acl-and-tokens-2026-10-30.md`](task-list-acl-and-tokens-2026-10-30.md).
+  [`task-list-acl-and-tokens-2026-10-31.md`](task-list-acl-and-tokens-2026-10-31.md).
 - Forwarding key/value, sessions, consistency modes, and blocking queries. Each
   is added when the corresponding server feature lands.
 - Response caching in the client, gossip, and configuration-file reload.

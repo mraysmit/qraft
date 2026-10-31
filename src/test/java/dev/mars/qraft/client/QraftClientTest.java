@@ -699,6 +699,145 @@ class QraftClientTest {
         }
     }
 
+    @Test
+    void aServiceRegisteredThroughTheLocalApiReachesTheServersWithItsChecksAndLeavesWhenDeregistered() throws Exception {
+        List<JsonNode> registrations = new CopyOnWriteArrayList<>();
+        List<String> deregistrations = new CopyOnWriteArrayList<>();
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext(NodeAnswerHelper.REGISTER, NodeAnswerHelper.dispatching("service", (exchange, body) -> {
+            registrations.add(body.path("service"));
+            NodeAnswerHelper.serviceRegistered(exchange, body.path("service").path("serviceId").asText());
+        }, exchange -> NodeAnswerHelper.answer(exchange, 200, "registered", true)));
+        server.createContext(NodeAnswerHelper.DEREGISTER, NodeAnswerHelper.dispatching("serviceId", (exchange, body) -> {
+            deregistrations.add(body.path("serviceId").asText());
+            NodeAnswerHelper.serviceDeregistered(exchange, body.path("serviceId").asText(), true);
+        }, exchange -> NodeAnswerHelper.answer(exchange, 200, "deregistered", true)));
+        server.start();
+        QraftClient client = new QraftClient(clientConfigWithoutServices());
+
+        try {
+            assertTrue(client.start().get(10, TimeUnit.SECONDS));
+
+            assertEquals(200, localApi(client, "PUT", "/v1/client/service/register", """
+                    {"id":"api-1","name":"api","port":9000,"checks":[{"id":"app","type":"ttl","ttlMs":30000}]}
+                    """));
+
+            awaitTrue(() -> !registrations.isEmpty(), "a registration is sent without waiting for the periodic pass");
+            assertEquals("api-1", registrations.getFirst().path("serviceId").asText());
+            assertEquals("127.0.0.1", registrations.getFirst().path("address").asText());
+            assertEquals("app", registrations.getFirst().path("checks").path(0).asText(),
+                    "the service declares its check, or the server would refuse its observations");
+            assertTrue(client.statusReporter("api-1", "app").isPresent(), "its check runs");
+
+            assertEquals(200, localApi(client, "PUT", "/v1/client/check/deregister/app", null));
+            awaitTrue(() -> registrations.size() == 2, "the service is sent again, no longer declaring the check");
+            assertEquals(0, registrations.getLast().path("checks").size());
+            assertTrue(client.statusReporter("api-1", "app").isEmpty(), "its check stopped");
+
+            assertEquals(200, localApi(client, "PUT", "/v1/client/service/deregister/api-1", null));
+            awaitTrue(() -> deregistrations.contains("api-1"), "a deregistration is sent at once as well");
+        } finally {
+            client.shutdown().get(10, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void aRequiredCheckRegisteredThroughTheLocalApiHoldsReadinessBackUntilItReportsOrGoes() throws Exception {
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext(NodeAnswerHelper.REGISTER, NodeAnswerHelper.dispatching("service",
+                (exchange, body) -> NodeAnswerHelper.serviceRegistered(exchange, body.path("service").path("serviceId").asText()),
+                exchange -> NodeAnswerHelper.answer(exchange, 200, "registered", true)));
+        server.createContext(NodeAnswerHelper.DEREGISTER, NodeAnswerHelper.dispatching("serviceId",
+                (exchange, body) -> NodeAnswerHelper.serviceDeregistered(exchange, body.path("serviceId").asText(), true),
+                exchange -> NodeAnswerHelper.answer(exchange, 200, "deregistered", true)));
+        server.start();
+        QraftClient client = new QraftClient(clientConfigWithoutServices());
+
+        try {
+            assertTrue(client.start().get(10, TimeUnit.SECONDS));
+            awaitTrue(() -> client.localApi().isReady(), "a client with nothing to register is ready");
+
+            assertEquals(200, localApi(client, "PUT", "/v1/client/service/register", """
+                    {"id":"api-1","name":"api","port":9000,"checks":[{"id":"app","type":"ttl","ttlMs":30000}]}
+                    """));
+            awaitTrue(() -> client.serviceReconciler().registeredCount() == 1, "the service is registered");
+            assertFalse(client.localApi().isReady(), "its required check has not reported");
+
+            assertTrue(client.statusReporter("api-1", "app").orElseThrow()
+                    .report(dev.mars.qraft.client.health.CheckStatus.PASSING, "ok"));
+            awaitTrue(() -> client.localApi().isReady(), "the check reported passing");
+
+            assertEquals(200, localApi(client, "PUT", "/v1/client/service/register", """
+                    {"id":"api-1","name":"api","port":9000,"checks":[{"id":"late","type":"ttl","ttlMs":30000}]}
+                    """));
+            awaitTrue(() -> !client.localApi().isReady(), "another required check holds it back");
+
+            assertEquals(200, localApi(client, "PUT", "/v1/client/check/deregister/late", null));
+            awaitTrue(() -> client.localApi().isReady(), "a check that is gone holds nothing back");
+        } finally {
+            client.shutdown().get(10, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void whatTheLocalApiRegisteredIsRestoredByTheNextClientOnTheDirectory() throws Exception {
+        ClientConfiguration config = ClientConfiguration.builder()
+                .nodeName("client-1").dataDirectory(dataDirectory).address("127.0.0.1").clientPort(0)
+                .serverUrl("http://localhost:1").shutdownTimeoutMs(2_000).requestTimeoutMs(500).build();
+        QraftClient first = new QraftClient(config);
+        first.localApi().start();
+        try {
+            assertEquals(200, localApi(first, "PUT", "/v1/client/service/register", """
+                    {"id":"api-1","name":"api","port":9000,"checks":[{"id":"app","type":"ttl","ttlMs":30000}]}
+                    """));
+        } finally {
+            first.shutdown().get(10, TimeUnit.SECONDS);
+        }
+
+        QraftClient restarted = new QraftClient(config);
+        try {
+            assertTrue(restarted.statusReporter("api-1", "app").isPresent(),
+                    "the kept check runs again without the application registering it again");
+        } finally {
+            restarted.shutdown().get(10, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void aRegistrationsFileThatCannotBeReadStopsTheStartAndLetsTheDirectoryGo() throws Exception {
+        Path kept = dataDirectory.resolve("registrations.json");
+        Files.writeString(kept, "{ not json");
+        ClientConfiguration config = ClientConfiguration.builder()
+                .nodeName("client-1").dataDirectory(dataDirectory).address("127.0.0.1").clientPort(0)
+                .serverUrl("http://localhost:1").build();
+
+        IllegalStateException refused = assertThrows(IllegalStateException.class, () -> new QraftClient(config));
+
+        assertTrue(refused.getMessage().contains(kept.toString()), refused.getMessage());
+        assertEquals("{ not json", Files.readString(kept), "what cannot be read is not replaced");
+        ClientDataDirectory.open(dataDirectory).close();
+    }
+
+    private ClientConfiguration clientConfigWithoutServices() {
+        return ClientConfiguration.builder()
+                .nodeName("client-1").dataDirectory(dataDirectory).address("127.0.0.1").clientPort(0)
+                .serverUrl("http://localhost:" + server.getAddress().getPort())
+                .heartbeatInterval(60_000)
+                .build();
+    }
+
+    /** Makes a request to {@code client}'s local API, as an application on its host does, and gives the status. */
+    private static int localApi(QraftClient client, String method, String path, String body) throws Exception {
+        java.net.http.HttpResponse<String> response = java.net.http.HttpClient.newHttpClient().send(
+                java.net.http.HttpRequest.newBuilder(
+                                java.net.URI.create("http://127.0.0.1:" + client.localApi().port() + path))
+                        .method(method, body == null ? java.net.http.HttpRequest.BodyPublishers.noBody()
+                                : java.net.http.HttpRequest.BodyPublishers.ofString(body))
+                        .build(),
+                java.net.http.HttpResponse.BodyHandlers.ofString());
+        return response.statusCode();
+    }
+
     private ClientConfiguration clientConfigWithServices(long shutdownTimeoutMs) throws Exception {
         return ClientConfiguration.builder()
                 .nodeName("client-1").dataDirectory(dataDirectory).address("127.0.0.1")

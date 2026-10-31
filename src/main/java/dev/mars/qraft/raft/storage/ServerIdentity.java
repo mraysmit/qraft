@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.raft.storage;
 
+import dev.mars.qraft.common.storage.DurableFile;
 import dev.mars.qraft.common.storage.IdentityFile;
 
 import java.io.IOException;
@@ -73,6 +74,6 @@ public final class ServerIdentity {
 
     /** Forces {@code directory}'s entries to disk, where the platform allows a directory to be opened for it. */
     public static void forceDirectory(Path directory) throws IOException {
-        IdentityFile.forceDirectory(directory);
+        DurableFile.forceDirectory(directory);
     }
 }

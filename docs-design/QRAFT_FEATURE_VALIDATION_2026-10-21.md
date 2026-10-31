@@ -1,7 +1,7 @@
 # Qraft Feature Validation
 
 **Date:** 2026-09-27
-**Last updated:** 2026-10-26 (Pre-Vote and its backoff-reset follow-up complete, noted under Raft. Earlier, 2026-10-21: membership Step 5 completed with runtime policy wiring and automatic failed-voter cleanup; five 332-test affected runs, 1,051 default tests with coverage and 42 runtime tests passed; retained-log audits clean; Steps 6 to 8 remain open; dated links refreshed. Earlier, 2026-10-14: single-POM plan Phase 7: native futures, executor ownership, test-helper removal, fenced-node diagnostics and the closed membership Step 4 gate; existing feature gaps remain open)
+**Last updated:** 2026-10-31 (services and checks through the local API, the client list's Phase 4. Earlier, 2026-10-30: the client section brought up to the client list's Phase 3 and `c33a2f2`: persisted node identity, the local API listener and client anti-entropy; item 10 of the order corrected. Earlier, 2026-10-26: Pre-Vote and its backoff-reset follow-up complete, noted under Raft. Earlier, 2026-10-21: membership Step 5 completed with runtime policy wiring and automatic failed-voter cleanup; five 332-test affected runs, 1,051 default tests with coverage and 42 runtime tests passed; retained-log audits clean; Steps 6 to 8 remain open; dated links refreshed. Earlier, 2026-10-14: single-POM plan Phase 7: native futures, executor ownership, test-helper removal, fenced-node diagnostics and the closed membership Step 4 gate; existing feature gaps remain open)
 **Scope:** every server and client feature in
 [`CONSUL_FEATURE_IMPLEMENTATION_PLAN.md`](CONSUL_FEATURE_IMPLEMENTATION_PLAN.md) and
 [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md),
@@ -91,10 +91,13 @@ Status key:
 | Local liveness and readiness from membership, convergence, required checks, and server contact | Done | `QraftClientTest`, `DockerClientRecoveryTest` |
 | Node registration, heartbeats, capped backoff, seed rotation, preferred endpoint | Done | `RegistrationClientTest`, `HttpCatalogClientTest`. On the catalog's write paths since 2026-10-09 |
 | Single-flight service reconciliation with fingerprints | Done | `ServiceReconcilerTest` |
+| Anti-entropy: reconciliation removes what the catalog holds for the node and the client does not want (design 8.2) | Done | `ServiceReconcilerTest`, `ClientServerContractTest`. Since 2026-10-30 in `c33a2f2`, verified by Jenkins build 56 |
+| Local API listener: `client.bindAddress`, shared request handling, writes refused once shutdown begins | Done | `LocalApiServerTest`, `JsonApiTest`. Since 2026-10-30 |
+| Services and checks through the local API, kept in the data directory (design 12.1.3) | Done | `LocalRegistrationRoutesTest`, `LocalDefinitionsTest`, `RegistrationStoreTest`, `QraftClientTest`. Since 2026-10-31, local checks only until the full suites run |
 | HTTP, TCP (with a warning threshold), and TTL checks; sequenced publication and renewal | Done | `*CheckRunnerTest`, `HealthPublisherTest` |
 | Bounded graceful shutdown: checks, services, then node | Done | `QraftClientTest`, `DockerClientHealthTest` |
 | Recovery from crash, partition, and whole-cluster outage | Done | `DockerClientRecoveryTest`, `DockerClientHealthTest` |
-| A generated node identity persisted locally (design 7.3) | Missing | Deferred by the health-propagation list; `client.id` is required in configuration |
+| A generated node identity persisted locally (design 7.3) | Done | `ClientDataDirectoryTest`, `IdentityFileTest`, `NodeIdentityStateStoreTest`, `WipedClientDirectoryEndToEndTest`. Since 2026-10-30; `client.nodeName` replaced `client.id` |
 | Client metrics: reconciliation attempts, failures, endpoint, readiness (design 18) | Missing | The client has no metrics |
 | Client libraries for key/value, sessions, and leader election | Missing | Depends on the server features |
 
@@ -193,10 +196,10 @@ need:
 9. **Security.** Authentication, ACL tokens and policies, and audit events.
    The token and ACL core is proposed, as of 2026-10-05, to come earlier,
    straight after the client:
-   [`task-list-acl-and-tokens-2026-10-30.md`](task-list-acl-and-tokens-2026-10-30.md).
-10. **Deferred until decided.** DNS discovery, and persisted generated node
-    identity. Server membership change was decided on 2026-09-29 and is in
-    progress in
+   [`task-list-acl-and-tokens-2026-10-31.md`](task-list-acl-and-tokens-2026-10-31.md).
+10. **Deferred until decided.** DNS discovery. Persisted generated node identity
+    was decided and built in the client list's Phase 2, closed on 2026-10-30.
+    Server membership change was decided on 2026-09-29 and completed in
     [`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md).
 
 Items 3 to 5 complete the Consul plan's target feature set. Items 6 to 9 are

@@ -70,6 +70,72 @@ class ServiceReconcilerTest {
     }
 
     @Test
+    void aChangeOfDefinitionsRunsAPassAtOnceWhenNoneIsRunning() {
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
+        AtomicReference<List<ServiceDefinition>> definitions = new AtomicReference<>(List.of());
+        ServiceReconciler reconciler = new ServiceReconciler(client, definitions::get, CLOCK);
+        reconciler.trigger().join();
+
+        definitions.set(List.of(service("web", "web", 8080, true)));
+        reconciler.definitionsChanged();
+
+        assertEquals(List.of("web"), client.registrations);
+    }
+
+    @Test
+    void aChangeOfDefinitionsDuringAPassRunsAnotherAfterItBecauseThatPassReadTheOldOnes() {
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
+        CompletableFuture<CatalogOutcome> pending = new CompletableFuture<>();
+        client.pendingRegistration = pending;
+        AtomicReference<List<ServiceDefinition>> definitions = new AtomicReference<>(List.of(
+                service("web", "web", 8080, true)));
+        ServiceReconciler reconciler = new ServiceReconciler(client, definitions::get, CLOCK);
+        reconciler.trigger();
+
+        definitions.set(List.of(service("web", "web", 8080, true), service("api", "api", 8081, true)));
+        reconciler.definitionsChanged();
+        reconciler.definitionsChanged();
+        assertEquals(List.of("web"), client.registrations, "a pass runs one at a time");
+
+        pending.complete(new CatalogOutcome.Success("web", true));
+
+        assertEquals(List.of("web", "api"), client.registrations, "two changes during a pass need one more pass");
+        assertTrue(reconciler.isConverged());
+        assertFalse(reconciler.isReconciling());
+    }
+
+    @Test
+    void aChangeOfDefinitionsSendsNothingWhileTheNodeIsNotRegistered() {
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
+        ServiceReconciler reconciler = new ServiceReconciler(client,
+                () -> List.of(service("web", "web", 8080, true)), CLOCK, () -> false);
+
+        reconciler.definitionsChanged();
+
+        assertEquals(List.of(), client.registrations);
+    }
+
+    @Test
+    void aChangeOfDefinitionsDuringAPassRunsNoMoreOnceShutdownBegan() {
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
+        CompletableFuture<CatalogOutcome> pending = new CompletableFuture<>();
+        client.pendingRegistration = pending;
+        AtomicReference<List<ServiceDefinition>> definitions = new AtomicReference<>(List.of(
+                service("web", "web", 8080, true)));
+        ServiceReconciler reconciler = new ServiceReconciler(client, definitions::get, CLOCK);
+        reconciler.trigger();
+        definitions.set(List.of(service("web", "web", 8080, true), service("api", "api", 8081, true)));
+        reconciler.definitionsChanged();
+        CompletableFuture<ServiceReconciler.ShutdownResult> shutdown = reconciler.beginShutdown();
+
+        pending.complete(new CatalogOutcome.Success("web", true));
+
+        assertTrue(shutdown.join().complete());
+        assertEquals(List.of("web"), client.registrations, "nothing is registered behind the deregistration");
+        assertEquals(List.of("web"), client.deregistrations);
+    }
+
+    @Test
     void aServiceOnlyTheCatalogHoldsIsRemovedAsConsulsAntiEntropyRemovesIt() {
         FakeCatalogClientFixture client = new FakeCatalogClientFixture();
         client.nodeServices = Optional.of(Set.of("web", "left-behind-by-a-crash"));

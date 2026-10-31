@@ -94,9 +94,25 @@ public final class DefinitionJson {
      * @throws IllegalArgumentException if the check is not a valid one
      */
     public static HealthCheckDefinition parseCheck(JsonNode check, ServiceDefinition service) {
-        ObjectNode withoutService = check.deepCopy();
-        withoutService.remove(SERVICE_ID);
-        return parseCheck(withoutService, requiredText(check, "id"), service, "check");
+        return parseCheck(withoutService(check), requiredText(check, "id"), service.id(), service.address(),
+                service.port(), "check");
+    }
+
+    /**
+     * Reads a check as {@link #write(HealthCheckDefinition)} wrote it. The written form names its service and spells
+     * out every setting, so nothing else is needed, and a setting that is missing is an error rather than a default.
+     *
+     * @throws IllegalArgumentException if the check is not a valid one
+     */
+    public static HealthCheckDefinition readWrittenCheck(JsonNode written) {
+        return parseCheck(withoutService(written), requiredText(written, "id"), requiredText(written, SERVICE_ID), null,
+                0, "kept check");
+    }
+
+    private static JsonNode withoutService(JsonNode check) {
+        ObjectNode without = check.deepCopy();
+        without.remove(SERVICE_ID);
+        return without;
     }
 
     /** Reads the checks a service's definition carries; {@code location} says where, in a refusal's message. */
@@ -111,13 +127,13 @@ public final class DefinitionJson {
             if (!ids.add(id)) {
                 throw new IllegalArgumentException("Duplicate health check id " + id + " for service " + service.id());
             }
-            definitions.add(parseCheck(check, id, service, location + "[]"));
+            definitions.add(parseCheck(check, id, service.id(), service.address(), service.port(), location + "[]"));
         }
         return definitions;
     }
 
-    private static HealthCheckDefinition parseCheck(JsonNode check, String id, ServiceDefinition service,
-                                                    String location) {
+    private static HealthCheckDefinition parseCheck(JsonNode check, String id, String serviceId, String serviceAddress,
+                                                    int servicePort, String location) {
         String type = requiredText(check, "type");
         boolean required = optionalBoolean(check, "required", true);
         Duration deregisterAfter = Duration.ofMillis(optionalLong(check, "deregisterAfterMs", 0));
@@ -126,22 +142,22 @@ public final class DefinitionJson {
                 rejectUnknown(check, location, "id", "type", "required", "url",
                         "intervalMs", "timeoutMs", "ttlMs", "deregisterAfterMs");
                 CheckTiming timing = CheckTiming.parse(check);
-                yield new HttpCheck(service.id(), id, checkUrl(requiredText(check, "url")),
+                yield new HttpCheck(serviceId, id, checkUrl(requiredText(check, "url")),
                         timing.interval(), timing.timeout(), timing.ttl(), required, deregisterAfter);
             }
             case "tcp" -> {
                 rejectUnknown(check, location, "id", "type", "required", "address", "port",
                         "intervalMs", "timeoutMs", "ttlMs", "deregisterAfterMs", "warnAfterMs");
                 CheckTiming timing = CheckTiming.parse(check);
-                yield new TcpCheck(service.id(), id, optionalText(check, "address", service.address()),
-                        optionalInt(check, "port", service.port()),
+                yield new TcpCheck(serviceId, id, optionalText(check, "address", serviceAddress),
+                        optionalInt(check, "port", servicePort),
                         timing.interval(), timing.timeout(), timing.ttl(), required, deregisterAfter,
                         Duration.ofMillis(optionalLong(check, "warnAfterMs", 0)));
             }
             case "ttl" -> {
                 rejectUnknown(check, location, "id", "type", "required", "ttlMs", "deregisterAfterMs");
                 if (!check.has("ttlMs")) throw new IllegalArgumentException("ttlMs is required for a ttl check");
-                yield new TtlCheck(service.id(), id, Duration.ofMillis(optionalLong(check, "ttlMs", 0)), required,
+                yield new TtlCheck(serviceId, id, Duration.ofMillis(optionalLong(check, "ttlMs", 0)), required,
                         deregisterAfter);
             }
             default -> throw new IllegalArgumentException("Unsupported health check type: " + type);

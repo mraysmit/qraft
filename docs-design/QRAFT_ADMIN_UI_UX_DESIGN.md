@@ -1,7 +1,7 @@
 # Qraft Administrative UI and UX Design
 
 **Status:** Draft  
-**Last updated:** 2026-10-27 (later the same day, after a review of the interface's logic against the ACL list and the platform design: access control rewritten as section 10.2's subsections, with the owner's decisions on the security profile, the lock-out guard, policy deletion and the explanation endpoint; principle 3.7; access control moved to Stage 2; section 11's integrity refusals and operations that are not idempotent; nodes, health states, unscoped views, and operations without an API in sections 3.2, 5 and 9. Earlier that day, after a review of the reference implementation against this document: workspace tabs, section 4.4; access control on the token model of the ACL list, sections 4.1, 10.2, 11 and 15, with Roles and Auth Methods reserved, section 2; the reference implementation follows section 4.3 and labels reserved views. Earlier, 2026-10-09: a client row shows the version from the node's metadata; a node has no capabilities any more. Before: 2026-09-25)
+**Last updated:** 2026-10-30 (section 5.1: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after a review of the interface's logic against the ACL list and the platform design: access control rewritten as section 10.2's subsections, with the owner's decisions on the security profile, the lock-out guard, policy deletion and the explanation endpoint; principle 3.7; access control moved to Stage 2; section 11's integrity refusals and operations that are not idempotent; nodes, health states, unscoped views, and operations without an API in sections 3.2, 5 and 9. Earlier that day, after a review of the reference implementation against this document: workspace tabs, section 4.4; access control on the token model of the ACL list, sections 4.1, 10.2, 11 and 15, with Roles and Auth Methods reserved, section 2; the reference implementation follows section 4.3 and labels reserved views. Earlier, 2026-10-09: a client row shows the version from the node's metadata; a node has no capabilities any more. Before: 2026-09-25)
 
 ## 1. Purpose
 
@@ -51,7 +51,7 @@ navigation entries until corresponding platform contracts and an approved
 delivery plan exist.
 
 Roles and Auth Methods, in Govern, are reserved in the same way. The ACL list
-([`task-list-acl-and-tokens-2026-10-30.md`](task-list-acl-and-tokens-2026-10-30.md))
+([`task-list-acl-and-tokens-2026-10-31.md`](task-list-acl-and-tokens-2026-10-31.md))
 delivers tokens and policies and leaves roles, authentication methods and login
 out (its section 7).
 
@@ -274,9 +274,10 @@ A service that a client registered belongs to that client (platform design
 section 7.4). The client registers it again at its next reconciliation (section
 8.2), so a deregistration or update made in the interface does not last, and
 the interface must not present it as lasting. A service registered on a
-client's node by someone other than that client stays until it is deregistered
-or its node is removed, because a client removes only what it registered
-itself (ACL list, proposal 11). Which services the interface may register, and
+client's node by someone other than that client does not last either if it is in
+the client's tenant and namespace: since 2026-10-30 the client removes it at its
+next reconciliation (platform design section 8.2). In another tenant or namespace
+it stays until it is deregistered or its node is removed. Which services the interface may register, and
 on which nodes, is open: implementation plan, open question 5.
 
 Maintenance is set through a client's local API, which listens on the client's
@@ -570,7 +571,7 @@ locks, routes, and peer exports before confirmation.
 
 Access control is part of the system's integrity, not a list of resources to
 browse. It follows Consul's token model, as the ACL list
-([`task-list-acl-and-tokens-2026-10-30.md`](task-list-acl-and-tokens-2026-10-30.md))
+([`task-list-acl-and-tokens-2026-10-31.md`](task-list-acl-and-tokens-2026-10-31.md))
 sets it out, including the decisions of 2026-10-27 in its proposals 16 to 19.
 The section contains Status, Tokens, Policies, and an explanation of
 decisions, and presents tokens and policies through their relationships

@@ -32,10 +32,12 @@ import dev.mars.qraft.client.health.LocalHealthChecks;
 import dev.mars.qraft.client.health.LocalStatusReporter;
 import dev.mars.qraft.client.health.RequiredCheckReadiness;
 import dev.mars.qraft.client.health.SocketTcpConnector;
-import dev.mars.qraft.common.ServiceDefinition;
 import dev.mars.qraft.common.concurrent.Deadlines;
 import dev.mars.qraft.client.service.RegistrationClient;
+import dev.mars.qraft.client.service.RegistrationStore;
 import dev.mars.qraft.client.service.LocalApiServer;
+import dev.mars.qraft.client.service.LocalDefinitions;
+import dev.mars.qraft.client.service.LocalRegistrationRoutes;
 import dev.mars.qraft.client.service.HeartbeatService;
 import dev.mars.qraft.client.service.ReadinessPolicy;
 import org.slf4j.Logger;
@@ -50,7 +52,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -61,7 +62,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 
 /**
  * Pure Java discovery client lifecycle.
@@ -86,6 +86,7 @@ public final class QraftClient implements AutoCloseable {
     private final ScheduledExecutorService scheduler;
     private final ScheduledExecutorService checkScheduler;
     private final ClientDataDirectory dataDirectory;
+    private final LocalDefinitions definitions;
     private final HttpClient checkHttpClient;
     private final HttpClient serverHttpClient;
     private final LocalHealthChecks localChecks;
@@ -117,11 +118,12 @@ public final class QraftClient implements AutoCloseable {
      * Creates a client on the given executors. The client owns both and shuts them down with itself.
      *
      * <p>The client holds its data directory from here until its shutdown completes. The directory is opened
-     * before anything else, so a client refused it opens no thread, HTTP client, or listener.
+     * before anything else, so a client refused it, or unable to read what it keeps, opens no HTTP client or listener.
      *
      * @param scheduler      runs registration retry delays, heartbeats, and periodic reconciliation
      * @param checkScheduler runs local health checks and publication retries
-     * @throws IllegalStateException if another client holds the data directory, or its node ID cannot be read
+     * @throws IllegalStateException if another client holds the data directory, or its node ID or the registrations
+     *                               it keeps cannot be read
      */
     QraftClient(ClientConfiguration config, ServerRetryPolicy retryPolicy, Clock clock,
                ScheduledExecutorService scheduler, ScheduledExecutorService checkScheduler) {
@@ -136,6 +138,14 @@ public final class QraftClient implements AutoCloseable {
             checkScheduler.shutdownNow();
             throw refused;
         }
+        try {
+            this.definitions = loadDefinitions(config, dataDirectory);
+        } catch (RuntimeException refused) {
+            scheduler.shutdownNow();
+            checkScheduler.shutdownNow();
+            dataDirectory.close();
+            throw refused;
+        }
         this.checkHttpClient = HttpClient.newHttpClient();
         this.serverHttpClient = HttpClient.newHttpClient();
         ServerContactTracker contactTracker = new ServerContactTracker(clock);
@@ -145,9 +155,9 @@ public final class QraftClient implements AutoCloseable {
                 Duration.ofMillis(config.getRequestTimeoutMs()), contactTracker);
         this.registrationClient = new RegistrationClient(serverClient);
         this.heartbeatService = new HeartbeatService(registrationClient);
-        this.serviceReconciler = new ServiceReconciler(serverClient, config::getServices, clock,
+        this.serviceReconciler = new ServiceReconciler(serverClient, definitions::services, clock,
                 registrationClient::isRegistered);
-        List<HealthCheckDefinition> checks = enabledServiceChecks(config);
+        List<HealthCheckDefinition> checks = definitions.checks();
         RequiredCheckReadiness checkReadiness = new RequiredCheckReadiness(checks);
         ExecutorCheckScheduler checkTimer = new ExecutorCheckScheduler(checkScheduler);
         this.healthPublisher = new HealthPublisher(serverClient, checkTimer, clock, retryPolicy::delayMillis);
@@ -160,6 +170,33 @@ public final class QraftClient implements AutoCloseable {
                 serviceReconciler::isConverged, checkReadiness::isSatisfied, contactTracker,
                 Duration.ofMillis(config.getContactFreshnessMs()), clock);
         this.localApi = new LocalApiServer(config, readinessPolicy::isReady);
+        new LocalRegistrationRoutes(definitions, localChecks::latest, config.getAddress()).install(localApi);
+        definitions.listen(new LocalDefinitions.Listener() {
+            @Override public void checkAdded(HealthCheckDefinition check) {
+                // Readiness counts the check before it can report, so its first result is not missed.
+                checkReadiness.add(check);
+                localChecks.add(check);
+            }
+
+            @Override public void checkRemoved(HealthCheckDefinition check) {
+                localChecks.remove(check);
+                checkReadiness.remove(check);
+                healthPublisher.forget(check);
+            }
+
+            @Override public void changed() {
+                serviceReconciler.definitionsChanged();
+            }
+        });
+    }
+
+    private static LocalDefinitions loadDefinitions(ClientConfiguration config, ClientDataDirectory directory) {
+        try {
+            return LocalDefinitions.load(config.getServices(), config.getHealthChecks(),
+                    new RegistrationStore(directory.path()));
+        } catch (IOException failure) {
+            throw new UncheckedIOException("Could not update the registrations kept in " + directory.path(), failure);
+        }
     }
 
     private static ClientDataDirectory openDataDirectory(Path directory) {
@@ -203,13 +240,6 @@ public final class QraftClient implements AutoCloseable {
             registrationRetryScheduled.set(false);
             // Shutdown won the race with a registration callback.
         }
-    }
-
-    /** Checks of disabled services are never run: their services are not registered. */
-    private static List<HealthCheckDefinition> enabledServiceChecks(ClientConfiguration config) {
-        Set<String> enabled = config.getServices().stream().filter(ServiceDefinition::enabled)
-                .map(ServiceDefinition::id).collect(Collectors.toUnmodifiableSet());
-        return config.getHealthChecks().stream().filter(check -> enabled.contains(check.serviceId())).toList();
     }
 
     private void activateHeartbeat(Node client) {
@@ -317,7 +347,7 @@ public final class QraftClient implements AutoCloseable {
     public String nodeId() { return dataDirectory.nodeId(); }
     public LocalApiServer localApi() { return localApi; }
 
-    /** Returns the process-local status input for a configured TTL check, or empty for any other check. */
+    /** Returns the process-local status input for a running TTL check, or empty for any other check. */
     public Optional<LocalStatusReporter> statusReporter(String serviceId, String checkId) {
         return localChecks.reporter(serviceId, checkId);
     }

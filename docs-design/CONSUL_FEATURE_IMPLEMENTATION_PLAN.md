@@ -441,5 +441,6 @@ unchecked features below remain open.
   affected runs, clean build/coverage, fresh-image runtime gate and log audit
   passed. The membership list records the captures and the remaining Steps 6
   to 8; the overall membership feature is still partial.
-- [ ] Decide on and implement DNS discovery and persisted generated node
-  identity (item 10).
+- [x] Decide on and implement persisted generated node identity (item 10).
+  Done 2026-10-30, in the client list's Phase 2.
+- [ ] Decide on and implement DNS discovery (item 10).

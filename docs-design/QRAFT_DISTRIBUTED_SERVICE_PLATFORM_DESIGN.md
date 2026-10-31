@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-10-30 (client list Phase 2, the server side: the node ID and the rules for who may hold a name, after Consul's catalog, in sections 7.3 and 22, and the `X-Qraft-Node-ID` header, the 409 `node_name_reserved` refusal and the node listing's `id` in sections 12.1 and 12.1.2. Earlier, 2026-10-27: section 12.4.1: how the Vite build names the asset manifest, and the security profile in the bootstrap data. Earlier, 2026-10-26: client list Phase 1: the server's service and check write routes moved from `/v1/client/*` to `/v1/catalog/*` in sections 12.1, 12.1.1 and 12.1.2. Earlier, 2026-10-25: Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
+**Last updated:** 2026-10-31 (client list Phase 4: services and checks through the local API, in sections 6.2, 7.4, 8.2, 12.1.3 and 16. Earlier, 2026-10-30: client anti-entropy and `GET /v1/catalog/node-services/{nodeName}` in sections 7.3, 8.2, 12.1 and 22; a check ID unique across a client in section 16. Earlier the same day: client list Phase 2, the server side: the node ID and the rules for who may hold a name, after Consul's catalog, in sections 7.3 and 22, and the `X-Qraft-Node-ID` header, the 409 `node_name_reserved` refusal and the node listing's `id` in sections 12.1 and 12.1.2. Earlier, 2026-10-27: section 12.4.1: how the Vite build names the asset manifest, and the security profile in the bootstrap data. Earlier, 2026-10-26: client list Phase 1: the server's service and check write routes moved from `/v1/client/*` to `/v1/catalog/*` in sections 12.1, 12.1.1 and 12.1.2. Earlier, 2026-10-25: Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
 
 ## 1. Purpose
 
@@ -516,7 +516,8 @@ not exist yet. `/health/live` is unaffected by every condition.
 
 - Validates client identity, server seeds, and service definitions.
 - Starts local liveness before contacting the cluster.
-- Reconciles configured services with the replicated catalog.
+- Reconciles the services its configuration defines and its local API registers
+  with the replicated catalog.
 - Runs local health checks and publishes changes or TTL renewals.
 - Remains live but unready during a server outage.
 - Never opens Raft transport or durable Raft storage.
@@ -595,8 +596,9 @@ replicated state alone, so every replica decides the same:
 - Once the holder is `unreachable`, or reaped, the new ID takes the name. A
   takeover removes the old node's services and checks in the same replicated
   step. Consul leaves them to the new agent's anti-entropy, which deletes what
-  it did not register; Qraft's reconciler removes only what it registered
-  itself, so the server must.
+  it did not register. Qraft's reconciler has done the same since 2026-10-30
+  (section 8.2), but only in its own tenant and namespace and not before its
+  first pass, so the server still removes them.
 - An old node that comes back after a takeover is another ID asking for a held
   name, and is refused while the new holder holds it.
 - A registration with an ID that no node has claims a node without an ID, even
@@ -632,7 +634,8 @@ Client state also includes:
 
 ### 7.4 Service definition
 
-A service definition is client-owned configuration. It contains:
+A service definition is client-owned. It comes from the configuration file or from
+the local API (section 12.1.3). It contains:
 
 - Local service ID.
 - Service name.
@@ -696,15 +699,29 @@ definitions and does not roll back successfully committed registrations.
 
 ### 8.2 Reconciliation
 
-The client periodically reconciles its startup service-definition snapshot rather
-than relying on one startup request. Reconciliation repairs state after
-administrative deletion or interrupted communication. Its source abstraction can
-also reconcile changed or removed definitions, but the production JSON source is
-immutable for the process lifetime because runtime configuration reload is not yet
-implemented.
+The client periodically reconciles its service definitions rather than relying on
+one startup request. Reconciliation repairs state after administrative deletion or
+interrupted communication.
+
+The definitions have one source (`LocalDefinitions`): the configuration file's and
+the local API's (section 12.1.3). The configuration file is read once, because
+runtime configuration reload is not yet implemented, but the local API changes the
+source while the client runs. A change runs a pass at once, as Consul's agent
+triggers a sync; a pass already running read the old definitions, so one more runs
+after it.
 
 Only one reconciliation may run at a time. A stable content fingerprint prevents
 unnecessary writes when the desired definition has not changed.
+
+Since 2026-10-30 a pass also removes what only the catalog knows, as Consul's
+anti-entropy does. It reads the node's services with
+`GET /v1/catalog/node-services/{nodeName}` and deregisters any in the client's
+tenant and namespace that its source does not want, whether or not this process
+registered them: a definition removed while the client was down, a deregistration
+accepted just before a crash, or a service something else registered on the node.
+A service in another tenant or namespace is left alone. When no server can answer
+the read, the pass goes on with what the process remembers. Nothing is read while
+the node is not registered.
 
 ### 8.3 Server selection and retry
 
@@ -863,6 +880,7 @@ PUT /v1/catalog/deregister
 PUT /v1/catalog/check/observe
 PUT /v1/catalog/node/heartbeat
 GET /v1/catalog/nodes
+GET /v1/catalog/node-services/{nodeName}
 GET /v1/catalog/services
 GET /v1/catalog/service/{serviceName}
 GET /v1/health/service/{serviceName}
@@ -950,6 +968,11 @@ A service is removed with `PUT /v1/catalog/deregister` and the body
 `{"serviceId":"web"}`, which uses the same three identity headers. It is idempotent
 and returns HTTP 200 with `{"node":"node-a","serviceId":"web","deregistered":false}`
 when the composite instance is already absent.
+
+`GET /v1/catalog/node-services/{nodeName}` returns one node's registrations in the
+read's tenant and namespace, as Consul's route of that name does, and carries
+`X-Qraft-Index`. An unknown node has an empty array, with HTTP 200. A missing name
+answers 400 `node_name_required`. The client's anti-entropy reads it (section 8.2).
 
 #### 12.1.1 Health observations and health discovery
 
@@ -1177,6 +1200,68 @@ names the node and carries the outcome field. Anything else is the retryable
 `invalid_response`, as it is for a service, so that an answer some other HTTP
 service could give never registers a node.
 
+#### 12.1.3 The client's local API: services and checks
+
+A client serves these routes to the applications on its host, after Consul's agent
+API (`agent/agent_endpoint.go`, read 2026-10-31), with the request handling of
+section 12.1 and the bind address of section 16:
+
+```text
+PUT /v1/client/service/register[?replace-existing-checks]
+PUT /v1/client/service/deregister/{serviceId}
+GET /v1/client/services
+GET /v1/client/service/{serviceId}
+PUT /v1/client/check/register
+PUT /v1/client/check/deregister/{checkId}
+GET /v1/client/checks
+```
+
+A service registration takes the fields of a service in the configuration file
+(section 16), without `enabled`. `id` defaults to `name`, and `address` to the
+client's, as in Consul:
+
+```json
+{
+  "id": "web-1", "name": "web", "port": 9000,
+  "tags": ["v1"], "metadata": {"team": "platform"},
+  "checks": [{"id": "app", "type": "ttl", "ttlMs": 15000}]
+}
+```
+
+It answers 200 with `{"serviceId":"web-1"}`. The service's other checks stay,
+unless `replace-existing-checks` is given with no value or `true`. A check
+registered alone takes the fields of a check and names its service in `serviceId`,
+and answers `{"checkId":"app","serviceId":"web-1"}`. A check ID is unique on a
+client, so registering it for another service moves it.
+
+- A malformed or invalid body answers 400 `invalid_registration`.
+- A check for a service that is not registered, and a read of one, answer 404
+  `service_not_found`, as in Consul.
+- Removing a service or check that is not registered is not an error, as in Consul:
+  it answers 200 with `deregistered` false, and true otherwise.
+- A change that cannot be kept answers 500 `registration_not_kept`, retryable, and
+  nothing has changed.
+
+`GET /v1/client/services` and `GET /v1/client/checks` return an object keyed by ID,
+in the form kept on disk. A check carries `status`, `output` and `observedAt` once
+it has reported. A service disabled in the configuration file is not registered,
+so these do not show it.
+
+A write answers once the change is kept and has taken effect locally: its checks
+run, and readiness counts them. The servers learn of it from the reconciler (section
+8.2), as Consul's agent syncs after it answers. A check's first observation can
+reach a server before its service does; the client retries it (section 12.1.1).
+
+The rules for an ID are Consul's. At run time the latest registration or
+deregistration wins, including for a service the configuration file defines. What
+the API registered is kept in `registrations.json` in `client.dataDirectory`,
+replaced atomically, and restored at startup. At startup the file's definitions are
+registered again and take precedence: a kept registration of the same ID is purged,
+and so is a kept check whose service is gone. A service the file defines and the API
+deregistered is therefore back after a restart. A `registrations.json` that cannot
+be read stops the client and is not replaced, where Consul logs such a file and goes
+on. These routes have no authentication until the ACL list.
+
 ### 12.2 Error envelope
 
 Errors use a stable machine-readable envelope:
@@ -1278,7 +1363,7 @@ At request time, the server renders a small non-cacheable `index.html` template
 with a safely JSON-encoded bootstrap object containing public runtime settings,
 such as the API base path, administrative content path, enabled feature flags,
 authentication mode, and the security profile proposed by
-[`task-list-acl-and-tokens-2026-10-30.md`](task-list-acl-and-tokens-2026-10-30.md)
+[`task-list-acl-and-tokens-2026-10-31.md`](task-list-acl-and-tokens-2026-10-31.md)
 (proposal 16). Secrets and bearer credentials are never included.
 Content-hashed assets are immutable and may receive long-lived cache headers;
 `index.html` and the asset manifest require revalidation so upgrades do not leave
@@ -1921,7 +2006,8 @@ The path names one versioned JSON document. A client document has this shape:
 `client.dataDirectory` is required. It is checked as a path when the document
 is read, and the client creates it at its first start. `client.nodeName`
 defaults to the machine's host name. The setting `client.id`, which named the
-node before 2026-10-27, is refused like any other unknown setting.
+node before 2026-10-27, is refused like any other unknown setting. The directory
+holds the node ID (section 7.3) and what the local API registered (section 12.1.3).
 
 Every `servers.urls` entry is an HTTP or HTTPS origin. Paths, queries,
 fragments, and user information are rejected. A root trailing slash is removed,
@@ -1990,8 +2076,8 @@ the client's network namespace sets the bind address, as Consul's `client_addr`
 is set for containers.
 
 The local API is one JDK `HttpServer` (`LocalApiServer`) serving `/health/live`,
-`/health/ready` and the API routes, which the later phases of the client list
-add under `/v1/client/*`. It shares its request handling with the server's API
+`/health/ready` and the API routes under `/v1/client/*` (section 12.1.3; the later
+phases of the client list add more). It shares its request handling with the server's API
 (`common.http.JsonApi`, section 12.1): request IDs, the body limit, the method
 check and the error envelope. Once the client's shutdown begins, before it
 deregisters anything, an API write (any method but `GET` and `HEAD`) is refused
@@ -2034,8 +2120,9 @@ environment variables or discovered through a separate environment-selected
 file. Sensitive material is mounted as a file and referenced by a configuration
 file path when security support lands.
 
-A service entry may carry an optional `checks` array. Check IDs are unique within
-their service, and the same ID may be reused by different services:
+A service entry may carry an optional `checks` array. A check ID is unique on a
+client, across all its services, as Consul's is per agent (since 2026-10-30;
+before that, within its service):
 
 ```json
 {
@@ -2422,7 +2509,7 @@ Evidence as of 2026-09-27, except where a row gives a later date:
   primary client behavior.
 - Whether the server can trust a caller's claim to a node. Proposed 2026-10-05,
   not yet decided: ACL tokens on Consul's model, in
-  [`task-list-acl-and-tokens-2026-10-30.md`](task-list-acl-and-tokens-2026-10-30.md).
+  [`task-list-acl-and-tokens-2026-10-31.md`](task-list-acl-and-tokens-2026-10-31.md).
   Until it is built, any caller can claim any node name and node ID.
 - How long legacy command and snapshot readers remain supported.
 
@@ -2435,7 +2522,7 @@ implementations do, and the opinion recorded before the decision.
 Resolved on 2026-10-04, recorded here on 2026-10-05: how a node's identity is
 made and kept, which was half of the open item "how client identity is
 established". It is decision 8 of
-[`task-list-consul-style-client-2026-10-30.md`](task-list-consul-style-client-2026-10-30.md)
+[`task-list-consul-style-client-2026-10-31.md`](task-list-consul-style-client-2026-10-31.md)
 and was built on 2026-10-30; section 7.3 states it. It follows Consul: a node ID
 generated at first start and kept in the client's data directory, a node name
 that defaults to the host name, a catalog keyed by name, and a registration
@@ -2446,7 +2533,8 @@ without one; names conflict regardless of case; a `registering` node holds its
 name. It departs from Consul in three ways. Qraft has no gossip, so a holder is
 dead when its node TTL has lapsed. A takeover removes the old node's services
 and checks in the same replicated step, where Consul leaves them to the new
-client's anti-entropy, which Qraft's reconciler does not have (D3 below). A node
+client's anti-entropy. Qraft's reconciler has had anti-entropy since 2026-10-30
+(D3 below), but only in its own tenant and namespace and from its first pass. A node
 that has not yet sent its first heartbeat keeps its name. Upgrade fixtures
 written before the node ID (`fixtures/node-identity/`) show older entries and
 snapshots loading without one. The other half, trusting the claim, is the open
@@ -2474,13 +2562,16 @@ authenticated API.
 Resolved D2 on 2026-09-24: reconciliation detects administrative deletion through
 `GET /v1/catalog/service/{name}` and filters the response by the complete tenant,
 namespace, node, and service identity. No additional node-scoped read endpoint is
-required.
+required. It still detects a deletion this way. The node-scoped read added on
+2026-10-30, `GET /v1/catalog/node-services/{nodeName}`, serves anti-entropy: only a
+list can show a service the client does not know.
 
 Resolved D3 on 2026-09-24: when the reconciler's definition source removes or
 disables a definition registered by the current process, it is deregistered on
 the next pass. The production JSON source is currently loaded once, so live file
 removal is not observed until a future reload mechanism is implemented. Instances
-left by an earlier process wait for automatic expiry from Tranche 6.
+left by an earlier process waited for automatic expiry from Tranche 6 until
+2026-10-30; the reconciler now removes them on its next pass (section 8.2).
 
 Decisions that affect durable identity or wire compatibility require an explicit
 architecture decision record and fixture-based upgrade tests before implementation.

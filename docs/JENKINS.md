@@ -395,6 +395,22 @@ or skips. Its 232 retained logs hold 833 ERROR lines, all flagged, 566 stack
 traces, none under an unflagged header, no JVM crash file, and no
 `too_many_pings`.
 
+## Build 56 verification, 2026-10-30
+
+Build 56 ran on `c33a2f2`, the first Jenkins build since build 55 on 2026-10-26.
+It is the first on Jenkins of the client list's Phases 1 to 3, the transport's
+deadlines and keepalive, and the client's anti-entropy. Jenkins answered from the
+`mraysmit` workstation, where the `markr` workstation could not reach it.
+
+It passed in 24 min 33 s: default 1,315 with every coverage gate met, end-to-end
+11, and Docker and `slow` 43, 1,369 in all, with no failures, errors or skips.
+
+The audit read the Jenkins console, 190 archived logs, 150 of them Docker archives
+from 16 classes, and the test reports. Many events appear in more than one of them.
+They hold 1,386 ERROR lines, all flagged, and 1,000 stack traces, none under an
+unflagged header. There is no `too_many_pings` and no JVM crash file.
+`DockerDeploymentContractTest` has no archive because it only reads files.
+
 ## Job configuration
 
 The job loads its pipeline from the repository's default branch using the following SCM configuration.

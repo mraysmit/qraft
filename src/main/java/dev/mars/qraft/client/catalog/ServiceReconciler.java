@@ -57,6 +57,7 @@ public final class ServiceReconciler {
     private final Map<String, String> registered = new ConcurrentHashMap<>();
     private final Map<String, Rejection> rejected = new ConcurrentHashMap<>();
     private CompletableFuture<Result> inFlight;
+    private boolean changedDuringPass;
     private CompletableFuture<ShutdownResult> shutdown;
     private boolean acceptingTriggers = true;
     private volatile Instant lastSuccessfulContact;
@@ -93,8 +94,25 @@ public final class ServiceReconciler {
         return pass;
     }
 
+    /**
+     * Says that what the source gives has changed, as Consul's agent triggers a sync when its local state changes. A
+     * pass runs at once; if one is running it read the old definitions, so one more runs after it.
+     */
+    public synchronized void definitionsChanged() {
+        if (inFlight != null) {
+            changedDuringPass = true;
+            return;
+        }
+        trigger();
+    }
+
     private synchronized void clear(CompletableFuture<Result> pass) {
-        if (inFlight == pass) inFlight = null;
+        if (inFlight != pass) return;
+        inFlight = null;
+        if (changedDuringPass) {
+            changedDuringPass = false;
+            trigger();
+        }
     }
 
     private CompletableFuture<Result> reconcile(List<ServiceDefinition> desiredDefinitions) {

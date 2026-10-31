@@ -17,15 +17,10 @@
 package dev.mars.qraft.common.storage;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -96,28 +91,8 @@ public final class IdentityFile {
         writeDurably(directory, id, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
     }
 
-    /** Forces {@code directory}'s entries to disk, where the platform allows a directory to be opened for it. */
-    public static void forceDirectory(Path directory) throws IOException {
-        try (FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ)) {
-            channel.force(true);
-        } catch (AccessDeniedException denied) {
-            // Windows cannot open a directory for forcing; its rename is already durable there.
-            if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("windows")) {
-                throw denied;
-            }
-        }
-    }
-
     private void writeDurably(Path directory, String id, StandardCopyOption... moveOptions) throws IOException {
-        Path temporary = directory.resolve(fileName + ".tmp");
-        try (FileChannel channel = FileChannel.open(temporary,
-                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE)) {
-            ByteBuffer bytes = ByteBuffer.wrap(id.getBytes(StandardCharsets.UTF_8));
-            while (bytes.hasRemaining()) channel.write(bytes);
-            channel.force(true);
-        }
-        Files.move(temporary, directory.resolve(fileName), moveOptions);
-        forceDirectory(directory);
+        DurableFile.write(directory.resolve(fileName), id.getBytes(StandardCharsets.UTF_8), moveOptions);
     }
 
     private String read(Path file) throws IOException {

@@ -122,6 +122,25 @@ class DefinitionJsonTest {
     }
 
     @Test
+    void aWrittenCheckReadsBackWithoutItsServiceBecauseItSpellsEverythingOut() throws Exception {
+        List<HealthCheckDefinition> checks = List.of(
+                new HttpCheck("web-1", "http", URI.create("http://127.0.0.1:8080/health"), Duration.ofSeconds(10),
+                        Duration.ofSeconds(2), Duration.ofSeconds(30), false, Duration.ofMinutes(5)),
+                new TcpCheck("web-1", "tcp", "10.0.0.7", 9090, Duration.ofSeconds(5), Duration.ofSeconds(1),
+                        Duration.ofSeconds(15), true, Duration.ZERO, Duration.ofMillis(500)),
+                new TtlCheck("web-1", "app", Duration.ofSeconds(30), true, Duration.ofMinutes(1)));
+
+        for (HealthCheckDefinition check : checks) {
+            assertEquals(check, DefinitionJson.readWrittenCheck(DefinitionJson.write(check)));
+        }
+        assertThrows(IllegalArgumentException.class, () -> DefinitionJson.readWrittenCheck(
+                json("{\"id\":\"tcp\",\"serviceId\":\"web-1\",\"type\":\"tcp\"}")),
+                "a written check names its address: nothing else could give it");
+        assertThrows(IllegalArgumentException.class, () -> DefinitionJson.readWrittenCheck(
+                json("{\"id\":\"app\",\"type\":\"ttl\",\"ttlMs\":1000}")));
+    }
+
+    @Test
     void theWrittenFormIsPinnedBecauseTheDataDirectoryKeepsItAcrossUpgrades() throws Exception {
         assertEquals(json("""
                 {"id":"web-1","name":"web","address":"10.0.0.5","port":8080,"tags":["v1"],

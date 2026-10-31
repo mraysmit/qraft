@@ -1,7 +1,7 @@
 # Qraft Administrative UI Implementation Plan
 
 **Status:** Agreed 2026-09-27; open questions 2 to 4 are decided when their increments start
-**Last updated:** 2026-10-27 (later the same day, after the review of the interface against the ACL list: access control moves from UI-6 to UI-5 with the security profile, sign-in, status, tokens, policies and explanations; server removal joins UI-5; section 4.2 gains the profile and the explanation endpoint; the client rows' data; open questions 5 and 6. Earlier that day: section 3: the asset manifest's file name in the Vite build; sections 4.2, 5 and 6: tokens and policies come from the ACL list, and roles and authentication methods are reserved; the embedded-interface task-list link refreshed. Earlier, 2026-10-26: section 4.1, the service writes are on `PUT /v1/catalog/register` and `/deregister` after the client list's Phase 1. Earlier, 2026-10-21: dated task-list links refreshed; the administrative interface remains paused after Step 1 while backend delivery continues. Earlier, 2026-10-09: section 4.1: the node list is at `/v1/catalog/nodes`, the node writes are listed, and bare `/health` is gone, after the single-POM list's Phase 4. On 2026-10-05: the build location and the tenancy owner, after the move to one Maven project; section 4 was brought up to date with scoped reads and the Raft operator endpoints on 2026-10-02)
+**Last updated:** 2026-10-30 (open question 5's facts corrected: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after the review of the interface against the ACL list: access control moves from UI-6 to UI-5 with the security profile, sign-in, status, tokens, policies and explanations; server removal joins UI-5; section 4.2 gains the profile and the explanation endpoint; the client rows' data; open questions 5 and 6. Earlier that day: section 3: the asset manifest's file name in the Vite build; sections 4.2, 5 and 6: tokens and policies come from the ACL list, and roles and authentication methods are reserved; the embedded-interface task-list link refreshed. Earlier, 2026-10-26: section 4.1, the service writes are on `PUT /v1/catalog/register` and `/deregister` after the client list's Phase 1. Earlier, 2026-10-21: dated task-list links refreshed; the administrative interface remains paused after Step 1 while backend delivery continues. Earlier, 2026-10-09: section 4.1: the node list is at `/v1/catalog/nodes`, the node writes are listed, and bare `/health` is gone, after the single-POM list's Phase 4. On 2026-10-05: the build location and the tenancy owner, after the move to one Maven project; section 4 was brought up to date with scoped reads and the Raft operator endpoints on 2026-10-02)
 **Design:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md) (what the interface is) and
 [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections
 12.4, 12.4.1, and 19.6 (how it is packaged and served)
@@ -107,7 +107,7 @@ section 4.1, after reviewing the `peegeeq-management-ui` and
 | HTTP key/value API with indexes and compare-and-set | Key/Value browser | Server HTTP API over the existing replicated state |
 | Sessions and locks | Sessions, Locks | Platform design section 11, not started |
 | Replicated tenants and namespaces with an API | Tenants, Namespaces, scope selector options | Tenancy work; nothing exists today (`qraft-tenant` was removed on 2026-10-04) |
-| Authentication, authorization, and the token and policy resources | Any mutation; Tokens, Policies; permission-shaped navigation; the token menu | [`task-list-acl-and-tokens-2026-10-30.md`](task-list-acl-and-tokens-2026-10-30.md), proposed to follow the client list |
+| Authentication, authorization, and the token and policy resources | Any mutation; Tokens, Policies; permission-shaped navigation; the token menu | [`task-list-acl-and-tokens-2026-10-31.md`](task-list-acl-and-tokens-2026-10-31.md), proposed to follow the client list |
 | The security profile and authentication mode in the bootstrap data; `installedFromFile` on the management token | Security status, banners, sign-in | ACL list, proposals 12 and 16; UI-0's bootstrap object |
 | Explaining a decision, `POST /v1/acl/explain`; the tokens linking to a policy, `GET /v1/acl/tokens?policy=` | Explanations; policy pages; policy deletion | ACL list, proposals 18 and 19 |
 | Lock-out and linked-policy refusals, `409 acl_lockout` and `409 policy_in_use` | Token and policy review steps | ACL list, proposals 17 and 18 |
@@ -367,10 +367,11 @@ contracts exist.
 4. **Metrics.** Should the Metrics page stay a configured link to the external
    dashboard, or read bounded summaries from the API listener?
 5. **Services registered from the interface.** Raised 2026-10-27. A client
-   re-registers the services it owns, and removes only what it registered
-   itself (UI/UX design section 5.1). Should the interface register only
-   services on nodes that no client runs, or also on a client's node, with a
-   warning? A node registered without a client stops heartbeating and is
+   re-registers the services it owns and, since 2026-10-30, removes at its next
+   reconciliation any other service on its node in its own tenant and namespace
+   (UI/UX design section 5.1). Should the interface register only services on
+   nodes that no client runs, or also on a client's node, with a warning? Such a
+   service lasts only in a tenant or namespace other than the client's. A node registered without a client stops heartbeating and is
    reaped (platform design section 9.2), so the first answer also needs a way
    to keep such a node, which the platform does not have.
 6. **What clients report.** Raised 2026-10-27. A client's readiness, current
