@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-04
 **Status:** Active from 2026-10-26, with Phase 1. The `client` package and new node model and routes were delivered by [`task-list-single-pom-and-quorus-removal-2026-10-21.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md), completed and archived on 2026-10-14. The membership list ([`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md)) was completed and archived on 2026-10-24, and Pre-Vote followed on 2026-10-25 and 2026-10-26, so nothing precedes this list. The sequencing decision of 2026-10-05 stands: this list, then the ACL list. The owner confirmed it on 2026-10-26 when asked whether key/value completion should go first, and said the embedded administrative interface waits until the other outstanding work is done.
-**Last updated:** 2026-10-31 (Phase 6 closed on Jenkins build 59. Earlier the same day: Phase 6's comparison with Consul corrected against its source and documents, and Phase 6A added: a dead node's services in discovery. Earlier the same day: Phase 6 built, test first, checked against Consul's agent; its exit waits for the full suites. Earlier the same day: Phase 5 closed on Jenkins build 58: built test first, checked against Consul's agent. Earlier the same day: Phase 4 closed on Jenkins build 57: its five tasks built, test first, checked against Consul's agent. Earlier, 2026-10-30: Phase 4 started: `c33a2f2` recorded, with client anti-entropy, a check ID unique across a client, and the groundwork for each task, none of them complete, verified by Jenkins build 56; decision 8's reason for the server's removal corrected to match; the rule on who runs builds corrected. Earlier the same day: Phase 3 closed: the local API on `client.bindAddress`, `127.0.0.1` by default as Consul's `client_addr`, request handling shared with the server through `common.http.JsonApi` with a 512 KiB body limit, and writes refused once shutdown begins. Earlier the same day: Phase 2 closed: the server side built test first, the node-identity fixtures, the determinism test and the design record, with writes from a node of another ID refused as Consul refuses them; its exit met on a local run. Earlier, 2026-10-29: decision 8 checked against Consul's catalog code and four points decided by the owner: a rename follows Consul, removing the node under its old name with its services and checks; a node without an ID can be claimed by a registration that carries one; names conflict regardless of case; a `REGISTERING` node holds its name. Phase 2's server task and exit follow. Earlier, 2026-10-28: Phase 2's three client tasks recorded as done: the data directory and its lock, the node ID kept through a shared identity file, and `client.nodeName`; the server side remains. Earlier, 2026-10-27: Phase 1 closed on a local run of the three suites, no Jenkins being reachable; Phase 2 started. Earlier the same day: renamed with the ACL list, which changed. Earlier, 2026-10-26: Phase 1 built, with local checks only; the full suites run on Jenkins before it is closed. Earlier the same day: started, membership and Pre-Vote complete. Earlier, 2026-10-21: membership Step 5 completed; Steps 6 to 8 remain the preceding work; this client list is still proposed; renamed with linked documents. Earlier, 2026-10-14: cleanup prerequisites completed and archived; membership Steps 5 to 8 remain the preceding work. On 2026-10-11: the rule that guards need mutation evidence removed at the owner's decision, from the rules and from one exit; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: decisions 5 and 8: what a node's deregistration removes, and the `client.hostname` setting; the file renamed to the date of its last change; the single-POM list's Phase 3A replaced Qraft's two retired words here and everywhere; decision 10 records the configuration names, and decision 3 the path of the local API. On 2026-10-08, the review with the other task lists: the request bodies of decision 5 and the log audit in the rules)
+**Last updated:** 2026-10-31 (Phase 6A built, on local checks until the full suites run. Earlier the same day: Phase 6 closed on Jenkins build 59. Earlier the same day: Phase 6's comparison with Consul corrected against its source and documents, and Phase 6A added: a dead node's services in discovery. Earlier the same day: Phase 6 built, test first, checked against Consul's agent; its exit waits for the full suites. Earlier the same day: Phase 5 closed on Jenkins build 58: built test first, checked against Consul's agent. Earlier the same day: Phase 4 closed on Jenkins build 57: its five tasks built, test first, checked against Consul's agent. Earlier, 2026-10-30: Phase 4 started: `c33a2f2` recorded, with client anti-entropy, a check ID unique across a client, and the groundwork for each task, none of them complete, verified by Jenkins build 56; decision 8's reason for the server's removal corrected to match; the rule on who runs builds corrected. Earlier the same day: Phase 3 closed: the local API on `client.bindAddress`, `127.0.0.1` by default as Consul's `client_addr`, request handling shared with the server through `common.http.JsonApi` with a 512 KiB body limit, and writes refused once shutdown begins. Earlier the same day: Phase 2 closed: the server side built test first, the node-identity fixtures, the determinism test and the design record, with writes from a node of another ID refused as Consul refuses them; its exit met on a local run. Earlier, 2026-10-29: decision 8 checked against Consul's catalog code and four points decided by the owner: a rename follows Consul, removing the node under its old name with its services and checks; a node without an ID can be claimed by a registration that carries one; names conflict regardless of case; a `REGISTERING` node holds its name. Phase 2's server task and exit follow. Earlier, 2026-10-28: Phase 2's three client tasks recorded as done: the data directory and its lock, the node ID kept through a shared identity file, and `client.nodeName`; the server side remains. Earlier, 2026-10-27: Phase 1 closed on a local run of the three suites, no Jenkins being reachable; Phase 2 started. Earlier the same day: renamed with the ACL list, which changed. Earlier, 2026-10-26: Phase 1 built, with local checks only; the full suites run on Jenkins before it is closed. Earlier the same day: started, membership and Pre-Vote complete. Earlier, 2026-10-21: membership Step 5 completed; Steps 6 to 8 remain the preceding work; this client list is still proposed; renamed with linked documents. Earlier, 2026-10-14: cleanup prerequisites completed and archived; membership Steps 5 to 8 remain the preceding work. On 2026-10-11: the rule that guards need mutation evidence removed at the owner's decision, from the rules and from one exit; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: decisions 5 and 8: what a node's deregistration removes, and the `client.hostname` setting; the file renamed to the date of its last change; the single-POM list's Phase 3A replaced Qraft's two retired words here and everywhere; decision 10 records the configuration names, and decision 3 the path of the local API. On 2026-10-08, the review with the other task lists: the request bodies of decision 5 and the log audit in the rules)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 4.3, 5, 6.2, 7.3, 8, 9.2, 12.1 and 16
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
 
@@ -537,13 +537,13 @@ locally.
 ### Phase 6A. A dead node's services in discovery
 
 Added 2026-10-31 at the owner's request, after Phase 6 was compared with Consul. It
-comes before Phase 7, which forwards `?passing`. Not started.
+comes before Phase 7, which forwards `?passing`. Built 2026-10-31, in the working tree.
 
-Today `?passing` looks only at a service's own checks. A check keeps its last result
-until its TTL lapses, and `ttlMs` has no upper limit. So a service on an unreachable
-node can stay in `?passing` until its check expires or the node is reaped, 72 hours by
+Until this phase `?passing` looked only at a service's own checks. A check keeps its last
+result until its TTL lapses, and `ttlMs` has no upper limit. So a service on an unreachable
+node could stay in `?passing` until its check expired or the node was reaped, 72 hours by
 default, or for good if `nodeReapAfterMs` is 0 and the check never lapses. Default probe
-checks lapse after 30 seconds, before the node's 90, so this needs a check whose TTL is
+checks lapse after 30 seconds, before the node's 90, so this needed a check whose TTL is
 longer than `nodeTtlMs`.
 
 In Consul a failed node's `serfHealth` check is critical, node checks "always apply to
@@ -551,23 +551,23 @@ any service on the node" (`agent/consul/state/catalog.go`), and `ExcludeBasedOnC
 (`agent/structs/structs.go`) excludes a service if any of its checks is not passing.
 The service's own checks keep their last values (`hashicorp/consul#258`).
 
-- [ ] `GET /v1/health/service/{name}?passing` also excludes an instance whose node is
+- [x] `GET /v1/health/service/{name}?passing` also excludes an instance whose node is
   `unreachable`, decided at the read from the replicated node status, so every server
   answers alike. Check results and the instance's stored health do not change, as in
   Consul. An instance whose node is `registering` or `healthy`, or has no entry, is
   decided by its checks as now.
-- [ ] Each entry of `/v1/health/service/{name}` also carries its node's status, null
+- [x] Each entry of `/v1/health/service/{name}` also carries its node's status, null
   with no node entry, so that an unfiltered answer explains why an instance with passing
   checks is not in `?passing`. Consul's shows `serfHealth` among the checks.
-- [ ] A node whose heartbeat returns is `healthy` again, and its services return to
+- [x] A node whose heartbeat returns is `healthy` again, and its services return to
   `?passing` with no new observation. A reaped or taken-over node's services are gone,
   as now.
-- [ ] `GET /v1/catalog/service/{name}` stays as it is: bare registrations, which list
+- [x] `GET /v1/catalog/service/{name}` stays as it is: bare registrations, which list
   the instance until the node is reaped (design 12.1.1).
-- [ ] Tests, red first: the rules above over real HTTP, and in
+- [x] Tests, red first: the rules above over real HTTP, and in
   `CrashedClientExpiryEndToEndTest` a killed client whose long-TTL check has not expired,
   whose service leaves `?passing` once its node is unreachable and is still listed.
-- [ ] Update the design's sections 9.2 and 12.1.1, the feature validation's health
+- [x] Update the design's sections 9.2 and 12.1.1, the feature validation's health
   aggregation row, and the health route's row in the administrative interface plan.
 
 A client cut off from the servers has its services leave `?passing` after `nodeTtlMs`,
@@ -575,7 +575,10 @@ though they may still be running. Consul's failure detector does the same. The g
 after failover (design 9.2) stops a change of leader from dropping them.
 
 **Exit:** none of its own; the list's rules. It changes the server, so the full suites
-run on Jenkins.
+run on Jenkins. Not met yet: local checks only, the HTTP API, contract and four end-to-end
+classes, and the two changed test classes five times in a row. Four tests were seen red
+on their assertions, with no stubs needed because they read the answers as JSON; the test
+of reaped and taken-over nodes passed from the start, because that behaviour did not change.
 
 ### Phase 7. Forwarded reads
 

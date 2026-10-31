@@ -25,7 +25,6 @@ import dev.mars.qraft.common.Node;
 import dev.mars.qraft.common.http.JsonApi;
 import dev.mars.qraft.state.catalog.HealthCheckState;
 import dev.mars.qraft.state.catalog.HealthObservation;
-import dev.mars.qraft.state.catalog.ServiceHealth;
 import dev.mars.qraft.state.catalog.ServiceInstance;
 import dev.mars.qraft.common.concurrent.Deadlines;
 import dev.mars.qraft.state.catalog.ServiceInstanceId;
@@ -706,9 +705,10 @@ public final class HttpApiServer implements AutoCloseable {
                 .collect(Collectors.groupingBy(state -> state.checkId().serviceInstanceId()));
         List<HealthServiceEntry> entries = stateStore.getServiceCatalog().instances(scope.service(serviceName))
                 .stream()
-                .filter(instance -> !passingOnly || instance.health() == ServiceHealth.PASSING)
                 .map(instance -> HealthServiceEntry.from(instance,
-                        checks.getOrDefault(instance.identity(), List.of())))
+                        checks.getOrDefault(instance.identity(), List.of()),
+                        stateStore.findNode(instance.nodeId()).map(Node::status).orElse(null)))
+                .filter(entry -> !passingOnly || entry.passing())
                 .toList();
         respondJson(exchange, 200, entries);
     }

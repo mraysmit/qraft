@@ -13,7 +13,8 @@ membership items were updated on 2026-10-02. Later updates recorded node-model
 removal on 2026-10-09, deployment cleanup on 2026-10-11, and the single-POM
 plan's Phase 7 runtime and diagnostic close-out on 2026-10-14. The 2026-10-21
 update records membership Step 5 complete, with Steps 6 to 8 still open. The
-2026-10-31 update adds the open item for a failed node's services in `?passing`.
+2026-10-31 update adds the item for a failed node's services in `?passing`, built
+in the client list's Phase 6A, on local checks until the full suites run.
 Sections 3 and 4
 reflect the one-project layout and explicit executor ownership. The open
 feature items in the checklist remain delivery gaps.
@@ -381,7 +382,7 @@ unchecked features below remain open.
   and server-contact freshness.
 - [x] Implement client membership and failure detection semantics: unreachable
   after the node TTL, reaped with its services after the reap delay.
-- [ ] Exclude an unreachable node's services from `?passing`, as Consul's failed
+- [x] Exclude an unreachable node's services from `?passing`, as Consul's failed
   `serfHealth` check does (consul-style client list, Phase 6A).
 - [x] Implement service registration, catalog replication, and query behavior.
 - [x] Add composite `(tenant, namespace, node, serviceId)` catalog identity with

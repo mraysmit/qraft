@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.server.http;
 
+import dev.mars.qraft.common.NodeStatus;
 import dev.mars.qraft.state.catalog.HealthCheckState;
 import dev.mars.qraft.state.catalog.ServiceHealth;
 import dev.mars.qraft.state.catalog.ServiceInstance;
@@ -24,19 +25,25 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * One service instance and its replicated checks, as returned by health discovery.
+ * One service instance, its replicated checks and its node's status, as returned by health discovery. The status
+ * is {@code null} for an instance whose node has no entry.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-26
  * @version 1.0
  */
-record HealthServiceEntry(ServiceInstance service, List<Check> checks) {
+record HealthServiceEntry(ServiceInstance service, List<Check> checks, NodeStatus nodeStatus) {
 
-    static HealthServiceEntry from(ServiceInstance service, List<HealthCheckState> states) {
+    static HealthServiceEntry from(ServiceInstance service, List<HealthCheckState> states, NodeStatus nodeStatus) {
         return new HealthServiceEntry(service, states.stream()
                 .sorted(Comparator.comparing((HealthCheckState state) -> state.checkId().checkId()))
                 .map(Check::from)
-                .toList());
+                .toList(), nodeStatus);
+    }
+
+    /** Whether {@code ?passing} includes this instance: its checks pass and its node is not unreachable. */
+    boolean passing() {
+        return service.health() == ServiceHealth.PASSING && nodeStatus != NodeStatus.UNREACHABLE;
     }
 
     record Check(

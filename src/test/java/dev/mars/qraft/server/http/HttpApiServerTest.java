@@ -33,6 +33,7 @@ import dev.mars.qraft.raft.grpc.AppendEntriesRequest;
 import dev.mars.qraft.raft.storage.RaftStorageFactory;
 import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.CatalogCommand;
+import dev.mars.qraft.state.NodeCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.server.ui.AdminUiConfig;
 import dev.mars.qraft.state.QraftStateStore;
@@ -1179,8 +1180,9 @@ class HttpApiServerTest {
         assertEquals(List.of("web-1", "web-2", "web-3", "web-4"), serviceIds(allBody));
         assertEquals(List.of("PASSING", "WARNING", "CRITICAL", "UNKNOWN"), healthStates(allBody));
         JsonNode firstEntry = allBody.get(0);
-        assertEquals(Set.of("service", "checks"),
+        assertEquals(Set.of("service", "checks", "nodeStatus"),
                 firstEntry.properties().stream().map(Map.Entry::getKey).collect(java.util.stream.Collectors.toSet()));
+        assertTrue(firstEntry.get("nodeStatus").isNull(), "a service whose node has no entry has no node status");
         JsonNode check = firstEntry.get("checks").get(0);
         assertEquals(Set.of("checkId", "status", "required", "sequenceNumber", "observedAt",
                         "acceptedAt", "deadline", "expired", "output", "deregisterAfterMillis"),
@@ -1207,6 +1209,117 @@ class HttpApiServerTest {
         assertEquals(4, new ObjectMapper().readTree(catalog.body()).size());
         assertEquals(index, store.getLastAppliedIndex());
         assertEquals(3, store.healthChecks().size());
+    }
+
+    @Test
+    void passingExcludesAnInstanceOnAnUnreachableNodeWithoutChangingItsChecks() throws Exception {
+        QraftStateStore store = startHealthApi(new MutableClockHelper(Instant.parse("2026-09-26T10:00:00Z")));
+        HttpClient client = HttpClient.newHttpClient();
+        for (String name : List.of("node-a", "node-b", "node-c", "node-e")) {
+            assertEquals(200, registerNode(client, name).statusCode());
+        }
+        for (String name : List.of("node-b", "node-e")) {
+            assertEquals(200, request(client, "/v1/catalog/node/heartbeat", "PUT", "{}",
+                    Map.of("X-Qraft-Node", name)).statusCode());
+        }
+        registerPassingService(client, "web-1", "frontend", "node-a");
+        registerPassingService(client, "web-2", "frontend", "node-b");
+        registerPassingService(client, "web-3", "frontend", "node-c");
+        registerPassingService(client, "web-4", "frontend", "node-d");
+        registerService(client, "web-5", "frontend", "node-e");
+        assertEquals(200, request(client, "/v1/catalog/check/observe", "PUT",
+                observation("web-5", "http", "critical", 1, 10_000, "refused"),
+                Map.of("X-Qraft-Node", "node-e")).statusCode());
+        Map<String, String> acme = Map.of("X-Qraft-Tenant", "acme", "X-Qraft-Namespace", "prod");
+        registerService(client, "web-6", "frontend", "node-a", "acme", "prod");
+        assertEquals(200, request(client, "/v1/catalog/check/observe", "PUT",
+                observation("web-6", "http", "passing", 1, 10_000, "ok"),
+                Map.of("X-Qraft-Node", "node-a", "X-Qraft-Tenant", "acme", "X-Qraft-Namespace", "prod")).statusCode());
+        assertEquals(List.of("web-1", "web-2", "web-3", "web-4"),
+                serviceIds(tree(request(client, "/v1/health/service/frontend?passing", "GET").body())));
+        assertEquals(List.of("web-6"), serviceIds(readJson(client, "/v1/health/service/frontend?passing", acme)));
+
+        markUnreachable(store, "node-a");
+        long index = store.getLastAppliedIndex();
+
+        HttpResponse<String> all = request(client, "/v1/health/service/frontend", "GET");
+        HttpResponse<String> passing = request(client, "/v1/health/service/frontend?passing", "GET");
+        HttpResponse<String> passingFalse = request(client, "/v1/health/service/frontend?passing=false", "GET");
+        HttpResponse<String> catalog = request(client, "/v1/catalog/service/frontend", "GET");
+
+        assertEquals(List.of("web-2", "web-3", "web-4"), serviceIds(tree(passing.body())),
+                "an unreachable node's instance leaves, and the others are decided by their checks as before");
+        assertEquals(List.of(), serviceIds(readJson(client, "/v1/health/service/frontend?passing", acme)),
+                "a node belongs to no tenant or namespace, so its status applies in all of them");
+        assertEquals(List.of("web-1", "web-2", "web-3", "web-4", "web-5"), serviceIds(tree(passingFalse.body())));
+        JsonNode entries = tree(all.body());
+        assertEquals(List.of("web-1", "web-2", "web-3", "web-4", "web-5"), serviceIds(entries));
+        assertEquals(java.util.Arrays.asList("unreachable", "healthy", "registering", null, "healthy"),
+                nodeStatuses(entries));
+        assertEquals(List.of("PASSING", "PASSING", "PASSING", "PASSING", "CRITICAL"), healthStates(entries),
+                "the stored health of an instance does not change with its node");
+        JsonNode check = entries.get(0).get("checks").get(0);
+        assertEquals("PASSING", check.get("status").textValue());
+        assertEquals(false, check.get("expired").booleanValue());
+        assertEquals(1, check.get("sequenceNumber").longValue());
+        assertEquals(ServiceHealth.PASSING, store.findHealthCheck(new ServiceCheckId(
+                new ServiceInstanceId("default", "default", "node-a", "web-1"), "http"))
+                .orElseThrow().observation().status());
+
+        JsonNode listed = tree(catalog.body());
+        assertEquals(List.of("web-1", "web-2", "web-3", "web-4", "web-5"), listed.findValuesAsText("serviceId"),
+                "the catalog still lists the instance until its node is reaped");
+        assertTrue(listed.get(0).path("nodeStatus").isMissingNode(), "the catalog keeps its bare registrations");
+        assertEquals(index, store.getLastAppliedIndex(), "reads change nothing");
+    }
+
+    @Test
+    void aReturningHeartbeatRestoresPassingWithNoNewObservation() throws Exception {
+        QraftStateStore store = startHealthApi(new MutableClockHelper(Instant.parse("2026-09-26T10:00:00Z")));
+        HttpClient client = HttpClient.newHttpClient();
+        assertEquals(200, registerNode(client).statusCode());
+        assertEquals(200, heartbeat(client, "{\"sequenceNumber\":1}").statusCode());
+        registerPassingService(client, "web", "frontend", "client-1");
+        markUnreachable(store, "client-1");
+        assertEquals(List.of(), serviceIds(tree(request(client, "/v1/health/service/frontend?passing", "GET").body())));
+
+        assertEquals(200, heartbeat(client, "{\"sequenceNumber\":2}").statusCode());
+
+        JsonNode passing = tree(request(client, "/v1/health/service/frontend?passing", "GET").body());
+        assertEquals(List.of("web"), serviceIds(passing));
+        assertEquals(List.of("healthy"), nodeStatuses(passing));
+        assertEquals(1, passing.get(0).get("checks").get(0).get("sequenceNumber").longValue(),
+                "the check did not need a new observation");
+    }
+
+    @Test
+    void aReapedOrTakenOverNodesServicesAreGoneFromDiscovery() throws Exception {
+        QraftStateStore store = startHealthApi(new MutableClockHelper(Instant.parse("2026-09-26T10:00:00Z")));
+        HttpClient client = HttpClient.newHttpClient();
+        assertEquals(200, registerNode(client, "node-a").statusCode());
+        registerPassingService(client, "web-a", "frontend", "node-a");
+        Map<String, String> first = Map.of("X-Qraft-Node", "node-b",
+                "X-Qraft-Node-ID", "00000000-0000-4000-8000-000000000001");
+        assertEquals(200, request(client, "/v1/catalog/register", "PUT", nodeRegistration(), first).statusCode());
+        assertEquals(200, request(client, "/v1/catalog/register", "PUT", inService("""
+                {"serviceId":"web-b","serviceName":"frontend","address":"127.0.0.1","port":8080}
+                """), first).statusCode());
+        markUnreachable(store, "node-a");
+        markUnreachable(store, "node-b");
+        assertEquals(List.of("web-a", "web-b"),
+                serviceIds(tree(request(client, "/v1/health/service/frontend", "GET").body())));
+
+        Instant lastContact = store.findNode("node-a").orElseThrow().lastContact();
+        node.submitCommand(NodeCommand.expire("node-a", lastContact, true, lastContact.plusSeconds(600)))
+                .get(10, TimeUnit.SECONDS);
+        assertEquals(200, request(client, "/v1/catalog/register", "PUT", nodeRegistration(),
+                Map.of("X-Qraft-Node", "node-b", "X-Qraft-Node-ID", "00000000-0000-4000-8000-000000000002"))
+                .statusCode());
+
+        for (String path : List.of("/v1/health/service/frontend", "/v1/health/service/frontend?passing",
+                "/v1/catalog/service/frontend")) {
+            assertEquals(0, tree(request(client, path, "GET").body()).size(), path);
+        }
     }
 
     @Test
@@ -1310,6 +1423,23 @@ class HttpApiServerTest {
         assertEquals(200, response.statusCode(), response.body());
     }
 
+    /** Registers a service on a node with one passing {@code http} check, which no test here lets lapse. */
+    private void registerPassingService(HttpClient client, String serviceId, String serviceName,
+                                        String nodeId) throws Exception {
+        registerService(client, serviceId, serviceName, nodeId);
+        assertEquals(200, request(client, "/v1/catalog/check/observe", "PUT",
+                observation(serviceId, "http", "passing", 1, 10_000, "ok"),
+                Map.of("X-Qraft-Node", nodeId)).statusCode());
+    }
+
+    /** Commits the command the leader's expiry proposes once a node's TTL has passed. */
+    private void markUnreachable(QraftStateStore store, String name) throws Exception {
+        Instant lastContact = store.findNode(name).orElseThrow().lastContact();
+        node.submitCommand(NodeCommand.expire(name, lastContact, false, lastContact.plusSeconds(90)))
+                .get(10, TimeUnit.SECONDS);
+        assertEquals(NodeStatus.UNREACHABLE, store.findNode(name).orElseThrow().status());
+    }
+
     private static String observation(String serviceId, String checkId, String status, long sequenceNumber,
                                       long ttlMillis, String output) {
         String outputField = output == null ? "" : ",\"output\":\"" + output + "\"";
@@ -1323,6 +1453,13 @@ class HttpApiServerTest {
         List<String> ids = new java.util.ArrayList<>();
         entries.forEach(entry -> ids.add(entry.get("service").get("serviceId").textValue()));
         return ids;
+    }
+
+    /** Each entry's node status; {@code null} for a null or absent one. */
+    private static List<String> nodeStatuses(JsonNode entries) {
+        List<String> statuses = new java.util.ArrayList<>();
+        entries.forEach(entry -> statuses.add(entry.path("nodeStatus").textValue()));
+        return statuses;
     }
 
     private static List<String> healthStates(JsonNode entries) {
@@ -1526,6 +1663,10 @@ class HttpApiServerTest {
 
     private HttpResponse<String> registerNode(HttpClient client) throws Exception {
         return request(client, "/v1/catalog/register", "PUT", nodeRegistration(), NODE);
+    }
+
+    private HttpResponse<String> registerNode(HttpClient client, String name) throws Exception {
+        return request(client, "/v1/catalog/register", "PUT", nodeRegistration(), Map.of("X-Qraft-Node", name));
     }
 
     private HttpResponse<String> heartbeat(HttpClient client, String body) throws Exception {

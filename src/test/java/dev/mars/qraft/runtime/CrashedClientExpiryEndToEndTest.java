@@ -38,12 +38,14 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * End-to-end test in which a client runtime in a separate JVM publishes a check to a real server
  * runtime and is then killed without graceful shutdown: the server's leader expires the unrenewed
- * check and, after the check's deregistration delay, deregisters the crashed client's service.
+ * check and, after the check's deregistration delay, deregisters the crashed client's service. A check with a
+ * long TTL keeps its last result, and the service still leaves {@code ?passing} once its node is unreachable.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-26
@@ -146,6 +148,35 @@ class CrashedClientExpiryEndToEndTest {
         assertTrue(sawUnreachable.get(), "the node was marked unreachable before it and its services were reaped");
     }
 
+    @Test
+    void aKilledClientsServiceWithAnUnexpiredCheckLeavesPassingOnceItsNodeIsUnreachableAndStaysListed() throws Exception {
+        Path serverConfig = temporaryDirectory.resolve("server.json");
+        Path clientConfig = temporaryDirectory.resolve("client.json");
+        writeServerConfig(serverConfig, 0, 0, 0, 600_000);
+        RuntimeLifecycle server = QraftRuntimeApplication.launch(new String[]{"server", "--config", serverConfig.toString()});
+        lifecycles.add(server);
+        int httpPort = server.boundPorts().get("http");
+        writeClientConfig(clientConfig, httpPort, 0, 600_000);
+        URI serverUri = URI.create("http://127.0.0.1:" + httpPort);
+        await(Duration.ofSeconds(10), () -> status(serverUri.resolve("/health/ready")) == 200);
+
+        client = startClient(clientConfig);
+        await(Duration.ofSeconds(30), () -> "HEALTHY".equals(nodeStatus(serverUri)) && passingCount(serverUri) == 1);
+
+        client.destroyForcibly();
+        assertTrue(client.waitFor(10, TimeUnit.SECONDS), "the client process did not terminate");
+
+        // The node is reaped only after nodeReapAfterMs (600 s), so nothing below can race it.
+        await(Duration.ofSeconds(30), () -> passingCount(serverUri) == 0);
+        assertEquals("UNREACHABLE", nodeStatus(serverUri));
+        assertEquals("PASSING", checkField(serverUri, "status"), "the check keeps its last result");
+        assertEquals("false", checkField(serverUri, "expired"));
+        assertEquals("PASSING", serviceHealth(serverUri));
+        assertEquals("unreachable", healthEntries(serverUri).get(0).path("nodeStatus").textValue());
+        assertEquals(1, JSON.readTree(http.send(HttpRequest.newBuilder(serverUri.resolve("/v1/catalog/service/web"))
+                .timeout(Duration.ofSeconds(5)).GET().build(), HttpResponse.BodyHandlers.ofString()).body()).size());
+    }
+
     private Process startClient(Path clientConfig) throws Exception {
         return new ProcessBuilder(Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                 "-cp", System.getProperty("java.class.path"),
@@ -189,9 +220,18 @@ class CrashedClientExpiryEndToEndTest {
     }
 
     private JsonNode healthEntries(URI serverUri) {
+        return readEntries(serverUri.resolve("/v1/health/service/web"));
+    }
+
+    private int passingCount(URI serverUri) {
+        JsonNode entries = readEntries(serverUri.resolve("/v1/health/service/web?passing"));
+        return entries == null ? -1 : entries.size();
+    }
+
+    private JsonNode readEntries(URI read) {
         try {
-            HttpResponse<String> response = http.send(HttpRequest.newBuilder(
-                            serverUri.resolve("/v1/health/service/web")).timeout(Duration.ofSeconds(5)).GET().build(),
+            HttpResponse<String> response = http.send(HttpRequest.newBuilder(read)
+                            .timeout(Duration.ofSeconds(5)).GET().build(),
                     HttpResponse.BodyHandlers.ofString());
             return response.statusCode() == 200 ? JSON.readTree(response.body()) : null;
         } catch (Exception unavailable) {
@@ -234,6 +274,11 @@ class CrashedClientExpiryEndToEndTest {
     }
 
     private void writeServerConfig(Path target, int httpPort, int raftPort, int apiGrpcPort) throws Exception {
+        writeServerConfig(target, httpPort, raftPort, apiGrpcPort, 5000);
+    }
+
+    private void writeServerConfig(Path target, int httpPort, int raftPort, int apiGrpcPort,
+                                   long nodeReapAfterMs) throws Exception {
         Files.writeString(target, """
                 {
                   "version": 1,
@@ -248,18 +293,22 @@ class CrashedClientExpiryEndToEndTest {
                       "heartbeatIntervalMs": 25,
                       "storage": {"type": "raftlog", "path": %s, "fsync": true}
                     },
-                    "health": {"expiryIntervalMs": 50, "nodeTtlMs": 600, "nodeReapAfterMs": 5000},
+                    "health": {"expiryIntervalMs": 50, "nodeTtlMs": 600, "nodeReapAfterMs": %d},
                     "telemetry": {"enabled": false},
                     "shutdown": {"drainTimeoutMs": 100, "timeoutMs": 5000}
                   },
                   "logging": {"directory": %s}
                 }
                 """.formatted(httpPort, apiGrpcPort, raftPort, raftPort,
-                JSON.writeValueAsString(temporaryDirectory.resolve("raft").toString()),
+                JSON.writeValueAsString(temporaryDirectory.resolve("raft").toString()), nodeReapAfterMs,
                 JSON.writeValueAsString(temporaryDirectory.resolve("logs").toString())));
     }
 
     private void writeClientConfig(Path target, int serverPort, int clientPort) throws Exception {
+        writeClientConfig(target, serverPort, clientPort, 600);
+    }
+
+    private void writeClientConfig(Path target, int serverPort, int clientPort, long checkTtlMs) throws Exception {
         Files.writeString(target, """
                 {
                   "version": 1,
@@ -270,14 +319,14 @@ class CrashedClientExpiryEndToEndTest {
                     "registrationRetryMinMs": 25, "registrationRetryMaxMs": 100, "contactFreshnessMs": 1000,
                     "services": [
                       {"id": "web", "name": "web", "address": "127.0.0.1", "port": %d,
-                       "checks": [{"id": "tcp", "type": "tcp", "intervalMs": 100, "ttlMs": 600,
+                       "checks": [{"id": "tcp", "type": "tcp", "intervalMs": 100, "ttlMs": %d,
                                    "deregisterAfterMs": 5000}]}
                     ]
                   },
                   "logging": {"directory": %s}
                 }
                 """.formatted(JSON.writeValueAsString(temporaryDirectory.resolve("client-data").toString()),
-                clientPort, serverPort, serverPort,
+                clientPort, serverPort, serverPort, checkTtlMs,
                 JSON.writeValueAsString(temporaryDirectory.resolve("client-logs").toString())));
     }
 
