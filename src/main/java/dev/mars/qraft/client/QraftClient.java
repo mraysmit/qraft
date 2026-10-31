@@ -36,6 +36,7 @@ import dev.mars.qraft.common.concurrent.Deadlines;
 import dev.mars.qraft.client.service.RegistrationClient;
 import dev.mars.qraft.client.service.RegistrationStore;
 import dev.mars.qraft.client.service.LocalApiServer;
+import dev.mars.qraft.client.service.LocalClientRoutes;
 import dev.mars.qraft.client.service.LocalDefinitions;
 import dev.mars.qraft.client.service.LocalRegistrationRoutes;
 import dev.mars.qraft.client.service.HeartbeatService;
@@ -97,6 +98,8 @@ public final class QraftClient implements AutoCloseable {
     private final AtomicBoolean registrationRetryScheduled = new AtomicBoolean();
     private final AtomicInteger registrationRetryNumber = new AtomicInteger();
     private final AtomicReference<CompletableFuture<Void>> pendingRetryDelay = new AtomicReference<>();
+    private final CompletableFuture<Void> left = new CompletableFuture<>();
+    private CompletableFuture<Boolean> departure;
     private CompletableFuture<Boolean> shutdownFuture;
 
     public QraftClient(ClientConfiguration config) {
@@ -172,6 +175,8 @@ public final class QraftClient implements AutoCloseable {
         this.localApi = new LocalApiServer(config, readinessPolicy::isReady);
         new LocalRegistrationRoutes(definitions, localChecks::latest, localChecks::reporter, config.getAddress())
                 .install(localApi);
+        new LocalClientRoutes(config, dataDirectory.nodeId(), readinessPolicy::conditions, contactTracker,
+                serverClient::forwardRead, this::depart, this::finishLeaving).install(localApi);
         definitions.listen(new LocalDefinitions.Listener() {
             @Override public void checkAdded(HealthCheckDefinition check) {
                 // Readiness counts the check before it can report, so its first result is not missed.
@@ -278,6 +283,21 @@ public final class QraftClient implements AutoCloseable {
 
     public synchronized CompletableFuture<Boolean> shutdown() {
         if (shutdownFuture != null) return shutdownFuture;
+        shutdownFuture = depart().thenApply(succeeded -> {
+            finishShutdown();
+            return succeeded;
+        }).thenCompose(succeeded -> awaitQuiescence().thenApply(quiet -> succeeded && quiet))
+                // Nothing of the client runs any more, so the directory can belong to the next one.
+                .whenComplete((succeeded, failure) -> dataDirectory.close());
+        return shutdownFuture;
+    }
+
+    /**
+     * Withdraws the client and leaves the catalog, within the shutdown bound, once however often it is asked. The local
+     * API can wait for this, where it cannot wait for {@link #shutdown()}, which stops the local API.
+     */
+    private synchronized CompletableFuture<Boolean> depart() {
+        if (departure != null) return departure;
 
         running.set(false);
         // Applications' writes stop first, so that nothing is registered behind the deregistration below.
@@ -297,9 +317,8 @@ public final class QraftClient implements AutoCloseable {
         });
         CompletableFuture<Boolean> bounded = Deadlines.bound(graceful,
                 config.getShutdownTimeoutMs(), TimeUnit.MILLISECONDS);
-        shutdownFuture = bounded.handle((complete, failure) -> {
+        departure = bounded.handle((complete, failure) -> {
             boolean succeeded = failure == null && Boolean.TRUE.equals(complete);
-            finishShutdown();
             if (failure != null) {
                 Logging.LOGGER.warn("Client shutdown incomplete within deadline={}ms; automatic expiry may be required",
                         config.getShutdownTimeoutMs());
@@ -308,10 +327,17 @@ public final class QraftClient implements AutoCloseable {
                         + "automatic expiry may be required");
             }
             return succeeded;
-        }).thenCompose(succeeded -> awaitQuiescence().thenApply(quiet -> succeeded && quiet))
-                // Nothing of the client runs any more, so the directory can belong to the next one.
-                .whenComplete((succeeded, failure) -> dataDirectory.close());
-        return shutdownFuture;
+        });
+        return departure;
+    }
+
+    /**
+     * Finishes what a leave through the local API began. It runs on no thread of the local API's, because the shutdown
+     * stops the local API and waits for its handlers, and the one that asked for this is still returning.
+     */
+    private void finishLeaving() {
+        Thread.ofVirtual().name("qraft-client-leave").start(() -> shutdown().whenComplete(
+                (succeeded, failure) -> left.complete(null)));
     }
 
     private void stopScheduledWork() {
@@ -353,6 +379,8 @@ public final class QraftClient implements AutoCloseable {
         return localChecks.reporter(serviceId, checkId);
     }
     ServiceReconciler serviceReconciler() { return serviceReconciler; }
+    /** Completes once a client told to leave through its local API has shut down. A client that is not told never does. */
+    public CompletableFuture<Void> left() { return left; }
     /** True once shutdown has completed and every client-owned thread, client, and listener has stopped. */
     public boolean isTerminated() {
         return scheduler.isTerminated() && checkScheduler.isTerminated() && checkHttpClient.isTerminated()

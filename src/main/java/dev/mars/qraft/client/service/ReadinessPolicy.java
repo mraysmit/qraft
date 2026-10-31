@@ -57,10 +57,24 @@ public final class ReadinessPolicy {
         }
     }
 
+    /** What readiness is made of. A client is ready when all of it holds. */
+    public record Conditions(boolean running, boolean nodeRegistered, boolean servicesConverged,
+                             boolean requiredChecksSatisfied, boolean serverContactFresh) {
+        public boolean ready() {
+            return running && nodeRegistered && servicesConverged && requiredChecksSatisfied && serverContactFresh;
+        }
+    }
+
+    public Conditions conditions() {
+        return new Conditions(running.getAsBoolean(), nodeRegistered.getAsBoolean(), servicesConverged.getAsBoolean(),
+                requiredChecksSatisfied.getAsBoolean(), serverContactFresh());
+    }
+
     public boolean isReady() {
-        if (!running.getAsBoolean() || !nodeRegistered.getAsBoolean()
-                || !servicesConverged.getAsBoolean()
-                || !requiredChecksSatisfied.getAsBoolean()) return false;
+        return conditions().ready();
+    }
+
+    private boolean serverContactFresh() {
         Instant contact = contactTracker.lastSuccessfulContact();
         if (contact == null) return false;
         Duration age = Duration.between(contact, clock.instant());

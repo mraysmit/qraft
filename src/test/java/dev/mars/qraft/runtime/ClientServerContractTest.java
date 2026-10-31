@@ -169,6 +169,20 @@ class ClientServerContractTest {
     }
 
     @Test
+    void aForwardedReadOfTheNodesAnswersAgainstRealServer() throws Exception {
+        startServer();
+        URI endpoint = URI.create("http://127.0.0.1:" + server.port());
+        catalogClient = new HttpCatalogClient(HttpClient.newHttpClient(), new ObjectMapper(), List.of(endpoint),
+                "catalog-client", "default", "default", "dc-1", "eu-west", Duration.ofSeconds(2));
+
+        var read = catalogClient.forwardRead("/v1/catalog/nodes", "request-1").get(10, TimeUnit.SECONDS).orElseThrow();
+
+        assertEquals(200, read.status(), read.body());
+        assertTrue(new ObjectMapper().readTree(read.body()).isArray());
+        assertTrue(read.index().isPresent(), "a read carries the index it was answered at");
+    }
+
+    @Test
     void aMaintenanceCheckTakesAServiceOutOfPassingDiscoveryAgainstRealServer() throws Exception {
         startServer();
         URI endpoint = URI.create("http://127.0.0.1:" + server.port());

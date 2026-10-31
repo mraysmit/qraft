@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-10-31 (client list Phase 5: TTL status and maintenance through the local API, in sections 12.1.3 and 16. Earlier the same day: client list Phase 4: services and checks through the local API, in sections 6.2, 7.4, 8.2, 12.1.3 and 16. Earlier, 2026-10-30: client anti-entropy and `GET /v1/catalog/node-services/{nodeName}` in sections 7.3, 8.2, 12.1 and 22; a check ID unique across a client in section 16. Earlier the same day: client list Phase 2, the server side: the node ID and the rules for who may hold a name, after Consul's catalog, in sections 7.3 and 22, and the `X-Qraft-Node-ID` header, the 409 `node_name_reserved` refusal and the node listing's `id` in sections 12.1 and 12.1.2. Earlier, 2026-10-27: section 12.4.1: how the Vite build names the asset manifest, and the security profile in the bootstrap data. Earlier, 2026-10-26: client list Phase 1: the server's service and check write routes moved from `/v1/client/*` to `/v1/catalog/*` in sections 12.1, 12.1.1 and 12.1.2. Earlier, 2026-10-25: Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
+**Last updated:** 2026-10-31 (client list Phase 6: `self`, `members` and `leave` on the local API, in sections 8.4 and 12.1.3. Earlier the same day: client list Phase 5: TTL status and maintenance through the local API, in sections 12.1.3 and 16. Earlier the same day: client list Phase 4: services and checks through the local API, in sections 6.2, 7.4, 8.2, 12.1.3 and 16. Earlier, 2026-10-30: client anti-entropy and `GET /v1/catalog/node-services/{nodeName}` in sections 7.3, 8.2, 12.1 and 22; a check ID unique across a client in section 16. Earlier the same day: client list Phase 2, the server side: the node ID and the rules for who may hold a name, after Consul's catalog, in sections 7.3 and 22, and the `X-Qraft-Node-ID` header, the 409 `node_name_reserved` refusal and the node listing's `id` in sections 12.1 and 12.1.2. Earlier, 2026-10-27: section 12.4.1: how the Vite build names the asset manifest, and the security profile in the bootstrap data. Earlier, 2026-10-26: client list Phase 1: the server's service and check write routes moved from `/v1/client/*` to `/v1/catalog/*` in sections 12.1, 12.1.1 and 12.1.2. Earlier, 2026-10-25: Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
 
 ## 1. Purpose
 
@@ -758,7 +758,8 @@ successful no-op. During graceful shutdown, the client:
 5. Stops the local HTTP server.
 6. Closes its scheduler and HTTP resources.
 
-Repeated and concurrent shutdown calls share one completion. The entire sequence
+`PUT /v1/client/leave` runs the same sequence, answering between steps 4 and 5
+(section 12.1.3). Repeated and concurrent shutdown calls share one completion. The entire sequence
 is bounded by the positive `client.shutdownTimeoutMs` file setting, which defaults
 to 30 seconds. Deadline expiry force-cancels outstanding HTTP work and logs one
 incomplete-cleanup warning; it does not delay process termination indefinitely.
@@ -1200,7 +1201,7 @@ names the node and carries the outcome field. Anything else is the retryable
 `invalid_response`, as it is for a service, so that an answer some other HTTP
 service could give never registers a node.
 
-#### 12.1.3 The client's local API: services, checks and maintenance
+#### 12.1.3 The client's local API
 
 A client serves these routes to the applications on its host, after Consul's agent
 API (`agent/agent_endpoint.go`, read 2026-10-31), with the request handling of
@@ -1220,6 +1221,9 @@ PUT /v1/client/check/fail/{checkId}[?note=...]
 PUT /v1/client/check/update/{checkId}
 PUT /v1/client/maintenance?enable=...[&reason=...]
 PUT /v1/client/service/maintenance/{serviceId}?enable=...[&reason=...]
+GET /v1/client/self
+GET /v1/client/members
+PUT /v1/client/leave
 ```
 
 A service registration takes the fields of a service in the configuration file
@@ -1294,6 +1298,24 @@ the client's readiness back. It reports again every third of its 60 s TTL, becau
 service removed and registered again comes back without its checks' state. Disabling
 it stops the declaration, and the server prunes the check. Deregistering a service
 ends its maintenance.
+
+`GET /v1/client/self` answers with `node` (name, ID, address, datacenter, region),
+`version`, `config`, `serverContact` (`lastSuccessfulContact`, null until a server has
+answered) and `readiness` (`ready`, and each condition of section 4.3). `config` names
+its settings one by one, so a secret added later is not shown by default.
+
+`GET /v1/client/members` is a forwarded read of `GET /v1/catalog/nodes`, because Qraft
+has no gossip pool. The answer is passed on as it came, under the caller's request ID,
+with `X-Qraft-Index` and the leader hint. A busy server or one that cannot be reached
+is passed over for the next seed, and if all are, the last answer is passed on. With
+no answer at all it is 503 `no_server_reachable`, retryable, and never older data.
+
+`PUT /v1/client/leave` answers `{"deregistered":true}` once the client has left the
+catalog (section 8.4), or false if it could not within its shutdown bound. It then
+finishes shutting down, and its process exits with code 0. Consul's agent does not
+shut down if its leave fails; a client always exits, and its services go when its
+node expires. What the API registered stays in `client.dataDirectory`, so the next
+start on it registers it again.
 
 ### 12.2 Error envelope
 

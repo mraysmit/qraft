@@ -67,8 +67,11 @@ public final class QraftRuntimeApplication {
 
     private static RuntimeLifecycle launchClient(Path configurationPath) {
         QraftClient client = QraftClient.launch(configurationPath);
-        return new ManagedRuntimeLifecycle(() -> client.shutdown().thenApply(ignored -> null),
+        RuntimeLifecycle lifecycle = new ManagedRuntimeLifecycle(() -> client.shutdown().thenApply(ignored -> null),
                 () -> java.util.Map.of("http", client.localApi().address()));
+        // A client told to leave ends the runtime, and with it the process. It may have been told already.
+        client.left().thenRun(lifecycle::closeAsync);
+        return lifecycle;
     }
 
     static Startup parseArguments(String[] args) {

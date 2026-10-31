@@ -894,6 +894,68 @@ class QraftClientTest {
         }
     }
 
+    @Test
+    void aClientToldToLeaveDeregistersAnswersAndThenFinishesShuttingDown() throws Exception {
+        List<String> departures = new CopyOnWriteArrayList<>();
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext(NodeAnswerHelper.REGISTER, NodeAnswerHelper.dispatching("service",
+                (exchange, body) -> NodeAnswerHelper.serviceRegistered(exchange, body.path("service").path("serviceId").asText()),
+                exchange -> NodeAnswerHelper.answer(exchange, 200, "registered", true)));
+        server.createContext(NodeAnswerHelper.DEREGISTER, NodeAnswerHelper.dispatching("serviceId", (exchange, body) -> {
+            departures.add("service " + body.path("serviceId").asText());
+            NodeAnswerHelper.serviceDeregistered(exchange, body.path("serviceId").asText(), true);
+        }, exchange -> {
+            departures.add("node");
+            NodeAnswerHelper.answer(exchange, 200, "deregistered", true);
+        }));
+        server.start();
+        QraftClient client = new QraftClient(clientConfigWithoutServices());
+        assertTrue(client.start().get(10, TimeUnit.SECONDS));
+        assertEquals(200, localApi(client, "PUT", "/v1/client/service/register",
+                "{\"id\":\"api-1\",\"name\":\"api\",\"port\":9000}"));
+        awaitTrue(() -> client.serviceReconciler().registeredCount() == 1, "the service is registered");
+        int port = client.localApi().port();
+
+        java.net.http.HttpResponse<String> answer = java.net.http.HttpClient.newHttpClient().send(
+                java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://127.0.0.1:" + port + "/v1/client/leave"))
+                        .PUT(java.net.http.HttpRequest.BodyPublishers.noBody()).build(),
+                java.net.http.HttpResponse.BodyHandlers.ofString());
+
+        assertEquals(200, answer.statusCode(), answer.body());
+        assertTrue(new ObjectMapper().readTree(answer.body()).path("deregistered").asBoolean(), answer.body());
+        assertEquals(List.of("service api-1", "node"), departures, "it has left the catalog by the time it answers");
+        client.left().get(10, TimeUnit.SECONDS);
+        assertTrue(client.shutdown().get(10, TimeUnit.SECONDS), "shutdown has begun and shares the departure");
+        awaitTrue(client::isTerminated, "nothing of the client is left running");
+        ClientDataDirectory.open(dataDirectory).close();
+        assertEquals(1, departures.stream().filter("node"::equals).count());
+    }
+
+    @Test
+    void aClientAnswersSelfAndMembersThroughTheLocalApi() throws Exception {
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext(NodeAnswerHelper.REGISTER, NodeAnswerHelper::accept);
+        server.createContext(NodeAnswerHelper.DEREGISTER, NodeAnswerHelper::accept);
+        server.createContext("/v1/catalog/nodes", exchange ->
+                NodeAnswerHelper.send(exchange, 200, "[{\"name\":\"client-1\"}]"));
+        server.start();
+        QraftClient client = new QraftClient(clientConfigWithoutServices());
+
+        try {
+            assertTrue(client.start().get(10, TimeUnit.SECONDS));
+            awaitTrue(() -> client.localApi().isReady(), "the client is ready");
+
+            JsonNode self = new ObjectMapper().readTree(localApiBody(client, "/v1/client/self"));
+            assertEquals("client-1", self.path("node").path("name").asText());
+            assertEquals(client.nodeId(), self.path("node").path("id").asText());
+            assertTrue(self.path("readiness").path("ready").asBoolean(), self.toString());
+            assertFalse(self.path("serverContact").path("lastSuccessfulContact").isNull());
+            assertEquals("[{\"name\":\"client-1\"}]", localApiBody(client, "/v1/client/members"));
+        } finally {
+            client.shutdown().get(10, TimeUnit.SECONDS);
+        }
+    }
+
     private static String localApiBody(QraftClient client, String path) throws Exception {
         return java.net.http.HttpClient.newHttpClient().send(java.net.http.HttpRequest.newBuilder(
                         java.net.URI.create("http://127.0.0.1:" + client.localApi().port() + path)).GET().build(),

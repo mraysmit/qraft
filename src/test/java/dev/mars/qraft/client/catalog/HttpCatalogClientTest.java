@@ -544,6 +544,79 @@ class HttpCatalogClientTest {
         return client;
     }
 
+    @Test
+    void aForwardedReadCarriesItsRequestIdAndIdentityAndComesBackAsItCame() throws Exception {
+        AtomicReference<CapturedRequest> request = new AtomicReference<>();
+        AtomicReference<String> query = new AtomicReference<>();
+        URI server = start(exchange -> {
+            query.set(exchange.getRequestURI().getRawQuery());
+            request.set(new CapturedRequest(exchange.getRequestMethod(), exchange.getRequestURI().getPath(),
+                    exchange.getRequestHeaders(), ""));
+            exchange.getResponseHeaders().set("X-Qraft-Index", "7");
+            exchange.getResponseHeaders().set("X-Qraft-Leader-Id", "server-2");
+            respond(exchange, 200, "[1,2]");
+        });
+
+        ForwardedRead read = selectedClient(List.of(server)).forwardRead("/v1/health/service/web?passing", "request-7")
+                .get(10, TimeUnit.SECONDS).orElseThrow();
+
+        assertEquals(new ForwardedRead(200, "[1,2]", java.util.Optional.of("7"), java.util.Optional.of("server-2")), read);
+        assertEquals("GET", request.get().method());
+        assertEquals("/v1/health/service/web", request.get().path());
+        assertEquals("passing", query.get());
+        assertEquals("request-7", request.get().header("X-Request-Id"));
+        assertEquals("node-a", request.get().header("X-Qraft-Node"));
+        assertEquals("tenant-a", request.get().header("X-Qraft-Tenant"));
+    }
+
+    @Test
+    void aForwardedReadThatARefusesIsPassedOnWithoutAskingAnotherSeed() throws Exception {
+        AtomicInteger secondAttempts = new AtomicInteger();
+        URI refusing = start(exchange -> respond(exchange, 404, "{\"code\":\"not_found\"}"));
+        URI second = start(exchange -> {
+            secondAttempts.incrementAndGet();
+            respond(exchange, 200, "[]");
+        });
+
+        ForwardedRead read = selectedClient(List.of(refusing, second)).forwardRead("/v1/catalog/nodes", "r")
+                .get(10, TimeUnit.SECONDS).orElseThrow();
+
+        assertEquals(404, read.status());
+        assertEquals("{\"code\":\"not_found\"}", read.body());
+        assertEquals(java.util.Optional.empty(), read.index());
+        assertEquals(0, secondAttempts.get());
+    }
+
+    @Test
+    void aForwardedReadTriesTheNextSeedWhenOneIsBusyOrDown() throws Exception {
+        URI refused;
+        try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
+            refused = URI.create("http://127.0.0.1:" + socket.getLocalPort());
+        }
+        URI busy = start(exchange -> respond(exchange, 503, "{\"code\":\"busy\",\"retryable\":true}"));
+        URI limited = start(exchange -> respond(exchange, 429, "{\"code\":\"limited\",\"retryable\":true}"));
+        URI answering = start(exchange -> respond(exchange, 200, "[]"));
+
+        assertEquals(200, selectedClient(List.of(refused, busy, limited, answering))
+                .forwardRead("/v1/catalog/nodes", "r").get(10, TimeUnit.SECONDS).orElseThrow().status());
+    }
+
+    @Test
+    void aForwardedReadThatEverySeedRefusesGivesTheLastAnswerAndOneNoSeedAnswersGivesNothing() throws Exception {
+        URI refused;
+        try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
+            refused = URI.create("http://127.0.0.1:" + socket.getLocalPort());
+        }
+        URI busy = start(exchange -> respond(exchange, 503, "{\"code\":\"busy\",\"retryable\":true}"));
+
+        assertEquals(503, selectedClient(List.of(refused, busy)).forwardRead("/v1/catalog/nodes", "r")
+                .get(10, TimeUnit.SECONDS).orElseThrow().status());
+        assertEquals(503, selectedClient(List.of(busy, refused)).forwardRead("/v1/catalog/nodes", "r")
+                .get(10, TimeUnit.SECONDS).orElseThrow().status(), "the seed that did answer says more than one that did not");
+        assertEquals(java.util.Optional.empty(), selectedClient(List.of(refused)).forwardRead("/v1/catalog/nodes", "r")
+                .get(10, TimeUnit.SECONDS));
+    }
+
     private HttpCatalogClient selectedClient(List<URI> endpoints) {
         HttpCatalogClient client = new HttpCatalogClient(HttpClient.newHttpClient(), JSON, endpoints,
                 "node-a", "tenant-a", "prod", "dc-1", "eu-west", Duration.ofSeconds(10));

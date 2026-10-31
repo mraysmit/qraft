@@ -309,6 +309,48 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         }
     }
 
+    /**
+     * Forwards a read across the server seeds for an application, under the application's request ID, to pass its
+     * answer on as it came. A busy server or one that cannot be reached is passed over for the next seed. When every
+     * seed has been tried, the answer is the last server's that did answer, whose envelope says more than silence, or
+     * empty when none did.
+     */
+    public CompletableFuture<Optional<ForwardedRead>> forwardRead(String pathAndQuery, String requestId) {
+        ensureOpen();
+        if (endpoints == null) {
+            throw new IllegalStateException("No server seeds were configured for automatic selection");
+        }
+        return forwardAttempt(endpoints.cycle(), 0, pathAndQuery, requestId, Optional.empty());
+    }
+
+    private CompletableFuture<Optional<ForwardedRead>> forwardAttempt(List<URI> cycle, int index, String pathAndQuery,
+            String requestId, Optional<ForwardedRead> lastAnswer) {
+        URI endpoint = cycle.get(index);
+        HttpRequest request = request(endpoint, pathAndQuery).setHeader("X-Request-Id", requestId).GET().build();
+        CompletableFuture<Optional<ForwardedRead>> answer;
+        try {
+            answer = httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                    .handle((response, failure) -> failure == null ? Optional.of(forwarded(response)) : Optional.empty());
+        } catch (RuntimeException failure) {
+            answer = CompletableFuture.completedFuture(Optional.empty());
+        }
+        return answer.thenCompose(read -> {
+            if (read.isPresent() && read.get().status() != 429 && read.get().status() < 500) {
+                endpoints.markSuccessful(endpoint);
+                contactTracker.recordSuccessfulContact();
+                return CompletableFuture.completedFuture(read);
+            }
+            Optional<ForwardedRead> latest = read.isPresent() ? read : lastAnswer;
+            return index + 1 == cycle.size() ? CompletableFuture.completedFuture(latest)
+                    : forwardAttempt(cycle, index + 1, pathAndQuery, requestId, latest);
+        });
+    }
+
+    private static ForwardedRead forwarded(HttpResponse<String> response) {
+        return new ForwardedRead(response.statusCode(), response.body(),
+                response.headers().firstValue("X-Qraft-Index"), response.headers().firstValue(LEADER_ID_HEADER));
+    }
+
     private static CatalogLookupOutcome.Retryable lookupRetryable(
             String code, Throwable failure, String leaderId) {
         return new CatalogLookupOutcome.Retryable(code,

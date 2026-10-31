@@ -26,6 +26,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -62,6 +63,33 @@ class ReadinessPolicyTest {
 
         running.set(false);
         assertFalse(policy.isReady(), "shutdown must always be unready");
+    }
+
+    @Test
+    void theConditionsSayWhichIsNotMetAndReadyIsAllOfThem() {
+        MutableClockHelper clock = new MutableClockHelper(Instant.parse("2026-09-24T12:00:00Z"));
+        ServerContactTracker contact = new ServerContactTracker(clock);
+        AtomicBoolean converged = new AtomicBoolean(false);
+        AtomicBoolean checks = new AtomicBoolean(true);
+        ReadinessPolicy policy = new ReadinessPolicy(() -> true, () -> true, converged::get, checks::get, contact,
+                Duration.ofSeconds(30), clock);
+
+        assertEquals(new ReadinessPolicy.Conditions(true, true, false, true, false), policy.conditions());
+        assertFalse(policy.conditions().ready());
+
+        converged.set(true);
+        contact.recordSuccessfulContact();
+        assertEquals(new ReadinessPolicy.Conditions(true, true, true, true, true), policy.conditions());
+        assertTrue(policy.conditions().ready());
+        assertTrue(policy.isReady());
+
+        checks.set(false);
+        assertEquals(new ReadinessPolicy.Conditions(true, true, true, false, true), policy.conditions());
+        assertFalse(policy.conditions().ready());
+
+        checks.set(true);
+        clock.advance(Duration.ofSeconds(31));
+        assertEquals(new ReadinessPolicy.Conditions(true, true, true, true, false), policy.conditions());
     }
 
     @Test

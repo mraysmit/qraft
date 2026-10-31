@@ -395,7 +395,7 @@ or skips. Its 232 retained logs hold 833 ERROR lines, all flagged, 566 stack
 traces, none under an unflagged header, no JVM crash file, and no
 `too_many_pings`.
 
-## Builds 56 and 57, 2026-10-30 and 2026-10-31
+## Builds 56 to 58, 2026-10-30 and 2026-10-31
 
 Build 56 ran on `c33a2f2`, the first Jenkins build since build 55 on 2026-10-26.
 It is the first on Jenkins of the client list's Phases 1 to 3, the transport's
@@ -418,6 +418,15 @@ lines, all flagged, and 1,038 stack traces, none under an unflagged header, no
 `too_many_pings` and no JVM crash file. The new code's only warnings are from tests
 that cause them on purpose: a registration that cannot be kept, and a kept check
 whose service is gone. They carry no stack trace.
+
+Build 58 ran on `1a60239`, with the client list's Phase 5. It passed in 23 min 58 s:
+default 1,408 with every coverage gate met, end-to-end 11, and Docker and `slow` 43,
+1,462 in all, with no failures, errors or skips. The same audit found 1,286 ERROR
+lines, all flagged, and 975 stack traces, none under an unflagged header, no
+`too_many_pings` and no JVM crash file. The count of ERROR lines moves from build to
+build with timing. Against build 57 the archived logs hold fewer `RAFT_PEER_UNREACHABLE`
+(315 from 376), `RAFT_PEER_NAME_UNRESOLVED` (110 from 173) and
+`RAFT_SNAPSHOT_TRANSFER_INTERRUPTED` (44 from 62), which account for most of the drop.
 
 ## Job configuration
 
