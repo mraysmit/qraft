@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-10-31 (client list Phase 6: `self`, `members` and `leave` on the local API, in sections 8.4 and 12.1.3. Earlier the same day: client list Phase 5: TTL status and maintenance through the local API, in sections 12.1.3 and 16. Earlier the same day: client list Phase 4: services and checks through the local API, in sections 6.2, 7.4, 8.2, 12.1.3 and 16. Earlier, 2026-10-30: client anti-entropy and `GET /v1/catalog/node-services/{nodeName}` in sections 7.3, 8.2, 12.1 and 22; a check ID unique across a client in section 16. Earlier the same day: client list Phase 2, the server side: the node ID and the rules for who may hold a name, after Consul's catalog, in sections 7.3 and 22, and the `X-Qraft-Node-ID` header, the 409 `node_name_reserved` refusal and the node listing's `id` in sections 12.1 and 12.1.2. Earlier, 2026-10-27: section 12.4.1: how the Vite build names the asset manifest, and the security profile in the bootstrap data. Earlier, 2026-10-26: client list Phase 1: the server's service and check write routes moved from `/v1/client/*` to `/v1/catalog/*` in sections 12.1, 12.1.1 and 12.1.2. Earlier, 2026-10-25: Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
+**Last updated:** 2026-10-31 (section 12.1.3's comparison with Consul corrected, and section 9.2 records a gap that client list Phase 6A closes. Earlier the same day: client list Phase 6: `self`, `members` and `leave` on the local API, in sections 8.4 and 12.1.3. Earlier the same day: client list Phase 5: TTL status and maintenance through the local API, in sections 12.1.3 and 16. Earlier the same day: client list Phase 4: services and checks through the local API, in sections 6.2, 7.4, 8.2, 12.1.3 and 16. Earlier, 2026-10-30: client anti-entropy and `GET /v1/catalog/node-services/{nodeName}` in sections 7.3, 8.2, 12.1 and 22; a check ID unique across a client in section 16. Earlier the same day: client list Phase 2, the server side: the node ID and the rules for who may hold a name, after Consul's catalog, in sections 7.3 and 22, and the `X-Qraft-Node-ID` header, the 409 `node_name_reserved` refusal and the node listing's `id` in sections 12.1 and 12.1.2. Earlier, 2026-10-27: section 12.4.1: how the Vite build names the asset manifest, and the security profile in the bootstrap data. Earlier, 2026-10-26: client list Phase 1: the server's service and check write routes moved from `/v1/client/*` to `/v1/catalog/*` in sections 12.1, 12.1.1 and 12.1.2. Earlier, 2026-10-25: Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
 
 ## 1. Purpose
 
@@ -836,6 +836,16 @@ leader and its followers hold identical values that expiry can match exactly.
 - Both phases name the stored last contact, so a heartbeat or re-registration
   committed first makes a stale command a no-op. Reaping applies only to a node
   that is already unreachable.
+- **Not yet built: an unreachable node does not affect `?passing`** (section 12.1.1).
+  A check keeps its last result until its TTL lapses, and `ttlMs` has no upper limit,
+  so a service whose check TTL is longer than `nodeTtlMs` stays in `?passing` after its
+  node is unreachable, until the check expires or the node is reaped. Consul excludes
+  such a service, because a failed node's critical `serfHealth` check counts among its
+  checks. Client list Phase 6A brings the same: the filter also excludes an instance
+  on an unreachable node, and check results do not change. A client cut off from the
+  servers then has its services leave `?passing` after `nodeTtlMs`, though they may
+  still be running, as Consul's failure detector does; the grace after failover stops a
+  change of leader from dropping them.
 - A node command differing only in its proposal time is the same in-flight
   expiry and is not proposed twice.
 
@@ -1065,6 +1075,7 @@ registration with its replicated checks ordered by check ID:
 `?passing` or `?passing=true` restricts the result to instances whose aggregate
 health is `PASSING`; `passing=false` is the unfiltered default. Any other query
 parameter or value returns `invalid_query`. Health reads never mutate the catalog.
+The filter does not yet consider the node's status (section 9.2).
 `GET /v1/catalog/service/{serviceName}` continues to return bare registrations.
 
 #### 12.1.2 Nodes
@@ -1309,13 +1320,22 @@ has no gossip pool. The answer is passed on as it came, under the caller's reque
 with `X-Qraft-Index` and the leader hint. A busy server or one that cannot be reached
 is passed over for the next seed, and if all are, the last answer is passed on. With
 no answer at all it is 503 `no_server_reachable`, retryable, and never older data.
+Consul's `/v1/agent/members` lists its gossip pool, and Consul itself points to
+`/v1/catalog/nodes` for a strongly consistent list. So here there is no answer without a
+server, only clients are listed, because servers have no node entry, and a node that
+left is gone, where Consul shows it as `left`. Consul documents `wan` as for its
+server-mode agents and `segment` as Enterprise; neither is carried over.
 
 `PUT /v1/client/leave` answers `{"deregistered":true}` once the client has left the
 catalog (section 8.4), or false if it could not within its shutdown bound. It then
-finishes shutting down, and its process exits with code 0. Consul's agent does not
-shut down if its leave fails; a client always exits, and its services go when its
-node expires. What the API registered stays in `client.dataDirectory`, so the next
-start on it registers it again.
+finishes shutting down, and its process exits with code 0. A Consul client does the
+same: its `Client.Leave` logs a failed leave and returns no error, so `AgentLeave` goes
+on to shut down. A client that could not deregister is then treated as one that crashed
+(section 9): its checks expire, its node is marked unreachable after `nodeTtlMs`, and
+the catalog keeps both until `nodeReapAfterMs`. What the API registered stays in
+`client.dataDirectory`, as Consul's persisted services do. Consul treats a leave as "a
+permanent intent" and does not rejoin without an explicit join or `rejoin_after_leave`;
+a client always has its server URLs, so its next start registers it again.
 
 ### 12.2 Error envelope
 
