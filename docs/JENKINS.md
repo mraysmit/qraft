@@ -395,7 +395,7 @@ or skips. Its 232 retained logs hold 833 ERROR lines, all flagged, 566 stack
 traces, none under an unflagged header, no JVM crash file, and no
 `too_many_pings`.
 
-## Build 56 verification, 2026-10-30
+## Builds 56 and 57, 2026-10-30 and 2026-10-31
 
 Build 56 ran on `c33a2f2`, the first Jenkins build since build 55 on 2026-10-26.
 It is the first on Jenkins of the client list's Phases 1 to 3, the transport's
@@ -410,6 +410,14 @@ from 16 classes, and the test reports. Many events appear in more than one of th
 They hold 1,386 ERROR lines, all flagged, and 1,000 stack traces, none under an
 unflagged header. There is no `too_many_pings` and no JVM crash file.
 `DockerDeploymentContractTest` has no archive because it only reads files.
+
+Build 57 ran on `a2459ee`, with the client list's Phase 4. It passed in 24 min 14 s:
+default 1,375 with every coverage gate met, end-to-end 11, and Docker and `slow` 43,
+1,429 in all, with no failures, errors or skips. The same audit found 1,478 ERROR
+lines, all flagged, and 1,038 stack traces, none under an unflagged header, no
+`too_many_pings` and no JVM crash file. The new code's only warnings are from tests
+that cause them on purpose: a registration that cannot be kept, and a kept check
+whose service is gone. They carry no stack trace.
 
 ## Job configuration
 

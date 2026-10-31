@@ -94,8 +94,31 @@ class RegistrationStoreTest {
                 """), written);
     }
 
+    @Test
+    void maintenanceIsKeptOnlyWhenThereIsSome() throws Exception {
+        RegistrationStore store = new RegistrationStore(directory);
+        RegistrationStore.Kept kept = new RegistrationStore.Kept(List.of(API), List.of(), "rack move",
+                Map.of("api-1", "upgrade"));
+
+        store.write(kept);
+
+        assertEquals(kept, new RegistrationStore(directory).read());
+        JsonNode written = new ObjectMapper().readTree(directory.resolve(RegistrationStore.FILE_NAME).toFile());
+        assertEquals(new ObjectMapper().readTree("{\"node\":\"rack move\",\"services\":{\"api-1\":\"upgrade\"}}"),
+                written.path("maintenance"));
+
+        store.write(new RegistrationStore.Kept(List.of(API), List.of()));
+        assertFalse(new ObjectMapper().readTree(directory.resolve(RegistrationStore.FILE_NAME).toFile())
+                .has("maintenance"), "a file without maintenance is the form that was kept before it existed");
+        assertEquals(new RegistrationStore.Kept(List.of(API), List.of()), store.read());
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {
+            "{\"version\":1,\"services\":[],\"checks\":[],\"maintenance\":[]}",
+            "{\"version\":1,\"services\":[],\"checks\":[],\"maintenance\":{\"node\":1}}",
+            "{\"version\":1,\"services\":[],\"checks\":[],\"maintenance\":{\"services\":{\"a\":1}}}",
+            "{\"version\":1,\"services\":[],\"checks\":[],\"maintenance\":{\"unknown\":\"x\"}}",
             "{ not json",
             "[]",
             "{\"version\":2,\"services\":[],\"checks\":[]}",

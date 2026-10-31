@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-10-31 (client list Phase 4: services and checks through the local API, in sections 6.2, 7.4, 8.2, 12.1.3 and 16. Earlier, 2026-10-30: client anti-entropy and `GET /v1/catalog/node-services/{nodeName}` in sections 7.3, 8.2, 12.1 and 22; a check ID unique across a client in section 16. Earlier the same day: client list Phase 2, the server side: the node ID and the rules for who may hold a name, after Consul's catalog, in sections 7.3 and 22, and the `X-Qraft-Node-ID` header, the 409 `node_name_reserved` refusal and the node listing's `id` in sections 12.1 and 12.1.2. Earlier, 2026-10-27: section 12.4.1: how the Vite build names the asset manifest, and the security profile in the bootstrap data. Earlier, 2026-10-26: client list Phase 1: the server's service and check write routes moved from `/v1/client/*` to `/v1/catalog/*` in sections 12.1, 12.1.1 and 12.1.2. Earlier, 2026-10-25: Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
+**Last updated:** 2026-10-31 (client list Phase 5: TTL status and maintenance through the local API, in sections 12.1.3 and 16. Earlier the same day: client list Phase 4: services and checks through the local API, in sections 6.2, 7.4, 8.2, 12.1.3 and 16. Earlier, 2026-10-30: client anti-entropy and `GET /v1/catalog/node-services/{nodeName}` in sections 7.3, 8.2, 12.1 and 22; a check ID unique across a client in section 16. Earlier the same day: client list Phase 2, the server side: the node ID and the rules for who may hold a name, after Consul's catalog, in sections 7.3 and 22, and the `X-Qraft-Node-ID` header, the 409 `node_name_reserved` refusal and the node listing's `id` in sections 12.1 and 12.1.2. Earlier, 2026-10-27: section 12.4.1: how the Vite build names the asset manifest, and the security profile in the bootstrap data. Earlier, 2026-10-26: client list Phase 1: the server's service and check write routes moved from `/v1/client/*` to `/v1/catalog/*` in sections 12.1, 12.1.1 and 12.1.2. Earlier, 2026-10-25: Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
 
 ## 1. Purpose
 
@@ -1200,7 +1200,7 @@ names the node and carries the outcome field. Anything else is the retryable
 `invalid_response`, as it is for a service, so that an answer some other HTTP
 service could give never registers a node.
 
-#### 12.1.3 The client's local API: services and checks
+#### 12.1.3 The client's local API: services, checks and maintenance
 
 A client serves these routes to the applications on its host, after Consul's agent
 API (`agent/agent_endpoint.go`, read 2026-10-31), with the request handling of
@@ -1214,6 +1214,12 @@ GET /v1/client/service/{serviceId}
 PUT /v1/client/check/register
 PUT /v1/client/check/deregister/{checkId}
 GET /v1/client/checks
+PUT /v1/client/check/pass/{checkId}[?note=...]
+PUT /v1/client/check/warn/{checkId}[?note=...]
+PUT /v1/client/check/fail/{checkId}[?note=...]
+PUT /v1/client/check/update/{checkId}
+PUT /v1/client/maintenance?enable=...[&reason=...]
+PUT /v1/client/service/maintenance/{serviceId}?enable=...[&reason=...]
 ```
 
 A service registration takes the fields of a service in the configuration file
@@ -1261,6 +1267,33 @@ and so is a kept check whose service is gone. A service the file defines and the
 deregistered is therefore back after a restart. A `registrations.json` that cannot
 be read stops the client and is not replaced, where Consul logs such a file and goes
 on. These routes have no authentication until the ACL list.
+
+A TTL check is told its status by `pass`, `warn` and `fail`, or by `update` with a
+body of `status`, one of `passing`, `warning` or `critical`, and an optional `output`.
+Each answers `{"checkId":"app","status":"passing"}`. An unknown check answers 404
+`check_not_found`, a check that is not a TTL check 400 `check_not_ttl`, an invalid
+update 400 `invalid_request`, and a check that is not running yet, before the node
+registers, 503 `check_not_running`, retryable. A status is not kept across a restart,
+where Consul keeps it until it would have expired.
+
+Maintenance takes a service out of `?passing` discovery while it stays registered.
+`enable` is required, read as Go's `strconv.ParseBool` reads it, as in Consul, and
+anything else answers 400 `invalid_request`; `reason` is optional. A service that is
+not registered answers 404 `service_not_found`, whether enabling or disabling. They
+answer `{"serviceId":"web-1","maintenance":true}` and `{"maintenance":true}`.
+
+As in Consul, maintenance is a check of its own, kept across a restart, and enabling
+it again keeps the first reason. The client adds `_service_maintenance:{serviceId}`,
+or `_node_maintenance:{serviceId}` on each service of a node in maintenance, including
+services registered later, because a check always names a service. Applications may
+not use those IDs. The service declares the check, the check reports the server's
+`maintenance` status with the reason as its output, and `GET /v1/client/checks` shows
+it. A server treats any `maintenance` observation as maintenance of the service
+(section 7.6). So, unlike Consul's critical check, it is not required: it never holds
+the client's readiness back. It reports again every third of its 60 s TTL, because a
+service removed and registered again comes back without its checks' state. Disabling
+it stops the declaration, and the server prunes the check. Deregistering a service
+ends its maintenance.
 
 ### 12.2 Error envelope
 
@@ -2144,8 +2177,8 @@ before that, within its service):
   critical. With `warnAfterMs`, a connection that takes at least that long is a
   warning. The threshold must be shorter than `timeoutMs`, and zero or absent
   never warns.
-- `ttl` has no probe. The local process reports its status (`passing`,
-  `warning`, `critical`, or `maintenance`) through an internal client input. If no
+- `ttl` has no probe. An application reports its status through the local API
+  (section 12.1.3). If no
   report arrives within `ttlMs`, the client records a critical result locally.
   `ttlMs` is required and it is the only timing setting.
 

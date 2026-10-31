@@ -28,6 +28,7 @@ import dev.mars.qraft.client.catalog.HttpCatalogClient;
 import dev.mars.qraft.client.config.ClientConfiguration;
 import dev.mars.qraft.client.health.CheckObservation;
 import dev.mars.qraft.client.health.CheckStatus;
+import dev.mars.qraft.client.health.MaintenanceCheck;
 import dev.mars.qraft.client.health.ObservationOutcome;
 import dev.mars.qraft.common.ServiceDefinition;
 import dev.mars.qraft.server.http.HttpApiServer;
@@ -165,6 +166,45 @@ class ClientServerContractTest {
         assertInstanceOf(CatalogOutcome.Success.class, catalogClient.register(service).get(10, TimeUnit.SECONDS));
         assertEquals(java.util.Optional.of(java.util.Set.of("payments-1")),
                 catalogClient.nodeServices().get(10, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void aMaintenanceCheckTakesAServiceOutOfPassingDiscoveryAgainstRealServer() throws Exception {
+        startServer();
+        URI endpoint = URI.create("http://127.0.0.1:" + server.port());
+        catalogClient = new HttpCatalogClient(HttpClient.newHttpClient(), new ObjectMapper(), List.of(endpoint),
+                "catalog-client", "default", "default", "dc-1", "eu-west", Duration.ofSeconds(2));
+        MaintenanceCheck maintenance = MaintenanceCheck.ofService("payments-1", "upgrade");
+        ServiceDefinition service = new ServiceDefinition("payments-1", "payments", "127.0.0.1", 9090,
+                List.of(), Map.of(), true).withCheckIds(List.of("http", maintenance.checkId()));
+        assertInstanceOf(CatalogOutcome.Success.class, catalogClient.register(service).get(10, TimeUnit.SECONDS));
+        assertInstanceOf(ObservationOutcome.Accepted.class, catalogClient.observe(new CheckObservation("payments-1",
+                "http", CheckStatus.PASSING, 1, Instant.now(), Duration.ofSeconds(30), true, "200 OK", Duration.ZERO))
+                .get(10, TimeUnit.SECONDS));
+        assertEquals(1, readHealth(endpoint, "payments?passing").size());
+
+        assertInstanceOf(ObservationOutcome.Accepted.class, catalogClient.observe(new CheckObservation("payments-1",
+                maintenance.checkId(), CheckStatus.MAINTENANCE, 2, Instant.now(), maintenance.ttl(),
+                maintenance.required(), maintenance.reason(), maintenance.deregisterAfter()))
+                .get(10, TimeUnit.SECONDS));
+
+        assertEquals(0, readHealth(endpoint, "payments?passing").size());
+        assertEquals(1, readHealth(endpoint, "payments").size(), "it is still registered");
+
+        assertInstanceOf(CatalogOutcome.Success.class,
+                catalogClient.register(service.withCheckIds(List.of("http"))).get(10, TimeUnit.SECONDS));
+        assertEquals(1, readHealth(endpoint, "payments?passing").size(),
+                "no longer declaring the check ends maintenance, as the client does when it is disabled");
+    }
+
+    private static JsonNode readHealth(URI endpoint, String serviceAndQuery) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(endpoint.resolve("/v1/health/service/" + serviceAndQuery))
+                .GET().build();
+        try (HttpClient client = HttpClient.newHttpClient()) {
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, response.statusCode(), response.body());
+            return new ObjectMapper().readTree(response.body());
+        }
     }
 
     @Test

@@ -22,6 +22,7 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.mars.qraft.client.health.HealthCheckDefinition;
 import dev.mars.qraft.client.health.HttpCheck;
+import dev.mars.qraft.client.health.MaintenanceCheck;
 import dev.mars.qraft.client.health.ProbeCheck;
 import dev.mars.qraft.client.health.TcpCheck;
 import dev.mars.qraft.client.health.TtlCheck;
@@ -94,7 +95,7 @@ public final class DefinitionJson {
      * @throws IllegalArgumentException if the check is not a valid one
      */
     public static HealthCheckDefinition parseCheck(JsonNode check, ServiceDefinition service) {
-        return parseCheck(withoutService(check), requiredText(check, "id"), service.id(), service.address(),
+        return parseCheck(withoutService(check), checkId(check), service.id(), service.address(),
                 service.port(), "check");
     }
 
@@ -105,8 +106,17 @@ public final class DefinitionJson {
      * @throws IllegalArgumentException if the check is not a valid one
      */
     public static HealthCheckDefinition readWrittenCheck(JsonNode written) {
-        return parseCheck(withoutService(written), requiredText(written, "id"), requiredText(written, SERVICE_ID), null,
+        return parseCheck(withoutService(written), checkId(written), requiredText(written, SERVICE_ID), null,
                 0, "kept check");
+    }
+
+    /** A check's ID, which an application cannot give the form that only maintenance uses. */
+    private static String checkId(JsonNode check) {
+        String id = requiredText(check, "id");
+        if (MaintenanceCheck.isReserved(id)) {
+            throw new IllegalArgumentException("The health check id " + id + " is reserved for maintenance");
+        }
+        return id;
     }
 
     private static JsonNode withoutService(JsonNode check) {
@@ -123,7 +133,7 @@ public final class DefinitionJson {
         Set<String> ids = new LinkedHashSet<>();
         for (JsonNode check : checks) {
             if (!check.isObject()) throw new IllegalArgumentException("Each health check must be an object");
-            String id = requiredText(check, "id");
+            String id = checkId(check);
             if (!ids.add(id)) {
                 throw new IllegalArgumentException("Duplicate health check id " + id + " for service " + service.id());
             }
@@ -202,6 +212,11 @@ public final class DefinitionJson {
                 written.put("type", "ttl");
                 written.put("required", ttl.required());
                 written.put("ttlMs", ttl.ttl().toMillis());
+            }
+            case MaintenanceCheck maintenance -> {
+                written.put("type", "maintenance");
+                written.put("required", maintenance.required());
+                written.put("reason", maintenance.reason());
             }
         }
         written.put("deregisterAfterMs", check.deregisterAfter().toMillis());

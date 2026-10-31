@@ -170,7 +170,8 @@ public final class QraftClient implements AutoCloseable {
                 serviceReconciler::isConverged, checkReadiness::isSatisfied, contactTracker,
                 Duration.ofMillis(config.getContactFreshnessMs()), clock);
         this.localApi = new LocalApiServer(config, readinessPolicy::isReady);
-        new LocalRegistrationRoutes(definitions, localChecks::latest, config.getAddress()).install(localApi);
+        new LocalRegistrationRoutes(definitions, localChecks::latest, localChecks::reporter, config.getAddress())
+                .install(localApi);
         definitions.listen(new LocalDefinitions.Listener() {
             @Override public void checkAdded(HealthCheckDefinition check) {
                 // Readiness counts the check before it can report, so its first result is not missed.

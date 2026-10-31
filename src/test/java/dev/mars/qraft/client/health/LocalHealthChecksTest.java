@@ -102,6 +102,29 @@ class LocalHealthChecksTest {
     }
 
     @Test
+    void aMaintenanceCheckReportsAtStartAndAgainSoThatItOutlivesAServiceRegisteredAgain() throws Exception {
+        MaintenanceCheck maintenance = MaintenanceCheck.ofService("web", "upgrade");
+        checks = new LocalHealthChecks(List.of(maintenance), client,
+                (host, port, timeout) -> new CompletableFuture<>(), time, time, results);
+        results.assertNoResult();
+
+        checks.start();
+
+        RecordingListenerHelper.Delivery first = results.nextDelivery();
+        assertEquals(maintenance, first.check());
+        assertEquals(CheckStatus.MAINTENANCE, first.result().status());
+        assertEquals("upgrade", first.result().output());
+        assertEquals(START, first.result().observedAt());
+        time.advance(maintenance.ttl().dividedBy(3));
+        assertEquals(START.plus(maintenance.ttl().dividedBy(3)), results.nextDelivery().result().observedAt());
+        assertTrue(checks.reporter("web", maintenance.checkId()).isEmpty(), "only an application's TTL check is told");
+
+        checks.remove(maintenance);
+        time.advance(maintenance.ttl());
+        results.assertNoResult();
+    }
+
+    @Test
     void processLocalStatusIsAnInputOnlyForTtlChecks() throws Exception {
         TtlCheck app = new TtlCheck("web", "app", Duration.ofSeconds(30), false);
         TcpCheck tcp = new TcpCheck("web", "tcp", "127.0.0.1", 8080, Duration.ofSeconds(5),

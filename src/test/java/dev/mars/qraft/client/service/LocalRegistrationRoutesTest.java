@@ -41,6 +41,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -62,6 +63,8 @@ class LocalRegistrationRoutesTest {
     Path directory;
     private final HttpClient http = HttpClient.newHttpClient();
     private final Map<String, CheckResult> results = new HashMap<>();
+    private final List<String> reports = new CopyOnWriteArrayList<>();
+    private volatile boolean running = true;
     private LocalDefinitions definitions;
     private LocalApiServer api;
 
@@ -76,6 +79,10 @@ class LocalRegistrationRoutesTest {
         api = new LocalApiServer(config, () -> true);
         new LocalRegistrationRoutes(definitions,
                 (serviceId, checkId) -> Optional.ofNullable(results.get(serviceId + "/" + checkId)),
+                (serviceId, checkId) -> "file-check".equals(checkId) ? Optional.of((status, output) -> {
+                    reports.add(status + ":" + output);
+                    return running;
+                }) : Optional.empty(),
                 "10.0.0.5").install(api);
         api.start();
     }
@@ -304,6 +311,158 @@ class LocalRegistrationRoutesTest {
         assertEquals(200, send("GET", "/v1/client/service/file", null).statusCode());
         assertEquals(200, send("GET", "/v1/client/checks", null).statusCode());
         assertEquals(List.of("file"), definitions.services().stream().map(ServiceDefinition::id).toList());
+    }
+
+    @Test
+    void aTtlCheckIsToldItsStatusWithAnOptionalNoteAsConsulsIs() throws Exception {
+        for (String[] route : List.of(
+                new String[] {"pass", "passing"}, new String[] {"warn", "warning"}, new String[] {"fail", "critical"})) {
+            HttpResponse<String> told = send("PUT", "/v1/client/check/" + route[0] + "/file-check", null);
+            assertEquals(200, told.statusCode(), told.body());
+            assertEquals("file-check", json(told).path("checkId").asText());
+            assertEquals(route[1], json(told).path("status").asText());
+        }
+        assertEquals(200, send("PUT", "/v1/client/check/pass/file-check?note=all%20good%20%26%20well", null).statusCode());
+
+        assertEquals(List.of("PASSING:", "WARNING:", "CRITICAL:", "PASSING:all good & well"), reports);
+    }
+
+    @Test
+    void aTtlCheckIsUpdatedWithAStatusAndOutputInTheBody() throws Exception {
+        HttpResponse<String> told = send("PUT", "/v1/client/check/update/file-check",
+                "{\"status\":\"warning\",\"output\":\"slow\"}");
+        assertEquals(200, told.statusCode(), told.body());
+        assertEquals(200, send("PUT", "/v1/client/check/update/file-check", "{\"status\":\"passing\"}").statusCode());
+
+        assertEquals(List.of("WARNING:slow", "PASSING:"), reports);
+    }
+
+    @Test
+    void anInvalidUpdateIsRefusedAndTellsTheCheckNothing() throws Exception {
+        for (String body : List.of("{ not json", "[]", "", "{}", "{\"status\":\"nonsense\"}",
+                "{\"status\":\"maintenance\"}", "{\"status\":1}", "{\"status\":\"passing\",\"output\":1}",
+                "{\"status\":\"passing\",\"unknown\":true}")) {
+            assertRefused(send("PUT", "/v1/client/check/update/file-check", body), 400, "invalid_request");
+        }
+
+        assertEquals(List.of(), reports);
+    }
+
+    @Test
+    void aStatusForACheckThatCannotTakeOneIsRefused() throws Exception {
+        assertRefused(send("PUT", "/v1/client/check/pass/nobody", null), 404, "check_not_found");
+        send("PUT", "/v1/client/check/register", "{\"id\":\"probe\",\"serviceId\":\"file\",\"type\":\"tcp\"}");
+        assertRefused(send("PUT", "/v1/client/check/pass/probe", null), 400, "check_not_ttl");
+        definitions.setServiceMaintenance("file", true, "upgrade");
+        assertRefused(send("PUT", "/v1/client/check/pass/_service_maintenance:file", null), 400, "check_not_ttl");
+
+        assertEquals(List.of(), reports);
+    }
+
+    @Test
+    void aStatusForACheckThatIsNotRunningYetIsRefusedAsRetryable() throws Exception {
+        running = false;
+
+        HttpResponse<String> refused = send("PUT", "/v1/client/check/pass/file-check", null);
+
+        assertRefused(refused, 503, "check_not_running");
+        assertTrue(json(refused).path("retryable").asBoolean());
+    }
+
+    @Test
+    void aServiceIsPutInMaintenanceWithAReasonAndTakenOutAgain() throws Exception {
+        HttpResponse<String> enabled = send("PUT", "/v1/client/service/maintenance/file?enable=true&reason=big%20upgrade",
+                null);
+        assertEquals(200, enabled.statusCode(), enabled.body());
+        assertEquals("file", json(enabled).path("serviceId").asText());
+        assertTrue(json(enabled).path("maintenance").asBoolean());
+
+        JsonNode check = json(send("GET", "/v1/client/checks", null)).path("_service_maintenance:file");
+        assertEquals("maintenance", check.path("type").asText());
+        assertEquals("big upgrade", check.path("reason").asText());
+        assertEquals("file", check.path("serviceId").asText());
+
+        HttpResponse<String> disabled = send("PUT", "/v1/client/service/maintenance/file?enable=false", null);
+        assertEquals(200, disabled.statusCode(), disabled.body());
+        assertFalse(json(disabled).path("maintenance").asBoolean());
+        assertFalse(json(send("GET", "/v1/client/checks", null)).has("_service_maintenance:file"));
+    }
+
+    @Test
+    void aNodeIsPutInMaintenanceWithAReasonAndTakenOutAgain() throws Exception {
+        HttpResponse<String> enabled = send("PUT", "/v1/client/maintenance?enable=true&reason=rack%20move", null);
+        assertEquals(200, enabled.statusCode(), enabled.body());
+        assertTrue(json(enabled).path("maintenance").asBoolean());
+        assertEquals("rack move", json(send("GET", "/v1/client/checks", null)).path("_node_maintenance:file")
+                .path("reason").asText());
+
+        HttpResponse<String> disabled = send("PUT", "/v1/client/maintenance?enable=false", null);
+        assertEquals(200, disabled.statusCode(), disabled.body());
+        assertFalse(json(send("GET", "/v1/client/checks", null)).has("_node_maintenance:file"));
+    }
+
+    @Test
+    void maintenanceWithoutAReasonHasADefaultOneAndEnableReadsAsGoReadsABool() throws Exception {
+        for (String truth : List.of("1", "t", "T", "TRUE", "true", "True")) {
+            assertEquals(200, send("PUT", "/v1/client/maintenance?enable=" + truth, null).statusCode(), truth);
+            assertTrue(json(send("GET", "/v1/client/checks", null)).path("_node_maintenance:file").path("reason")
+                    .asText().contains("no reason"), truth);
+            assertEquals(200, send("PUT", "/v1/client/maintenance?enable=false", null).statusCode());
+        }
+        for (String falsehood : List.of("0", "f", "F", "FALSE", "false", "False")) {
+            send("PUT", "/v1/client/maintenance?enable=true", null);
+            assertEquals(200, send("PUT", "/v1/client/maintenance?enable=" + falsehood, null).statusCode(), falsehood);
+            assertFalse(json(send("GET", "/v1/client/checks", null)).has("_node_maintenance:file"), falsehood);
+        }
+    }
+
+    @Test
+    void maintenanceWithoutAValidEnableIsRefusedAsConsulRefusesIt() throws Exception {
+        for (String path : List.of("/v1/client/maintenance", "/v1/client/service/maintenance/file")) {
+            assertRefused(send("PUT", path, null), 400, "invalid_request");
+            assertRefused(send("PUT", path + "?enable=maybe", null), 400, "invalid_request");
+            assertRefused(send("PUT", path + "?enable=", null), 400, "invalid_request");
+        }
+        assertEquals(1, json(send("GET", "/v1/client/checks", null)).size());
+    }
+
+    @Test
+    void maintenanceOfAnUnknownServiceIsNotFoundEitherWayAsConsulAnswers() throws Exception {
+        assertRefused(send("PUT", "/v1/client/service/maintenance/nobody?enable=true", null), 404, "service_not_found");
+        assertRefused(send("PUT", "/v1/client/service/maintenance/nobody?enable=false", null), 404, "service_not_found");
+    }
+
+    @Test
+    void theStatusAndMaintenanceRoutesRefuseOtherMethodsAndPathsAndWritesOnceShutdownBegins() throws Exception {
+        for (String path : List.of("/v1/client/check/pass/file-check", "/v1/client/check/warn/file-check",
+                "/v1/client/check/fail/file-check", "/v1/client/check/update/file-check",
+                "/v1/client/maintenance?enable=true", "/v1/client/service/maintenance/file?enable=true")) {
+            assertRefused(send("GET", path, null), 405, "method_not_allowed");
+        }
+        for (String path : List.of("/v1/client/check/pass/", "/v1/client/check/warn/", "/v1/client/check/fail/",
+                "/v1/client/check/update/", "/v1/client/maintenance/extra", "/v1/client/service/maintenance/")) {
+            assertRefused(send("PUT", path, "{}"), 404, "not_found");
+        }
+
+        api.beginShutdown();
+
+        for (String path : List.of("/v1/client/check/pass/file-check", "/v1/client/check/update/file-check",
+                "/v1/client/maintenance?enable=true", "/v1/client/service/maintenance/file?enable=true")) {
+            assertRefused(send("PUT", path, "{\"status\":\"passing\"}"), 503, "shutting_down");
+        }
+        assertEquals(List.of(), reports);
+    }
+
+    @Test
+    void maintenanceThatCannotBeKeptIsAnsweredAsARetryableFailure() throws Exception {
+        Path temporary = Files.createDirectory(directory.resolve(RegistrationStore.FILE_NAME + ".tmp"));
+
+        assertRefused(send("PUT", "/v1/client/maintenance?enable=true", null), 500, "registration_not_kept");
+        assertRefused(send("PUT", "/v1/client/service/maintenance/file?enable=true", null), 500,
+                "registration_not_kept");
+
+        Files.delete(temporary);
+        assertEquals(1, json(send("GET", "/v1/client/checks", null)).size());
     }
 
     @Test

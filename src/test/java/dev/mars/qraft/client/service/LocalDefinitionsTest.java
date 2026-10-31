@@ -18,6 +18,7 @@ package dev.mars.qraft.client.service;
 
 import dev.mars.qraft.client.config.DefinitionJson.Registration;
 import dev.mars.qraft.client.health.HealthCheckDefinition;
+import dev.mars.qraft.client.health.MaintenanceCheck;
 import dev.mars.qraft.client.health.TtlCheck;
 import dev.mars.qraft.common.ServiceDefinition;
 import org.junit.jupiter.api.BeforeEach;
@@ -328,6 +329,140 @@ class LocalDefinitionsTest {
         Files.delete(temporary);
         definitions.register(new Registration(service("api", 9000), List.of()), false);
         assertEquals(List.of("web", "api"), ids(definitions.services()));
+    }
+
+    @Test
+    void aServiceInMaintenanceHasACheckThatItDeclaresAndThatGoesWhenMaintenanceEnds() throws Exception {
+        LocalDefinitions definitions = open(List.of(FILE_WEB), List.of(FILE_APP));
+        MaintenanceCheck maintenance = MaintenanceCheck.ofService("web", "upgrade");
+
+        assertTrue(definitions.setServiceMaintenance("web", true, "upgrade"));
+
+        assertEquals(List.of(maintenance.checkId(), "app"), named(definitions, "web").checkIds());
+        assertEquals(List.of(FILE_APP, maintenance), definitions.checks());
+        assertEquals(java.util.Optional.of(maintenance), definitions.check(maintenance.checkId()));
+        assertEquals(List.of("added web/" + maintenance.checkId(), "changed"), events);
+
+        events.clear();
+        assertTrue(definitions.setServiceMaintenance("web", false, null));
+        assertEquals(List.of("app"), named(definitions, "web").checkIds());
+        assertEquals(List.of("removed web/" + maintenance.checkId(), "changed"), events);
+    }
+
+    @Test
+    void enablingMaintenanceAgainKeepsTheFirstReasonAsConsulsDoes() throws Exception {
+        LocalDefinitions definitions = open(List.of(FILE_WEB), List.of());
+        definitions.setServiceMaintenance("web", true, "upgrade");
+        definitions.setNodeMaintenance(true, "rack move");
+        events.clear();
+
+        assertTrue(definitions.setServiceMaintenance("web", true, "another"));
+        definitions.setNodeMaintenance(true, "another");
+
+        assertEquals(List.of(), events);
+        assertTrue(definitions.checks().contains(MaintenanceCheck.ofService("web", "upgrade")));
+        assertTrue(definitions.checks().contains(MaintenanceCheck.ofNode("web", "rack move")));
+    }
+
+    @Test
+    void maintenanceOfAServiceThatIsNotRegisteredIsRefusedAndDisablingWhatIsNotEnabledChangesNothing() throws Exception {
+        LocalDefinitions definitions = open(List.of(FILE_WEB), List.of());
+
+        assertFalse(definitions.setServiceMaintenance("nobody", true, "upgrade"));
+        assertFalse(definitions.setServiceMaintenance("nobody", false, null));
+        assertTrue(definitions.setServiceMaintenance("web", false, null));
+        definitions.setNodeMaintenance(false, null);
+
+        assertEquals(List.of(), events);
+    }
+
+    @Test
+    void aNodeInMaintenanceHasACheckOnEveryRegisteredServiceIncludingThoseThatComeLater() throws Exception {
+        ServiceDefinition disabled = new ServiceDefinition("legacy", "legacy", "10.0.0.5", 8081, List.of(),
+                Map.of(), false);
+        LocalDefinitions definitions = open(List.of(FILE_WEB, disabled), List.of());
+
+        definitions.setNodeMaintenance(true, "rack move");
+
+        assertEquals(List.of(MaintenanceCheck.ofNode("web", "rack move")), definitions.checks());
+        definitions.register(new Registration(service("api", 9000), List.of()), false);
+        assertTrue(definitions.checks().contains(MaintenanceCheck.ofNode("api", "rack move")));
+        assertEquals(List.of(MaintenanceCheck.ofNode("api", "rack move").checkId()),
+                named(definitions, "api").checkIds());
+
+        definitions.setNodeMaintenance(false, null);
+        assertEquals(List.of(), definitions.checks());
+    }
+
+    @Test
+    void deregisteringAServiceEndsItsMaintenanceSoThatItIsNotInMaintenanceWhenItComesBack() throws Exception {
+        LocalDefinitions definitions = open(List.of(FILE_WEB), List.of());
+        definitions.setServiceMaintenance("web", true, "upgrade");
+
+        definitions.deregisterService("web");
+        definitions.register(new Registration(FILE_WEB, List.of()), false);
+
+        assertEquals(List.of(), definitions.checks());
+    }
+
+    @Test
+    void maintenanceOfAServiceDoesNotStopItsOtherChecksOrChangeOnReRegistration() throws Exception {
+        LocalDefinitions definitions = open(List.of(FILE_WEB), List.of());
+        definitions.setServiceMaintenance("web", true, "upgrade");
+        events.clear();
+
+        definitions.register(new Registration(service("web", 9999), List.of()), true);
+
+        assertEquals(List.of(MaintenanceCheck.ofService("web", "upgrade")), definitions.checks());
+        assertEquals(List.of("changed"), events);
+    }
+
+    @Test
+    void anApplicationCannotRemoveAMaintenanceCheckAsACheck() throws Exception {
+        LocalDefinitions definitions = open(List.of(FILE_WEB), List.of());
+        definitions.setServiceMaintenance("web", true, "upgrade");
+
+        assertFalse(definitions.deregisterCheck(MaintenanceCheck.ofService("web", "upgrade").checkId()));
+
+        assertEquals(List.of(MaintenanceCheck.ofService("web", "upgrade")), definitions.checks());
+    }
+
+    @Test
+    void maintenancePersistsAcrossARestart() throws Exception {
+        LocalDefinitions first = open(List.of(FILE_WEB), List.of());
+        first.setServiceMaintenance("web", true, "upgrade");
+        first.setNodeMaintenance(true, "rack move");
+
+        LocalDefinitions restarted = LocalDefinitions.load(List.of(FILE_WEB), List.of(),
+                new RegistrationStore(directory));
+
+        assertEquals(List.of(MaintenanceCheck.ofService("web", "upgrade"), MaintenanceCheck.ofNode("web", "rack move")),
+                restarted.checks());
+    }
+
+    @Test
+    void keptMaintenanceOfAServiceThatIsGoneIsPurgedAtStartup() throws Exception {
+        LocalDefinitions first = open(List.of(FILE_WEB), List.of());
+        first.setServiceMaintenance("web", true, "upgrade");
+        first.setNodeMaintenance(true, "rack move");
+
+        LocalDefinitions restarted = LocalDefinitions.load(List.of(), List.of(), new RegistrationStore(directory));
+
+        assertEquals(List.of(), restarted.checks());
+        assertEquals(new RegistrationStore.Kept(List.of(), List.of(), "rack move", Map.of()),
+                new RegistrationStore(directory).read(), "the node is still in maintenance");
+    }
+
+    @Test
+    void maintenanceThatCannotBeKeptIsRefusedWithNothingChanged() throws Exception {
+        LocalDefinitions definitions = open(List.of(FILE_WEB), List.of());
+        Files.createDirectory(directory.resolve(RegistrationStore.FILE_NAME + ".tmp"));
+
+        assertThrows(IOException.class, () -> definitions.setServiceMaintenance("web", true, "upgrade"));
+        assertThrows(IOException.class, () -> definitions.setNodeMaintenance(true, "rack move"));
+
+        assertEquals(List.of(), definitions.checks());
+        assertEquals(List.of(), events);
     }
 
     @Test

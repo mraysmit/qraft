@@ -25,7 +25,7 @@ import java.time.Duration;
  * @since 2026-09-26
  * @version 1.0
  */
-public sealed interface HealthCheckDefinition permits ProbeCheck, TtlCheck {
+public sealed interface HealthCheckDefinition permits ProbeCheck, TtlCheck, MaintenanceCheck {
     String serviceId();
 
     String checkId();

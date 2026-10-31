@@ -818,6 +818,88 @@ class QraftClientTest {
         ClientDataDirectory.open(dataDirectory).close();
     }
 
+    @Test
+    void aTtlStatusAndMaintenanceThroughTheLocalApiReachTheServersAsObservations() throws Exception {
+        List<JsonNode> registrations = new CopyOnWriteArrayList<>();
+        List<JsonNode> observations = new CopyOnWriteArrayList<>();
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext(NodeAnswerHelper.REGISTER, NodeAnswerHelper.dispatching("service", (exchange, body) -> {
+            registrations.add(body.path("service"));
+            NodeAnswerHelper.serviceRegistered(exchange, body.path("service").path("serviceId").asText());
+        }, exchange -> NodeAnswerHelper.answer(exchange, 200, "registered", true)));
+        server.createContext(NodeAnswerHelper.DEREGISTER, NodeAnswerHelper.dispatching("serviceId",
+                (exchange, body) -> NodeAnswerHelper.serviceDeregistered(exchange, body.path("serviceId").asText(), true),
+                exchange -> NodeAnswerHelper.answer(exchange, 200, "deregistered", true)));
+        server.createContext("/v1/catalog/check/observe", exchange -> {
+            JsonNode body = new ObjectMapper().readTree(exchange.getRequestBody());
+            observations.add(body);
+            NodeAnswerHelper.send(exchange, 200, "{\"sequenceNumber\":" + body.path("sequenceNumber").asLong()
+                    + ",\"deadline\":\"2030-01-01T00:00:00Z\"}");
+        });
+        server.start();
+        QraftClient client = new QraftClient(clientConfigWithoutServices());
+
+        try {
+            assertTrue(client.start().get(10, TimeUnit.SECONDS));
+            assertEquals(200, localApi(client, "PUT", "/v1/client/service/register", """
+                    {"id":"api-1","name":"api","port":9000,"checks":[{"id":"app","type":"ttl","ttlMs":30000}]}
+                    """));
+            awaitTrue(() -> client.serviceReconciler().registeredCount() == 1, "the service is registered");
+
+            assertEquals(200, localApi(client, "PUT", "/v1/client/check/pass/app?note=all%20good", null));
+            awaitTrue(() -> observations.stream().anyMatch(observed -> "app".equals(observed.path("checkId").asText())
+                    && "passing".equals(observed.path("status").asText())
+                    && "all good".equals(observed.path("output").asText())), "the status reaches the servers");
+            awaitTrue(() -> client.localApi().isReady(), "the required check reported passing");
+
+            assertEquals(200, localApi(client, "PUT", "/v1/client/service/maintenance/api-1?enable=true&reason=upgrade",
+                    null));
+            String checkId = "_service_maintenance:api-1";
+            awaitTrue(() -> registrations.getLast().path("checks").toString().contains(checkId),
+                    "the service declares the check, or the server would refuse its observations");
+            awaitTrue(() -> observations.stream().anyMatch(observed -> checkId.equals(observed.path("checkId").asText())
+                    && "maintenance".equals(observed.path("status").asText())
+                    && "upgrade".equals(observed.path("output").asText())), "maintenance reaches the servers");
+            awaitTrue(() -> client.localApi().isReady(), "maintenance does not hold readiness back once the service converges");
+
+            assertEquals(200, localApi(client, "PUT", "/v1/client/service/maintenance/api-1?enable=false", null));
+            awaitTrue(() -> !registrations.getLast().path("checks").toString().contains(checkId),
+                    "the service stops declaring it, and the server prunes what it observed");
+        } finally {
+            client.shutdown().get(10, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void maintenanceThroughTheLocalApiPersistsAcrossARestart() throws Exception {
+        ClientConfiguration config = ClientConfiguration.builder()
+                .nodeName("client-1").dataDirectory(dataDirectory).address("127.0.0.1").clientPort(0)
+                .serverUrl("http://localhost:1").shutdownTimeoutMs(2_000).requestTimeoutMs(500).build();
+        QraftClient first = new QraftClient(config);
+        first.localApi().start();
+        try {
+            assertEquals(200, localApi(first, "PUT", "/v1/client/service/register",
+                    "{\"id\":\"api-1\",\"name\":\"api\",\"port\":9000}"));
+            assertEquals(200, localApi(first, "PUT", "/v1/client/maintenance?enable=true&reason=rack%20move", null));
+        } finally {
+            first.shutdown().get(10, TimeUnit.SECONDS);
+        }
+
+        QraftClient restarted = new QraftClient(config);
+        restarted.localApi().start();
+        try {
+            assertTrue(localApiBody(restarted, "/v1/client/checks").contains("rack move"));
+        } finally {
+            restarted.shutdown().get(10, TimeUnit.SECONDS);
+        }
+    }
+
+    private static String localApiBody(QraftClient client, String path) throws Exception {
+        return java.net.http.HttpClient.newHttpClient().send(java.net.http.HttpRequest.newBuilder(
+                        java.net.URI.create("http://127.0.0.1:" + client.localApi().port() + path)).GET().build(),
+                java.net.http.HttpResponse.BodyHandlers.ofString()).body();
+    }
+
     private ClientConfiguration clientConfigWithoutServices() {
         return ClientConfiguration.builder()
                 .nodeName("client-1").dataDirectory(dataDirectory).address("127.0.0.1").clientPort(0)

@@ -20,6 +20,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.mars.qraft.client.health.HealthCheckDefinition;
 import dev.mars.qraft.client.health.HttpCheck;
+import dev.mars.qraft.client.health.MaintenanceCheck;
 import dev.mars.qraft.client.health.TcpCheck;
 import dev.mars.qraft.client.health.TtlCheck;
 import dev.mars.qraft.common.ServiceDefinition;
@@ -119,6 +120,25 @@ class DefinitionJsonTest {
         for (HealthCheckDefinition check : checks) {
             assertEquals(check, DefinitionJson.parseCheck(DefinitionJson.write(check), WEB));
         }
+    }
+
+    @Test
+    void aMaintenanceCheckIdIsRefusedWhereverACheckIsReadBecauseOnlyMaintenanceMayUseIt() throws Exception {
+        for (String id : List.of(MaintenanceCheck.ofService("web-1", "r").checkId(),
+                MaintenanceCheck.ofNode("web-1", "r").checkId())) {
+            String check = "{\"id\":\"" + id + "\",\"type\":\"ttl\",\"ttlMs\":1000}";
+            assertThrows(IllegalArgumentException.class, () -> DefinitionJson.parseCheck(json(check), WEB));
+            assertThrows(IllegalArgumentException.class, () -> DefinitionJson.parseRegistration(
+                    json("{\"name\":\"web\",\"port\":80,\"checks\":[" + check + "]}"), "10.0.0.5"));
+        }
+    }
+
+    @Test
+    void aMaintenanceCheckIsWrittenWithItsReasonForTheListing() throws Exception {
+        assertEquals(json("""
+                {"id":"_service_maintenance:web-1","serviceId":"web-1","type":"maintenance","required":false,
+                 "reason":"upgrade","deregisterAfterMs":0}
+                """), written(DefinitionJson.write(MaintenanceCheck.ofService("web-1", "upgrade"))));
     }
 
     @Test

@@ -18,6 +18,7 @@ package dev.mars.qraft.client.service;
 
 import dev.mars.qraft.client.config.DefinitionJson.Registration;
 import dev.mars.qraft.client.health.HealthCheckDefinition;
+import dev.mars.qraft.client.health.MaintenanceCheck;
 import dev.mars.qraft.common.ServiceDefinition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,11 +41,13 @@ import java.util.Set;
  *   <li>at startup, the file's definitions are registered again and take precedence over a kept registration of the
  *       same ID, which is purged, as it is by Consul's {@code loadServices} and {@code loadChecks};</li>
  *   <li>a kept check whose service is gone is purged, as Consul purges a check it cannot restore;</li>
- *   <li>a check ID is unique on a client, whichever service the check is for.</li>
+ *   <li>a check ID is unique on a client, whichever service the check is for;</li>
+ *   <li>maintenance is a check of its own on each service it covers ({@link MaintenanceCheck}), which comes and goes
+ *       with the maintenance and is not an application's to remove.</li>
  * </ul>
  *
- * <p>Only what the API registered is kept: the file's definitions are read again at every start. A change is kept
- * before it takes effect, so a change that cannot be kept is refused with nothing changed.
+ * <p>Only what the API did is kept: the file's definitions are read again at every start. A change is kept before it
+ * takes effect, so a change that cannot be kept is refused with nothing changed.
  *
  * <p>Reads take no lock. The reconciler reads this under its own lock, and a change tells the reconciler under this
  * one, so a lock here would invert the order.
@@ -68,23 +71,42 @@ public final class LocalDefinitions {
         void changed();
     }
 
-    /** An immutable view of the definitions; each change replaces it whole. */
+    /**
+     * An immutable view of the definitions; each change replaces it whole. {@code checks} are those registered, and
+     * {@code running} those with the checks that maintenance adds.
+     */
     private record State(Map<String, ServiceDefinition> services, Map<String, HealthCheckDefinition> checks,
-                         Set<String> keptServices, Set<String> keptChecks, List<ServiceDefinition> declared) {
-        static State of(Map<String, ServiceDefinition> services, Map<String, HealthCheckDefinition> checks,
-                        Set<String> keptServices, Set<String> keptChecks) {
-            List<ServiceDefinition> declared = services.values().stream()
-                    .map(service -> service.withCheckIds(checks.values().stream()
+                         Set<String> keptServices, Set<String> keptChecks, String nodeMaintenance,
+                         Map<String, String> serviceMaintenance, Map<String, HealthCheckDefinition> running,
+                         List<ServiceDefinition> declared) {
+        static State of(Change change) {
+            Map<String, HealthCheckDefinition> running = new LinkedHashMap<>(change.checks);
+            for (ServiceDefinition service : change.services.values()) {
+                if (!service.enabled()) continue;
+                String reason = change.serviceMaintenance.get(service.id());
+                if (reason != null) {
+                    MaintenanceCheck check = MaintenanceCheck.ofService(service.id(), reason);
+                    running.put(check.checkId(), check);
+                }
+                if (change.nodeMaintenance != null) {
+                    MaintenanceCheck check = MaintenanceCheck.ofNode(service.id(), change.nodeMaintenance);
+                    running.put(check.checkId(), check);
+                }
+            }
+            List<ServiceDefinition> declared = change.services.values().stream()
+                    .map(service -> service.withCheckIds(running.values().stream()
                             .filter(check -> check.serviceId().equals(service.id()))
                             .map(HealthCheckDefinition::checkId).toList()))
                     .toList();
-            return new State(services, checks, keptServices, keptChecks, declared);
+            return new State(change.services, change.checks, change.keptServices, change.keptChecks,
+                    change.nodeMaintenance, change.serviceMaintenance, running, declared);
         }
 
         RegistrationStore.Kept kept() {
             return new RegistrationStore.Kept(
                     services.values().stream().filter(service -> keptServices.contains(service.id())).toList(),
-                    checks.values().stream().filter(check -> keptChecks.contains(check.checkId())).toList());
+                    checks.values().stream().filter(check -> keptChecks.contains(check.checkId())).toList(),
+                    nodeMaintenance, serviceMaintenance);
         }
 
         Optional<ServiceDefinition> enabledService(String serviceId) {
@@ -94,13 +116,31 @@ public final class LocalDefinitions {
 
         Change change() {
             return new Change(new LinkedHashMap<>(services), new LinkedHashMap<>(checks),
-                    new LinkedHashSet<>(keptServices), new LinkedHashSet<>(keptChecks));
+                    new LinkedHashSet<>(keptServices), new LinkedHashSet<>(keptChecks), nodeMaintenance,
+                    new LinkedHashMap<>(serviceMaintenance));
         }
     }
 
     /** A change being made, on copies of the current state. */
-    private record Change(Map<String, ServiceDefinition> services, Map<String, HealthCheckDefinition> checks,
-                          Set<String> keptServices, Set<String> keptChecks) {
+    private static final class Change {
+        private final Map<String, ServiceDefinition> services;
+        private final Map<String, HealthCheckDefinition> checks;
+        private final Set<String> keptServices;
+        private final Set<String> keptChecks;
+        private final Map<String, String> serviceMaintenance;
+        private String nodeMaintenance;
+
+        Change(Map<String, ServiceDefinition> services, Map<String, HealthCheckDefinition> checks,
+               Set<String> keptServices, Set<String> keptChecks, String nodeMaintenance,
+               Map<String, String> serviceMaintenance) {
+            this.services = services;
+            this.checks = checks;
+            this.keptServices = keptServices;
+            this.keptChecks = keptChecks;
+            this.nodeMaintenance = nodeMaintenance;
+            this.serviceMaintenance = serviceMaintenance;
+        }
+
         void removeChecksOf(String serviceId) {
             checks.values().removeIf(check -> check.serviceId().equals(serviceId));
             keptChecks.retainAll(checks.keySet());
@@ -156,7 +196,10 @@ public final class LocalDefinitions {
             checks.put(check.checkId(), check);
             keptChecks.add(check.checkId());
         }
-        State loaded = State.of(services, checks, keptServices, keptChecks);
+        Map<String, String> serviceMaintenance = new LinkedHashMap<>(kept.serviceMaintenance());
+        serviceMaintenance.keySet().removeIf(serviceId -> !isEnabled(services, serviceId));
+        State loaded = State.of(new Change(services, checks, keptServices, keptChecks, kept.nodeMaintenance(),
+                serviceMaintenance));
         if (!loaded.kept().equals(kept)) store.write(loaded.kept());
         return new LocalDefinitions(store, loaded);
     }
@@ -176,9 +219,14 @@ public final class LocalDefinitions {
         return state.declared();
     }
 
-    /** Every check that should be running. */
+    /** Every check that should be running, with those of maintenance. */
     public List<HealthCheckDefinition> checks() {
-        return List.copyOf(state.checks().values());
+        return List.copyOf(state.running().values());
+    }
+
+    /** A check that should be running. */
+    public Optional<HealthCheckDefinition> check(String checkId) {
+        return Optional.ofNullable(state.running().get(checkId));
     }
 
     /** A service that is registered, declaring its checks. A disabled definition is not. */
@@ -195,8 +243,8 @@ public final class LocalDefinitions {
     public synchronized void register(Registration registration, boolean replaceExistingChecks) throws IOException {
         ServiceDefinition service = registration.service().withCheckIds(List.of());
         Change change = state.change();
-        change.services().put(service.id(), service);
-        change.keptServices().add(service.id());
+        change.services.put(service.id(), service);
+        change.keptServices.add(service.id());
         if (replaceExistingChecks) change.removeChecksOf(service.id());
         registration.checks().forEach(change::addKeptCheck);
         commit(change);
@@ -211,8 +259,9 @@ public final class LocalDefinitions {
     public synchronized boolean deregisterService(String serviceId) throws IOException {
         if (state.enabledService(serviceId).isEmpty()) return false;
         Change change = state.change();
-        change.services().remove(serviceId);
-        change.keptServices().remove(serviceId);
+        change.services.remove(serviceId);
+        change.keptServices.remove(serviceId);
+        change.serviceMaintenance.remove(serviceId);
         change.removeChecksOf(serviceId);
         commit(change);
         return true;
@@ -241,22 +290,52 @@ public final class LocalDefinitions {
     public synchronized boolean deregisterCheck(String checkId) throws IOException {
         if (!state.checks().containsKey(checkId)) return false;
         Change change = state.change();
-        change.checks().remove(checkId);
-        change.keptChecks().remove(checkId);
+        change.checks.remove(checkId);
+        change.keptChecks.remove(checkId);
         commit(change);
         return true;
     }
 
+    /**
+     * Puts a service in maintenance or takes it out. Enabling it again keeps the first reason, as Consul's agent does.
+     *
+     * @return whether the service is registered; if not, nothing has changed
+     * @throws IOException if the change cannot be kept; nothing has changed
+     */
+    public synchronized boolean setServiceMaintenance(String serviceId, boolean enable, String reason)
+            throws IOException {
+        if (state.enabledService(serviceId).isEmpty()) return false;
+        if (enable == state.serviceMaintenance().containsKey(serviceId)) return true;
+        Change change = state.change();
+        if (enable) change.serviceMaintenance.put(serviceId, reason);
+        else change.serviceMaintenance.remove(serviceId);
+        commit(change);
+        return true;
+    }
+
+    /**
+     * Puts the node in maintenance, which covers each of its services for as long as they are registered, or takes it
+     * out. Enabling it again keeps the first reason, as Consul's agent does.
+     *
+     * @throws IOException if the change cannot be kept; nothing has changed
+     */
+    public synchronized void setNodeMaintenance(boolean enable, String reason) throws IOException {
+        if (enable == (state.nodeMaintenance() != null)) return;
+        Change change = state.change();
+        change.nodeMaintenance = enable ? reason : null;
+        commit(change);
+    }
+
     private void commit(Change change) throws IOException {
         State previous = state;
-        State next = State.of(change.services(), change.checks(), change.keptServices(), change.keptChecks());
+        State next = State.of(change);
         if (!next.kept().equals(previous.kept())) store.write(next.kept());
         state = next;
-        previous.checks().forEach((id, check) -> {
-            if (!check.equals(next.checks().get(id))) listener.checkRemoved(check);
+        previous.running().forEach((id, check) -> {
+            if (!check.equals(next.running().get(id))) listener.checkRemoved(check);
         });
-        next.checks().forEach((id, check) -> {
-            if (!check.equals(previous.checks().get(id))) listener.checkAdded(check);
+        next.running().forEach((id, check) -> {
+            if (!check.equals(previous.running().get(id))) listener.checkAdded(check);
         });
         if (!next.declared().equals(previous.declared())) listener.changed();
     }

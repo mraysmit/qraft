@@ -23,6 +23,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.mars.qraft.client.config.DefinitionJson;
 import dev.mars.qraft.client.health.HealthCheckDefinition;
 import dev.mars.qraft.common.ServiceDefinition;
+import dev.mars.qraft.common.config.JsonSettings;
 import dev.mars.qraft.common.storage.DurableFile;
 
 import java.io.IOException;
@@ -30,10 +31,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 /**
- * What the local API registered, kept in {@value #FILE_NAME} in the client's data directory, as Consul's agent keeps
+ * What the local API registered and put in maintenance, kept in {@value #FILE_NAME} in the client's data directory, as Consul's agent keeps
  * what its API registers in its data directory. Each write replaces the file atomically.
  *
  * <p>A file that cannot be read stops the start and is not replaced, because replacing it would lose the
@@ -47,13 +51,25 @@ import java.util.List;
 public final class RegistrationStore {
     static final String FILE_NAME = "registrations.json";
     private static final int VERSION = 1;
+    private static final String MAINTENANCE = "maintenance";
+    private static final String NODE = "node";
+    private static final String SERVICES = "services";
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    /** What is kept: services the API registered, and checks it registered, whichever services those are for. */
-    public record Kept(List<ServiceDefinition> services, List<HealthCheckDefinition> checks) {
+    /**
+     * What is kept: services the API registered, checks it registered, whichever services those are for, and the
+     * reasons for maintenance: the node's, or {@code null} when it is not in maintenance, and by service ID.
+     */
+    public record Kept(List<ServiceDefinition> services, List<HealthCheckDefinition> checks, String nodeMaintenance,
+                       Map<String, String> serviceMaintenance) {
         public Kept {
             services = List.copyOf(services);
             checks = List.copyOf(checks);
+            serviceMaintenance = Map.copyOf(serviceMaintenance);
+        }
+
+        public Kept(List<ServiceDefinition> services, List<HealthCheckDefinition> checks) {
+            this(services, checks, null, Map.of());
         }
     }
 
@@ -84,7 +100,9 @@ public final class RegistrationStore {
             for (JsonNode check : array(root, "checks")) {
                 checks.add(DefinitionJson.readWrittenCheck(check));
             }
-            return new Kept(services, checks);
+            JsonNode maintenance = root.get(MAINTENANCE);
+            return maintenance == null ? new Kept(services, checks)
+                    : new Kept(services, checks, nodeMaintenance(maintenance), serviceMaintenance(maintenance));
         } catch (IOException | IllegalArgumentException failure) {
             throw new IllegalStateException("The registrations kept in " + file + " cannot be read: "
                     + failure.getMessage() + ". The file is not replaced, because that would lose them; restore it, "
@@ -100,8 +118,39 @@ public final class RegistrationStore {
         kept.services().forEach(service -> services.add(DefinitionJson.write(service)));
         ArrayNode checks = root.putArray("checks");
         kept.checks().forEach(check -> checks.add(DefinitionJson.write(check)));
+        if (kept.nodeMaintenance() != null || !kept.serviceMaintenance().isEmpty()) {
+            ObjectNode maintenance = root.putObject(MAINTENANCE);
+            if (kept.nodeMaintenance() != null) maintenance.put(NODE, kept.nodeMaintenance());
+            ObjectNode reasons = maintenance.putObject(SERVICES);
+            new TreeMap<>(kept.serviceMaintenance()).forEach(reasons::put);
+        }
         DurableFile.write(file, JSON.writerWithDefaultPrettyPrinter().writeValueAsBytes(root),
                 StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    private static String nodeMaintenance(JsonNode maintenance) {
+        JsonSettings.rejectUnknown(requireObject(maintenance, MAINTENANCE), MAINTENANCE, NODE, SERVICES);
+        return maintenance.has(NODE) ? reason(maintenance.get(NODE)) : null;
+    }
+
+    private static Map<String, String> serviceMaintenance(JsonNode maintenance) {
+        if (!maintenance.has(SERVICES)) return Map.of();
+        Map<String, String> reasons = new LinkedHashMap<>();
+        requireObject(maintenance.get(SERVICES), SERVICES).fields()
+                .forEachRemaining(entry -> reasons.put(entry.getKey(), reason(entry.getValue())));
+        return reasons;
+    }
+
+    private static JsonNode requireObject(JsonNode value, String field) {
+        if (!value.isObject()) throw new IllegalArgumentException(field + " is not an object");
+        return value;
+    }
+
+    private static String reason(JsonNode value) {
+        if (!value.isTextual() || value.textValue().isBlank()) {
+            throw new IllegalArgumentException("a reason for maintenance is not a non-blank string: " + value);
+        }
+        return value.textValue();
     }
 
     private static JsonNode array(JsonNode root, String field) {

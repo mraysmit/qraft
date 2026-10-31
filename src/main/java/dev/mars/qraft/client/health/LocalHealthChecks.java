@@ -72,6 +72,7 @@ public final class LocalHealthChecks {
             case TcpCheck tcp -> new ProbeCheckRunner(tcp, new TcpProbe(tcp, tcpConnector, clock), scheduler, clock,
                     listener);
             case TtlCheck ttl -> new TtlCheckRunner(ttl, scheduler, clock, listener);
+            case MaintenanceCheck maintenance -> new MaintenanceCheckRunner(maintenance, scheduler, clock, listener);
         });
     }
 
