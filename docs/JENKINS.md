@@ -395,7 +395,7 @@ or skips. Its 232 retained logs hold 833 ERROR lines, all flagged, 566 stack
 traces, none under an unflagged header, no JVM crash file, and no
 `too_many_pings`.
 
-## Builds 56 to 61, 2026-10-30 to 2026-11-01
+## Builds 56 to 62, 2026-10-30 to 2026-11-01
 
 Build 56 ran on `c33a2f2`, the first Jenkins build since build 55 on 2026-10-26.
 It is the first on Jenkins of the client list's Phases 1 to 3, the transport's
@@ -459,6 +459,23 @@ no `too_many_pings` and no JVM crash file. Against build 60 no new kind of error
 and none has gone. Only three differ, all down, counted across every retained file:
 `RAFT_PEER_UNREACHABLE` (604 from 608), `RAFT_PEER_NAME_UNRESOLVED` (168 from 204) and
 `RAFT_SNAPSHOT_TRANSFER_INTERRUPTED` (56 from 84).
+
+Build 62 ran on `a0a2cda`, with the client list's Phase 8, its last. It passed in 24 min
+28 s: default 1,450 with every coverage gate met, end-to-end 13, and Docker and `slow` 44,
+1,507 in all, with no failures, errors or skips. The same audit, over the console, 199
+archived logs, 156 of them Docker archives from 17 classes, and the test reports, found
+1,650 ERROR lines, all flagged, and 1,078 stack traces, none under an unflagged header,
+no `too_many_pings` and no JVM crash file. Against build 61 no new kind of error appears
+and none has gone. Three differ, all up, counted across every retained file:
+`RAFT_PEER_UNREACHABLE` (716 from 604), `RAFT_PEER_NAME_UNRESOLVED` (332 from 168) and
+`RAFT_SNAPSHOT_TRANSFER_INTERRUPTED` (104 from 56). The new leader change in
+`ClientEndToEndTest` accounts for 16 of the rise in the first. The new
+`DockerClientLocalApiTest` logged no error at all. The rest come from Docker classes that
+did not change, each line counted in several retained files, and their run times hardly
+moved: `DockerPeriodicCleanupTest` took 181.4 s in both builds, but two of its servers
+logged failed name lookups where one had. `DockerClientLocalApiTest` declared two errors
+on another class's evidence, and they were removed after this build because its run
+showed neither. The next full run is the first without them.
 
 ## Job configuration
 

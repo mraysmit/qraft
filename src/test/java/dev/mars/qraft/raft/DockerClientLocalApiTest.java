@@ -18,7 +18,6 @@ package dev.mars.qraft.raft;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.mars.qraft.testing.fault.ExpectedDockerErrorsHelper;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -49,10 +48,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * @version 1.0
  */
 @Tag("docker")
-@ExpectedDockerErrorsHelper({
-        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE,
-        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_NAME_UNRESOLVED
-})
 // The test starts its own cluster and then waits on bounded conditions; the method budget exceeds their sum.
 @Timeout(value = 10, unit = TimeUnit.MINUTES)
 @Execution(ExecutionMode.SAME_THREAD)

@@ -1,10 +1,10 @@
 # Task List: Consul-Style Client
 
 **Date:** 2026-10-04
-**Status:** Active from 2026-10-26, with Phase 1. The `client` package and new node model and routes were delivered by [`task-list-single-pom-and-quorus-removal-2026-10-21.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md), completed and archived on 2026-10-14. The membership list ([`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md)) was completed and archived on 2026-10-24, and Pre-Vote followed on 2026-10-25 and 2026-10-26, so nothing precedes this list. The sequencing decision of 2026-10-05 stands: this list, then the ACL list. The owner confirmed it on 2026-10-26 when asked whether key/value completion should go first, and said the embedded administrative interface waits until the other outstanding work is done.
-**Last updated:** 2026-11-01 (Phase 8 built, on local checks; its Docker test has not run yet. Earlier the same day: Phase 7 closed on Jenkins build 61. Earlier the same day: Phase 7 built. Earlier the same day: Phase 6A closed on Jenkins build 60. Earlier, 2026-10-31: Phase 6A built. Earlier the same day: Phase 6 closed on Jenkins build 59. Earlier the same day: Phase 6's comparison with Consul corrected against its source and documents, and Phase 6A added: a dead node's services in discovery. Earlier the same day: Phase 6 built, test first, checked against Consul's agent; its exit waits for the full suites. Earlier the same day: Phase 5 closed on Jenkins build 58: built test first, checked against Consul's agent. Earlier the same day: Phase 4 closed on Jenkins build 57: its five tasks built, test first, checked against Consul's agent. Earlier, 2026-10-30: Phase 4 started: `c33a2f2` recorded, with client anti-entropy, a check ID unique across a client, and the groundwork for each task, none of them complete, verified by Jenkins build 56; decision 8's reason for the server's removal corrected to match; the rule on who runs builds corrected. Earlier the same day: Phase 3 closed: the local API on `client.bindAddress`, `127.0.0.1` by default as Consul's `client_addr`, request handling shared with the server through `common.http.JsonApi` with a 512 KiB body limit, and writes refused once shutdown begins. Earlier the same day: Phase 2 closed: the server side built test first, the node-identity fixtures, the determinism test and the design record, with writes from a node of another ID refused as Consul refuses them; its exit met on a local run. Earlier, 2026-10-29: decision 8 checked against Consul's catalog code and four points decided by the owner: a rename follows Consul, removing the node under its old name with its services and checks; a node without an ID can be claimed by a registration that carries one; names conflict regardless of case; a `REGISTERING` node holds its name. Phase 2's server task and exit follow. Earlier, 2026-10-28: Phase 2's three client tasks recorded as done: the data directory and its lock, the node ID kept through a shared identity file, and `client.nodeName`; the server side remains. Earlier, 2026-10-27: Phase 1 closed on a local run of the three suites, no Jenkins being reachable; Phase 2 started. Earlier the same day: renamed with the ACL list, which changed. Earlier, 2026-10-26: Phase 1 built, with local checks only; the full suites run on Jenkins before it is closed. Earlier the same day: started, membership and Pre-Vote complete. Earlier, 2026-10-21: membership Step 5 completed; Steps 6 to 8 remain the preceding work; this client list is still proposed; renamed with linked documents. Earlier, 2026-10-14: cleanup prerequisites completed and archived; membership Steps 5 to 8 remain the preceding work. On 2026-10-11: the rule that guards need mutation evidence removed at the owner's decision, from the rules and from one exit; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: decisions 5 and 8: what a node's deregistration removes, and the `client.hostname` setting; the file renamed to the date of its last change; the single-POM list's Phase 3A replaced Qraft's two retired words here and everywhere; decision 10 records the configuration names, and decision 3 the path of the local API. On 2026-10-08, the review with the other task lists: the request bodies of decision 5 and the log audit in the rules)
-**Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 4.3, 5, 6.2, 7.3, 8, 9.2, 12.1 and 16
-**Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
+**Status:** Complete and archived on 2026-11-01. Phases 1 to 8, with 6A, are done, and the last exit was met on Jenkins build 62 on `a0a2cda`. It was active from 2026-10-26, with Phase 1. The `client` package and new node model and routes were delivered by [`task-list-single-pom-and-quorus-removal-2026-10-21.md`](task-list-single-pom-and-quorus-removal-2026-10-21.md), completed and archived on 2026-10-14. The membership list ([`task-list-raft-membership-changes-2026-10-24.md`](task-list-raft-membership-changes-2026-10-24.md)) was completed and archived on 2026-10-24, and Pre-Vote followed on 2026-10-25 and 2026-10-26, so nothing precedes this list. The sequencing decision of 2026-10-05 stands: this list, then the ACL list. The owner confirmed it on 2026-10-26 when asked whether key/value completion should go first, and said the embedded administrative interface waits until the other outstanding work is done.
+**Last updated:** 2026-11-01 (Phase 8 closed on Jenkins build 62, and the list complete and archived. Earlier the same day: Phase 8 built. Earlier the same day: Phase 7 closed on Jenkins build 61. Earlier the same day: Phase 7 built. Earlier the same day: Phase 6A closed on Jenkins build 60. Earlier, 2026-10-31: Phase 6A built. Earlier the same day: Phase 6 closed on Jenkins build 59. Earlier the same day: Phase 6's comparison with Consul corrected against its source and documents, and Phase 6A added: a dead node's services in discovery. Earlier the same day: Phase 6 built, test first, checked against Consul's agent; its exit waits for the full suites. Earlier the same day: Phase 5 closed on Jenkins build 58: built test first, checked against Consul's agent. Earlier the same day: Phase 4 closed on Jenkins build 57: its five tasks built, test first, checked against Consul's agent. Earlier, 2026-10-30: Phase 4 started: `c33a2f2` recorded, with client anti-entropy, a check ID unique across a client, and the groundwork for each task, none of them complete, verified by Jenkins build 56; decision 8's reason for the server's removal corrected to match; the rule on who runs builds corrected. Earlier the same day: Phase 3 closed: the local API on `client.bindAddress`, `127.0.0.1` by default as Consul's `client_addr`, request handling shared with the server through `common.http.JsonApi` with a 512 KiB body limit, and writes refused once shutdown begins. Earlier the same day: Phase 2 closed: the server side built test first, the node-identity fixtures, the determinism test and the design record, with writes from a node of another ID refused as Consul refuses them; its exit met on a local run. Earlier, 2026-10-29: decision 8 checked against Consul's catalog code and four points decided by the owner: a rename follows Consul, removing the node under its old name with its services and checks; a node without an ID can be claimed by a registration that carries one; names conflict regardless of case; a `REGISTERING` node holds its name. Phase 2's server task and exit follow. Earlier, 2026-10-28: Phase 2's three client tasks recorded as done: the data directory and its lock, the node ID kept through a shared identity file, and `client.nodeName`; the server side remains. Earlier, 2026-10-27: Phase 1 closed on a local run of the three suites, no Jenkins being reachable; Phase 2 started. Earlier the same day: renamed with the ACL list, which changed. Earlier, 2026-10-26: Phase 1 built, with local checks only; the full suites run on Jenkins before it is closed. Earlier the same day: started, membership and Pre-Vote complete. Earlier, 2026-10-21: membership Step 5 completed; Steps 6 to 8 remain the preceding work; this client list is still proposed; renamed with linked documents. Earlier, 2026-10-14: cleanup prerequisites completed and archived; membership Steps 5 to 8 remain the preceding work. On 2026-10-11: the rule that guards need mutation evidence removed at the owner's decision, from the rules and from one exit; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: decisions 5 and 8: what a node's deregistration removes, and the `client.hostname` setting; the file renamed to the date of its last change; the single-POM list's Phase 3A replaced Qraft's two retired words here and everywhere; decision 10 records the configuration names, and decision 3 the path of the local API. On 2026-10-08, the review with the other task lists: the request bodies of decision 5 and the log audit in the rules)
+**Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 4.3, 5, 6.2, 7.3, 8, 9.2, 12.1 and 16
+**Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
 ## 1. Goal
 
@@ -58,7 +58,7 @@ decision 10 on 2026-10-09. Decisions 5 to 8 follow the Consul pattern.
      replicated step, as in Consul (decided by the user on 2026-10-09).
 6. **The local API binds to `127.0.0.1` by default,** like Consul's
    `client_addr`. It has no authentication until
-   [`task-list-acl-and-tokens-2026-11-01.md`](task-list-acl-and-tokens-2026-11-01.md),
+   [`task-list-acl-and-tokens-2026-11-01.md`](../../docs-design/task-list-acl-and-tokens-2026-11-01.md),
    which is proposed to follow this list; liveness and readiness share the
    same listener.
 7. **Registrations follow Consul's rules.**
@@ -167,7 +167,7 @@ decision 10 on 2026-10-09. Decisions 5 to 8 follow the Consul pattern.
   causes an error on purpose declares it. Added 2026-10-08: this list predates
   the logging policy.
 - The owner commits. The main verification runs on Jenkins
-  ([`docs/JENKINS.md`](../docs/JENKINS.md)).
+  ([`docs/JENKINS.md`](../JENKINS.md)).
 
 ## 4. Tasks
 
@@ -212,7 +212,7 @@ decision 10 on 2026-10-09. Decisions 5 to 8 follow the Consul pattern.
 **Exit:** The contract test passes, along with the full default, end-to-end,
 and Docker suites. Met 2026-10-27, on `7a1ed98` with the image-build retry removed,
 locally against Docker Desktop because no Jenkins was reachable (see
-[`docs/JENKINS.md`](../docs/JENKINS.md), "Local run in place of Jenkins, 2026-10-27"):
+[`docs/JENKINS.md`](../JENKINS.md), "Local run in place of Jenkins, 2026-10-27"):
 default 1,205, end-to-end 10 and Docker 41 passed, coverage gates met, and the 223
 retained logs hold 823 ERROR lines, all flagged, and no unflagged stack trace.
 
@@ -375,7 +375,7 @@ trace.
 ### Phase 4. Services and checks through the API
 
 Groundwork came with `c33a2f2` on 2026-10-30, which Jenkins build 56 passed with
-clean logs ([`docs/JENKINS.md`](../docs/JENKINS.md)); nothing records whether its
+clean logs ([`docs/JENKINS.md`](../JENKINS.md)); nothing records whether its
 tests were seen red first. The five tasks were built on 2026-10-31, test first:
 53 of the 104 tests in the affected classes were seen red on stubs, each on an
 assertion or on what a stub left empty. Checked against Consul's
@@ -625,9 +625,8 @@ ID that killed the handler without an answer.
   gone from discovery once it does, and the rebuilt host's own are present
   (`WipedClientDirectoryEndToEndTest`, which now also reads through the rebuilt host's
   local API).
-- [ ] Docker: two client containers whose applications use only `localhost`
-  (decision 9). `DockerClientLocalApiTest` is written and has not run yet: it runs on
-  Jenkins with the Docker suite.
+- [x] Docker: two client containers whose applications use only `localhost`
+  (decision 9), in `DockerClientLocalApiTest`, first run on Jenkins build 62.
   - Each application runs in its client's network namespace and reaches the
     local API at `127.0.0.1`, the default bind.
   - An application registers through one client and is discovered through
@@ -647,9 +646,14 @@ ID that killed the handler without an answer.
   updated on 2026-10-30.
 
 **Exit:** Full suites on a fresh image; changed concurrency tests pass five
-consecutive runs; audits as in the other lists. Not met yet: local checks only, the scenario
-classes five times in a row, and the Docker test has not run. These tests were written after
-what they cover was built, so they passed at their first run and were not seen red.
+consecutive runs; audits as in the other lists. Met 2026-11-01, on Jenkins build 62 on
+`a0a2cda`: default 1,450 with every coverage gate met, end-to-end 13 and Docker 44 passed with
+no failures, errors or skips, and the retained logs hold 1,650 ERROR lines, all flagged, and no
+unflagged stack trace. Before it, the scenario classes passed five times in a row locally.
+These tests were written after what they cover was built, so they passed at their first run
+and were not seen red. `DockerClientLocalApiTest` logged no error in that build, so the two it
+had declared on another class's evidence were removed after it; the next full run, recorded in
+`docs/JENKINS.md`, is the first without them.
 
 ## 5. Out of scope
 
@@ -657,7 +661,7 @@ what they cover was built, so they passed at their first run and were not seen r
 - Authentication and ACLs, on the local API and on the server. Until they
   exist, decision 8 detects a conflicting node identity but cannot stop a
   caller from claiming one. Proposed in
-  [`task-list-acl-and-tokens-2026-11-01.md`](task-list-acl-and-tokens-2026-11-01.md).
+  [`task-list-acl-and-tokens-2026-11-01.md`](../../docs-design/task-list-acl-and-tokens-2026-11-01.md).
 - Forwarding key/value, sessions, consistency modes, and blocking queries. Each
   is added when the corresponding server feature lands.
 - Response caching in the client, gossip, and configuration-file reload.
