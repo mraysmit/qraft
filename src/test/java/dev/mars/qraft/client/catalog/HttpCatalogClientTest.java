@@ -557,7 +557,7 @@ class HttpCatalogClientTest {
             respond(exchange, 200, "[1,2]");
         });
 
-        ForwardedRead read = selectedClient(List.of(server)).forwardRead("/v1/health/service/web?passing", "request-7")
+        ForwardedRead read = selectedClient(List.of(server)).forwardRead("/v1/health/service/web?passing", "request-7", java.util.Map.of())
                 .get(10, TimeUnit.SECONDS).orElseThrow();
 
         assertEquals(new ForwardedRead(200, "[1,2]", java.util.Optional.of("7"), java.util.Optional.of("server-2")), read);
@@ -570,6 +570,27 @@ class HttpCatalogClientTest {
     }
 
     @Test
+    void aForwardedReadCarriesTheCallersScopeInPlaceOfTheClientsOwn() throws Exception {
+        AtomicReference<CapturedRequest> request = new AtomicReference<>();
+        URI server = start(exchange -> {
+            request.set(new CapturedRequest(exchange.getRequestMethod(), exchange.getRequestURI().getPath(),
+                    exchange.getRequestHeaders(), ""));
+            respond(exchange, 200, "[]");
+        });
+        HttpCatalogClient client = selectedClient(List.of(server));
+
+        client.forwardRead("/v1/catalog/services", "r",
+                java.util.Map.of("X-Qraft-Tenant", "acme", "X-Qraft-Namespace", "staging")).get(10, TimeUnit.SECONDS);
+        assertEquals("acme", request.get().header("X-Qraft-Tenant"));
+        assertEquals("staging", request.get().header("X-Qraft-Namespace"));
+
+        client.forwardRead("/v1/catalog/services", "r", java.util.Map.of("X-Qraft-Namespace", "staging"))
+                .get(10, TimeUnit.SECONDS);
+        assertEquals("tenant-a", request.get().header("X-Qraft-Tenant"));
+        assertEquals("staging", request.get().header("X-Qraft-Namespace"));
+    }
+
+    @Test
     void aForwardedReadThatARefusesIsPassedOnWithoutAskingAnotherSeed() throws Exception {
         AtomicInteger secondAttempts = new AtomicInteger();
         URI refusing = start(exchange -> respond(exchange, 404, "{\"code\":\"not_found\"}"));
@@ -578,7 +599,7 @@ class HttpCatalogClientTest {
             respond(exchange, 200, "[]");
         });
 
-        ForwardedRead read = selectedClient(List.of(refusing, second)).forwardRead("/v1/catalog/nodes", "r")
+        ForwardedRead read = selectedClient(List.of(refusing, second)).forwardRead("/v1/catalog/nodes", "r", java.util.Map.of())
                 .get(10, TimeUnit.SECONDS).orElseThrow();
 
         assertEquals(404, read.status());
@@ -598,7 +619,7 @@ class HttpCatalogClientTest {
         URI answering = start(exchange -> respond(exchange, 200, "[]"));
 
         assertEquals(200, selectedClient(List.of(refused, busy, limited, answering))
-                .forwardRead("/v1/catalog/nodes", "r").get(10, TimeUnit.SECONDS).orElseThrow().status());
+                .forwardRead("/v1/catalog/nodes", "r", java.util.Map.of()).get(10, TimeUnit.SECONDS).orElseThrow().status());
     }
 
     @Test
@@ -609,11 +630,11 @@ class HttpCatalogClientTest {
         }
         URI busy = start(exchange -> respond(exchange, 503, "{\"code\":\"busy\",\"retryable\":true}"));
 
-        assertEquals(503, selectedClient(List.of(refused, busy)).forwardRead("/v1/catalog/nodes", "r")
+        assertEquals(503, selectedClient(List.of(refused, busy)).forwardRead("/v1/catalog/nodes", "r", java.util.Map.of())
                 .get(10, TimeUnit.SECONDS).orElseThrow().status());
-        assertEquals(503, selectedClient(List.of(busy, refused)).forwardRead("/v1/catalog/nodes", "r")
+        assertEquals(503, selectedClient(List.of(busy, refused)).forwardRead("/v1/catalog/nodes", "r", java.util.Map.of())
                 .get(10, TimeUnit.SECONDS).orElseThrow().status(), "the seed that did answer says more than one that did not");
-        assertEquals(java.util.Optional.empty(), selectedClient(List.of(refused)).forwardRead("/v1/catalog/nodes", "r")
+        assertEquals(java.util.Optional.empty(), selectedClient(List.of(refused)).forwardRead("/v1/catalog/nodes", "r", java.util.Map.of())
                 .get(10, TimeUnit.SECONDS));
     }
 

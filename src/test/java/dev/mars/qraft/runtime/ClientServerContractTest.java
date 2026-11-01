@@ -175,7 +175,8 @@ class ClientServerContractTest {
         catalogClient = new HttpCatalogClient(HttpClient.newHttpClient(), new ObjectMapper(), List.of(endpoint),
                 "catalog-client", "default", "default", "dc-1", "eu-west", Duration.ofSeconds(2));
 
-        var read = catalogClient.forwardRead("/v1/catalog/nodes", "request-1").get(10, TimeUnit.SECONDS).orElseThrow();
+        var read = catalogClient.forwardRead("/v1/catalog/nodes", "request-1", Map.of())
+                .get(10, TimeUnit.SECONDS).orElseThrow();
 
         assertEquals(200, read.status(), read.body());
         assertTrue(new ObjectMapper().readTree(read.body()).isArray());
@@ -266,6 +267,82 @@ class ClientServerContractTest {
         waitUntil(() -> store.findNode("contract-client").isEmpty());
         assertFalse(client.isRunning());
         assertEquals(0, store.getNodes().size());
+    }
+
+    @Test
+    void anApplicationReadsDiscoveryThroughItsLocalClientAgainstRealServer() throws Exception {
+        QraftStateStore store = startServer();
+        ClientConfiguration configuration = ClientConfiguration.builder()
+                .nodeName("contract-client")
+                .dataDirectory(dataRoot)
+                .address("127.0.0.1")
+                .clientPort(0)
+                .serverUrl("http://localhost:" + server.port())
+                .heartbeatInterval(25)
+                .requestTimeoutMs(1_000)
+                .tenant("acme")
+                .namespace("prod")
+                .services(List.of(new ServiceDefinition("payments-1", "payments", "127.0.0.1", 9090,
+                        List.of("blue"), Map.of(), true)))
+                .build();
+        client = new QraftClient(configuration);
+        assertTrue(client.start().get(10, TimeUnit.SECONDS));
+        waitUntil(() -> !store.getServiceCatalog().instances().isEmpty());
+        URI local = URI.create("http://127.0.0.1:" + client.localApi().port());
+
+        HttpResponse<String> services = readLocally(local, "/v1/catalog/services", Map.of("X-Request-Id", "request-9"));
+        assertEquals(200, services.statusCode(), services.body());
+        assertEquals("blue", new ObjectMapper().readTree(services.body()).path("payments").path(0).textValue());
+        assertEquals("request-9", services.headers().firstValue("X-Request-Id").orElseThrow());
+        assertTrue(services.headers().firstValue("X-Qraft-Index").isPresent());
+        assertEquals("payments-1", readLocallyAsJson(local, "/v1/catalog/service/payments", Map.of())
+                .path(0).path("serviceId").textValue());
+        assertEquals("contract-client", readLocallyAsJson(local, "/v1/catalog/nodes", Map.of())
+                .path(0).path("name").textValue());
+        JsonNode health = readLocallyAsJson(local, "/v1/health/service/payments", Map.of());
+        assertEquals("payments-1", health.path(0).path("service").path("serviceId").textValue());
+        assertTrue(health.path(0).has("nodeStatus"));
+        assertEquals(0, readLocallyAsJson(local, "/v1/health/service/payments?passing", Map.of()).size(),
+                "the filter reaches the server: a service with no check result is not passing");
+
+        assertEquals(1, readLocallyAsJson(local, "/v1/catalog/service/payments",
+                Map.of("X-Qraft-Tenant", "acme", "X-Qraft-Namespace", "prod")).size());
+        assertEquals(0, readLocallyAsJson(local, "/v1/catalog/service/payments",
+                Map.of("X-Qraft-Tenant", "other")).size(), "the caller's scope is the one read");
+        assertEquals(0, readCatalog(URI.create("http://127.0.0.1:" + server.port()), "payments").size(),
+                "a read of the server without a scope is in the default one, where the client's service is not");
+
+        for (String refused : List.of("/v1/client/members?wan=1", "/v1/catalog/nodes?wan=1",
+                "/v1/catalog/services?dc=dc-2", "/v1/catalog/service/payments?tag=blue",
+                "/v1/health/service/payments?stale")) {
+            assertLocalRefusal(readLocally(local, refused, Map.of()), 400, "invalid_query", refused);
+        }
+        assertLocalRefusal(readLocally(local, "/v1/catalog/services", Map.of("X-Qraft-Tenant", "")), 400,
+                "invalid_scope", "a blank scope");
+        assertLocalRefusal(readLocally(local, "/v1/catalog/service/a%2Fb", Map.of()), 400,
+                "service_name_required", "a name with a slash");
+    }
+
+    private static HttpResponse<String> readLocally(URI local, String pathAndQuery, Map<String, String> headers)
+            throws Exception {
+        HttpRequest.Builder request = HttpRequest.newBuilder(local.resolve(pathAndQuery)).GET();
+        headers.forEach(request::header);
+        try (HttpClient client = HttpClient.newHttpClient()) {
+            return client.send(request.build(), HttpResponse.BodyHandlers.ofString());
+        }
+    }
+
+    private static JsonNode readLocallyAsJson(URI local, String pathAndQuery, Map<String, String> headers)
+            throws Exception {
+        HttpResponse<String> response = readLocally(local, pathAndQuery, headers);
+        assertEquals(200, response.statusCode(), pathAndQuery + " " + response.body());
+        return new ObjectMapper().readTree(response.body());
+    }
+
+    private static void assertLocalRefusal(HttpResponse<String> response, int status, String code, String why)
+            throws Exception {
+        assertEquals(status, response.statusCode(), why + " " + response.body());
+        assertEquals(code, new ObjectMapper().readTree(response.body()).path("code").textValue(), why);
     }
 
     private QraftStateStore startServer() throws Exception {

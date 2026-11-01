@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-11-01 (dated task-list links refreshed. Earlier, 2026-10-31: client list Phase 6A: an unreachable node's services leave `?passing`, and a health entry carries its node's status, in sections 9.2 and 12.1.1. Earlier the same day: section 12.1.3's comparison with Consul corrected, and section 9.2 records a gap that client list Phase 6A closes. Earlier the same day: client list Phase 6: `self`, `members` and `leave` on the local API, in sections 8.4 and 12.1.3. Earlier the same day: client list Phase 5: TTL status and maintenance through the local API, in sections 12.1.3 and 16. Earlier the same day: client list Phase 4: services and checks through the local API, in sections 6.2, 7.4, 8.2, 12.1.3 and 16. Earlier, 2026-10-30: client anti-entropy and `GET /v1/catalog/node-services/{nodeName}` in sections 7.3, 8.2, 12.1 and 22; a check ID unique across a client in section 16. Earlier the same day: client list Phase 2, the server side: the node ID and the rules for who may hold a name, after Consul's catalog, in sections 7.3 and 22, and the `X-Qraft-Node-ID` header, the 409 `node_name_reserved` refusal and the node listing's `id` in sections 12.1 and 12.1.2. Earlier, 2026-10-27: section 12.4.1: how the Vite build names the asset manifest, and the security profile in the bootstrap data. Earlier, 2026-10-26: client list Phase 1: the server's service and check write routes moved from `/v1/client/*` to `/v1/catalog/*` in sections 12.1, 12.1.1 and 12.1.2. Earlier, 2026-10-25: Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
+**Last updated:** 2026-11-01 (client list Phase 7: discovery reads through the local API, and the server's discovery reads refuse a query parameter they do not know, in sections 12.1 and 12.1.3. Earlier the same day: dated task-list links refreshed. Earlier, 2026-10-31: client list Phase 6A: an unreachable node's services leave `?passing`, and a health entry carries its node's status, in sections 9.2 and 12.1.1. Earlier the same day: section 12.1.3's comparison with Consul corrected, and section 9.2 records a gap that client list Phase 6A closes. Earlier the same day: client list Phase 6: `self`, `members` and `leave` on the local API, in sections 8.4 and 12.1.3. Earlier the same day: client list Phase 5: TTL status and maintenance through the local API, in sections 12.1.3 and 16. Earlier the same day: client list Phase 4: services and checks through the local API, in sections 6.2, 7.4, 8.2, 12.1.3 and 16. Earlier, 2026-10-30: client anti-entropy and `GET /v1/catalog/node-services/{nodeName}` in sections 7.3, 8.2, 12.1 and 22; a check ID unique across a client in section 16. Earlier the same day: client list Phase 2, the server side: the node ID and the rules for who may hold a name, after Consul's catalog, in sections 7.3 and 22, and the `X-Qraft-Node-ID` header, the 409 `node_name_reserved` refusal and the node listing's `id` in sections 12.1 and 12.1.2. Earlier, 2026-10-27: section 12.4.1: how the Vite build names the asset manifest, and the security profile in the bootstrap data. Earlier, 2026-10-26: client list Phase 1: the server's service and check write routes moved from `/v1/client/*` to `/v1/catalog/*` in sections 12.1, 12.1.1 and 12.1.2. Earlier, 2026-10-25: Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
 
 ## 1. Purpose
 
@@ -902,6 +902,13 @@ aliases for client compatibility, but responses use one stable Qraft schema.
 Internal fields such as Raft indexes and authoritative health cannot be set by a
 registration request.
 
+The discovery reads take no query parameter, except `passing` on the health route. Any
+other answers 400 `invalid_query`, naming the parameter (since 2026-11-01). Consul's
+handlers read the parameters they know and ignore the rest (`agent/http.go`, read
+2026-11-01). Here an ignored parameter would answer another question than the one
+asked: `?tag=blue` would list every instance, and `?stale` would suggest a choice of
+consistency that does not exist.
+
 Registration identity is supplied through interim request-context headers:
 
 ```text
@@ -1238,6 +1245,10 @@ PUT /v1/client/service/maintenance/{serviceId}?enable=...[&reason=...]
 GET /v1/client/self
 GET /v1/client/members
 PUT /v1/client/leave
+GET /v1/catalog/services
+GET /v1/catalog/service/{name}
+GET /v1/catalog/nodes
+GET /v1/health/service/{name}[?passing]
 ```
 
 A service registration takes the fields of a service in the configuration file
@@ -1327,7 +1338,25 @@ Consul's `/v1/agent/members` lists its gossip pool, and Consul itself points to
 `/v1/catalog/nodes` for a strongly consistent list. So here there is no answer without a
 server, only clients are listed, because servers have no node entry, and a node that
 left is gone, where Consul shows it as `left`. Consul documents `wan` as for its
-server-mode agents and `segment` as Enterprise; neither is carried over.
+server-mode agents and `segment` as Enterprise; neither is carried over, so the servers
+refuse `?wan=1` as they do any parameter they do not know (section 12.1).
+
+The four reads at `/v1/catalog/*` and `/v1/health/*` are forwarded in the same way, as
+Consul's agent serves them, so an application needs only its local client. Each reaches
+the servers with its path and query as the caller wrote them, so what a read means is
+decided in one place. A read's scope needs a rule of its own:
+
+- `X-Qraft-Tenant` and `X-Qraft-Namespace` go on as the caller sent them, each alone.
+- Without one, the read uses the client's own, because that is where this API registers
+  services: an application reads what it registered without naming a scope. A read
+  sent straight to a server without one uses `default` (section 12.1).
+- A value holding a control character, which the listener takes and the client sending
+  it on refuses, answers 400 `invalid_scope` without asking a server. A request ID that
+  does so answers 400 `invalid_request_id`, here and on `members`.
+
+Only `GET` is served; another method answers 405 without asking a server. Consul's agent
+also forwards catalog writes, and here applications write through `/v1/client/*`. These
+reads are served after shutdown begins, until the listener stops.
 
 `PUT /v1/client/leave` answers `{"deregistered":true}` once the client has left the
 catalog (section 8.4), or false if it could not within its shutdown bound. It then

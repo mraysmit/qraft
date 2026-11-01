@@ -221,6 +221,22 @@ class LocalClientRoutesTest {
     }
 
     @Test
+    void membersCarryTheCallersQueryToTheServersWhichDecideWhatToDoWithIt() throws Exception {
+        AtomicReference<String> asked = new AtomicReference<>();
+        start(stubServer(exchange -> {
+            asked.set(exchange.getRequestURI().toString());
+            byte[] body = "{\"code\":\"invalid_query\",\"retryable\":false}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(400, body.length);
+            try (var output = exchange.getResponseBody()) { output.write(body); }
+        }));
+
+        HttpResponse<String> members = send("GET", "/v1/client/members?wan=1");
+
+        assertRefused(members, 400, "invalid_query");
+        assertEquals("/v1/catalog/nodes?wan=1", asked.get());
+    }
+
+    @Test
     void aServersRefusalOfMembersIsPassedOnWithItsLeaderHint() throws Exception {
         start(stubServer(exchange -> {
             exchange.getResponseHeaders().set("X-Qraft-Leader-Id", "server-2");

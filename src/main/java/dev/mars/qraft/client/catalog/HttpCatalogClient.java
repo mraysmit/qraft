@@ -314,19 +314,24 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
      * answer on as it came. A busy server or one that cannot be reached is passed over for the next seed. When every
      * seed has been tried, the answer is the last server's that did answer, whose envelope says more than silence, or
      * empty when none did.
+     *
+     * @param scope the scope headers the application sent, in place of this client's own
      */
-    public CompletableFuture<Optional<ForwardedRead>> forwardRead(String pathAndQuery, String requestId) {
+    public CompletableFuture<Optional<ForwardedRead>> forwardRead(String pathAndQuery, String requestId,
+                                                                  Map<String, String> scope) {
         ensureOpen();
         if (endpoints == null) {
             throw new IllegalStateException("No server seeds were configured for automatic selection");
         }
-        return forwardAttempt(endpoints.cycle(), 0, pathAndQuery, requestId, Optional.empty());
+        return forwardAttempt(endpoints.cycle(), 0, pathAndQuery, requestId, scope, Optional.empty());
     }
 
     private CompletableFuture<Optional<ForwardedRead>> forwardAttempt(List<URI> cycle, int index, String pathAndQuery,
-            String requestId, Optional<ForwardedRead> lastAnswer) {
+            String requestId, Map<String, String> scope, Optional<ForwardedRead> lastAnswer) {
         URI endpoint = cycle.get(index);
-        HttpRequest request = request(endpoint, pathAndQuery).setHeader("X-Request-Id", requestId).GET().build();
+        HttpRequest.Builder builder = request(endpoint, pathAndQuery).setHeader("X-Request-Id", requestId);
+        scope.forEach(builder::setHeader);
+        HttpRequest request = builder.GET().build();
         CompletableFuture<Optional<ForwardedRead>> answer;
         try {
             answer = httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
@@ -342,7 +347,7 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
             }
             Optional<ForwardedRead> latest = read.isPresent() ? read : lastAnswer;
             return index + 1 == cycle.size() ? CompletableFuture.completedFuture(latest)
-                    : forwardAttempt(cycle, index + 1, pathAndQuery, requestId, latest);
+                    : forwardAttempt(cycle, index + 1, pathAndQuery, requestId, scope, latest);
         });
     }
 

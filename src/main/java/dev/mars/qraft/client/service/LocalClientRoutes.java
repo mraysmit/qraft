@@ -18,7 +18,6 @@ package dev.mars.qraft.client.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
-import dev.mars.qraft.client.catalog.ForwardedRead;
 import dev.mars.qraft.client.catalog.ServerContactTracker;
 import dev.mars.qraft.client.config.ClientConfiguration;
 import dev.mars.qraft.common.QraftVersion;
@@ -28,12 +27,10 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
@@ -47,7 +44,7 @@ import java.util.function.Supplier;
  *
  * <p>{@code self} names its settings one by one, so a secret added to the configuration later is not shown unless
  * someone chooses to show it. {@code members} is a forwarded read of the servers' catalog, because Qraft has no gossip
- * pool for a client to know its members from; with no server to ask it fails rather than answer from old data.
+ * pool for a client to know its members from, handled as the discovery reads are ({@link LocalDiscoveryRoutes}).
  *
  * <p>{@code leave} answers once the client has left the catalog, or tried to within its shutdown bound, and only then
  * says the client has left. It cannot wait for the rest of the shutdown, which stops this listener and waits for its
@@ -64,18 +61,12 @@ public final class LocalClientRoutes {
     private static final String LEAVE = "/v1/client/leave";
     private static final String SERVER_NODES = "/v1/catalog/nodes";
 
-    /** Forwards a read to the servers; empty when no server could be asked. */
-    @FunctionalInterface
-    public interface ForwardedReads {
-        CompletableFuture<Optional<ForwardedRead>> read(String pathAndQuery, String requestId);
-    }
-
     private final JsonApi api = new JsonApi(new ObjectMapper());
     private final ClientConfiguration config;
     private final String nodeId;
     private final Supplier<ReadinessPolicy.Conditions> readiness;
     private final ServerContactTracker contact;
-    private final ForwardedReads reads;
+    private final LocalDiscoveryRoutes discovery;
     private final Supplier<CompletableFuture<Boolean>> depart;
     private final Runnable left;
 
@@ -85,12 +76,13 @@ public final class LocalClientRoutes {
      */
     public LocalClientRoutes(ClientConfiguration config, String nodeId,
                              Supplier<ReadinessPolicy.Conditions> readiness, ServerContactTracker contact,
-                             ForwardedReads reads, Supplier<CompletableFuture<Boolean>> depart, Runnable left) {
+                             LocalDiscoveryRoutes.ForwardedReads reads, Supplier<CompletableFuture<Boolean>> depart,
+                             Runnable left) {
         this.config = Objects.requireNonNull(config, "config");
         this.nodeId = Objects.requireNonNull(nodeId, "nodeId");
         this.readiness = Objects.requireNonNull(readiness, "readiness");
         this.contact = Objects.requireNonNull(contact, "contact");
-        this.reads = Objects.requireNonNull(reads, "reads");
+        this.discovery = new LocalDiscoveryRoutes(reads);
         this.depart = Objects.requireNonNull(depart, "depart");
         this.left = Objects.requireNonNull(left, "left");
     }
@@ -166,22 +158,7 @@ public final class LocalClientRoutes {
 
     private void members(HttpExchange exchange) throws IOException {
         if (!exactly(exchange, MEMBERS) || !api.requireMethod(exchange, "GET")) return;
-        String requestId = exchange.getResponseHeaders().getFirst(JsonApi.REQUEST_ID_HEADER);
-        Optional<ForwardedRead> read = reads.read(SERVER_NODES, requestId).join();
-        if (read.isEmpty()) {
-            api.error(exchange, 503, "no_server_reachable", "No server could be reached", true, Map.of());
-            return;
-        }
-        passOn(exchange, read.get());
-    }
-
-    private static void passOn(HttpExchange exchange, ForwardedRead read) throws IOException {
-        read.index().ifPresent(index -> exchange.getResponseHeaders().set("X-Qraft-Index", index));
-        read.leaderId().ifPresent(leader -> exchange.getResponseHeaders().set("X-Qraft-Leader-Id", leader));
-        exchange.getResponseHeaders().set("Content-Type", "application/json");
-        byte[] body = read.body().getBytes(StandardCharsets.UTF_8);
-        exchange.sendResponseHeaders(read.status(), body.length == 0 ? -1 : body.length);
-        try (var output = exchange.getResponseBody()) { output.write(body); }
+        discovery.forward(exchange, SERVER_NODES);
     }
 
     private void leave(HttpExchange exchange) throws IOException {

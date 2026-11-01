@@ -37,6 +37,7 @@ import dev.mars.qraft.client.service.RegistrationClient;
 import dev.mars.qraft.client.service.RegistrationStore;
 import dev.mars.qraft.client.service.LocalApiServer;
 import dev.mars.qraft.client.service.LocalClientRoutes;
+import dev.mars.qraft.client.service.LocalDiscoveryRoutes;
 import dev.mars.qraft.client.service.LocalDefinitions;
 import dev.mars.qraft.client.service.LocalRegistrationRoutes;
 import dev.mars.qraft.client.service.HeartbeatService;
@@ -177,6 +178,7 @@ public final class QraftClient implements AutoCloseable {
                 .install(localApi);
         new LocalClientRoutes(config, dataDirectory.nodeId(), readinessPolicy::conditions, contactTracker,
                 serverClient::forwardRead, this::depart, this::finishLeaving).install(localApi);
+        new LocalDiscoveryRoutes(serverClient::forwardRead).install(localApi);
         definitions.listen(new LocalDefinitions.Listener() {
             @Override public void checkAdded(HealthCheckDefinition check) {
                 // Readiness counts the check before it can report, so its first result is not missed.

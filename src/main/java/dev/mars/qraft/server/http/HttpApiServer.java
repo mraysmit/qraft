@@ -54,6 +54,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -554,7 +555,7 @@ public final class HttpApiServer implements AutoCloseable {
 
     /** Lists the registered nodes in name order, after Consul's {@code GET /v1/catalog/nodes}. */
     private void listNodes(HttpExchange exchange) throws IOException {
-        if (!prepareNodeRequest(exchange, "GET")) return;
+        if (!prepareNodeRequest(exchange, "GET") || refusedForItsQuery(exchange)) return;
         setAppliedIndex(exchange);
         respondJson(exchange, 200, stateStore.getNodes().values().stream().map(NodeEntry::from).toList());
     }
@@ -580,7 +581,7 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     private void listServices(HttpExchange exchange) throws IOException {
-        if (!prepareCatalogRequest(exchange, "GET")) return;
+        if (!prepareCatalogRequest(exchange, "GET") || refusedForItsQuery(exchange)) return;
         ReadScope scope = readScope(exchange);
         if (scope == null) return;
         setAppliedIndex(exchange);
@@ -601,6 +602,7 @@ public final class HttpApiServer implements AutoCloseable {
             respondError(exchange, 400, "node_name_required", "Node name is required", false);
             return;
         }
+        if (refusedForItsQuery(exchange)) return;
         ReadScope scope = readScope(exchange);
         if (scope == null) return;
         setAppliedIndex(exchange);
@@ -619,6 +621,7 @@ public final class HttpApiServer implements AutoCloseable {
             respondError(exchange, 400, "service_name_required", "Service name is required", false);
             return;
         }
+        if (refusedForItsQuery(exchange)) return;
         ReadScope scope = readScope(exchange);
         if (scope == null) return;
         setAppliedIndex(exchange);
@@ -711,6 +714,20 @@ public final class HttpApiServer implements AutoCloseable {
                 .filter(entry -> !passingOnly || entry.passing())
                 .toList();
         respondJson(exchange, 200, entries);
+    }
+
+    /**
+     * Answers {@code invalid_query} for a read that takes no query parameter and was given one. Ignoring it, as
+     * Consul does a parameter it does not know, would answer another question than the one asked.
+     */
+    private boolean refusedForItsQuery(HttpExchange exchange) throws IOException {
+        String rawQuery = exchange.getRequestURI().getRawQuery();
+        if (rawQuery == null || rawQuery.isEmpty()) return false;
+        Optional<String> parameter = Arrays.stream(rawQuery.split("&")).filter(text -> !text.isEmpty()).findFirst();
+        if (parameter.isEmpty()) return false;
+        respondError(exchange, 400, "invalid_query", "Unsupported query parameter: "
+                + URLDecoder.decode(parameter.get().split("=", 2)[0], StandardCharsets.UTF_8), false);
+        return true;
     }
 
     /** Parses the only supported health query parameter: {@code passing}, {@code passing=true|false}. */

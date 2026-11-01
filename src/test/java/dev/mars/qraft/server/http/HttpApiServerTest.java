@@ -1212,6 +1212,27 @@ class HttpApiServerTest {
     }
 
     @Test
+    void catalogReadsRefuseAQueryParameterTheyDoNotKnowRatherThanAnswerAnotherQuestion() throws Exception {
+        startHealthApi(new MutableClockHelper(Instant.parse("2026-09-26T10:00:00Z")));
+        HttpClient client = HttpClient.newHttpClient();
+        registerService(client, "web-1", "frontend", "node-a");
+
+        for (String read : List.of("/v1/catalog/nodes?wan=1", "/v1/catalog/services?dc=dc-2",
+                "/v1/catalog/service/frontend?tag=blue", "/v1/catalog/node-services/node-a?stale",
+                "/v1/catalog/services?passing&dc=dc-2", "/v1/catalog/nodes?a%20b=1")) {
+            HttpResponse<String> refused = request(client, read, "GET");
+            assertEquals(400, refused.statusCode(), read + " " + refused.body());
+            assertErrorEnvelope(refused, "invalid_query", false);
+        }
+        assertTrue(new ObjectMapper().readTree(request(client, "/v1/catalog/nodes?wan=1", "GET").body())
+                .path("message").textValue().contains("wan"), "the refusal names the parameter");
+        for (String read : List.of("/v1/catalog/nodes", "/v1/catalog/services", "/v1/catalog/service/frontend",
+                "/v1/catalog/node-services/node-a", "/v1/catalog/services?")) {
+            assertEquals(200, request(client, read, "GET").statusCode(), read);
+        }
+    }
+
+    @Test
     void passingExcludesAnInstanceOnAnUnreachableNodeWithoutChangingItsChecks() throws Exception {
         QraftStateStore store = startHealthApi(new MutableClockHelper(Instant.parse("2026-09-26T10:00:00Z")));
         HttpClient client = HttpClient.newHttpClient();
