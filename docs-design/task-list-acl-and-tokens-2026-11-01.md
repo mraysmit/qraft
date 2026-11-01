@@ -1,9 +1,9 @@
 # Task List: ACLs and Tokens
 
 **Date:** 2026-10-05
-**Status:** Proposed. Section 4's items are recommendations to confirm or change, except the points marked "Decided 2026-10-09", in proposals 11, 12, and 14, and those marked "Decided 2026-10-27", in proposals 12 and 16 to 19. Proposal 16's default profile is a recommendation. No point is open. No code exists.
+**Status:** Proposed, and aligned with Consul's source on 2026-11-01 at the owner's request, except that secrets follow ZooKeeper, at the owner's decision of the same day (proposal 3). It waits for the owner's word to start. On 2026-11-01 the owner kept proposals 16, 17 and 19, changed proposal 18 to Consul's behaviour, and left `server.operator.token` to Phase 9. No code exists.
 **Proposed start:** after [`task-list-consul-style-client-2026-11-01.md`](../docs/archive/task-list-consul-style-client-2026-11-01.md) (proposal 15), complete on 2026-11-01.
-**Last updated:** 2026-11-01 (the client list complete and archived, and its link updated. Earlier the same day: renamed with the client list. Earlier, 2026-10-31: renamed with the client list; the token for the client's anti-entropy removals read in Consul's source and recommended to follow it, in proposal 11 and Phase 6; Consul's anti-entropy moved from the recalled items to what has been read. Earlier, 2026-10-30: proposal 11's planted instance corrected: the client's reconciler has had anti-entropy since `c33a2f2`, which opens the point of the token its removals use, added to Phase 6; the rule on who runs builds corrected. Earlier the same day: renamed with the client list, which changed; nothing else changed. Earlier, 2026-10-29: renamed with the client list, which changed; nothing else changed. Earlier, 2026-10-28: renamed with the client list, which changed; nothing else changed. Earlier, 2026-10-27: the review of the administrative interface against this list: four points decided by the owner: a security profile, proposal 16; a lock-out guard on the server, proposal 17; a policy that tokens link to cannot be deleted, proposal 18, which settles Phase 1's open item; and a server-side explanation of a decision, proposal 19. Proposal 12 gains the marker for a token installed from the file, and its revocation order follows from proposal 17. Phases 1, 2, 3, 5 and 9 gain the tasks. Renamed to the date of its last change, with the client list. Earlier, 2026-10-26: renamed with the client list, which became active; nothing else changed. Earlier, 2026-10-21: renamed with linked documents; this list remains proposed after the client list. Earlier, 2026-10-11: the rule that guards need recorded mutations removed at the owner's decision, from the rules and from four exits; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: proposal 11 brought in line with the node routes and with what a node's deregistration removes; the file renamed to the date of its last change; four points decided: the authorize call; revoking the management token; Consul's rule for registering a service, which needs `service:write` alone on a registered node; and a client certificate on the server's HTTP listener, for the transport security list)
+**Last updated:** 2026-11-01 (the owner's decisions on proposals 16 to 19 recorded: 16, 17 and 19 stay, and 18 now follows Consul, in proposal 18, the differences from Consul, and Phases 1 and 5. Earlier the same day: `defaultPolicy` has no default, and `deny` with ACLs disabled logs a critical warning, at the owner's decision: proposals 12, 13 and 16, the differences from Consul, and Phases 3 and 6. Earlier the same day: secrets stored only as a hash, following ZooKeeper rather than Consul, at the owner's decision: proposal 3, the rules, the differences from Consul, and Phases 1, 5, 6 and 9. Earlier the same day: aligned with Consul's source at the owner's request: section 3 rewritten from the source, with the items that were only recalled now read; the departures reversed, and those that stay listed at the end of section 4; roles, the bootstrap endpoint, the default policy, the client's cache, down policy and four tokens added; every route the client list built added to proposal 11, with the client deciding for itself so that it keeps working with no server; proposal 11's token for anti-entropy's removals corrected; section 2 checked again; the default profile changed to `development`. Earlier the same day: the client list complete and archived, and its link updated. Earlier the same day: renamed with the client list. Earlier, 2026-10-31: renamed with the client list; the token for the client's anti-entropy removals read in Consul's source and recommended to follow it, in proposal 11 and Phase 6; Consul's anti-entropy moved from the recalled items to what has been read. Earlier, 2026-10-30: proposal 11's planted instance corrected: the client's reconciler has had anti-entropy since `c33a2f2`, which opens the point of the token its removals use, added to Phase 6; the rule on who runs builds corrected. Earlier the same day: renamed with the client list, which changed; nothing else changed. Earlier, 2026-10-29: renamed with the client list, which changed; nothing else changed. Earlier, 2026-10-28: renamed with the client list, which changed; nothing else changed. Earlier, 2026-10-27: the review of the administrative interface against this list: four points decided by the owner: a security profile, proposal 16; a lock-out guard on the server, proposal 17; a policy that tokens link to cannot be deleted, proposal 18, which settles Phase 1's open item; and a server-side explanation of a decision, proposal 19. Proposal 12 gains the marker for a token installed from the file, and its revocation order follows from proposal 17. Phases 1, 2, 3, 5 and 9 gain the tasks. Renamed to the date of its last change, with the client list. Earlier, 2026-10-26: renamed with the client list, which became active; nothing else changed. Earlier, 2026-10-21: renamed with linked documents; this list remains proposed after the client list. Earlier, 2026-10-11: the rule that guards need recorded mutations removed at the owner's decision, from the rules and from four exits; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: proposal 11 brought in line with the node routes and with what a node's deregistration removes; the file renamed to the date of its last change; four points decided: the authorize call; revoking the management token; Consul's rule for registering a service, which needs `service:write` alone on a registered node; and a client certificate on the server's HTTP listener, for the transport security list)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 7.3, 12, 15, 16 and 22
 **Related:** the client list's decisions 6 and 8; decision 6 of [`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md), the operator token; item 9 of [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md); phase 7 of [`CONSUL_FEATURE_IMPLEMENTATION_PLAN.md`](CONSUL_FEATURE_IMPLEMENTATION_PLAN.md); section 10.2 of [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md), the administrative interface's access control
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
@@ -14,11 +14,14 @@ Stop trusting what a caller says about itself. Design section 15 already says
 the long-term design "does not trust a caller-supplied node or tenant
 identity". Today the server does exactly that.
 
-When this list is complete:
+When this list is complete, with ACLs enabled:
 
-- every request to a server is made under a token, or as the anonymous token;
-- a client can register and renew its own node only, and can register and
-  publish for the services its token allows;
+- every request to a server or a client's local API is made under a token, or
+  as the anonymous token;
+- a client's own token registers and renews its node, and removes what should
+  not be on it;
+- an application's token decides which services it can register, report on, and
+  read;
 - the node identity rules of the client list's decision 8 are enforced, not
   only detected: a takeover or a rename needs a token that may write that name;
 - operator actions use the same tokens, in place of the one shared operator
@@ -29,23 +32,41 @@ When this list is complete:
 This list gives authentication and authorization. It does not give secrecy on
 the wire: that is transport security, proposal 14.
 
+The rule for every choice: **do what Consul does.** Section 4 ends with each
+place this list still differs, and why.
+
 ## 2. Current state
 
-Checked in the code on 2026-10-05.
+Checked in the code on 2026-11-01, after the client list finished.
 
 - **Identity is whatever the headers say.** `HeaderRequestContext` reads the
-  tenant, namespace, and node from `X-Qraft-Tenant`, `X-Qraft-Namespace`, and
-  `X-Qraft-Node`. Nothing authenticates them. The class sits behind the
-  `RequestContext` interface, which design section 15 put there so that token
-  authentication could replace it without changing the catalog commands.
+  tenant, namespace, node, and node ID from `X-Qraft-Tenant`,
+  `X-Qraft-Namespace`, `X-Qraft-Node`, and `X-Qraft-Node-ID`. Nothing
+  authenticates them. The class sits behind the `RequestContext` interface,
+  which design section 15 put there so that token authentication could replace
+  it without changing the catalog commands.
 - **One shared secret exists.** `server.operator.token` guards
   `DELETE /v1/operator/raft/peer`. It is sent as `X-Qraft-Token` or
   `Authorization: Bearer`, compared in constant time in `MembershipService`,
   and checked again by the leader when a removal is forwarded.
-- **Everything else is open:** node registration and heartbeats, service
-  writes, check observations, every catalog and health read, `/raft/status`,
-  the gRPC `DistributedStateService`, and the administrative interface.
-- **The client has no credential.** `ClientConfiguration` has no token setting.
+- **Everything else on a server is open:** the routes
+  `/v1/catalog/register`, `deregister`, `node/heartbeat`, `check/observe`,
+  `nodes`, `node-services/{name}`, `services`, and `service/{name}`,
+  `/v1/health/service/{name}`, `/v1/operator/raft/configuration`,
+  `/raft/status`, the gRPC `DistributedStateService`, and the administrative
+  interface.
+- **Everything on a client's local API is open** to whoever reaches it, which by
+  default means the host, because it binds `127.0.0.1` (`client.bindAddress`):
+  `/v1/client/self`, `members`, `leave`, `service/register`,
+  `service/deregister/{id}`, `services`, `service/{id}`, `check/register`,
+  `check/deregister/{id}`, `checks`, `check/pass|warn|fail|update/{id}`,
+  `maintenance`, and `service/maintenance/{id}`, and the forwarded reads
+  `/v1/catalog/nodes`, `services`, `service/{name}`, and
+  `/v1/health/service/{name}`.
+- **The client has no credential.** `ClientConfiguration` has no token setting,
+  and `HttpCatalogClient` sends none.
+- **Registrations are kept without a token.** `registrations.json` in the data
+  directory holds what the local API registered, through `RegistrationStore`.
 - **Nodes have no scope.** Services carry a tenant and a namespace; a node
   does not.
 - **The Raft port is trusted,** including a claim to an existing server ID
@@ -54,87 +75,163 @@ Checked in the code on 2026-10-05.
 
 ## 3. Reference: how Consul handles this
 
-Read on 2026-10-05 from HashiCorp's documentation. The sources are listed at
-the end of this section.
+Read on 2026-11-01 from Consul's source, on its `main` branch, and on 2026-10-05
+from its documentation. The files are named at each point, and the sources are
+listed at the end of this section.
 
-- **Token.** A token has an accessor ID, which is public and names the token
-  in the API and logs, and a secret ID, which the caller presents. It also
-  has a description, a creation time, an optional expiry, and links to
+**Tokens** (`agent/structs/acl.go`, `agent/consul/auth/token_writer.go`)
+
+- A token has an accessor ID, which is public and names the token in the API and
+  logs, and a secret ID, which the caller presents. Both are UUIDs, generated
+  unless the caller supplies them.
+- It has a description, a creation time, an optional expiry, and links to
   policies, roles, service identities, and node identities.
-- **Presenting it.** The secret is sent in the `X-Consul-Token` header.
-- **Anonymous token.** A request without a token acts as a built-in anonymous
-  token. It cannot be deleted, and an operator may attach policies to it.
-- **Rules.** A rule names a resource type, a name or a name prefix, and an
-  access level.
-  - Resource types include `node`, `service`, `agent`, `key`, `session`,
-    `operator`, and `acl`, each with a `_prefix` form where names apply.
-  - Access levels are `read`, `write`, and `deny`, plus `list` for keys.
-  - An exact name takes precedence over a prefix.
-- **What the resources control.**
-  - `node`: catalog registration of the node, its health checks, and which
-    nodes discovery results show.
-  - `service`: service registration, and which services discovery shows.
-  - `agent`: the agent's own utility operations. Catalog operations come
-    under `node` and `service` instead.
-  - `operator`: the operator API, which includes the Raft configuration.
-  - `acl`: reading and writing ACLs. `acl:write` also reveals any token's
-    secret.
-- **Registering in the catalog.** A registration needs `node:write` only when
-  it creates the node or changes what is recorded for it. A service registered
-  on a node that already exists, with the node's details unchanged, needs
-  `service:write` alone. Read on 2026-10-08 in `vetRegisterWithACL`, in
-  Consul's `catalog_endpoint.go`.
-- **Policies and roles.** A policy is a named set of rules. A role is a named
-  set of policies and identities. Tokens link to either.
-- **Identities** are policy templates:
-  - a node identity gives `write` on that node name and `read` on every
-    service;
-  - a service identity gives `write` on that service name and on its sidecar
-    proxy, and `read` on every service and every node.
-- **Configuration.**
-  - `acl.enabled` is off by default.
-  - `acl.default_policy` is `allow` by default; the documentation says that
-    default will change. With `deny`, anything not allowed is refused.
-  - Agents cache tokens and policies for 30 seconds, and `acl.down_policy`
-    (default `extend-cache`) says what an agent does when it cannot reach a
-    server to resolve one.
-- **The agent's own tokens.**
-  - `acl.tokens.agent` is used for the agent's internal operations. It needs
-    at least `write` on the node name the agent registers as.
-  - `acl.tokens.config_file_service_registration` registers the services and
-    checks defined in configuration files.
-  - `acl.tokens.default` is used for requests that carry no token.
-  - `acl.tokens.agent_recovery` works on the agent's own endpoints when no
-    server can be reached.
-- **Bootstrap.**
-  - `PUT /v1/acl/bootstrap` creates the first management token, with the
-    built-in `global-management` policy. It succeeds once; afterwards it
-    answers 403. The caller may supply the secret.
-  - Alternatively, `acl.tokens.initial_management` in the server
-    configuration names a secret that a server installs when it gains
-    leadership.
-- **The token API.** Creating, updating, and deleting need `acl:write`.
-  Reading and listing need `acl:read`, which sees secrets redacted.
-  `/acl/token/self` needs no privilege. An expiry set through the API must be
-  between one minute and 24 hours ahead.
-- **Anti-entropy.** Read on 2026-10-31 in `updateSyncState`, in Consul's
-  `agent/local/state.go`: "Mark a remote service that does not exist locally as
-  deleted so that it will be removed on the server later." Its removal uses the
-  agent's token: "Always use the agent token to delete without trying the service
-  token." A denial is logged as a warning, "Service deregistration blocked by
-  ACLs", and the service is not tried again until the next full sync.
+- The secret and the expiry cannot change once the token exists: "Changing a
+  token's SecretID is not permitted", "Cannot change expiration time".
+- An expiry must be between one minute and 24 hours ahead.
+- **Secrets are stored unhashed.** The state store looks a token up by its secret
+  (`ACLTokenGetBySecret`, in `agent/consul/state/acl.go`). A read with `acl:read`
+  shows the secret as `<hidden>`; `acl:write` reveals it.
+- A request cannot delete the token it was made with ("Deletion of the request's
+  authorization token is not permitted"), and nobody can delete the anonymous
+  token (`ACL.TokenDelete`).
 
-Recalled, and not found in the pages read. Verify each before relying on it:
+**Presenting a token and being refused** (`agent/http.go`)
 
-- Consul keeps token secrets unhashed in its replicated state.
-- A lost bootstrap is reset through a file in the leader's data directory.
-- A service registered through an agent keeps the token it was registered
-  with, and the agent syncs that service under it.
-- A registration under a name held by another node ID is refused unless the
-  holder's gossip health is failing. This is the rule the client list's
-  decision 8 follows.
+- The secret comes from `?token=`, then `X-Consul-Token`, then
+  `Authorization: Bearer`. A request with none uses the agent's default token, if
+  it has one (`parseTokenWithDefault`), and otherwise acts as the anonymous token.
+- **403 for an unknown or expired token and for a missing permission alike:**
+  `acl.IsErrPermissionDenied(err) || acl.IsErrNotFound(err)`. The messages differ:
+  "ACL not found" and "Permission denied".
+- With ACLs disabled, the ACL endpoints answer 401 "ACL support disabled".
+
+**Rules** (`acl/policy.go`, `acl/policy_authorizer.go`, and the rule documentation)
+
+- A rule names a resource, a name or a name prefix, and an access level: `read`,
+  `write`, or `deny`, and `list` for keys. Rules are written in HCL or its JSON
+  form: `{"service_prefix": {"billing-": {"policy": "write"}}, "acl": "read"}`.
+- An exact name wins, and otherwise the longest prefix. Where two rules of a
+  token's policies are equally specific, the merge prefers `deny`, then `write`,
+  then `read` (`takesPrecedenceOver`).
+- Consul Enterprise nests rules under `partition` and `namespace`, each with a
+  `_prefix` form. Qraft's tenant is the partition's counterpart.
+- `node` controls catalog registration of a node, its checks, and which nodes
+  discovery shows. `service` controls service registration, and which services
+  discovery shows. `agent` controls the agent's own utility operations.
+  `operator` covers the Raft configuration. `acl` covers ACLs.
+- The built-in policies are `global-management` and `global-read-only`.
+  Neither's rules can be changed, and neither can be deleted (`ACL.PolicySet`,
+  `ACL.PolicyDelete`).
+- **A policy that tokens link to can be deleted.** The links are dropped when a
+  token is next read (`fixupTokenPolicyLinks`).
+- A role is a named set of policies and identities, and tokens link to it.
+- A node identity gives `write` on that node name and `read` on every service.
+  A service identity gives `write` on that service name and its sidecar proxy,
+  and `read` on every service and every node.
+
+**What each operation needs on a server** (`agent/consul/catalog_endpoint.go`,
+`health_endpoint.go`, `agent/structs/aclfilter/filter.go`)
+
+- **Registering** (`vetRegisterWithACL`): `node:write` only when the registration
+  creates the node or changes what is recorded for it; `service:write` on the
+  service name, and on the name of any instance with the same ID that it replaces;
+  for a check, `service:write` on its service, or `node:write` without one.
+- **Deregistering** (`vetDeregisterWithACL`): **`node:write` on the node is enough
+  for anything on it.** "This accounts for cases where the agent no longer has a
+  token with write permission on the service to deregister it." Without it, a
+  service needs `service:write` on its name, and a check the same on its service.
+- **Reads are filtered, including a read of one named service.** The answer is
+  what the token may see, which may be nothing, with
+  `X-Consul-Results-Filtered-By-ACLs: true` when anything was removed
+  (`setResultsFilteredByACLs`). An instance needs both `node:read` and
+  `service:read` (`CheckServiceNode.CanRead`). The only 403 on these reads is for
+  an unknown token.
+- **Operator:** `operator:read` for the Raft configuration, `operator:write` to
+  remove a peer.
+
+**What each operation needs on an agent** (`agent/agent_endpoint.go`, `agent/acl.go`)
+
+| Consul endpoint | Needs |
+|---|---|
+| `AgentSelf` | `agent:read` on the node name |
+| `AgentMembers` | filtered by `node:read` (`filterMembers`) |
+| `AgentLeave` | `agent:write` on the node name |
+| `AgentToken` | `agent:write` on the node name |
+| `AgentRegisterService` | `service:write` on the name, and on the name of the instance it replaces (`vetServiceRegister`) |
+| `AgentDeregisterService`, `AgentServiceMaintenance` | `service:write` on the existing service; 404 if there is none (`vetServiceUpdate`) |
+| `AgentServices`, `AgentChecks` | filtered by `service:read` and `node:read` |
+| `AgentService` | `service:read`, and 403 without it |
+| `AgentRegisterCheck` | `service:write` on its service, or `node:write` without one, for the new check and the one it replaces (`vetCheckRegister`) |
+| `AgentDeregisterCheck`, `agentCheckUpdate` (pass, warn, fail, update) | the same, on the existing check; 404 if there is none (`vetCheckUpdate`) |
+| `AgentNodeMaintenance` | `node:write` on the node name |
+
+**How an agent decides** (`agent/consul/acl.go`, `acl_client.go`)
+
+- The agent decides itself, from a token and policies it resolved from a server
+  and caches: `ACL.TokenRead` and `ACL.PolicyResolve`, which answers for the
+  policies and roles the presenting token links to.
+- `acl.token_ttl`, `policy_ttl`, and `role_ttl` are 30 s by default
+  (`agent/config/default.go`).
+- `acl.down_policy` says what happens when no server answers:
+  `extend-cache`, the default, keeps using what is cached past its expiry;
+  `async-cache` does too and refreshes in the background; `allow` and `deny` allow
+  or deny everything. With `extend-cache` and nothing cached, the code answers
+  with the default policy (`down = acl.RootAuthorizer(ACLDefaultPolicy)`), where a
+  comment says "this acts like deny".
+- `acl.default_policy` is `allow` by default. With `deny`, anything not allowed is
+  refused. Under either, reading or writing ACLs needs a rule for it: the static
+  allow-all authorizer denies `acl` (`acl/static_authorizer.go`).
+- `acl.enabled` is off by default.
+
+**An agent's own tokens** (`agent/token/store.go`, `agent/local/state.go`,
+`agent/agent.go`)
+
+- `tokens.agent`, which falls back to `tokens.default`, covers the node: its
+  registration and anti-entropy's read. **Every deregistration during a sync uses
+  it:** "Always use the agent token to delete without trying the service token."
+- A service or check registered through the API **keeps the token it was
+  registered with**, written with it to the data directory (`persistedService`),
+  and syncs under it. Without one it uses `config_file_service_registration` for
+  a definition from a file, and then `default`.
+- `tokens.agent_recovery` is recognised by the agent itself, with no server. It
+  gives `agent:write` on its own node name and `read` on every node.
+- A refused sync is not fatal: "Service registration blocked by ACLs" is logged as
+  a warning, the service is marked in sync, and it is tried again at the next full
+  sync.
+- `PUT /v1/agent/token/{kind}` changes a token on a running agent. It is kept
+  across a restart only with `acl.enable_token_persistence`.
+
+**Bootstrap** (`agent/consul/acl_endpoint.go`, `leader.go`)
+
+- `PUT /v1/acl/bootstrap` needs no token and creates the first management token.
+  It works once and then answers 403, naming a reset index. The caller may supply
+  the secret.
+- **A lost bootstrap is reset** by writing that index to `acl-bootstrap-reset` in
+  the leader's data directory. The file is removed when used.
+- `acl.tokens.initial_management` names a secret that a server installs when it
+  gains leadership, if no token has it. It uses the same one-time command, so it
+  also closes the endpoint.
+- The anonymous token is created at leadership too.
+- The leader deletes expired tokens in batches (`acl_token_exp.go`).
+
+**The ACL API** (`agent/http_register.go`, `agent/acl_endpoint.go`)
+
+- Tokens: `PUT /v1/acl/token`, `GET`, `PUT`, and `DELETE /v1/acl/token/{id}`,
+  `GET /v1/acl/token/self`, and `PUT /v1/acl/token/{id}/clone`.
+  `GET /v1/acl/tokens` filters on `policy`, `role`, and `servicename`.
+- Policies: `PUT /v1/acl/policy`, `GET`, `PUT`, and `DELETE /v1/acl/policy/{id}`,
+  `GET /v1/acl/policy/name/{name}`, and `GET /v1/acl/policies`. Roles have the same
+  shape.
+- `POST /v1/internal/acl/authorize` answers up to 64 checks for the token that
+  presents it, and needs no grant.
+
+The client list's decision 8 follows Consul's rule for a name held by another node
+ID (`agent/consul/state/catalog.go`: "Node name %s is reserved by node %s"), checked
+on 2026-10-29.
 
 Sources:
+- [Consul's source](https://github.com/hashicorp/consul/tree/main), at the paths above
 - [ACL tokens](https://developer.hashicorp.com/consul/docs/secure/acl/token)
 - [ACL rules](https://developer.hashicorp.com/consul/docs/secure/acl/rule)
 - [ACL roles, with the identity templates](https://developer.hashicorp.com/consul/docs/secure/acl/role)
@@ -148,376 +245,441 @@ Sources:
   HTTP API binds to `127.0.0.1` by default (`client_addr`), `verify_incoming`
   makes it require a client certificate, and `allow_write_http_from` limits
   write calls to listed networks
-- [Consul `catalog_endpoint.go`](https://github.com/hashicorp/consul/blob/main/agent/consul/catalog_endpoint.go)
-- [Anti-entropy](https://developer.hashicorp.com/consul/docs/architecture/anti-entropy)
-- [Consul `agent/local/state.go`](https://github.com/hashicorp/consul/blob/main/agent/local/state.go)
+- ZooKeeper, read on 2026-11-01 for how it keeps secrets (proposal 3): the
+  [administrator's guide](https://zookeeper.apache.org/doc/current/zookeeperAdmin.html),
+  which says its snapshots and logs are not encrypted and leaves their protection to
+  external measures; the
+  [programmer's guide](https://zookeeper.apache.org/doc/current/zookeeperProgrammers.html)
+  and [`DigestAuthenticationProvider`](https://github.com/apache/zookeeper/blob/master/zookeeper-server/src/main/java/org/apache/zookeeper/server/auth/DigestAuthenticationProvider.java),
+  for its digest scheme; and
+  [its SASL guide](https://cwiki.apache.org/confluence/display/ZOOKEEPER/Client-Server+mutual+authentication),
+  for files readable only by the server's user
 
 ## 4. Proposed decisions
 
-Each is a recommendation. Where Qraft would depart from Consul, the item says
-so and why.
+Each follows Consul unless it says otherwise. The owner asked on 2026-11-01 for the
+list to be aligned with Consul, which reversed the departures this list used to
+propose: no bootstrap endpoint, no `allow` mode, 401 for a bad token, no cache or
+down policy, no default or recovery token, 403 on a named read, and roles left out.
+On how secrets are stored, the owner chose ZooKeeper's approach over Consul's the
+same day (proposal 3). The numbering is kept, because other documents cite it.
 
 ### The model
 
-1. **Follow Consul's model:** tokens, policies, and node and service
-   identities, held in replicated state. Roles are left out of this list;
-   they are a convenience over policies and can be added without changing
-   anything stored.
+1. **Consul's model:** tokens, policies, roles, and node and service identities,
+   held in replicated state.
 2. **A token** has:
-   - an accessor ID, a UUID, which is public and is what logs and the API use;
-   - a secret of 256 random bits from `SecureRandom`;
-   - a description, linked policies, node identities, and service identities;
-   - a creation time and an optional expiry, both stamped by the leader into
-     the command so that every replica stores the same values.
-3. **Secrets are stored only as a SHA-256 hash.** This departs from Consul.
-   - The leader generates the secret, proposes the hash, and returns the
-     secret once in the HTTP response when the command commits.
-   - The WAL, snapshots, and offline backups therefore hold nothing a reader
-     can present.
-   - A fast unsalted hash is enough because the secret is random, not chosen.
-   - The cost: a secret cannot be read back. A lost secret means a new token.
-     No permission reveals another token's secret.
+   - an accessor ID and a secret, each a UUID from `SecureRandom`, generated unless
+     the caller supplies them;
+   - a description, and links to policies, roles, node identities, and service
+     identities;
+   - a creation time and an optional expiry, between one minute and 24 hours ahead,
+     both stamped by the leader into the command so that every replica stores the
+     same values.
+
+   The secret and the expiry cannot change once the token exists. To replace a
+   secret, clone the token (`PUT /v1/acl/token/{id}/clone`), move its users, and
+   delete the old one.
+3. **Decided 2026-11-01: secrets are stored only as a hash, following ZooKeeper
+   rather than Consul.** Consul stores a secret as it is, so a copy of a snapshot holds
+   working tokens. ZooKeeper's digest scheme stores a hash and hashes what a caller
+   presents, so a copied hash is not a login.
+   - The server hashes the secret with SHA-256 before it proposes the command, so
+     replicas, the WAL, snapshots, and backups hold only the hash. A token is looked up
+     by the hash of what a caller presents.
+   - **SHA-256, not ZooKeeper's default of SHA-1, and no slow password hash.** ZooKeeper's
+     passwords are chosen by people. A generated secret has about 122 random bits, too
+     many to guess back from a fast hash. A secret a caller supplies must be a UUID, but
+     has that strength only if it is random, so the documents say to let the server
+     generate it.
+   - **A secret is returned once,** by the create, clone, or bootstrap that made it, or
+     not at all when the caller supplied it. Every later read shows `<hidden>`, whatever
+     the permission, and never shows the hash.
+   - **The cost: no reveal.** A lost secret cannot be read back. Its token is cloned, its
+     users moved to the clone, and the old token deleted (proposal 2).
+   - **What this does not cover.** A file that must hold a secret stays readable only by
+     the user that runs the process, as ZooKeeper says of its JAAS files and keytabs: the
+     management file, the client's token files, `registrations.json`, and persisted tokens.
+     Qraft writes its own files that way, and a deployment does the same for what it
+     mounts. The client's cache stays in memory. Backups still hold everything else, so
+     Phase 9's runbook carries Consul's advice on them.
 4. **Presenting a token.** `X-Qraft-Token` or `Authorization: Bearer`, as the
-   operator token is sent today. Never in a query string. Never logged
-   (`PROJECT_STANDARDS.md` section 6.3); a log line names the accessor ID.
-5. **Anonymous and invalid.**
-   - A request without a token acts as a built-in anonymous token. It has no
-     policies until an operator attaches some, and it cannot be deleted.
-   - An unknown or expired secret is refused with 401 `token_invalid`. A valid
-     token without the permission is refused with 403 `permission_denied`.
-     Consul answers 403 for both; the split tells a client whether to stop
-     and report a bad credential or a missing grant.
+   operator token is sent today. Never logged (`PROJECT_STANDARDS.md` section 6.3);
+   a log line names the accessor ID.
+5. **Anonymous, invalid, and disabled.**
+   - A request without a token uses the client's default token, if any, and
+     otherwise acts as a built-in anonymous token, which can have policies attached
+     and cannot be deleted.
+   - An unknown or expired secret is refused with 403 `token_not_found`. A valid
+     token without the permission is refused with 403 `permission_denied`. The
+     status is Consul's; the two codes carry what its two messages do.
+   - With ACLs disabled, the ACL API answers 401 `acl_disabled`.
 
 ### Rules and scope
 
-6. **Resources in this list:** `node`, `service`, `client`, `operator`, and
-   `acl`. Access is `read`, `write`, or `deny`. A rule matches an exact name
-   or a prefix; an exact name beats a prefix, a longer prefix beats a shorter
-   one, and `deny` beats an allow of equal specificity. `key` and `session`
-   are reserved names, added by the key/value and sessions lists. A policy
+6. **Resources in this list:** `node`, `service`, `client`, `operator`, and `acl`.
+   `client` is Consul's `agent`, under Qraft's name. Access is `read`, `write`, or
+   `deny`. `node`, `service`, and `client` take an exact name or, with `_prefix`, a
+   prefix; `operator` and `acl` are single values, as in Consul. An exact name beats
+   a prefix, and a longer prefix beats a shorter one. Where a token's policies give
+   two equally specific rules, `deny` wins, then `write`, then `read`. `key` and
+   `session` are reserved names, added by the key/value and sessions lists. A policy
    naming an unknown resource is refused when it is stored.
-7. **Scope.** A `service` rule carries a tenant and a namespace, each
-   defaulting to `default`, and `*` matches any. A rule for one tenant grants
-   nothing in another. The scope headers stay, as the caller's choice of
-   scope; authorization checks that choice against the token. `node`,
-   `client`, `operator`, and `acl` rules have no scope, because nodes have
-   none today (section 2). If the tenancy list scopes nodes, their rules gain
-   the same two fields.
-8. **Policies are JSON documents,** like every other Qraft configuration,
-   validated when stored, with unknown fields refused:
+7. **Scope.** Rules are nested under `tenant` and `namespace`, each with a `_prefix`
+   form, as Consul Enterprise nests them under `partition` and `namespace`, and a
+   rule outside them applies to `default`. The empty prefix matches any. A rule for
+   one tenant grants nothing in another. The scope headers stay, as the caller's
+   choice of scope; authorization checks that choice against the token. `node`,
+   `client`, `operator`, and `acl` rules have no scope, because nodes have none
+   today (section 2). If the tenancy list scopes nodes, their rules move inside.
+8. **Policies use the JSON form of Consul's rules,** validated when stored, with
+   unknown fields refused:
 
    ```json
    {
      "name": "billing-services",
-     "rules": [
-       { "resource": "service", "prefix": "billing-", "access": "write",
-         "tenant": "acme", "namespace": "prod" },
-       { "resource": "service", "prefix": "", "access": "read",
-         "tenant": "acme", "namespace": "*" },
-       { "resource": "node", "prefix": "", "access": "read" }
-     ]
+     "description": "Billing's services in acme/prod, and read access across acme",
+     "rules": {
+       "tenant": {
+         "acme": {
+           "namespace": {
+             "prod": { "service_prefix": { "billing-": { "policy": "write" } } }
+           },
+           "namespace_prefix": {
+             "": { "service_prefix": { "": { "policy": "read" } } }
+           }
+         }
+       },
+       "node_prefix": { "": { "policy": "read" } }
+     }
    }
    ```
+
+   The built-in `global-management` and `global-read-only` policies cannot be
+   changed or deleted. A role is a name, a description, and links to policies and
+   identities; a token that links to it holds what it holds.
 9. **Identities, as in Consul:**
-   - a node identity gives `write` on that node name and `read` on every
-     service in the token's scope;
-   - a service identity gives `write` on that service name, and `read` on
-     every service in its scope and on every node. There is no sidecar rule,
-     because Qraft has no mesh.
+   - a node identity gives `write` on that node name and `read` on every service;
+   - a service identity gives `write` on that service name, and `read` on every
+     service and every node. There is no sidecar rule, because Qraft has no mesh.
 
 ### Enforcement
 
-10. **One enforcement point: the server's HTTP adapter.** A successor to
-    `HeaderRequestContext` resolves the token against the answering server's
-    applied state, authorizes, and only then proposes or reads.
-    - **No client-side cache and no down policy.** This departs from Consul. A
-      client that cannot reach a server already answers 503 (client list,
-      Phase 7), so there is nothing for a cached decision to protect.
-    - **The state machine does not check again when it applies a command,** as
-      in Consul. A write is authorized by the leader, which holds the latest
-      ACL state. A follower that is behind may honour a revoked token for a
-      read until it catches up. Record this as a known limit, and revisit it
-      with the consistency modes.
-    - **Lists are filtered; named resources are refused.** A catalog or
-      health list returns only what the token may read, as Consul filters. A
-      request for one named service or node the token may not read gets 403.
-11. **What each operation needs.** The paths are those the client list's
-    decision 5 leaves in place. The node routes have been on them since
-    2026-10-09 (design section 12.1.2).
+10. **Two places decide, as in Consul: a server's HTTP adapter, and a client's local
+    API.**
+    - **On a server,** a successor to `HeaderRequestContext` resolves the token
+      against the answering server's applied state, authorizes, and only then
+      proposes or reads.
+    - **On a client,** the local API decides for itself, with the same authorizer
+      (Phase 2), from a token and policies it resolves from a server and caches. A
+      forwarded read is decided by the server, under the caller's token.
+    - **Resolving.** The client calls `GET /v1/acl/token/self` under the caller's
+      token, and a new `POST /v1/internal/acl/resolve` for the policies and roles
+      that token links to: Consul's `ACL.TokenRead`, `ACL.PolicyResolve`, and
+      `ACL.RoleResolve`, over HTTP because a Qraft client talks to servers that way
+      (client list, decision 2). The route answers only for what the presenting
+      token links to, and needs no grant.
+    - **The cache.** `client.acl.tokenTtlMs`, `policyTtlMs`, and `roleTtlMs`, each
+      30 s by default.
+    - **The down policy.** `client.acl.downPolicy`: `extend-cache` by default, or
+      `async-cache`, `allow`, `deny`, with Consul's meanings, including the default
+      policy where nothing is cached. So an application can go on reporting its TTL
+      check while no server answers, and a client can leave.
+    - **What this costs, as in Consul:** a revoked token keeps working on a client
+      until its cache entry expires, and for as long as no server answers under
+      `extend-cache`.
+    - **The state machine does not check again when it applies a command.** A write
+      is authorized by the leader, which holds the latest ACL state. A follower that
+      is behind may honour a revoked token for a read until it catches up. Proposal
+      17's invariant is not an authorization check, and is the exception.
+    - **Reads are filtered, including a read of one named service or node.** The
+      answer is what the token may see, with `X-Qraft-Results-Filtered-By-ACLs: true`
+      when anything was removed. An instance needs both `node:read` and
+      `service:read`. `GET /v1/client/service/{id}` alone answers 403, as Consul's
+      `AgentService` does.
+11. **What each operation needs.**
+
+    On a server:
 
     | Operation | Needs |
     |---|---|
-    | Register, renew, or deregister a node | `node:write` on the node name, which `X-Qraft-Node` gives. Since 2026-10-09 a node's deregistration also removes the services and checks registered on it; as in Consul, it needs nothing more for them |
-    | Take over a node name (client decision 8) | `node:write` on that name |
-    | Rename a node | `node:write` on the old name and on the new |
-    | Register or deregister a service | `service:write` on the service name in its scope. A request that also creates or changes the node needs `node:write` on it |
-    | Publish a check observation | `service:write` for a service's check; `node:write` for a node's |
-    | Catalog and health reads | `service:read` or `node:read`; lists are filtered |
+    | `/v1/catalog/register`, a node | `node:write` on the name, only when the request creates the node or changes what is recorded for it |
+    | `/v1/catalog/register`, a service | `service:write` on its name in its scope, and on the name of any instance with the same ID that it replaces |
+    | `/v1/catalog/register`, a takeover (client decision 8) | `node:write` on that name |
+    | `/v1/catalog/register`, a rename | `node:write` on the old name and on the new |
+    | `/v1/catalog/node/heartbeat` | `node:write` on the name. Qraft's own: Consul's agents have gossip |
+    | `/v1/catalog/check/observe` | `service:write` on its service |
+    | `/v1/catalog/deregister` | `node:write` on the node for anything on it; otherwise `service:write` on the service's name |
+    | `/v1/catalog/nodes` | filtered by `node:read` |
+    | `/v1/catalog/node-services/{name}` | `node:read`, filtered by `service:read` |
+    | `/v1/catalog/services` | filtered by `service:read` |
+    | `/v1/catalog/service/{name}`, `/v1/health/service/{name}` | filtered by `node:read` and `service:read` |
     | `GET /v1/operator/raft/configuration`, `/raft/status` | `operator:read` |
     | `DELETE /v1/operator/raft/peer` | `operator:write`, checked again by the leader |
-    | The ACL API | `acl:read` or `acl:write` |
+    | `PUT /v1/acl/bootstrap` | no token, and it works once |
+    | `GET /v1/acl/token/self`, `POST /v1/internal/acl/authorize`, `POST /v1/internal/acl/resolve` | any valid token, and each answers only for that token |
+    | The rest of the ACL API | `acl:read` or `acl:write`; no permission reads a secret back (proposal 3) |
     | `POST /v1/acl/explain` (proposal 19) | `acl:read` |
-    | `GET /v1/acl/token/self`, `POST /v1/acl/authorize` | any token: each answers only for the token that presents it |
-    | The client's own endpoints (`/v1/client/self`, `leave`, maintenance) | `client:read` or `client:write` on the node name |
+    | gRPC `DistributedStateService` | `operator:write`, sent as `x-qraft-token` metadata, until the key/value list adds `key` rules |
     | `/health/live`, `/health/ready` | no token, ever: orchestrators call them |
     | The administrative interface's static files | no token; its API calls carry one (UI-5) |
-    | gRPC `DistributedStateService` | `operator:write`, sent as `x-qraft-token` metadata, until the key/value list adds `key` rules |
+
+    On a client's local API:
+
+    | Operation | Needs |
+    |---|---|
+    | `GET /v1/client/self` | `client:read` on the node name |
+    | `GET /v1/client/members` | forwarded; the server filters by `node:read` |
+    | `PUT /v1/client/leave` | `client:write` on the node name |
+    | `PUT /v1/client/token/{kind}` | `client:write` on the node name |
+    | `PUT /v1/client/service/register` | `service:write` on the name, and on the name of the instance it replaces |
+    | `PUT /v1/client/service/deregister/{id}` | `service:write` on the existing service; 404 if there is none |
+    | `GET /v1/client/services`, `GET /v1/client/checks` | filtered by `service:read` |
+    | `GET /v1/client/service/{id}` | `service:read`, and 403 without it |
+    | `PUT /v1/client/check/register` | `service:write` on its service, for the new check and the one it replaces |
+    | `PUT /v1/client/check/deregister/{id}`, `check/pass`, `warn`, `fail`, `update` | `service:write` on the existing check's service; 404 if there is none |
+    | `PUT /v1/client/maintenance` | `node:write` on the node name |
+    | `PUT /v1/client/service/maintenance/{id}` | `service:write` on the existing service; 404 if there is none |
+    | `/v1/catalog/nodes`, `services`, `service/{name}`, `/v1/health/service/{name}` | forwarded under the caller's token; the server filters |
+    | `/health/live`, `/health/ready` | no token, ever |
 
     Not covered: the Raft port, which stays trusted until transport security
     (proposal 14), and the Prometheus port.
 
-    **Decided 2026-10-09: `POST /v1/acl/authorize` answers only for the token
-    that presents it,** as `GET /v1/acl/token/self` does, and needs no grant.
-    - A process in client mode sends the caller's token as the presenting
-      token. A request without one is answered for the anonymous token.
-    - It cannot be used to ask about another token.
-    - The alternative, `acl:read` with the token named in the body, was
-      rejected: every client's own token would need `acl:read`, which also
-      reads every token's metadata.
-
-    The review of 2026-10-08 added the row: proposal 13 introduces the call
-    without saying what it needs.
+    **Decided 2026-10-09, and moved on 2026-11-01 to Consul's path:
+    `POST /v1/internal/acl/authorize` answers only for the token that presents it,**
+    as `GET /v1/acl/token/self` does, and needs no grant. It takes up to 64 checks,
+    and cannot ask about another token. The client no longer uses it, because the
+    client decides for itself (proposal 10). The administrative interface can.
 
     **Decided 2026-10-09: Consul's rule for registering a service.**
-    `node:write` is needed only to create or change a node. A service on a
-    node that is already registered, with the node's details unchanged, needs
-    `service:write` alone (section 3). The row above reads accordingly.
-    - **What it settled.** As first written, the table could not hold with
-      proposals 9 and 13. It asked one token for `service:write` and
-      `node:write`; a service identity gives only `node:read`; and a service
-      registered through the local API is synced under the application's
-      token. An application holding a service identity would have been
-      refused, and Phase 9's first scenario with it. The review of
-      2026-10-08 found this.
-    - **Not a requirement.** No decision required a service registration to
-      be tied to a node. The words "for its own node only" were in section 1
-      of this proposal and nowhere else. The design's section 15 asks that
-      the server not trust a caller's claim to be a node, and creating or
-      changing a node still needs `node:write`. Consul has no such rule.
-    - **What it allows.** A holder of `service:write` on a name can add an
-      instance of that service on any registered node. Section 1 and Phase 7
-      no longer say otherwise.
-    - **A stolen service token** works from anywhere that reaches a server.
-      Consul limits that outside its ACL rules: its HTTP API binds to
-      `127.0.0.1` by default, and when opened to a network it can require a
-      client certificate. Qraft's servers must listen on a network, because
-      clients reach them over the HTTP API (client list, decision 2). So
-      Qraft takes the second: proposal 14's transport security list makes
-      the server's HTTP listener require a client certificate.
-    - **A planted instance** in the client's tenant and namespace goes at the
-      client's next pass: since 2026-10-30 `ServiceReconciler` removes what the
-      catalog holds for its node and its source does not want (client list,
-      Phase 4). In another scope it stays until someone deregisters it. Since
-      2026-10-09 a planted instance also goes when its node is deregistered or
-      reaped: both remove every service on the node.
-    - **The token for those removals: the client's own, as in Consul** (section
-      3). Removing a service needs `service:write` on its name, and proposal 13's
-      client token holds that only for the client's configured services. So with
-      ACLs a planted instance the client's token cannot write stays. The client
-      logs a warning and tries again on its next pass, without stopping the pass
-      or reporting not ready for it. An operator who wants these removed gives
-      the client's token `service:write` on them.
-    - **Rejected: two credentials on a synced service write,** the client's
-      own token for the node and the registration's for the service. It
-      would have tied a registration to a node, at the cost of a second
-      header on every service-scoped write and a departure from Consul.
+    `node:write` is needed only to create or change a node. A service on a node that
+    is already registered, with the node's details unchanged, needs `service:write`
+    alone (section 3).
+    - **Not a requirement.** No decision required a service registration to be tied
+      to a node. The design's section 15 asks that the server not trust a caller's
+      claim to be a node, and creating or changing a node still needs `node:write`.
+    - **What it allows.** A holder of `service:write` on a name can add an instance
+      of that service on any registered node.
+    - **A stolen service token** works from anywhere that reaches a server. Consul
+      limits that outside its ACL rules: its HTTP API binds to `127.0.0.1` by
+      default, and when opened to a network it can require a client certificate.
+      Qraft's servers must listen on a network, because clients reach them over the
+      HTTP API (client list, decision 2). So Qraft takes the second: proposal 14.
+    - **A planted instance** goes at the client's next pass in the client's tenant
+      and namespace, since `ServiceReconciler` removes what the catalog holds for its
+      node and its source does not want (client list, Phase 4). In another scope it
+      stays until someone deregisters it. A planted instance also goes when its node
+      is deregistered or reaped.
+    - **The token for those removals: the client's own, and its `node:write` is
+      enough.** Corrected on 2026-11-01: this list used to say that removal needs
+      `service:write`, so that a planted instance could stay, but Consul's
+      `vetDeregisterWithACL` allows it for this very reason. A client's node identity
+      therefore removes anything on its node. A refusal is logged as a warning, and
+      tried again on the next pass.
+    - **Rejected: two credentials on a synced service write,** the client's own token
+      for the node and the registration's for the service. It would have tied a
+      registration to a node, and departed from Consul.
 
 ### Configuration and bootstrap
 
 12. **`server.acl` in the server configuration.**
-    - `enabled`, defaulting to `false` in this list, so that existing
-      configurations and tests are unchanged until they are given tokens.
-      Proposal 16 makes the production profile refuse `false`, which replaces
-      the question of whether the default becomes `true`.
-    - **When enabled, anything not allowed is refused.** There is no
-      `allow` mode. This departs from Consul, whose `allow` default exists to
-      migrate running clusters; Qraft has none to migrate.
-    - `initialManagementTokenFile`: a file holding the first management
-      secret. A server that gains leadership installs it, as a token with the
-      built-in management policy, if no token with that hash exists.
-    - **There is no bootstrap endpoint.** This departs from Consul. Qraft's
-      HTTP API listens on every interface, so an unauthenticated bootstrap
-      call would go to whoever made it first. The file fits Qraft's rule that
-      secrets are mounted files, and it is also the recovery path: when every
-      management secret is lost, put a new one in the file and restart the
-      leader.
-    - **Decided 2026-10-09: revoking that token.** Every server mounts the
-      same file. To revoke the token, replace the secret in every server's
-      file first, and then delete the old token.
-      - A leader installs the file's secret whenever no token has its hash.
-        So a token deleted first returns at the next leadership change,
-        while any server's file still holds its secret. Servers with
-        different files each install their own.
-      - This is how Consul's `initial_management` token behaves, and it adds
-        no replicated state.
-      - The alternative, recording the hash of a deleted management token so
-        that no file can install it again, was rejected: it departs from
-        Consul and adds a set to the ACL state and its snapshot.
-      - Phase 3 tests the rule, and Phase 9 puts the order in the runbook.
+    - `enabled`, defaulting to `false`, so that existing configurations and tests are
+      unchanged until they are given tokens.
+    - `defaultPolicy`: `allow`, or `deny`, under which anything not allowed is refused.
+      Under either, reading or writing ACLs needs a rule for it, so `allow` does not leave
+      the ACL API open.
+    - **Decided 2026-11-01: `defaultPolicy` has no default.** Consul's is `allow`.
+      - With ACLs enabled and no `defaultPolicy`, the server refuses to start, before any
+        resource opens. An operator chooses it knowingly.
+      - With ACLs disabled it may be left out, so existing configurations do not change.
+      - With ACLs disabled and `defaultPolicy` `deny`, the server starts and logs one critical
+        warning, `ACL_DENY_NOT_ENFORCED`: the configuration asks for `deny`, but ACLs are
+        disabled, so nothing is denied and every call is allowed. It is logged at WARN and
+        marked `CRITICAL` in its message, without an exception, because the server goes on
+        running as configured.
+    - `PUT /v1/acl/bootstrap` creates the first management token, with the
+      `global-management` policy. It takes an optional secret, returns the token, and
+      afterwards answers 403 `permission_denied`, naming a reset index.
+    - `initialManagementTokenFile`: a file holding the first management secret, a
+      UUID. A server that gains leadership installs it if no token has that secret,
+      through the same one-time command, so it closes the endpoint. Consul also takes
+      the secret inline; Qraft's rule is that secrets are mounted files.
+    - **Recovery when every management secret is lost,** either of Consul's two ways:
+      write the reset index to `acl-bootstrap-reset` in the leader's data directory
+      and bootstrap again, or put a new secret in the file and change leadership.
+    - **A risk of following Consul here.** Consul's API binds to `127.0.0.1` by
+      default, and Qraft's server listens on the network, so an open cluster's
+      bootstrap goes to whoever calls first. A deployment closes that by using the
+      file: the bootstrap is taken before a server serves requests that matter.
+    - **Decided 2026-10-09: revoking that token.** Every server mounts the same file.
+      A leader installs the file's secret whenever no token has it, so a token deleted
+      first returns at the next leadership change, while any server's file still holds
+      its secret. Servers with different files each install their own. This is how
+      Consul's `initial_management` token behaves, and it adds no replicated state.
+    - **Decided 2026-10-27, with proposal 17: the order.** While the old management
+      token is the only token that holds `acl:write` without an expiry, the lock-out
+      guard refuses its deletion. So: replace the secret in every server's file; change
+      leadership, by restarting the leader, so that the new secret is installed; check
+      that the new management token exists; then delete the old one. Phase 3 tests the
+      rule, and Phase 9 puts the order in the runbook.
+    - **Decided 2026-10-27: a token installed from the file is marked so.** A token
+      read shows `installedFromFile: true`. The API, the command line, and the
+      administrative interface use it to warn, before a deletion, that the token returns
+      at the next leadership change while any server's file still holds its secret.
+    - With ACLs enabled, `server.operator.token` is refused as a conflicting setting,
+      and `operator:write` replaces it. With ACLs disabled it guards removal as it does
+      today.
+13. **`client.acl` in the client configuration.**
+    - `enabled`, `defaultPolicy`, `downPolicy`, and the cache settings of proposal 10,
+      as Consul's agents have them. The default policy must match the servers'. A client
+      applies proposal 12's rules for it: refused with ACLs enabled and no `defaultPolicy`,
+      and the critical warning with ACLs disabled and `deny`.
+    - Its tokens, each a mounted file:
 
-    **Decided 2026-10-27, with proposal 17: the order gains a step.** While
-    the old management token is the only token that holds `acl:write` without
-    an expiry, the lock-out guard refuses its deletion. So the order is:
-    replace the secret in every server's file; change leadership, by
-    restarting the leader, so that the new secret is installed; check that
-    the new management token exists; then delete the old one.
+      | Setting, under `client.acl.tokens` | Consul's | Used for | Falls back to |
+      |---|---|---|---|
+      | `clientFile` | `agent` | Registering and renewing the node, anti-entropy's read, and every removal during a pass | `defaultFile` |
+      | `configFileRegistrationFile` | `config_file_service_registration` | Services and checks from the configuration file | `defaultFile` |
+      | `defaultFile` | `default` | A request with no token, and a sync with no other token | the anonymous token |
+      | `recoveryFile` | `agent_recovery` | The client's own endpoints with no server: `client:write` on its node name and `read` on every node | none |
 
-    **Decided 2026-10-27: a token installed from the file is marked so.** A
-    token read shows `installedFromFile: true` for it. The API, the command
-    line, and the administrative interface use the marker to warn, before a
-    deletion, that the token returns at the next leadership change while any
-    server's file still holds its secret.
-    - With ACLs enabled, `server.operator.token` is refused as a conflicting
-      setting, and `operator:write` replaces it. With ACLs disabled it guards
-      removal as it does today.
-13. **The client.**
-    - `client.acl.tokenFile` holds the client's own token. The client uses it to
-      register and renew its node, and to register the services and checks of
-      its configuration file. Consul splits these into two tokens; one is
-      enough here. A node identity for the client's node name, plus service
-      identities for its configured services, is the intended grant.
-    - A request to the local API is forwarded under the caller's own token,
-      unchanged. Without one it is forwarded as anonymous. There is no
-      default token: this departs from Consul, and means a process on the
-      host gets no rights merely by being on the host.
-    - A service registered through the local API keeps the token it was
-      registered with, as in Consul. The client stores it with the
-      registration in `client.dataDirectory`, in a file only its own user can
-      read, and syncs that service and its checks under it.
-    - The client's own endpoints are authorized by asking a server, through a
-      new `POST /v1/acl/authorize`. With no server reachable they answer 503.
-      There is no recovery token.
-    - A 401 or 403 from a server is a rejected outcome, not a retryable one:
-      the client reports not ready and logs it once.
-14. **Tokens cross the network unencrypted until TLS exists.** Consul allows
-    the same and recommends TLS. Propose a transport security list to follow
-    this one directly: HTTPS on the server listener and the client's calls,
-    and mutual TLS on the Raft port, which is how Consul protects server
-    traffic. Until then, a server with ACLs enabled on a listener without TLS
-    logs one startup warning, as the administrative interface does for being
+      A node identity for the client's node name is the intended grant for `clientFile`,
+      and service identities for its configured services for
+      `configFileRegistrationFile`. A service in the file may name its own `tokenFile`.
+    - A request to the local API is decided and forwarded under the caller's own token.
+      Without one it uses the default token, and without that it is anonymous. A
+      deployment that gives a default token gives its rights to every process on the
+      host; with none, a process gets no rights merely by being on the host.
+    - A service or check registered through the local API keeps the token it was
+      registered with. The client stores it with the registration in `registrations.json`,
+      in a file only its own user can read, and syncs that service and its checks under it.
+    - `PUT /v1/client/token/{default|client|configFileRegistration|recovery}` changes a
+      token while the client runs, kept across a restart only with
+      `client.acl.enableTokenPersistence`. The client has no configuration reload, so this
+      is how a client's token is replaced without a restart.
+    - **A refused sync is a warning.** A 403 on a service, check, or removal is logged as a
+      warning, marked as synced, and tried again at the next full pass. Readiness follows
+      from the conditions it already has: a client whose node is refused is not registered,
+      and so not ready.
+14. **Tokens cross the network unencrypted until TLS exists.** Consul allows the same and
+    recommends TLS. Propose a transport security list to follow this one directly: HTTPS on
+    the server listener and the client's calls, and mutual TLS on the Raft port, which is
+    how Consul protects server traffic. Until then, a server with ACLs enabled on a listener
+    without TLS logs one startup warning, as the administrative interface does for being
     unauthenticated.
 
-    **Decided 2026-10-09: that list makes the server's HTTP listener require
-    a client certificate.** HTTPS alone hides a token on the wire. A required
-    certificate also stops a stolen token being used from a machine that has
-    none, which is the protection proposal 11 leaves to this list. Clients,
-    operators' tools, and the administrative interface's users each need a
-    certificate then; that list says how they get one.
+    **Decided 2026-10-09: that list makes the server's HTTP listener require a client
+    certificate.** HTTPS alone hides a token on the wire. A required certificate also stops
+    a stolen token being used from a machine that has none, which is the protection proposal
+    11 leaves to this list. In Consul it is optional, through `verify_incoming`; that list
+    says how clients, operators' tools, and the interface's users get a certificate.
 
 ### Order
 
-15. **This list follows the client list.**
-    - The routes it protects become final only with the single-POM list's
-      Phase 4 and the client list's Phase 1. Built earlier, enforcement would
-      be written twice.
-    - The local API, whose requests it must forward under the caller's token,
-      does not exist before the client list.
-    - The alternative is to build Phases 1 to 3 below, which touch no route,
-      before the client list. That brings the replicated model forward but
-      delivers no protection sooner.
-    - The feature validation's recommended order puts security last, after
-      key/value, sessions, and tenancy. This list takes only the token and ACL
-      core out of that item. The `key` and `session` rules, replicated
-      tenants, and audit events stay with their own lists.
+15. **This list follows the client list,** which finished on 2026-11-01.
+    - The local API, whose requests it must decide and forward, did not exist before it.
+    - The feature validation's recommended order puts security last, after key/value,
+      sessions, and tenancy. This list takes only the token and ACL core out of that item.
+      The `key` and `session` rules, replicated tenants, and audit events stay with their
+      own lists.
 
 ### Integrity and the administrative interface
 
-Proposals 16 to 19 came from reviewing the administrative interface's design
-against this list on 2026-10-27. The owner decided each of them that day.
+Proposals 16 to 19 came from reviewing the administrative interface's design against this
+list on 2026-10-27, and the owner decided each of them that day. None of them was in Consul.
+On 2026-11-01, against the alignment, the owner kept proposals 16, 17 and 19, which remain
+differences from Consul, and changed proposal 18 to Consul's behaviour.
 
-16. **A security profile: `server.security.profile`, `production` or
-    `development`.**
-    - **Production refuses to run without ACLs.** A configuration with
-      `production` and `server.acl.enabled` `false` is refused before any
-      resource opens. The only superuser is the management token, from
-      `initialManagementTokenFile` (proposal 12).
-    - **Development may run without ACLs.** With ACLs disabled, every call
-      is allowed, as today, and the server logs one startup warning naming
-      the profile and saying that there is no access control. With ACLs
-      enabled, development behaves exactly as production. That is how a
-      development cluster tests ACL behaviour.
-    - **The management token is the superuser in both profiles.** There is
-      no second superuser mechanism. Development's only relaxation is that
-      ACLs may be off.
-    - **The profile is public.** The administrative interface's bootstrap
-      data carries the profile and the authentication mode, `none` or
-      `token` (design section 12.4.1), so the interface can show both. Neither
-      is a secret.
-    - **Client mode has no profile.** A client follows what the servers
-      enforce.
-    - **This departs from Consul,** which has no profile: its ACLs are off by
-      default, and running a production cluster with them on is a deployment
-      practice. Qraft makes it a startup check, so a production server cannot
-      run open by mistake.
-    - **Recommended, to confirm: the default is `production`.** A server that
-      names no profile is then secure, and every development and test
-      configuration says `development`: the `docker/config` files, the test
-      fixtures, and the examples. Phase 3 changes them.
+16. **A security profile: `server.security.profile`, `production` or `development`.**
+    - **Production refuses to run open.** A configuration with `production`, and with
+      `server.acl.enabled` `false` or `defaultPolicy` `allow`, is refused before any resource
+      opens.
+    - **Development may run without ACLs.** With ACLs disabled, every call is allowed, as
+      today, and the server logs one startup warning naming the profile and saying that there
+      is no access control. With `defaultPolicy` `deny`, proposal 12's critical warning takes
+      its place. With ACLs enabled, development behaves exactly as production, apart
+      from allowing `defaultPolicy` `allow`.
+    - **The management token is the superuser in both profiles.**
+    - **The profile is public.** The administrative interface's bootstrap data carries the
+      profile and the authentication mode, `none` or `token` (design section 12.4.1).
+    - **Client mode has no profile.** A client follows what the servers enforce.
+    - **The default is `development`,** changed on 2026-11-01 from a recommendation of
+      `production`: Consul's ACLs are off by default, and no existing configuration then has
+      to change. A production deployment says `production`.
 17. **The server refuses a lock-out.**
-    - A command after which no token would hold `acl:write` without an
-      expiry is refused with 409 `acl_lockout`. That covers deleting a token,
-      changing its policies or its expiry, changing a policy's rules, and
-      deleting a policy (proposal 18).
-    - A token with an expiry does not count, because it will lapse. Removing
-      `acl:write` from the caller's own token is allowed while another token
-      still holds it; the administrative interface warns about it.
-    - **The state machine applies the check,** when it applies the command,
-      not only the leader when it proposes. Every replica reaches the same
-      outcome, and two commands in flight cannot together remove the last
-      holder. This is a state invariant, not an authorization decision, so
-      it does not contradict proposal 10.
-    - The leader's deletion of expired tokens (Phase 8) is unaffected,
-      because an expiring token never counts.
-    - Recovery stays as in proposal 12: a new secret in the file and a
-      leader restart.
-18. **A policy that a token links to cannot be deleted.**
-    - `DELETE /v1/acl/policy/{name}` answers 409 `policy_in_use`, naming the
-      accessor IDs of the tokens that link to it. They are unlinked first. No
-      token loses permissions without its own change.
-    - `GET /v1/acl/tokens?policy={name}` lists the tokens that link to a
-      policy, for this message and for the interface's policy page.
-    - The built-in management policy cannot be deleted at all (Phase 1).
-    - This settles Phase 1's open item.
-19. **The server explains a decision: `POST /v1/acl/explain`,** needing
-    `acl:read`.
-    - It takes an accessor ID, a resource, a name, an access level, and for
-      `service` a tenant and namespace. It answers allow or deny and what
-      decided it: the policy and the rule, the identity, or that nothing
-      matched and anything not allowed is refused.
-    - Phase 2's function returns the deciding rule with the decision, and
-      both enforcement and this endpoint use it, so an explanation cannot
-      differ from what the server enforces. The administrative interface
-      uses this endpoint and never evaluates rules itself.
-    - It reads the answering server's applied state, like every other read;
-      proposal 10's limit applies.
-    - It is separate from `POST /v1/acl/authorize`, which answers only for
-      the presenting token and needs no grant (proposal 11).
-    - The reverse question, which tokens may do something, is out of scope
-      (section 7).
+    - A command after which no token would hold `acl:write` without an expiry is refused with
+      409 `acl_lockout`. That covers deleting a token, changing its policies or roles, changing
+      a policy's or role's rules, and deleting a policy or role.
+    - A token with an expiry does not count, because it will lapse. Removing `acl:write` from
+      the caller's own token is allowed while another token still holds it; the administrative
+      interface warns about it.
+    - **The state machine applies the check,** when it applies the command, not only the leader
+      when it proposes. Every replica reaches the same outcome, and two commands in flight
+      cannot together remove the last holder.
+    - The leader's deletion of expired tokens (Phase 8) is unaffected, because an expiring token
+      never counts.
+    - Consul has no such guard, and recovers through the bootstrap reset instead. Recovery here
+      stays as in proposal 12.
+18. **A policy or role that tokens link to can be deleted, as in Consul.** Decided
+    2026-11-01, replacing the decision of 2026-10-27 that such a deletion is refused.
+    - The deletion succeeds, and the links are dropped when each token or role is next read
+      (`fixupTokenPolicyLinks`, `fixupTokenRoleLinks`, `fixupRolePolicyLinks`).
+    - **The cost:** tokens lose what it granted with no change of their own: on a server at
+      once, and on a client when its cache entry expires (proposal 10).
+    - **Proposal 17 still applies.** A deletion that would leave no token holding `acl:write`
+      without an expiry is refused with 409 `acl_lockout`.
+    - `GET /v1/acl/tokens?policy={id}` lists the tokens that link to a policy, as in Consul, so
+      that an operator can see who is affected first, and for the interface's policy page.
+19. **The server explains a decision: `POST /v1/acl/explain`,** needing `acl:read`.
+    - It takes an accessor ID, a resource, a name, an access level, and for `service` a tenant
+      and namespace. It answers allow or deny and what decided it: the policy and the rule, the
+      identity, or that nothing matched and the default policy decided.
+    - Phase 2's function returns the deciding rule with the decision, and both enforcement and
+      this endpoint use it, so an explanation cannot differ from what the server enforces. The
+      administrative interface uses this endpoint and never evaluates rules itself.
+    - It reads the answering server's applied state, like every other read.
+    - It is separate from `POST /v1/internal/acl/authorize`, which answers only for the presenting
+      token and needs no grant.
+    - The reverse question, which tokens may do something, is out of scope (section 7).
+
+### Where this list still differs from Consul
+
+| Point | Consul | This list | Why |
+|---|---|---|---|
+| Default policy (proposal 12) | `allow` unless set | No default: ACLs enabled without one are refused at startup, and `deny` with ACLs disabled logs a critical warning | The owner's decision of 2026-11-01 |
+| Token secrets (proposal 3) | Stored as they are; `acl:write` reads them | A SHA-256 hash; no permission reads them | The owner's decision of 2026-11-01, following ZooKeeper |
+| Proposals 16, 17 and 19 | None of them | Kept | The owner's decisions of 2026-10-27, confirmed on 2026-11-01 |
+| Client certificate on the server's listener (proposal 14) | Optional | Required, in the following list | The owner's decision of 2026-10-09 |
+| `server.operator.token` with ACLs disabled | No such token | Stays until Phase 9's decision | With ACLs off, Consul has no guard on removing a server; this one is the membership list's decision 6 |
+| Token in the query string | `?token=` also read | Headers only | A query string reaches logs, and every Qraft route refuses a parameter it does not know |
+| Rule syntax | HCL or JSON | JSON, in Consul's form | HCL needs a parser Qraft does not have, and JSON is one of Consul's two forms |
+| Secrets in configuration | Inline or in a file | A mounted file | Qraft's rule for secrets |
+| Name of the resource and tokens | `agent` | `client` | Qraft has only server mode and client mode |
+| `/raft/status` | Consul's `/v1/status/*` have no check | `operator:read` | It shows more than a leader and peers |
+| `node/heartbeat`, gRPC, `/health/*` | No counterpart | As in proposal 11 | Qraft's own routes |
 
 ## 5. Rules
 
-- Red before green. (The rule that safety guards need recorded mutations was removed by the owner on 2026-10-11, from every task list. It stood here for every
-  authorization guard.)
-- Deterministic tests, with injected clocks for expiry. No Mockito.
-- HTTP behaviour is tested against real JDK HTTP servers, on both sides for
-  the client.
-- Every ACL command has a replica-determinism test. Fixtures prove that a WAL
-  and a snapshot written before ACLs still load.
-- A test searches the captured log of each ACL scenario for the secrets it
-  used, and fails if it finds one.
-- A denial is not an error. It is logged at a level below ERROR and without
-  an exception, so it needs no entry in `IntentionalErrorFixture`.
-- A run is accepted only after its retained Maven, application, subprocess,
-  and Docker logs have been read and hold no unflagged error (`AGENTS.md`, and
-  `docs/TESTING.md`, "Intentional error flags and log auditing"). Added
-  2026-10-08.
+- Red before green. (The rule that safety guards need recorded mutations was removed by the
+  owner on 2026-10-11, from every task list. It stood here for every authorization guard.)
+- Deterministic tests, with injected clocks for expiry and for the client's cache. No Mockito.
+- HTTP behaviour is tested against real JDK HTTP servers, on both sides for the client.
+- Every ACL command has a replica-determinism test. Fixtures prove that a WAL and a snapshot
+  written before ACLs still load.
+- A test searches the captured log of each ACL scenario for the secrets it used, and fails if
+  it finds one. A secret passes through the server on its way to being hashed, so nothing may log
+  a request's body.
+- A denial is not an error. It is logged at a level below ERROR and without an exception, so it
+  needs no entry in `IntentionalErrorFixture`.
+- A run is accepted only after its retained Maven, application, subprocess, and Docker logs have
+  been read and hold no unflagged error (`AGENTS.md`, and `docs/TESTING.md`, "Intentional error
+  flags and log auditing"). Added 2026-10-08.
 - The design document changes in the same phase as the behaviour.
-- Each phase ends with `mvn install`. Phases that change the runtime also run
-  the end-to-end suite and the Docker suite on a fresh image.
-- A phase without its own exit line exits on these rules, with each of its
-  endpoints and commands tested over real HTTP. Added 2026-10-08, for
-  Phases 5 and 8.
+- Each phase ends with `mvn install`. Phases that change the runtime also run the end-to-end
+  suite and the Docker suite on a fresh image.
+- A phase without its own exit line exits on these rules, with each of its endpoints and commands
+  tested over real HTTP. Added 2026-10-08, for Phases 5 and 8.
 - The owner commits. The main verification runs on Jenkins
   ([`docs/JENKINS.md`](../docs/JENKINS.md)).
 
@@ -525,160 +687,163 @@ against this list on 2026-10-27. The owner decided each of them that day.
 
 ### Phase 1. Replicated ACL state
 
-- [ ] Add the token and policy values, with the validation of proposals 6
-  to 9.
-- [ ] Add the commands: create, update, and delete a token; create, update,
-  and delete a policy; install the management token. Add their protobuf
+- [ ] Add the token, policy, and role values, with the validation of proposals 2 and 6 to 9.
+- [ ] Add the commands: create, update, and delete a token, a policy, and a role; bootstrap, used
+  by the endpoint and the management file alike; and delete expired tokens. Add their protobuf
   messages with new field numbers, and their place in the snapshot.
-- [ ] Store the secret's hash only (proposal 3). No command, WAL entry, or
-  snapshot carries a secret.
-- [ ] Build in the management policy and the anonymous token. Neither can be
-  deleted.
-- [ ] Refuse the deletion of a policy that a token still links to, with
-  409 `policy_in_use` (proposal 18, decided 2026-10-27).
-- [ ] Apply the lock-out guard in the state machine (proposal 17). Include a
-  determinism test of two commands in flight that would together remove the
-  last token holding `acl:write` without an expiry.
-- [ ] Record `installedFromFile` on the token the management file installs
-  (proposal 12).
+- [ ] Hold a secret only as its SHA-256 hash, taken before the command is proposed, and look a token up by
+  that hash (proposal 3). A test on real storage searches the WAL and a snapshot for the secret, and fails if
+  it finds it.
+- [ ] Refuse a change to a token's secret or expiry.
+- [ ] Build in the `global-management` and `global-read-only` policies and the anonymous token.
+  None of them can be deleted, and the policies' rules cannot change.
+- [ ] Allow the deletion of a policy or role that a token links to, and drop the links when the token or role is
+  next read (proposal 18). A test proves that the deleted policy no longer grants anything, and that a deletion
+  the lock-out guard refuses leaves the links in place.
+- [ ] Apply the lock-out guard in the state machine (proposal 17). Include a determinism test of two
+  commands in flight that would together remove the last token holding `acl:write` without an expiry.
+- [ ] Record `installedFromFile` on the token the management file installs (proposal 12).
 
-**Exit:** Codec, determinism, and legacy-fixture tests. A test shows that the
-store holds the secret's hash and not the secret.
+**Exit:** Codec, determinism, and legacy-fixture tests.
 
 ### Phase 2. The authorizer
 
-- [ ] One pure function from a token's rules, a resource, a name, a scope,
-  and an access level to allow or deny, together with the rule or identity
-  that decided it (proposal 19).
-- [ ] Table-driven tests of exact against prefix, longer against shorter
-  prefix, `deny` against allow, the scope match and its wildcard, and both
-  identity templates.
+- [ ] Parse Consul's JSON rule form, with the `tenant` and `namespace` nesting of proposal 7, refusing
+  an unknown resource or field.
+- [ ] One pure function from a token's rules, a resource, a name, a scope, and an access level to allow
+  or deny, together with the rule or identity that decided it (proposal 19). The server and the client
+  both use it.
+- [ ] The default policy, and that neither `allow` nor `deny` grants `acl` without a rule for it.
+- [ ] Table-driven tests of exact against prefix, longer against shorter prefix, the merge of equally
+  specific rules, the scope match and the empty prefix, both identities, and a role.
 
-**Exit:** A test, red before green, for each precedence rule and for the scope
-check.
+**Exit:** A test, red before green, for each precedence rule and for the scope check.
 
-### Phase 3. Configuration and the management token
+### Phase 3. Configuration and the first token
 
-- [ ] Add `server.acl.enabled` and `server.acl.initialManagementTokenFile`,
-  validated before any resource opens. Refuse an unreadable or too-short
-  file, and `server.operator.token` together with enabled ACLs.
-- [ ] The leader installs the management token when it gains leadership and
-  none with that hash exists. Installing twice changes nothing.
+- [ ] Add `server.acl.enabled`, `defaultPolicy`, and `initialManagementTokenFile`, validated before any
+  resource opens. Refuse an unreadable file, a secret that is not a UUID, enabled ACLs with no
+  `defaultPolicy`, and `server.operator.token` together with enabled ACLs.
+- [ ] `PUT /v1/acl/bootstrap`: once only, then 403 with the reset index. The reset through
+  `acl-bootstrap-reset` in the leader's data directory, removing the file when used.
+- [ ] The leader installs the management token when it gains leadership and none has that secret, through
+  the bootstrap command, and creates the anonymous token. Doing it twice changes nothing.
 - [ ] Log the effective settings without the secret.
-- [ ] Add `server.security.profile` (proposal 16). Refuse `production` with
-  ACLs disabled, before any resource opens. Log the one startup warning for
-  `development` with ACLs disabled. Set `development` in every development
-  and test configuration if the default is `production`.
-- [ ] Test how the management token is revoked (proposal 12, decided
-  2026-10-09): a deleted token is installed again while a server's file
-  still holds its secret, and is not once every file holds a new one.
-  While the old token is the only holder of `acl:write` without an expiry,
-  its deletion is refused with `acl_lockout` (proposals 12 and 17).
+- [ ] Add `server.security.profile` (proposal 16), `development` by default. Refuse `production` with ACLs
+  disabled or `defaultPolicy` `allow`, before any resource opens. Log the one startup warning for
+  `development` with ACLs disabled, or in its place, with `defaultPolicy` `deny`, the critical warning
+  `ACL_DENY_NOT_ENFORCED` (proposal 12). A test asserts which one is logged for each combination.
+- [ ] Test how the management token is revoked (proposal 12): a deleted token is installed again while a
+  server's file still holds its secret, and is not once every file holds a new one. While the old token is
+  the only holder of `acl:write` without an expiry, its deletion is refused with `acl_lockout`.
 
-**Exit:** Lifecycle tests on real storage: a restarted cluster keeps its
-tokens, and a new secret in the file is installed at the next leadership.
+**Exit:** Lifecycle tests on real storage: a restarted cluster keeps its tokens, a new secret in the file is
+installed at the next leadership, and a bootstrap reset works once.
 
 ### Phase 4. Enforcement on the server
 
-- [ ] Replace `HeaderRequestContext` with a context that resolves the token
-  and carries the principal. Keep the scope headers as the caller's choice.
-- [ ] Authorize every endpoint as proposal 11 sets out. Filter lists.
-- [ ] Answer 401 `token_invalid` and 403 `permission_denied` in the standard
-  error envelope, with the request ID and never the secret.
-- [ ] Move the operator endpoints from the operator token to `operator`
-  rules. A forwarded removal carries the caller's token, and the leader
-  authorizes it again.
+- [ ] Replace `HeaderRequestContext` with a context that resolves the token and carries the principal. Keep
+  the scope headers as the caller's choice.
+- [ ] Authorize every route as proposal 11's server table sets out. Filter reads, and send
+  `X-Qraft-Results-Filtered-By-ACLs`.
+- [ ] Answer 403 `token_not_found` and 403 `permission_denied` in the standard error envelope, with the
+  request ID and never the secret.
+- [ ] Move the operator endpoints from the operator token to `operator` rules. A forwarded removal carries the
+  caller's token, and the leader authorizes it again.
 - [ ] Require a token on the gRPC `DistributedStateService`.
 - [ ] Leave `/health/live` and `/health/ready` open, and prove it.
 
-**Exit:** One test per row of proposal 11's table, each red before green.
-With ACLs disabled, every existing test passes unchanged.
+**Exit:** One test per row of the server table, each red before green. With ACLs disabled, every existing test
+passes unchanged.
 
 ### Phase 5. The ACL API and commands
 
-- [ ] `PUT /v1/acl/token`, `GET /v1/acl/tokens`, `GET`, `PUT`, and
-  `DELETE /v1/acl/token/{accessorId}`, and `GET /v1/acl/token/self`.
-- [ ] `PUT /v1/acl/policy`, `GET /v1/acl/policies`, and `GET`, `PUT`, and
-  `DELETE /v1/acl/policy/{name}`.
-- [ ] `POST /v1/acl/authorize`, for the client's own endpoints.
-- [ ] `GET /v1/acl/tokens?policy={name}` and `POST /v1/acl/explain`
-  (proposals 18 and 19), and `qraft acl explain`.
-- [ ] Answer 409 `acl_lockout` and 409 `policy_in_use` in the standard error
-  envelope, with the names that explain them.
-- [ ] `qraft acl token create|list|read|delete` and
-  `qraft acl policy create|list|read|delete`, taking the caller's token from
-  `--token-file` as `RaftOperatorCommand` does.
-- [ ] A created token's secret appears once, in the creating response.
+- [ ] `PUT /v1/acl/token`, `GET /v1/acl/tokens` with `policy`, `role`, and `servicename`, `GET`, `PUT`, and
+  `DELETE /v1/acl/token/{accessorId}`, `PUT /v1/acl/token/{accessorId}/clone`, and `GET /v1/acl/token/self`.
+  A request cannot delete the token it was made with.
+- [ ] `PUT /v1/acl/policy`, `GET /v1/acl/policies`, `GET`, `PUT`, and `DELETE /v1/acl/policy/{id}`, and
+  `GET /v1/acl/policy/name/{name}`. The same for roles.
+- [ ] Return a secret only in the response that made it: create, clone, or bootstrap. Every later read shows `<hidden>`,
+  under any permission, and never the hash (proposal 3).
+- [ ] `POST /v1/internal/acl/authorize`, and `POST /v1/internal/acl/resolve` for the client.
+- [ ] `POST /v1/acl/explain` (proposal 19), and `qraft acl explain`.
+- [ ] Answer 401 `acl_disabled` and 409 `acl_lockout` in the standard error envelope, with the names that explain
+  them.
+- [ ] `qraft acl bootstrap`, and `qraft acl token|policy|role create|list|read|delete`, taking the caller's token
+  from `--token-file` as `RaftOperatorCommand` does.
 
 ### Phase 6. The client
 
-- [ ] Add `client.acl.tokenFile`, validated at startup. Send the token on
-  every call the client makes for itself.
-- [ ] Treat 401 and 403 as rejected outcomes: not ready, logged once, no
-  retry storm.
-- [ ] Forward local API requests under the caller's token.
-- [ ] Keep each API registration's token with it in the data directory, and
-  sync that service under it.
-- [ ] Authorize the client's own endpoints through the server.
-- [ ] Remove a service the client does not know under the client's own token. A
-  denial is a warning, not a rejected outcome: it does not make the client not
-  ready (proposal 11).
+- [ ] Add `client.acl`, with its settings and tokens (proposal 13), validated at startup: refuse enabled ACLs with no
+  `defaultPolicy`, and log `ACL_DENY_NOT_ENFORCED` with ACLs disabled and `deny`.
+- [ ] Send the client's own token, with its fallback, on every call it makes for its node, including anti-entropy's
+  read and every removal during a pass.
+- [ ] Resolve and cache tokens, policies, and roles, with the TTLs and the four down policies (proposal 10), on an
+  injected clock.
+- [ ] Authorize every route of proposal 11's client table on the client, with the 404 for what does not exist after
+  the authorization, as Consul's order is.
+- [ ] Forward discovery reads and `members` under the caller's token, then the default token. A token holding a
+  control character is refused, as a scope header is (client list, Phase 7).
+- [ ] Keep each API registration's token with it in `registrations.json`, readable only by the client's user, and
+  sync that service and its checks under it, falling back as proposal 13 sets out.
+- [ ] Treat a refused sync as a warning, marked synced until the next full pass.
+- [ ] Recognise the recovery token on the client, with no server.
+- [ ] `PUT /v1/client/token/{kind}` and `client.acl.enableTokenPersistence`, with persisted tokens readable only by the
+  client's user (proposal 3).
 
-**Exit:** `ClientServerContractTest` covers every client call with a
-sufficient token, an insufficient one, and none.
+**Exit:** One test per row of the client table, each red before green. `ClientServerContractTest` covers every call
+from the client to a server with a sufficient token, an insufficient one, and none. A test of each down policy with
+no server reachable: a TTL check's report under a cached token, a leave under the recovery token.
 
 ### Phase 7. Node identity is enforced
 
 - [ ] A token for node A cannot register, renew, take over, or rename node B.
-- [ ] A token with `service:write` and no `node:write` cannot create a node
-  or change one, and can register its service on a node that is already
-  registered (proposal 11, decided 2026-10-09).
-- [ ] A takeover and a rename succeed with the right token, under the rules of
-  the client list's decision 8.
+- [ ] A token with `service:write` and no `node:write` cannot create a node or change one, and can register its
+  service on a node that is already registered (proposal 11).
+- [ ] A client's node identity removes a planted instance on its node, and a token with neither `node:write` nor
+  `service:write` on it cannot.
+- [ ] A takeover and a rename succeed with the right token, under the rules of the client list's decision 8.
 
-**Exit:** A test, red before green, for each of these guards. This phase closes the
-"can the server trust the claim" half of design section 22.
+**Exit:** A test, red before green, for each of these guards. This phase closes the "can the server trust the claim"
+half of design section 22.
 
 ### Phase 8. Expiry and revocation
 
-- [ ] A server refuses an expired token, by its own clock.
-- [ ] The leader deletes expired tokens with a replicated command, on the
-  pattern of `LeaderHealthExpiry`.
-- [ ] A client whose token is deleted becomes not ready and says why.
+- [ ] A server refuses an expired token, by its own clock, as `token_not_found`.
+- [ ] Refuse an expiry less than one minute or more than 24 hours ahead.
+- [ ] The leader deletes expired tokens in batches with a replicated command, on the pattern of `LeaderHealthExpiry`.
+- [ ] A revoked token stops working on a client when its cache entry expires, and not before; a test records the bound.
+- [ ] A client whose own token is deleted logs why, and becomes not ready when it is refused.
 
 ### Phase 9. Verification and documentation
 
-- [ ] End-to-end: an application registers through its client under a service
-  identity, is discovered by a reader with `service:read`, and is invisible
-  to one without it.
-- [ ] End-to-end: a second host with another node's name and its own token
-  is refused.
-- [ ] Docker: three servers with ACLs enabled, and clients holding node
-  identity tokens. Revoke one client's token and observe it.
-- [ ] Update the design's sections 7.3, 12, 15, 16 and 22, the feature
-  validation, and the Consul plan's phase 7 checklist.
-- [ ] Add to `RAFT_STORAGE_OPERATIONS.md`: backups hold token hashes, not
-  secrets; the procedure for a lost management secret; and the order for
-  revoking the management token (proposal 12): every server's file first,
-  then a leadership change so the new token is installed, then the old
-  token.
-- [ ] Confirm the default profile (proposal 16), and decide whether
-  `server.operator.token` is removed.
+- [ ] End-to-end: an application registers through its client under a service identity, is discovered by a reader with
+  `service:read`, and is invisible to one without it.
+- [ ] End-to-end: a second host with another node's name and its own token is refused.
+- [ ] End-to-end: with every server stopped, an application goes on reporting its TTL check under a cached token.
+- [ ] Docker: three servers with ACLs enabled, and clients holding node identity tokens. Revoke one client's token and
+  observe it.
+- [ ] Update the design's sections 7.3, 12, 15, 16 and 22, the feature validation, and the Consul plan's phase 7
+  checklist.
+- [ ] Add to `RAFT_STORAGE_OPERATIONS.md`: WAL files, snapshots, and backups hold token hashes and not secrets, and
+  still need an encrypted medium with strict access controls, as Consul advises, for the rest of what they hold;
+  which files do hold a secret, and that only the process's user may read them (proposal 3); both procedures for a
+  lost management secret; and the order for revoking the management token (proposal 12).
+- [ ] Decide whether `server.operator.token` is removed.
 
-**Exit:** Full suites on a fresh image; changed concurrency tests pass five
-consecutive runs; audits as in the other lists.
+**Exit:** Full suites on a fresh image; changed concurrency tests pass five consecutive runs; audits as in the other lists.
 
 ## 7. Out of scope
 
-- TLS and mutual TLS, and so the Raft port and the client certificate on the
-  server's HTTP listener (proposal 14's following list).
-- Roles, authentication methods and login, and any templated policy beyond
-  the two identities.
-- `key` and `session` rules, which the key/value and sessions lists add.
-- Replicated tenants and namespaces as objects. This list only matches a
-  scope; the tenancy list creates and validates them.
-- Structured audit events and a durable audit sink, which need the event
-  journal. This list logs ACL changes and denials with the accessor ID.
-- Client-side caching of decisions, a down policy, and a recovery token.
+- TLS and mutual TLS, and so the Raft port and the client certificate on the server's HTTP listener (proposal 14's
+  following list).
+- Authentication methods, binding rules, login, and templated policies beyond the two identities. Consul has them; they
+  connect ACLs to outside identity systems, and can be added without changing anything stored.
+- Token replication and local tokens, because there is one datacentre.
+- `key` and `session` rules, which the key/value and sessions lists add. `mesh`, `intention`, `query`, `event`, and
+  `peering`, because Qraft has none of those.
+- Replicated tenants and namespaces as objects. This list only matches a scope; the tenancy list creates and validates
+  them.
+- Structured audit events and a durable audit sink, which need the event journal. This list logs ACL changes and denials
+  with the accessor ID.
 - The reverse of proposal 19: which tokens may do a given thing.
-- More than one datacentre.

@@ -1,7 +1,7 @@
 # Qraft Administrative UI and UX Design
 
 **Status:** Draft  
-**Last updated:** 2026-11-01 (dated task-list links refreshed. Earlier, 2026-10-30: section 5.1: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after a review of the interface's logic against the ACL list and the platform design: access control rewritten as section 10.2's subsections, with the owner's decisions on the security profile, the lock-out guard, policy deletion and the explanation endpoint; principle 3.7; access control moved to Stage 2; section 11's integrity refusals and operations that are not idempotent; nodes, health states, unscoped views, and operations without an API in sections 3.2, 5 and 9. Earlier that day, after a review of the reference implementation against this document: workspace tabs, section 4.4; access control on the token model of the ACL list, sections 4.1, 10.2, 11 and 15, with Roles and Auth Methods reserved, section 2; the reference implementation follows section 4.3 and labels reserved views. Earlier, 2026-10-09: a client row shows the version from the node's metadata; a node has no capabilities any more. Before: 2026-09-25)
+**Last updated:** 2026-11-01 (a policy that tokens link to can now be deleted, as the owner decided for the ACL list's proposal 18: sections 10.2 and the refusals changed. Earlier the same day: section 10.2 follows the ACL list's alignment with Consul: the first sign-in, a secret shown once and stored only as a hash, 403 for a bad token, the form of a policy's rules, and recovery. Earlier the same day: dated task-list links refreshed. Earlier, 2026-10-30: section 5.1: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after a review of the interface's logic against the ACL list and the platform design: access control rewritten as section 10.2's subsections, with the owner's decisions on the security profile, the lock-out guard, policy deletion and the explanation endpoint; principle 3.7; access control moved to Stage 2; section 11's integrity refusals and operations that are not idempotent; nodes, health states, unscoped views, and operations without an API in sections 3.2, 5 and 9. Earlier that day, after a review of the reference implementation against this document: workspace tabs, section 4.4; access control on the token model of the ACL list, sections 4.1, 10.2, 11 and 15, with Roles and Auth Methods reserved, section 2; the reference implementation follows section 4.3 and labels reserved views. Earlier, 2026-10-09: a client row shows the version from the node's metadata; a node has no capabilities any more. Before: 2026-09-25)
 
 ## 1. Purpose
 
@@ -52,8 +52,9 @@ delivery plan exist.
 
 Roles and Auth Methods, in Govern, are reserved in the same way. The ACL list
 ([`task-list-acl-and-tokens-2026-11-01.md`](task-list-acl-and-tokens-2026-11-01.md))
-delivers tokens and policies and leaves roles, authentication methods and login
-out (its section 7).
+delivers tokens, policies and roles, and leaves authentication methods and login
+out (its section 7). The interface reserves the page for roles until a later
+increment.
 
 ## 3. Design principles
 
@@ -572,7 +573,7 @@ locks, routes, and peer exports before confirmation.
 Access control is part of the system's integrity, not a list of resources to
 browse. It follows Consul's token model, as the ACL list
 ([`task-list-acl-and-tokens-2026-11-01.md`](task-list-acl-and-tokens-2026-11-01.md))
-sets it out, including the decisions of 2026-10-27 in its proposals 16 to 19.
+sets it out, including the decisions in its proposals 16 to 19.
 The section contains Status, Tokens, Policies, and an explanation of
 decisions, and presents tokens and policies through their relationships
 rather than as disconnected lists. Roles and Auth Methods are reserved
@@ -610,10 +611,11 @@ Two states carry a persistent banner on every page (principle 3.7):
 
 - With ACLs enabled, the interface asks for a token secret before it makes any
   API call. The first operator signs in with the management secret from the
-  server's file (ACL list, proposal 12). There is no bootstrap endpoint.
+  server's file, or the one `PUT /v1/acl/bootstrap` returned (ACL list, proposal
+  12). The interface never calls that endpoint itself.
 - The secret is typed or pasted, sent as `X-Qraft-Token`, never placed in a
   URL, and never shown again after it is entered. Signing out discards it.
-- `401 token_invalid` (the token is unknown, expired, or was revoked during the
+- `403 token_not_found` (the token is unknown, expired, or was revoked during the
   session) ends the session. The interface discards the secret and asks for
   another; it never retries with the old one. `403 permission_denied` is an
   outcome of one operation and does not end the session.
@@ -639,7 +641,7 @@ Two states carry a persistent banner on every page (principle 3.7):
   secret once, in the response to the committed command. The interface shows
   it at that point only, with a copy control and a warning that it cannot be
   shown again, and clears it when the dialog closes. No later view and no
-  permission reveals a secret.
+  permission reveals a secret: every read shows `<hidden>` (ACL list, proposal 3).
 - **Creation is not idempotent.** Each attempt makes a new secret, so the
   interface never retries it automatically. When the outcome is unknown, the
   token may exist with nobody holding its secret. The interface says so,
@@ -652,10 +654,11 @@ Two states carry a persistent banner on every page (principle 3.7):
   not ready, and its node becomes unreachable after the node TTL. The result
   says the revocation takes effect on the leader at once and on each follower
   when it applies the deletion's index; until then a follower may still
-  accept the token for reads (ACL list, proposal 10).
-- **No rotation.** A secret cannot be read back or reissued. The interface
-  offers replacement as a guided sequence: create a new token with the same
-  policies and identities, move its users to it, then delete the old one.
+  accept the token for reads. A client may go on accepting it until its cache
+  entry expires, or for as long as it reaches no server (ACL list, proposal 10).
+- **No rotation.** A secret cannot change once the token exists. The interface
+  offers replacement as a guided sequence: clone the token, move its users to the
+  clone, then delete the old one.
 - **The management token.** Marked as installed from the file. Before a
   deletion, the review step says the token returns at the next leadership
   change while any server's file holds its secret, and gives the revocation
@@ -670,19 +673,22 @@ Two states carry a persistent banner on every page (principle 3.7):
 - **List.** Name, a summary of its rules, and how many tokens link to it.
 - **Editor.** The policy's JSON, with a structured view of its rules:
   resource, exact name or prefix, access (`read`, `write`, or `deny`), and for
-  `service` rules the tenant and namespace, where `*` matches any. The editor
-  states the precedence: an exact name beats a prefix, a longer prefix beats a
-  shorter one, and `deny` beats an allow of equal specificity. It shows the
+  `service` rules the tenant and namespace, where the empty prefix matches any.
+  The editor states the precedence: an exact name beats a prefix, a longer prefix
+  beats a shorter one, and where two rules are equally specific `deny` wins, then
+  `write`, then `read`. It shows the
   server's refusals, such as an unknown field or resource, at the rule they
   concern. Local checks never imply that the server will accept the policy
   (section 11).
 - **Detail.** Rules, the tokens that link to it (`GET
-  /v1/acl/tokens?policy={name}`), and explanations for those tokens.
+  /v1/acl/tokens?policy={id}`), and explanations for those tokens.
 - **Change.** The review step lists the linked tokens the change affects.
-- **Delete.** A policy that any token links to cannot be deleted; the server
-  answers `409 policy_in_use` (ACL list, proposal 18). The interface lists the
-  linked tokens and offers deletion only when there are none. The built-in
-  management policy cannot be deleted.
+- **Delete.** A policy that tokens link to can be deleted, and those tokens lose
+  what it granted (ACL list, proposal 18). The review step lists the linked tokens
+  and says so, and that a client may go on honouring the policy until its cache
+  entry expires. The server refuses a deletion that would leave no token holding
+  `acl:write` without an expiry, with `409 acl_lockout`. The built-in
+  `global-management` and `global-read-only` policies cannot be deleted.
 
 #### 10.2.5 Explaining decisions
 
@@ -705,9 +711,10 @@ step predicts the refusal: it shows how many other tokens hold `acl:write`
 without an expiry, and warns when a change removes `acl:write` from the token
 in use, which the server allows while another token holds it.
 
-When every management secret is lost, recovery is a new secret in the
-management file and a leader restart. The interface describes this procedure
-and links the runbook; it cannot perform it.
+When every management secret is lost, recovery is either a new secret in the
+management file and a leader restart, or a bootstrap reset through a file in the
+leader's data directory. The interface describes both and links the runbook; it
+cannot perform them.
 
 #### 10.2.7 Limits until later lists
 
@@ -717,7 +724,7 @@ and links the runbook; it cannot perform it.
 - **Audit.** The ACL list writes ACL changes and denials to the log only, with
   the accessor ID. Structured audit records wait for the event journal
   (section 10.3).
-- **A revoked client token looks like a crash.** A client refused with `401`
+- **A revoked client token looks like a crash.** A client refused with `403`
   becomes not ready and stops heartbeating, and its node becomes unreachable.
   The servers record no reason. Until denials are recorded as events, the node
   page shows, for an unreachable node, whether any valid token holds its node
@@ -753,12 +760,12 @@ The UI distinguishes:
 - committed and applied successfully;
 - rejected by validation;
 - rejected by compare-and-set or ownership rules;
-- refused because the token is unknown or expired (`401 token_invalid`),
+- refused because the token is unknown or expired (`403 token_not_found`),
   which asks the operator for another token rather than offering a retry;
 - refused for a missing permission (`403 permission_denied`), or hidden by
   policy;
 - refused to protect integrity, with the names that explain it:
-  `409 acl_lockout`, `409 policy_in_use`, `409 node_name_reserved`;
+  `409 acl_lockout`, `409 node_name_reserved`;
 - submitted to a follower with a leader hint;
 - retryable failure;
 - outcome unknown after submission;
