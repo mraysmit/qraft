@@ -303,6 +303,13 @@ public final class SharedDockerClusterFixture {
             runCommand(List.of("docker", "stop", "--time", "20", name));
         }
 
+        /** Runs {@code command} inside the client's container, failing if it exits non-zero, and returns its output. */
+        public String exec(String... command) throws Exception {
+            List<String> line = new ArrayList<>(List.of("docker", "exec", name));
+            line.addAll(List.of(command));
+            return commandOutput(line);
+        }
+
         @Override
         public void close() throws Exception {
             try {
@@ -541,6 +548,13 @@ public final class SharedDockerClusterFixture {
         return cluster.getContainerByServiceName(serviceName)
                 .orElseThrow(() -> new IllegalArgumentException("Unknown compose service: " + serviceName))
                 .execInContainer(command).getStdout();
+    }
+
+    /** The exit code of {@code command} run inside one compose service. */
+    public static int execExitCode(ComposeContainer cluster, String serviceName, String... command) throws Exception {
+        return cluster.getContainerByServiceName(serviceName)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown compose service: " + serviceName))
+                .execInContainer(command).getExitCode();
     }
 
     /** Reconnects a service to the exact Docker networks and aliases it previously used. */

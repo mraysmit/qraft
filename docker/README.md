@@ -49,10 +49,29 @@ container, as an application on its host does:
 docker exec qraft-client-dev curl -fsS http://127.0.0.1:8080/health/ready
 ```
 
+An application uses only that address. It registers its service and a TTL check,
+reports passing, and discovers services through the same client, which forwards
+discovery reads to the servers:
+
+```sh
+docker exec qraft-client-dev curl -fsS -X PUT http://127.0.0.1:8080/v1/client/service/register \
+  -d '{"id":"orders-1","name":"orders","port":9000,"checks":[{"id":"app","type":"ttl","ttlMs":60000}]}'
+docker exec qraft-client-dev curl -fsS -X PUT http://127.0.0.1:8080/v1/client/check/pass/app
+docker exec qraft-client-dev curl -fsS 'http://127.0.0.1:8080/v1/health/service/orders?passing'
+```
+
 An application in a container of its own can share the client's network
-namespace with `network_mode: "service:client"`. A deployment whose applications
-cannot share it sets `client.bindAddress` instead, for example to `0.0.0.0`, as
-Consul's `client_addr` is set for containers.
+namespace with `network_mode: "service:client"`. A container outside that namespace,
+even on the same Docker network, is refused the connection.
+
+A deployment whose applications cannot share the namespace sets `client.bindAddress`
+instead, for example to `0.0.0.0`, as Consul's `client_addr` is set for containers.
+The local API has no authentication until
+[the ACL list](../docs-design/task-list-acl-and-tokens-2026-11-01.md), so that exposes all
+of it to anything that can reach the port. Such a caller can register and remove this
+node's services and checks, set their status and maintenance, read the client's settings
+and discover services in any tenant and namespace, and make the client leave and exit. Keep
+the port on a network only its applications can reach, and do not publish it.
 
 Mount the file read-only and select it explicitly when the container may use an
 arbitrary destination:

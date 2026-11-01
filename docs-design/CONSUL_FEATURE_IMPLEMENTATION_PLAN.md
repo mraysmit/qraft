@@ -14,7 +14,8 @@ removal on 2026-10-09, deployment cleanup on 2026-10-11, and the single-POM
 plan's Phase 7 runtime and diagnostic close-out on 2026-10-14. The 2026-10-21
 update records membership Step 5 complete, with Steps 6 to 8 still open. The
 2026-10-31 update adds the item for a failed node's services in `?passing`, built
-in the client list's Phase 6A and verified by Jenkins build 60 on 2026-11-01.
+in the client list's Phase 6A and verified by Jenkins build 60 on 2026-11-01. The
+2026-11-01 update adds the client's local API.
 Sections 3 and 4
 reflect the one-project layout and explicit executor ownership. The open
 feature items in the checklist remain delivery gaps.
@@ -205,6 +206,8 @@ The client will be responsible for:
 - Qraft-prefixed configuration.
 - Running as the `client` mode of the unified Qraft runtime.
 - Serving local liveness and readiness endpoints for orchestration.
+- Serving a local API on `localhost`, after Consul's agent API, through which the
+  applications on its host register, report status and discover services.
 
 The client will not poll for jobs or execute transfers.
 
@@ -384,6 +387,9 @@ unchecked features below remain open.
   after the node TTL, reaped with its services after the reap delay.
 - [x] Exclude an unreachable node's services from `?passing`, as Consul's failed
   `serfHealth` check does (consul-style client list, Phase 6A).
+- [x] Serve a local API on every client, after Consul's agent API: services, checks,
+  TTL status, maintenance, client information and forwarded discovery reads, for
+  applications that use only `localhost` (consul-style client list, Phases 3 to 8).
 - [x] Implement service registration, catalog replication, and query behavior.
 - [x] Add composite `(tenant, namespace, node, serviceId)` catalog identity with
   node-scoped idempotent deregistration and legacy-data defaults.

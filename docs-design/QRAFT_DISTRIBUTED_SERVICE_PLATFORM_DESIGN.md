@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-11-01 (client list Phase 7: discovery reads through the local API, and the server's discovery reads refuse a query parameter they do not know, in sections 12.1 and 12.1.3. Earlier the same day: dated task-list links refreshed. Earlier, 2026-10-31: client list Phase 6A: an unreachable node's services leave `?passing`, and a health entry carries its node's status, in sections 9.2 and 12.1.1. Earlier the same day: section 12.1.3's comparison with Consul corrected, and section 9.2 records a gap that client list Phase 6A closes. Earlier the same day: client list Phase 6: `self`, `members` and `leave` on the local API, in sections 8.4 and 12.1.3. Earlier the same day: client list Phase 5: TTL status and maintenance through the local API, in sections 12.1.3 and 16. Earlier the same day: client list Phase 4: services and checks through the local API, in sections 6.2, 7.4, 8.2, 12.1.3 and 16. Earlier, 2026-10-30: client anti-entropy and `GET /v1/catalog/node-services/{nodeName}` in sections 7.3, 8.2, 12.1 and 22; a check ID unique across a client in section 16. Earlier the same day: client list Phase 2, the server side: the node ID and the rules for who may hold a name, after Consul's catalog, in sections 7.3 and 22, and the `X-Qraft-Node-ID` header, the 409 `node_name_reserved` refusal and the node listing's `id` in sections 12.1 and 12.1.2. Earlier, 2026-10-27: section 12.4.1: how the Vite build names the asset manifest, and the security profile in the bootstrap data. Earlier, 2026-10-26: client list Phase 1: the server's service and check write routes moved from `/v1/client/*` to `/v1/catalog/*` in sections 12.1, 12.1.1 and 12.1.2. Earlier, 2026-10-25: Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
+**Last updated:** 2026-11-01 (client list Phase 8's check of the design: applications talk to their local client, in sections 4.3, 5, 6.2, 8.1 and 16. Earlier the same day: client list Phase 7: discovery reads through the local API, and the server's discovery reads refuse a query parameter they do not know, in sections 12.1 and 12.1.3. Earlier the same day: dated task-list links refreshed. Earlier, 2026-10-31: client list Phase 6A: an unreachable node's services leave `?passing`, and a health entry carries its node's status, in sections 9.2 and 12.1.1. Earlier the same day: section 12.1.3's comparison with Consul corrected, and section 9.2 records a gap that client list Phase 6A closes. Earlier the same day: client list Phase 6: `self`, `members` and `leave` on the local API, in sections 8.4 and 12.1.3. Earlier the same day: client list Phase 5: TTL status and maintenance through the local API, in sections 12.1.3 and 16. Earlier the same day: client list Phase 4: services and checks through the local API, in sections 6.2, 7.4, 8.2, 12.1.3 and 16. Earlier, 2026-10-30: client anti-entropy and `GET /v1/catalog/node-services/{nodeName}` in sections 7.3, 8.2, 12.1 and 22; a check ID unique across a client in section 16. Earlier the same day: client list Phase 2, the server side: the node ID and the rules for who may hold a name, after Consul's catalog, in sections 7.3 and 22, and the `X-Qraft-Node-ID` header, the 409 `node_name_reserved` refusal and the node listing's `id` in sections 12.1 and 12.1.2. Earlier, 2026-10-27: section 12.4.1: how the Vite build names the asset manifest, and the security profile in the bootstrap data. Earlier, 2026-10-26: client list Phase 1: the server's service and check write routes moved from `/v1/client/*` to `/v1/catalog/*` in sections 12.1, 12.1.1 and 12.1.2. Earlier, 2026-10-25: Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
 
 ## 1. Purpose
 
@@ -349,7 +349,8 @@ later observations for them.
 Client mode currently owns:
 
 - A local identity and network address.
-- A JDK HTTP liveness and readiness server.
+- A local API on one JDK HTTP server: liveness, readiness, and what the applications
+  on its host use (section 12.1.3).
 - A client-membership facade over the shared outbound server client.
 - A validated list of server seeds and local service definitions.
 - A `CatalogClient` port and `HttpCatalogClient` adapter for service registration,
@@ -365,7 +366,7 @@ Client mode currently owns:
 The client registers its node through the server's
 `PUT /v1/catalog/register`, `PUT /v1/catalog/node/heartbeat`, and
 `PUT /v1/catalog/deregister` endpoints (section 12.1.2). A failed initial registration
-keeps the local health server live and unready and retries in the background;
+keeps the local API live and unready and retries in the background;
 readiness is derived continuously from lifecycle state, accepted node
 registration, convergence of every enabled local service definition, required
 checks, and the freshness of the last successful server response.
@@ -403,11 +404,10 @@ definitions are verified by catalog read rather than rewritten; missing instance
 are repaired, changed definitions are resubmitted, and unchanged rejected
 definitions remain reported without being retried every cycle.
 
-The production definition source is the `catalog.services` array loaded once from
-the client JSON document at startup. Runtime file watching and configuration reload
-are not implemented. The reconciler's removal path is therefore exercised by its
-mutable source contract and tests today and becomes externally reachable when a
-future reload mechanism supplies a changed definition set.
+The definitions have one source (section 8.2): the `catalog.services` array, loaded
+once from the client JSON document at startup, and what the local API registers, which
+changes while the client runs. Runtime file watching and configuration reload are not
+implemented.
 
 Node, heartbeat, and catalog operations update one server-contact timestamp.
 If that timestamp becomes older than `catalog.contactFreshnessMs`, readiness
@@ -421,7 +421,7 @@ code and message while the client remains live and unready. On shutdown, the cli
 withdraws readiness before stopping scheduled work. It waits for an active
 reconciliation pass, deregisters every service known to have committed, prevents
 new node registrations, waits for an in-flight node registration, and then sends
-an idempotent node deregistration before stopping local health and HTTP resources.
+an idempotent node deregistration before stopping the local API and HTTP resources.
 All callers share one completion bounded by `client.shutdownTimeoutMs`; when the
 deadline expires, outstanding HTTP work is cancelled and incomplete cleanup is
 reported once.
@@ -448,9 +448,9 @@ instance fields.
 ## 5. Target system context
 
 ```text
-Applications and operators
+Operators
           |
-          | HTTP, gRPC, optional DNS
+          | HTTP, gRPC
           v
 +---------------- Qraft server cluster ----------------+
 |  Server A       Server B       Server C              |
@@ -461,15 +461,25 @@ Applications and operators
 |          replicated state machine                    |
 +------------------------------------------------------+
           ^
-          | registration, health observations, renewal
+          | registration, health observations, renewal, forwarded reads
           |
-+---------+----------+       +-------------------------+
-| Client              |       | Client                   |
++---------+-----------+       +-------------------------+
+| Client              |       | Client                  |
 | node-a              |       | node-b                  |
+| local API           |       | local API               |
 | local checks        |       | local checks            |
 | service definitions |       | service definitions     |
-+--------------------+       +-------------------------+
++---------+-----------+       +------------+------------+
+          ^                                ^
+          | localhost                      | localhost
+          |                                |
+     Applications                     Applications
 ```
+
+Applications talk only to the client on their own host, at `localhost` (section
+12.1.3). Through it they register their services and checks, report TTL status and
+discover other services, and the client keeps those registrations in sync with the
+servers and forwards discovery reads to them. Discovery by DNS is a later list.
 
 Servers are authoritative for committed cluster state. Clients are
 authoritative only for local observations and submit those observations as
@@ -515,7 +525,9 @@ not exist yet. `/health/live` is unaffected by every condition.
 `qraft client`:
 
 - Validates client identity, server seeds, and service definitions.
-- Starts local liveness before contacting the cluster.
+- Starts its local API, with liveness and readiness, before contacting the cluster.
+- Serves the applications on its host at `localhost`: their registrations, check
+  status and discovery reads (section 12.1.3).
 - Reconciles the services its configuration defines and its local API registers
   with the replicated catalog.
 - Runs local health checks and publishes changes or TTL renewals.
@@ -686,7 +698,7 @@ authoritative health result.
 ### 8.1 Registration flow
 
 1. The client loads and validates all service definitions.
-2. The local health server becomes live and reports not ready.
+2. The local API becomes live and reports not ready.
 3. The client selects a configured server seed.
 4. Each enabled definition is submitted as an idempotent registration request.
 5. The receiving server validates and proposes a Raft command.
@@ -2183,8 +2195,8 @@ the client's network namespace sets the bind address, as Consul's `client_addr`
 is set for containers.
 
 The local API is one JDK `HttpServer` (`LocalApiServer`) serving `/health/live`,
-`/health/ready` and the API routes under `/v1/client/*` (section 12.1.3; the later
-phases of the client list add more). It shares its request handling with the server's API
+`/health/ready` and the routes of section 12.1.3: `/v1/client/*` and the forwarded
+discovery reads. It shares its request handling with the server's API
 (`common.http.JsonApi`, section 12.1): request IDs, the body limit, the method
 check and the error envelope. Once the client's shutdown begins, before it
 deregisters anything, an API write (any method but `GET` and `HEAD`) is refused

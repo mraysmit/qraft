@@ -45,8 +45,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * registers two services; a second client with the same node name and an empty data directory, so a new node ID,
  * is refused the name with {@code node_name_reserved} while the first holds it. Once the first is killed and its
  * node turns unreachable, the second takes the name over: the node carries the new ID, the first node's services
- * are gone, and only the services the second registers are in the catalog. Reaping is set far off, so the name
- * passes by takeover and not because the old node was reaped.
+ * are gone, and only the services the second registers are in the catalog, as its own local API shows. Reaping is
+ * set far off, so the name passes by takeover and not because the old node was reaped.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-10-30
@@ -123,6 +123,31 @@ class WipedClientDirectoryEndToEndTest {
                 && "healthy".equals(nodeField(serverUri, "status"))
                 && instances(serverUri, "web") == 1 && instances(serverUri, "legacy") == 0);
         assertEquals(1, nodesNamed(serverUri), "one node holds the name");
+
+        // An application on the rebuilt host sees the same through its local client.
+        URI local = localApi("rebuilt");
+        JsonNode web = JSON.readTree(readBody(local.resolve("/v1/catalog/service/web")));
+        assertEquals(1, web.size());
+        assertEquals(NODE_NAME, web.get(0).path("nodeId").asText());
+        assertEquals(0, JSON.readTree(readBody(local.resolve("/v1/catalog/service/legacy"))).size(),
+                "the old node's service went with it");
+        assertEquals(0, JSON.readTree(readBody(local.resolve("/v1/health/service/legacy"))).size());
+    }
+
+    /** Where a client's local API listens, which it logs as it starts because its port is chosen at start. */
+    private URI localApi(String label) throws Exception {
+        java.util.regex.Matcher started = java.util.regex.Pattern
+                .compile("Local API started: protocol=http, address=(\\S+)")
+                .matcher(Files.readString(temporaryDirectory.resolve(label + ".out")));
+        assertTrue(started.find(), "the client logs where its local API listens");
+        return URI.create("http://" + started.group(1));
+    }
+
+    private String readBody(URI uri) throws Exception {
+        HttpResponse<String> response = http.send(HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(5)).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, response.statusCode(), uri + " " + response.body());
+        return response.body();
     }
 
     private Process startClient(String label, Path dataDirectory, int serverPort, List<String> services)

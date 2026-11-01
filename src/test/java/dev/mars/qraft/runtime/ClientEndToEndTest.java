@@ -16,6 +16,8 @@
 
 package dev.mars.qraft.runtime;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.mars.qraft.raft.PeerlessTransportFixture;
 import dev.mars.qraft.state.catalog.ServiceKey;
 import dev.mars.qraft.client.QraftClient;
@@ -28,11 +30,16 @@ import dev.mars.qraft.raft.RaftNode;
 import dev.mars.qraft.raft.RaftNodeMode;
 import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.state.QraftStateStore;
+import dev.mars.qraft.testing.fault.IntentionalErrorFixture;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -48,7 +55,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * End-to-end tests of {@link QraftClient} against in-process servers: reconciliation after
- * restart, shared local service IDs, and follower seeds.
+ * restart, shared local service IDs, follower seeds, and applications that talk only to their local client
+ * over real HTTP, each client standing for one host.
  *
  * <p>The servers' Raft timers are manual ({@link ManualRaftClusterFixture}): the first node is elected by the
  * test, and a cluster's followers learn commits when a wait fires the leader's heartbeat.
@@ -61,7 +69,13 @@ class ClientEndToEndTest {
     @TempDir
     Path dataRoot;
 
+    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final String ORDERS = """
+            {"id":"orders-1","name":"orders","port":9000,"checks":[{"id":"app","type":"ttl","ttlMs":60000}]}
+            """;
+
     private final List<QraftClient> clients = new ArrayList<>();
+    private final HttpClient http = HttpClient.newHttpClient();
     private ServerGroupFixture servers;
 
     @AfterEach
@@ -149,6 +163,144 @@ class ClientEndToEndTest {
                 store.getServiceCatalog().instances(ServiceKey.inDefaultScope("web")).isEmpty()));
     }
 
+    @Test
+    void anApplicationRegistersAndReportsPassingThroughItsClientAndIsDiscoveredThroughAnotherHostsClient()
+            throws Exception {
+        servers = ServerGroupFixture.single(0);
+        QraftClient hostA = startedClient("host-a", servers.endpoints());
+        QraftClient hostB = startedClient("host-b", servers.endpoints());
+
+        assertEquals(200, local(hostA, "PUT", "/v1/client/service/register", ORDERS).statusCode());
+        waitUntil(() -> serviceIds(hostB, "/v1/health/service/orders").equals(List.of("orders-1")));
+        assertEquals(List.of(), serviceIds(hostB, "/v1/health/service/orders?passing"),
+                "a TTL check that has not been told anything is not passing");
+
+        assertEquals(200, local(hostA, "PUT", "/v1/client/check/pass/app?note=ready", null).statusCode());
+
+        waitUntil(() -> serviceIds(hostB, "/v1/health/service/orders?passing").equals(List.of("orders-1")));
+        JsonNode entry = readJson(hostB, "/v1/health/service/orders?passing").get(0);
+        assertEquals("host-a", entry.path("service").path("nodeId").textValue(), "the instance is on the other host");
+        assertEquals("127.0.0.1", entry.path("service").path("address").textValue(), "its client's address, by default");
+        assertEquals(9000, entry.path("service").path("port").intValue());
+        JsonNode check = entry.path("checks").get(0);
+        assertEquals("app", check.path("checkId").textValue());
+        assertEquals("PASSING", check.path("status").textValue());
+        assertEquals("ready", check.path("output").textValue());
+    }
+
+    @Test
+    void anApplicationDeregistersCleanlyAndStaysGoneAfterItsClientRestarts() throws Exception {
+        servers = ServerGroupFixture.single(0);
+        QraftClient hostA = startedClient("host-a", servers.endpoints());
+        QraftClient hostB = startedClient("host-b", servers.endpoints());
+        assertEquals(200, local(hostA, "PUT", "/v1/client/service/register", ORDERS).statusCode());
+        assertEquals(200, local(hostA, "PUT", "/v1/client/check/pass/app", null).statusCode());
+        waitUntil(() -> serviceIds(hostB, "/v1/health/service/orders?passing").equals(List.of("orders-1")));
+
+        HttpResponse<String> deregistered = local(hostA, "PUT", "/v1/client/service/deregister/orders-1", null);
+
+        assertEquals(200, deregistered.statusCode(), deregistered.body());
+        assertTrue(JSON.readTree(deregistered.body()).path("deregistered").booleanValue());
+        waitUntil(() -> serviceIds(hostB, "/v1/health/service/orders").isEmpty()
+                && readJson(hostB, "/v1/catalog/service/orders").isEmpty()
+                && !readJson(hostB, "/v1/catalog/services").has("orders"));
+        assertTrue(servers.store(0).healthChecks().isEmpty(), "its check went with it and was not left to expire");
+        assertTrue(readJson(hostA, "/v1/client/services").isEmpty());
+        assertTrue(readJson(hostA, "/v1/client/checks").isEmpty());
+        assertEquals(2, readJson(hostB, "/v1/client/members").size(), "the application left, and its host did not");
+
+        assertTrue(hostA.shutdown().get(10, TimeUnit.SECONDS));
+        QraftClient restarted = startedClient("host-a", servers.endpoints());
+        waitUntil(() -> servers.store(0).findNode("host-a").isPresent());
+        assertTrue(readJson(restarted, "/v1/client/services").isEmpty(), "a deregistered service is not restored");
+        assertEquals(List.of(), serviceIds(hostB, "/v1/health/service/orders"));
+    }
+
+    @Test
+    void registrationsMadeThroughTheLocalApiSurviveAClientRestart() throws Exception {
+        servers = ServerGroupFixture.single(0);
+        QraftClient hostA = startedClient("host-a", servers.endpoints());
+        QraftClient hostB = startedClient("host-b", servers.endpoints());
+        assertEquals(200, local(hostA, "PUT", "/v1/client/service/register", ORDERS).statusCode());
+        assertEquals(200, local(hostA, "PUT", "/v1/client/check/pass/app", null).statusCode());
+        waitUntil(() -> serviceIds(hostB, "/v1/health/service/orders?passing").equals(List.of("orders-1")));
+        String nodeId = hostA.nodeId();
+
+        assertTrue(hostA.shutdown().get(10, TimeUnit.SECONDS));
+        waitUntil(() -> serviceIds(hostB, "/v1/health/service/orders").isEmpty());
+
+        QraftClient restarted = startedClient("host-a", servers.endpoints());
+        assertEquals(nodeId, restarted.nodeId());
+        waitUntil(() -> serviceIds(hostB, "/v1/health/service/orders").equals(List.of("orders-1")));
+        assertTrue(readJson(restarted, "/v1/client/services").has("orders-1"));
+        assertTrue(readJson(restarted, "/v1/client/checks").has("app"));
+        assertEquals(List.of(), serviceIds(hostB, "/v1/health/service/orders?passing"),
+                "a TTL check's status is not kept across a restart, so the application tells it again");
+
+        assertEquals(200, local(restarted, "PUT", "/v1/client/check/pass/app", null).statusCode());
+        waitUntil(() -> serviceIds(hostB, "/v1/health/service/orders?passing").equals(List.of("orders-1")));
+    }
+
+    @Test
+    void theLocalApiKeepsWorkingAcrossAServerLeaderChange() throws Exception {
+        // The old leader is cut off from its peers below, so its calls to them fail.
+        IntentionalErrorsHelper.expect(IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
+        servers = ServerGroupFixture.cluster("node-a", "node-b", "node-c");
+        List<URI> seeds = List.of(servers.endpoint(0), servers.endpoint(1), servers.endpoint(2));
+        QraftClient hostA = startedClient("host-a", seeds);
+        QraftClient hostB = startedClient("host-b", seeds);
+        assertEquals(200, local(hostA, "PUT", "/v1/client/service/register", ORDERS).statusCode());
+        assertEquals(200, local(hostA, "PUT", "/v1/client/check/pass/app", null).statusCode());
+        servers.replicateUntil(() -> serviceIds(hostB, "/v1/health/service/orders?passing").equals(List.of("orders-1")));
+        int oldLeader = servers.leaderIndex();
+
+        servers.failOver();
+
+        assertNotEquals(oldLeader, servers.leaderIndex());
+        assertEquals(200, local(hostA, "PUT", "/v1/client/service/register", """
+                {"id":"orders-2","name":"orders","port":9001,"checks":[{"id":"app-2","type":"ttl","ttlMs":60000}]}
+                """).statusCode());
+        assertEquals(200, local(hostA, "PUT", "/v1/client/check/pass/app-2", null).statusCode());
+        assertEquals(200, local(hostA, "PUT", "/v1/client/check/fail/app", null).statusCode());
+        servers.replicateUntil(() -> serviceIds(hostB, "/v1/health/service/orders?passing").equals(List.of("orders-2"))
+                && serviceIds(hostB, "/v1/health/service/orders").equals(List.of("orders-1", "orders-2")));
+    }
+
+    /** A client with no services of its own, started and registered, as a host before its applications arrive. */
+    private QraftClient startedClient(String id, List<URI> endpoints) throws Exception {
+        QraftClient client = client(id, endpoints, List.of(), 2_000);
+        assertTrue(client.start().get(10, TimeUnit.SECONDS));
+        return client;
+    }
+
+    /** What an application on the client's host does: a request to the local API on the loopback address. */
+    private HttpResponse<String> local(QraftClient client, String method, String pathAndQuery, String body)
+            throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + client.localApi().port() + pathAndQuery))
+                .method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(body))
+                .build();
+        return http.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    private JsonNode readJson(QraftClient client, String pathAndQuery) {
+        try {
+            HttpResponse<String> answer = local(client, "GET", pathAndQuery, null);
+            assertEquals(200, answer.statusCode(), pathAndQuery + " " + answer.body());
+            return JSON.readTree(answer.body());
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(interrupted);
+        } catch (Exception failure) {
+            throw new IllegalStateException(pathAndQuery, failure);
+        }
+    }
+
+    private List<String> serviceIds(QraftClient client, String pathAndQuery) {
+        List<String> ids = new ArrayList<>();
+        readJson(client, pathAndQuery).forEach(entry -> ids.add(entry.path("service").path("serviceId").textValue()));
+        return ids;
+    }
+
     private QraftClient client(String id, List<URI> endpoints,
                              List<ServiceDefinition> services, long freshnessMs) throws Exception {
         QraftClient client = new QraftClient(ClientConfiguration.builder()
@@ -180,6 +332,7 @@ class ClientEndToEndTest {
         private final List<RaftNode> nodes;
         private final List<QraftStateStore> stores;
         private final List<HttpApiServer> servers;
+        private final Set<HttpApiServer> stopped = new java.util.HashSet<>();
         private boolean closed;
 
         private ServerGroupFixture(RaftExecutorsFixture runtime, ManualRaftClusterFixture raft, List<RaftNode> nodes,
@@ -236,6 +389,25 @@ class ClientEndToEndTest {
             raft.heartbeatUntil(nodes.get(leaderIndex()), condition, "the servers converge");
         }
 
+        /**
+         * Cuts the leader off and stops its API, elects another member, and returns once the old leader has stepped
+         * down and the remaining member follows the new one. To a client the old leader is then a seed that is down.
+         */
+        void failOver() throws Exception {
+            int oldIndex = leaderIndex();
+            RaftNode oldLeader = nodes.get(oldIndex);
+            Set<String> majority = new LinkedHashSet<>();
+            nodes.stream().filter(node -> node != oldLeader).forEach(node -> majority.add(node.getNodeId()));
+            InMemoryTransportSimulatorFixture.createPartition(Set.of(oldLeader.getNodeId()), majority);
+            HttpApiServer oldServer = servers.get(oldIndex);
+            oldServer.close();
+            stopped.add(oldServer);
+            RaftNode newLeader = raft.elect(nodes.get((oldIndex + 1) % nodes.size()));
+            raft.heartbeatUntilSteppedDown(oldLeader);
+            raft.heartbeatUntil(newLeader, () -> nodes.stream().filter(node -> node != oldLeader)
+                    .allMatch(node -> newLeader.getNodeId().equals(node.getLeaderId())), "the majority follows the new leader");
+        }
+
         List<URI> endpoints() { return List.of(endpoint(0)); }
         URI endpoint(int index) { return URI.create("http://127.0.0.1:" + port(index)); }
         int port(int index) { return servers.get(index).port(); }
@@ -252,7 +424,9 @@ class ClientEndToEndTest {
             if (closed) return;
             closed = true;
             CleanupHelper cleanup = new CleanupHelper();
-            for (HttpApiServer server : servers.reversed()) cleanup.run(server::close);
+            for (HttpApiServer server : servers.reversed()) {
+                if (!stopped.contains(server)) cleanup.run(server::close);
+            }
             cleanup.run(raft::close)
                     .run(() -> runtime.close().get(10, TimeUnit.SECONDS))
                     .rethrow();
