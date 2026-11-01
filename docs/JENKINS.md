@@ -395,7 +395,7 @@ or skips. Its 232 retained logs hold 833 ERROR lines, all flagged, 566 stack
 traces, none under an unflagged header, no JVM crash file, and no
 `too_many_pings`.
 
-## Builds 56 to 60, 2026-10-30 to 2026-11-01
+## Builds 56 to 61, 2026-10-30 to 2026-11-01
 
 Build 56 ran on `c33a2f2`, the first Jenkins build since build 55 on 2026-10-26.
 It is the first on Jenkins of the client list's Phases 1 to 3, the transport's
@@ -449,6 +449,16 @@ and none has gone. Only three differ, by timing, all down: `RAFT_PEER_UNREACHABL
 from 628), `RAFT_PEER_NAME_UNRESOLVED` (204 from 260) and
 `RAFT_SNAPSHOT_TRANSFER_INTERRUPTED` (84 from 88). These counts are across every retained
 file, where build 59's above are for the archived logs alone.
+
+Build 61 ran on `6a5c4e5`, with the client list's Phase 7. It passed in 24 min 23 s:
+default 1,446 with every coverage gate met, end-to-end 13, and Docker and `slow` 43,
+1,502 in all, with no failures, errors or skips. The same audit, over the console, 193
+archived logs, 150 of them Docker archives from 16 classes, and the test reports, found
+1,326 ERROR lines, all flagged, and 985 stack traces, none under an unflagged header,
+no `too_many_pings` and no JVM crash file. Against build 60 no new kind of error appears
+and none has gone. Only three differ, all down, counted across every retained file:
+`RAFT_PEER_UNREACHABLE` (604 from 608), `RAFT_PEER_NAME_UNRESOLVED` (168 from 204) and
+`RAFT_SNAPSHOT_TRANSFER_INTERRUPTED` (56 from 84).
 
 ## Job configuration
 
