@@ -96,7 +96,7 @@ class ClientEndToEndTest {
         QraftClient client = client("client-a", servers.endpoints(), List.of(
                 service("web", "web", 8080), service("api", "api", 8081)), 1_000);
 
-        assertTrue(client.start().get(10, TimeUnit.SECONDS));
+        start(client);
         waitUntil(() -> client.localApi().isReady()
                 && servers.store(0).getServiceCatalog().instances().size() == 2);
 
@@ -121,8 +121,8 @@ class ClientEndToEndTest {
         QraftClient first = client("client-a", servers.endpoints(), List.of(web), 2_000);
         QraftClient second = client("client-b", servers.endpoints(), List.of(web), 2_000);
 
-        assertTrue(first.start().get(10, TimeUnit.SECONDS));
-        assertTrue(second.start().get(10, TimeUnit.SECONDS));
+        start(first);
+        start(second);
         waitUntil(() -> first.localApi().isReady() && second.localApi().isReady()
                 && servers.store(0).getServiceCatalog().instances(ServiceKey.inDefaultScope("web")).size() == 2);
 
@@ -151,7 +151,7 @@ class ClientEndToEndTest {
 
         QraftClient client = client("cluster-client", seeds,
                 List.of(service("web", "web", 8080)), 2_000);
-        assertTrue(client.start().get(10, TimeUnit.SECONDS));
+        start(client);
         servers.replicateUntil(() -> client.localApi().isReady()
                 && servers.stores().stream().allMatch(store ->
                         store.getServiceCatalog().instances(ServiceKey.inDefaultScope("web")).size() == 1));
@@ -269,8 +269,18 @@ class ClientEndToEndTest {
     /** A client with no services of its own, started and registered, as a host before its applications arrive. */
     private QraftClient startedClient(String id, List<URI> endpoints) throws Exception {
         QraftClient client = client(id, endpoints, List.of(), 2_000);
-        assertTrue(client.start().get(10, TimeUnit.SECONDS));
+        start(client);
+        // Registered, not ready: a restarted client's restored TTL check holds readiness back until it is told again.
+        waitUntil(() -> servers.store(servers.leaderIndex()).findNode(id).isPresent());
         return client;
+    }
+
+    /**
+     * Starts a client without requiring its first registration attempt to succeed: under load the answer can outlast
+     * the request timeout, and the client registers again. Each test waits for the outcome it needs.
+     */
+    private static void start(QraftClient client) throws Exception {
+        client.start().get(10, TimeUnit.SECONDS);
     }
 
     /** What an application on the client's host does: a request to the local API on the loopback address. */

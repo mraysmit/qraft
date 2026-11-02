@@ -105,7 +105,7 @@ class ClientHealthPublicationTest {
         URI workloadUrl = startWorkload();
         client = client(List.of(refusedEndpoint(), server.endpoint()), workloadUrl);
 
-        assertTrue(client.start().get(10, TimeUnit.SECONDS));
+        start(client);
         waitUntil(() -> status("http").filter(ServiceHealth.PASSING::equals).isPresent()
                 && client.localApi().isReady());
         assertEquals(ServiceHealth.PASSING, serviceHealth());
@@ -144,7 +144,7 @@ class ClientHealthPublicationTest {
         server = Server.start(0);
         URI workloadUrl = startWorkload();
         client = client(List.of(startRecordingProxy(server.endpoint())), workloadUrl);
-        assertTrue(client.start().get(10, TimeUnit.SECONDS));
+        start(client);
         waitUntil(() -> status("http").filter(ServiceHealth.PASSING::equals).isPresent());
         waitUntil(() -> proxiedRequests.stream().filter(this::isObservation).count() >= 2);
 
@@ -255,6 +255,14 @@ class ClientHealthPublicationTest {
         }
     }
 
+
+    /**
+     * Starts a client without requiring its first registration attempt to succeed: under load the answer can outlast
+     * the request timeout, and the client registers again. Each test waits for the outcome it needs.
+     */
+    private static void start(QraftClient client) throws Exception {
+        client.start().get(10, TimeUnit.SECONDS);
+    }
 
     private static void waitUntil(BooleanSupplier condition) throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
