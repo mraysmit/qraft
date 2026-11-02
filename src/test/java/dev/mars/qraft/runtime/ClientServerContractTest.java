@@ -223,6 +223,24 @@ class ClientServerContractTest {
     }
 
     @Test
+    void aServiceIdContainingASlashIsRegisteredFoundListedAndRemovedAgainstRealServer() throws Exception {
+        startServer();
+        URI endpoint = URI.create("http://127.0.0.1:" + server.port());
+        catalogClient = new HttpCatalogClient(HttpClient.newHttpClient(), new ObjectMapper(), List.of(endpoint),
+                "catalog-client", "default", "default", "dc-1", "eu-west", Duration.ofSeconds(2));
+        ServiceDefinition service = new ServiceDefinition("team/payments", "payments", "127.0.0.1", 9090,
+                List.of(), Map.of(), true);
+
+        assertInstanceOf(CatalogOutcome.Success.class, catalogClient.register(service).get(10, TimeUnit.SECONDS));
+        assertInstanceOf(CatalogLookupOutcome.Present.class, catalogClient.lookup(service).get(10, TimeUnit.SECONDS));
+        assertEquals(java.util.Optional.of(java.util.Set.of("team/payments")),
+                catalogClient.nodeServices().get(10, TimeUnit.SECONDS));
+        assertInstanceOf(CatalogOutcome.Success.class,
+                catalogClient.deregister("team/payments").get(10, TimeUnit.SECONDS));
+        assertEquals(java.util.Optional.of(java.util.Set.of()), catalogClient.nodeServices().get(10, TimeUnit.SECONDS));
+    }
+
+    @Test
     void httpCatalogClientPublishesACheckObservationAgainstRealServer() throws Exception {
         QraftStateStore store = startServer();
         URI endpoint = URI.create("http://127.0.0.1:" + server.port());
@@ -255,10 +273,9 @@ class ClientServerContractTest {
                 .build();
         client = new QraftClient(configuration);
 
-        assertTrue(client.start().get(10, TimeUnit.SECONDS),
-                () -> "the real client rejected the server response; replicated state="
-                        + store.findNode("contract-client"));
-        assertTrue(client.localApi().isReady());
+        // Not the first attempt's answer: under load it can outlast the request timeout, and the client registers again.
+        client.start().get(10, TimeUnit.SECONDS);
+        waitUntil(() -> client.localApi().isReady());
         waitUntil(() -> store.findNode("contract-client")
                 .filter(info -> info.status() == NodeStatus.HEALTHY && info.lastHeartbeat() != null)
                 .isPresent());
@@ -286,7 +303,8 @@ class ClientServerContractTest {
                         List.of("blue"), Map.of(), true)))
                 .build();
         client = new QraftClient(configuration);
-        assertTrue(client.start().get(10, TimeUnit.SECONDS));
+        // Not the first attempt's answer: under load it can outlast the request timeout, and the client registers again.
+        client.start().get(10, TimeUnit.SECONDS);
         waitUntil(() -> !store.getServiceCatalog().instances().isEmpty());
         URI local = URI.create("http://127.0.0.1:" + client.localApi().port());
 

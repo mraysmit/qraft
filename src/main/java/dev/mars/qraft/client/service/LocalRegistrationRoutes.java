@@ -346,7 +346,7 @@ public final class LocalRegistrationRoutes {
             change.run();
             return true;
         } catch (IOException failure) {
-            LOGGER.warn("A registration could not be kept in the data directory: {}", failure.toString());
+            LOGGER.error("A registration could not be kept in the data directory: {}", failure.toString(), failure);
             api.error(exchange, 500, "registration_not_kept", "The registration could not be kept in the data "
                     + "directory, so nothing changed", true, Map.of());
             return false;

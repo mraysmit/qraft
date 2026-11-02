@@ -1286,8 +1286,8 @@ client, so registering it for another service moves it.
   `service_not_found`, as in Consul.
 - Removing a service or check that is not registered is not an error, as in Consul:
   it answers 200 with `deregistered` false, and true otherwise.
-- A change that cannot be kept answers 500 `registration_not_kept`, retryable, and
-  nothing has changed.
+- A change that cannot be kept is logged as an ERROR with its cause and answers 500
+  `registration_not_kept`, retryable, and nothing has changed.
 
 `GET /v1/client/services` and `GET /v1/client/checks` return an object keyed by ID,
 in the form kept on disk. A check carries `status`, `output` and `observedAt` once

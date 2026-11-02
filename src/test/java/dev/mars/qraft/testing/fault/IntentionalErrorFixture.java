@@ -86,6 +86,10 @@ public enum IntentionalErrorFixture {
                     + " remote_name=\\S+ url=http://prometheus:9090/api/v1/write"
                     + " msg=\"error tailing WAL\" err=\"failed to find segment for index\""),
 
+    /** A test takes the name of the client's temporary file, so a local API registration cannot be kept. */
+    CLIENT_REGISTRATION_NOT_KEPT("dev.mars.qraft.client.service.LocalRegistrationRoutes", Level.ERROR,
+            "A registration could not be kept in the data directory: java\\.nio\\.file\\.\\w+: .*registrations\\.json\\.tmp.*"),
+
     /** Bootstrap refuses a peer whose advertised server list disagrees with the local list. */
     BOOTSTRAP_SERVER_LISTS_DISAGREE("dev.mars.qraft.raft.ClusterBootstrap", Level.ERROR,
             "Bootstrap refused: \\S+ answers as \\S+ and lists \\[.*], but this server lists \\[.*]"),

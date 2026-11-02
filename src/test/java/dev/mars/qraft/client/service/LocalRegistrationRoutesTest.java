@@ -16,6 +16,10 @@
 
 package dev.mars.qraft.client.service;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.mars.qraft.client.config.ClientConfiguration;
@@ -24,10 +28,13 @@ import dev.mars.qraft.client.health.CheckStatus;
 import dev.mars.qraft.client.health.TtlCheck;
 import dev.mars.qraft.common.ServiceDefinition;
 import dev.mars.qraft.common.http.JsonApi;
+import dev.mars.qraft.testing.fault.IntentionalErrorFixture;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.LoggerFactory;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -455,6 +462,8 @@ class LocalRegistrationRoutesTest {
 
     @Test
     void maintenanceThatCannotBeKeptIsAnsweredAsARetryableFailure() throws Exception {
+        // The test takes the temporary file's name with a directory, so neither write below can be kept.
+        IntentionalErrorsHelper.expect(IntentionalErrorFixture.CLIENT_REGISTRATION_NOT_KEPT, 2);
         Path temporary = Files.createDirectory(directory.resolve(RegistrationStore.FILE_NAME + ".tmp"));
 
         assertRefused(send("PUT", "/v1/client/maintenance?enable=true", null), 500, "registration_not_kept");
@@ -473,7 +482,45 @@ class LocalRegistrationRoutesTest {
     }
 
     @Test
+    void anIdContainingASlashIsReachedThroughItsPathAsConsulsIs() throws Exception {
+        assertEquals(200, send("PUT", "/v1/client/service/register",
+                "{\"id\":\"team/web\",\"name\":\"web\",\"port\":8080}").statusCode());
+        assertEquals(200, send("PUT", "/v1/client/check/register",
+                "{\"id\":\"team/ttl\",\"serviceId\":\"team/web\",\"type\":\"ttl\",\"ttlMs\":30000}").statusCode());
+
+        assertEquals("team/web", json(send("GET", "/v1/client/service/team/web", null)).path("id").asText());
+        assertEquals("team/web", json(send("GET", "/v1/client/service/team%2Fweb", null)).path("id").asText());
+
+        assertTrue(json(send("PUT", "/v1/client/check/deregister/team/ttl", null)).path("deregistered").asBoolean());
+        assertTrue(json(send("PUT", "/v1/client/service/deregister/team%2Fweb", null)).path("deregistered").asBoolean());
+        assertRefused(send("GET", "/v1/client/service/team/web", null), 404, "service_not_found");
+    }
+
+    @Test
+    void aFailureToKeepARegistrationIsLoggedAsAnErrorWithItsCause() throws Exception {
+        // The test takes the temporary file's name with a directory, so the kept file cannot be replaced.
+        IntentionalErrorsHelper.expect(IntentionalErrorFixture.CLIENT_REGISTRATION_NOT_KEPT, 1);
+        Logger logger = (Logger) LoggerFactory.getLogger(LocalRegistrationRoutes.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        Path temporary = Files.createDirectory(directory.resolve(RegistrationStore.FILE_NAME + ".tmp"));
+        try {
+            assertRefused(send("PUT", "/v1/client/service/register", WEB), 500, "registration_not_kept");
+        } finally {
+            logger.detachAppender(appender);
+            Files.delete(temporary);
+        }
+
+        ILoggingEvent logged = appender.list.getFirst();
+        assertEquals(Level.ERROR, logged.getLevel(), logged.getFormattedMessage());
+        assertTrue(logged.getThrowableProxy() != null, "the failure's stack trace is kept");
+    }
+
+    @Test
     void aRegistrationThatCannotBeKeptIsAnsweredAsARetryableFailureAndChangesNothing() throws Exception {
+        // The test takes the temporary file's name with a directory, so neither write below can be kept.
+        IntentionalErrorsHelper.expect(IntentionalErrorFixture.CLIENT_REGISTRATION_NOT_KEPT, 2);
         send("PUT", "/v1/client/service/register", WEB);
         Path temporary = Files.createDirectory(directory.resolve(RegistrationStore.FILE_NAME + ".tmp"));
 
