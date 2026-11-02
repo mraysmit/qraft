@@ -1004,7 +1004,7 @@ read's tenant and namespace, as Consul's route of that name does, and carries
 `X-Qraft-Index`. An unknown node has an empty array, with HTTP 200. A missing name
 answers 400 `node_name_required`. The client's anti-entropy reads it (section 8.2).
 
-A name in the path of this route, `GET /v1/catalog/service/{name}` or
+A name in the path of this route, of `GET /v1/catalog/service/{name}`, or of
 `GET /v1/health/service/{name}` is everything after the route's prefix, decoded once, as
 in Consul. It may contain a slash, raw or encoded.
 

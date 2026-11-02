@@ -170,7 +170,7 @@ public final class ManualRaftClusterFixture implements AutoCloseable {
      * Waits until the simulated network and the shared state loop are quiescent.
      * Tests that drive several nodes directly use this between deterministic timer steps.
      */
-    void settle() throws InterruptedException {
+    public void settle() throws InterruptedException {
         settle(System.nanoTime() + TimeUnit.SECONDS.toNanos(WAIT_SECONDS));
     }
 

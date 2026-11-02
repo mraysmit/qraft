@@ -412,7 +412,12 @@ class ClientEndToEndTest {
             HttpApiServer oldServer = servers.get(oldIndex);
             oldServer.close();
             stopped.add(oldServer);
-            RaftNode newLeader = raft.elect(nodes.get((oldIndex + 1) % nodes.size()));
+            // What the old leader sent before the cut still lands, on some members and not others. A candidate with
+            // the shorter log is rightly refused, and with manual timers nothing would try again, so the longest runs.
+            raft.settle();
+            RaftNode newLeader = nodes.stream().filter(node -> node != oldLeader)
+                    .max(java.util.Comparator.comparingLong(RaftNode::getLastLogIndex)).orElseThrow();
+            raft.elect(newLeader);
             raft.heartbeatUntilSteppedDown(oldLeader);
             raft.heartbeatUntil(newLeader, () -> nodes.stream().filter(node -> node != oldLeader)
                     .allMatch(node -> newLeader.getNodeId().equals(node.getLeaderId())), "the majority follows the new leader");

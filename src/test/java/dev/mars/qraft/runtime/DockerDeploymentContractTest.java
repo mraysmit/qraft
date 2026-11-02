@@ -261,6 +261,20 @@ class DockerDeploymentContractTest {
     }
 
     @Test
+    void grafanaMakesNoUpdateCheckSoTheStackDoesNotDependOnTheInternet() throws IOException {
+        Path root = Path.of("").toAbsolutePath();
+        for (String relativePath : List.of("docker/compose/docker-compose-observability.yml",
+                "docker/compose/docker-compose-observability-cluster.yml")) {
+            String compose = Files.readString(root.resolve(relativePath));
+            for (String setting : List.of("GF_ANALYTICS_CHECK_FOR_UPDATES=false",
+                    "GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES=false")) {
+                assertTrue(compose.contains(setting), relativePath + " needs " + setting
+                        + ": a failed check logs an error that a network blip alone can cause");
+            }
+        }
+    }
+
+    @Test
     void dockerIntegrationTestsRequireTheHostBuiltRuntimeJar() throws IOException {
         Path root = Path.of("").toAbsolutePath();
         String sharedCluster = Files.readString(root.resolve(
