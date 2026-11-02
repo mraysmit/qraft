@@ -834,8 +834,9 @@ public final class HttpApiServer implements AutoCloseable {
     private static String pathParameter(HttpExchange exchange, String prefix) {
         String path = exchange.getRequestURI().getPath();
         if (!path.startsWith(prefix) || path.length() == prefix.length()) return null;
-        String value = URLDecoder.decode(path.substring(prefix.length()), StandardCharsets.UTF_8);
-        return value.isBlank() || value.contains("/") ? null : value;
+        // As Consul's strings.TrimPrefix(req.URL.Path, ...): the path is already decoded, and the rest of it is the name.
+        String value = path.substring(prefix.length());
+        return value.isBlank() ? null : value;
     }
 
     private static String safeMessage(Throwable error) {

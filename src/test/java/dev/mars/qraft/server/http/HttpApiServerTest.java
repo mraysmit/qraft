@@ -641,8 +641,7 @@ class HttpApiServerTest {
         server.start().get(10, TimeUnit.SECONDS);
         HttpClient client = HttpClient.newHttpClient();
 
-        for (String path : List.of("/v1/catalog/service/", "/v1/health/service/", "/v1/catalog/service/a%2Fb",
-                "/v1/health/service/a%2Fb")) {
+        for (String path : List.of("/v1/catalog/service/", "/v1/health/service/")) {
             assertRejected(request(client, path, "GET"), 400, "service_name_required", null);
         }
     }

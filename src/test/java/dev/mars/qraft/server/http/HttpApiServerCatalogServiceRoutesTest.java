@@ -32,6 +32,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -147,6 +148,46 @@ class HttpApiServerCatalogServiceRoutesTest {
 
         assertRejected(get("/v1/catalog/node-services/"), 400, "node_name_required");
         assertRejected(put("/v1/catalog/node-services/web-01", "{}"), 405, "method_not_allowed");
+    }
+
+    @Test
+    void aServiceNameContainingASlashIsReadLikeAnyOtherAsConsulsIs() throws Exception {
+        assertEquals(200, put("/v1/catalog/register",
+                "{\"service\":" + SERVICE.replace("frontend", "team/payments") + "}").statusCode());
+
+        for (String path : List.of("/v1/catalog/service/team/payments", "/v1/catalog/service/team%2Fpayments",
+                "/v1/health/service/team/payments", "/v1/health/service/team%2Fpayments")) {
+            HttpResponse<String> read = get(path);
+            assertEquals(200, read.statusCode(), path + ": " + read.body());
+            assertEquals(1, JSON.readTree(read.body()).size(), path + ": " + read.body());
+        }
+        assertEquals(0, JSON.readTree(get("/v1/catalog/service/team").body()).size(), "the whole path is the name");
+    }
+
+    @Test
+    void aNodeNameContainingASlashIsReadLikeAnyOtherAsConsulsIs() throws Exception {
+        assertEquals(200, registerAs("rack/web-01", "default", SERVICE).statusCode());
+
+        for (String path : List.of("/v1/catalog/node-services/rack/web-01", "/v1/catalog/node-services/rack%2Fweb-01")) {
+            HttpResponse<String> read = get(path);
+            assertEquals(200, read.statusCode(), path + ": " + read.body());
+            assertEquals("web", JSON.readTree(read.body()).path(0).path("serviceId").asText(), path + ": " + read.body());
+        }
+    }
+
+    @Test
+    void aNameInThePathIsDecodedOnceSoAPlusOrAPercentStaysAsItWasRegistered() throws Exception {
+        assertEquals(200, put("/v1/catalog/register",
+                "{\"service\":" + SERVICE.replace("frontend", "a+b") + "}").statusCode());
+        assertEquals(200, registerAs("web-02", "default",
+                SERVICE.replace("\"web\"", "\"percent\"").replace("frontend", "100%")).statusCode());
+
+        for (String path : List.of("/v1/catalog/service/a%2Bb", "/v1/health/service/a%2Bb",
+                "/v1/catalog/service/100%25", "/v1/health/service/100%25")) {
+            HttpResponse<String> read = get(path);
+            assertEquals(200, read.statusCode(), path + ": " + read.body());
+            assertEquals(1, JSON.readTree(read.body()).size(), path + ": " + read.body());
+        }
     }
 
     @Test

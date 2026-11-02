@@ -241,6 +241,34 @@ class ClientServerContractTest {
     }
 
     @Test
+    void aServiceNameContainingASlashIsRegisteredAndFoundAgainstRealServer() throws Exception {
+        startServer();
+        URI endpoint = URI.create("http://127.0.0.1:" + server.port());
+        catalogClient = new HttpCatalogClient(HttpClient.newHttpClient(), new ObjectMapper(), List.of(endpoint),
+                "catalog-client", "default", "default", "dc-1", "eu-west", Duration.ofSeconds(2));
+        ServiceDefinition service = new ServiceDefinition("payments-1", "team/payments", "127.0.0.1", 9090,
+                List.of(), Map.of(), true);
+
+        assertInstanceOf(CatalogOutcome.Success.class, catalogClient.register(service).get(10, TimeUnit.SECONDS));
+        CatalogLookupOutcome found = catalogClient.lookup(service).get(10, TimeUnit.SECONDS);
+        assertInstanceOf(CatalogLookupOutcome.Present.class, found, String.valueOf(found));
+    }
+
+    @Test
+    void aNodeNamedWithASlashListsItsServicesAgainstRealServerSoAntiEntropyStillWorks() throws Exception {
+        startServer();
+        URI endpoint = URI.create("http://127.0.0.1:" + server.port());
+        catalogClient = new HttpCatalogClient(HttpClient.newHttpClient(), new ObjectMapper(), List.of(endpoint),
+                "rack/client", "default", "default", "dc-1", "eu-west", Duration.ofSeconds(2));
+        ServiceDefinition service = new ServiceDefinition("payments-1", "payments", "127.0.0.1", 9090,
+                List.of(), Map.of(), true);
+
+        assertInstanceOf(CatalogOutcome.Success.class, catalogClient.register(service).get(10, TimeUnit.SECONDS));
+        assertEquals(java.util.Optional.of(java.util.Set.of("payments-1")),
+                catalogClient.nodeServices().get(10, TimeUnit.SECONDS));
+    }
+
+    @Test
     void httpCatalogClientPublishesACheckObservationAgainstRealServer() throws Exception {
         QraftStateStore store = startServer();
         URI endpoint = URI.create("http://127.0.0.1:" + server.port());
@@ -337,8 +365,8 @@ class ClientServerContractTest {
         }
         assertLocalRefusal(readLocally(local, "/v1/catalog/services", Map.of("X-Qraft-Tenant", "")), 400,
                 "invalid_scope", "a blank scope");
-        assertLocalRefusal(readLocally(local, "/v1/catalog/service/a%2Fb", Map.of()), 400,
-                "service_name_required", "a name with a slash");
+        assertEquals(0, readLocallyAsJson(local, "/v1/catalog/service/a%2Fb", Map.of()).size(),
+                "a name with a slash reaches the server as one name, and no such service is registered");
     }
 
     private static HttpResponse<String> readLocally(URI local, String pathAndQuery, Map<String, String> headers)
