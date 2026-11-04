@@ -22,7 +22,7 @@ import java.util.Objects;
  * Algebraic data type for the result of applying a {@link RaftCommand} to the state machine.
  *
  * <p>Replaces the previous {@code Object} return (which used {@code null} to signal
- * "entity not found") with an explicit sum type. Callers pattern-match on the four
+ * "entity not found") with an explicit sum type. Callers pattern-match on the five
  * permitted subtypes instead of null-checking or {@code instanceof}-casting.
  *
  * <h3>Permitted subtypes</h3>
@@ -31,6 +31,7 @@ import java.util.Objects;
  *   <li>{@link NotFound} — the target entity does not exist in the state store</li>
  *   <li>{@link NoOp} — command was a no-op (e.g., null command, delete of absent metadata)</li>
  *   <li>{@link CasMismatch} — a compare-and-swap precondition did not match</li>
+ *   <li>{@link Refused} — the command breaks a rule of the replicated state, named by a code</li>
  * </ul>
  *
  * @param <T> the type of entity produced on success
@@ -42,7 +43,8 @@ public sealed interface RaftCommandResult<T>
         permits RaftCommandResult.Success,
                 RaftCommandResult.NotFound,
                 RaftCommandResult.NoOp,
-                RaftCommandResult.CasMismatch {
+                RaftCommandResult.CasMismatch,
+                RaftCommandResult.Refused {
 
     /**
      * The command was applied successfully.
@@ -89,6 +91,21 @@ public sealed interface RaftCommandResult<T>
     record CasMismatch<T>(T entity) implements RaftCommandResult<T> {
         public CasMismatch {
             Objects.requireNonNull(entity, "entity");
+        }
+    }
+
+    /**
+     * The command breaks a rule of the replicated state and changed nothing. Every replica refuses it the same
+     * way, from the same state.
+     *
+     * @param code    a stable code naming the rule, as an answer's error envelope carries it
+     * @param message a description for people
+     * @param <T>     entity type (phantom)
+     */
+    record Refused<T>(String code, String message) implements RaftCommandResult<T> {
+        public Refused {
+            Objects.requireNonNull(code, "code");
+            Objects.requireNonNull(message, "message");
         }
     }
 }

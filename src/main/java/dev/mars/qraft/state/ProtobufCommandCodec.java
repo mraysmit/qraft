@@ -51,6 +51,7 @@ import java.time.Instant;
  * <p>Delegates to domain-specific codecs for supported {@link RaftCommand} subtypes:
  * <ul>
  *   <li>{@link NodeCodec} — {@link NodeCommand}, Node, NodeStatus</li>
+ *   <li>{@link AclCodec} — {@link AclCommand}, with tokens, policies and roles</li>
  *   <li>Inline mapping — {@link DistributedStateRaftCommand} via SystemMetadata protobuf envelope</li>
  * </ul>
  *
@@ -84,6 +85,7 @@ public final class ProtobufCommandCodec {
                     .setCatalogCommand(toCatalogProto(cmd)).build();
             case ConfigurationCommand cmd -> RaftCommandMessage.newBuilder()
                     .setConfiguration(RaftConfigurationCodec.toProto(cmd.configuration())).build();
+            case AclCommand cmd -> RaftCommandMessage.newBuilder().setAclCommand(AclCodec.toProto(cmd)).build();
                 default -> throw new IllegalArgumentException(
                     "Unsupported RaftCommand type for protobuf codec: " + command.getClass().getName());
         };
@@ -105,6 +107,7 @@ public final class ProtobufCommandCodec {
                 case SYSTEM_METADATA_COMMAND -> fromSystemMetadataProto(raftMessage.getSystemMetadataCommand());
                 case CATALOG_COMMAND -> fromCatalogProto(raftMessage.getCatalogCommand());
                 case CONFIGURATION -> new ConfigurationCommand(RaftConfigurationCodec.fromProto(raftMessage.getConfiguration()));
+                case ACL_COMMAND -> AclCodec.fromProto(raftMessage.getAclCommand());
                 case COMMAND_NOT_SET -> null; // No-op entry
                 default -> throw new IllegalArgumentException(
                         "Unsupported protobuf command case: " + raftMessage.getCommandCase());

@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-11-02 (a name in a read route's path may contain a slash, and a registration that cannot be kept is logged as an ERROR. Earlier, 2026-11-01: the client list archived, and its link updated. Earlier the same day: client list Phase 8's check of the design: applications talk to their local client, in sections 4.3, 5, 6.2, 8.1 and 16. Earlier the same day: client list Phase 7: discovery reads through the local API, and the server's discovery reads refuse a query parameter they do not know, in sections 12.1 and 12.1.3. Earlier the same day: dated task-list links refreshed. Earlier, 2026-10-31: client list Phase 6A: an unreachable node's services leave `?passing`, and a health entry carries its node's status, in sections 9.2 and 12.1.1. Earlier the same day: section 12.1.3's comparison with Consul corrected, and section 9.2 records a gap that client list Phase 6A closes. Earlier the same day: client list Phase 6: `self`, `members` and `leave` on the local API, in sections 8.4 and 12.1.3. Earlier the same day: client list Phase 5: TTL status and maintenance through the local API, in sections 12.1.3 and 16. Earlier the same day: client list Phase 4: services and checks through the local API, in sections 6.2, 7.4, 8.2, 12.1.3 and 16. Earlier, 2026-10-30: client anti-entropy and `GET /v1/catalog/node-services/{nodeName}` in sections 7.3, 8.2, 12.1 and 22; a check ID unique across a client in section 16. Earlier the same day: client list Phase 2, the server side: the node ID and the rules for who may hold a name, after Consul's catalog, in sections 7.3 and 22, and the `X-Qraft-Node-ID` header, the 409 `node_name_reserved` refusal and the node listing's `id` in sections 12.1 and 12.1.2. Earlier, 2026-10-27: section 12.4.1: how the Vite build names the asset manifest, and the security profile in the bootstrap data. Earlier, 2026-10-26: client list Phase 1: the server's service and check write routes moved from `/v1/client/*` to `/v1/catalog/*` in sections 12.1, 12.1.1 and 12.1.2. Earlier, 2026-10-25: Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
+**Last updated:** 2026-11-04 (ACL list Phase 1: the replicated ACL state, in sections 1.1, 14.8, 15.1 and 22. Earlier, 2026-11-02: a name in a read route's path may contain a slash, and a registration that cannot be kept is logged as an ERROR. Earlier, 2026-11-01: the client list archived, and its link updated. Earlier the same day: client list Phase 8's check of the design: applications talk to their local client, in sections 4.3, 5, 6.2, 8.1 and 16. Earlier the same day: client list Phase 7: discovery reads through the local API, and the server's discovery reads refuse a query parameter they do not know, in sections 12.1 and 12.1.3. Earlier the same day: dated task-list links refreshed. Earlier, 2026-10-31: client list Phase 6A: an unreachable node's services leave `?passing`, and a health entry carries its node's status, in sections 9.2 and 12.1.1. Earlier the same day: section 12.1.3's comparison with Consul corrected, and section 9.2 records a gap that client list Phase 6A closes. Earlier the same day: client list Phase 6: `self`, `members` and `leave` on the local API, in sections 8.4 and 12.1.3. Earlier the same day: client list Phase 5: TTL status and maintenance through the local API, in sections 12.1.3 and 16. Earlier the same day: client list Phase 4: services and checks through the local API, in sections 6.2, 7.4, 8.2, 12.1.3 and 16. Earlier, 2026-10-30: client anti-entropy and `GET /v1/catalog/node-services/{nodeName}` in sections 7.3, 8.2, 12.1 and 22; a check ID unique across a client in section 16. Earlier the same day: client list Phase 2, the server side: the node ID and the rules for who may hold a name, after Consul's catalog, in sections 7.3 and 22, and the `X-Qraft-Node-ID` header, the 409 `node_name_reserved` refusal and the node listing's `id` in sections 12.1 and 12.1.2. Earlier, 2026-10-27: section 12.4.1: how the Vite build names the asset manifest, and the security profile in the bootstrap data. Earlier, 2026-10-26: client list Phase 1: the server's service and check write routes moved from `/v1/client/*` to `/v1/catalog/*` in sections 12.1, 12.1.1 and 12.1.2. Earlier, 2026-10-25: Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
 
 ## 1. Purpose
 
@@ -28,8 +28,8 @@ state referring to server HTTP or the runtime entry point.
 | Layer | Packages | Responsibility |
 |---|---|---|
 | Raft | `dev.mars.qraft.raft` and subpackages | Consensus implementation, contracts under `raft.api`, transport, generated Raft protocol classes, durable storage adapters, and Raft metrics. |
-| Replicated state | `dev.mars.qraft.state`, `state.catalog`, `state.distributed` | Deterministic state host, replicated commands/codecs, catalog projections, health observations, and distributed metadata. |
-| Common | `dev.mars.qraft.common` and subpackages | Shared node models and `ServiceDefinition`, configuration helpers, deadlines, caller-context propagation, `RaftStateLoop`, and `BlockingTaskExecutor`. |
+| Replicated state | `dev.mars.qraft.state`, `state.catalog`, `state.distributed`, `state.acl` | Deterministic state host, replicated commands/codecs, catalog projections, health observations, distributed metadata, and ACL tokens, policies and roles (section 15.1). |
+| Common | `dev.mars.qraft.common` and subpackages | Shared node models and `ServiceDefinition`, the ACL rule model and identities (`common.acl`), configuration helpers, deadlines, caller-context propagation, `RaftStateLoop`, and `BlockingTaskExecutor`. |
 | Client | `dev.mars.qraft.client` and subpackages | Registration, server-seed failover, reconciliation, heartbeat scheduling, local checks, liveness/readiness, and bounded graceful shutdown. |
 | Server | `dev.mars.qraft.server` and subpackages | Server composition/lifecycle, HTTP and external gRPC adapters, telemetry exporters, background health processing, and administrative UI. |
 | Runtime | `dev.mars.qraft.runtime` | Executable mode selection, operator command, and runtime-owned completion/shutdown boundary. |
@@ -1486,7 +1486,7 @@ At request time, the server renders a small non-cacheable `index.html` template
 with a safely JSON-encoded bootstrap object containing public runtime settings,
 such as the API base path, administrative content path, enabled feature flags,
 authentication mode, and the security profile proposed by
-[`task-list-acl-and-tokens-2026-11-01.md`](task-list-acl-and-tokens-2026-11-01.md)
+[`task-list-acl-and-tokens-2026-11-04.md`](task-list-acl-and-tokens-2026-11-04.md)
 (proposal 16). Secrets and bearer credentials are never included.
 Content-hashed assets are immutable and may receive long-lived cache headers;
 `index.html` and the asset manifest require revalidation so upgrades do not leave
@@ -1944,7 +1944,8 @@ Compatibility rules:
   `default`, empty datacenter and region, and `enabled=true`; no operator action
   or offline rewrite is required.
 - Application snapshot payload readers accept older documents that omit newer
-  catalog sections. Whole-node recovery still requires the Raft configuration
+  catalog sections. A snapshot without an `acl` section restores the initial ACL
+  state (section 15.1), proved by a fixture written before ACLs. Whole-node recovery still requires the Raft configuration
   envelope; legacy payload readability does not imply startup compatibility.
 - Mixed legacy and current WAL entries remain readable during the supported
   migration window.
@@ -2064,6 +2065,37 @@ to allowed tenants, namespaces, nodes, services, and operations.
 Initial development may use explicit identity headers in a trusted environment,
 but the boundary must be isolated behind a request-context interface so token or
 certificate authentication can replace it without changing catalog commands.
+
+### 15.1 Replicated ACL state
+
+Built on 2026-11-04 by Phase 1 of
+[`task-list-acl-and-tokens-2026-11-04.md`](task-list-acl-and-tokens-2026-11-04.md),
+on Consul's model. Nothing enforces it yet: no route, setting or command uses it
+until the list's later phases.
+
+- **What is replicated.** Tokens, policies, roles, and a bootstrap index, in
+  `state.acl.AclState`, changed only by `AclCommand` and read through the
+  read-only `QraftStateStore.getAcl()`. A token has an accessor ID, the SHA-256
+  hash of its secret, a description, links to policies and roles, node and
+  service identities, a creation time, an optional expiry, and a mark for a
+  token installed from the management file. A policy holds typed rules
+  (`common.acl.AclRules`), so that the client's authorizer can share the model.
+- **No secret is replicated.** A secret is hashed before its command is proposed,
+  so the WAL, snapshots and backups hold only hashes, following ZooKeeper's
+  digest scheme rather than Consul. A token is found by the hash of what a caller
+  presents.
+- **Built in.** The `global-management` and `builtin/global-read-only` policies
+  and the anonymous token, with Consul's IDs, are part of every server's initial
+  state. The built-ins cannot be deleted, and the policies' rules cannot change.
+- **Decided by the state machine,** from the replicated state, so every replica
+  decides the same, and refused with a code (`RaftCommandResult.Refused`): a
+  secret or expiry that an update changes; an ID, name or secret already in use;
+  a link to a policy or role that does not exist; a reserved ID; and a command
+  after which no token would hold `acl:write` without an expiry (the lock-out
+  guard). A policy or role that is linked to can be deleted, and its links are
+  dropped when a token or role is read, as in Consul.
+- **The bootstrap** works once, and again only with the current bootstrap index,
+  which counts the bootstraps applied.
 
 ## 16. Configuration
 
@@ -2630,10 +2662,11 @@ Evidence as of 2026-09-27, except where a row gives a later date:
 - Whether warning services are returned by default discovery queries.
 - Whether write forwarding is implemented server-side or seed rotation remains the
   primary client behavior.
-- Whether the server can trust a caller's claim to a node. Proposed 2026-10-05,
-  not yet decided: ACL tokens on Consul's model, in
-  [`task-list-acl-and-tokens-2026-11-01.md`](task-list-acl-and-tokens-2026-11-01.md).
-  Until it is built, any caller can claim any node name and node ID.
+- Whether the server can trust a caller's claim to a node. Proposed 2026-10-05:
+  ACL tokens on Consul's model, in
+  [`task-list-acl-and-tokens-2026-11-04.md`](task-list-acl-and-tokens-2026-11-04.md),
+  started 2026-11-04. Its replicated state exists (section 15.1), but until the
+  list enforces it, any caller can claim any node name and node ID.
 - How long legacy command and snapshot readers remain supported.
 
 Resolved on 2026-10-10: a server recovers by itself from a kill during its

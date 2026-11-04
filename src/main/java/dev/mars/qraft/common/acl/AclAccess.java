@@ -16,12 +16,21 @@
 
 package dev.mars.qraft.common.acl;
 
-
 /**
- * STUB
+ * The access a rule grants to a resource, as Consul's {@code read}, {@code write} and {@code deny}. Where two rules
+ * are equally specific, {@code deny} wins, then {@code write}, then {@code read} (ACL list, proposal 6; Consul's
+ * {@code takesPrecedenceOver} in {@code acl/policy.go}).
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-04
  * @version 1.0
  */
-public enum AclAccess { READ, WRITE, DENY }
+public enum AclAccess {
+    READ, WRITE, DENY;
+
+    /** The access that wins when this and {@code other} come from equally specific rules. */
+    public AclAccess merge(AclAccess other) {
+        if (this == DENY || other == DENY) return DENY;
+        return this == WRITE || other == WRITE ? WRITE : READ;
+    }
+}

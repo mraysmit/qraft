@@ -16,15 +16,22 @@
 
 package dev.mars.qraft.common.acl;
 
-
 /**
- * STUB
+ * A node identity: {@code write} on one node name and {@code read} on every service, as in Consul (ACL list,
+ * proposal 9). It takes any name a node can register under, which Qraft defaults to the host name, so a dot, a
+ * capital or a slash is allowed where Consul allows only a lower-case DNS label; the length limit is Consul's.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-04
  * @version 1.0
  */
 public record NodeIdentity(String nodeName) implements Comparable<NodeIdentity> {
+    public NodeIdentity {
+        nodeName = AclNames.identityName(nodeName, "a node identity's node name");
+    }
+
     @Override
-    public int compareTo(NodeIdentity other) { return 0; }
+    public int compareTo(NodeIdentity other) {
+        return nodeName.compareTo(other.nodeName);
+    }
 }

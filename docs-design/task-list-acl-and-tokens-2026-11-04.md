@@ -1,9 +1,9 @@
 # Task List: ACLs and Tokens
 
 **Date:** 2026-10-05
-**Status:** Proposed, and aligned with Consul's source on 2026-11-01 at the owner's request, except that secrets follow ZooKeeper, at the owner's decision of the same day (proposal 3). It waits for the owner's word to start. On 2026-11-01 the owner kept proposals 16, 17 and 19, changed proposal 18 to Consul's behaviour, and left `server.operator.token` to Phase 9. No code exists.
+**Status:** Active. Started on 2026-11-04 at the owner's word; Phase 1 is built (section 6). Aligned with Consul's source on 2026-11-01 at the owner's request, except that secrets follow ZooKeeper, at the owner's decision of the same day (proposal 3). On 2026-11-01 the owner kept proposals 16, 17 and 19, changed proposal 18 to Consul's behaviour, and left `server.operator.token` to Phase 9.
 **Proposed start:** after [`task-list-consul-style-client-2026-11-01.md`](../docs/archive/task-list-consul-style-client-2026-11-01.md) (proposal 15), complete on 2026-11-01.
-**Last updated:** 2026-11-01 (the owner's decisions on proposals 16 to 19 recorded: 16, 17 and 19 stay, and 18 now follows Consul, in proposal 18, the differences from Consul, and Phases 1 and 5. Earlier the same day: `defaultPolicy` has no default, and `deny` with ACLs disabled logs a critical warning, at the owner's decision: proposals 12, 13 and 16, the differences from Consul, and Phases 3 and 6. Earlier the same day: secrets stored only as a hash, following ZooKeeper rather than Consul, at the owner's decision: proposal 3, the rules, the differences from Consul, and Phases 1, 5, 6 and 9. Earlier the same day: aligned with Consul's source at the owner's request: section 3 rewritten from the source, with the items that were only recalled now read; the departures reversed, and those that stay listed at the end of section 4; roles, the bootstrap endpoint, the default policy, the client's cache, down policy and four tokens added; every route the client list built added to proposal 11, with the client deciding for itself so that it keeps working with no server; proposal 11's token for anti-entropy's removals corrected; section 2 checked again; the default profile changed to `development`. Earlier the same day: the client list complete and archived, and its link updated. Earlier the same day: renamed with the client list. Earlier, 2026-10-31: renamed with the client list; the token for the client's anti-entropy removals read in Consul's source and recommended to follow it, in proposal 11 and Phase 6; Consul's anti-entropy moved from the recalled items to what has been read. Earlier, 2026-10-30: proposal 11's planted instance corrected: the client's reconciler has had anti-entropy since `c33a2f2`, which opens the point of the token its removals use, added to Phase 6; the rule on who runs builds corrected. Earlier the same day: renamed with the client list, which changed; nothing else changed. Earlier, 2026-10-29: renamed with the client list, which changed; nothing else changed. Earlier, 2026-10-28: renamed with the client list, which changed; nothing else changed. Earlier, 2026-10-27: the review of the administrative interface against this list: four points decided by the owner: a security profile, proposal 16; a lock-out guard on the server, proposal 17; a policy that tokens link to cannot be deleted, proposal 18, which settles Phase 1's open item; and a server-side explanation of a decision, proposal 19. Proposal 12 gains the marker for a token installed from the file, and its revocation order follows from proposal 17. Phases 1, 2, 3, 5 and 9 gain the tasks. Renamed to the date of its last change, with the client list. Earlier, 2026-10-26: renamed with the client list, which became active; nothing else changed. Earlier, 2026-10-21: renamed with linked documents; this list remains proposed after the client list. Earlier, 2026-10-11: the rule that guards need recorded mutations removed at the owner's decision, from the rules and from four exits; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: proposal 11 brought in line with the node routes and with what a node's deregistration removes; the file renamed to the date of its last change; four points decided: the authorize call; revoking the management token; Consul's rule for registering a service, which needs `service:write` alone on a registered node; and a client certificate on the server's HTTP listener, for the transport security list)
+**Last updated:** 2026-11-04 (Phase 1 built, test first, with its record and the points it decided in section 6; the built-in read-only policy's name corrected to Consul's `builtin/global-read-only` in proposal 8; the anonymous token built into the initial state, in proposal 5 and Phase 3; the rows Phase 1 adds to the differences from Consul; the list renamed. Earlier, 2026-11-01: the owner's decisions on proposals 16 to 19 recorded: 16, 17 and 19 stay, and 18 now follows Consul, in proposal 18, the differences from Consul, and Phases 1 and 5. Earlier the same day: `defaultPolicy` has no default, and `deny` with ACLs disabled logs a critical warning, at the owner's decision: proposals 12, 13 and 16, the differences from Consul, and Phases 3 and 6. Earlier the same day: secrets stored only as a hash, following ZooKeeper rather than Consul, at the owner's decision: proposal 3, the rules, the differences from Consul, and Phases 1, 5, 6 and 9. Earlier the same day: aligned with Consul's source at the owner's request: section 3 rewritten from the source, with the items that were only recalled now read; the departures reversed, and those that stay listed at the end of section 4; roles, the bootstrap endpoint, the default policy, the client's cache, down policy and four tokens added; every route the client list built added to proposal 11, with the client deciding for itself so that it keeps working with no server; proposal 11's token for anti-entropy's removals corrected; section 2 checked again; the default profile changed to `development`. Earlier the same day: the client list complete and archived, and its link updated. Earlier the same day: renamed with the client list. Earlier, 2026-10-31: renamed with the client list; the token for the client's anti-entropy removals read in Consul's source and recommended to follow it, in proposal 11 and Phase 6; Consul's anti-entropy moved from the recalled items to what has been read. Earlier, 2026-10-30: proposal 11's planted instance corrected: the client's reconciler has had anti-entropy since `c33a2f2`, which opens the point of the token its removals use, added to Phase 6; the rule on who runs builds corrected. Earlier the same day: renamed with the client list, which changed; nothing else changed. Earlier, 2026-10-29: renamed with the client list, which changed; nothing else changed. Earlier, 2026-10-28: renamed with the client list, which changed; nothing else changed. Earlier, 2026-10-27: the review of the administrative interface against this list: four points decided by the owner: a security profile, proposal 16; a lock-out guard on the server, proposal 17; a policy that tokens link to cannot be deleted, proposal 18, which settles Phase 1's open item; and a server-side explanation of a decision, proposal 19. Proposal 12 gains the marker for a token installed from the file, and its revocation order follows from proposal 17. Phases 1, 2, 3, 5 and 9 gain the tasks. Renamed to the date of its last change, with the client list. Earlier, 2026-10-26: renamed with the client list, which became active; nothing else changed. Earlier, 2026-10-21: renamed with linked documents; this list remains proposed after the client list. Earlier, 2026-10-11: the rule that guards need recorded mutations removed at the owner's decision, from the rules and from four exits; otherwise renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: proposal 11 brought in line with the node routes and with what a node's deregistration removes; the file renamed to the date of its last change; four points decided: the authorize call; revoking the management token; Consul's rule for registering a service, which needs `service:write` alone on a registered node; and a client certificate on the server's HTTP listener, for the transport security list)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 7.3, 12, 15, 16 and 22
 **Related:** the client list's decisions 6 and 8; decision 6 of [`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md), the operator token; item 9 of [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md); phase 7 of [`CONSUL_FEATURE_IMPLEMENTATION_PLAN.md`](CONSUL_FEATURE_IMPLEMENTATION_PLAN.md); section 10.2 of [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md), the administrative interface's access control
 **Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
@@ -309,7 +309,8 @@ same day (proposal 3). The numbering is kept, because other documents cite it.
 5. **Anonymous, invalid, and disabled.**
    - A request without a token uses the client's default token, if any, and
      otherwise acts as a built-in anonymous token, which can have policies attached
-     and cannot be deleted.
+     and cannot be deleted. It is part of every server's initial state, with Consul's
+     accessor ID and secret (Phase 1).
    - An unknown or expired secret is refused with 403 `token_not_found`. A valid
      token without the permission is refused with 403 `permission_denied`. The
      status is Consul's; the two codes carry what its two messages do.
@@ -355,8 +356,9 @@ same day (proposal 3). The numbering is kept, because other documents cite it.
    }
    ```
 
-   The built-in `global-management` and `global-read-only` policies cannot be
-   changed or deleted. A role is a name, a description, and links to policies and
+   The built-in `global-management` and `builtin/global-read-only` policies, Consul's
+   names on its `main` branch, cannot be deleted, and their rules cannot change; as in
+   Consul, they can be renamed and described. A role is a name, a description, and links to policies and
    identities; a token that links to it holds what it holds.
 9. **Identities, as in Consul:**
    - a node identity gives `write` on that node name and `read` on every service;
@@ -658,6 +660,12 @@ differences from Consul, and changed proposal 18 to Consul's behaviour.
 | Name of the resource and tokens | `agent` | `client` | Qraft has only server mode and client mode |
 | `/raft/status` | Consul's `/v1/status/*` have no check | `operator:read` | It shows more than a leader and peers |
 | `node/heartbeat`, gRPC, `/health/*` | No counterpart | As in proposal 11 | Qraft's own routes |
+| The anonymous token (Phase 1) | Created by the leader when it gains leadership | In every server's initial state | The same on every replica with no command |
+| Bootstrap reset index (Phase 1) | The bootstrap's Raft index | A count of bootstraps applied | The state machine is not given an entry's index |
+| Stored rules (Phase 1) | The rule text, parsed when used | Typed rules, sorted, with no rule twice | Validated once, when stored, and encoded the same on every replica |
+| Identity names (Phase 1) | A lower-case DNS label | Any node or service name, 256 characters at most | Qraft's node names default to the host name |
+| A service identity's scope (Phase 1) | The token's partition and namespace | Its own tenant and namespace | A Qraft token has no scope |
+| Secret and expiry unchanged on update (Phase 1) | Checked by the leader's token writer | Checked by the state machine | Every replica refuses the same |
 
 ## 5. Rules
 
@@ -687,24 +695,85 @@ differences from Consul, and changed proposal 18 to Consul's behaviour.
 
 ### Phase 1. Replicated ACL state
 
-- [ ] Add the token, policy, and role values, with the validation of proposals 2 and 6 to 9.
-- [ ] Add the commands: create, update, and delete a token, a policy, and a role; bootstrap, used
+- [x] Add the token, policy, and role values, with the validation of proposals 2 and 6 to 9.
+- [x] Add the commands: create, update, and delete a token, a policy, and a role; bootstrap, used
   by the endpoint and the management file alike; and delete expired tokens. Add their protobuf
   messages with new field numbers, and their place in the snapshot.
-- [ ] Hold a secret only as its SHA-256 hash, taken before the command is proposed, and look a token up by
+- [x] Hold a secret only as its SHA-256 hash, taken before the command is proposed, and look a token up by
   that hash (proposal 3). A test on real storage searches the WAL and a snapshot for the secret, and fails if
   it finds it.
-- [ ] Refuse a change to a token's secret or expiry.
-- [ ] Build in the `global-management` and `global-read-only` policies and the anonymous token.
+- [x] Refuse a change to a token's secret or expiry.
+- [x] Build in the `global-management` and `builtin/global-read-only` policies and the anonymous token.
   None of them can be deleted, and the policies' rules cannot change.
-- [ ] Allow the deletion of a policy or role that a token links to, and drop the links when the token or role is
+- [x] Allow the deletion of a policy or role that a token links to, and drop the links when the token or role is
   next read (proposal 18). A test proves that the deleted policy no longer grants anything, and that a deletion
   the lock-out guard refuses leaves the links in place.
-- [ ] Apply the lock-out guard in the state machine (proposal 17). Include a determinism test of two
+- [x] Apply the lock-out guard in the state machine (proposal 17). Include a determinism test of two
   commands in flight that would together remove the last token holding `acl:write` without an expiry.
-- [ ] Record `installedFromFile` on the token the management file installs (proposal 12).
+- [x] Record `installedFromFile` on the token the management file installs (proposal 12).
 
 **Exit:** Codec, determinism, and legacy-fixture tests.
+
+**Record, 2026-11-04.** Built test first, checked against Consul's source on its `main` branch
+(`agent/structs/acl.go`, `acl/acl.go`, `acl/validation.go`, `agent/consul/state/acl.go` and `acl_schema.go`,
+`agent/consul/acl_endpoint.go`, `agent/consul/auth/token_writer.go`, `agent/consul/leader.go`). No route, setting or
+command line uses it yet; with ACLs not yet configurable, a server's only change is that its snapshots carry an `acl`
+section.
+
+- **Where it lives.** The rule model and the identities are in `common.acl` (`AclResource`, `AclAccess`, `AclScope`,
+  `AclRule`, `AclRules`, `NodeIdentity`, `ServiceIdentity`), because Phase 2's authorizer is shared with the client,
+  which may use only Common. The stored values and the state are in `state.acl` (`AclToken`, `AclPolicy`, `AclRole`,
+  `AclSecrets`, `AclBuiltins`, `AclRefusal`, `AclState`, and the read-only `AclView` that
+  `QraftStateStore.getAcl()` answers). The commands are `state.AclCommand`, encoded by `state.AclCodec` as
+  `AclCommandProto`, field 5 of `RaftCommandMessage`.
+- **Rules are held typed, not as text.** A policy holds its rules as `AclRules`, sorted and with no rule twice, and the
+  WAL and snapshot hold them in that form. Phase 2 parses Consul's JSON form into it and the authorizer evaluates it;
+  Phase 5 writes it back as JSON. Consul stores the rule text and parses it when used.
+- **A refusal is a result.** `RaftCommandResult` gained `Refused`, with a code from `AclRefusal`: `accessor_in_use`,
+  `secret_in_use`, `reserved_id`, `id_in_use`, `name_in_use`, `policy_not_found`, `role_not_found`,
+  `secret_immutable`, `expiry_immutable`, `builtin_immutable`, `acl_lockout`, `acl_bootstrapped` and
+  `invalid_reset_index`. A missing token, policy or role to update or delete is `NotFound`.
+- **Built in, not created at leadership.** The two policies and the anonymous token are part of every server's initial
+  state, so they need no command and a snapshot from before ACLs restores them. Consul's leader creates the anonymous
+  token when it gains leadership. Phase 3 therefore no longer creates it. The anonymous token's creation time is the
+  epoch, the same on every server.
+- **Consul's IDs and names.** `global-management` is `00000000-0000-0000-0000-000000000001`, `builtin/global-read-only`
+  `...0002`, and the anonymous token's accessor `...0002` with the secret `anonymous`. IDs beginning
+  `00000000-0000-0000-0000-0000000000` are reserved, so a created token, policy or role cannot take one. This list
+  had named the read-only policy `global-read-only`; Consul's `main` renamed it and reserves the `builtin/` prefix.
+- **IDs and secrets.** An accessor, policy or role ID is a canonical UUID, held in lower case, because Consul indexes
+  it as a UUID's bytes. A secret is hashed as written, because Consul compares secrets case-sensitively
+  (`indexFromStringCaseSensitive`).
+- **Names.** Policy names follow `ValidatePolicyName` (128 characters, at most one `/`, no `builtin/`), role names
+  `validRoleName` (256), and both are unique regardless of case, as Consul's name indexes lower-case them.
+- **Identities, departing from Consul.** A node identity takes any name a node can register under, because Qraft's
+  node names default to the host name and may hold a dot, a capital or a slash; Consul allows only a lower-case DNS
+  label. A service identity carries its service's tenant and namespace, `default` unless given, because a Qraft token
+  has no scope; Consul Enterprise takes them from the token's partition and namespace.
+- **Expiry.** An expiry lies between one minute and 24 hours after the token's creation time, both stamped by the
+  leader, so the value checks Phase 8's bounds without a clock.
+- **Updates keep what the server owns:** a token's creation time and its `installedFromFile` mark. The secret and
+  the expiry must be the ones it has; Consul's token writer checks this on the leader, and here the state machine does.
+- **The bootstrap index is a count.** The state machine is not given an entry's Raft index, so the reset index is the
+  number of bootstraps applied, kept in the replicated state. Consul uses the bootstrap's Raft index. Either way an
+  operator copies it from the refusal into `acl-bootstrap-reset`.
+- **The lock-out guard** counts a token that has no expiry and whose policies, directly and through its roles, merge
+  to `write` for `acl`; links to deleted policies and roles grant nothing. Before any token holds `acl:write`, nothing
+  is a lock-out, so a cluster can be set up before its bootstrap.
+- **Tests,** each seen red on a stub before the code existed, except two written after the code they cover, which
+  passed at their first run: `AclFixtureTest` and `AclSecretStorageTest`. `AclRulesTest` 7, `AclIdentityTest` 3,
+  `AclValuesTest` 7, `AclStateStoreTest` 15, `AclCommandCodecTest` 4 (its field-number test pins the schema and
+  passed on the stub), `ReplicaDeterminismTest` 3 new, `AclFixtureTest` 3 and `AclSecretStorageTest` 1. The fixture
+  `fixtures/acl/snapshot-before-acl.json` was written by the code at `1eb1955`, before any of this.
+- **Exit met on 2026-11-04,** on a local run of the three suites (Jenkins does not answer from the `markr`
+  workstation): default 1,502 with every coverage gate met, end-to-end 13, Docker and `slow` 44, no failures, errors
+  or skips; 236 retained logs with 683 ERROR lines, all flagged, and 585 stack traces, none under an unflagged
+  header.
+- **Open for the owner: a server from before ACLs that meets an ACL entry.** It reads field 5 of `RaftCommandMessage`
+  as an unknown field, decodes the entry as a no-op, and applies nothing, where it should stop as it does for a command
+  it cannot apply. That divergence needs a rolling upgrade that writes an ACL command before every server runs this
+  code; nothing writes one until Phase 3. Consul marks such entries with `IgnoreUnknownTypeFlag` to choose. The fix
+  belongs in the codec, before Phase 3, and is the owner's to order.
 
 ### Phase 2. The authorizer
 
@@ -727,7 +796,8 @@ differences from Consul, and changed proposal 18 to Consul's behaviour.
 - [ ] `PUT /v1/acl/bootstrap`: once only, then 403 with the reset index. The reset through
   `acl-bootstrap-reset` in the leader's data directory, removing the file when used.
 - [ ] The leader installs the management token when it gains leadership and none has that secret, through
-  the bootstrap command, and creates the anonymous token. Doing it twice changes nothing.
+  the bootstrap command, or, once the bootstrap is used, a token creation, as Consul's `initializeACLs` does.
+  Doing it twice changes nothing. The anonymous token needs nothing: it is built in (Phase 1).
 - [ ] Log the effective settings without the secret.
 - [ ] Add `server.security.profile` (proposal 16), `development` by default. Refuse `production` with ACLs
   disabled or `defaultPolicy` `allow`, before any resource opens. Log the one startup warning for

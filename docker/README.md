@@ -67,7 +67,7 @@ even on the same Docker network, is refused the connection.
 A deployment whose applications cannot share the namespace sets `client.bindAddress`
 instead, for example to `0.0.0.0`, as Consul's `client_addr` is set for containers.
 The local API has no authentication until
-[the ACL list](../docs-design/task-list-acl-and-tokens-2026-11-01.md), so that exposes all
+[the ACL list](../docs-design/task-list-acl-and-tokens-2026-11-04.md), so that exposes all
 of it to anything that can reach the port. Such a caller can register and remove this
 node's services and checks, set their status and maintenance, read the client's settings
 and discover services in any tenant and namespace, and make the client leave and exit. Keep

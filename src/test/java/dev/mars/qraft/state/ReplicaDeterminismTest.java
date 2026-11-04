@@ -18,6 +18,16 @@ package dev.mars.qraft.state;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.mars.qraft.common.acl.AclAccess;
+import dev.mars.qraft.common.acl.AclResource;
+import dev.mars.qraft.common.acl.AclRule;
+import dev.mars.qraft.common.acl.AclRules;
+import dev.mars.qraft.raft.RaftCommandResult;
+import dev.mars.qraft.state.acl.AclBuiltins;
+import dev.mars.qraft.state.acl.AclPolicy;
+import dev.mars.qraft.state.acl.AclRole;
+import dev.mars.qraft.state.acl.AclSecrets;
+import dev.mars.qraft.state.acl.AclToken;
 import dev.mars.qraft.state.catalog.ServiceKey;
 import dev.mars.qraft.common.Node;
 import dev.mars.qraft.common.NodeStatus;
@@ -292,6 +302,123 @@ class ReplicaDeterminismTest {
                 NodeCommand.register(identified("web-4", c), registered.plusSeconds(34)),
                 NodeCommand.register(identified("WEB-4", a), registered.plusSeconds(35)),
                 CatalogCommand.register(onWeb1, List.of("http"), a));
+    }
+
+    @Test
+    void aclCommandsDecideTheSameOnEveryReplicaAndAfterASnapshot() {
+        List<RaftCommand> log = aclLog();
+
+        QraftStateStore replica = new QraftStateStore();
+        List<String> decisions = new ArrayList<>();
+        log.forEach(command -> decisions.add(outcome(replica.apply(codec.deserialize(codec.serialize(command))))));
+
+        QraftStateStore leader = new QraftStateStore();
+        QraftStateStore follower = new QraftStateStore();
+        List<String> followerDecisions = new ArrayList<>();
+        int half = log.size() / 2;
+        for (RaftCommand command : log.subList(0, half)) {
+            followerDecisions.add(outcome(leader.apply(codec.deserialize(codec.serialize(command)))));
+        }
+        follower.restoreSnapshot(leader.takeSnapshot());
+        for (RaftCommand command : log.subList(half, log.size())) {
+            followerDecisions.add(outcome(follower.apply(codec.deserialize(codec.serialize(command)))));
+        }
+
+        assertEquals(decisions, followerDecisions, "every replica decides each ACL command the same");
+        assertEquals(snapshotText(replica), snapshotText(follower), "and ends with the same ACL state");
+        assertEquals(List.of("Success", "Success", "Success", "Success", "Refused", "Success", "Success", "Refused",
+                "Success", "Success"), decisions);
+    }
+
+    @Test
+    void twoCommandsInFlightCannotTogetherRemoveTheLastTokenHoldingAclWrite() {
+        // Each deletion alone leaves the other token holding acl:write, so a leader that checked each against the
+        // state it proposed from would accept both. The state machine checks each as it applies it.
+        List<RaftCommand> log = new ArrayList<>(aclLog().subList(0, 3));
+        log.add(AclCommand.deleteToken(ACL_ALICE));
+        log.add(AclCommand.deleteToken(ACL_BOB));
+
+        for (int restoreAt = 0; restoreAt <= log.size(); restoreAt++) {
+            QraftStateStore before = new QraftStateStore();
+            List<RaftCommandResult<?>> results = new ArrayList<>();
+            for (RaftCommand command : log.subList(0, restoreAt)) {
+                results.add(before.apply(codec.deserialize(codec.serialize(command))));
+            }
+            QraftStateStore replica = new QraftStateStore();
+            replica.restoreSnapshot(before.takeSnapshot());
+            for (RaftCommand command : log.subList(restoreAt, log.size())) {
+                results.add(replica.apply(codec.deserialize(codec.serialize(command))));
+            }
+
+            assertEquals("Success", outcome(results.get(3)), "restored at " + restoreAt);
+            assertEquals(new RaftCommandResult.Refused<>("acl_lockout",
+                            "No token would hold acl:write without an expiry after this change, so it is refused"),
+                    results.get(4), "restored at " + restoreAt);
+            assertEquals(List.of(AclBuiltins.ANONYMOUS_TOKEN_ID, ACL_BOB),
+                    replica.getAcl().tokens().stream().map(AclToken::accessorId).toList());
+        }
+    }
+
+    @Test
+    void aclStateIsWrittenToASnapshotInIdOrder() throws Exception {
+        QraftStateStore store = new QraftStateStore();
+        for (char suffix = 'f'; suffix >= 'a'; suffix--) {
+            String id = "6ba7b81" + suffix + "-9dad-41d1-80b4-00c04fd430c8";
+            store.apply(codec.deserialize(codec.serialize(AclCommand.createToken(new AclToken(id,
+                    AclSecrets.hash("3f2504e" + suffix + "-4f89-41d3-9a0c-0305e82c3301"), "", List.of(), List.of(),
+                    List.of(), List.of(), NANOS, null, false)))));
+            store.apply(codec.deserialize(codec.serialize(AclCommand.createPolicy(
+                    new AclPolicy(id, "policy-" + suffix, "", AclRules.EMPTY)))));
+            store.apply(codec.deserialize(codec.serialize(AclCommand.createRole(
+                    new AclRole(id, "role-" + suffix, "", List.of(id), List.of(), List.of())))));
+        }
+
+        byte[] snapshot = store.takeSnapshot();
+        QraftStateStore restored = new QraftStateStore();
+        restored.restoreSnapshot(snapshot);
+
+        assertEquals(new String(snapshot, StandardCharsets.UTF_8), snapshotText(restored));
+        for (String list : List.of("tokens", "policies", "roles")) {
+            List<String> order = new ArrayList<>();
+            JSON.readTree(snapshot).get("acl").get(list).forEach(entry ->
+                    order.add(entry.has("accessorId") ? entry.get("accessorId").asText() : entry.get("id").asText()));
+            assertEquals(true, order.size() >= 6, list + " holds the ordering fixture");
+            assertEquals(order.stream().sorted().toList(), order, list + " are written in ID order");
+        }
+    }
+
+    private static final String ACL_ALICE = "6ba7b810-9dad-41d1-80b4-00c04fd430c8";
+    private static final String ACL_BOB = "6ba7b811-9dad-41d1-80b4-00c04fd430c8";
+
+    /**
+     * A log of ACL commands: a policy granting acl:write, two tokens holding it, a role, a refused bootstrap reset,
+     * a policy deleted while linked, a lock-out refused, and expired tokens deleted.
+     */
+    private static List<RaftCommand> aclLog() {
+        String writers = "1b4e28ba-2fa1-4d2a-883f-0016d3cca427";
+        String team = "9c5b94b1-35ad-49bb-b118-8e8fc24abf80";
+        String expiring = "6ba7b812-9dad-41d1-80b4-00c04fd430c8";
+        Instant created = Instant.parse("2026-11-04T09:00:00Z");
+        AclRules aclWrite = new AclRules(List.of(AclRule.single(AclResource.ACL, AclAccess.WRITE)));
+        return List.of(
+                AclCommand.createPolicy(new AclPolicy(writers, "acl-writers", "", aclWrite)),
+                AclCommand.bootstrap(aclToken(ACL_ALICE, "3f2504e0-4f89-41d3-9a0c-0305e82c3301", created, null,
+                        AclBuiltins.GLOBAL_MANAGEMENT_ID), 0),
+                AclCommand.createToken(aclToken(ACL_BOB, "3f2504e1-4f89-41d3-9a0c-0305e82c3301", created, null, writers)),
+                AclCommand.createRole(new AclRole(team, "team", "", List.of(writers), List.of(), List.of())),
+                AclCommand.bootstrap(aclToken(expiring, "3f2504e2-4f89-41d3-9a0c-0305e82c3301", created, null), 5),
+                AclCommand.createToken(aclToken(expiring, "3f2504e2-4f89-41d3-9a0c-0305e82c3301", created,
+                        created.plus(java.time.Duration.ofHours(1)), AclBuiltins.GLOBAL_MANAGEMENT_ID)),
+                AclCommand.deleteToken(ACL_ALICE),
+                AclCommand.deletePolicy(writers),
+                AclCommand.updatePolicy(new AclPolicy(writers, "Acl-Writers", "renamed", aclWrite)),
+                AclCommand.deleteExpiredTokens(created.plus(java.time.Duration.ofHours(1)), List.of(expiring, ACL_BOB)));
+    }
+
+    private static AclToken aclToken(String accessor, String secret, Instant created, Instant expires,
+                                     String... policies) {
+        return new AclToken(accessor, AclSecrets.hash(secret), "", List.of(policies), List.of(), List.of(), List.of(),
+                created, expires, false);
     }
 
     private static Node identified(String name, String id) {

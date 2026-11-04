@@ -24,6 +24,8 @@ import dev.mars.qraft.common.NodeStatus;
 import dev.mars.qraft.raft.RaftCommand;
 import dev.mars.qraft.raft.RaftCommandResult;
 import dev.mars.qraft.raft.RaftLogApplicator;
+import dev.mars.qraft.state.acl.AclState;
+import dev.mars.qraft.state.acl.AclView;
 import dev.mars.qraft.state.distributed.DistributedStateCommand;
 import dev.mars.qraft.state.catalog.ServiceCatalog;
 import dev.mars.qraft.state.catalog.ServiceCatalogView;
@@ -45,7 +47,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Replicated server state for nodes and generic distributed metadata.
+ * Replicated server state: nodes, the service catalog and its health, ACLs, and generic distributed metadata.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-03-15
@@ -62,6 +64,8 @@ public final class QraftStateStore implements RaftLogApplicator {
     private final ServiceCatalogView catalogView = ServiceCatalogView.of(serviceCatalog);
     private final Map<ServiceCheckId, HealthCheckState> healthChecks = new ConcurrentHashMap<>();
     private final Map<ServiceInstanceId, List<String>> declaredChecks = new ConcurrentHashMap<>();
+    private final AclState acl = new AclState();
+    private final AclView aclView = AclView.of(acl);
     private final AtomicLong lastAppliedIndex = new AtomicLong();
     private final ObjectMapper objectMapper = new ObjectMapper()
             .findAndRegisterModules()
@@ -86,6 +90,7 @@ public final class QraftStateStore implements RaftLogApplicator {
             case NodeCommand clientCommand -> applyNodeCommand(clientCommand);
             case DistributedStateRaftCommand stateCommand -> applyMetadataCommand(stateCommand.delegate());
             case CatalogCommand catalogCommand -> applyCatalogCommand(catalogCommand);
+            case AclCommand aclCommand -> applyAclCommand(aclCommand);
             default -> throw new IllegalArgumentException("Unsupported server command: "
                     + command.getClass().getName());
         };
@@ -135,6 +140,22 @@ public final class QraftStateStore implements RaftLogApplicator {
             }
             case CatalogCommand.ObserveHealth observe -> applyHealthObservation(observe);
             case CatalogCommand.ExpireHealth expire -> applyHealthExpiry(expire);
+        };
+    }
+
+    private RaftCommandResult<?> applyAclCommand(AclCommand command) {
+        return switch (command) {
+            case AclCommand.CreateToken create -> acl.createToken(create.token());
+            case AclCommand.UpdateToken update -> acl.updateToken(update.token());
+            case AclCommand.DeleteToken delete -> acl.deleteToken(delete.accessorId());
+            case AclCommand.CreatePolicy create -> acl.createPolicy(create.policy());
+            case AclCommand.UpdatePolicy update -> acl.updatePolicy(update.policy());
+            case AclCommand.DeletePolicy delete -> acl.deletePolicy(delete.id());
+            case AclCommand.CreateRole create -> acl.createRole(create.role());
+            case AclCommand.UpdateRole update -> acl.updateRole(update.role());
+            case AclCommand.DeleteRole delete -> acl.deleteRole(delete.id());
+            case AclCommand.Bootstrap bootstrap -> acl.bootstrap(bootstrap.token(), bootstrap.resetIndex());
+            case AclCommand.DeleteExpiredTokens expired -> acl.deleteExpiredTokens(expired.asOf(), expired.accessorIds());
         };
     }
 
@@ -416,7 +437,7 @@ public final class QraftStateStore implements RaftLogApplicator {
                     .toList();
             return objectMapper.writeValueAsBytes(new Snapshot(Map.copyOf(nodes), Map.copyOf(heartbeatSequences),
                     Map.copyOf(metadata), serviceCatalog.instances(), orderedHealthChecks, orderedDeclarations,
-                    lastAppliedIndex.get()));
+                    acl.snapshot(), lastAppliedIndex.get()));
         } catch (IOException e) {
             throw new IllegalStateException("Failed to serialize server snapshot", e);
         }
@@ -444,6 +465,7 @@ public final class QraftStateStore implements RaftLogApplicator {
                 snapshot.declaredChecks().forEach(declared ->
                         declaredChecks.put(declared.instance(), List.copyOf(declared.checkIds())));
             }
+            acl.restore(snapshot.acl());
             lastAppliedIndex.set(snapshot.lastAppliedIndex());
         } catch (IOException e) {
             throw new IllegalStateException("Failed to restore server snapshot", e);
@@ -469,6 +491,7 @@ public final class QraftStateStore implements RaftLogApplicator {
         serviceCatalog.clear();
         healthChecks.clear();
         declaredChecks.clear();
+        acl.reset();
         lastAppliedIndex.set(0);
     }
 
@@ -503,6 +526,11 @@ public final class QraftStateStore implements RaftLogApplicator {
         return Optional.ofNullable(healthChecks.get(checkId));
     }
 
+    /** Returns a read-only view; ACL state changes only through committed commands. */
+    public AclView getAcl() {
+        return aclView;
+    }
+
     public List<HealthCheckState> healthChecks() {
         return healthChecks.values().stream()
                 .sorted(Comparator.comparing(state -> state.checkId().toString()))
@@ -512,7 +540,8 @@ public final class QraftStateStore implements RaftLogApplicator {
     /**
      * {@code nodes} is also read under the two names that earlier snapshots use. Unknown properties are ignored
      * on restore, so without these names such a snapshot would restore with its nodes silently missing. They are
-     * read and never written.
+     * read and never written. {@code acl} is absent from snapshots written before ACLs, which restore the initial ACL
+     * state.
      */
     private record Snapshot(@JsonAlias({"clients", "agents"}) Map<String, Node> nodes,
                             Map<String, Long> heartbeatSequences,
@@ -520,6 +549,7 @@ public final class QraftStateStore implements RaftLogApplicator {
                             java.util.List<ServiceInstance> services,
                             java.util.List<HealthCheckState> healthChecks,
                             java.util.List<DeclaredChecks> declaredChecks,
+                            AclState.Snapshot acl,
                             long lastAppliedIndex) {
     }
 

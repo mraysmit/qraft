@@ -58,7 +58,7 @@ decision 10 on 2026-10-09. Decisions 5 to 8 follow the Consul pattern.
      replicated step, as in Consul (decided by the user on 2026-10-09).
 6. **The local API binds to `127.0.0.1` by default,** like Consul's
    `client_addr`. It has no authentication until
-   [`task-list-acl-and-tokens-2026-11-01.md`](../../docs-design/task-list-acl-and-tokens-2026-11-01.md),
+   [`task-list-acl-and-tokens-2026-11-04.md`](../../docs-design/task-list-acl-and-tokens-2026-11-04.md),
    which is proposed to follow this list; liveness and readiness share the
    same listener.
 7. **Registrations follow Consul's rules.**
@@ -661,7 +661,7 @@ had declared on another class's evidence were removed after it; the next full ru
 - Authentication and ACLs, on the local API and on the server. Until they
   exist, decision 8 detects a conflicting node identity but cannot stop a
   caller from claiming one. Proposed in
-  [`task-list-acl-and-tokens-2026-11-01.md`](../../docs-design/task-list-acl-and-tokens-2026-11-01.md).
+  [`task-list-acl-and-tokens-2026-11-04.md`](../../docs-design/task-list-acl-and-tokens-2026-11-04.md).
 - Forwarding key/value, sessions, consistency modes, and blocking queries. Each
   is added when the corresponding server feature lands.
 - Response caching in the client, gossip, and configuration-file reload.

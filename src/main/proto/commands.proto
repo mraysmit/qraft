@@ -165,11 +165,113 @@ message RaftConfigurationProto {
   repeated RaftServerProto servers = 1;
 }
 
+// The resources and access levels of ACL rules. Zero is never written; an entry holding it, or a value this server
+// does not know, is refused rather than read as another resource or level.
+enum AclResourceProto {
+  ACL_RESOURCE_UNSPECIFIED = 0;
+  ACL_RESOURCE_NODE = 1;
+  ACL_RESOURCE_SERVICE = 2;
+  ACL_RESOURCE_CLIENT = 3;
+  ACL_RESOURCE_OPERATOR = 4;
+  ACL_RESOURCE_ACL = 5;
+}
+
+enum AclAccessProto {
+  ACL_ACCESS_UNSPECIFIED = 0;
+  ACL_ACCESS_READ = 1;
+  ACL_ACCESS_WRITE = 2;
+  ACL_ACCESS_DENY = 3;
+}
+
+// The tenants or namespaces a service rule applies in: an exact name, or a prefix that may be empty.
+message AclScopeProto {
+  string name = 1;
+  bool prefix = 2;
+}
+
+// One rule of a policy. A single-valued resource has no name; only a service rule has a tenant and a namespace.
+message AclRuleProto {
+  AclResourceProto resource = 1;
+  optional string name = 2;
+  bool prefix = 3;
+  AclAccessProto access = 4;
+  AclScopeProto tenant = 5;
+  AclScopeProto namespace = 6;
+}
+
+message AclNodeIdentityProto {
+  string node_name = 1;
+}
+
+message AclServiceIdentityProto {
+  string service_name = 1;
+  string tenant = 2;
+  string namespace = 3;
+}
+
+// A token as replicated state holds it: the SHA-256 hash of its secret, never the secret.
+message AclTokenProto {
+  string accessor_id = 1;
+  string secret_hash = 2;
+  string description = 3;
+  repeated string policy_ids = 4;
+  repeated string role_ids = 5;
+  repeated AclNodeIdentityProto node_identities = 6;
+  repeated AclServiceIdentityProto service_identities = 7;
+  int64 create_time_epoch_ms = 8;
+  optional int64 expiration_time_epoch_ms = 9;
+  bool installed_from_file = 10;
+}
+
+message AclPolicyProto {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  repeated AclRuleProto rules = 4;
+}
+
+message AclRoleProto {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  repeated string policy_ids = 4;
+  repeated AclNodeIdentityProto node_identities = 5;
+  repeated AclServiceIdentityProto service_identities = 6;
+}
+
+message AclBootstrapProto {
+  AclTokenProto token = 1;
+  int64 reset_index = 2;
+}
+
+message AclDeleteExpiredTokensProto {
+  int64 as_of_epoch_ms = 1;
+  repeated string accessor_ids = 2;
+}
+
+// A mutation of the replicated ACL state. An entry with no command set is refused.
+message AclCommandProto {
+  oneof command {
+    AclTokenProto create_token = 1;
+    AclTokenProto update_token = 2;
+    string delete_token = 3;
+    AclPolicyProto create_policy = 4;
+    AclPolicyProto update_policy = 5;
+    string delete_policy = 6;
+    AclRoleProto create_role = 7;
+    AclRoleProto update_role = 8;
+    string delete_role = 9;
+    AclBootstrapProto bootstrap = 10;
+    AclDeleteExpiredTokensProto delete_expired_tokens = 11;
+  }
+}
+
 message RaftCommandMessage {
   oneof command {
     NodeCommandProto node_command = 1;
     SystemMetadataCommandProto system_metadata_command = 2;
     CatalogCommandProto catalog_command = 3;
     RaftConfigurationProto configuration = 4;
+    AclCommandProto acl_command = 5;
   }
 }

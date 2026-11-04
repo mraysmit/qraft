@@ -16,15 +16,29 @@
 
 package dev.mars.qraft.common.acl;
 
-
 /**
- * STUB
+ * The tenants or namespaces a {@code service} rule applies in: one by its exact name, or every one whose name starts
+ * with a prefix, which may be empty to match any (ACL list, proposal 7). The counterpart of Consul Enterprise's
+ * {@code partition} and {@code namespace} nesting, with its {@code _prefix} forms.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-04
  * @version 1.0
  */
-public record AclScope(String name, boolean prefix) {
-    public static final AclScope DEFAULT = null;
-    public static final AclScope ANY = null;
+public record AclScope(String name, boolean prefix) implements Comparable<AclScope> {
+    /** Where a rule outside a {@code tenant} or {@code namespace} nesting applies. */
+    public static final AclScope DEFAULT = new AclScope("default", false);
+    /** Every tenant or namespace: the empty prefix. */
+    public static final AclScope ANY = new AclScope("", true);
+
+    public AclScope {
+        AclNames.requireMatch(name, prefix, "a scope");
+    }
+
+    /** Exact scopes before prefixes, then by name, so that a policy's rules have one order. */
+    @Override
+    public int compareTo(AclScope other) {
+        int byForm = Boolean.compare(prefix, other.prefix);
+        return byForm != 0 ? byForm : name.compareTo(other.name);
+    }
 }
