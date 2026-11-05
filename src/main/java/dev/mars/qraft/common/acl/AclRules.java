@@ -50,24 +50,6 @@ public record AclRules(List<AclRule> rules) {
         rules = List.copyOf(ordered);
     }
 
-    /**
-     * The access that {@code policies} together grant to a single-valued resource, {@code operator} or {@code acl},
-     * or {@code null} when none has a rule for it. Every rule for such a resource is equally specific, so
-     * {@link AclAccess#merge} decides.
-     */
-    public static AclAccess mergedAccess(AclResource resource, List<AclRules> policies) {
-        if (resource.named()) {
-            throw new IllegalArgumentException(resource.ruleName() + " is named, so it has no single access");
-        }
-        AclAccess merged = null;
-        for (AclRules policy : policies) {
-            for (AclRule rule : policy.rules()) {
-                if (rule.resource() == resource) merged = merged == null ? rule.access() : merged.merge(rule.access());
-            }
-        }
-        return merged;
-    }
-
     private static AclRules global(AclAccess access) {
         return new AclRules(List.of(
                 AclRule.prefix(AclResource.NODE, "", access),

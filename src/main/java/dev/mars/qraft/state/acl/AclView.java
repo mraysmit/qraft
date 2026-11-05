@@ -16,6 +16,8 @@
 
 package dev.mars.qraft.state.acl;
 
+import dev.mars.qraft.common.acl.AclGrant;
+
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -82,6 +84,15 @@ public final class AclView {
     /** Every role, in ID order. */
     public List<AclRole> roles() {
         return state.roles();
+    }
+
+    /**
+     * What {@code token} is granted, for {@link dev.mars.qraft.common.acl.AclAuthorizer}: its own policies, node
+     * identities and service identities, then those of each of its roles, each in ID or name order, leaving out
+     * policies and roles that no longer exist.
+     */
+    public List<AclGrant> grants(AclToken token) {
+        return state.grants(token);
     }
 
     /** How many bootstraps have been applied: zero before the first, and the reset index after it. */

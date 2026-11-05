@@ -17,8 +17,13 @@
 package dev.mars.qraft.state.acl;
 
 import dev.mars.qraft.common.acl.AclAccess;
+import dev.mars.qraft.common.acl.AclAuthorizer;
+import dev.mars.qraft.common.acl.AclDefaultPolicy;
+import dev.mars.qraft.common.acl.AclGrant;
+import dev.mars.qraft.common.acl.AclRequest;
 import dev.mars.qraft.common.acl.AclResource;
-import dev.mars.qraft.common.acl.AclRules;
+import dev.mars.qraft.common.acl.NodeIdentity;
+import dev.mars.qraft.common.acl.ServiceIdentity;
 import dev.mars.qraft.raft.RaftCommandResult;
 
 import java.time.Instant;
@@ -50,9 +55,8 @@ import java.util.TreeMap;
  *   <li><b>What cannot change.</b> A token's secret and expiry; its creation time and installed-from-file mark, which
  *       an update keeps; a built-in policy's rules; and the existence of the built-ins.</li>
  *   <li><b>The lock-out guard</b> (proposal 17). While some token holds {@code acl:write} without an expiry, a command
- *       after which none would is refused with {@link AclRefusal#ACL_LOCKOUT}. Holding it means that the policies the
- *       token reaches, directly or through its roles, merge to {@code write} for {@code acl}; identities never grant
- *       it. The guard is applied here, as each command applies, so that two commands in flight cannot together
+ *       after which none would is refused with {@link AclRefusal#ACL_LOCKOUT}. Holding it is decided by
+ *       {@link AclAuthorizer} over the token's grants, directly and through its roles; identities never grant it. The guard is applied here, as each command applies, so that two commands in flight cannot together
  *       remove the last holder. Consul has no such guard.</li>
  *   <li><b>The bootstrap index</b> counts the bootstraps applied, and is the reset index an operator writes to
  *       {@code acl-bootstrap-reset}. Consul uses the bootstrap's Raft index; the state machine is not given an
@@ -70,6 +74,7 @@ public final class AclState {
     private static final String TOKEN = "AclToken";
     private static final String POLICY = "AclPolicy";
     private static final String ROLE = "AclRole";
+    private static final AclRequest ACL_WRITE = AclRequest.single(AclResource.ACL, AclAccess.WRITE);
 
     private volatile Tables tables = Tables.initial();
 
@@ -278,6 +283,10 @@ public final class AclState {
         return tables.bootstrapIndex;
     }
 
+    List<AclGrant> grants(AclToken token) {
+        return tables.grants(token);
+    }
+
     /** The state for a snapshot, with links as they are stored, each list in ID order. */
     public Snapshot snapshot() {
         Tables current = tables;
@@ -314,11 +323,14 @@ public final class AclState {
         return new RaftCommandResult.Success<>(entity);
     }
 
-    /** Whether some token in {@code state} holds {@code acl:write} without an expiry. */
+    /**
+     * Whether some token in {@code state} holds {@code acl:write} without an expiry, decided by the same authorizer
+     * that enforcement uses. No default policy grants {@code acl}, so the one given here changes nothing.
+     */
     private static boolean holdsAclWrite(Tables state) {
         for (AclToken token : state.tokens.values()) {
-            if (token.expirationTime() == null
-                    && AclRules.mergedAccess(AclResource.ACL, state.rulesReachedBy(token)) == AclAccess.WRITE) {
+            if (token.expirationTime() == null && AclAuthorizer.decide(state.grants(token), AclDefaultPolicy.DENY,
+                    ACL_WRITE).allowed()) {
                 return true;
             }
         }
@@ -403,16 +415,30 @@ public final class AclState {
                     Collections.unmodifiableSortedMap(roles), Map.copyOf(bySecretHash), bootstrapIndex);
         }
 
-        /** The rules of the policies {@code token} links to, directly and through its roles, that still exist. */
-        List<AclRules> rulesReachedBy(AclToken token) {
-            List<AclRules> rules = new ArrayList<>();
-            token.policyIds().stream().map(policies::get).filter(Objects::nonNull).forEach(p -> rules.add(p.rules()));
+        /**
+         * What {@code token} is granted: its own policies, node identities and service identities, then those of each
+         * of its roles, in ID order, leaving out policies and roles that no longer exist.
+         */
+        List<AclGrant> grants(AclToken token) {
+            List<AclGrant> grants = new ArrayList<>();
+            addGrants(grants, token.policyIds(), token.nodeIdentities(), token.serviceIdentities(), null);
             for (String roleId : token.roleIds()) {
                 AclRole role = roles.get(roleId);
-                if (role == null) continue;
-                role.policyIds().stream().map(policies::get).filter(Objects::nonNull).forEach(p -> rules.add(p.rules()));
+                if (role != null) {
+                    addGrants(grants, role.policyIds(), role.nodeIdentities(), role.serviceIdentities(), role.id());
+                }
             }
-            return rules;
+            return List.copyOf(grants);
+        }
+
+        private void addGrants(List<AclGrant> grants, List<String> policyIds, List<NodeIdentity> nodeIdentities,
+                               List<ServiceIdentity> serviceIdentities, String roleId) {
+            for (String policyId : policyIds) {
+                AclPolicy policy = policies.get(policyId);
+                if (policy != null) grants.add(AclGrant.policy(policy.id(), policy.name(), roleId, policy.rules()));
+            }
+            nodeIdentities.forEach(identity -> grants.add(AclGrant.of(identity, roleId)));
+            serviceIdentities.forEach(identity -> grants.add(AclGrant.of(identity, roleId)));
         }
 
         AclToken readable(AclToken token) {

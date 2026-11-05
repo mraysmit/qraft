@@ -17,10 +17,15 @@
 package dev.mars.qraft.state;
 
 import dev.mars.qraft.common.acl.AclAccess;
+import dev.mars.qraft.common.acl.AclAuthorizer;
+import dev.mars.qraft.common.acl.AclDefaultPolicy;
+import dev.mars.qraft.common.acl.AclGrant;
+import dev.mars.qraft.common.acl.AclRequest;
 import dev.mars.qraft.common.acl.AclResource;
 import dev.mars.qraft.common.acl.AclRule;
 import dev.mars.qraft.common.acl.AclRules;
 import dev.mars.qraft.common.acl.NodeIdentity;
+import dev.mars.qraft.common.acl.ServiceIdentity;
 import dev.mars.qraft.raft.RaftCommandResult;
 import dev.mars.qraft.state.acl.AclBuiltins;
 import dev.mars.qraft.state.acl.AclPolicy;
@@ -333,6 +338,32 @@ class AclStateStoreTest {
         restored.restoreSnapshot("{\"nodes\":{},\"metadata\":{},\"lastAppliedIndex\":3}".getBytes());
         assertEquals(AclBuiltins.policies(), restored.getAcl().policies(), "a snapshot from before ACLs");
         assertEquals(List.of(AclBuiltins.anonymousToken()), restored.getAcl().tokens());
+    }
+
+    @Test
+    void aTokensGrantsAreItsPoliciesAndIdentitiesThenThoseOfEachRoleThatStillExist() {
+        AclRules operatorWrite = new AclRules(List.of(AclRule.single(AclResource.OPERATOR, AclAccess.WRITE)));
+        assertSuccess(store.apply(AclCommand.createPolicy(policy(OPERATORS, "operators", operatorWrite))));
+        assertSuccess(store.apply(AclCommand.createPolicy(policy(READERS, "readers", AclRules.GLOBAL_READ_ONLY))));
+        assertSuccess(store.apply(AclCommand.createRole(new AclRole(ADMINS, "admins", "", List.of(OPERATORS, READERS),
+                List.of(new NodeIdentity("web-2")), List.of(new ServiceIdentity("api", "acme", "prod"))))));
+        AclToken token = new AclToken(ALICE, AclSecrets.hash(ALICE_SECRET), "", List.of(READERS), List.of(ADMINS),
+                List.of(new NodeIdentity("web-1")), List.of(new ServiceIdentity("billing", null, null)), CREATED, null,
+                false);
+        assertSuccess(store.apply(AclCommand.createToken(token)));
+        assertSuccess(store.apply(AclCommand.deletePolicy(READERS)));
+
+        List<AclGrant> grants = store.getAcl().grants(store.getAcl().token(ALICE).orElseThrow());
+
+        assertEquals(List.of(
+                AclGrant.of(new NodeIdentity("web-1"), null),
+                AclGrant.of(new ServiceIdentity("billing", null, null), null),
+                AclGrant.policy(OPERATORS, "operators", ADMINS, operatorWrite),
+                AclGrant.of(new NodeIdentity("web-2"), ADMINS),
+                AclGrant.of(new ServiceIdentity("api", "acme", "prod"), ADMINS)), grants,
+                "the deleted policy grants nothing, directly or through the role");
+        assertEquals(true, AclAuthorizer.decide(grants, AclDefaultPolicy.DENY,
+                AclRequest.single(AclResource.OPERATOR, AclAccess.WRITE)).allowed(), "operator:write through the role");
     }
 
     @Test

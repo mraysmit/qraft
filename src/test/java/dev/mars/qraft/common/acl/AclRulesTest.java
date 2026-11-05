@@ -28,8 +28,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 /**
  * Tests the rule model of the ACL list's proposals 6 and 7: which resources take a name and a scope, that an
  * exact name cannot be blank while a prefix may be empty, that a rule outside a tenant or namespace applies to
- * {@code default}, that a policy's rules are held in one canonical order and refuse a repeated rule, how the
- * rules for a single-valued resource merge, and the rules of the two built-in policies.
+ * {@code default}, that a policy's rules are held in one canonical order and refuse a repeated rule, how equally
+ * specific access merges, and the rules of the two built-in policies.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-04
@@ -117,17 +117,12 @@ class AclRulesTest {
     }
 
     @Test
-    void theAccessToASingleValuedResourceMergesDenyThenWriteThenRead() {
-        AclRules read = new AclRules(List.of(AclRule.single(AclResource.ACL, AclAccess.READ)));
-        AclRules write = new AclRules(List.of(AclRule.single(AclResource.ACL, AclAccess.WRITE)));
-        AclRules deny = new AclRules(List.of(AclRule.single(AclResource.ACL, AclAccess.DENY)));
-
-        assertEquals(AclAccess.WRITE, AclRules.mergedAccess(AclResource.ACL, List.of(read, write)));
-        assertEquals(AclAccess.DENY, AclRules.mergedAccess(AclResource.ACL, List.of(write, deny, read)));
-        assertEquals(AclAccess.READ, AclRules.mergedAccess(AclResource.ACL, List.of(read)));
-        assertNull(AclRules.mergedAccess(AclResource.OPERATOR, List.of(read, write)), "no rule for operator");
-        assertThrows(IllegalArgumentException.class, () -> AclRules.mergedAccess(AclResource.NODE, List.of()),
-                "a named resource has no single access");
+    void equallySpecificAccessMergesDenyThenWriteThenRead() {
+        assertEquals(AclAccess.WRITE, AclAccess.READ.merge(AclAccess.WRITE));
+        assertEquals(AclAccess.WRITE, AclAccess.WRITE.merge(AclAccess.READ));
+        assertEquals(AclAccess.DENY, AclAccess.WRITE.merge(AclAccess.DENY));
+        assertEquals(AclAccess.DENY, AclAccess.DENY.merge(AclAccess.READ));
+        assertEquals(AclAccess.READ, AclAccess.READ.merge(AclAccess.READ));
     }
 
     @Test
