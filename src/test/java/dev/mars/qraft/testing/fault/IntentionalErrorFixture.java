@@ -192,6 +192,14 @@ public enum IntentionalErrorFixture {
             "(?:Recovery failed|Failed to recover Raft state from storage): WAL .* is corrupt at byte \\d+ of \\d+;"
                     + " \\d+ entries precede the damage\\. Not repaired: restore this node from its peers\\."),
 
+    /**
+     * Startup refuses, through both recovery log sites, a WAL holding on purpose an entry whose command a newer server
+     * wrote and this one cannot read.
+     */
+    RAFT_RECOVERY_UNKNOWN_COMMAND("dev.mars.qraft.raft.RaftNode", Level.ERROR,
+            "(?:Recovery failed|Failed to recover Raft state from storage): .*Log entry holds a command this server"
+                    + " does not know, in field \\d+ of RaftCommandMessage.*"),
+
     /** Server startup reports that deliberately corrupted storage left the node live but fenced. */
     SERVER_RECOVERY_AMBIGUOUS_CORRUPTION(QraftServerService.class.getName(), Level.ERROR,
             "Raft recovery failed; node remains live but unready and will not participate\\."

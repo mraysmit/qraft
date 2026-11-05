@@ -108,13 +108,26 @@ public final class ProtobufCommandCodec {
                 case CATALOG_COMMAND -> fromCatalogProto(raftMessage.getCatalogCommand());
                 case CONFIGURATION -> new ConfigurationCommand(RaftConfigurationCodec.fromProto(raftMessage.getConfiguration()));
                 case ACL_COMMAND -> AclCodec.fromProto(raftMessage.getAclCommand());
-                case COMMAND_NOT_SET -> null; // No-op entry
+                case COMMAND_NOT_SET -> noOpOrRefused(raftMessage);
                 default -> throw new IllegalArgumentException(
                         "Unsupported protobuf command case: " + raftMessage.getCommandCase());
             };
         } catch (InvalidProtocolBufferException e) {
             throw new RuntimeException("Failed to deserialize Protobuf command", e);
         }
+    }
+
+    /**
+     * {@code null} for a no-op entry, which holds nothing. An entry that holds a field this server does not know holds
+     * a command a newer server wrote, and is refused: reading it as a no-op would leave this server without a change
+     * that every newer replica applied. A follower then refuses the append, and a recovering server stops, until it
+     * is upgraded. Unknown fields inside a known command are still read past, as section 14.8 of the design allows.
+     */
+    private static RaftCommand noOpOrRefused(RaftCommandMessage message) {
+        if (message.getUnknownFields().asMap().isEmpty()) return null;
+        throw new IllegalArgumentException("Log entry holds a command this server does not know, in field "
+                + message.getUnknownFields().asMap().keySet().iterator().next() + " of RaftCommandMessage: a newer"
+                + " server wrote it, so upgrade this server before it applies the entry");
     }
 
     private static SystemMetadataCommandProto toSystemMetadataProto(DistributedStateCommand cmd) {

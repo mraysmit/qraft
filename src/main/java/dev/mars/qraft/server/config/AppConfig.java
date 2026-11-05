@@ -17,7 +17,9 @@
 package dev.mars.qraft.server.config;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import dev.mars.qraft.common.acl.AclDefaultPolicy;
 import dev.mars.qraft.common.config.JsonSettings;
+import dev.mars.qraft.state.acl.AclSecrets;
 import dev.mars.qraft.server.ui.AdminUiConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,6 +33,7 @@ import java.nio.file.Path;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.StringJoiner;
@@ -64,6 +67,7 @@ public final class AppConfig {
 
     private final Settings settings;
     private volatile String resolvedNodeId;
+    private volatile String managementSecret;
 
     private AppConfig(Settings settings) {
         this.settings = settings;
@@ -72,7 +76,10 @@ public final class AppConfig {
     /** The {@code server} object of the document, with {@code logging.directory} beside it. */
     private record Settings(String id, Http http, int apiGrpcPort, Raft raft, String operatorToken,
                             Telemetry telemetry, Shutdown shutdown, Health health, AdminUiConfig ui,
-                            String loggingDirectory) { }
+                            Acl acl, SecurityProfile profile, String loggingDirectory) { }
+
+    /** {@code server.acl}; {@code defaultPolicy} is {@code null} when the document leaves it out. */
+    private record Acl(boolean enabled, AclDefaultPolicy defaultPolicy, String initialManagementTokenFile) { }
 
     private record Http(String host, int port) { }
 
@@ -121,9 +128,11 @@ public final class AppConfig {
         JsonNode health = optionalObject(server, "health");
         JsonNode ui = optionalObject(server, "ui");
         JsonNode operator = optionalObject(server, "operator");
+        JsonNode acl = optionalObject(server, "acl");
+        JsonNode security = optionalObject(server, "security");
         JsonNode logging = optionalObject(root, "logging");
         rejectUnknown(server, "server", "id", "http", "apiGrpcPort",
-                "raft", "telemetry", "shutdown", "health", "ui", "operator");
+                "raft", "telemetry", "shutdown", "health", "ui", "operator", "acl", "security");
         rejectUnknown(http, "server.http", "host", "port");
         rejectUnknown(raft, "server.raft", "port", "nodes", "electionTimeoutMs",
                 "heartbeatIntervalMs", "storage", "snapshot", "logHardLimit", "io", "membership");
@@ -136,6 +145,8 @@ public final class AppConfig {
         rejectUnknown(health, "server.health", "expiryIntervalMs", "nodeTtlMs", "nodeReapAfterMs");
         rejectUnknown(ui, "server.ui", "enabled", "path", "devAssetsDirectory");
         rejectUnknown(operator, "server.operator", "token");
+        rejectUnknown(acl, "server.acl", "enabled", "defaultPolicy", "initialManagementTokenFile");
+        rejectUnknown(security, "server.security", "profile");
         rejectUnknown(logging, "logging", "directory");
 
         // The settings are read in one fixed order, so that a document with several faults always reports
@@ -168,13 +179,17 @@ public final class AppConfig {
         long nodeReapAfterMs = optionalLong(health, "nodeReapAfterMs", DEFAULT_NODE_REAP_AFTER_MS);
         if (nodeReapAfterMs < 0) throw new IllegalArgumentException("server.health.nodeReapAfterMs must not be negative");
         AdminUiConfig adminUi = parseAdminUi(ui);
+        Acl aclSettings = new Acl(optionalBoolean(acl, "enabled", false), defaultPolicy(acl),
+                optionalText(acl, "initialManagementTokenFile", ""));
+        SecurityProfile profile = securityProfile(security);
         String loggingDirectory = optionalText(logging, "directory", "./logs");
 
         return new AppConfig(new Settings(id, httpSettings, apiGrpcPort,
                 new Raft(raftPort, nodes, electionTimeoutMs, heartbeatIntervalMs, storageSettings, snapshotSettings,
                         logHardLimit, ioSettings, membershipSettings),
                 operatorToken, telemetrySettings, shutdownSettings,
-                new Health(expiryIntervalMs, nodeTtlMs, nodeReapAfterMs), adminUi, loggingDirectory));
+                new Health(expiryIntervalMs, nodeTtlMs, nodeReapAfterMs), adminUi, aclSettings, profile,
+                loggingDirectory));
     }
 
     public synchronized String getNodeId() {
@@ -277,6 +292,28 @@ public final class AppConfig {
         return token.isBlank() ? Optional.empty() : Optional.of(token);
     }
 
+    /** Whether ACLs are enforced ({@code server.acl.enabled}); off by default, as in Consul. */
+    public boolean isAclEnabled() { return settings.acl().enabled(); }
+    /** {@code server.acl.defaultPolicy}, which has no default (ACL list, proposal 12). */
+    public Optional<AclDefaultPolicy> getAclDefaultPolicy() { return Optional.ofNullable(settings.acl().defaultPolicy()); }
+    public SecurityProfile getSecurityProfile() { return settings.profile(); }
+
+    /**
+     * The first management token's secret, read from {@code server.acl.initialManagementTokenFile} and trimmed;
+     * empty when no file is configured. It is read once, when first asked for, which {@link #validate} does before
+     * any resource opens. Never logged, and never put in a message.
+     */
+    public Optional<String> getInitialManagementSecret() {
+        String file = settings.acl().initialManagementTokenFile();
+        if (file.isBlank()) return Optional.empty();
+        String secret = managementSecret;
+        if (secret == null) {
+            secret = readManagementSecret(Path.of(file));
+            managementSecret = secret;
+        }
+        return Optional.of(secret);
+    }
+
     public int getRaftIoPoolSize() { return settings.raft().io().poolSize(); }
     public int getRaftIoQueueSize() { return settings.raft().io().queueSize(); }
     /** How long a stopping server drains the requests it already has. */
@@ -348,6 +385,7 @@ public final class AppConfig {
             throw new IllegalStateException("server.operator.token must be at least " + MIN_OPERATOR_TOKEN_LENGTH
                     + " characters");
         }
+        validateAcl();
         validateListeningPort("server.http.port", getHttpPort());
         validateListeningPort("server.raft.port", getRaftPort());
         validateListeningPort("server.apiGrpcPort", getApiGrpcPort());
@@ -379,12 +417,109 @@ public final class AppConfig {
         getNodeId();
     }
 
+    /**
+     * The ACL and security-profile rules of the ACL list's proposals 12 and 16, checked before any resource opens:
+     * enabled ACLs need a default policy and exclude the operator token, which {@code operator:write} replaces; the
+     * management file needs ACLs enabled, which Consul would ignore, and must hold a UUID outside the reserved range;
+     * and the {@code production} profile refuses to run without ACLs or with {@code allow}.
+     */
+    private void validateAcl() {
+        boolean enabled = isAclEnabled();
+        Optional<AclDefaultPolicy> defaultPolicy = getAclDefaultPolicy();
+        if (enabled && defaultPolicy.isEmpty()) {
+            throw new IllegalStateException("server.acl.defaultPolicy must be set when ACLs are enabled: allow or deny");
+        }
+        if (enabled && getOperatorToken().isPresent()) {
+            throw new IllegalStateException("server.operator.token cannot be used with server.acl.enabled: "
+                    + "operator:write replaces it");
+        }
+        if (!settings.acl().initialManagementTokenFile().isBlank()) {
+            if (!enabled) {
+                throw new IllegalStateException("server.acl.initialManagementTokenFile needs server.acl.enabled");
+            }
+            getInitialManagementSecret();
+        }
+        if (getSecurityProfile() == SecurityProfile.PRODUCTION) {
+            if (!enabled) {
+                throw new IllegalStateException("server.security.profile: the production profile needs "
+                        + "server.acl.enabled");
+            }
+            if (defaultPolicy.orElseThrow() != AclDefaultPolicy.DENY) {
+                throw new IllegalStateException("server.security.profile: the production profile needs "
+                        + "server.acl.defaultPolicy deny");
+            }
+        }
+    }
+
     /** Logs the settings an operator looks for first. Call it once the log directory has been selected. */
     public void logConfiguration() {
         Logging.LOGGER.info("Server configuration: nodeId={}, http={}:{}, raftPort={}, apiGrpcPort={}, "
                         + "clusterNodes={}, storagePath={}, telemetryEnabled={}",
                 getNodeId(), getHttpHost(), getHttpPort(), getRaftPort(), getApiGrpcPort(),
                 getClusterNodes(), getRaftStoragePath(), isTelemetryEnabled());
+        String file = settings.acl().initialManagementTokenFile();
+        Logging.LOGGER.info("ACL configuration: enabled={}, defaultPolicy={}, initialManagementTokenFile={}, "
+                        + "securityProfile={}", isAclEnabled(),
+                getAclDefaultPolicy().map(policy -> policy.name().toLowerCase(Locale.ROOT)).orElse("none"),
+                file.isBlank() ? "none" : Path.of(file), getSecurityProfile().name().toLowerCase(Locale.ROOT));
+        logSecurityWarning();
+    }
+
+    /**
+     * The one startup warning a server's ACL settings call for, or none (ACL list, proposals 12, 14 and 16). With ACLs
+     * disabled, every call is allowed: a {@code deny} default policy then says so as a critical warning, and otherwise
+     * the development profile does. With ACLs enabled, tokens cross the network unencrypted until transport security
+     * is added (proposal 14).
+     */
+    private void logSecurityWarning() {
+        if (isAclEnabled()) {
+            Logging.LOGGER.warn("ACLs are enabled, but no listener uses TLS: tokens cross the network unencrypted "
+                    + "until transport security is added");
+        } else if (getAclDefaultPolicy().orElse(null) == AclDefaultPolicy.DENY) {
+            Logging.LOGGER.warn("CRITICAL ACL_DENY_NOT_ENFORCED: server.acl.defaultPolicy is deny, but ACLs are "
+                    + "disabled, so nothing is denied and every call is allowed. Set server.acl.enabled to enforce it");
+        } else {
+            Logging.LOGGER.warn("Security profile development with ACLs disabled: every call is allowed, and there "
+                    + "is no access control. A deployment that needs it sets server.security.profile to production "
+                    + "and enables ACLs");
+        }
+    }
+
+    private static String readManagementSecret(Path file) {
+        String secret;
+        try {
+            secret = Files.readString(file).strip();
+        } catch (IOException e) {
+            throw new IllegalStateException("server.acl.initialManagementTokenFile cannot be read: " + file, e);
+        }
+        if (!AclSecrets.isUuid(secret)) {
+            throw new IllegalStateException("server.acl.initialManagementTokenFile must hold a UUID: " + file);
+        }
+        if (AclSecrets.isReserved(secret)) {
+            throw new IllegalStateException("server.acl.initialManagementTokenFile holds a UUID in the range kept for "
+                    + "built-ins: " + file);
+        }
+        return secret;
+    }
+
+    private static AclDefaultPolicy defaultPolicy(JsonNode acl) {
+        JsonNode value = acl.get("defaultPolicy");
+        if (value == null || value.isNull()) return null;
+        return switch (value.isTextual() ? value.textValue() : "") {
+            case "allow" -> AclDefaultPolicy.ALLOW;
+            case "deny" -> AclDefaultPolicy.DENY;
+            default -> throw new IllegalArgumentException("server.acl.defaultPolicy must be allow or deny");
+        };
+    }
+
+    private static SecurityProfile securityProfile(JsonNode security) {
+        JsonNode value = security.get("profile");
+        if (value == null || value.isNull()) return SecurityProfile.DEVELOPMENT;
+        return switch (value.isTextual() ? value.textValue() : "") {
+            case "production" -> SecurityProfile.PRODUCTION;
+            case "development" -> SecurityProfile.DEVELOPMENT;
+            default -> throw new IllegalArgumentException("server.security.profile must be production or development");
+        };
     }
 
     /** A port this server listens on: 0 asks the system for any free port. */

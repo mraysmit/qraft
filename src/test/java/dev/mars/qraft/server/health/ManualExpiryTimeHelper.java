@@ -33,12 +33,12 @@ import java.util.List;
  * @since 2026-09-26
  * @version 1.0
  */
-final class ManualExpiryTimeHelper extends Clock implements ExpiryScheduler {
+public final class ManualExpiryTimeHelper extends Clock implements ExpiryScheduler {
     private final List<TaskHelper> tasks = new ArrayList<>();
     private Instant now;
     private long nextOrder;
 
-    ManualExpiryTimeHelper(Instant start) {
+    public ManualExpiryTimeHelper(Instant start) {
         now = start;
     }
 
@@ -54,7 +54,7 @@ final class ManualExpiryTimeHelper extends Clock implements ExpiryScheduler {
     }
 
     /** Moves time forward, running every task that falls due in deadline order. */
-    void advance(Duration duration) {
+    public void advance(Duration duration) {
         Instant target;
         synchronized (this) {
             target = now.plus(duration);
@@ -77,15 +77,15 @@ final class ManualExpiryTimeHelper extends Clock implements ExpiryScheduler {
         }
     }
 
-    void runDue() {
+    public void runDue() {
         advance(Duration.ZERO);
     }
 
-    synchronized int pendingTasks() {
+    public synchronized int pendingTasks() {
         return tasks.size();
     }
 
-    synchronized Instant nextTaskAt() {
+    public synchronized Instant nextTaskAt() {
         return tasks.stream().map(TaskHelper::deadline).min(Comparator.naturalOrder()).orElse(null);
     }
 

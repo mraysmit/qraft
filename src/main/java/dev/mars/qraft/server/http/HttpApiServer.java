@@ -44,6 +44,11 @@ import dev.mars.qraft.state.CatalogCommand;
 import dev.mars.qraft.raft.RaftCommand;
 import dev.mars.qraft.raft.RaftCommandResult;
 import dev.mars.qraft.state.QraftStateStore;
+import dev.mars.qraft.state.AclCommand;
+import dev.mars.qraft.state.acl.AclBuiltins;
+import dev.mars.qraft.state.acl.AclRefusal;
+import dev.mars.qraft.state.acl.AclSecrets;
+import dev.mars.qraft.state.acl.AclToken;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,6 +56,8 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -60,6 +67,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutorService;
@@ -93,6 +101,7 @@ public final class HttpApiServer implements AutoCloseable {
     private final Clock clock;
     private final Duration raftTimeout;
     private final MembershipService membership;
+    private final AclHttpSettings acl;
 
     /** How long a request waits for the Raft node to answer a status read or commit a write. */
     public static final Duration DEFAULT_RAFT_TIMEOUT = Duration.ofSeconds(5);
@@ -136,6 +145,14 @@ public final class HttpApiServer implements AutoCloseable {
     public HttpApiServer(int port, RaftNode raftNode, QraftStateStore stateStore, Clock clock,
                          AdminUiConfig ui, UiAssets assets, Duration raftTimeout, MembershipService membership)
             throws IOException {
+        this(port, raftNode, stateStore, clock, ui, assets, raftTimeout, membership, AclHttpSettings.disabled());
+    }
+
+    /** @param acl whether ACLs are enabled, and the data directory that may hold a bootstrap reset index */
+    public HttpApiServer(int port, RaftNode raftNode, QraftStateStore stateStore, Clock clock,
+                         AdminUiConfig ui, UiAssets assets, Duration raftTimeout, MembershipService membership,
+                         AclHttpSettings acl) throws IOException {
+        this.acl = Objects.requireNonNull(acl, "acl");
         this.membership = membership;
         this.raftTimeout = Objects.requireNonNull(raftTimeout, "raftTimeout");
         if (raftTimeout.isNegative() || raftTimeout.isZero()) {
@@ -170,6 +187,7 @@ public final class HttpApiServer implements AutoCloseable {
         server.createContext("/v1/catalog/services", requestAware(this::listServices));
         server.createContext("/v1/catalog/service", requestAware(this::listServiceInstances));
         server.createContext("/v1/health/service", requestAware(this::listServiceHealth));
+        server.createContext("/v1/acl/bootstrap", requestAware(this::bootstrapAcl));
     }
 
     public CompletableFuture<Void> start() {
@@ -438,6 +456,93 @@ public final class HttpApiServer implements AutoCloseable {
         } catch (CompletionException e) {
             respondUnavailable(exchange, e);
         }
+    }
+
+    /**
+     * Creates the first management token, after Consul's {@code PUT /v1/acl/bootstrap} (ACL list, proposal 12). It
+     * needs no token, and works once: afterwards it answers 403 {@code permission_denied}, naming the reset index. An
+     * operator who has lost every management secret writes that index to {@code acl-bootstrap-reset} in the leader's
+     * data directory, which allows one more bootstrap and is removed when used. The body may supply the secret as
+     * {@code bootstrapSecret}, a UUID outside the reserved range; otherwise one is generated. The secret is returned
+     * in this answer only, the server keeps its hash, and neither the body nor the secret is logged. With ACLs
+     * disabled it answers 401 {@code acl_disabled}, as Consul's ACL endpoints do.
+     */
+    private void bootstrapAcl(HttpExchange exchange) throws IOException {
+        if (!prepareStateRequest(exchange, "PUT")) return;
+        if (!acl.enabled()) {
+            respondError(exchange, 401, "acl_disabled", "ACL support disabled", false);
+            return;
+        }
+        try {
+            String secret = bootstrapSecret(exchange);
+            Path resetFile = acl.dataDirectory().resolve(AclHttpSettings.BOOTSTRAP_RESET_FILE);
+            long resetIndex = bootstrapResetIndex(resetFile);
+            AclToken token = new AclToken(UUID.randomUUID().toString(), AclSecrets.hash(secret),
+                    "Bootstrap Token (Global Management)", List.of(AclBuiltins.GLOBAL_MANAGEMENT_ID), List.of(),
+                    List.of(), List.of(), clock.instant(), null, false);
+            RaftCommandResult<?> result = submit(AclCommand.bootstrap(token, resetIndex));
+            if (result instanceof RaftCommandResult.Refused<?> refused) {
+                boolean bootstrapped = refused.code().equals(AclRefusal.ACL_BOOTSTRAPPED.code())
+                        || refused.code().equals(AclRefusal.INVALID_RESET_INDEX.code());
+                if (bootstrapped) {
+                    respondError(exchange, 403, "permission_denied", refused.message(), false,
+                            Map.of("resetIndex", stateStore.getAcl().bootstrapIndex()));
+                } else {
+                    respondError(exchange, 409, refused.code(), refused.message(), false);
+                }
+                return;
+            }
+            if (resetIndex > 0) {
+                try {
+                    Files.deleteIfExists(resetFile);
+                } catch (IOException e) {
+                    LOG.warn("ACL bootstrap used {} but could not remove it; remove it by hand: {}", resetFile,
+                            e.getMessage());
+                }
+            }
+            LOG.info("ACL bootstrap created the management token with accessor {}", token.accessorId());
+            setAppliedIndex(exchange);
+            respondJson(exchange, 200, AclTokenAnswer.of(token, secret, stateStore.getAcl()));
+        } catch (com.fasterxml.jackson.core.JacksonException e) {
+            // The original message names the problem without quoting the body, which may hold a secret.
+            respondError(exchange, 400, "invalid_bootstrap", e.getOriginalMessage(), false);
+        } catch (IllegalArgumentException e) {
+            respondError(exchange, 400, "invalid_bootstrap", safeMessage(e), false);
+        } catch (CompletionException e) {
+            respondUnavailable(exchange, e);
+        }
+    }
+
+    /** The secret the body supplies as {@code bootstrapSecret}, or a generated one when the body is empty. */
+    private String bootstrapSecret(HttpExchange exchange) throws IOException {
+        byte[] body = exchange.getRequestBody().readAllBytes();
+        if (new String(body, java.nio.charset.StandardCharsets.UTF_8).isBlank()) return UUID.randomUUID().toString();
+        AclBootstrapRequest request = objectMapper.readerFor(AclBootstrapRequest.class)
+                .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES).readValue(body);
+        if (request == null) throw new IllegalArgumentException("The body must be a JSON object");
+        if (request.bootstrapSecret() == null) return UUID.randomUUID().toString();
+        // The message never repeats what was supplied: it may be a secret.
+        if (!AclSecrets.isUuid(request.bootstrapSecret())) {
+            throw new IllegalArgumentException("bootstrapSecret must be a UUID");
+        }
+        if (AclSecrets.isReserved(request.bootstrapSecret())) {
+            throw new IllegalArgumentException("bootstrapSecret lies in the range of UUIDs kept for built-ins");
+        }
+        return request.bootstrapSecret();
+    }
+
+    /** The reset index in {@code resetFile}, as Consul's {@code fileBootstrapResetIndex} reads it, or 0 without one. */
+    private static long bootstrapResetIndex(Path resetFile) throws IOException {
+        if (!Files.exists(resetFile)) return 0;
+        String text = Files.readString(resetFile).strip();
+        try {
+            long index = Long.parseLong(text);
+            if (index > 0) return index;
+        } catch (NumberFormatException ignored) {
+            // Refused below with the file's name.
+        }
+        throw new IllegalArgumentException(AclHttpSettings.BOOTSTRAP_RESET_FILE + " in the data directory must hold the "
+                + "reset index, a whole number above zero");
     }
 
     /** Answers {@code result} when it refuses a write because a node of another ID holds the name. */

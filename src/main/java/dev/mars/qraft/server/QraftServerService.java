@@ -19,7 +19,9 @@ package dev.mars.qraft.server;
 import dev.mars.qraft.common.concurrent.Completions;
 import dev.mars.qraft.common.concurrent.Deadlines;
 import dev.mars.qraft.server.api.DistributedStateGrpcService;
+import dev.mars.qraft.server.acl.ManagementTokenInstaller;
 import dev.mars.qraft.server.config.AppConfig;
+import dev.mars.qraft.server.http.AclHttpSettings;
 import dev.mars.qraft.server.ui.UiAssets;
 import dev.mars.qraft.server.health.ExpiryScheduler;
 import dev.mars.qraft.server.health.LeaderHealthExpiry;
@@ -71,6 +73,8 @@ public class QraftServerService {
     private static final Logger logger = LoggerFactory.getLogger(QraftServerService.class);
     /** Bounds an expiry proposal, so a proposal that never completes cannot suppress re-evaluation. */
     private static final long HEALTH_EXPIRY_PROPOSAL_TIMEOUT_MS = 5_000;
+    /** How long a leader waits before trying again to install the management token from its file. */
+    private static final Duration MANAGEMENT_TOKEN_RETRY = Duration.ofSeconds(1);
     private static final long BOOTSTRAP_RETRY_MS = 1_000;
 
     private final RaftStateLoop runtime;
@@ -84,6 +88,7 @@ public class QraftServerService {
     private Optional<GrpcServiceServer> apiGrpcServer = Optional.empty();
     private Optional<HttpApiServer> httpApiServer = Optional.empty();
     private Optional<LeaderHealthExpiry> healthExpiry = Optional.empty();
+    private Optional<ManagementTokenInstaller> managementTokenInstaller = Optional.empty();
     private Optional<ScheduledExecutorService> healthExpiryExecutor = Optional.empty();
     private Optional<ShutdownCoordinator> shutdownCoordinator = Optional.empty();
     private volatile Optional<Long> bootstrapTimer = Optional.empty();
@@ -225,7 +230,7 @@ public class QraftServerService {
             this.apiGrpcServer = Optional.of(externalApiServer);
             HttpApiServer healthServer = new HttpApiServer(config.getHttpPort(), node, stateMachine, Clock.systemUTC(),
                     config.getAdminUi(), UiAssets.forConfig(config.getAdminUi()), HttpApiServer.DEFAULT_RAFT_TIMEOUT,
-                    membership);
+                    membership, new AclHttpSettings(config.isAclEnabled(), Path.of(config.getRaftStoragePath())));
             this.httpApiServer = Optional.of(healthServer);
 
             // Only the leader evaluates health-check deadlines; followers apply committed expiry commands.
@@ -240,6 +245,12 @@ public class QraftServerService {
                             HEALTH_EXPIRY_PROPOSAL_TIMEOUT_MS, TimeUnit.MILLISECONDS),
                     ExpiryScheduler.of(expiryExecutor), Clock.systemUTC(),
                     Duration.ofMillis(config.getHealthExpiryIntervalMs())));
+            // Whenever this server leads, it installs the management token from its file if no token has it.
+            this.managementTokenInstaller = config.getInitialManagementSecret().map(secret ->
+                    ManagementTokenInstaller.attach(node, stateMachine.getAcl(), secret,
+                            command -> Deadlines.bound(node.submitCommand(command),
+                                    HEALTH_EXPIRY_PROPOSAL_TIMEOUT_MS, TimeUnit.MILLISECONDS),
+                            ExpiryScheduler.of(expiryExecutor), Clock.systemUTC(), MANAGEMENT_TOKEN_RETRY));
 
             internalRaftServer.start().thenCompose(v1 -> {
                 logger.info("Internal Raft gRPC server started on port {}", internalRaftServer.port());
@@ -357,6 +368,7 @@ public class QraftServerService {
     }
 
     private void stopHealthExpiry() {
+        managementTokenInstaller.ifPresent(ManagementTokenInstaller::close);
         healthExpiry.ifPresent(LeaderHealthExpiry::close);
         healthExpiryExecutor.ifPresent(ScheduledExecutorService::shutdownNow);
     }
