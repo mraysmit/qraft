@@ -55,6 +55,10 @@ public final class DockerLogCaptureHelper {
             "\\blevel=(?:error|fatal)\\b|\\t(?:error|fatal)\\t", Pattern.CASE_INSENSITIVE);
     private static final Pattern UNCAUGHT_EXCEPTION = Pattern.compile(
             "(?:^|\\s)Exception in thread \"[^\"]+\" (?<exception>.+)$");
+    /** A command line's error output, such as {@code Error 403: <code>: <message>} from an operator command. */
+    private static final Pattern COMMAND_ERROR = Pattern.compile("^(?:\\S+ \\| )?(?<message>Error\\b.*)$");
+    /** The name a command line's error is audited under, since its output has no logger. */
+    private static final String COMMAND_LOGGER = "dev.mars.qraft.runtime.RaftOperatorCommand";
     private static final Pattern STACK_TRACE_LINE = Pattern.compile(
             "^(?:\\S+ \\| )?(?:\\s+at \\S+\\(.*\\)|Caused by: \\S.*|\\s+\\.\\.\\. \\d+ (?:more|common frames omitted))$");
     private static final Map<String, String> PREVIOUS_OUTPUT = new HashMap<>();
@@ -194,10 +198,18 @@ public final class DockerLogCaptureHelper {
         List<ExternalError> recognised = new ArrayList<>();
         ExternalError tempoStartup = recoveredTempoStartup(lines, expected);
         if (tempoStartup != null) recognised.add(tempoStartup);
-        // Docker can merge stderr ahead of stdout. Discover matching events before auditing rethrows.
+        // Docker can merge stderr ahead of stdout. Discover matching events and command-line errors before auditing
+        // rethrows.
         for (int index = 0; index < lines.length; index++) {
             Matcher event = EVENT.matcher(lines[index]);
-            if (!event.matches()) continue;
+            if (!event.matches()) {
+                Matcher command = COMMAND_ERROR.matcher(lines[index]);
+                IntentionalErrorFixture match = command.matches() ? matchCommandError(command, expected) : null;
+                if (match != null) {
+                    recognised.add(new ExternalError(match, COMMAND_LOGGER, command.group("message"), lines[index]));
+                }
+                continue;
+            }
             IntentionalErrorFixture match = matchDeclaredError(event, thrownBy(lines, index), expected);
             if (match != null) {
                 recognised.add(new ExternalError(match, event.group("logger"), event.group("message"), lines[index]));
@@ -214,6 +226,7 @@ public final class DockerLogCaptureHelper {
             String rawLine = rawLines[index];
             String line = lines[index];
             Matcher event = EVENT.matcher(line);
+            Matcher command = COMMAND_ERROR.matcher(line);
             if (event.matches()) {
                 IntentionalErrorFixture match = matchDeclaredError(event, thrownBy(lines, index), expected);
                 if (match != null) {
@@ -236,6 +249,10 @@ public final class DockerLogCaptureHelper {
                     if (match == null) problems.add("undeclared container uncaught exception: " + line);
                     else rawLine = labelLine(rawLine, uncaught.start("exception"), match.error(), classOwner);
                 }
+            } else if (command.matches()) {
+                IntentionalErrorFixture match = matchCommandError(command, expected);
+                if (match == null) problems.add("undeclared command-line error: " + line);
+                else rawLine = labelLine(rawLine, command.start("message"), match, classOwner);
             } else if (NATIVE_ERROR.matcher(line).find()) {
                 if (tempoStartup != null && line.equals(tempoStartup.originalLine())) {
                     rawLine = labelLine(rawLine, line.indexOf("level=error ") + "level=error ".length(),
@@ -283,6 +300,13 @@ public final class DockerLogCaptureHelper {
         Level level = Level.toLevel(event.group("level"));
         return expected.stream()
                 .filter(error -> error.matches(event.group("logger"), level, event.group("message"), thrown))
+                .findFirst().orElse(null);
+    }
+
+    /** The declared error that a command line's error output, audited as an ERROR of the command, matches. */
+    private static IntentionalErrorFixture matchCommandError(Matcher command, Set<IntentionalErrorFixture> expected) {
+        return expected.stream()
+                .filter(error -> error.matches(COMMAND_LOGGER, Level.ERROR, command.group("message")))
                 .findFirst().orElse(null);
     }
 

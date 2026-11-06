@@ -17,13 +17,17 @@
 package dev.mars.qraft.server.http;
 
 /**
- * Auth-replaceable source of the catalog identity attached to an HTTP request.
+ * The principal an HTTP request acts as, and the catalog identity it names: the scope and node it chose to act in,
+ * which the principal's rules decide (ACL list, Phase 4).
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-24
- * @version 1.0
+ * @version 1.1
  */
 interface RequestContext {
+    /** Who the request acts as: its resolved token, or, with ACLs disabled, an unrestricted principal. */
+    dev.mars.qraft.server.acl.AclPrincipal principal();
+
     String tenantId();
 
     String namespace();

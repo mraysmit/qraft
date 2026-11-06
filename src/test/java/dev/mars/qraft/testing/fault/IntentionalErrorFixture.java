@@ -148,6 +148,21 @@ public enum IntentionalErrorFixture {
                     + " cause=java\\.lang\\.RuntimeException: java\\.net\\.UnknownHostException: \\k<host>(?:: .+)?"),
 
     /**
+     * A test runs {@code operator raft remove-peer} with a wrong operator token, and the command writes the
+     * server's refusal to its error output. A command's output has no logger, so the Docker audit gives such a line
+     * the command's class name.
+     */
+    RAFT_OPERATOR_TOKEN_REFUSED("dev.mars.qraft.runtime.RaftOperatorCommand", Level.ERROR,
+            "Error 403: permission_denied: The operator token is missing or wrong"),
+
+    /**
+     * A test issues two removals at once, so the leader refuses the one that meets the other's uncommitted change,
+     * and the command writes the refusal to its error output before the test repeats it.
+     */
+    RAFT_OPERATOR_CHANGE_IN_PROGRESS("dev.mars.qraft.runtime.RaftOperatorCommand", Level.ERROR,
+            "Error 409: refused: A configuration change is already in progress at index \\d+"),
+
+    /**
      * A test has a gRPC server prepare an accepted connection in the instant it stops: after it has released
      * its shared resources and before it has marked itself terminated. Netty closes the connection with this
      * warning.

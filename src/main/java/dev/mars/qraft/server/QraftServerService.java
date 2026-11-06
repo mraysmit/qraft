@@ -18,7 +18,10 @@ package dev.mars.qraft.server;
 
 import dev.mars.qraft.common.concurrent.Completions;
 import dev.mars.qraft.common.concurrent.Deadlines;
+import dev.mars.qraft.server.api.AclGrpcGuard;
 import dev.mars.qraft.server.api.DistributedStateGrpcService;
+import dev.mars.qraft.server.acl.AclRemovalAuthorizer;
+import dev.mars.qraft.server.acl.AclResolver;
 import dev.mars.qraft.server.acl.ManagementTokenInstaller;
 import dev.mars.qraft.server.config.AppConfig;
 import dev.mars.qraft.server.http.AclHttpSettings;
@@ -216,21 +219,32 @@ public class QraftServerService {
             transport.setRaftNode(node);
 
             // 7. Create and start separate gRPC servers: internal Raft RPC and external API RPC
-            // Joins and operator removals reach any server, over HTTP or the Raft port, and go to the leader.
-            MembershipService membership = new MembershipService(node, transport,
-                    config.getOperatorToken().orElse(null));
-            if (config.getOperatorToken().isEmpty()) {
-                logger.info("No server.operator.token is configured: Raft operator removals are refused");
+            // Joins and operator removals reach any server, over HTTP or the Raft port, and go to the leader. With
+            // ACLs enabled a removal needs operator:write, resolved in each deciding server's own state; with them
+            // disabled, the operator token.
+            AclResolver aclResolver = config.isAclEnabled()
+                    ? AclResolver.enabled(config.getAclDefaultPolicy().orElseThrow(), stateMachine.getAcl())
+                    : AclResolver.disabled();
+            MembershipService membership;
+            if (aclResolver.enabled()) {
+                membership = MembershipService.authorizedBy(node, transport, AclRemovalAuthorizer.of(aclResolver));
+            } else {
+                membership = new MembershipService(node, transport, config.getOperatorToken().orElse(null));
+                if (config.getOperatorToken().isEmpty()) {
+                    logger.info("No server.operator.token is configured: Raft operator removals are refused");
+                }
             }
             GrpcRaftServer internalRaftServer = new GrpcRaftServer(blockingTasks, raftPort, node, membership);
             this.raftGrpcServer = Optional.of(internalRaftServer);
 
             DistributedStateGrpcService distributedStateService = new DistributedStateGrpcService(node, stateMachine);
-            GrpcServiceServer externalApiServer = new GrpcServiceServer(blockingTasks, apiGrpcPort, distributedStateService);
+            GrpcServiceServer externalApiServer = new GrpcServiceServer(blockingTasks, apiGrpcPort,
+                    AclGrpcGuard.guard(distributedStateService, aclResolver));
             this.apiGrpcServer = Optional.of(externalApiServer);
             HttpApiServer healthServer = new HttpApiServer(config.getHttpPort(), node, stateMachine, Clock.systemUTC(),
                     config.getAdminUi(), UiAssets.forConfig(config.getAdminUi()), HttpApiServer.DEFAULT_RAFT_TIMEOUT,
-                    membership, new AclHttpSettings(config.isAclEnabled(), Path.of(config.getRaftStoragePath())));
+                    membership, new AclHttpSettings(config.isAclEnabled(), Path.of(config.getRaftStoragePath()),
+                            config.getAclDefaultPolicy().orElse(null)));
             this.httpApiServer = Optional.of(healthServer);
 
             // Only the leader evaluates health-check deadlines; followers apply committed expiry commands.

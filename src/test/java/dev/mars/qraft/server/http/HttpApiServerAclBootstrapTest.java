@@ -242,7 +242,8 @@ class HttpApiServerAclBootstrapTest {
     }
 
     private AclHttpSettings enabled() {
-        return new AclHttpSettings(true, dataDirectory);
+        // The bootstrap needs no token, so the strictest default policy changes nothing here.
+        return new AclHttpSettings(true, dataDirectory, dev.mars.qraft.common.acl.AclDefaultPolicy.DENY);
     }
 
     private void serve(String name, AclHttpSettings acl) throws Exception {

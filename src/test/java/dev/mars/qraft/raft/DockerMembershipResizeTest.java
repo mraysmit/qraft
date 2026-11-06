@@ -82,7 +82,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         // against the removed server beside it once that one is stopped at the end of the test, and the name of a
         // stopped server may then fail to resolve.
         dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE,
-        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_NAME_UNRESOLVED
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_NAME_UNRESOLVED,
+        // The two removals are issued at once, so the leader may refuse the one that meets the other's uncommitted
+        // change; removeUntilDone repeats it, and the command writes each refusal to its output.
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_OPERATOR_CHANGE_IN_PROGRESS
 })
 // Each wait is bounded; their worst-case sum is about fourteen minutes, so the method budget is twenty-five and a
 // failure reports the condition that was not met rather than the module's default method timeout.

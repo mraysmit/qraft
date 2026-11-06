@@ -814,6 +814,17 @@ Docker class that declares `RAFT_PEER_UNREACHABLE` declares it too, and a test c
 Docker merges stderr into stdout, so an event can land inside an uncaught exception's trace. Frames that
 follow an uncaught exception therefore belong to that exception, which has its own check above.
 
+A command line's error output is a fourth check, added on 2026-11-06. A command run once from the image, such
+as `operator raft remove-peer`, writes a refusal as `Error <status>: <code>: <message>` with no logger and no
+level, so the upper-case `ERROR` checks missed it. Every captured line that starts with `Error` is now audited
+as an ERROR of `dev.mars.qraft.runtime.RaftOperatorCommand`: it fails the audit unless it matches a declaration
+exactly, and a match is flagged and replayed like a declared event. There are two definitions:
+`RAFT_OPERATOR_TOKEN_REFUSED`, which `DockerServerReplacementTest` declares for its removal with a wrong
+operator token, and `RAFT_OPERATOR_CHANGE_IN_PROGRESS`, which `DockerMembershipResizeTest` declares for the
+refusal one of its two simultaneous removals may meet before it is repeated. The Phase 3 run of 2026-11-05
+held the first line unflagged, found by an audit that matched error text in any case; the run of 2026-11-06
+was the first to meet the second, and failed its audit until it was declared.
+
 The observability programs use native log formats. `DockerLogCaptureHelper` checks their
 `level=error`/`level=fatal` and tab-delimited error levels during archive auditing;
 `DockerStartCommandsTest` also checks live output before stopping them. Their errors fail the test.

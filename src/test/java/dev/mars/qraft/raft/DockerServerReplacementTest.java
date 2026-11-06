@@ -72,7 +72,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @ExpectedDockerErrorsHelper({
         // The replaced server is unreachable while it is stopped, and its name may fail to resolve meanwhile.
         dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE,
-        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_NAME_UNRESOLVED
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_NAME_UNRESOLVED,
+        // The removal with a wrong operator token is refused, and the command writes the refusal to its output.
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_OPERATOR_TOKEN_REFUSED
 })
 // Each wait is bounded; their worst-case sum is about twelve minutes, so the method budget is twenty and a failure
 // reports the condition that was not met rather than the module's default method timeout.

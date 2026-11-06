@@ -22,7 +22,18 @@ import ch.qos.logback.core.read.ListAppender;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.mars.qraft.common.async.RaftExecutorsFixture;
+import dev.mars.qraft.server.api.AclGrpcGuard;
+import dev.mars.qraft.server.api.grpc.DistributedStateServiceGrpc;
+import dev.mars.qraft.server.api.grpc.GetRequest;
 import dev.mars.qraft.server.config.AppConfig;
+import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
+import io.grpc.Metadata;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
+import io.grpc.stub.MetadataUtils;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.LoggerFactory;
@@ -39,16 +50,19 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests that a real server started with ACLs enabled and a management file installs the file's token when it becomes
- * leader, through the bootstrap, so that its bootstrap endpoint then refuses with reset index 1 (ACL list, Phase 3),
- * and that no log line holds the file's secret.
+ * Tests a real server started with ACLs enabled under {@code deny} and a management file: it installs the file's
+ * token when it becomes leader, through the bootstrap, so that its bootstrap endpoint then refuses with reset index 1
+ * (ACL list, Phase 3); and it enforces ACLs on each of its listeners, its HTTP API, its server removals and its gRPC
+ * API, where the management token is allowed and a request without a token is not (Phase 4). No log line holds the
+ * file's secret.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-05
- * @version 1.0
+ * @version 1.1
  */
 class QraftServerAclStartupTest {
     private static final String SECRET = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
@@ -57,8 +71,14 @@ class QraftServerAclStartupTest {
     @TempDir
     Path directory;
 
-    @Test
-    void aServerWithAManagementFileInstallsItsTokenWhenItLeads() throws Exception {
+    private final ListAppender<ILoggingEvent> captured = new ListAppender<>();
+    private final Logger root = (Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
+    private RaftExecutorsFixture executors;
+    private QraftServerService service;
+    private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+
+    @BeforeEach
+    void start() throws Exception {
         Path secretFile = Files.writeString(directory.resolve("management-token"), SECRET);
         Path configuration = directory.resolve("server.json");
         JSON.writeValue(configuration.toFile(), Map.of("version", 1, "server", Map.of(
@@ -70,48 +90,85 @@ class QraftServerAclStartupTest {
                 "telemetry", Map.of("enabled", false))));
         AppConfig config = AppConfig.fromFile(configuration);
         config.validate();
-        Logger root = (Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME);
-        ListAppender<ILoggingEvent> captured = new ListAppender<>();
         captured.start();
         root.addAppender(captured);
-        RaftExecutorsFixture executors = RaftExecutorsFixture.create();
-        QraftServerService service = new QraftServerService(executors.stateLoop(), executors.blockingTasks(), config);
+        executors = RaftExecutorsFixture.create();
+        service = new QraftServerService(executors.stateLoop(), executors.blockingTasks(), config);
+        service.start().get(30, TimeUnit.SECONDS);
+    }
+
+    @AfterEach
+    void stop() throws Exception {
         try {
-            service.start().get(30, TimeUnit.SECONDS);
-            URI bootstrap = URI.create("http://127.0.0.1:" + service.boundPorts().get("http") + "/v1/acl/bootstrap");
-
-            HttpResponse<String> answer = refusedOnceInstalled(bootstrap);
-
-            JsonNode error = JSON.readTree(answer.body());
-            assertEquals("permission_denied", error.get("code").asText(), answer.body());
-            assertEquals(1, error.get("resetIndex").asLong(), "the file's token used the bootstrap");
-            assertTrue(captured.list.stream().anyMatch(event -> event.getFormattedMessage()
-                    .startsWith("Installed the management token from server.acl.initialManagementTokenFile")));
+            client.close();
+            service.stop().get(30, TimeUnit.SECONDS);
         } finally {
-            try {
-                service.stop().get(30, TimeUnit.SECONDS);
-            } finally {
-                executors.close().get(30, TimeUnit.SECONDS);
-                root.detachAppender(captured);
-            }
+            executors.close().get(30, TimeUnit.SECONDS);
+            root.detachAppender(captured);
         }
         assertFalse(captured.list.stream().anyMatch(event -> event.getFormattedMessage().contains(SECRET)),
                 "no log line holds the management secret");
     }
 
-    /** Asks for a bootstrap until the server, once leader, refuses it; a server not yet leading answers 503. */
-    private static HttpResponse<String> refusedOnceInstalled(URI bootstrap) throws Exception {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
-        try (HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()) {
-            while (true) {
-                HttpResponse<String> response = client.send(HttpRequest.newBuilder(bootstrap)
-                        .timeout(Duration.ofSeconds(10)).PUT(HttpRequest.BodyPublishers.noBody()).build(),
-                        HttpResponse.BodyHandlers.ofString());
-                if (response.statusCode() == 403 || System.nanoTime() > deadline) return response;
-                assertEquals(503, response.statusCode(), "only a server that does not lead yet may refuse otherwise: "
-                        + response.body());
-                Thread.sleep(50);
-            }
+    @Test
+    void aServerWithAManagementFileInstallsItsTokenWhenItLeads() throws Exception {
+        HttpResponse<String> answer = refusedOnceInstalled();
+
+        JsonNode error = JSON.readTree(answer.body());
+        assertEquals("permission_denied", error.get("code").asText(), answer.body());
+        assertEquals(1, error.get("resetIndex").asLong(), "the file's token used the bootstrap");
+    }
+
+    @Test
+    void aServerWithAclsEnforcesThemOnItsHttpApiItsRemovalsAndItsGrpcApi() throws Exception {
+        refusedOnceInstalled();
+
+        HttpResponse<String> anonymous = http("GET", "/v1/operator/raft/configuration", null);
+        assertEquals(403, anonymous.statusCode(), anonymous.body());
+        assertEquals("permission_denied", JSON.readTree(anonymous.body()).get("code").asText());
+        assertEquals(200, http("GET", "/v1/operator/raft/configuration", SECRET).statusCode());
+
+        HttpResponse<String> removal = http("DELETE", "/v1/operator/raft/peer?name=absent", SECRET);
+        assertEquals(404, removal.statusCode(), "the management token passes operator:write on the server and "
+                + "in its membership service, which then finds no such server: " + removal.body());
+
+        ManagedChannel channel = ManagedChannelBuilder.forAddress("127.0.0.1", service.boundPorts().get("apiGrpc"))
+                .usePlaintext().build();
+        try {
+            DistributedStateServiceGrpc.DistributedStateServiceBlockingStub stub =
+                    DistributedStateServiceGrpc.newBlockingStub(channel).withDeadlineAfter(10, TimeUnit.SECONDS);
+            GetRequest get = GetRequest.newBuilder().setKey("missing").build();
+            StatusRuntimeException refused = assertThrows(StatusRuntimeException.class, () -> stub.get(get));
+            assertEquals(Status.Code.PERMISSION_DENIED, refused.getStatus().getCode());
+
+            Metadata token = new Metadata();
+            token.put(Metadata.Key.of(AclGrpcGuard.TOKEN_METADATA_KEY, Metadata.ASCII_STRING_MARSHALLER), SECRET);
+            assertFalse(stub.withInterceptors(MetadataUtils.newAttachHeadersInterceptor(token)).get(get).getFound());
+        } finally {
+            channel.shutdownNow().awaitTermination(10, TimeUnit.SECONDS);
         }
+    }
+
+    /**
+     * Waits until the server, once leader, has installed the file's token, and then asks for a bootstrap. It must not
+     * ask before: a bootstrap that reaches the new leader before its installer proposes is applied, and the file's
+     * token is then created instead, as the installer's own tests show.
+     */
+    private HttpResponse<String> refusedOnceInstalled() throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
+        while (captured.list.stream().noneMatch(event -> event.getFormattedMessage()
+                .startsWith("Installed the management token from server.acl.initialManagementTokenFile"))) {
+            assertTrue(System.nanoTime() < deadline, "the server installs the file's token within 20 s");
+            Thread.sleep(50);
+        }
+        return http("PUT", "/v1/acl/bootstrap", null);
+    }
+
+    private HttpResponse<String> http(String method, String path, String token) throws Exception {
+        HttpRequest.Builder request = HttpRequest.newBuilder(
+                        URI.create("http://127.0.0.1:" + service.boundPorts().get("http") + path))
+                .timeout(Duration.ofSeconds(10)).method(method, HttpRequest.BodyPublishers.noBody());
+        if (token != null) request.header("X-Qraft-Token", token);
+        return client.send(request.build(), HttpResponse.BodyHandlers.ofString());
     }
 }

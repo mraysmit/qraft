@@ -750,6 +750,15 @@ class QraftClientTest {
         server.createContext(NodeAnswerHelper.DEREGISTER, NodeAnswerHelper.dispatching("serviceId",
                 (exchange, body) -> NodeAnswerHelper.serviceDeregistered(exchange, body.path("serviceId").asText(), true),
                 exchange -> NodeAnswerHelper.answer(exchange, 200, "deregistered", true)));
+        // The check's report is published to the servers as an observation. Without this route the JDK server
+        // answers its own HTML 404, and the client logs it as a malformed error response.
+        AtomicInteger observations = new AtomicInteger();
+        server.createContext("/v1/catalog/check/observe", exchange -> {
+            JsonNode body = new ObjectMapper().readTree(exchange.getRequestBody());
+            observations.incrementAndGet();
+            NodeAnswerHelper.send(exchange, 200, "{\"sequenceNumber\":" + body.path("sequenceNumber").asLong()
+                    + ",\"deadline\":\"2030-01-01T00:00:00Z\"}");
+        });
         server.start();
         QraftClient client = new QraftClient(clientConfigWithoutServices());
 
@@ -766,6 +775,7 @@ class QraftClientTest {
             assertTrue(client.statusReporter("api-1", "app").orElseThrow()
                     .report(dev.mars.qraft.client.health.CheckStatus.PASSING, "ok"));
             awaitTrue(() -> client.localApi().isReady(), "the check reported passing");
+            awaitTrue(() -> observations.get() > 0, "the report reaches the servers");
 
             assertEquals(200, localApi(client, "PUT", "/v1/client/service/register", """
                     {"id":"api-1","name":"api","port":9000,"checks":[{"id":"late","type":"ttl","ttlMs":30000}]}

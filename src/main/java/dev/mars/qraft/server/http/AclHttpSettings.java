@@ -16,27 +16,33 @@
 
 package dev.mars.qraft.server.http;
 
+import dev.mars.qraft.common.acl.AclDefaultPolicy;
+
 import java.nio.file.Path;
 import java.util.Objects;
 
 /**
- * What the HTTP API needs to know of a server's ACL settings: whether ACLs are enabled, and the server's data
- * directory, where an operator writes {@code acl-bootstrap-reset} (ACL list, proposal 12).
+ * What the HTTP API needs to know of a server's ACL settings: whether ACLs are enabled, the server's data
+ * directory, where an operator writes {@code acl-bootstrap-reset} (ACL list, proposal 12), and the default policy
+ * that decides a request no rule of its token matches.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-05
- * @version 1.0
+ * @version 1.1
  */
-public record AclHttpSettings(boolean enabled, Path dataDirectory) {
+public record AclHttpSettings(boolean enabled, Path dataDirectory, AclDefaultPolicy defaultPolicy) {
     /** The name of the file that holds a bootstrap reset index, as in Consul. */
     public static final String BOOTSTRAP_RESET_FILE = "acl-bootstrap-reset";
 
     public AclHttpSettings {
-        if (enabled) Objects.requireNonNull(dataDirectory, "dataDirectory");
+        if (enabled) {
+            Objects.requireNonNull(dataDirectory, "dataDirectory");
+            Objects.requireNonNull(defaultPolicy, "defaultPolicy");
+        }
     }
 
-    /** ACLs disabled: the ACL API answers 401 {@code acl_disabled}. */
+    /** ACLs disabled: every request is allowed, and the ACL API answers 401 {@code acl_disabled}. */
     public static AclHttpSettings disabled() {
-        return new AclHttpSettings(false, null);
+        return new AclHttpSettings(false, null, null);
     }
 }

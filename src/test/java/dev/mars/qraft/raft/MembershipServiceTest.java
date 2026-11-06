@@ -241,6 +241,22 @@ class MembershipServiceTest {
     }
 
     @Test
+    void theLeadersOwnAuthorizerDecidesAForwardedRemoval() throws Exception {
+        leadWithACommit();
+        // With ACLs, each server resolves the token in its own state: here the follower accepts what the leader refuses.
+        services.put("b", MembershipService.authorizedBy(b, new ForwarderFixture(), token -> java.util.Optional.empty()));
+        services.put("a", MembershipService.authorizedBy(a, new ForwarderFixture(),
+                token -> java.util.Optional.of("Permission denied: refused in the leader's state")));
+
+        MembershipResponse answer = await(services.get("b").remove(removal().setName("c").setToken("t").build()));
+
+        assertEquals(Status.UNAUTHORIZED, answer.getStatus());
+        assertEquals("Permission denied: refused in the leader's state", answer.getMessage());
+        assertEquals(List.of("a"), forwardedTo);
+        assertTrue(a.getConfiguration().orElseThrow().serverNamed("c").isPresent());
+    }
+
+    @Test
     void withNoTokenConfiguredEveryRemovalIsRefused() throws Exception {
         leadWithACommit();
         MembershipService unconfigured = new MembershipService(a, new ForwarderFixture(), null);

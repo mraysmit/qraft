@@ -254,6 +254,35 @@ class RaftNodePreVoteCandidateTest {
     }
 
     @Test
+    void aRefusalFromALaterTermIsAdoptedSoTheNextRoundAsksBeyondIt() throws Exception {
+        // As hashicorp/raft's runCandidate: "Check if the term is greater than ours, bail", for a pre-vote answer as
+        // for a vote. Without it, a server restarted while a term passed asks forever for a term its peers already
+        // hold, and a peer with a shorter log is refused by it: the two never elect (DockerClientTopologyTest,
+        // 2026-11-06).
+        start(MEMBERS);
+        timers.fireElectionTimeout();
+        await(() -> transport.preVotes.size() == 2, "pre-votes held");
+
+        transport.preVote("peer-2").complete(answer("peer-2", 2, false));
+        transport.preVote("peer-3").complete(answer("peer-3", 0, false));
+        settle();
+
+        RaftStatus adopted = status();
+        assertEquals(2, adopted.term(), "the refusal's later term is taken");
+        assertEquals(RaftNode.State.FOLLOWER, adopted.state());
+        assertTrue(transport.votes.isEmpty(), "and no election starts from the refused round");
+
+        timers.fireElectionTimeout();
+        await(() -> transport.preVotes.size() == 4, "the next timeout asks again");
+        for (var held : transport.preVotes.subList(2, 4)) {
+            assertEquals(3, held.request().getTerm(), "beyond the term it learned");
+        }
+        transport.preVotes.get(2).response().complete(answer(transport.preVotes.get(2).target(), 2, true));
+        await(() -> transport.votes.size() == 2, "a willing peer in term 2 lets it stand for term 3");
+        assertEquals(3, status().term());
+    }
+
+    @Test
     void anAnswerFromAServerOtherThanTheConfiguredOneIsNotCounted() throws Exception {
         start(MEMBERS);
         timers.fireElectionTimeout();

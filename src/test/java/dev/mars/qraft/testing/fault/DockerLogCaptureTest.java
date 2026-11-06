@@ -189,6 +189,52 @@ class DockerLogCaptureTest {
     }
 
     @Test
+    void aCommandLineErrorFailsWithoutADeclaration() {
+        String output = "Error 403: permission_denied: The operator token is missing or wrong\n";
+
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(output, Set.of(), "DockerClass");
+
+        assertTrue(audit.recognised().isEmpty());
+        assertEquals(java.util.List.of("undeclared command-line error: " + output.stripTrailing()), audit.problems());
+        assertEquals(output, audit.archivedOutput());
+    }
+
+    @Test
+    void aDeclaredCommandLineErrorIsFlaggedAndRecognisedUnderTheCommandsName() {
+        String refused = "Error 403: permission_denied: The operator token is missing or wrong\n";
+        String removed = "Removed server1 (18496cd9-6902-4627-a1c7-6a5e08491a68)\n";
+
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(refused + removed,
+                Set.of(IntentionalErrorFixture.RAFT_OPERATOR_TOKEN_REFUSED), "DockerClass");
+
+        assertTrue(audit.problems().isEmpty(), audit.problems().toString());
+        assertEquals(1, audit.recognised().size());
+        assertEquals("dev.mars.qraft.runtime.RaftOperatorCommand", audit.recognised().getFirst().logger());
+        assertEquals("*** INTENTIONAL ERROR: RAFT_OPERATOR_TOKEN_REFUSED, caused by DockerClass *** " + refused
+                + removed, audit.archivedOutput());
+    }
+
+    @Test
+    void aRemovalRefusedForAChangeInProgressMatchesAtAnyIndex() {
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(
+                "Error 409: refused: A configuration change is already in progress at index 79\n",
+                Set.of(IntentionalErrorFixture.RAFT_OPERATOR_CHANGE_IN_PROGRESS), "DockerClass");
+
+        assertTrue(audit.problems().isEmpty(), audit.problems().toString());
+        assertEquals(1, audit.recognised().size());
+    }
+
+    @Test
+    void aDeclaredCommandLineErrorCannotExcuseAnother() {
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(
+                "Error 404: peer_not_found: No server is named server9\n",
+                Set.of(IntentionalErrorFixture.RAFT_OPERATOR_TOKEN_REFUSED), "DockerClass");
+
+        assertTrue(audit.recognised().isEmpty());
+        assertEquals(1, audit.problems().size());
+    }
+
+    @Test
     void anErrorShapedLineThatCannotBeParsedIsNeverSilentlyIgnored() {
         DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(
                 "12:00:00 | ERROR | runtime failed before Logback started", Set.of());

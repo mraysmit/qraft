@@ -17,37 +17,44 @@
 package dev.mars.qraft.server.http;
 
 import com.sun.net.httpserver.HttpExchange;
+import dev.mars.qraft.server.acl.AclPrincipal;
 import dev.mars.qraft.state.catalog.ServiceInstance;
 
+import java.util.Objects;
 import java.util.UUID;
 
 /**
- * {@link RequestContext} read from the X-Qraft-Tenant, X-Qraft-Namespace, X-Qraft-Node, and X-Qraft-Node-ID
- * request headers. The node ID is optional, for clients from before node IDs, and when present must be a
- * canonical UUID.
+ * {@link RequestContext} of a request whose token has been resolved (ACL list, Phase 4): the principal it acts as,
+ * and the X-Qraft-Tenant, X-Qraft-Namespace, X-Qraft-Node, and X-Qraft-Node-ID request headers. The headers are the
+ * caller's choice of where it acts, which the principal's rules then decide (proposal 7); they authenticate nothing.
+ * The node ID is optional, for clients from before node IDs, and when present must be a canonical UUID. Replaces
+ * {@code HeaderRequestContext}, which trusted the headers alone.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-24
- * @version 1.0
+ * @version 1.1
  */
-final class HeaderRequestContext implements RequestContext {
+final class TokenRequestContext implements RequestContext {
     static final String TENANT_HEADER = "X-Qraft-Tenant";
     static final String NAMESPACE_HEADER = "X-Qraft-Namespace";
     static final String NODE_HEADER = "X-Qraft-Node";
     static final String NODE_ID_HEADER = "X-Qraft-Node-ID";
 
+    private final AclPrincipal principal;
     private final String tenantId;
     private final String namespace;
     private final String nodeId;
     private final String nodeUuid;
 
-    HeaderRequestContext(HttpExchange exchange) {
+    TokenRequestContext(HttpExchange exchange, AclPrincipal principal) {
+        this.principal = Objects.requireNonNull(principal, "principal");
         tenantId = optionalScope(exchange, TENANT_HEADER);
         namespace = optionalScope(exchange, NAMESPACE_HEADER);
         nodeId = required(exchange, NODE_HEADER);
         nodeUuid = optionalUuid(exchange, NODE_ID_HEADER);
     }
 
+    @Override public AclPrincipal principal() { return principal; }
     @Override public String tenantId() { return tenantId; }
     @Override public String namespace() { return namespace; }
     @Override public String nodeId() { return nodeId; }

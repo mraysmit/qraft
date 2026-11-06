@@ -1748,9 +1748,31 @@ public class RaftNode {
         } else if (!fromConfiguredServer(peerName, response.getVoterServerId())) {
             logger.warn("Ignoring a pre-vote answer from {} with server ID {}, which is not the configured server",
                     peerName, response.getVoterServerId());
+        } else if (response.getTerm() > currentTerm) {
+            sequencePreVoteHigherTerm(response.getTerm());
         } else if (response.getVoteGranted()) {
             countWillingPreVoter(round, peerName);
         }
+    }
+
+    /**
+     * Takes the later term a pre-vote refusal carries, as hashicorp/raft's {@code runCandidate} does for a pre-vote
+     * answer as for a vote ("Check if the term is greater than ours, bail"). A voter answers with its own term and
+     * grants only a term beyond it, so such an answer is always a refusal from a server already in a later term.
+     * Without this, a server that missed a term asks forever for a term its peers already hold.
+     */
+    private void sequencePreVoteHigherTerm(long term) {
+        transitionSequencer.submit(
+                        "pre-vote-response:" + term,
+                        RaftTransitionSequencer.FailurePolicy.FENCE,
+                        () -> term <= currentTerm ? CompletableFuture.completedFuture(false)
+                                : persistMetadata(term, Optional.empty()).thenApply(ignored -> true),
+                        higher -> {
+                            if (higher) applyDurableHigherTerm(term, null);
+                            return null;
+                        })
+                .whenComplete(Completions.onFailure(error -> TransitionFailureLog.log(logger,
+                        "Failed to take the term {} of a pre-vote answer: {}", error, term)));
     }
 
     private void countWillingPreVoter(PreVoteRound round, String peerName) {

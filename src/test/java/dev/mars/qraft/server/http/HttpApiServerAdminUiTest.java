@@ -156,6 +156,18 @@ class HttpApiServerAdminUiTest {
                         && event.getFormattedMessage().contains("unauthenticated")).count());
     }
 
+    @Test
+    void withAclsEnabledTheInterfacesFilesNeedNoToken() throws Exception {
+        // ACL list, proposal 11: the static files need no token; the interface's API calls carry one (UI-5).
+        server = new HttpApiServer(0, null, null, Clock.systemUTC(), new AdminUiConfig(true, "/ui/", Optional.empty()),
+                FIXTURE, HttpApiServer.DEFAULT_RAFT_TIMEOUT, null, new AclHttpSettings(true, temporaryDirectory,
+                        dev.mars.qraft.common.acl.AclDefaultPolicy.DENY));
+        server.start().get(10, TimeUnit.SECONDS);
+
+        assertEquals(200, get("/ui/").statusCode());
+        assertEquals(200, get("/ui/assets/app-3f2a1b.js").statusCode());
+    }
+
     private void start(AdminUiConfig ui, UiAssets assets) throws Exception {
         server = new HttpApiServer(0, null, null, Clock.systemUTC(), ui, assets);
         server.start().get(10, TimeUnit.SECONDS);

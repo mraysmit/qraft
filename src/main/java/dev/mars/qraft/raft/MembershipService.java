@@ -25,8 +25,6 @@ import dev.mars.qraft.common.concurrent.Deadlines;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -43,10 +41,12 @@ import java.util.function.Function;
  *   <li>any other server forwards the request to the leader it knows over the Raft port, marked as forwarded,
  *       and returns the leader's answer. A forwarded request is never forwarded again, so two servers that
  *       each think the other leads cannot pass it back and forth;</li>
- *   <li>a removal needs the operator token. The server that receives it checks the token before forwarding,
- *       and the leader checks it again, so the Raft port does not bypass it. With no token configured, every
- *       removal is refused. Joining needs no token, as joining gives a server no vote until the leader
- *       promotes it. A join that collides with another server ID is refused until an operator removes it.</li>
+ *   <li>a removal needs a token its {@link RemovalAuthorizer} accepts: the operator token with ACLs disabled, and
+ *       one holding {@code operator:write} with ACLs enabled. The server that receives it checks the token before
+ *       forwarding, and the leader checks it again, so the Raft port does not bypass it. With no operator token
+ *       configured and ACLs disabled, every removal is refused. Joining needs no token, as joining gives a server
+ *       no vote until the leader promotes it. A join that collides with another server ID is refused until an
+ *       operator removes it.</li>
  * </ul>
  * The node's refusals, such as the quorum rule, come back as {@link Status#REFUSED} with the node's reason.
  *
@@ -61,17 +61,30 @@ public final class MembershipService {
 
     private final RaftNode node;
     private final RaftTransport forwarder;
-    private final byte[] operatorToken;
+    private final RemovalAuthorizer removals;
 
     /**
      * @param forwarder the transport that carries a request to the leader
      * @param operatorToken the token a removal must carry; null or blank refuses every removal
      */
     public MembershipService(RaftNode node, RaftTransport forwarder, String operatorToken) {
+        this(node, forwarder, RemovalAuthorizer.operatorToken(operatorToken,
+                Objects.requireNonNull(node, "node").getNodeId()));
+    }
+
+    /**
+     * A membership service whose removals {@code removals} decides, here and on the leader.
+     *
+     * @param forwarder the transport that carries a request to the leader
+     */
+    public static MembershipService authorizedBy(RaftNode node, RaftTransport forwarder, RemovalAuthorizer removals) {
+        return new MembershipService(node, forwarder, removals);
+    }
+
+    private MembershipService(RaftNode node, RaftTransport forwarder, RemovalAuthorizer removals) {
         this.node = Objects.requireNonNull(node, "node");
         this.forwarder = Objects.requireNonNull(forwarder, "forwarder");
-        this.operatorToken = operatorToken == null || operatorToken.isBlank()
-                ? null : operatorToken.getBytes(StandardCharsets.UTF_8);
+        this.removals = Objects.requireNonNull(removals, "removals");
     }
 
     /** Admits {@code request}'s server as a non-voter on the leader, or forwards the request to it. */
@@ -101,13 +114,9 @@ public final class MembershipService {
     /** Removes the server {@code request} names, by ID or by name, on the leader, or forwards it there. */
     public CompletableFuture<MembershipResponse> remove(RemoveServerRequest request) {
         Objects.requireNonNull(request, "request");
-        if (operatorToken == null) {
-            return CompletableFuture.completedFuture(response(Status.UNAUTHORIZED,
-                    "Removal refused: no operator token is configured on " + node.getNodeId()));
-        }
-        if (!MessageDigest.isEqual(operatorToken, request.getToken().getBytes(StandardCharsets.UTF_8))) {
-            logger.warn("Refused a server removal with a missing or wrong operator token");
-            return CompletableFuture.completedFuture(response(Status.UNAUTHORIZED, "The operator token is missing or wrong"));
+        Optional<String> refusal = removals.refusal(request.getToken());
+        if (refusal.isPresent()) {
+            return CompletableFuture.completedFuture(response(Status.UNAUTHORIZED, refusal.get()));
         }
         if (!node.isLeader()) {
             return forward(request.getForwarded(), leader -> forwarder.removeServer(leader,

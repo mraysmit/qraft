@@ -22,7 +22,12 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import dev.mars.qraft.common.Node;
+import dev.mars.qraft.common.acl.AclAccess;
+import dev.mars.qraft.common.acl.AclRequest;
+import dev.mars.qraft.common.acl.AclResource;
 import dev.mars.qraft.common.http.JsonApi;
+import dev.mars.qraft.server.acl.AclPrincipal;
+import dev.mars.qraft.server.acl.AclResolver;
 import dev.mars.qraft.state.catalog.HealthCheckState;
 import dev.mars.qraft.state.catalog.HealthObservation;
 import dev.mars.qraft.state.catalog.ServiceInstance;
@@ -102,9 +107,13 @@ public final class HttpApiServer implements AutoCloseable {
     private final Duration raftTimeout;
     private final MembershipService membership;
     private final AclHttpSettings acl;
+    /** Resolves a request's token against this server's applied ACL state; unrestricted with ACLs disabled. */
+    private final AclResolver resolver;
 
     /** How long a request waits for the Raft node to answer a status read or commit a write. */
     public static final Duration DEFAULT_RAFT_TIMEOUT = Duration.ofSeconds(5);
+    /** Set on a read whose answer leaves out what the token may not see, as Consul's header is. */
+    static final String RESULTS_FILTERED_HEADER = "X-Qraft-Results-Filtered-By-ACLs";
 
     public HttpApiServer(int port) throws IOException {
         this(port, null, null);
@@ -148,7 +157,11 @@ public final class HttpApiServer implements AutoCloseable {
         this(port, raftNode, stateStore, clock, ui, assets, raftTimeout, membership, AclHttpSettings.disabled());
     }
 
-    /** @param acl whether ACLs are enabled, and the data directory that may hold a bootstrap reset index */
+    /**
+     * @param acl whether ACLs are enabled, the data directory that may hold a bootstrap reset index, and the default
+     *            policy. With ACLs enabled, every route but health, the bootstrap and the administrative interface's
+     *            files authorizes its request's token before it reads or proposes anything (ACL list, Phase 4)
+     */
     public HttpApiServer(int port, RaftNode raftNode, QraftStateStore stateStore, Clock clock,
                          AdminUiConfig ui, UiAssets assets, Duration raftTimeout, MembershipService membership,
                          AclHttpSettings acl) throws IOException {
@@ -166,6 +179,9 @@ public final class HttpApiServer implements AutoCloseable {
         }
         this.raftNode = raftNode;
         this.stateStore = stateStore;
+        // Without a state store every route that takes a token answers that the catalog is unavailable.
+        this.resolver = acl.enabled() && stateStore != null
+                ? AclResolver.enabled(acl.defaultPolicy(), stateStore.getAcl()) : AclResolver.disabled();
         this.server = HttpServer.create(new InetSocketAddress(port), 0);
         this.executor = Executors.newVirtualThreadPerTaskExecutor();
         server.setExecutor(executor);
@@ -276,11 +292,14 @@ public final class HttpApiServer implements AutoCloseable {
         try (var output = exchange.getResponseBody()) { output.write(bytes); }
     }
 
+    /** This server's Raft state. With ACLs enabled it needs {@code operator:read} (ACL list, proposal 11). */
     private void raftStatus(HttpExchange exchange) throws IOException {
         if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
             respondError(exchange, 405, "method_not_allowed", "Method not allowed", false);
             return;
         }
+        AclPrincipal principal = principal(exchange);
+        if (principal == null || refused(exchange, principal, OPERATOR_READ)) return;
         if (raftNode == null) {
             respondError(exchange, 503, "catalog_unavailable", "Raft state is unavailable", true);
             return;
@@ -313,10 +332,13 @@ public final class HttpApiServer implements AutoCloseable {
     /**
      * Lists the Raft configuration as this server holds it, after Consul's
      * {@code GET /v1/operator/raft/configuration?stale}: each server's ID, name, address, whether it votes, and
-     * whether it is the leader this server knows. Open without a token, like {@code /raft/status}.
+     * whether it is the leader this server knows. With ACLs enabled it needs {@code operator:read}, as Consul's
+     * does; with them disabled it is open, like {@code /raft/status}.
      */
     private void raftConfiguration(HttpExchange exchange) throws IOException {
         if (!prepareStateRequest(exchange, "GET")) return;
+        AclPrincipal principal = principal(exchange);
+        if (principal == null || refused(exchange, principal, OPERATOR_READ)) return;
         Optional<RaftConfiguration> configuration = raftNode.getConfiguration();
         if (configuration.isEmpty()) {
             respondError(exchange, 503, "not_configured", "This server has no Raft configuration yet", true);
@@ -338,8 +360,9 @@ public final class HttpApiServer implements AutoCloseable {
 
     /**
      * Removes a server, named by {@code id} or {@code name}, after Consul's {@code DELETE /v1/operator/raft/peer}.
-     * It needs the operator token, as {@code X-Qraft-Token} or {@code Authorization: Bearer}. Any server forwards
-     * the removal to the leader.
+     * With ACLs disabled it needs the operator token; with them enabled, a token with {@code operator:write}, checked
+     * here and again by the membership service, on this server and on the leader. The token is sent as
+     * {@code X-Qraft-Token} or {@code Authorization: Bearer}. Any server forwards the removal to the leader.
      */
     private void removeRaftPeer(HttpExchange exchange) throws IOException {
         if (!prepareStateRequest(exchange, "DELETE")) return;
@@ -348,6 +371,8 @@ public final class HttpApiServer implements AutoCloseable {
                     false);
             return;
         }
+        AclPrincipal principal = principal(exchange);
+        if (principal == null || refused(exchange, principal, OPERATOR_WRITE)) return;
         Map<String, String> query;
         try {
             query = operatorQuery(exchange.getRequestURI().getRawQuery());
@@ -363,7 +388,7 @@ public final class HttpApiServer implements AutoCloseable {
             return;
         }
         RemoveServerRequest request = RemoveServerRequest.newBuilder().setServerId(id).setName(name)
-                .setToken(operatorToken(exchange)).build();
+                .setToken(presentedToken(exchange)).build();
         MembershipResponse answer;
         try {
             answer = Deadlines.bound(membership.remove(request),
@@ -382,8 +407,12 @@ public final class HttpApiServer implements AutoCloseable {
         }
     }
 
-    /** The operator token, from {@code X-Qraft-Token} or else a bearer {@code Authorization} header. */
-    private static String operatorToken(HttpExchange exchange) {
+    /**
+     * The token a request presents, from {@code X-Qraft-Token} or else a bearer {@code Authorization} header, as
+     * Consul reads {@code X-Consul-Token} before {@code Authorization}; empty without one. Qraft reads no token from
+     * the query string, which reaches logs (ACL list, section 4).
+     */
+    private static String presentedToken(HttpExchange exchange) {
         String token = exchange.getRequestHeaders().getFirst("X-Qraft-Token");
         if (token != null) return token;
         String authorization = exchange.getRequestHeaders().getFirst("Authorization");
@@ -417,11 +446,18 @@ public final class HttpApiServer implements AutoCloseable {
      * {@code PUT /v1/catalog/register}: the node under {@code node}, a service under {@code service}, or both. The
      * whole body is checked before anything is replicated, so a body that cannot be accepted registers neither half.
      * The node is committed first, then the service.
+     *
+     * <p>With ACLs enabled the whole body is authorized first, as Consul's {@code vetRegisterWithACL}:
+     * {@code node:write} on the name when the node is created or what is recorded for it changes, and on the old name
+     * when its ID is registered under another; {@code service:write} on the service's name in its scope, and on the
+     * name of the instance with the same ID that it replaces.
      */
     private void registerInCatalog(HttpExchange exchange) throws IOException {
         if (!prepareNodeRequest(exchange, "PUT")) return;
+        AclPrincipal principal = principal(exchange);
+        if (principal == null) return;
         try {
-            RequestContext context = new HeaderRequestContext(exchange);
+            RequestContext context = new TokenRequestContext(exchange, principal);
             CatalogRegistrationRequest request = objectMapper.readerFor(CatalogRegistrationRequest.class)
                     .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                     .readValue(exchange.getRequestBody());
@@ -431,6 +467,8 @@ public final class HttpApiServer implements AutoCloseable {
             ServiceInstance instance = request.service() == null ? null
                     : request.service().toServiceInstance(context);
             List<String> declaredCheckIds = request.service() == null ? null : request.service().declaredCheckIds();
+            if (node.isPresent() && refusedNodeRegistration(exchange, principal, node.get())) return;
+            if (instance != null && refusedServiceRegistration(exchange, principal, instance)) return;
             Map<String, Object> answer = new LinkedHashMap<>();
             answer.put("node", context.nodeId());
             if (node.isPresent()) {
@@ -456,6 +494,49 @@ public final class HttpApiServer implements AutoCloseable {
         } catch (CompletionException e) {
             respondUnavailable(exchange, e);
         }
+    }
+
+    /**
+     * Answers 403 when {@code principal} may not register {@code proposed}: {@code node:write} on its name when the
+     * registration creates the node or changes what is recorded for it, as Consul's {@code ChangesNode} decides, and
+     * on any other name its ID is registered under, which the registration takes over by renaming it.
+     */
+    private boolean refusedNodeRegistration(HttpExchange exchange, AclPrincipal principal, Node proposed)
+            throws IOException {
+        Node recorded = stateStore.findNode(proposed.name()).orElse(null);
+        if (changesNode(recorded, proposed) && refused(exchange, principal, nodeWrite(proposed.name()))) return true;
+        if (proposed.id() == null) return false;
+        for (Node other : stateStore.getNodes().values()) {
+            if (proposed.id().equals(other.id()) && !other.name().equals(proposed.name())
+                    && refused(exchange, principal, nodeWrite(other.name()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether registering {@code proposed} creates the node or changes what a client describes of it. */
+    private static boolean changesNode(Node recorded, Node proposed) {
+        return recorded == null
+                || !Objects.equals(recorded.name(), proposed.name())
+                || !Objects.equals(recorded.id(), proposed.id())
+                || !Objects.equals(recorded.address(), proposed.address())
+                || !Objects.equals(recorded.datacenter(), proposed.datacenter())
+                || !Objects.equals(recorded.region(), proposed.region())
+                || !recorded.metadata().equals(proposed.metadata());
+    }
+
+    /**
+     * Answers 403 when {@code principal} may not register {@code instance}: {@code service:write} on its name in its
+     * scope, and on the name of the instance with the same ID that it replaces, as Consul's
+     * {@code vetRegisterWithACL}.
+     */
+    private boolean refusedServiceRegistration(HttpExchange exchange, AclPrincipal principal, ServiceInstance instance)
+            throws IOException {
+        if (refused(exchange, principal, serviceWrite(instance))) return true;
+        Optional<ServiceInstance> replaced = stateStore.getServiceCatalog().find(instance.identity());
+        return replaced.isPresent() && !replaced.get().serviceName().equals(instance.serviceName())
+                && refused(exchange, principal, serviceWrite(replaced.get()));
     }
 
     /**
@@ -574,11 +655,19 @@ public final class HttpApiServer implements AutoCloseable {
      * {@code {"serviceId": ...}} removes that service and keeps the node, and a body that names no service removes
      * the node itself with everything registered on it. The service ID must be a non-blank string, so that a missing
      * value cannot remove the node instead. Both are idempotent.
+     *
+     * <p>With ACLs enabled, as Consul's {@code vetDeregisterWithACL}: {@code node:write} on the node allows removing
+     * anything on it, so that a client can remove what it no longer wants whoever registered it. Without it, a service
+     * needs {@code service:write} on its name, and an unknown service ID is answered 404 {@code service_not_found}, as
+     * Consul answers "Unknown service ID"; the node itself needs {@code node:write}.
      */
     private void deregisterFromCatalog(HttpExchange exchange) throws IOException {
         if (!prepareNodeRequest(exchange, "PUT")) return;
+        AclPrincipal principal = principal(exchange);
+        if (principal == null) return;
         try {
-            RequestContext context = new HeaderRequestContext(exchange);
+            RequestContext context = new TokenRequestContext(exchange, principal);
+            boolean writesNode = principal.allows(nodeWrite(context.nodeId()));
             com.fasterxml.jackson.databind.JsonNode body = objectMapper.readTree(exchange.getRequestBody());
             if (body == null || !body.isObject()) {
                 throw new IllegalArgumentException("The body must be a JSON object");
@@ -593,8 +682,17 @@ public final class HttpApiServer implements AutoCloseable {
                     throw new IllegalArgumentException("serviceId must be a non-blank string");
                 }
                 String serviceId = value.textValue();
-                RaftCommandResult<?> removed = submit(CatalogCommand.deregister(
-                        new DeregistrationRequest(serviceId, context).identity(), context.nodeUuid()));
+                ServiceInstanceId identity = new DeregistrationRequest(serviceId, context).identity();
+                if (!writesNode) {
+                    Optional<ServiceInstance> existing = stateStore.getServiceCatalog().find(identity);
+                    if (existing.isEmpty()) {
+                        respondError(exchange, 404, "service_not_found", "Unknown service ID " + serviceId
+                                + " for node " + context.nodeId(), false, Map.of("serviceId", serviceId));
+                        return;
+                    }
+                    if (refused(exchange, principal, serviceWrite(existing.get()))) return;
+                }
+                RaftCommandResult<?> removed = submit(CatalogCommand.deregister(identity, context.nodeUuid()));
                 if (refusedAsReserved(exchange, context.nodeId(), removed)) return;
                 setAppliedIndex(exchange);
                 Map<String, Object> answer = new LinkedHashMap<>();
@@ -604,6 +702,7 @@ public final class HttpApiServer implements AutoCloseable {
                 respondJson(exchange, 200, answer);
                 return;
             }
+            if (!writesNode && refused(exchange, principal, nodeWrite(context.nodeId()))) return;
             RaftCommandResult<?> result = submit(
                     new NodeCommand.Deregister(context.nodeId(), clock.instant(), context.nodeUuid()));
             if (refusedAsReserved(exchange, context.nodeId(), result)) return;
@@ -617,11 +716,17 @@ public final class HttpApiServer implements AutoCloseable {
         }
     }
 
-    /** Records a heartbeat of the node that {@code X-Qraft-Node} names, which makes the node healthy. */
+    /**
+     * Records a heartbeat of the node that {@code X-Qraft-Node} names, which makes the node healthy. With ACLs enabled
+     * it needs {@code node:write} on the name; Consul's agents have gossip instead.
+     */
     private void heartbeatNode(HttpExchange exchange) throws IOException {
         if (!prepareNodeRequest(exchange, "PUT")) return;
+        AclPrincipal principal = principal(exchange);
+        if (principal == null) return;
         try {
-            RequestContext context = new HeaderRequestContext(exchange);
+            RequestContext context = new TokenRequestContext(exchange, principal);
+            if (refused(exchange, principal, nodeWrite(context.nodeId()))) return;
             NodeHeartbeatRequest heartbeat = objectMapper.readerFor(NodeHeartbeatRequest.class)
                     .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                     .readValue(exchange.getRequestBody());
@@ -658,11 +763,19 @@ public final class HttpApiServer implements AutoCloseable {
         }
     }
 
-    /** Lists the registered nodes in name order, after Consul's {@code GET /v1/catalog/nodes}. */
+    /**
+     * Lists the registered nodes in name order, after Consul's {@code GET /v1/catalog/nodes}, leaving out those the
+     * token may not read ({@code node:read}).
+     */
     private void listNodes(HttpExchange exchange) throws IOException {
         if (!prepareNodeRequest(exchange, "GET") || refusedForItsQuery(exchange)) return;
+        AclPrincipal principal = principal(exchange);
+        if (principal == null) return;
         setAppliedIndex(exchange);
-        respondJson(exchange, 200, stateStore.getNodes().values().stream().map(NodeEntry::from).toList());
+        List<Node> all = List.copyOf(stateStore.getNodes().values());
+        List<Node> readable = all.stream().filter(node -> principal.allows(nodeRead(node.name()))).toList();
+        markFiltered(exchange, all, readable);
+        respondJson(exchange, 200, readable.stream().map(NodeEntry::from).toList());
     }
 
     /**
@@ -685,13 +798,20 @@ public final class HttpApiServer implements AutoCloseable {
         return answer;
     }
 
+    /** The services in the read's scope with their tags, leaving out those the token may not read. */
     private void listServices(HttpExchange exchange) throws IOException {
         if (!prepareCatalogRequest(exchange, "GET") || refusedForItsQuery(exchange)) return;
+        AclPrincipal principal = principal(exchange);
+        if (principal == null) return;
         ReadScope scope = readScope(exchange);
         if (scope == null) return;
         setAppliedIndex(exchange);
+        List<String> all = List.copyOf(stateStore.getServiceCatalog().services(scope.tenantId(), scope.namespace()));
+        List<String> readable = all.stream().filter(service -> principal.allows(
+                AclRequest.service(service, scope.tenantId(), scope.namespace(), AclAccess.READ))).toList();
+        markFiltered(exchange, all, readable);
         Map<String, List<String>> services = new LinkedHashMap<>();
-        for (String service : stateStore.getServiceCatalog().services(scope.tenantId(), scope.namespace())) {
+        for (String service : readable) {
             List<String> tags = stateStore.getServiceCatalog().instances(scope.service(service)).stream()
                     .flatMap(instance -> instance.tags().stream()).distinct().sorted().toList();
             services.put(service, tags);
@@ -699,9 +819,14 @@ public final class HttpApiServer implements AutoCloseable {
         respondJson(exchange, 200, services);
     }
 
-    /** One node's services in the read's scope, as Consul's {@code /v1/catalog/node-services/:node}. */
+    /**
+     * One node's services in the read's scope, as Consul's {@code /v1/catalog/node-services/:node}: nothing without
+     * {@code node:read} on the node, and otherwise the services the token may read.
+     */
     private void listNodeServices(HttpExchange exchange) throws IOException {
         if (!prepareCatalogRequest(exchange, "GET")) return;
+        AclPrincipal principal = principal(exchange);
+        if (principal == null) return;
         String node = pathParameter(exchange, "/v1/catalog/node-services/");
         if (node == null) {
             respondError(exchange, 400, "node_name_required", "Node name is required", false);
@@ -711,15 +836,22 @@ public final class HttpApiServer implements AutoCloseable {
         ReadScope scope = readScope(exchange);
         if (scope == null) return;
         setAppliedIndex(exchange);
-        respondJson(exchange, 200, stateStore.getServiceCatalog().instances().stream()
+        List<ServiceInstance> all = stateStore.getServiceCatalog().instances().stream()
                 .filter(instance -> node.equals(instance.nodeId())
                         && scope.tenantId().equals(instance.tenantId())
                         && scope.namespace().equals(instance.namespace()))
-                .toList());
+                .toList();
+        List<ServiceInstance> readable = principal.allows(nodeRead(node))
+                ? all.stream().filter(instance -> principal.allows(serviceRead(instance))).toList() : List.of();
+        markFiltered(exchange, all, readable);
+        respondJson(exchange, 200, readable);
     }
 
+    /** A service's instances in the read's scope, leaving out those the token may not read. */
     private void listServiceInstances(HttpExchange exchange) throws IOException {
         if (!prepareCatalogRequest(exchange, "GET")) return;
+        AclPrincipal principal = principal(exchange);
+        if (principal == null) return;
         String prefix = exchange.getHttpContext().getPath() + "/";
         String serviceName = pathParameter(exchange, prefix);
         if (serviceName == null) {
@@ -730,7 +862,19 @@ public final class HttpApiServer implements AutoCloseable {
         ReadScope scope = readScope(exchange);
         if (scope == null) return;
         setAppliedIndex(exchange);
-        respondJson(exchange, 200, stateStore.getServiceCatalog().instances(scope.service(serviceName)));
+        List<ServiceInstance> all = stateStore.getServiceCatalog().instances(scope.service(serviceName));
+        List<ServiceInstance> readable = readableInstances(principal, all);
+        markFiltered(exchange, all, readable);
+        respondJson(exchange, 200, readable);
+    }
+
+    /**
+     * The instances {@code principal} may read: an instance needs both {@code node:read} on its node and
+     * {@code service:read} on its service, as Consul's {@code CheckServiceNode.CanRead}.
+     */
+    private static List<ServiceInstance> readableInstances(AclPrincipal principal, List<ServiceInstance> instances) {
+        return instances.stream().filter(instance -> principal.allows(nodeRead(instance.nodeId()))
+                && principal.allows(serviceRead(instance))).toList();
     }
 
     /**
@@ -740,8 +884,8 @@ public final class HttpApiServer implements AutoCloseable {
     private ReadScope readScope(HttpExchange exchange) throws IOException {
         try {
             return new ReadScope(
-                    HeaderRequestContext.optionalScope(exchange, HeaderRequestContext.TENANT_HEADER),
-                    HeaderRequestContext.optionalScope(exchange, HeaderRequestContext.NAMESPACE_HEADER));
+                    TokenRequestContext.optionalScope(exchange, TokenRequestContext.TENANT_HEADER),
+                    TokenRequestContext.optionalScope(exchange, TokenRequestContext.NAMESPACE_HEADER));
         } catch (IllegalArgumentException e) {
             respondError(exchange, 400, "invalid_scope", safeMessage(e), false);
             return null;
@@ -754,14 +898,23 @@ public final class HttpApiServer implements AutoCloseable {
         }
     }
 
+    /**
+     * Records a check's observation. With ACLs enabled it needs {@code service:write} on the check's service; an
+     * observation of an instance that is not registered is answered 404 as before, since there is no service to name.
+     */
     private void observeHealth(HttpExchange exchange) throws IOException {
         if (!prepareCatalogRequest(exchange, "PUT")) return;
+        AclPrincipal principal = principal(exchange);
+        if (principal == null) return;
         try {
-            RequestContext context = new HeaderRequestContext(exchange);
+            RequestContext context = new TokenRequestContext(exchange, principal);
             HealthObservationRequest request = objectMapper.readerFor(HealthObservationRequest.class)
                     .with(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
                     .readValue(exchange.getRequestBody());
             HealthObservation observation = request.toObservation(context);
+            Optional<ServiceInstance> observed = stateStore.getServiceCatalog()
+                    .find(observation.checkId().serviceInstanceId());
+            if (observed.isPresent() && refused(exchange, principal, serviceWrite(observed.get()))) return;
             RaftCommandResult<?> result = submit(
                     CatalogCommand.observe(observation, clock.instant(), context.nodeUuid()));
             if (refusedAsReserved(exchange, context.nodeId(), result)) return;
@@ -792,8 +945,11 @@ public final class HttpApiServer implements AutoCloseable {
         }
     }
 
+    /** A service's instances with their checks, leaving out those the token may not read. */
     private void listServiceHealth(HttpExchange exchange) throws IOException {
         if (!prepareCatalogRequest(exchange, "GET")) return;
+        AclPrincipal principal = principal(exchange);
+        if (principal == null) return;
         String serviceName = pathParameter(exchange, "/v1/health/service/");
         if (serviceName == null) {
             respondError(exchange, 400, "service_name_required", "Service name is required", false);
@@ -811,8 +967,10 @@ public final class HttpApiServer implements AutoCloseable {
         setAppliedIndex(exchange);
         Map<ServiceInstanceId, List<HealthCheckState>> checks = stateStore.healthChecks().stream()
                 .collect(Collectors.groupingBy(state -> state.checkId().serviceInstanceId()));
-        List<HealthServiceEntry> entries = stateStore.getServiceCatalog().instances(scope.service(serviceName))
-                .stream()
+        List<ServiceInstance> all = stateStore.getServiceCatalog().instances(scope.service(serviceName));
+        List<ServiceInstance> readable = readableInstances(principal, all);
+        markFiltered(exchange, all, readable);
+        List<HealthServiceEntry> entries = readable.stream()
                 .map(instance -> HealthServiceEntry.from(instance,
                         checks.getOrDefault(instance.identity(), List.of()),
                         stateStore.findNode(instance.nodeId()).map(Node::status).orElse(null)))
@@ -916,6 +1074,56 @@ public final class HttpApiServer implements AutoCloseable {
         exchange.getResponseHeaders().set("X-Qraft-Leader-Id", leaderId);
         respondError(exchange, 503, "leader_unavailable", safeMessage(cause), true,
                 Map.of("leaderId", leaderId));
+    }
+
+    private static final AclRequest OPERATOR_READ = AclRequest.single(AclResource.OPERATOR, AclAccess.READ);
+    private static final AclRequest OPERATOR_WRITE = AclRequest.single(AclResource.OPERATOR, AclAccess.WRITE);
+
+    /**
+     * The principal the request acts as, resolved from its token against this server's applied ACL state; or
+     * {@code null} after answering 403 {@code token_not_found} for a token that names none, as Consul answers 403 for
+     * "ACL not found". The secret is never answered or logged.
+     */
+    private AclPrincipal principal(HttpExchange exchange) throws IOException {
+        Optional<AclPrincipal> principal = resolver.resolve(presentedToken(exchange));
+        if (principal.isPresent()) return principal.get();
+        LOG.info("ACL refused {} {}: the token was not found", exchange.getRequestMethod(),
+                exchange.getRequestURI().getPath());
+        respondError(exchange, 403, "token_not_found", AclResolver.TOKEN_NOT_FOUND_MESSAGE, false);
+        return null;
+    }
+
+    /**
+     * Answers 403 {@code permission_denied}, in Consul's words, and returns {@code true} when {@code principal} may
+     * not make {@code request}. A refusal is not an error: it is logged at INFO with the accessor ID.
+     */
+    private boolean refused(HttpExchange exchange, AclPrincipal principal, AclRequest request) throws IOException {
+        if (principal.allows(request)) return false;
+        String denied = principal.permissionDenied(request);
+        LOG.info("ACL refused {} {}: {}", exchange.getRequestMethod(), exchange.getRequestURI().getPath(), denied);
+        respondError(exchange, 403, "permission_denied", denied, false);
+        return true;
+    }
+
+    /** Marks a read whose answer, {@code kept}, leaves out some of {@code all}, as Consul's results filter does. */
+    private static void markFiltered(HttpExchange exchange, List<?> all, List<?> kept) {
+        if (kept.size() < all.size()) exchange.getResponseHeaders().set(RESULTS_FILTERED_HEADER, "true");
+    }
+
+    private static AclRequest nodeRead(String name) {
+        return AclRequest.named(AclResource.NODE, name, AclAccess.READ);
+    }
+
+    private static AclRequest nodeWrite(String name) {
+        return AclRequest.named(AclResource.NODE, name, AclAccess.WRITE);
+    }
+
+    private static AclRequest serviceRead(ServiceInstance instance) {
+        return AclRequest.service(instance.serviceName(), instance.tenantId(), instance.namespace(), AclAccess.READ);
+    }
+
+    private static AclRequest serviceWrite(ServiceInstance instance) {
+        return AclRequest.service(instance.serviceName(), instance.tenantId(), instance.namespace(), AclAccess.WRITE);
     }
 
     private HttpHandler requestAware(HttpHandler delegate) {
