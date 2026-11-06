@@ -993,7 +993,12 @@ table for the ACL API itself, `token/self`, `authorize`, `resolve` and `explain`
   but a bootstrap that reaches the new leader before its management installer proposes is applied. The second test
   of the class met it at its first run. The test now waits for the installer's log line before it asks. The same
   window exists in production; see the first point below.
-- **Exit:** pending the full run of 2026-11-06; recorded below when its log audit is done.
+- **Exit: not yet met.** The run of 2026-11-06 passed the default suite (1,587, every coverage gate met) and the
+  end-to-end suite (13), and failed in the Docker stage on two causes outside this phase: a deliberate removal
+  refusal in `DockerMembershipResizeTest` that the new command-line audit caught, now declared; and a Raft Pre-Vote
+  deadlock in `DockerClientTopologyTest`, whose fix waits for the owner's word because it reverses the Pre-Vote
+  list's decision 5. Both are in the handover of 2026-11-06, section 3. The three suites run again once that is
+  decided.
 
 **Two points for the owner, raised in Phase 4.**
 
