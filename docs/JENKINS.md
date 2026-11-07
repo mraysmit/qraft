@@ -515,6 +515,21 @@ unflagged lines had two causes, so the run was not accepted:
 
 The logs are in `logs/jenkins/Qraft-64/`.
 
+## Build 65, 2026-11-07
+
+Build 65 ran on `bb1101a`, with both fixes. It passed in 24 min 44 s: default 1,603 with every coverage
+gate met, end-to-end 13, and Docker and `slow` 44, 1,660 in all, with no failures, errors or skips.
+The same audit, over the console, the archived logs (156 Docker archive files from 17 classes) and the
+test reports, found 1,403 error lines and 1,048 stack traces. Every error line is flagged except one,
+the console's echo of the commit message, which contains the word; no stack trace is under an
+unflagged header; no `too_many_pings` and no JVM crash file. Logback reported no write failure.
+Grafana's lock retries appeared in the cluster start this time, three of them, each flagged
+`GRAFANA_SQLITE_LOCK_RETRY`. Against build 64 no new kind of error appears; `RAFT_OPERATOR_CHANGE_IN_PROGRESS`
+did not occur (its two removals did not meet), and the peer and snapshot counts moved with timing:
+`RAFT_PEER_UNREACHABLE` 596 from 700, `RAFT_PEER_NAME_UNRESOLVED` 180 from 312,
+`RAFT_SNAPSHOT_TRANSFER_INTERRUPTED` 84 from 92, counted across every retained copy. ACL Phase 4's
+exit is met on this build. The logs are in `logs/jenkins/Qraft-65/`.
+
 ## Job configuration
 
 The job loads its pipeline from the repository's default branch using the following SCM configuration.
