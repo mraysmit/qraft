@@ -488,6 +488,33 @@ every retained file: `RAFT_PEER_UNREACHABLE` (700 from 716), `RAFT_PEER_NAME_UNR
 (264 from 332) and `RAFT_SNAPSHOT_TRANSFER_INTERRUPTED` (96 from 104).
 `DockerClientLocalApiTest` passed without its declarations and again logged no error.
 
+## Build 64, 2026-11-07
+
+Build 64 ran on `b33d594`, ACL Phase 4 with the owner's decisions of 2026-11-07, the first build
+since 63. It passed in 25 min 9 s: default 1,598 with every coverage gate met, end-to-end 13, and
+Docker and `slow` 44, 1,655 in all, with no failures, errors or skips. `DockerClientTopologyTest`,
+which timed out on the Pre-Vote deadlock in the local run of 2026-11-06, passed.
+
+The audit read the console, the archived logs (156 Docker archive files from 17 classes) and the
+test reports, matching error text in any case; JaCoCo's coverage pages were left out, since they are
+rendered source and hold every `LOG.error` call. It found 1,666 error lines, 1,638 flagged, and
+1,118 stack traces, 24 under an unflagged header; no `too_many_pings` and no JVM crash file. The
+unflagged lines had two causes, so the run was not accepted:
+
+- **Logback lost the end-to-end log** in `CrashedClientExpiryEndToEndTest`: eight `IO failure while
+  writing to file` status errors, each with its trace, once in the console, the log and the report.
+  The server's shutdown hook `health-expiry-stop` called `shutdownNow()` on the expiry thread while
+  it logged a node reap; the interrupt landed inside the prudent file appender's
+  `FileChannel.lock`, which closed the channel (`FileLockInterruptionException`, then
+  `ClosedChannelException` for every later write). Fixed by stopping the thread without an
+  interrupt (`server.health.ExpiryExecutor`). An earlier audit script missed these traces because
+  Jenkins's timestamp and Logback's doubled `at` hid the frames.
+- **Grafana's four `Database locked, sleeping then retrying` lines** in `DockerStartCommandsTest`,
+  with `GF_DATABASE_WAL=true` confirmed in effect. WAL did not help, and was removed; the lines are
+  now declared as `GRAFANA_SQLITE_LOCK_RETRY` ([TESTING.md](TESTING.md)).
+
+The logs are in `logs/jenkins/Qraft-64/`.
+
 ## Job configuration
 
 The job loads its pipeline from the repository's default branch using the following SCM configuration.

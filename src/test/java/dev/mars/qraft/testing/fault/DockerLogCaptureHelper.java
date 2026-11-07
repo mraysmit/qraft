@@ -53,6 +53,13 @@ public final class DockerLogCaptureHelper {
     private static final Pattern ERROR_TOKEN = Pattern.compile("(?:^|[|\\s-])ERROR(?:[|:\\s-]|$)");
     private static final Pattern NATIVE_ERROR = Pattern.compile(
             "\\blevel=(?:error|fatal)\\b|\\t(?:error|fatal)\\t", Pattern.CASE_INSENSITIVE);
+    /**
+     * An error carried in a logfmt field below error level, as Grafana logs a retried transaction at INFO with
+     * {@code error="database is locked"}; Loki's {@code err=null} reports none.
+     */
+    private static final Pattern ERROR_FIELD = Pattern.compile("(?:^|\\s)(?:error|err)=(?!null(?:\\s|$))\\S");
+    private static final Pattern LOGFMT_LOGGER = Pattern.compile("(?:^|\\s)logger=(\\S+)");
+    private static final Pattern LOGFMT_LEVEL = Pattern.compile("(?:^|\\s)level=(\\w+) ?");
     private static final Pattern UNCAUGHT_EXCEPTION = Pattern.compile(
             "(?:^|\\s)Exception in thread \"[^\"]+\" (?<exception>.+)$");
     /** A command line's error output, such as {@code Error 403: <code>: <message>} from an operator command. */
@@ -207,6 +214,12 @@ public final class DockerLogCaptureHelper {
                 IntentionalErrorFixture match = command.matches() ? matchCommandError(command, expected) : null;
                 if (match != null) {
                     recognised.add(new ExternalError(match, COMMAND_LOGGER, command.group("message"), lines[index]));
+                } else if (!NATIVE_ERROR.matcher(lines[index]).find() && ERROR_FIELD.matcher(lines[index]).find()) {
+                    IntentionalErrorFixture field = matchFieldError(lines[index], expected);
+                    if (field != null) {
+                        recognised.add(new ExternalError(field, fieldLogger(lines[index]), lines[index],
+                                lines[index]));
+                    }
                 }
                 continue;
             }
@@ -260,6 +273,14 @@ public final class DockerLogCaptureHelper {
                 } else {
                     problems.add("undeclared native container ERROR: " + line);
                 }
+            } else if (ERROR_FIELD.matcher(line).find()) {
+                IntentionalErrorFixture match = matchFieldError(line, expected);
+                if (match == null) {
+                    problems.add("undeclared container error field: " + line);
+                } else {
+                    Matcher level = LOGFMT_LEVEL.matcher(line);
+                    rawLine = labelLine(rawLine, level.find() ? level.end() : 0, match, classOwner);
+                }
             } else if (ERROR_TOKEN.matcher(line).find()) {
                 problems.add("unparseable container ERROR: " + line);
             }
@@ -304,6 +325,25 @@ public final class DockerLogCaptureHelper {
     }
 
     /** The declared error that a command line's error output, audited as an ERROR of the command, matches. */
+    /**
+     * The declared error matching a logfmt line that carries an error field, or {@code null}. The line is audited
+     * whole, under {@code grafana.} and its {@code logger} field, at the level of its {@code level} field; a line
+     * without a level matches nothing.
+     */
+    private static IntentionalErrorFixture matchFieldError(String line, Set<IntentionalErrorFixture> expected) {
+        Matcher level = LOGFMT_LEVEL.matcher(line);
+        if (!level.find()) return null;
+        Level declared = Level.toLevel(level.group(1), null);
+        if (declared == null) return null;
+        String logger = fieldLogger(line);
+        return expected.stream().filter(error -> error.matches(logger, declared, line)).findFirst().orElse(null);
+    }
+
+    private static String fieldLogger(String line) {
+        Matcher logger = LOGFMT_LOGGER.matcher(line);
+        return logger.find() ? "grafana." + logger.group(1) : "container";
+    }
+
     private static IntentionalErrorFixture matchCommandError(Matcher command, Set<IntentionalErrorFixture> expected) {
         return expected.stream()
                 .filter(error -> error.matches(COMMAND_LOGGER, Level.ERROR, command.group("message")))

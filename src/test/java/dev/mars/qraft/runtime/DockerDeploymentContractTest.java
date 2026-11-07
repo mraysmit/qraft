@@ -275,19 +275,6 @@ class DockerDeploymentContractTest {
     }
 
     @Test
-    void grafanaKeepsItsSqliteStoreInWriteAheadModeSoStartupWritersDoNotLockEachOtherOut() throws IOException {
-        // On 2026-11-05 DockerStartCommandsTest's observability start logged Grafana's "Database locked, sleeping
-        // then retrying" four times, from contention on its own SQLite store (owner's decision of 2026-11-07).
-        Path root = Path.of("").toAbsolutePath();
-        for (String relativePath : List.of("docker/compose/docker-compose-observability.yml",
-                "docker/compose/docker-compose-observability-cluster.yml")) {
-            String compose = Files.readString(root.resolve(relativePath));
-            assertTrue(compose.contains("GF_DATABASE_WAL=true"), relativePath + " needs GF_DATABASE_WAL=true: "
-                    + "in SQLite's default journal mode a reader blocks Grafana's startup writes");
-        }
-    }
-
-    @Test
     void dockerIntegrationTestsRequireTheHostBuiltRuntimeJar() throws IOException {
         Path root = Path.of("").toAbsolutePath();
         String sharedCluster = Files.readString(root.resolve(

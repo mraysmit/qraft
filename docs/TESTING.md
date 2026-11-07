@@ -837,6 +837,15 @@ definition and Docker test class, preserving its original error level and line, 
 into the Maven/application log with the same attribution. Tempo 2.3.1 starts the remote watcher
 before opening its metrics WAL; the first span can expose this startup race.
 
+An error carried in a field below error level is a fifth check, added on 2026-11-07. Grafana logs a retried
+transaction at INFO with `error="database is locked"`, which none of the level checks saw. A container line with
+an `error=` or `err=` field is now audited whole, under `grafana.` and its `logger` field, at the level of its
+`level` field, and fails unless it matches a declaration; `err=null`, which Loki writes when there is none, is not
+an error. One definition exists, `GRAFANA_SQLITE_LOCK_RETRY`, which `DockerStartCommandsTest` declares: its
+observability start stops the stack as soon as it answers, while Grafana's startup writers still contend for its
+SQLite store, and Jenkins build 64 showed four retries. WAL mode was tried in that build and did not stop them,
+since SQLite still allows one writer, so it was removed again. The flag goes after the line's `level` field.
+
 ### A warning of a library, caused on purpose inside the test JVM
 
 A definition can also name a library's logger and a level below ERROR for an event inside the test JVM.

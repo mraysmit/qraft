@@ -71,7 +71,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         IntentionalErrorFixture.TEMPO_METRICS_WAL_STARTUP,
         // A script starts every server at once and Docker starts their containers one at a time, so a server can
         // dial a peer whose container has not started yet, and whose name does not resolve until it has.
-        IntentionalErrorFixture.RAFT_PEER_NAME_UNRESOLVED
+        IntentionalErrorFixture.RAFT_PEER_NAME_UNRESOLVED,
+        // The observability start stops the stack as soon as it answers, while Grafana's startup writers still
+        // contend for its SQLite store and retry; four retries in Jenkins build 64, with WAL mode tried and no help.
+        IntentionalErrorFixture.GRAFANA_SQLITE_LOCK_RETRY
 })
 @Timeout(value = 20, unit = TimeUnit.MINUTES)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)

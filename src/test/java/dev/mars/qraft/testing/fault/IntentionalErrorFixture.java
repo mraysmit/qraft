@@ -80,6 +80,15 @@ public enum IntentionalErrorFixture {
     /** A test storage fails recovery while an installed snapshot is being reconciled with the WAL. */
     RAFT_RECOVERY_STORAGE_FAILURE,
 
+    /**
+     * A test starts the observability stack and stops it as soon as it answers, while two of Grafana 10.3.1's startup
+     * writers still contend for its SQLite store: Grafana logs each retry at INFO with the error in a field. Seen four
+     * times in Jenkins build 64, with WAL mode on, which still allows only one writer.
+     */
+    GRAFANA_SQLITE_LOCK_RETRY("grafana.sqlstore.transactions", Level.INFO,
+            "logger=sqlstore\\.transactions t=\\S+ level=info msg=\"Database locked, sleeping then retrying\""
+                    + " error=\"database is locked\" retry=\\d+ code=\"database is locked\""),
+
     /** A fresh Tempo 2.3.1 metrics WAL races its remote watcher; only accepted after matching replay recovery. */
     TEMPO_METRICS_WAL_STARTUP("grafana.tempo.metrics-generator", Level.ERROR,
             "ts=\\S+ caller=dedupe\\.go:\\d+ tenant=\\S+ component=remote level=error"

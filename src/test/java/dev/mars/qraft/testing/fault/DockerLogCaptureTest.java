@@ -214,6 +214,45 @@ class DockerLogCaptureTest {
                 + removed, audit.archivedOutput());
     }
 
+    private static final String GRAFANA_LOCK_RETRY = "logger=sqlstore.transactions t=2026-11-07T07:53:15.763442549Z"
+            + " level=info msg=\"Database locked, sleeping then retrying\" error=\"database is locked\" retry=0"
+            + " code=\"database is locked\"\n";
+    private static final String LOKI_NO_ERROR = "level=info ts=2026-11-07T07:53:39.943315499Z caller=manager.go:85"
+            + " component=tsdb-manager msg=\"loaded leftover local indices\" err=null successful=true\n";
+
+    @Test
+    void anErrorFieldOnAContainerLineBelowErrorLevelFailsWithoutADeclaration() {
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(GRAFANA_LOCK_RETRY + LOKI_NO_ERROR,
+                Set.of(), "DockerClass");
+
+        assertEquals(1, audit.problems().size(), audit.problems().toString());
+        assertTrue(audit.problems().getFirst().contains("Database locked"), "err=null is no error");
+    }
+
+    @Test
+    void aDeclaredGrafanaLockRetryIsFlaggedAfterItsLevel() {
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(GRAFANA_LOCK_RETRY,
+                Set.of(IntentionalErrorFixture.GRAFANA_SQLITE_LOCK_RETRY), "DockerClass");
+
+        assertTrue(audit.problems().isEmpty(), audit.problems().toString());
+        assertEquals(1, audit.recognised().size());
+        assertEquals(GRAFANA_LOCK_RETRY.replace("level=info ",
+                "level=info *** INTENTIONAL ERROR: GRAFANA_SQLITE_LOCK_RETRY, caused by DockerClass *** "),
+                audit.archivedOutput());
+    }
+
+    @Test
+    void aDeclaredGrafanaLockRetryCannotExcuseAnotherErrorField() {
+        String other = "logger=sqlstore t=2026-11-07T07:53:15Z level=info msg=\"Migration failed\""
+                + " error=\"no such table\"\n";
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(other,
+                Set.of(IntentionalErrorFixture.GRAFANA_SQLITE_LOCK_RETRY), "DockerClass");
+
+        assertTrue(audit.recognised().isEmpty());
+        assertEquals(1, audit.problems().size());
+        assertEquals(other, audit.archivedOutput());
+    }
+
     @Test
     void aRemovalRefusedForAChangeInProgressMatchesAtAnyIndex() {
         DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(

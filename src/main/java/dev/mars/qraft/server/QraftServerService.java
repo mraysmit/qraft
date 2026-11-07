@@ -26,6 +26,7 @@ import dev.mars.qraft.server.acl.ManagementTokenInstaller;
 import dev.mars.qraft.server.config.AppConfig;
 import dev.mars.qraft.server.http.AclHttpSettings;
 import dev.mars.qraft.server.ui.UiAssets;
+import dev.mars.qraft.server.health.ExpiryExecutor;
 import dev.mars.qraft.server.health.ExpiryScheduler;
 import dev.mars.qraft.server.health.LeaderHealthExpiry;
 import dev.mars.qraft.server.health.NodeExpiryPolicy;
@@ -59,8 +60,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -79,6 +79,8 @@ public class QraftServerService {
     private static final long HEALTH_EXPIRY_PROPOSAL_TIMEOUT_MS = 5_000;
     /** How long a leader waits before trying again to install the management token from its file. */
     private static final Duration MANAGEMENT_TOKEN_RETRY = Duration.ofSeconds(1);
+    /** As long as {@code RaftStateLoop} waits for its thread; an evaluation that runs longer is interrupted. */
+    private static final Duration HEALTH_EXPIRY_STOP_TIMEOUT = Duration.ofSeconds(5);
     private static final long BOOTSTRAP_RETRY_MS = 1_000;
 
     private final RaftStateLoop runtime;
@@ -93,7 +95,7 @@ public class QraftServerService {
     private Optional<HttpApiServer> httpApiServer = Optional.empty();
     private Optional<LeaderHealthExpiry> healthExpiry = Optional.empty();
     private Optional<ManagementTokenInstaller> managementTokenInstaller = Optional.empty();
-    private Optional<ScheduledExecutorService> healthExpiryExecutor = Optional.empty();
+    private Optional<ScheduledThreadPoolExecutor> healthExpiryExecutor = Optional.empty();
     private Optional<ShutdownCoordinator> shutdownCoordinator = Optional.empty();
     private volatile Optional<Long> bootstrapTimer = Optional.empty();
 
@@ -250,8 +252,7 @@ public class QraftServerService {
             this.httpApiServer = Optional.of(healthServer);
 
             // Only the leader evaluates health-check deadlines; followers apply committed expiry commands.
-            ScheduledExecutorService expiryExecutor = Executors.newSingleThreadScheduledExecutor(
-                    Thread.ofPlatform().name("qraft-health-expiry").daemon(true).factory());
+            ScheduledThreadPoolExecutor expiryExecutor = ExpiryExecutor.create("qraft-health-expiry");
             this.healthExpiryExecutor = Optional.of(expiryExecutor);
             NodeExpiryPolicy nodePolicy = new NodeExpiryPolicy(Duration.ofMillis(config.getNodeTtlMs()),
                     Duration.ofMillis(config.getNodeReapAfterMs()));
@@ -360,10 +361,7 @@ public class QraftServerService {
         // Phase 2: AWAIT_COMPLETION - no server-managed work remains after draining.
         
         // Phase 3: STOP_SERVICES - Stop in reverse order of startup
-        coordinator.onServiceStop("health-expiry-stop", () -> {
-            stopHealthExpiry();
-            return CompletableFuture.completedFuture(null);
-        });
+        coordinator.onServiceStop("health-expiry-stop", this::stopHealthExpiry);
         coordinator.onServiceStop("grpc-server-stop", () -> {
             CompletableFuture<Void> raftStop = raftGrpcServer.map(GrpcRaftServer::stop)
                     .orElseGet(QraftServerService::nothingToStop);
@@ -383,10 +381,12 @@ public class QraftServerService {
                    drainTimeoutMs, shutdownTimeoutMs);
     }
 
-    private void stopHealthExpiry() {
+    /** Stops evaluation and the expiry thread, letting a running evaluation finish rather than interrupting it. */
+    private CompletableFuture<Void> stopHealthExpiry() {
         managementTokenInstaller.ifPresent(ManagementTokenInstaller::close);
         healthExpiry.ifPresent(LeaderHealthExpiry::close);
-        healthExpiryExecutor.ifPresent(ScheduledExecutorService::shutdownNow);
+        return healthExpiryExecutor.map(executor -> ExpiryExecutor.stop(executor, HEALTH_EXPIRY_STOP_TIMEOUT))
+                .orElseGet(QraftServerService::nothingToStop);
     }
 
     /**
@@ -445,7 +445,7 @@ public class QraftServerService {
                     })),
             () -> {
                 // Fallback to immediate shutdown if coordinator wasn't initialized
-                stopHealthExpiry();
+                CompletableFuture<Void> expiryStop = stopHealthExpiry();
                 try {
                     CompletableFuture<Void> raftStop = raftNode.map(RaftNode::stop)
                             .orElseGet(QraftServerService::nothingToStop);
@@ -455,7 +455,7 @@ public class QraftServerService {
                             .orElseGet(QraftServerService::nothingToStop);
                     httpApiServer.ifPresent(HttpApiServer::stop);
 
-                    CompletableFuture.allOf(raftStop, internalGrpcStop, externalGrpcStop)
+                    CompletableFuture.allOf(expiryStop, raftStop, internalGrpcStop, externalGrpcStop)
                             .whenComplete(Completions.outcome(
                                     v -> {
                                         logger.info("QraftServerService stopped successfully (immediate)");
