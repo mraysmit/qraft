@@ -47,6 +47,7 @@ import dev.mars.qraft.raft.storage.RaftStorageFactory;
 import dev.mars.qraft.raft.storage.ServerIdentity;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
+import dev.mars.qraft.state.acl.AclSecrets;
 import dev.mars.qraft.server.http.HttpApiServer;
 
 import java.nio.file.Path;
@@ -244,7 +245,8 @@ public class QraftServerService {
             HttpApiServer healthServer = new HttpApiServer(config.getHttpPort(), node, stateMachine, Clock.systemUTC(),
                     config.getAdminUi(), UiAssets.forConfig(config.getAdminUi()), HttpApiServer.DEFAULT_RAFT_TIMEOUT,
                     membership, new AclHttpSettings(config.isAclEnabled(), Path.of(config.getRaftStoragePath()),
-                            config.getAclDefaultPolicy().orElse(null)));
+                            config.getAclDefaultPolicy().orElse(null),
+                            config.getInitialManagementSecret().map(AclSecrets::hash).orElse(null)));
             this.httpApiServer = Optional.of(healthServer);
 
             // Only the leader evaluates health-check deadlines; followers apply committed expiry commands.

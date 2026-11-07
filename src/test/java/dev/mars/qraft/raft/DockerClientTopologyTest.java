@@ -38,6 +38,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static dev.mars.qraft.raft.DockerHealthApiHelper.get;
 import static dev.mars.qraft.raft.DockerHealthApiHelper.httpSequence;
 import static dev.mars.qraft.raft.DockerHealthApiHelper.instanceCount;
+import static dev.mars.qraft.raft.DockerHealthApiHelper.leaderAgreed;
 import static dev.mars.qraft.raft.DockerHealthApiHelper.leaderIndex;
 import static dev.mars.qraft.raft.DockerHealthApiHelper.passingWithBothChecks;
 import static org.awaitility.Awaitility.await;
@@ -150,7 +151,7 @@ class DockerClientTopologyTest {
         ComposeContainer cluster = SharedDockerClusterFixture.startIsolatedThreeNodeClusterWithClient();
         try {
             List<String> servers = SharedDockerClusterFixture.getNodeEndpoints(cluster, 3);
-            await().atMost(Duration.ofSeconds(60)).until(() -> leaderIndex(servers) >= 0
+            await().atMost(Duration.ofSeconds(60)).until(() -> leaderAgreed(servers)
                     && servers.stream().allMatch(DockerHealthApiHelper::passingWithBothChecks));
             AtomicBoolean sawLoss = new AtomicBoolean();
 
@@ -165,9 +166,12 @@ class DockerClientTopologyTest {
                     return leaderIndex(running) >= 0 && running.stream().allMatch(DockerHealthApiHelper::passingWithBothChecks);
                 });
                 SharedDockerClusterFixture.startContainer(cluster, service);
+                // A restarted server reports the client's checks from its recovered state before it has heard the
+                // current term, so the next round waits until every server names the leader in the leader's term.
+                // On 2026-11-06 a round began while one server was a term behind (handover of 2026-11-07, section 3).
                 await().atMost(Duration.ofSeconds(90)).pollInterval(Duration.ofMillis(200)).until(() -> {
                     watchForLoss(running, sawLoss);
-                    return leaderIndex(servers) >= 0 && servers.stream().allMatch(DockerHealthApiHelper::passingWithBothChecks);
+                    return leaderAgreed(servers) && servers.stream().allMatch(DockerHealthApiHelper::passingWithBothChecks);
                 });
             }
 

@@ -23,14 +23,18 @@ import java.util.Objects;
 
 /**
  * What the HTTP API needs to know of a server's ACL settings: whether ACLs are enabled, the server's data
- * directory, where an operator writes {@code acl-bootstrap-reset} (ACL list, proposal 12), and the default policy
- * that decides a request no rule of its token matches.
+ * directory, where an operator writes {@code acl-bootstrap-reset} (ACL list, proposal 12), the default policy
+ * that decides a request no rule of its token matches, and the hash of the secret in
+ * {@code server.acl.initialManagementTokenFile}, or null when no file is configured. While a file is configured, the
+ * bootstrap endpoint stays closed until a token with that hash is installed, so that no bootstrap can be applied
+ * before the file's token (the owner's decision of 2026-11-07). Only the hash is held, never the secret.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-05
- * @version 1.1
+ * @version 1.2
  */
-public record AclHttpSettings(boolean enabled, Path dataDirectory, AclDefaultPolicy defaultPolicy) {
+public record AclHttpSettings(boolean enabled, Path dataDirectory, AclDefaultPolicy defaultPolicy,
+                              String managementSecretHash) {
     /** The name of the file that holds a bootstrap reset index, as in Consul. */
     public static final String BOOTSTRAP_RESET_FILE = "acl-bootstrap-reset";
 
@@ -41,8 +45,13 @@ public record AclHttpSettings(boolean enabled, Path dataDirectory, AclDefaultPol
         }
     }
 
+    /** Settings with no management token file. */
+    public AclHttpSettings(boolean enabled, Path dataDirectory, AclDefaultPolicy defaultPolicy) {
+        this(enabled, dataDirectory, defaultPolicy, null);
+    }
+
     /** ACLs disabled: every request is allowed, and the ACL API answers 401 {@code acl_disabled}. */
     public static AclHttpSettings disabled() {
-        return new AclHttpSettings(false, null, null);
+        return new AclHttpSettings(false, null, null, null);
     }
 }

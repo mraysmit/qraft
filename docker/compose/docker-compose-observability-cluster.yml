@@ -115,6 +115,9 @@ services:
       # No update checks: the stack does not depend on the internet, and a failed one logs an error.
       - GF_ANALYTICS_CHECK_FOR_UPDATES=false
       - GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES=false
+      # SQLite in write-ahead mode: in its default journal mode a reader blocks Grafana's startup writes, which
+      # then log "Database locked, sleeping then retrying".
+      - GF_DATABASE_WAL=true
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - grafana-data:/var/lib/grafana

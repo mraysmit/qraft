@@ -150,9 +150,9 @@ class QraftServerAclStartupTest {
     }
 
     /**
-     * Waits until the server, once leader, has installed the file's token, and then asks for a bootstrap. It must not
-     * ask before: a bootstrap that reaches the new leader before its installer proposes is applied, and the file's
-     * token is then created instead, as the installer's own tests show.
+     * Waits until the server, once leader, has installed the file's token, and then asks for a bootstrap. Asked
+     * before, the endpoint answers 503 {@code management_token_pending}, since a configured file closes it until its
+     * token is installed (HttpApiServerAclBootstrapTest); this test is about the 403 that follows.
      */
     private HttpResponse<String> refusedOnceInstalled() throws Exception {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);

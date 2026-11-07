@@ -63,17 +63,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * disabled it answers 401 {@code acl_disabled}; the first bootstrap creates a management token, with a generated or a
  * supplied secret, returned only in that answer; afterwards it answers 403 {@code permission_denied} naming the reset
  * index; a reset index written to {@code acl-bootstrap-reset} in the data directory allows one more bootstrap and the
- * file is removed, while a wrong one is refused and kept; a follower answers that the leader must be asked; and no log
- * line holds a secret.
+ * file is removed, while a wrong one is refused and kept; while a management token file is configured, no bootstrap is
+ * applied before the file's token is installed, and the endpoint answers as usual afterwards; a follower answers that
+ * the leader must be asked; and no log line holds a secret.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-05
- * @version 1.0
+ * @version 1.1
  */
 class HttpApiServerAclBootstrapTest {
     private static final Set<String> MEMBERS = Set.of("a", "b", "c");
     private static final Instant NOW = Instant.parse("2026-11-05T10:00:00Z");
     private static final String SUPPLIED = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
+    private static final String FILE_SECRET = "9b8e7d6c-5a4b-4c3d-8e2f-1a0b9c8d7e6f";
     private static final ObjectMapper JSON = new ObjectMapper();
 
     @TempDir
@@ -233,6 +235,48 @@ class HttpApiServerAclBootstrapTest {
     }
 
     @Test
+    void whileTheManagementFileIsConfiguredNoBootstrapIsAppliedBeforeItsToken() throws Exception {
+        // A new leader's installer proposes the file's token after its election; a bootstrap that came first
+        // would have been applied and handed its caller a management token (owner's decision of 2026-11-07).
+        serve("a", withManagementFile());
+
+        HttpResponse<String> response = bootstrap("");
+
+        assertEquals(503, response.statusCode(), response.body());
+        JsonNode error = JSON.readTree(response.body());
+        assertEquals("management_token_pending", error.get("code").asText());
+        assertTrue(error.get("retryable").asBoolean(), "the leader's installer retries until the token is in");
+        assertEquals(0, stores.get("a").getAcl().bootstrapIndex());
+        assertEquals(1, stores.get("a").getAcl().tokens().size(), "only the anonymous token");
+    }
+
+    @Test
+    void onceTheFilesTokenIsInstalledTheBootstrapAnswersAsAfterAnyBootstrap() throws Exception {
+        serve("a", withManagementFile());
+        installFileToken();
+
+        HttpResponse<String> response = bootstrap("");
+
+        assertEquals(403, response.statusCode(), response.body());
+        JsonNode error = JSON.readTree(response.body());
+        assertEquals("permission_denied", error.get("code").asText());
+        assertEquals(1, error.get("resetIndex").asLong());
+    }
+
+    @Test
+    void onceTheFilesTokenIsInstalledTheResetFileStillAllowsOneMoreBootstrap() throws Exception {
+        serve("a", withManagementFile());
+        installFileToken();
+        Files.writeString(dataDirectory.resolve("acl-bootstrap-reset"), "1\n");
+
+        HttpResponse<String> response = bootstrap("");
+
+        assertEquals(200, response.statusCode(), response.body());
+        secretsUsed.add(JSON.readTree(response.body()).get("secretId").asText());
+        assertEquals(2, stores.get("a").getAcl().bootstrapIndex());
+    }
+
+    @Test
     void onlyPutBootstraps() throws Exception {
         serve("a", enabled());
 
@@ -244,6 +288,21 @@ class HttpApiServerAclBootstrapTest {
     private AclHttpSettings enabled() {
         // The bootstrap needs no token, so the strictest default policy changes nothing here.
         return new AclHttpSettings(true, dataDirectory, dev.mars.qraft.common.acl.AclDefaultPolicy.DENY);
+    }
+
+    /** Enabled ACLs with {@link #FILE_SECRET} in {@code server.acl.initialManagementTokenFile}. */
+    private AclHttpSettings withManagementFile() {
+        secretsUsed.add(FILE_SECRET);
+        return new AclHttpSettings(true, dataDirectory, dev.mars.qraft.common.acl.AclDefaultPolicy.DENY,
+                AclSecrets.hash(FILE_SECRET));
+    }
+
+    /** Applies the file's token as the leader's installer does while no bootstrap has been applied. */
+    private void installFileToken() throws Exception {
+        AclToken token = new AclToken("6a1b7c2d-3e4f-4a5b-8c6d-7e8f9a0b1c2d", AclSecrets.hash(FILE_SECRET),
+                "Initial Management Token", List.of(AclBuiltins.GLOBAL_MANAGEMENT_ID), List.of(), List.of(), List.of(),
+                NOW, null, true);
+        await(leader.submitCommand(dev.mars.qraft.state.AclCommand.bootstrap(token, 0)));
     }
 
     private void serve(String name, AclHttpSettings acl) throws Exception {

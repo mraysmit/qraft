@@ -1,7 +1,7 @@
 # Task List: Raft Pre-Vote
 
 **Date:** 2026-10-24
-**Last updated:** 2026-10-25 (complete: Jenkins builds 43 to 45 green on `9c946ac`; moved to `docs/archive/`. Created 2026-10-24)
+**Last updated:** 2026-11-07 (decision 5 reversed by the owner after the archive; the list's work is otherwise unchanged. Earlier, 2026-10-25: complete: Jenkins builds 43 to 45 green on `9c946ac`; moved to `docs/archive/`. Created 2026-10-24)
 **Status:** Complete, 2026-10-25. Follows the completed membership list,
 [`task-list-raft-membership-changes-2026-10-24.md`](task-list-raft-membership-changes-2026-10-24.md).
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), section 14.9
@@ -88,6 +88,14 @@ disrupting a cluster; stickiness does, and stays.
 5. **A denial, or a timeout, ends the round.** The next election timeout starts
    another. A higher term in a pre-vote answer is not adopted: the leader's next
    heartbeat carries it (thesis section 9.6).
+   **Reversed on 2026-11-07 by the owner:** a later term in a pre-vote answer is
+   now adopted, as `hashicorp/raft`'s `runCandidate` and etcd do. With no leader,
+   no heartbeat carries the term, and on 2026-11-06 `DockerClientTopologyTest`
+   deadlocked: a server behind in term with the longer log and a server ahead in
+   term with the shorter log refused each other's pre-votes for ever. The fix is
+   `RaftNode.sequencePreVoteHigherTerm`, in `4b2d1b5`, with
+   `RaftNodePreVoteCandidateTest.aRefusalFromALaterTermIsAdoptedSoTheNextRoundAsksBeyondIt`;
+   the record is in the handover of 2026-11-07, section 3, and design section 14.10.
 6. **A sole voter skips the round**, as it skips voting.
 7. **Rolling upgrades.** A transport that cannot send a pre-vote fails as
    unsupported, like `describe`, `join` and `removeServer`, and a peer that
@@ -254,5 +262,5 @@ and are not counted either way. Follow-up closed, 2026-10-26.
 ## 7. Out of scope
 
 - Leadership transfer, and any change to how a leader steps down.
-- Adopting a term from a pre-vote answer.
+- Adopting a term from a pre-vote answer. (Brought in on 2026-11-07: see decision 5.)
 - Changing the election timeout, its jitter, or the stickiness window.

@@ -38,6 +38,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.parallel.Execution;
 import org.junit.jupiter.api.parallel.ExecutionMode;
 
+import static dev.mars.qraft.raft.DockerHealthApiHelper.agreedLeader;
 import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -118,22 +119,6 @@ public class DockerRaftClusterTest {
     }
 
     // Helper methods
-
-    /**
-     * The leader's ID when exactly one server leads and every server names it as leader in the leader's term;
-     * otherwise null.
-     */
-    private static String agreedLeader(List<JsonNode> statuses) {
-        List<JsonNode> leaders = statuses.stream()
-                .filter(status -> "LEADER".equals(status.path("state").asText()))
-                .toList();
-        if (leaders.size() != 1) return null;
-        String leaderId = leaders.getFirst().path("nodeId").asText();
-        long term = leaders.getFirst().path("term").asLong();
-        boolean followed = statuses.stream().allMatch(status ->
-                leaderId.equals(status.path("leaderId").asText()) && status.path("term").asLong() == term);
-        return followed ? leaderId : null;
-    }
 
     /** Each server's {@code /raft/status}; a server that cannot answer counts as a missing status. */
     private List<JsonNode> statuses() {

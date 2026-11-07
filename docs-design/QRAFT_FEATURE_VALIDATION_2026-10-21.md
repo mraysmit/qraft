@@ -201,7 +201,7 @@ need:
    The token and ACL core comes earlier, straight after the client, as proposed on
    2026-10-05; it started on 2026-11-04, and its Phases 1 to 4 are built, so a
    server enforces ACLs while clients do not yet send tokens:
-   [`task-list-acl-and-tokens-2026-11-06.md`](task-list-acl-and-tokens-2026-11-06.md).
+   [`task-list-acl-and-tokens-2026-11-07.md`](task-list-acl-and-tokens-2026-11-07.md).
 10. **Deferred until decided.** DNS discovery. Persisted generated node identity
     was decided and built in the client list's Phase 2, closed on 2026-10-30.
     Server membership change was decided on 2026-09-29 and completed in

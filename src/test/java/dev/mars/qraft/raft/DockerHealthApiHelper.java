@@ -18,6 +18,7 @@ package dev.mars.qraft.raft;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.MissingNode;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -25,6 +26,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.awaitility.Awaitility.await;
@@ -173,6 +175,29 @@ final class DockerHealthApiHelper {
             }
         }
         return leader;
+    }
+
+    /**
+     * The leader's ID when exactly one server leads and every server names it as leader in the leader's term;
+     * otherwise null. A missing status, from a server that did not answer, is not agreement.
+     */
+    static String agreedLeader(List<JsonNode> statuses) {
+        List<JsonNode> leaders = statuses.stream()
+                .filter(status -> "LEADER".equals(status.path("state").asText()))
+                .toList();
+        if (leaders.size() != 1) return null;
+        String leaderId = leaders.getFirst().path("nodeId").asText();
+        long term = leaders.getFirst().path("term").asLong();
+        boolean followed = statuses.stream().allMatch(status ->
+                leaderId.equals(status.path("leaderId").asText()) && status.path("term").asLong() == term);
+        return followed ? leaderId : null;
+    }
+
+    /** Every server agrees on one leader in the leader's term (see {@link #agreedLeader}). */
+    static boolean leaderAgreed(List<String> servers) {
+        return agreedLeader(servers.stream()
+                .map(server -> Objects.requireNonNullElse(get(server + "/raft/status"), MissingNode.getInstance()))
+                .toList()) != null;
     }
 
     /** HTTP status of a GET, or -1 when the endpoint does not answer. */

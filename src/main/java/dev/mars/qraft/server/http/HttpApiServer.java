@@ -548,10 +548,23 @@ public final class HttpApiServer implements AutoCloseable {
      * in this answer only, the server keeps its hash, and neither the body nor the secret is logged. With ACLs
      * disabled it answers 401 {@code acl_disabled}, as Consul's ACL endpoints do.
      */
+    /** A management token file is configured and no token in the applied state has its secret's hash. */
+    private boolean managementTokenPending() {
+        String hash = acl.managementSecretHash();
+        return hash != null && stateStore.getAcl().tokens().stream().noneMatch(t -> t.secretHash().equals(hash));
+    }
+
     private void bootstrapAcl(HttpExchange exchange) throws IOException {
         if (!prepareStateRequest(exchange, "PUT")) return;
         if (!acl.enabled()) {
             respondError(exchange, 401, "acl_disabled", "ACL support disabled", false);
+            return;
+        }
+        if (managementTokenPending()) {
+            // Checked on the applied state before proposing: once the file's token is in, a bootstrap has been
+            // applied, so a later one succeeds only through the reset file.
+            respondError(exchange, 503, "management_token_pending", "ACL bootstrap is closed until the management "
+                    + "token from server.acl.initialManagementTokenFile is installed", true);
             return;
         }
         try {
