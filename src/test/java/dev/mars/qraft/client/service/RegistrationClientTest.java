@@ -240,6 +240,48 @@ class RegistrationClientTest {
     }
 
     @Test
+    void aClientWhoseTokenIsRefusedLogsWhyIsNotReadyAndTriesAgain() throws Exception {
+        server.removeContext("/v1/catalog");
+        AtomicReference<String> heartbeatAnswer = new AtomicReference<>();
+        AtomicReference<String> registrationAnswer = new AtomicReference<>();
+        server.createContext("/v1/catalog", exchange -> {
+            String answer = exchange.getRequestURI().getPath().endsWith("/heartbeat") ? heartbeatAnswer.get()
+                    : registrationAnswer.get();
+            if (answer == null) {
+                NodeAnswerHelper.accept(exchange);
+                return;
+            }
+            byte[] body = answer.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(403, body.length);
+            try (var output = exchange.getResponseBody()) { output.write(body); }
+        });
+        RegistrationClient client = client();
+        Logger logger = (Logger) LoggerFactory.getLogger(RegistrationClient.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            assertTrue(client.register(Node.of("client-1", "127.0.0.1", null, null, null)).join());
+
+            // The client's token is deleted: its next heartbeat is refused.
+            heartbeatAnswer.set("{\"code\":\"token_not_found\",\"message\":\"ACL not found\",\"retryable\":false}");
+            assertFalse(client.heartbeat(1).join());
+            assertFalse(client.isRegistered(), "a client whose token is refused is not registered, so not ready");
+            assertTrue(appender.list.stream().anyMatch(event -> event.getLevel() == ch.qos.logback.classic.Level.WARN
+                    && event.getFormattedMessage().contains("token_not_found")
+                    && event.getFormattedMessage().contains("token")), appender.list.toString());
+
+            // Registering again is refused for the token too, and is tried again, since the token can be replaced.
+            registrationAnswer.set("{\"code\":\"permission_denied\",\"message\":\"Permission denied: token with "
+                    + "AccessorID 'x' lacks permission 'node:write' on \\\"client-1\\\"\",\"retryable\":false}");
+            assertFalse(client.register(Node.of("client-1", "127.0.0.1", null, null, null)).join());
+            assertTrue(client.shouldRetryRegistration(), "a refused token may be replaced, so it is tried again");
+        } finally {
+            logger.detachAppender(appender);
+        }
+    }
+
+    @Test
     void shutdownDeregistrationWaitsForAnActiveRegistration() throws Exception {
         server.removeContext("/v1/catalog");
         CountDownLatch registrationStarted = new CountDownLatch(1);

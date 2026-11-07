@@ -50,12 +50,19 @@ public final class ServiceReconciler {
     private static final Logger LOGGER = LoggerFactory.getLogger(ServiceReconciler.class);
     /** The servers' refusal of a write from a node whose name a node of another ID holds. */
     private static final String NODE_NAME_RESERVED = "node_name_reserved";
+    /** The servers' refusals of a token, which another token may mend: Consul's "permission denied" and "ACL not found". */
+    private static final Set<String> TOKEN_REFUSALS = Set.of("permission_denied", "token_not_found");
     private final CatalogClient client;
     private final Supplier<List<ServiceDefinition>> definitions;
     private final Clock clock;
     private final BooleanSupplier nodeRegistered;
     private final Map<String, String> registered = new ConcurrentHashMap<>();
     private final Map<String, Rejection> rejected = new ConcurrentHashMap<>();
+    /**
+     * Definitions whose sync the servers refused for its token, by fingerprint: counted as synced, as Consul's agent
+     * marks them, and sent again at the next pass, when a replaced token may have mended them (ACL list, proposal 13).
+     */
+    private final Map<String, String> refusedForToken = new ConcurrentHashMap<>();
     private CompletableFuture<Result> inFlight;
     private boolean changedDuringPass;
     private CompletableFuture<ShutdownResult> shutdown;
@@ -151,6 +158,10 @@ public final class ServiceReconciler {
                 contacted();
             } else if (outcome instanceof CatalogOutcome.Rejected failure) {
                 pass.rejections.put(serviceId, failure);
+                if (TOKEN_REFUSALS.contains(failure.code())) {
+                    LOGGER.warn("Service deregistration refused for its token, to be tried again at the next pass: "
+                            + "serviceId={}, code={}, message={}", serviceId, failure.code(), failure.message());
+                }
             }
         });
     }
@@ -164,7 +175,7 @@ public final class ServiceReconciler {
         }
         if (previousRejection != null) rejected.remove(definition.id());
 
-        if (!fingerprint.equals(registered.get(definition.id()))) {
+        if (refusedForToken.remove(definition.id()) != null || !fingerprint.equals(registered.get(definition.id()))) {
             return register(definition, fingerprint, pass);
         }
         return client.lookup(definition).thenCompose(outcome -> {
@@ -193,9 +204,11 @@ public final class ServiceReconciler {
                 pass.registered++;
                 contacted();
             } else if (outcome instanceof CatalogOutcome.Rejected failure) {
-                // A name another node holds is not a fault of the definition, so the same definition is sent
-                // again on the next pass rather than suppressed until it changes.
-                if (!NODE_NAME_RESERVED.equals(failure.code())) {
+                // A name another node holds, or a token the servers refuse, is not a fault of the definition, so
+                // the same definition is sent again on the next pass rather than suppressed until it changes.
+                if (TOKEN_REFUSALS.contains(failure.code())) {
+                    refusedForToken.put(definition.id(), fingerprint);
+                } else if (!NODE_NAME_RESERVED.equals(failure.code())) {
                     rejected.put(definition.id(), new Rejection(fingerprint, failure));
                 }
                 pass.rejections.put(definition.id(), failure);
@@ -214,8 +227,9 @@ public final class ServiceReconciler {
     /** True when every currently enabled definition has its exact content committed. */
     public boolean isConverged() {
         for (ServiceDefinition definition : definitions.get()) {
-            if (definition.enabled()
-                    && !fingerprint(definition).equals(registered.get(definition.id()))) return false;
+            String fingerprint = fingerprint(definition);
+            if (definition.enabled() && !fingerprint.equals(registered.get(definition.id()))
+                    && !fingerprint.equals(refusedForToken.get(definition.id()))) return false;
         }
         return true;
     }

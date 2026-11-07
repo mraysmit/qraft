@@ -21,6 +21,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -76,6 +77,43 @@ public final class AclRulesJson {
         List<AclRule> rules = new ArrayList<>();
         block(root, "", Level.TOP, null, null, rules);
         return new AclRules(rules);
+    }
+
+    /**
+     * {@code rules} in the form {@link #parse} reads, so that the two are inverses: a service rule in {@code default}
+     * at the top, and any other scope nested under {@code tenant} and {@code namespace}, each with its
+     * {@code _prefix} form; the access in lower case.
+     */
+    public static String write(AclRules rules) {
+        ObjectNode root = MAPPER.createObjectNode();
+        for (AclRule rule : rules.rules()) {
+            String access = rule.access().name().toLowerCase(java.util.Locale.ROOT);
+            if (!rule.resource().named()) {
+                root.put(rule.resource().ruleName(), access);
+                continue;
+            }
+            ObjectNode block = root;
+            if (rule.resource().scoped()) {
+                if (!rule.tenant().equals(AclScope.DEFAULT)) block = scope(block, "tenant", rule.tenant());
+                if (!rule.namespace().equals(AclScope.DEFAULT)) block = scope(block, "namespace", rule.namespace());
+            }
+            child(child(block, rule.resource().ruleName() + (rule.prefix() ? "_prefix" : "")), rule.name())
+                    .put("policy", access);
+        }
+        try {
+            return MAPPER.writeValueAsString(root);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("ACL rules could not be written", e);
+        }
+    }
+
+    private static ObjectNode scope(ObjectNode block, String kind, AclScope scope) {
+        return child(child(block, kind + (scope.prefix() ? "_prefix" : "")), scope.name());
+    }
+
+    private static ObjectNode child(ObjectNode parent, String key) {
+        JsonNode existing = parent.get(key);
+        return existing instanceof ObjectNode object ? object : parent.putObject(key);
     }
 
     private static void block(JsonNode node, String path, Level level, AclScope tenant, AclScope namespace,

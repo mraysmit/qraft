@@ -224,12 +224,12 @@ final class RaftOperatorCommand {
         return 0;
     }
 
-    private static void printField(PrintStream out, String label, Object value) {
+    static void printField(PrintStream out, String label, Object value) {
         out.println(String.format("%-" + LABEL_WIDTH + "s%s", label, value));
     }
 
     /** Prints {@code rows} in columns, each two spaces wider than its widest cell. */
-    private static void printTable(List<String[]> rows, PrintStream out) {
+    static void printTable(List<String[]> rows, PrintStream out) {
         int[] widths = new int[rows.getFirst().length];
         for (String[] row : rows) {
             for (int i = 0; i < row.length; i++) widths[i] = Math.max(widths[i], row[i].length());
@@ -269,12 +269,12 @@ final class RaftOperatorCommand {
         return 0;
     }
 
-    private static int refused(JsonNode body, int status, PrintStream err) {
+    static int refused(JsonNode body, int status, PrintStream err) {
         err.println("Error " + status + ": " + body.path("code").asText() + ": " + body.path("message").asText());
         return 1;
     }
 
-    private static String baseUri(String address) {
+    static String baseUri(String address) {
         String trimmed = address.endsWith("/") ? address.substring(0, address.length() - 1) : address;
         return trimmed.startsWith("http://") || trimmed.startsWith("https://") ? trimmed : "http://" + trimmed;
     }

@@ -22,6 +22,7 @@ import dev.mars.qraft.server.api.AclGrpcGuard;
 import dev.mars.qraft.server.api.DistributedStateGrpcService;
 import dev.mars.qraft.server.acl.AclRemovalAuthorizer;
 import dev.mars.qraft.server.acl.AclResolver;
+import dev.mars.qraft.server.acl.AclTokenExpiry;
 import dev.mars.qraft.server.acl.ManagementTokenInstaller;
 import dev.mars.qraft.server.config.AppConfig;
 import dev.mars.qraft.server.http.AclHttpSettings;
@@ -79,6 +80,8 @@ public class QraftServerService {
     private static final long HEALTH_EXPIRY_PROPOSAL_TIMEOUT_MS = 5_000;
     /** How long a leader waits before trying again to install the management token from its file. */
     private static final Duration MANAGEMENT_TOKEN_RETRY = Duration.ofSeconds(1);
+    /** How often a leader looks for expired tokens to delete; they are refused from their expiry on regardless. */
+    private static final Duration ACL_TOKEN_EXPIRY_INTERVAL = Duration.ofSeconds(30);
     /** As long as {@code RaftStateLoop} waits for its thread; an evaluation that runs longer is interrupted. */
     private static final Duration HEALTH_EXPIRY_STOP_TIMEOUT = Duration.ofSeconds(5);
     private static final long BOOTSTRAP_RETRY_MS = 1_000;
@@ -95,6 +98,7 @@ public class QraftServerService {
     private Optional<HttpApiServer> httpApiServer = Optional.empty();
     private Optional<LeaderHealthExpiry> healthExpiry = Optional.empty();
     private Optional<ManagementTokenInstaller> managementTokenInstaller = Optional.empty();
+    private Optional<AclTokenExpiry> aclTokenExpiry = Optional.empty();
     private Optional<ScheduledThreadPoolExecutor> healthExpiryExecutor = Optional.empty();
     private Optional<ShutdownCoordinator> shutdownCoordinator = Optional.empty();
     private volatile Optional<Long> bootstrapTimer = Optional.empty();
@@ -268,6 +272,12 @@ public class QraftServerService {
                             command -> Deadlines.bound(node.submitCommand(command),
                                     HEALTH_EXPIRY_PROPOSAL_TIMEOUT_MS, TimeUnit.MILLISECONDS),
                             ExpiryScheduler.of(expiryExecutor), Clock.systemUTC(), MANAGEMENT_TOKEN_RETRY));
+            // Whenever this server leads with ACLs enabled, it deletes expired tokens (ACL list, Phase 8).
+            this.aclTokenExpiry = config.isAclEnabled() ? Optional.of(AclTokenExpiry.attach(node,
+                    stateMachine.getAcl(), command -> Deadlines.bound(node.submitCommand(command),
+                            HEALTH_EXPIRY_PROPOSAL_TIMEOUT_MS, TimeUnit.MILLISECONDS),
+                    ExpiryScheduler.of(expiryExecutor), Clock.systemUTC(), ACL_TOKEN_EXPIRY_INTERVAL))
+                    : Optional.empty();
 
             internalRaftServer.start().thenCompose(v1 -> {
                 logger.info("Internal Raft gRPC server started on port {}", internalRaftServer.port());
@@ -384,6 +394,7 @@ public class QraftServerService {
     /** Stops evaluation and the expiry thread, letting a running evaluation finish rather than interrupting it. */
     private CompletableFuture<Void> stopHealthExpiry() {
         managementTokenInstaller.ifPresent(ManagementTokenInstaller::close);
+        aclTokenExpiry.ifPresent(AclTokenExpiry::close);
         healthExpiry.ifPresent(LeaderHealthExpiry::close);
         return healthExpiryExecutor.map(executor -> ExpiryExecutor.stop(executor, HEALTH_EXPIRY_STOP_TIMEOUT))
                 .orElseGet(QraftServerService::nothingToStop);

@@ -21,6 +21,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sun.net.httpserver.HttpExchange;
+import dev.mars.qraft.client.acl.ClientAuthorizer;
 import dev.mars.qraft.client.config.DefinitionJson;
 import dev.mars.qraft.client.health.CheckResult;
 import dev.mars.qraft.client.health.CheckStatus;
@@ -83,6 +84,8 @@ public final class LocalRegistrationRoutes {
     private static final String NODE_MAINTENANCE = "/v1/client/maintenance";
     private static final String SERVICE_MAINTENANCE = "/v1/client/service/maintenance/";
     private static final String REPLACE_EXISTING_CHECKS = "replace-existing-checks";
+    /** Set on a list that left out what the caller may not read, as on a server and as Consul's agent does. */
+    static final String RESULTS_FILTERED_HEADER = "X-Qraft-Results-Filtered-By-ACLs";
     private static final String INVALID_REGISTRATION = "invalid_registration";
     private static final String INVALID_REQUEST = "invalid_request";
     private static final String DEFAULT_SERVICE_REASON =
@@ -95,6 +98,7 @@ public final class LocalRegistrationRoutes {
     private final BiFunction<String, String, Optional<CheckResult>> latestResult;
     private final BiFunction<String, String, Optional<LocalStatusReporter>> statusReporter;
     private final String clientAddress;
+    private final ClientAuthorizer acl;
 
     /** A change to the definitions, which may fail to be kept. */
     @FunctionalInterface
@@ -111,10 +115,19 @@ public final class LocalRegistrationRoutes {
                                    BiFunction<String, String, Optional<CheckResult>> latestResult,
                                    BiFunction<String, String, Optional<LocalStatusReporter>> statusReporter,
                                    String clientAddress) {
+        this(definitions, latestResult, statusReporter, clientAddress, ClientAuthorizer.disabled());
+    }
+
+    /** @param acl decides each request for the token it presents (ACL list, proposal 11's client table) */
+    public LocalRegistrationRoutes(LocalDefinitions definitions,
+                                   BiFunction<String, String, Optional<CheckResult>> latestResult,
+                                   BiFunction<String, String, Optional<LocalStatusReporter>> statusReporter,
+                                   String clientAddress, ClientAuthorizer acl) {
         this.definitions = Objects.requireNonNull(definitions, "definitions");
         this.latestResult = Objects.requireNonNull(latestResult, "latestResult");
         this.statusReporter = Objects.requireNonNull(statusReporter, "statusReporter");
         this.clientAddress = Objects.requireNonNull(clientAddress, "clientAddress");
+        this.acl = Objects.requireNonNull(acl, "acl");
     }
 
     /** Serves the routes on {@code localApi}, which refuses their writes once shutdown begins. */
@@ -145,14 +158,23 @@ public final class LocalRegistrationRoutes {
             api.error(exchange, 400, INVALID_REGISTRATION, invalid.getMessage(), false, Map.of());
             return;
         }
+        // As Consul's vetServiceRegister: service:write on the service, and on the instance of that ID it replaces.
+        ServiceDefinition service = registration.service();
+        if (acl.refused(exchange, acl.serviceWrite(service.name()))) return;
+        Optional<ServiceDefinition> replaced = definitions.service(service.id());
+        if (replaced.isPresent() && !replaced.get().name().equals(service.name())
+                && acl.refused(exchange, acl.serviceWrite(replaced.get().name()))) return;
+        // The registration keeps the token it was made with, to sync under; with none, the default token is used.
+        String token = acl.presented(exchange).orElse(null);
         boolean replaceExistingChecks = asksToReplaceExistingChecks(exchange);
-        if (!keep(exchange, () -> definitions.register(registration, replaceExistingChecks))) return;
+        if (!keep(exchange, () -> definitions.register(registration, replaceExistingChecks, token))) return;
         api.json(exchange, 200, Map.of("serviceId", registration.service().id()));
     }
 
     private void deregisterService(HttpExchange exchange) throws IOException {
         String serviceId = pathId(exchange, SERVICE_DEREGISTER);
         if (serviceId == null || !api.requireMethod(exchange, "PUT")) return;
+        if (refusedForService(exchange, serviceId)) return;
         boolean[] removed = new boolean[1];
         if (!keep(exchange, () -> removed[0] = definitions.deregisterService(serviceId))) return;
         Map<String, Object> answer = new LinkedHashMap<>();
@@ -163,10 +185,18 @@ public final class LocalRegistrationRoutes {
 
     private void listServices(HttpExchange exchange) throws IOException {
         if (!exactly(exchange, SERVICES) || !api.requireMethod(exchange, "GET")) return;
+        if (acl.unauthenticated(exchange)) return;
         Map<String, ObjectNode> services = new TreeMap<>();
+        boolean filtered = false;
         for (ServiceDefinition service : definitions.services()) {
-            if (service.enabled()) services.put(service.id(), DefinitionJson.write(service));
+            if (!service.enabled()) continue;
+            if (acl.allows(exchange, acl.serviceRead(service.name()))) {
+                services.put(service.id(), DefinitionJson.write(service));
+            } else {
+                filtered = true;
+            }
         }
+        if (filtered) exchange.getResponseHeaders().set(RESULTS_FILTERED_HEADER, "true");
         api.json(exchange, 200, services);
     }
 
@@ -178,6 +208,8 @@ public final class LocalRegistrationRoutes {
             serviceNotFound(exchange, serviceId);
             return;
         }
+        // One service is refused rather than filtered, as Consul's AgentService answers 403.
+        if (acl.refused(exchange, acl.serviceRead(service.get().name()))) return;
         api.json(exchange, 200, DefinitionJson.write(service.get()));
     }
 
@@ -199,6 +231,13 @@ public final class LocalRegistrationRoutes {
             api.error(exchange, 400, INVALID_REGISTRATION, invalid.getMessage(), false, Map.of());
             return;
         }
+        // service:write on the check's service, and on the service of the check of that ID it replaces.
+        if (acl.refused(exchange, acl.serviceWrite(definitions.service(serviceId).map(ServiceDefinition::name)
+                .orElse(serviceId)))) return;
+        Optional<String> replacedService = definitions.check(check.checkId())
+                .map(HealthCheckDefinition::serviceId).filter(id -> !id.equals(check.serviceId()))
+                .flatMap(definitions::service).map(ServiceDefinition::name);
+        if (replacedService.isPresent() && acl.refused(exchange, acl.serviceWrite(replacedService.get()))) return;
         boolean[] registered = new boolean[1];
         if (!keep(exchange, () -> registered[0] = definitions.registerCheck(check))) return;
         if (!registered[0]) {
@@ -212,6 +251,14 @@ public final class LocalRegistrationRoutes {
     private void deregisterCheck(HttpExchange exchange) throws IOException {
         String checkId = pathId(exchange, CHECK_DEREGISTER);
         if (checkId == null || !api.requireMethod(exchange, "PUT")) return;
+        if (acl.enabled()) {
+            Optional<HealthCheckDefinition> check = definitions.check(checkId);
+            if (check.isEmpty()) {
+                checkNotFound(exchange, checkId);
+                return;
+            }
+            if (refusedForCheck(exchange, check.get())) return;
+        }
         boolean[] removed = new boolean[1];
         if (!keep(exchange, () -> removed[0] = definitions.deregisterCheck(checkId))) return;
         Map<String, Object> answer = new LinkedHashMap<>();
@@ -222,8 +269,14 @@ public final class LocalRegistrationRoutes {
 
     private void listChecks(HttpExchange exchange) throws IOException {
         if (!exactly(exchange, CHECKS) || !api.requireMethod(exchange, "GET")) return;
+        if (acl.unauthenticated(exchange)) return;
         Map<String, ObjectNode> checks = new TreeMap<>();
+        boolean filtered = false;
         for (HealthCheckDefinition check : definitions.checks()) {
+            if (!acl.allows(exchange, acl.serviceRead(serviceName(check)))) {
+                filtered = true;
+                continue;
+            }
             ObjectNode written = DefinitionJson.write(check);
             latestResult.apply(check.serviceId(), check.checkId()).ifPresent(result -> {
                 written.put("status", result.status().name().toLowerCase(Locale.ROOT));
@@ -232,6 +285,7 @@ public final class LocalRegistrationRoutes {
             });
             checks.put(check.checkId(), written);
         }
+        if (filtered) exchange.getResponseHeaders().set(RESULTS_FILTERED_HEADER, "true");
         api.json(exchange, 200, checks);
     }
 
@@ -276,10 +330,10 @@ public final class LocalRegistrationRoutes {
     private void report(HttpExchange exchange, String checkId, CheckStatus status, String output) throws IOException {
         Optional<HealthCheckDefinition> check = definitions.check(checkId);
         if (check.isEmpty()) {
-            api.error(exchange, 404, "check_not_found", "Unknown check ID: " + checkId, false,
-                    Map.of("checkId", checkId));
+            checkNotFound(exchange, checkId);
             return;
         }
+        if (refusedForCheck(exchange, check.get())) return;
         Optional<LocalStatusReporter> reporter = statusReporter.apply(check.get().serviceId(), checkId);
         if (reporter.isEmpty()) {
             api.error(exchange, 400, "check_not_ttl", "Check " + checkId + " does not take a status: it is not a "
@@ -296,6 +350,7 @@ public final class LocalRegistrationRoutes {
 
     private void nodeMaintenance(HttpExchange exchange) throws IOException {
         if (!exactly(exchange, NODE_MAINTENANCE) || !api.requireMethod(exchange, "PUT")) return;
+        if (acl.refused(exchange, acl.nodeWrite())) return;
         Map<String, String> query = query(exchange);
         Boolean enable = enable(exchange, query);
         if (enable == null) return;
@@ -307,6 +362,7 @@ public final class LocalRegistrationRoutes {
     private void serviceMaintenance(HttpExchange exchange) throws IOException {
         String serviceId = pathId(exchange, SERVICE_MAINTENANCE);
         if (serviceId == null || !api.requireMethod(exchange, "PUT")) return;
+        if (refusedForService(exchange, serviceId)) return;
         Map<String, String> query = query(exchange);
         Boolean enable = enable(exchange, query);
         if (enable == null) return;
@@ -367,6 +423,35 @@ public final class LocalRegistrationRoutes {
             return null;
         }
         return body;
+    }
+
+    /**
+     * With ACLs enabled, answers 404 for a service that does not exist, since there is no name to authorize, and 403
+     * without {@code service:write} on the one that does, as Consul's {@code vetServiceUpdate}; true when answered.
+     * With ACLs disabled nothing is answered, and a removal of what is not registered stays a success.
+     */
+    private boolean refusedForService(HttpExchange exchange, String serviceId) throws IOException {
+        if (!acl.enabled()) return false;
+        Optional<ServiceDefinition> service = definitions.service(serviceId);
+        if (service.isEmpty()) {
+            serviceNotFound(exchange, serviceId);
+            return true;
+        }
+        return acl.refused(exchange, acl.serviceWrite(service.get().name()));
+    }
+
+    /** Answers 403 without {@code service:write} on the check's service, as Consul's {@code vetCheckUpdate}. */
+    private boolean refusedForCheck(HttpExchange exchange, HealthCheckDefinition check) throws IOException {
+        return acl.refused(exchange, acl.serviceWrite(serviceName(check)));
+    }
+
+    /** The name of the service {@code check} is for; its ID, should the service have gone meanwhile. */
+    private String serviceName(HealthCheckDefinition check) {
+        return definitions.service(check.serviceId()).map(ServiceDefinition::name).orElse(check.serviceId());
+    }
+
+    private void checkNotFound(HttpExchange exchange, String checkId) throws IOException {
+        api.error(exchange, 404, "check_not_found", "Unknown check ID: " + checkId, false, Map.of("checkId", checkId));
     }
 
     private void serviceNotFound(HttpExchange exchange, String serviceId) throws IOException {

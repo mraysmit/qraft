@@ -1,7 +1,7 @@
 # Qraft Distributed Service Platform Design
 
 **Status:** Draft  
-**Last updated:** 2026-11-07 (a later term in a pre-vote answer is adopted, at the owner's decision, in section 14.10; a configured management file keeps the bootstrap endpoint closed until its token is installed, at the owner's decision, in section 16. Earlier, 2026-11-06: ACL list Phase 4: enforcement on the server's HTTP API, removals and gRPC API, in sections 12.5, 15.1, 16 and 22; the ACL list's link renamed. Earlier, 2026-11-05: ACL list Phase 3: the ACL and security-profile settings, the startup warnings, the bootstrap endpoint and the management file, in sections 15.1 and 16; an entry holding an unknown command refused, in section 15.1. Earlier the same day: ACL list Phase 2: the authorizer and the rule parser, in section 15.1. Earlier, 2026-11-04: ACL list Phase 1: the replicated ACL state, in sections 1.1, 14.8, 15.1 and 22. Earlier, 2026-11-02: a name in a read route's path may contain a slash, and a registration that cannot be kept is logged as an ERROR. Earlier, 2026-11-01: the client list archived, and its link updated. Earlier the same day: client list Phase 8's check of the design: applications talk to their local client, in sections 4.3, 5, 6.2, 8.1 and 16. Earlier the same day: client list Phase 7: discovery reads through the local API, and the server's discovery reads refuse a query parameter they do not know, in sections 12.1 and 12.1.3. Earlier the same day: dated task-list links refreshed. Earlier, 2026-10-31: client list Phase 6A: an unreachable node's services leave `?passing`, and a health entry carries its node's status, in sections 9.2 and 12.1.1. Earlier the same day: section 12.1.3's comparison with Consul corrected, and section 9.2 records a gap that client list Phase 6A closes. Earlier the same day: client list Phase 6: `self`, `members` and `leave` on the local API, in sections 8.4 and 12.1.3. Earlier the same day: client list Phase 5: TTL status and maintenance through the local API, in sections 12.1.3 and 16. Earlier the same day: client list Phase 4: services and checks through the local API, in sections 6.2, 7.4, 8.2, 12.1.3 and 16. Earlier, 2026-10-30: client anti-entropy and `GET /v1/catalog/node-services/{nodeName}` in sections 7.3, 8.2, 12.1 and 22; a check ID unique across a client in section 16. Earlier the same day: client list Phase 2, the server side: the node ID and the rules for who may hold a name, after Consul's catalog, in sections 7.3 and 22, and the `X-Qraft-Node-ID` header, the 409 `node_name_reserved` refusal and the node listing's `id` in sections 12.1 and 12.1.2. Earlier, 2026-10-27: section 12.4.1: how the Vite build names the asset manifest, and the security profile in the bootstrap data. Earlier, 2026-10-26: client list Phase 1: the server's service and check write routes moved from `/v1/client/*` to `/v1/catalog/*` in sections 12.1, 12.1.1 and 12.1.2. Earlier, 2026-10-25: Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
+**Last updated:** 2026-11-07 (ACL list Phases 5 to 9: the ACL API, the client's tokens and its own decisions, node identity, and expiry and revocation, in sections 15.1, 16 and 22. Earlier the same day: a later term in a pre-vote answer is adopted, at the owner's decision, in section 14.10; a configured management file keeps the bootstrap endpoint closed until its token is installed, at the owner's decision, in section 16. Earlier, 2026-11-06: ACL list Phase 4: enforcement on the server's HTTP API, removals and gRPC API, in sections 12.5, 15.1, 16 and 22; the ACL list's link renamed. Earlier, 2026-11-05: ACL list Phase 3: the ACL and security-profile settings, the startup warnings, the bootstrap endpoint and the management file, in sections 15.1 and 16; an entry holding an unknown command refused, in section 15.1. Earlier the same day: ACL list Phase 2: the authorizer and the rule parser, in section 15.1. Earlier, 2026-11-04: ACL list Phase 1: the replicated ACL state, in sections 1.1, 14.8, 15.1 and 22. Earlier, 2026-11-02: a name in a read route's path may contain a slash, and a registration that cannot be kept is logged as an ERROR. Earlier, 2026-11-01: the client list archived, and its link updated. Earlier the same day: client list Phase 8's check of the design: applications talk to their local client, in sections 4.3, 5, 6.2, 8.1 and 16. Earlier the same day: client list Phase 7: discovery reads through the local API, and the server's discovery reads refuse a query parameter they do not know, in sections 12.1 and 12.1.3. Earlier the same day: dated task-list links refreshed. Earlier, 2026-10-31: client list Phase 6A: an unreachable node's services leave `?passing`, and a health entry carries its node's status, in sections 9.2 and 12.1.1. Earlier the same day: section 12.1.3's comparison with Consul corrected, and section 9.2 records a gap that client list Phase 6A closes. Earlier the same day: client list Phase 6: `self`, `members` and `leave` on the local API, in sections 8.4 and 12.1.3. Earlier the same day: client list Phase 5: TTL status and maintenance through the local API, in sections 12.1.3 and 16. Earlier the same day: client list Phase 4: services and checks through the local API, in sections 6.2, 7.4, 8.2, 12.1.3 and 16. Earlier, 2026-10-30: client anti-entropy and `GET /v1/catalog/node-services/{nodeName}` in sections 7.3, 8.2, 12.1 and 22; a check ID unique across a client in section 16. Earlier the same day: client list Phase 2, the server side: the node ID and the rules for who may hold a name, after Consul's catalog, in sections 7.3 and 22, and the `X-Qraft-Node-ID` header, the 409 `node_name_reserved` refusal and the node listing's `id` in sections 12.1 and 12.1.2. Earlier, 2026-10-27: section 12.4.1: how the Vite build names the asset manifest, and the security profile in the bootstrap data. Earlier, 2026-10-26: client list Phase 1: the server's service and check write routes moved from `/v1/client/*` to `/v1/catalog/*` in sections 12.1, 12.1.1 and 12.1.2. Earlier, 2026-10-25: Pre-Vote, section 14.10, with the silent-leader and the test-practice notes in sections 14.10 and 19.6; the shutdown-refusal and snapshot-backoff notes in 14.9. Earlier, 2026-10-21: Step 6 disruptive-server validation verified with manual-timer tests; Step 7 is next. Earlier: Step 5 runtime policy and automatic failed-voter cleanup implemented and verified; dated task-list links refreshed. Earlier, 2026-10-14: Phase 8 documentation reconciliation against `f737d6b`: native storage futures, explicit executor ownership and callback rules, caller-context restoration, and the current node-model boundary. Phase 7 added the executor and fencing descriptions on 2026-10-13. On 2026-10-11: section 14.5: the compaction index comes from RaftLog's storage interface, with `raftlog-core` 1.5.0 in section 14.7; section 18: one scrape of each server, and the warning a stopping gRPC server can log. On 2026-10-10: recovery in sections 14.4, 14.5, and 22: an interrupted first snapshot is set aside and no longer stops a server, and a WAL compacted further than the published snapshot reaches is refused. On 2026-10-09: the node model in section 7.3, the node routes in section 12.1.2, what a node's deregistration removes, and the readiness of a server that does not campaign in section 6.1. On 2026-10-08: Phase 3 package ownership and dependency directions in section 1.1)
 
 ## 1. Purpose
 
@@ -2089,11 +2089,12 @@ certificate authentication can replace it without changing catalog commands.
 
 ### 15.1 Replicated ACL state
 
-Built from 2026-11-04 to 2026-11-06 by Phases 1 to 4 of
+Built from 2026-11-04 to 2026-11-07 by Phases 1 to 9 of
 [`task-list-acl-and-tokens-2026-11-07.md`](task-list-acl-and-tokens-2026-11-07.md),
-on Consul's model. Since Phase 4 a server enforces it on its own listeners; a
-client sends no token and decides nothing until Phase 6, so with ACLs enabled
-under `deny` a client cannot yet register.
+on Consul's model. A server enforces it on its own listeners (Phase 4) and serves
+the ACL API (Phase 5); a client sends its tokens and decides its own local API
+(Phase 6); node identity is enforced (Phase 7); and expired tokens are refused
+and deleted (Phase 8).
 
 - **What is replicated.** Tokens, policies, roles, and a bootstrap index, in
   `state.acl.AclState`, changed only by `AclCommand` and read through the
@@ -2172,8 +2173,42 @@ under `deny` a client cannot yet register.
     ignored, as in Consul.
   - **Not checked again when applied:** the leader authorizes a write from its
     applied state and the state machine does not, so a follower that is behind may
-    honour a revoked token for a read until it catches up (proposal 10). Expired
-    tokens are refused from Phase 8.
+    honour a revoked token for a read until it catches up (proposal 10).
+- **The ACL API** (Phase 5, 2026-11-07), `server.http.AclApiRoutes`, after Consul's
+  `agent/acl_endpoint.go` in camel case: tokens (`PUT /v1/acl/token`, the list
+  with `policy`, `role` and `servicename`, read, update, delete, clone and `self`),
+  policies and roles by ID and by name, `POST /v1/internal/acl/authorize` and
+  `resolve`, which answer only for the presenting token, and `POST /v1/acl/explain`,
+  which decides through the same authorizer as enforcement. Everything else needs
+  `acl:read` or `acl:write`. A secret is answered only by the create or clone that
+  made it, never later and never as its hash; a request cannot delete its own token;
+  a policy's rules are given and answered in Consul's JSON form
+  (`AclRulesJson.write` is the inverse of `parse`). With ACLs disabled the API
+  answers 401 `acl_disabled`. `qraft acl` (`runtime.AclCommandLine`) drives it.
+- **The client** (Phase 6). `client.acl` (section 16) gives the client four tokens,
+  each a mounted file (`client.acl.ClientTokens`): its own for its node's calls,
+  anti-entropy's read and every removal; one for the file's services and checks; a
+  default for a request with none; and a recovery token for its own endpoints with no
+  server. Each call to the servers carries the token the table names
+  (`client.catalog.RequestTokens`, `client.service.ServiceTokens`); an API
+  registration keeps the token it was made with in `registrations.json`, readable
+  only by the client's user. The local API decides for itself
+  (`client.acl.ClientAuthorizer`), with the shared authorizer, from what
+  `POST /v1/internal/acl/resolve` answers for the caller's token
+  (`client.acl.ClientAclResolver`), cached for the shortest time to live of what it
+  holds and, with no server, decided by the down policy. A forwarded read goes under
+  the caller's token, else the default; a sync refused for its token is a warning,
+  counted as synced and tried again at the next pass.
+- **Node identity** (Phase 7): the guards above, stated for the token a client holds,
+  a node identity for its own node: it cannot register, renew, take over or rename
+  another node, and it removes anything planted on its own. This closes the server's
+  half of section 22's question whether the server can trust a node's claim.
+- **Expiry and revocation** (Phase 8). A server refuses a token from its expiry on,
+  by its own clock, as `token_not_found`, and while it leads deletes expired tokens
+  in batches through the replicated command (`server.acl.AclTokenExpiry`). An expiry
+  is between one minute and 24 hours from its creation. A revoked token keeps working
+  on a client until its cache entry expires; a client whose own token is refused logs
+  why and is not ready until a valid token registers it again.
 
 ## 16. Configuration
 
@@ -2371,6 +2406,39 @@ default policy.
   to `acl-bootstrap-reset` in the leader's data directory
   (`server.raft.storage.path`) to allow one more. With ACLs disabled it answers
   401 `acl_disabled`.
+
+`client.acl` (since 2026-11-07, ACL list Phase 6; section 15.1), as Consul's agent
+has its `acl` block. A client decides its own local API, so it needs what a server
+needs to decide, and the tokens it calls the servers with:
+
+```json
+"acl": {
+  "enabled": true, "defaultPolicy": "deny", "downPolicy": "extend-cache",
+  "tokenTtlMs": 30000, "policyTtlMs": 30000, "roleTtlMs": 30000,
+  "enableTokenPersistence": false,
+  "tokens": {"clientFile": "/run/qraft/client-token",
+             "configFileRegistrationFile": "/run/qraft/registration-token",
+             "defaultFile": "/run/qraft/default-token",
+             "recoveryFile": "/run/qraft/recovery-token"}
+}
+```
+
+- `enabled` defaults to `false`. `defaultPolicy` must be the servers'; enabled ACLs
+  without one are refused at startup, and `deny` with ACLs disabled logs the critical
+  warning `ACL_DENY_NOT_ENFORCED`, as on a server.
+- `downPolicy` is `extend-cache` (the default), `async-cache`, `allow` or `deny`,
+  with Consul's meanings; where nothing is cached the default policy decides.
+- Each token is a mounted file. `clientFile` (Consul's `agent`) is for the client's
+  calls for its node and falls back to `defaultFile`; `configFileRegistrationFile`
+  is for the file's services and checks and falls back to `defaultFile`; a service
+  in `catalog.services` may name its own `tokenFile`; `defaultFile` serves a request
+  with none, else the anonymous token; `recoveryFile` writes the client and reads
+  nodes with no server. A file that cannot be read stops the start, and a token is
+  never logged or quoted.
+- `PUT /v1/client/token/{default|client|configFileRegistration|recovery}` replaces a
+  token while the client runs, with `client:write` on its node. With
+  `enableTokenPersistence` it is kept in `acl-tokens.json` in the data directory,
+  readable only by the client's user, and takes its file's place at the next start.
 
 `server.ui` controls the embedded administrative interface (section 12.4):
 
@@ -2780,8 +2848,11 @@ Evidence as of 2026-09-27, except where a row gives a later date:
   [`task-list-acl-and-tokens-2026-11-07.md`](task-list-acl-and-tokens-2026-11-07.md),
   started 2026-11-04. Since its Phase 4 (2026-11-06), a server with ACLs enabled
   needs `node:write` on a name to register, renew, take over or rename it
-  (section 15.1); Phase 7 tests those guards as node identity. With ACLs
-  disabled, any caller can still claim any node name and node ID.
+  (section 15.1); Phase 7 (2026-11-07) states those guards for a client's node
+  identity, and Phase 6 has the client send it, so with ACLs enabled the server
+  trusts a claim only as far as the token's grants. With ACLs disabled, any caller
+  can still claim any node name and node ID; transport security, which binds a
+  token to a machine with a client certificate, follows (proposal 14).
 - How long legacy command and snapshot readers remain supported.
 
 Resolved on 2026-10-10: a server recovers by itself from a kill during its

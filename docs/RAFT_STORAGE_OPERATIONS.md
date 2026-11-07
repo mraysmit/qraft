@@ -544,6 +544,52 @@ and are not faults.
   reaches a stopping node is turned away before anything is written. Any other
   failure of such a transition is an error.
 
+## ACLs, tokens and the files that hold secrets
+
+With `server.acl.enabled` (design section 15.1, section 16), the replicated state
+holds tokens, policies and roles.
+
+- **What the WAL, snapshots and backups hold.** A token's secret is hashed with
+  SHA-256 before its command is proposed, so they hold hashes, never a working
+  secret: a copied snapshot or backup is not a login. They still hold everything
+  else the cluster knows, the catalog, the policies' rules and the tokens' links
+  among it, so keep them, as Consul advises for its own, on an encrypted medium
+  with strict access controls.
+- **Which files hold a secret.** On a server, the file named by
+  `server.acl.initialManagementTokenFile`. On a client, each file under
+  `client.acl.tokens` and a service's own `tokenFile`; `registrations.json` in the
+  data directory, which keeps each local API registration's token; and
+  `acl-tokens.json`, which keeps tokens set through `PUT /v1/client/token/{kind}`
+  when `client.acl.enableTokenPersistence` is on. Only the user that runs the
+  process may read them. Qraft writes its own files `rw-------` on a file system with
+  POSIX permissions; on Windows, restrict the data directory. A deployment does the
+  same for what it mounts. A client's token cache is held only in memory.
+- **A lost management secret,** in either of Consul's two ways. First: ask the
+  leader for a bootstrap, `qraft acl bootstrap --http-addr <leader>`, whose refusal
+  names the reset index; write that number to `acl-bootstrap-reset` in the leader's
+  data directory (`server.raft.storage.path`); and bootstrap again. The answer holds
+  the new management secret, once; the file is removed when used. While a management
+  file is configured, the bootstrap answers `management_token_pending` until the
+  file's token is installed. Second: put a new secret in every server's management
+  file and change leadership, by restarting the leader, which installs it.
+- **Revoking the management token,** in this order, because the lock-out guard
+  refuses to delete the last token that holds `acl:write` without an expiry: replace
+  the secret in every server's management file; restart the leader, so that the new
+  one is installed; check that the new token exists (`qraft acl token list
+  --token-file <new secret>`); then delete the old one (`qraft acl token delete --id
+  <old accessor> --token-file <new secret>`). A token installed from a file returns at
+  the next leadership change while any server's file still holds its secret, so the
+  files are changed first.
+- **Removing a server with ACLs enabled** needs a token with `operator:write`, given
+  to `qraft operator raft remove-peer` with `--token-file`; `server.operator.token`
+  is refused with enabled ACLs.
+- **Enabling ACLs on a running cluster.** Every server must run a version that knows
+  the ACL commands before ACLs are enabled or bootstrapped: an older server reads an
+  ACL entry as a no-op, while a current one refuses an entry it does not know and
+  stops its recovery. Then enable ACLs server by server, give each client its tokens
+  and `client.acl` with the servers' default policy, and change the security profile
+  to `production` last.
+
 ## Upgrade and migration
 
 Current Qraft supports only the external `raftlog` backend. The former `file`

@@ -18,6 +18,7 @@ package dev.mars.qraft.client.catalog;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.mars.qraft.client.acl.AclLookup;
 import dev.mars.qraft.common.Node;
 import dev.mars.qraft.client.health.CheckObservation;
 import dev.mars.qraft.client.health.ObservationClient;
@@ -73,6 +74,7 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
     private final Duration requestTimeout;
     private final ServerContactTracker contactTracker;
     private final AtomicBoolean closed = new AtomicBoolean();
+    private volatile RequestTokens tokens = RequestTokens.NONE;
 
     /** Single-endpoint constructor retained for protocol fixtures and direct attempts. */
     public HttpCatalogClient(HttpClient httpClient, ObjectMapper objectMapper,
@@ -133,6 +135,69 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         }
     }
 
+    /** Sets the tokens this client's calls carry from now on (ACL list, proposal 13). */
+    public void useTokens(RequestTokens tokens) {
+        this.tokens = Objects.requireNonNull(tokens, "tokens");
+    }
+
+    /**
+     * Asks the servers what {@code secret} holds, through {@code POST /v1/internal/acl/resolve}, across the seeds;
+     * {@code null} asks for the anonymous token.
+     */
+    public CompletableFuture<AclLookup> resolveAcl(String secret) {
+        ensureOpen();
+        if (endpoints == null) {
+            throw new IllegalStateException("No server seeds were configured for automatic selection");
+        }
+        return resolveAttempt(endpoints.cycle(), 0, secret, "no server was asked");
+    }
+
+    private CompletableFuture<AclLookup> resolveAttempt(List<URI> cycle, int index, String secret, String last) {
+        URI endpoint = cycle.get(index);
+        HttpRequest request = withToken(request(endpoint, "/v1/internal/acl/resolve"), Optional.ofNullable(secret))
+                .POST(HttpRequest.BodyPublishers.noBody()).build();
+        CompletableFuture<AclLookup> answer;
+        try {
+            answer = httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                    .handle((response, failure) -> failure == null ? classifyResolution(response)
+                            : new AclLookup.Unavailable(transportCode(failure) + ": " + unwrap(failure)));
+        } catch (RuntimeException failure) {
+            answer = CompletableFuture.completedFuture(new AclLookup.Unavailable(transportCode(failure)));
+        }
+        return answer.thenCompose(lookup -> {
+            if (!(lookup instanceof AclLookup.Unavailable unavailable)) {
+                endpoints.markSuccessful(endpoint);
+                contactTracker.recordSuccessfulContact();
+                return CompletableFuture.completedFuture(lookup);
+            }
+            return index + 1 == cycle.size() ? CompletableFuture.completedFuture(lookup)
+                    : resolveAttempt(cycle, index + 1, secret, unavailable.reason());
+        });
+    }
+
+    /** A token's resolution, or that no token has the secret; anything else is no answer, for the down policy. */
+    private AclLookup classifyResolution(HttpResponse<String> response) {
+        if (isSuccess(response.statusCode())) {
+            try {
+                JsonNode answer = objectMapper.readTree(response.body());
+                if (answer != null && answer.path("token").isObject()) return new AclLookup.Found(answer);
+            } catch (IOException malformed) {
+                // Answered below as no answer.
+            }
+            return new AclLookup.Unavailable("the server answered a resolution that cannot be read");
+        }
+        JsonNode error = parseObject(response.body());
+        String code = error == null ? "" : error.path("code").asText();
+        if (response.statusCode() == 403 && "token_not_found".equals(code)) return new AclLookup.NotFound();
+        return new AclLookup.Unavailable("HTTP " + response.statusCode() + (code.isEmpty() ? "" : " " + code));
+    }
+
+    /** {@code request} carrying {@code token}, if there is one. */
+    private static HttpRequest.Builder withToken(HttpRequest.Builder request, Optional<String> token) {
+        token.ifPresent(secret -> request.header("X-Qraft-Token", secret));
+        return request;
+    }
+
     @Override
     public CompletableFuture<CatalogOutcome> register(ServiceDefinition service) {
         return acrossSeeds(endpoint -> register(endpoint, service));
@@ -158,7 +223,7 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         body.put("enabled", service.enabled());
         body.put("checks", service.checkIds());
         try {
-            HttpRequest request = request(server, "/v1/catalog/register")
+            HttpRequest request = withToken(request(server, "/v1/catalog/register"), tokens.service(service.id()))
                     .header("Content-Type", "application/json")
                     .PUT(HttpRequest.BodyPublishers.ofString(
                             objectMapper.writeValueAsString(Map.of("service", body))))
@@ -173,7 +238,7 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         ensureOpen();
         String id = required("serviceId", serviceId);
         try {
-            HttpRequest request = request(server, "/v1/catalog/deregister")
+            HttpRequest request = withToken(request(server, "/v1/catalog/deregister"), tokens.node())
                     .header("Content-Type", "application/json")
                     .PUT(HttpRequest.BodyPublishers.ofString(
                             objectMapper.writeValueAsString(Map.of("serviceId", id))))
@@ -198,8 +263,8 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
     private CompletableFuture<CatalogLookupOutcome> lookupAttempt(
             List<URI> cycle, int index, ServiceDefinition service) {
         URI endpoint = cycle.get(index);
-        HttpRequest request = request(endpoint, "/v1/catalog/service/" + encode(service.name()))
-                .GET().build();
+        HttpRequest request = withToken(request(endpoint, "/v1/catalog/service/" + encode(service.name())),
+                tokens.node()).GET().build();
         return sendLookup(request, service).thenCompose(outcome -> {
             if (outcome instanceof CatalogLookupOutcome.Present
                     || outcome instanceof CatalogLookupOutcome.Absent) {
@@ -270,7 +335,8 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
 
     private CompletableFuture<Optional<Set<String>>> nodeServicesAttempt(List<URI> cycle, int index) {
         URI endpoint = cycle.get(index);
-        HttpRequest request = request(endpoint, "/v1/catalog/node-services/" + encode(nodeId)).GET().build();
+        HttpRequest request = withToken(request(endpoint, "/v1/catalog/node-services/" + encode(nodeId)),
+                tokens.node()).GET().build();
         CompletableFuture<Optional<Set<String>>> answer;
         try {
             answer = httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
@@ -385,16 +451,18 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         body.put("output", observation.output());
         body.put("deregisterAfterMillis", observation.deregisterAfter().toMillis());
         try {
-            return observeAttempt(endpoints.cycle(), 0, objectMapper.writeValueAsString(body));
+            return observeAttempt(endpoints.cycle(), 0, objectMapper.writeValueAsString(body),
+                    tokens.service(observation.serviceId()));
         } catch (IOException error) {
             return CompletableFuture.completedFuture(new ObservationOutcome.Retryable("request_encoding",
                     Objects.toString(error.getMessage(), error.getClass().getSimpleName()), null));
         }
     }
 
-    private CompletableFuture<ObservationOutcome> observeAttempt(List<URI> cycle, int index, String body) {
+    private CompletableFuture<ObservationOutcome> observeAttempt(List<URI> cycle, int index, String body,
+                                                                 Optional<String> token) {
         URI endpoint = cycle.get(index);
-        HttpRequest request = request(endpoint, "/v1/catalog/check/observe")
+        HttpRequest request = withToken(request(endpoint, "/v1/catalog/check/observe"), token)
                 .header("Content-Type", "application/json")
                 .PUT(HttpRequest.BodyPublishers.ofString(body)).build();
         return sendObservation(request).thenCompose(outcome -> {
@@ -406,7 +474,7 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
             if (outcome instanceof ObservationOutcome.Rejected || index + 1 == cycle.size()) {
                 return CompletableFuture.completedFuture(outcome);
             }
-            return observeAttempt(cycle, index + 1, body);
+            return observeAttempt(cycle, index + 1, body, token);
         });
     }
 
@@ -490,7 +558,7 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         try {
             String json = objectMapper.writeValueAsString(body);
             return acrossSeeds(endpoint -> send(
-                    request(endpoint, path).header("Content-Type", "application/json")
+                    withToken(request(endpoint, path), tokens.node()).header("Content-Type", "application/json")
                             .PUT(HttpRequest.BodyPublishers.ofString(json)).build(),
                     response -> classifyNode(response, operation)));
         } catch (IOException error) {

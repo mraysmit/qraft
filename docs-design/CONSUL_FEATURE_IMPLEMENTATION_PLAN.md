@@ -250,12 +250,12 @@ Add:
 
 After the core behavior is stable, add:
 
-- ACL tokens.
-- Policies and capabilities.
+- ACL tokens. Done 2026-11-07, by the ACL list's Phases 1 to 9.
+- Policies and capabilities. Done 2026-11-07: policies, roles, and node and service identities.
 - Namespaces.
 - Datacenter isolation.
-- Token-validation middleware.
-- Audit events.
+- Token-validation middleware. Done 2026-11-07, on servers and on clients.
+- Audit events. Left to the events list (item 8).
 
 ### Phase 8: Operations
 
@@ -436,7 +436,10 @@ unchecked features below remain open.
   membership and storage status (phase 8; item 7).
 - [ ] Implement the bounded event journal (item 8).
 - [ ] Implement ACL tokens, policies, token validation, and audit events
-  (phase 7; item 9).
+  (phase 7; item 9). Tokens, policies, roles, identities and validation on servers and
+  clients are done (2026-11-07, the ACL list,
+  [`task-list-acl-and-tokens-2026-11-07.md`](task-list-acl-and-tokens-2026-11-07.md));
+  audit events wait for the events list.
 - [ ] Implement server membership change. Decided 2026-09-29, and in progress
   in [`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md):
   server IDs, the configuration in the log, non-voter promotion, joining, and

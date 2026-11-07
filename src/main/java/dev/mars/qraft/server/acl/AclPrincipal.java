@@ -19,12 +19,12 @@ package dev.mars.qraft.server.acl;
 import dev.mars.qraft.common.acl.AclAuthorizer;
 import dev.mars.qraft.common.acl.AclDecision;
 import dev.mars.qraft.common.acl.AclDefaultPolicy;
+import dev.mars.qraft.common.acl.AclDenial;
 import dev.mars.qraft.common.acl.AclGrant;
 import dev.mars.qraft.common.acl.AclRequest;
 import dev.mars.qraft.state.acl.AclToken;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 
 /**
@@ -86,15 +86,6 @@ public final class AclPrincipal {
      * permission it lacks, and what it lacks it on. It never holds the secret.
      */
     public String permissionDenied(AclRequest request) {
-        Objects.requireNonNull(request, "request");
-        StringBuilder message = new StringBuilder("Permission denied: token with AccessorID '").append(accessorId)
-                .append("' lacks permission '").append(request.resource().ruleName()).append(':')
-                .append(request.access().name().toLowerCase(Locale.ROOT)).append('\'');
-        if (request.name() != null) message.append(" on \"").append(request.name()).append('"');
-        if (request.resource().scoped()) {
-            message.append(" in tenant \"").append(request.tenant()).append("\" namespace \"")
-                    .append(request.namespace()).append('"');
-        }
-        return message.toString();
+        return AclDenial.message(accessorId, request);
     }
 }

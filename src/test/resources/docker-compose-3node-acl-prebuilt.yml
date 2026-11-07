@@ -1,0 +1,70 @@
+# 3-node Raft cluster with ACLs enabled under deny, using the pre-built image (ACL list, Phase 9).
+# Every server installs the management token from the mounted test-only file.
+# Requires qraft-runtime:test image — built by SharedDockerClusterFixture.
+
+services:
+  server1:
+    image: qraft-runtime:test
+    hostname: server1
+    command: ["server", "--config", "/etc/qraft/server.json"]
+    ports:
+      - "8080"
+    volumes:
+      - ../../../docker/config/three-node-acl/server1.json:/etc/qraft/server.json:ro
+      - ../../../docker/config/three-node-acl/management-token:/etc/qraft/management-token:ro
+      - server1-data:/app/data
+    networks:
+      - raft-cluster
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  server2:
+    image: qraft-runtime:test
+    hostname: server2
+    command: ["server", "--config", "/etc/qraft/server.json"]
+    ports:
+      - "8080"
+    volumes:
+      - ../../../docker/config/three-node-acl/server2.json:/etc/qraft/server.json:ro
+      - ../../../docker/config/three-node-acl/management-token:/etc/qraft/management-token:ro
+      - server2-data:/app/data
+    networks:
+      - raft-cluster
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  server3:
+    image: qraft-runtime:test
+    hostname: server3
+    command: ["server", "--config", "/etc/qraft/server.json"]
+    ports:
+      - "8080"
+    volumes:
+      - ../../../docker/config/three-node-acl/server3.json:/etc/qraft/server.json:ro
+      - ../../../docker/config/three-node-acl/management-token:/etc/qraft/management-token:ro
+      - server3-data:/app/data
+    networks:
+      - raft-cluster
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+networks:
+  raft-cluster:
+    driver: bridge
+
+volumes:
+  server1-data:
+  server2-data:
+  server3-data:

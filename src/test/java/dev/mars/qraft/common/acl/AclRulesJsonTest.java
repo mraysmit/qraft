@@ -135,6 +135,38 @@ class AclRulesJsonTest {
     }
 
     @Test
+    void writesRulesInTheFormItReads() throws Exception {
+        String written = AclRulesJson.write(AclRules.GLOBAL_READ_ONLY);
+
+        assertEquals(new com.fasterxml.jackson.databind.ObjectMapper().readTree("""
+                {"node_prefix": {"": {"policy": "read"}},
+                 "client_prefix": {"": {"policy": "read"}},
+                 "operator": "read", "acl": "read",
+                 "tenant_prefix": {"": {"namespace_prefix": {"": {"service_prefix": {"": {"policy": "read"}}}}}}}
+                """), new com.fasterxml.jackson.databind.ObjectMapper().readTree(written));
+    }
+
+    @Test
+    void whatItWritesReadsBackAsTheSameRules() {
+        List<AclRules> cases = List.of(AclRules.EMPTY, AclRules.GLOBAL_MANAGEMENT, AclRules.GLOBAL_READ_ONLY,
+                new AclRules(List.of(
+                        AclRule.exact(AclResource.SERVICE, "web", AclAccess.WRITE),
+                        AclRule.exact(AclResource.SERVICE, "web", AclAccess.DENY).in(ACME, AclScope.DEFAULT),
+                        AclRule.prefix(AclResource.SERVICE, "billing-", AclAccess.WRITE).in(ACME, PROD),
+                        AclRule.prefix(AclResource.SERVICE, "", AclAccess.READ).in(AclScope.DEFAULT, PROD),
+                        AclRule.prefix(AclResource.SERVICE, "", AclAccess.READ).in(new AclScope("ac", true),
+                                new AclScope("p", true)),
+                        AclRule.exact(AclResource.NODE, "web-1", AclAccess.WRITE),
+                        AclRule.prefix(AclResource.NODE, "", AclAccess.READ),
+                        AclRule.exact(AclResource.CLIENT, "web-1", AclAccess.WRITE),
+                        AclRule.single(AclResource.OPERATOR, AclAccess.DENY))));
+
+        for (AclRules rules : cases) {
+            assertEquals(rules, AclRulesJson.parse(AclRulesJson.write(rules)), rules.toString());
+        }
+    }
+
+    @Test
     void aRefusalNamesWhereTheRulesWentWrong() {
         IllegalArgumentException nested = assertThrows(IllegalArgumentException.class, () -> AclRulesJson.parse(
                 "{\"tenant\": {\"acme\": {\"namespace\": {\"prod\": {\"servcie\": {}}}}}}"));

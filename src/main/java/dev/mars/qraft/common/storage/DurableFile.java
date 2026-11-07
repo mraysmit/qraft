@@ -55,6 +55,32 @@ public final class DurableFile {
     }
 
     /** Forces {@code directory}'s entries to disk, where the platform allows a directory to be opened for it. */
+    /**
+     * As {@link #write}, for a file that holds a secret: on a file system with POSIX permissions it is readable and
+     * writable by its owner alone, {@code rw-------}, from the moment it is created (ACL list, proposal 3). Elsewhere,
+     * as on Windows, it takes the permissions of its directory, which a deployment restricts.
+     */
+    public static void writePrivate(Path file, byte[] content, CopyOption... moveOptions) throws IOException {
+        Path temporary = file.resolveSibling(file.getFileName() + ".tmp");
+        boolean posix = Files.getFileStore(file.getParent()).supportsFileAttributeView("posix");
+        java.util.Set<java.nio.file.attribute.PosixFilePermission> ownerOnly =
+                java.nio.file.attribute.PosixFilePermissions.fromString("rw-------");
+        java.nio.file.attribute.FileAttribute<?>[] attributes = posix
+                ? new java.nio.file.attribute.FileAttribute<?>[] {
+                        java.nio.file.attribute.PosixFilePermissions.asFileAttribute(ownerOnly)}
+                : new java.nio.file.attribute.FileAttribute<?>[0];
+        try (FileChannel channel = FileChannel.open(temporary, java.util.Set.of(StandardOpenOption.CREATE,
+                StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE), attributes)) {
+            // A temporary file left by an earlier failure keeps its permissions, so they are set again.
+            if (posix) Files.setPosixFilePermissions(temporary, ownerOnly);
+            ByteBuffer bytes = ByteBuffer.wrap(content);
+            while (bytes.hasRemaining()) channel.write(bytes);
+            channel.force(true);
+        }
+        Files.move(temporary, file, moveOptions);
+        forceDirectory(file.getParent());
+    }
+
     public static void forceDirectory(Path directory) throws IOException {
         try (FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ)) {
             channel.force(true);

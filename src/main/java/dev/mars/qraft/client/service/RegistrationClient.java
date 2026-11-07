@@ -39,6 +39,9 @@ public final class RegistrationClient {
     private static final Logger LOGGER = LoggerFactory.getLogger(RegistrationClient.class);
     /** The servers' refusal of a name that a node of another ID holds. */
     static final String NODE_NAME_RESERVED = "node_name_reserved";
+    /** The servers' refusals of the client's token: Consul's "permission denied" and "ACL not found". */
+    private static final java.util.Set<String> TOKEN_REFUSALS = java.util.Set.of("permission_denied",
+            "token_not_found");
     private final HttpCatalogClient serverClient;
     private final AtomicBoolean registered = new AtomicBoolean();
     private final AtomicBoolean registrationRetryable = new AtomicBoolean();
@@ -60,9 +63,11 @@ public final class RegistrationClient {
                 .thenApply(outcome -> {
                     // A name another node holds is free once that node is unreachable, so the registration is
                     // tried again later, as Consul's agent keeps syncing; any other rejection is final.
+                    // A token the servers refuse may be replaced through the local API, so it is tried again too.
                     registrationRetryable.set(outcome instanceof CatalogOutcome.Retryable
                             || outcome instanceof CatalogOutcome.Rejected rejected
-                                    && NODE_NAME_RESERVED.equals(rejected.code()));
+                                    && (NODE_NAME_RESERVED.equals(rejected.code())
+                                            || TOKEN_REFUSALS.contains(rejected.code())));
                     if (outcome instanceof CatalogOutcome.Rejected rejected) {
                         LOGGER.warn("Client registration rejected: nodeName={}, code={}, message={}",
                                 client.name(), rejected.code(), rejected.message());
@@ -83,6 +88,15 @@ public final class RegistrationClient {
             if (outcome instanceof CatalogOutcome.Rejected rejected
                     && ("node_not_found".equals(rejected.code()) || "http_404".equals(rejected.code())
                             || "registration_superseded".equals(rejected.code()))) {
+                recordOutcome(heartbeatRegistrationId, false);
+                return false;
+            }
+            // A deleted or insufficient token: the node can no longer be renewed, so the client is not registered,
+            // and so not ready, until a valid token registers it again (ACL list, Phase 8).
+            if (outcome instanceof CatalogOutcome.Rejected rejected && TOKEN_REFUSALS.contains(rejected.code())) {
+                LOGGER.warn("The servers refused the client's token for its heartbeat, so the client is not ready "
+                        + "until a valid token registers it again: code={}, message={}", rejected.code(),
+                        rejected.message());
                 recordOutcome(heartbeatRegistrationId, false);
                 return false;
             }

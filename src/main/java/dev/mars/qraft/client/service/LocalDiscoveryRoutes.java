@@ -18,6 +18,7 @@ package dev.mars.qraft.client.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
+import dev.mars.qraft.client.acl.ClientAuthorizer;
 import dev.mars.qraft.client.catalog.ForwardedRead;
 import dev.mars.qraft.common.http.JsonApi;
 
@@ -61,9 +62,16 @@ public final class LocalDiscoveryRoutes {
 
     private final JsonApi api = new JsonApi(new ObjectMapper());
     private final ForwardedReads reads;
+    private final ClientAuthorizer acl;
 
     public LocalDiscoveryRoutes(ForwardedReads reads) {
+        this(reads, ClientAuthorizer.disabled());
+    }
+
+    /** @param acl gives the token each read is sent on under: the caller's, else the client's default token */
+    public LocalDiscoveryRoutes(ForwardedReads reads, ClientAuthorizer acl) {
         this.reads = Objects.requireNonNull(reads, "reads");
+        this.acl = Objects.requireNonNull(acl, "acl");
     }
 
     /** Serves the routes on {@code localApi}. */
@@ -87,6 +95,13 @@ public final class LocalDiscoveryRoutes {
                 return;
             }
             scope.put(header, value);
+        }
+        // Sent on under the caller's token, else the client's default token; the server decides and filters.
+        try {
+            acl.forwarding(exchange).ifPresent(token -> scope.put("X-Qraft-Token", token));
+        } catch (IllegalArgumentException unsendable) {
+            api.error(exchange, 400, "invalid_token", unsendable.getMessage(), false, Map.of());
+            return;
         }
         String query = exchange.getRequestURI().getRawQuery();
         String requestId = exchange.getResponseHeaders().getFirst(JsonApi.REQUEST_ID_HEADER);

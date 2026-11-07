@@ -78,7 +78,7 @@ public final class LocalDefinitions {
     private record State(Map<String, ServiceDefinition> services, Map<String, HealthCheckDefinition> checks,
                          Set<String> keptServices, Set<String> keptChecks, String nodeMaintenance,
                          Map<String, String> serviceMaintenance, Map<String, HealthCheckDefinition> running,
-                         List<ServiceDefinition> declared) {
+                         List<ServiceDefinition> declared, Map<String, String> tokens) {
         static State of(Change change) {
             Map<String, HealthCheckDefinition> running = new LinkedHashMap<>(change.checks);
             for (ServiceDefinition service : change.services.values()) {
@@ -98,15 +98,17 @@ public final class LocalDefinitions {
                             .filter(check -> check.serviceId().equals(service.id()))
                             .map(HealthCheckDefinition::checkId).toList()))
                     .toList();
+            Map<String, String> tokens = new LinkedHashMap<>(change.tokens);
+            tokens.keySet().retainAll(change.keptServices);
             return new State(change.services, change.checks, change.keptServices, change.keptChecks,
-                    change.nodeMaintenance, change.serviceMaintenance, running, declared);
+                    change.nodeMaintenance, change.serviceMaintenance, running, declared, Map.copyOf(tokens));
         }
 
         RegistrationStore.Kept kept() {
             return new RegistrationStore.Kept(
                     services.values().stream().filter(service -> keptServices.contains(service.id())).toList(),
                     checks.values().stream().filter(check -> keptChecks.contains(check.checkId())).toList(),
-                    nodeMaintenance, serviceMaintenance);
+                    nodeMaintenance, serviceMaintenance, tokens);
         }
 
         Optional<ServiceDefinition> enabledService(String serviceId) {
@@ -117,7 +119,7 @@ public final class LocalDefinitions {
         Change change() {
             return new Change(new LinkedHashMap<>(services), new LinkedHashMap<>(checks),
                     new LinkedHashSet<>(keptServices), new LinkedHashSet<>(keptChecks), nodeMaintenance,
-                    new LinkedHashMap<>(serviceMaintenance));
+                    new LinkedHashMap<>(serviceMaintenance), new LinkedHashMap<>(tokens));
         }
     }
 
@@ -128,17 +130,19 @@ public final class LocalDefinitions {
         private final Set<String> keptServices;
         private final Set<String> keptChecks;
         private final Map<String, String> serviceMaintenance;
+        private final Map<String, String> tokens;
         private String nodeMaintenance;
 
         Change(Map<String, ServiceDefinition> services, Map<String, HealthCheckDefinition> checks,
                Set<String> keptServices, Set<String> keptChecks, String nodeMaintenance,
-               Map<String, String> serviceMaintenance) {
+               Map<String, String> serviceMaintenance, Map<String, String> tokens) {
             this.services = services;
             this.checks = checks;
             this.keptServices = keptServices;
             this.keptChecks = keptChecks;
             this.nodeMaintenance = nodeMaintenance;
             this.serviceMaintenance = serviceMaintenance;
+            this.tokens = tokens;
         }
 
         void removeChecksOf(String serviceId) {
@@ -199,7 +203,7 @@ public final class LocalDefinitions {
         Map<String, String> serviceMaintenance = new LinkedHashMap<>(kept.serviceMaintenance());
         serviceMaintenance.keySet().removeIf(serviceId -> !isEnabled(services, serviceId));
         State loaded = State.of(new Change(services, checks, keptServices, keptChecks, kept.nodeMaintenance(),
-                serviceMaintenance));
+                serviceMaintenance, new LinkedHashMap<>(kept.tokens())));
         if (!loaded.kept().equals(kept)) store.write(loaded.kept());
         return new LocalDefinitions(store, loaded);
     }
@@ -241,13 +245,36 @@ public final class LocalDefinitions {
      * @throws IOException if the change cannot be kept; nothing has changed
      */
     public synchronized void register(Registration registration, boolean replaceExistingChecks) throws IOException {
+        register(registration, replaceExistingChecks, null);
+    }
+
+    /**
+     * As {@link #register(Registration, boolean)}, keeping {@code token}, the token the registration was made with,
+     * to sync the service and its checks under (ACL list, proposal 13); {@code null} is none, and the default token is
+     * used then.
+     */
+    public synchronized void register(Registration registration, boolean replaceExistingChecks, String token)
+            throws IOException {
         ServiceDefinition service = registration.service().withCheckIds(List.of());
         Change change = state.change();
         change.services.put(service.id(), service);
         change.keptServices.add(service.id());
+        // A registration replaces its token, as Consul's agent replaces a service's token when it is registered again.
+        if (token == null) change.tokens.remove(service.id());
+        else change.tokens.put(service.id(), token);
         if (replaceExistingChecks) change.removeChecksOf(service.id());
         registration.checks().forEach(change::addKeptCheck);
         commit(change);
+    }
+
+    /** The token the local API registration of {@code serviceId} was made with, if it was made with one. */
+    public Optional<String> registrationToken(String serviceId) {
+        return Optional.ofNullable(state.tokens().get(serviceId));
+    }
+
+    /** Whether {@code serviceId} was registered through the local API, rather than taken from the file. */
+    public boolean registeredThroughApi(String serviceId) {
+        return state.keptServices().contains(serviceId);
     }
 
     /**
@@ -261,6 +288,7 @@ public final class LocalDefinitions {
         Change change = state.change();
         change.services.remove(serviceId);
         change.keptServices.remove(serviceId);
+        change.tokens.remove(serviceId);
         change.serviceMaintenance.remove(serviceId);
         change.removeChecksOf(serviceId);
         commit(change);

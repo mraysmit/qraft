@@ -144,6 +144,21 @@ class AclResolverTest {
                 + "' lacks permission 'operator:write'"), removals.refusal(""));
     }
 
+    @Test
+    void anExpiredTokenIsRefusedByTheServersOwnClockAsNotFound() {
+        assertInstanceOf(RaftCommandResult.Success.class, store.apply(AclCommand.createToken(new AclToken(
+                WEB_ACCESSOR, AclSecrets.hash(WEB_SECRET), "", List.of(), List.of(), List.of(), List.of(), NOW,
+                NOW.plusSeconds(3600), false))));
+
+        AclResolver before = AclResolver.enabled(AclDefaultPolicy.DENY, store.getAcl(),
+                java.time.Clock.fixed(NOW.plusSeconds(3599), java.time.ZoneOffset.UTC));
+        AclResolver at = AclResolver.enabled(AclDefaultPolicy.DENY, store.getAcl(),
+                java.time.Clock.fixed(NOW.plusSeconds(3600), java.time.ZoneOffset.UTC));
+
+        assertEquals(WEB_ACCESSOR, before.resolve(WEB_SECRET).orElseThrow().accessorId());
+        assertEquals(Optional.empty(), at.resolve(WEB_SECRET), "expired at its expiry, before the leader deletes it");
+    }
+
     private void createToken(String accessor, String secret, String rules) {
         String policyId = java.util.UUID.nameUUIDFromBytes(accessor.getBytes()).toString();
         assertInstanceOf(RaftCommandResult.Success.class, store.apply(AclCommand.createPolicy(

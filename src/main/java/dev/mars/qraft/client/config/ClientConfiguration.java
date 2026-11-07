@@ -18,6 +18,7 @@ package dev.mars.qraft.client.config;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import dev.mars.qraft.client.acl.ClientAclSettings;
 import dev.mars.qraft.client.health.HealthCheckDefinition;
 import dev.mars.qraft.common.ServiceDefinition;
 import dev.mars.qraft.common.config.JsonSettings;
@@ -34,6 +35,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 import static dev.mars.qraft.client.config.DefinitionJson.optionalText;
@@ -76,8 +78,12 @@ public final class ClientConfiguration {
     private final List<ServiceDefinition> services;
     private final List<HealthCheckDefinition> healthChecks;
     private final String loggingDirectory;
+    private final ClientAclSettings acl;
+    private final Map<String, Path> serviceTokenFiles;
 
     private ClientConfiguration(Builder builder) {
+        acl = builder.acl;
+        serviceTokenFiles = Map.copyOf(builder.serviceTokenFiles);
         nodeName = builder.nodeName.trim();
         dataDirectory = builder.dataDirectory;
         address = builder.address.trim();
@@ -124,14 +130,17 @@ public final class ClientConfiguration {
         JsonNode catalog = optionalObject(root, "catalog");
         JsonNode logging = optionalObject(root, "logging");
         rejectUnknown(client, "client", "nodeName", "dataDirectory", "address", "bindAddress", "httpPort",
-                "heartbeatIntervalMs", "shutdownTimeoutMs", "datacenter", "region");
+                "heartbeatIntervalMs", "shutdownTimeoutMs", "datacenter", "region", "acl");
         rejectUnknown(servers, "servers", "urls", "requestTimeoutMs");
         rejectUnknown(catalog, "catalog", "tenant", "namespace", "registrationRetryMinMs",
                 "registrationRetryMaxMs", "contactFreshnessMs", "services");
         rejectUnknown(logging, "logging", "directory");
         List<HealthCheckDefinition> healthChecks = new ArrayList<>();
-        List<ServiceDefinition> services = parseServices(catalog.get("services"), healthChecks);
+        Map<String, Path> serviceTokenFiles = new java.util.LinkedHashMap<>();
+        List<ServiceDefinition> services = parseServices(catalog.get("services"), healthChecks, serviceTokenFiles);
         return builder()
+                .acl(ClientAclSettings.parse(client.get("acl")))
+                .serviceTokenFiles(serviceTokenFiles)
                 .nodeName(optionalText(client, "nodeName", null))
                 .dataDirectory(dataDirectory(requiredText(client, "dataDirectory")))
                 .address(optionalText(client, "address", localAddress()))
@@ -205,7 +214,9 @@ public final class ClientConfiguration {
         return List.copyOf(unique);
     }
 
-    private static List<ServiceDefinition> parseServices(JsonNode services, List<HealthCheckDefinition> checks) {
+    /** The file's services; their checks go to {@code checks}, and a service's own {@code tokenFile} to {@code tokens}. */
+    private static List<ServiceDefinition> parseServices(JsonNode services, List<HealthCheckDefinition> checks,
+                                                         Map<String, Path> tokens) {
         if (services == null || services.isNull()) return List.of();
         if (!services.isArray()) throw new IllegalArgumentException("catalog.services must be an array");
         List<ServiceDefinition> definitions = new ArrayList<>();
@@ -213,9 +224,11 @@ public final class ClientConfiguration {
         for (JsonNode service : services) {
             if (!service.isObject()) throw new IllegalArgumentException("Each catalog service must be an object");
             rejectUnknown(service, "catalog.services[]", "id", "name", "address", "port",
-                    "tags", "metadata", "enabled", "checks");
+                    "tags", "metadata", "enabled", "checks", "tokenFile");
             String id = requiredText(service, "id");
             if (!ids.add(id)) throw new IllegalArgumentException("Duplicate catalog service id: " + id);
+            String tokenFile = optionalText(service, "tokenFile", null);
+            if (tokenFile != null) tokens.put(id, Path.of(tokenFile));
             ServiceDefinition definition = new ServiceDefinition(id, requiredText(service, "name"),
                     requiredText(service, "address"), requiredInt(service, "port"),
                     stringList(service.get("tags"), "tags"), stringMap(service.get("metadata")),
@@ -292,6 +305,10 @@ public final class ClientConfiguration {
     public List<ServiceDefinition> getServices() { return services; }
     public List<HealthCheckDefinition> getHealthChecks() { return healthChecks; }
     public String getLoggingDirectory() { return loggingDirectory; }
+    /** {@code client.acl} (ACL list, proposal 13); disabled when the document has none. */
+    public ClientAclSettings getAcl() { return acl; }
+    /** The token file a configured service names for itself, by service ID. */
+    public Map<String, Path> getServiceTokenFiles() { return serviceTokenFiles; }
 
     public static final class Builder {
         private String nodeName;
@@ -313,6 +330,11 @@ public final class ClientConfiguration {
         private List<ServiceDefinition> services = List.of();
         private List<HealthCheckDefinition> healthChecks = List.of();
         private String loggingDirectory = "./logs";
+        private ClientAclSettings acl = ClientAclSettings.DISABLED;
+        private Map<String, Path> serviceTokenFiles = Map.of();
+
+        public Builder acl(ClientAclSettings value) { acl = java.util.Objects.requireNonNull(value, "acl"); return this; }
+        public Builder serviceTokenFiles(Map<String, Path> value) { serviceTokenFiles = Map.copyOf(value); return this; }
 
         /** The node's name; unset, it is the machine's host name. */
         public Builder nodeName(String value) { nodeName = value; return this; }

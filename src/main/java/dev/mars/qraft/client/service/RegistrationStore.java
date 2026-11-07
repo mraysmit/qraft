@@ -54,6 +54,7 @@ public final class RegistrationStore {
     private static final String MAINTENANCE = "maintenance";
     private static final String NODE = "node";
     private static final String SERVICES = "services";
+    private static final String TOKENS = "tokens";
     private static final ObjectMapper JSON = new ObjectMapper();
 
     /**
@@ -61,15 +62,27 @@ public final class RegistrationStore {
      * reasons for maintenance: the node's, or {@code null} when it is not in maintenance, and by service ID.
      */
     public record Kept(List<ServiceDefinition> services, List<HealthCheckDefinition> checks, String nodeMaintenance,
-                       Map<String, String> serviceMaintenance) {
+                       Map<String, String> serviceMaintenance, Map<String, String> tokens) {
         public Kept {
             services = List.copyOf(services);
             checks = List.copyOf(checks);
             serviceMaintenance = Map.copyOf(serviceMaintenance);
+            tokens = Map.copyOf(tokens);
+        }
+
+        public Kept(List<ServiceDefinition> services, List<HealthCheckDefinition> checks, String nodeMaintenance,
+                    Map<String, String> serviceMaintenance) {
+            this(services, checks, nodeMaintenance, serviceMaintenance, Map.of());
         }
 
         public Kept(List<ServiceDefinition> services, List<HealthCheckDefinition> checks) {
             this(services, checks, null, Map.of());
+        }
+
+        @Override
+        public String toString() {
+            return "Kept[services=" + services + ", checks=" + checks + ", nodeMaintenance=" + nodeMaintenance
+                    + ", serviceMaintenance=" + serviceMaintenance + ", tokens=" + tokens.keySet() + "]";
         }
     }
 
@@ -101,8 +114,8 @@ public final class RegistrationStore {
                 checks.add(DefinitionJson.readWrittenCheck(check));
             }
             JsonNode maintenance = root.get(MAINTENANCE);
-            return maintenance == null ? new Kept(services, checks)
-                    : new Kept(services, checks, nodeMaintenance(maintenance), serviceMaintenance(maintenance));
+            return new Kept(services, checks, maintenance == null ? null : nodeMaintenance(maintenance),
+                    maintenance == null ? Map.of() : serviceMaintenance(maintenance), tokens(root.get(TOKENS)));
         } catch (IOException | IllegalArgumentException failure) {
             throw new IllegalStateException("The registrations kept in " + file + " cannot be read: "
                     + failure.getMessage() + ". The file is not replaced, because that would lose them; restore it, "
@@ -124,8 +137,26 @@ public final class RegistrationStore {
             ObjectNode reasons = maintenance.putObject(SERVICES);
             new TreeMap<>(kept.serviceMaintenance()).forEach(reasons::put);
         }
-        DurableFile.write(file, JSON.writerWithDefaultPrettyPrinter().writeValueAsBytes(root),
+        if (!kept.tokens().isEmpty()) {
+            ObjectNode tokens = root.putObject(TOKENS);
+            new TreeMap<>(kept.tokens()).forEach(tokens::put);
+        }
+        // It may hold a registration's token, so only the client's user may read it (ACL list, proposal 3).
+        DurableFile.writePrivate(file, JSON.writerWithDefaultPrettyPrinter().writeValueAsBytes(root),
                 StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+    }
+
+    /** The token each API registration was made with, by service ID; none when the file has no {@code tokens}. */
+    private static Map<String, String> tokens(JsonNode tokens) {
+        if (tokens == null) return Map.of();
+        Map<String, String> kept = new LinkedHashMap<>();
+        requireObject(tokens, TOKENS).properties().forEach(entry -> {
+            if (!entry.getValue().isTextual() || entry.getValue().textValue().isBlank()) {
+                throw new IllegalArgumentException("the token of " + entry.getKey() + " is not a non-blank string");
+            }
+            kept.put(entry.getKey(), entry.getValue().textValue());
+        });
+        return kept;
     }
 
     private static String nodeMaintenance(JsonNode maintenance) {

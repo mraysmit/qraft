@@ -20,6 +20,11 @@ import dev.mars.qraft.common.Node;
 import dev.mars.qraft.common.QraftVersion;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.mars.qraft.client.acl.ClientAclResolver;
+import dev.mars.qraft.client.acl.ClientAclSettings;
+import dev.mars.qraft.client.acl.ClientAuthorizer;
+import dev.mars.qraft.client.acl.ClientTokens;
+import dev.mars.qraft.client.acl.TokenKind;
 import dev.mars.qraft.client.catalog.ServerContactTracker;
 import dev.mars.qraft.client.catalog.ServerRetryPolicy;
 import dev.mars.qraft.client.catalog.HttpCatalogClient;
@@ -42,6 +47,7 @@ import dev.mars.qraft.client.service.LocalDefinitions;
 import dev.mars.qraft.client.service.LocalRegistrationRoutes;
 import dev.mars.qraft.client.service.HeartbeatService;
 import dev.mars.qraft.client.service.ReadinessPolicy;
+import dev.mars.qraft.client.service.ServiceTokens;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,6 +58,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -142,14 +149,20 @@ public final class QraftClient implements AutoCloseable {
             checkScheduler.shutdownNow();
             throw refused;
         }
+        ClientTokens tokens;
+        Map<String, String> fileServiceTokens;
         try {
             this.definitions = loadDefinitions(config, dataDirectory);
+            // The tokens are read before anything opens, so a client whose token file cannot be read opens nothing.
+            tokens = ClientTokens.load(config.getAcl(), config.getDataDirectory());
+            fileServiceTokens = ClientTokens.readServiceTokens(config.getServiceTokenFiles());
         } catch (RuntimeException refused) {
             scheduler.shutdownNow();
             checkScheduler.shutdownNow();
             dataDirectory.close();
             throw refused;
         }
+        logAclSettings(config.getAcl());
         this.checkHttpClient = HttpClient.newHttpClient();
         this.serverHttpClient = HttpClient.newHttpClient();
         ServerContactTracker contactTracker = new ServerContactTracker(clock);
@@ -157,6 +170,10 @@ public final class QraftClient implements AutoCloseable {
                 config.getServerUrls(), config.getNodeName(), dataDirectory.nodeId(), config.getTenant(),
                 config.getNamespace(), config.getDatacenter(), config.getRegion(),
                 Duration.ofMillis(config.getRequestTimeoutMs()), contactTracker);
+        serverClient.useTokens(new ServiceTokens(tokens, definitions, fileServiceTokens));
+        ClientAuthorizer acl = new ClientAuthorizer(new ClientAclResolver(config.getAcl(), config.getNodeName(), tokens,
+                serverClient::resolveAcl, clock), tokens, config.getNodeName(), config.getTenant(),
+                config.getNamespace());
         this.registrationClient = new RegistrationClient(serverClient);
         this.heartbeatService = new HeartbeatService(registrationClient);
         this.serviceReconciler = new ServiceReconciler(serverClient, definitions::services, clock,
@@ -174,11 +191,11 @@ public final class QraftClient implements AutoCloseable {
                 serviceReconciler::isConverged, checkReadiness::isSatisfied, contactTracker,
                 Duration.ofMillis(config.getContactFreshnessMs()), clock);
         this.localApi = new LocalApiServer(config, readinessPolicy::isReady);
-        new LocalRegistrationRoutes(definitions, localChecks::latest, localChecks::reporter, config.getAddress())
+        new LocalRegistrationRoutes(definitions, localChecks::latest, localChecks::reporter, config.getAddress(), acl)
                 .install(localApi);
         new LocalClientRoutes(config, dataDirectory.nodeId(), readinessPolicy::conditions, contactTracker,
-                serverClient::forwardRead, this::depart, this::finishLeaving).install(localApi);
-        new LocalDiscoveryRoutes(serverClient::forwardRead).install(localApi);
+                serverClient::forwardRead, this::depart, this::finishLeaving, acl).install(localApi);
+        new LocalDiscoveryRoutes(serverClient::forwardRead, acl).install(localApi);
         definitions.listen(new LocalDefinitions.Listener() {
             @Override public void checkAdded(HealthCheckDefinition check) {
                 // Readiness counts the check before it can report, so its first result is not missed.
@@ -196,6 +213,16 @@ public final class QraftClient implements AutoCloseable {
                 serviceReconciler.definitionsChanged();
             }
         });
+    }
+
+    /** Logs the ACL settings without a token, and the one warning they call for, as a server does its own. */
+    private static void logAclSettings(ClientAclSettings acl) {
+        Logging.LOGGER.info("Client ACL configuration: enabled={}, defaultPolicy={}, downPolicy={}, tokens={}, "
+                        + "enableTokenPersistence={}", acl.enabled(),
+                acl.defaultPolicy() == null ? "none" : acl.defaultPolicy().name().toLowerCase(java.util.Locale.ROOT),
+                acl.downPolicy().setting(), acl.tokenFiles().keySet().stream().map(TokenKind::apiName).sorted()
+                        .toList(), acl.enableTokenPersistence());
+        acl.startupWarning().ifPresent(Logging.LOGGER::warn);
     }
 
     private static LocalDefinitions loadDefinitions(ClientConfiguration config, ClientDataDirectory directory) {

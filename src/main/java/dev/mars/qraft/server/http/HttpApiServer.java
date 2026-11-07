@@ -95,18 +95,18 @@ public final class HttpApiServer implements AutoCloseable {
     private final AdminUiConfig adminUi;
     private final HttpServer server;
     private final ExecutorService executor;
-    private final ObjectMapper objectMapper = new ObjectMapper()
+    final ObjectMapper objectMapper = new ObjectMapper()
             .findAndRegisterModules()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     /** The request handling this API shares with the client's local API: request IDs, body limits, errors. */
     private final JsonApi api = new JsonApi(objectMapper);
     private final RaftNode raftNode;
-    private final QraftStateStore stateStore;
+    final QraftStateStore stateStore;
     private final AtomicBoolean draining = new AtomicBoolean();
-    private final Clock clock;
+    final Clock clock;
     private final Duration raftTimeout;
     private final MembershipService membership;
-    private final AclHttpSettings acl;
+    final AclHttpSettings acl;
     /** Resolves a request's token against this server's applied ACL state; unrestricted with ACLs disabled. */
     private final AclResolver resolver;
 
@@ -181,7 +181,7 @@ public final class HttpApiServer implements AutoCloseable {
         this.stateStore = stateStore;
         // Without a state store every route that takes a token answers that the catalog is unavailable.
         this.resolver = acl.enabled() && stateStore != null
-                ? AclResolver.enabled(acl.defaultPolicy(), stateStore.getAcl()) : AclResolver.disabled();
+                ? AclResolver.enabled(acl.defaultPolicy(), stateStore.getAcl(), clock) : AclResolver.disabled();
         this.server = HttpServer.create(new InetSocketAddress(port), 0);
         this.executor = Executors.newVirtualThreadPerTaskExecutor();
         server.setExecutor(executor);
@@ -204,6 +204,8 @@ public final class HttpApiServer implements AutoCloseable {
         server.createContext("/v1/catalog/service", requestAware(this::listServiceInstances));
         server.createContext("/v1/health/service", requestAware(this::listServiceHealth));
         server.createContext("/v1/acl/bootstrap", requestAware(this::bootstrapAcl));
+        AclApiRoutes aclApi = new AclApiRoutes(this);
+        AclApiRoutes.CONTEXTS.forEach(context -> server.createContext(context, requestAware(aclApi::handle)));
     }
 
     public CompletableFuture<Void> start() {
@@ -996,7 +998,7 @@ public final class HttpApiServer implements AutoCloseable {
      * Answers {@code invalid_query} for a read that takes no query parameter and was given one. Ignoring it, as
      * Consul does a parameter it does not know, would answer another question than the one asked.
      */
-    private boolean refusedForItsQuery(HttpExchange exchange) throws IOException {
+    boolean refusedForItsQuery(HttpExchange exchange) throws IOException {
         String rawQuery = exchange.getRequestURI().getRawQuery();
         if (rawQuery == null || rawQuery.isEmpty()) return false;
         Optional<String> parameter = Arrays.stream(rawQuery.split("&")).filter(text -> !text.isEmpty()).findFirst();
@@ -1029,7 +1031,7 @@ public final class HttpApiServer implements AutoCloseable {
         return passingOnly;
     }
 
-    private void setAppliedIndex(HttpExchange exchange) {
+    void setAppliedIndex(HttpExchange exchange) {
         exchange.getResponseHeaders().set("X-Qraft-Index", Long.toString(stateStore.getLastAppliedIndex()));
     }
 
@@ -1037,7 +1039,7 @@ public final class HttpApiServer implements AutoCloseable {
         return prepareStateRequest(exchange, expectedMethod);
     }
 
-    private boolean prepareStateRequest(HttpExchange exchange, String expectedMethod) throws IOException {
+    boolean prepareStateRequest(HttpExchange exchange, String expectedMethod) throws IOException {
         if (draining.get()) {
             respondError(exchange, 503, "draining", "Server is draining", true);
             return false;
@@ -1053,7 +1055,7 @@ public final class HttpApiServer implements AutoCloseable {
         return true;
     }
 
-    private RaftCommandResult<?> submit(RaftCommand command) {
+    RaftCommandResult<?> submit(RaftCommand command) {
         return Deadlines.bound(raftNode.submitCommand(command),
                 raftTimeout.toNanos(), TimeUnit.NANOSECONDS)
                 .join();
@@ -1064,11 +1066,11 @@ public final class HttpApiServer implements AutoCloseable {
         exchange.close();
     }
 
-    private void respondJson(HttpExchange exchange, int status, Object body) throws IOException {
+    void respondJson(HttpExchange exchange, int status, Object body) throws IOException {
         api.json(exchange, status, body);
     }
 
-    private void respondUnavailable(HttpExchange exchange, CompletionException error) throws IOException {
+    void respondUnavailable(HttpExchange exchange, CompletionException error) throws IOException {
         Throwable cause = error.getCause() == null ? error : error.getCause();
         String leaderId = raftNode == null ? null : raftNode.getLeaderId();
         if (cause instanceof TimeoutException || cause instanceof CommandOutcomeUnknownException) {
@@ -1097,7 +1099,7 @@ public final class HttpApiServer implements AutoCloseable {
      * {@code null} after answering 403 {@code token_not_found} for a token that names none, as Consul answers 403 for
      * "ACL not found". The secret is never answered or logged.
      */
-    private AclPrincipal principal(HttpExchange exchange) throws IOException {
+    AclPrincipal principal(HttpExchange exchange) throws IOException {
         Optional<AclPrincipal> principal = resolver.resolve(presentedToken(exchange));
         if (principal.isPresent()) return principal.get();
         LOG.info("ACL refused {} {}: the token was not found", exchange.getRequestMethod(),
@@ -1110,7 +1112,7 @@ public final class HttpApiServer implements AutoCloseable {
      * Answers 403 {@code permission_denied}, in Consul's words, and returns {@code true} when {@code principal} may
      * not make {@code request}. A refusal is not an error: it is logged at INFO with the accessor ID.
      */
-    private boolean refused(HttpExchange exchange, AclPrincipal principal, AclRequest request) throws IOException {
+    boolean refused(HttpExchange exchange, AclPrincipal principal, AclRequest request) throws IOException {
         if (principal.allows(request)) return false;
         String denied = principal.permissionDenied(request);
         LOG.info("ACL refused {} {}: {}", exchange.getRequestMethod(), exchange.getRequestURI().getPath(), denied);
@@ -1147,12 +1149,12 @@ public final class HttpApiServer implements AutoCloseable {
         });
     }
 
-    private void respondError(HttpExchange exchange, int status, String code, String message,
-                              boolean retryable) throws IOException {
+    void respondError(HttpExchange exchange, int status, String code, String message,
+                      boolean retryable) throws IOException {
         respondError(exchange, status, code, message, retryable, Map.of());
     }
 
-    private void respondError(HttpExchange exchange, int status, String code, String message,
+    void respondError(HttpExchange exchange, int status, String code, String message,
                               boolean retryable, Map<String, ?> details) throws IOException {
         api.error(exchange, status, code, message, retryable, details);
     }
@@ -1165,7 +1167,7 @@ public final class HttpApiServer implements AutoCloseable {
         return value.isBlank() ? null : value;
     }
 
-    private static String safeMessage(Throwable error) {
+    static String safeMessage(Throwable error) {
         return Objects.toString(error.getMessage(), error.getClass().getSimpleName());
     }
 }

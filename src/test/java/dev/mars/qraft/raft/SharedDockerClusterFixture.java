@@ -118,6 +118,24 @@ public final class SharedDockerClusterFixture {
     }
 
     /**
+     * Starts a disposable three-node cluster with ACLs enabled under {@code deny} (ACL list, Phase 9). Every server
+     * installs the management token from {@code docker/config/three-node-acl/management-token}, a test-only secret;
+     * health needs no token, so the cluster is waited for as any other.
+     */
+    public static ComposeContainer startIsolatedThreeNodeAclCluster() {
+        ensureImageBuilt();
+        ComposeContainer cluster = new ComposeContainer(
+                new File("src/test/resources/docker-compose-3node-acl-prebuilt.yml"))
+                .withExposedService("server1", 8080, Wait.forHttp("/health/live").forStatusCode(200))
+                .withExposedService("server2", 8080, Wait.forHttp("/health/live").forStatusCode(200))
+                .withExposedService("server3", 8080, Wait.forHttp("/health/live").forStatusCode(200))
+                .withStartupTimeout(Duration.ofSeconds(90));
+        cluster.start();
+        registerCluster(cluster, List.of("server1", "server2", "server3"));
+        return cluster;
+    }
+
+    /**
      * Starts a disposable three-node cluster with one client-mode {@code client} container using the expiry
      * profile: HTTP and TCP checks with a 5-second TTL, so expiry and deregistration are quick to observe.
      */
@@ -303,6 +321,11 @@ public final class SharedDockerClusterFixture {
             runCommand(List.of("docker", "stop", "--time", "20", name));
         }
 
+        /** Everything the client has logged so far, standard output and error together. */
+        public String logs() throws Exception {
+            return commandOutput(List.of("docker", "logs", name));
+        }
+
         /** Runs {@code command} inside the client's container, failing if it exits non-zero, and returns its output. */
         public String exec(String... command) throws Exception {
             List<String> line = new ArrayList<>(List.of("docker", "exec", name));
@@ -328,18 +351,40 @@ public final class SharedDockerClusterFixture {
      */
     public static DetachedClient startDetachedClient(ComposeContainer cluster, String alias, String clientJson)
             throws Exception {
+        return startDetachedClient(cluster, alias, clientJson, Map.of());
+    }
+
+    /**
+     * As {@link #startDetachedClient(ComposeContainer, String, String)}, with each of {@code files} written to a
+     * temporary file and mounted read-only at its key, such as a token file; they are removed with the client.
+     */
+    public static DetachedClient startDetachedClient(ComposeContainer cluster, String alias, String clientJson,
+                                                     Map<String, String> files) throws Exception {
         String network = networkOf(cluster);
         Path config = Files.createTempFile("qraft-client-", ".json");
         String name = "qraft-client-" + alias + "-" + java.util.UUID.randomUUID();
+        List<Path> mounted = new ArrayList<>();
         try {
             Files.writeString(config, clientJson);
             makeContainerConfigReadable(config);
-            runCommand(List.of("docker", "run", "-d", "--name", name, "--network", network,
+            List<String> command = new ArrayList<>(List.of("docker", "run", "-d", "--name", name, "--network", network,
                     "--network-alias", alias, "--label", "org.testcontainers=true",
-                    "--mount", "type=bind,source=" + config.toAbsolutePath() + ",target=/etc/qraft/client.json,readonly",
-                    "qraft-runtime:test", "client", "--config", "/etc/qraft/client.json"));
+                    "--mount", "type=bind,source=" + config.toAbsolutePath() + ",target=/etc/qraft/client.json,readonly"));
+            for (Map.Entry<String, String> file : files.entrySet()) {
+                Path source = Files.createTempFile("qraft-client-file-", ".txt");
+                mounted.add(source);
+                Files.writeString(source, file.getValue());
+                makeContainerConfigReadable(source);
+                command.addAll(List.of("--mount", "type=bind,source=" + source.toAbsolutePath() + ",target="
+                        + file.getKey() + ",readonly"));
+            }
+            command.addAll(List.of("qraft-runtime:test", "client", "--config", "/etc/qraft/client.json"));
+            runCommand(command);
+            // The mounted files are removed with the configuration; Docker holds them open until then.
+            mounted.forEach(source -> source.toFile().deleteOnExit());
         } catch (Exception failed) {
             Files.deleteIfExists(config);
+            for (Path source : mounted) Files.deleteIfExists(source);
             throw failed;
         }
         return new DetachedClient(name, config);
