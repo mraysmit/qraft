@@ -530,6 +530,49 @@ did not occur (its two removals did not meet), and the peer and snapshot counts 
 `RAFT_SNAPSHOT_TRANSFER_INTERRUPTED` 84 from 92, counted across every retained copy. ACL Phase 4's
 exit is met on this build. The logs are in `logs/jenkins/Qraft-65/`.
 
+## Build 66, 2026-11-07
+
+Build 66 ran on `f833761`, ACL Phases 5 to 9. It passed in 24 min 46 s: default 1,684 with every coverage
+gate met, end-to-end 16, and Docker and `slow` 45, 1,745 in all, with no failures, errors or skips; the new
+`AclEndToEndTest` and `DockerAclTest` among them. The audit, over the console, the archived logs (18 Docker
+archive folders) and the test reports, found 1,619 error lines, 1,618 flagged, and 1,093 stack traces, none
+unflagged; no `too_many_pings` and no JVM crash file.
+
+The one unflagged line was the OpenTelemetry collector's, in `DockerStartCommandsTest`'s observability cluster
+start: `grpc: addrConn.createTransport failed to connect to {Addr: "tempo:4317"} ... Error while dialing ...
+connection refused`, at WARN. The collector started before Tempo listened; it reconnected, and spans flowed
+15 s later. Builds 64 and 65 did not meet it, so it was a startup race, not a known message. Fixed by starting
+the collector only once Tempo is healthy (`depends_on` with `service_healthy` in both observability compose
+files, pinned by `DockerDeploymentContractTest`). The Docker audit had not caught it: the collector writes
+tab-separated levels, and the error was text inside a WARN line. The logs are in `logs/jenkins/Qraft-66/`.
+
+## Local runs, 2026-11-07
+
+Two runs of the three suites from the copy at `C:\qx7`, against Docker Desktop, in place of Jenkins while the work
+was uncommitted.
+
+The first, on `f833761` with the collector's fix, passed default 1,685 with every coverage gate met and end-to-end
+16, and failed the Docker stage, 45 passed and one class-level failure: `DockerStartCommandsTest`'s audit met
+Tempo's `error tailing WAL ... failed to find segment for index`, the metrics generator's declared startup race
+(`TEMPO_METRICS_WAL_STARTUP`), without its recovery. The declaration holds only once the same remote logs
+`Done replaying WAL`. With the collector waiting for Tempo, the first span came after the audit and before the
+capture, so the archive ended 2 ms after the error. Its 18 unflagged lines were that line and the reports of it.
+Fixed by waiting, before the audit, until Tempo's span metrics are in Prometheus. The logs are in
+`logs/local-run-2026-11-07-acl-phases5-9/`.
+
+The final run, with that fix and the fix for a takeover under another case, passed default 1,686 with every
+coverage gate met, end-to-end 16 and Docker 45, with no failures, errors or skips. It met Tempo's race, and the
+audit found its recovery 20 s later and flagged it. The audit, over 452 files (the three consoles, the suites' logs
+and 18 Docker archive folders), found 1,340 error lines, all flagged, and 933 stack traces, none unflagged; no
+`too_many_pings` and no JVM crash file. The logs are in `logs/local-run-2026-11-07-final/`.
+
+## Local runs for transport security, 2026-11-07 and 08
+
+Two runs of the three suites from the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted. On
+Phase 2 of the transport security list: default 1,726 with every coverage gate met, end-to-end 16 and Docker 45; audit
+over 658 files clean (logs `logs/local-run-2026-11-07-tls-phase2/`). On the complete list, with `TlsEndToEndTest` and
+`DockerTlsTest`: default 1,743 with every coverage gate met, end-to-end 17 and Docker 46, with no failures, errors or skips; audit over 862 files: 2,414 error lines, all flagged, 1,678 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/local-run-2026-11-07-tls-final/`).
+
 ## Job configuration
 
 The job loads its pipeline from the repository's default branch using the following SCM configuration.

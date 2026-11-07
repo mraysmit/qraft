@@ -95,6 +95,14 @@ public enum IntentionalErrorFixture {
                     + " remote_name=\\S+ url=http://prometheus:9090/api/v1/write"
                     + " msg=\"error tailing WAL\" err=\"failed to find segment for index\""),
 
+    /**
+     * A test's client presents no certificate to a server that requires one, or trusts another CA than the server's,
+     * so the TLS handshake fails; the client says so once per server and reason (transport security list, Phase 3).
+     */
+    CLIENT_TLS_REFUSED("dev.mars.qraft.client.catalog.HttpCatalogClient", Level.WARN,
+            "TLS with server https://localhost:\\d+ failed, so the client cannot use that server until it is fixed: "
+                    + ".+\\. Check client\\.tls and the server's certificate"),
+
     /** A test takes the name of the client's temporary file, so a local API registration cannot be kept. */
     CLIENT_REGISTRATION_NOT_KEPT("dev.mars.qraft.client.service.LocalRegistrationRoutes", Level.ERROR,
             "A registration could not be kept in the data directory: java\\.nio\\.file\\.\\w+: .*registrations\\.json\\.tmp.*"),

@@ -19,12 +19,16 @@ package dev.mars.qraft.raft;
 import io.grpc.BindableService;
 import io.grpc.Server;
 import io.grpc.ServerBuilder;
+import io.grpc.netty.NettyServerBuilder;
+import dev.mars.qraft.common.tls.ServerTls;
 import dev.mars.qraft.common.async.BlockingTaskExecutor;
 import dev.mars.qraft.common.concurrent.Completions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -42,9 +46,19 @@ public class GrpcServiceServer {
     private final BlockingTaskExecutor blockingTasks;
     private final int port;
     private final BindableService[] services;
+    private final Optional<ServerTls> tls;
     private volatile Server server;
 
     public GrpcServiceServer(BlockingTaskExecutor blockingTasks, int port, BindableService... services) {
+        this(blockingTasks, port, Optional.empty(), services);
+    }
+
+    /**
+     * @param tls how the port serves TLS, or empty to serve it without (transport security list, Phase 2)
+     */
+    public GrpcServiceServer(BlockingTaskExecutor blockingTasks, int port, Optional<ServerTls> tls,
+                             BindableService... services) {
+        this.tls = Objects.requireNonNull(tls, "tls");
         this.blockingTasks = blockingTasks;
         this.port = port;
         this.services = services != null ? services : new BindableService[0];
@@ -55,12 +69,14 @@ public class GrpcServiceServer {
 
         blockingTasks.execute(() -> {
             try {
-                ServerBuilder<?> builder = ServerBuilder.forPort(port);
+                ServerBuilder<?> builder = tls.isPresent()
+                        ? NettyServerBuilder.forPort(port).sslContext(GrpcTls.serverContext(tls.get()))
+                        : ServerBuilder.forPort(port);
                 for (BindableService service : services) {
                     builder.addService(service);
                 }
                 server = builder.build().start();
-                logger.info("gRPC API server started on port {}", server.getPort());
+                logger.info("gRPC API server started on port {}{}", server.getPort(), tls.isPresent() ? " with TLS" : "");
                 return null;
             } catch (IOException e) {
                 throw new RuntimeException("Failed to start gRPC API server on port " + port, e);

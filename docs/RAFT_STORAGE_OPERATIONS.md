@@ -590,6 +590,38 @@ holds tokens, policies and roles.
   and `client.acl` with the servers' default policy, and change the security profile
   to `production` last.
 
+## Transport security
+
+`server.tls` and `client.tls` (design section 15.2) encrypt and authenticate every
+connection that carries a token, a registration or Raft traffic.
+
+- **Certificates.** One CA for the cluster. Each server's certificate names every
+  host its peers and clients dial it by (the hosts in `server.raft.nodes` and in the
+  clients' `servers.urls`), with both server and client use, since a server is a
+  client of its peers. Each client's certificate has client use. Keys are PEM,
+  PKCS #8 (`BEGIN PRIVATE KEY`); convert an older RSA key with
+  `openssl pkcs8 -topk8 -nocrypt`. Keep key files readable by the server's user alone.
+  `src/test/resources/tls/generate.sh` shows the commands; its keys are public and for
+  tests only.
+- **Turning it on.** Give every server the material and enable `https`, `grpc` and
+  `raft` together, then restart the servers one at a time: a server with mutual TLS
+  on its Raft port and one without cannot reach each other, so a cluster that is half
+  changed keeps a quorum only while the changed or the unchanged servers are a
+  majority. Change each client's `servers.urls` to `https` and give it `client.tls`.
+- **Probes and tools.** With `verifyIncoming`, the default, the health endpoints need a
+  certificate too: `curl --cacert ca.pem --cert client.pem --key client.key
+  https://server1:8080/health/ready`. `qraft acl` and `qraft operator raft` take
+  `--http-addr https://server1:8080 --ca-file ca.pem --client-cert client.pem
+  --client-key client.key`.
+- **What a refusal looks like.** A client logs once per server `TLS with server ...
+  failed, so the client cannot use that server until it is fixed` with the reason,
+  and is not ready. A server that cannot reach a peer over mutual TLS logs it as an
+  unreachable peer, as for a partitioned one; `/raft/status` on each server shows
+  whether they agree on a leader.
+- **Not yet:** certificate reloading (a server reads its files at start, so a renewed
+  certificate takes a restart), revocation lists, and HTTPS on the client's local API,
+  which listens on loopback.
+
 ## Upgrade and migration
 
 Current Qraft supports only the external `raftlog` backend. The former `file`

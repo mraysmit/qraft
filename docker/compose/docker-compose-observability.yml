@@ -32,6 +32,10 @@ services:
       - "${PUBLISHED_PORT:-13133}:13133" # Health check
     networks:
       - observability
+    # It exports traces to Tempo, so it starts once Tempo is ready; started first, its first dial is refused.
+    depends_on:
+      tempo:
+        condition: service_healthy
     # No health check: this image holds no shell and no wget or curl, so one could never pass.
     restart: unless-stopped
 

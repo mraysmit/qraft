@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.client;
 
+import dev.mars.qraft.common.tls.TlsMaterial;
 import dev.mars.qraft.common.Node;
 import dev.mars.qraft.common.QraftVersion;
 
@@ -164,7 +165,12 @@ public final class QraftClient implements AutoCloseable {
         }
         logAclSettings(config.getAcl());
         this.checkHttpClient = HttpClient.newHttpClient();
-        this.serverHttpClient = HttpClient.newHttpClient();
+        // An https server URL is called with client.tls's CA and certificate when the document has them
+        // (transport security list, Phase 3).
+        this.serverHttpClient = config.getTls().map(TlsMaterial::load)
+                .map(material -> HttpClient.newBuilder().sslContext(material.clientContext())
+                        .sslParameters(material.clientParameters(true)).build())
+                .orElseGet(HttpClient::newHttpClient);
         ServerContactTracker contactTracker = new ServerContactTracker(clock);
         this.serverClient = new HttpCatalogClient(serverHttpClient, new ObjectMapper(),
                 config.getServerUrls(), config.getNodeName(), dataDirectory.nodeId(), config.getTenant(),

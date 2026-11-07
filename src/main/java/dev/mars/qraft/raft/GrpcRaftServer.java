@@ -100,6 +100,7 @@ public class GrpcRaftServer {
     private final RaftNode raftNode;
     private final MembershipService membership;
     private final BindableService[] extraServices;
+    private final java.util.Optional<RaftTls> tls;
     private volatile Server server;
 
     public GrpcRaftServer(BlockingTaskExecutor blockingTasks, int port, RaftNode raftNode) {
@@ -116,6 +117,16 @@ public class GrpcRaftServer {
      */
     public GrpcRaftServer(BlockingTaskExecutor blockingTasks, int port, RaftNode raftNode, MembershipService membership,
                           BindableService... extraServices) {
+        this(blockingTasks, port, raftNode, membership, java.util.Optional.empty(), extraServices);
+    }
+
+    /**
+     * @param tls mutual TLS on the port, which then refuses a peer without a certificate from the cluster's CA,
+     *            or empty for plaintext (transport security list, decision 4)
+     */
+    public GrpcRaftServer(BlockingTaskExecutor blockingTasks, int port, RaftNode raftNode, MembershipService membership,
+                          java.util.Optional<RaftTls> tls, BindableService... extraServices) {
+        this.tls = java.util.Objects.requireNonNull(tls, "tls");
         this.blockingTasks = blockingTasks;
         this.port = port;
         this.raftNode = raftNode;
@@ -133,7 +144,10 @@ public class GrpcRaftServer {
 
         blockingTasks.execute(() -> {
             try {
-            ServerBuilder<?> builder = ServerBuilder.forPort(port)
+            ServerBuilder<?> builder = (tls.isPresent()
+                    ? io.grpc.netty.NettyServerBuilder.forPort(port).sslContext(GrpcTls.serverContext(
+                            new dev.mars.qraft.common.tls.ServerTls(tls.get().material(), true)))
+                    : ServerBuilder.forPort(port))
                 .permitKeepAliveTime(PERMITTED_KEEPALIVE_TIME.toNanos(), TimeUnit.NANOSECONDS)
                 .permitKeepAliveWithoutCalls(true)
                 .intercept(new CorrelationIdServerInterceptor())
@@ -144,7 +158,8 @@ public class GrpcRaftServer {
             }
 
             server = builder.build().start();
-                logger.info("gRPC Raft server started on port {}", server.getPort());
+                logger.info("gRPC Raft server started on port {}{}", server.getPort(),
+                        tls.isPresent() ? " with mutual TLS" : "");
                 return null;
             } catch (IOException e) {
                 throw new RuntimeException("Failed to start gRPC server on port " + port, e);

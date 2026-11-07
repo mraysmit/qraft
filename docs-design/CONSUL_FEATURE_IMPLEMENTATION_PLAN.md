@@ -438,7 +438,8 @@ unchecked features below remain open.
 - [ ] Implement ACL tokens, policies, token validation, and audit events
   (phase 7; item 9). Tokens, policies, roles, identities and validation on servers and
   clients are done (2026-11-07, the ACL list,
-  [`task-list-acl-and-tokens-2026-11-07.md`](task-list-acl-and-tokens-2026-11-07.md));
+  [`task-list-acl-and-tokens-2026-11-07.md`](../docs/archive/task-list-acl-and-tokens-2026-11-07.md)),
+  and TLS on every listener, with mutual TLS on the Raft port, is built (2026-11-07, [`task-list-transport-security-2026-11-08.md`](../docs/archive/task-list-transport-security-2026-11-08.md));
   audit events wait for the events list.
 - [ ] Implement server membership change. Decided 2026-09-29, and in progress
   in [`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md):

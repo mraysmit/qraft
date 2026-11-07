@@ -219,6 +219,12 @@ class DockerStartCommandsTest {
         int prometheus = publishedPort("qraft-prometheus", 9090);
         await().atMost(Duration.ofSeconds(120)).pollInterval(Duration.ofSeconds(2)).ignoreExceptions()
                 .until(() -> get("http://localhost:" + prometheus + query).body().contains(",\"3\"]"));
+        // Tempo's metrics generator opens its WAL at the first span, and its remote watcher can race that WAL and
+        // retry (TEMPO_METRICS_WAL_STARTUP). Once its span metrics are in Prometheus, that WAL exists and any such
+        // error is already in Tempo's log, so the audit below meets it with its recovery, not between the two.
+        String spanMetrics = "/api/v1/query?query=count(traces_spanmetrics_calls_total)";
+        await().atMost(Duration.ofSeconds(120)).pollInterval(Duration.ofSeconds(2)).ignoreExceptions()
+                .until(() -> get("http://localhost:" + prometheus + spanMetrics).body().contains("\"result\":[{"));
         assertNoThirdPartyError();
 
         captureProjectLogs("observability-cluster");

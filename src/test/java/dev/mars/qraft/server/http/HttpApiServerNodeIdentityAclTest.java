@@ -193,6 +193,25 @@ class HttpApiServerNodeIdentityAclTest {
         assertEquals(claimant, stores.get("a").findNode("node-c").orElseThrow().id());
     }
 
+    @Test
+    void aNameThatDiffersOnlyInCaseNeedsNodeWriteOnTheNameItTakesOver() throws Exception {
+        // The catalog holds a name regardless of case, so registering Host-A would take over host-a and remove what
+        // is on it; a token for Host-A alone must not do that.
+        arrangeNode("host-a", UUID.randomUUID().toString());
+        markUnreachable("host-a");
+        String claimant = UUID.randomUUID().toString();
+
+        HttpResponse<String> refused = register("Host-A", claimant, identity("Host-A"));
+        assertDenied(refused, "host-a", "a takeover by a name that differs only in case");
+        assertTrue(stores.get("a").findNode("host-a").isPresent(), "a refused takeover is not proposed");
+
+        String both = policyToken("{\"node\":{\"Host-A\":{\"policy\":\"write\"},\"host-a\":{\"policy\":\"write\"}}}");
+        HttpResponse<String> takenOver = register("Host-A", claimant, both);
+        assertEquals(200, takenOver.statusCode(), "with node:write on both spellings: " + takenOver.body());
+        assertTrue(stores.get("a").findNode("host-a").isEmpty());
+        assertEquals(claimant, stores.get("a").findNode("Host-A").orElseThrow().id());
+    }
+
     private void arrangeNode(String name, String nodeId) throws Exception {
         assertSuccess(await(leader.submitCommand(NodeCommand.register(
                 Node.of(name, "10.0.0.1", null, null, Map.of()).withId(nodeId), NOW))));

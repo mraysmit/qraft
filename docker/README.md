@@ -66,12 +66,17 @@ even on the same Docker network, is refused the connection.
 
 A deployment whose applications cannot share the namespace sets `client.bindAddress`
 instead, for example to `0.0.0.0`, as Consul's `client_addr` is set for containers.
-The local API has no authentication until
-[the ACL list](../docs-design/task-list-acl-and-tokens-2026-11-07.md), so that exposes all
-of it to anything that can reach the port. Such a caller can register and remove this
-node's services and checks, set their status and maintenance, read the client's settings
-and discover services in any tenant and namespace, and make the client leave and exit. Keep
-the port on a network only its applications can reach, and do not publish it.
+With ACLs disabled the local API has no authentication, so that exposes all of it to
+anything that can reach the port. Such a caller can register and remove this node's
+services and checks, set their status and maintenance, read the client's settings and
+discover services in any tenant and namespace, and make the client leave and exit. With
+`client.acl` enabled, each request needs a token that grants it
+([the ACL list](../docs/archive/task-list-acl-and-tokens-2026-11-07.md)). The local API
+serves plain HTTP even when the client calls its servers over HTTPS (`client.tls`, design
+section 15.2), so tokens sent to it cross whatever network reaches it in the clear. Either
+way, keep the port on a network only its applications can reach, and do not publish it.
+`src/test/resources/docker-compose-3node-tls-prebuilt.yml` runs three servers that serve
+only TLS, with the test certificates.
 
 Mount the file read-only and select it explicitly when the container may use an
 arbitrary destination:

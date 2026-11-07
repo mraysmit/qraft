@@ -275,6 +275,23 @@ class DockerDeploymentContractTest {
     }
 
     @Test
+    void theCollectorStartsOnlyOnceTempoIsHealthySoItsFirstExportFindsTempoListening() throws IOException {
+        // Jenkins build 66: the collector dialled tempo:4317 before Tempo listened, and gRPC logged the refusal,
+        // "Error while dialing ... connection refused", at WARN; it reconnected, but the line is error text.
+        Path root = Path.of("").toAbsolutePath();
+        for (String relativePath : List.of("docker/compose/docker-compose-observability.yml",
+                "docker/compose/docker-compose-observability-cluster.yml")) {
+            String compose = Files.readString(root.resolve(relativePath)).replace("\r\n", "\n");
+            int collector = compose.indexOf("\n  otel-collector:\n");
+            int next = compose.indexOf("\n  # ====", collector + 1);
+            assertTrue(collector >= 0 && next > collector, relativePath + " defines otel-collector");
+            String service = compose.substring(collector, next);
+            assertTrue(service.contains("depends_on:\n      tempo:\n        condition: service_healthy"),
+                    relativePath + ": otel-collector must wait for tempo's health check");
+        }
+    }
+
+    @Test
     void dockerIntegrationTestsRequireTheHostBuiltRuntimeJar() throws IOException {
         Path root = Path.of("").toAbsolutePath();
         String sharedCluster = Files.readString(root.resolve(

@@ -70,13 +70,14 @@ import java.util.Set;
  */
 final class RaftOperatorCommand {
     static final String USAGE = """
-            Usage: qraft operator raft list-peers [--http-addr <host:port>]
+            Usage: qraft operator raft list-peers [--http-addr <host:port>] [TLS options]
                    qraft operator raft remove-peer (--id <server-id> | --name <name>) [--http-addr <host:port>] \
-            (--token <token> | --token-file <path>)
+            (--token <token> | --token-file <path>) [TLS options]
                    qraft operator raft inspect --dir <path>
                    qraft operator raft recover --input <recovery.json>
-            The HTTP address defaults to 127.0.0.1:8080. inspect and recover act on stopped data directories \
-            and contact no server.""";
+            The HTTP address defaults to 127.0.0.1:8080; give https:// for a server that serves HTTPS. TLS options: \
+            --ca-file <path> [--client-cert <path> --client-key <path>]. inspect and recover act on stopped data \
+            directories and contact no server.""";
     /** Wide enough for the longest label, so each value starts after at least two spaces. */
     private static final int LABEL_WIDTH = 20;
     private static final String DEFAULT_ADDRESS = "127.0.0.1:8080";
@@ -90,12 +91,13 @@ final class RaftOperatorCommand {
     static int run(String[] args, PrintStream out, PrintStream err) {
         Map<String, String> options = new HashMap<>();
         String subcommand;
+        HttpClient client = null;
         try {
             if (args.length < 2 || !args[0].equals("raft")) throw new IllegalArgumentException("Unknown command");
             subcommand = args[1];
             Set<String> allowed = switch (subcommand) {
-                case "list-peers" -> Set.of("--http-addr");
-                case "remove-peer" -> Set.of("--http-addr", "--token", "--token-file", "--id", "--name");
+                case "list-peers" -> withTls(Set.of("--http-addr"));
+                case "remove-peer" -> withTls(Set.of("--http-addr", "--token", "--token-file", "--id", "--name"));
                 case "inspect" -> Set.of("--dir");
                 case "recover" -> Set.of("--input");
                 default -> throw new IllegalArgumentException("Unknown command: " + subcommand);
@@ -106,6 +108,9 @@ final class RaftOperatorCommand {
                 options.put(args[i], args[i + 1]);
             }
             requireOptions(subcommand, options);
+            if (subcommand.equals("list-peers") || subcommand.equals("remove-peer")) {
+                client = CommandLineTls.client(options::get);
+            }
         } catch (IllegalArgumentException misuse) {
             err.println(misuse.getMessage());
             err.println(USAGE);
@@ -114,7 +119,6 @@ final class RaftOperatorCommand {
         if (subcommand.equals("inspect")) return inspect(Path.of(options.get("--dir")), out, err);
         if (subcommand.equals("recover")) return recover(Path.of(options.get("--input")), out, err);
         String base = baseUri(options.getOrDefault("--http-addr", DEFAULT_ADDRESS));
-        HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
         try {
             return subcommand.equals("list-peers")
                     ? listPeers(client, base, out, err)
@@ -272,6 +276,12 @@ final class RaftOperatorCommand {
     static int refused(JsonNode body, int status, PrintStream err) {
         err.println("Error " + status + ": " + body.path("code").asText() + ": " + body.path("message").asText());
         return 1;
+    }
+
+    private static Set<String> withTls(Set<String> options) {
+        Set<String> all = new java.util.HashSet<>(options);
+        all.addAll(CommandLineTls.OPTIONS);
+        return all;
     }
 
     static String baseUri(String address) {

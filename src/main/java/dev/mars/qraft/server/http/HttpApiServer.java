@@ -21,6 +21,10 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
+import com.sun.net.httpserver.HttpsConfigurator;
+import com.sun.net.httpserver.HttpsParameters;
+import com.sun.net.httpserver.HttpsServer;
+import dev.mars.qraft.common.tls.ServerTls;
 import dev.mars.qraft.common.Node;
 import dev.mars.qraft.common.acl.AclAccess;
 import dev.mars.qraft.common.acl.AclRequest;
@@ -165,6 +169,15 @@ public final class HttpApiServer implements AutoCloseable {
     public HttpApiServer(int port, RaftNode raftNode, QraftStateStore stateStore, Clock clock,
                          AdminUiConfig ui, UiAssets assets, Duration raftTimeout, MembershipService membership,
                          AclHttpSettings acl) throws IOException {
+        this(port, raftNode, stateStore, clock, ui, assets, raftTimeout, membership, acl, Optional.empty());
+    }
+
+    /**
+     * @param tls how the listener serves HTTPS, or empty to serve plain HTTP (transport security list, decision 2)
+     */
+    public HttpApiServer(int port, RaftNode raftNode, QraftStateStore stateStore, Clock clock,
+                         AdminUiConfig ui, UiAssets assets, Duration raftTimeout, MembershipService membership,
+                         AclHttpSettings acl, Optional<ServerTls> tls) throws IOException {
         this.acl = Objects.requireNonNull(acl, "acl");
         this.membership = membership;
         this.raftTimeout = Objects.requireNonNull(raftTimeout, "raftTimeout");
@@ -182,7 +195,7 @@ public final class HttpApiServer implements AutoCloseable {
         // Without a state store every route that takes a token answers that the catalog is unavailable.
         this.resolver = acl.enabled() && stateStore != null
                 ? AclResolver.enabled(acl.defaultPolicy(), stateStore.getAcl(), clock) : AclResolver.disabled();
-        this.server = HttpServer.create(new InetSocketAddress(port), 0);
+        this.server = tls.isPresent() ? httpsServer(port, tls.get()) : HttpServer.create(new InetSocketAddress(port), 0);
         this.executor = Executors.newVirtualThreadPerTaskExecutor();
         server.setExecutor(executor);
         server.createContext("/health/live", requestAware(this::liveness));
@@ -229,6 +242,18 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     public boolean isDraining() { return draining.get(); }
+    /** An HTTPS listener with {@code tls}'s material, which refuses plain HTTP (decision 2). */
+    private static HttpServer httpsServer(int port, ServerTls tls) throws IOException {
+        HttpsServer https = HttpsServer.create(new InetSocketAddress(port), 0);
+        https.setHttpsConfigurator(new HttpsConfigurator(tls.material().serverContext()) {
+            @Override
+            public void configure(HttpsParameters parameters) {
+                parameters.setSSLParameters(tls.material().serverParameters(tls.requireClientCertificate()));
+            }
+        });
+        return https;
+    }
+
     public int port() { return server.getAddress().getPort(); }
     /** The address and port this server listens on. */
     public java.net.InetSocketAddress address() { return server.getAddress(); }
@@ -507,12 +532,13 @@ public final class HttpApiServer implements AutoCloseable {
             throws IOException {
         Node recorded = stateStore.findNode(proposed.name()).orElse(null);
         if (changesNode(recorded, proposed) && refused(exchange, principal, nodeWrite(proposed.name()))) return true;
-        if (proposed.id() == null) return false;
         for (Node other : stateStore.getNodes().values()) {
-            if (proposed.id().equals(other.id()) && !other.name().equals(proposed.name())
-                    && refused(exchange, principal, nodeWrite(other.name()))) {
-                return true;
-            }
+            if (other.name().equals(proposed.name())) continue;
+            // The catalog holds a name regardless of case, so another spelling of it is the node this one replaces;
+            // a node that already carries the proposed ID is renamed by it.
+            boolean sameName = other.name().equalsIgnoreCase(proposed.name());
+            boolean sameId = proposed.id() != null && proposed.id().equals(other.id());
+            if ((sameName || sameId) && refused(exchange, principal, nodeWrite(other.name()))) return true;
         }
         return false;
     }

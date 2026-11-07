@@ -61,7 +61,9 @@ import java.util.function.Function;
 public final class HttpCatalogClient implements CatalogClient, ObservationClient {
     private static final String LEADER_ID_HEADER = "X-Qraft-Leader-Id";
 
+    private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger(HttpCatalogClient.class);
     private final HttpClient httpClient;
+    private final java.util.Set<String> tlsWarnings = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private final ObjectMapper objectMapper;
     private final ServerEndpoints endpoints;
     private final String nodeId;
@@ -160,9 +162,9 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         try {
             answer = httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                     .handle((response, failure) -> failure == null ? classifyResolution(response)
-                            : new AclLookup.Unavailable(transportCode(failure) + ": " + unwrap(failure)));
+                            : new AclLookup.Unavailable(transportCode(request, failure) + ": " + unwrap(failure)));
         } catch (RuntimeException failure) {
-            answer = CompletableFuture.completedFuture(new AclLookup.Unavailable(transportCode(failure)));
+            answer = CompletableFuture.completedFuture(new AclLookup.Unavailable(transportCode(request, failure)));
         }
         return answer.thenCompose(lookup -> {
             if (!(lookup instanceof AclLookup.Unavailable unavailable)) {
@@ -285,10 +287,10 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
             return httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                     .handle((response, failure) -> failure == null
                             ? classifyLookup(response, service)
-                            : lookupRetryable(transportCode(failure), unwrap(failure), null));
+                            : lookupRetryable(transportCode(request, failure), unwrap(failure), null));
         } catch (RuntimeException failure) {
             return CompletableFuture.completedFuture(
-                    lookupRetryable(transportCode(failure), unwrap(failure), null));
+                    lookupRetryable(transportCode(request, failure), unwrap(failure), null));
         }
     }
 
@@ -483,10 +485,10 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
             return httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                     .handle((response, failure) -> failure == null
                             ? classifyObservation(response)
-                            : observationRetryable(retryable(transportCode(failure), unwrap(failure))));
+                            : observationRetryable(retryable(transportCode(request, failure), unwrap(failure))));
         } catch (RuntimeException failure) {
             return CompletableFuture.completedFuture(
-                    observationRetryable(retryable(transportCode(failure), unwrap(failure))));
+                    observationRetryable(retryable(transportCode(request, failure), unwrap(failure))));
         }
     }
 
@@ -614,9 +616,9 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
             return httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
                     .handle((response, failure) -> failure == null
                             ? classifier.apply(response)
-                            : retryable(transportCode(failure), unwrap(failure)));
+                            : retryable(transportCode(request, failure), unwrap(failure)));
         } catch (RuntimeException failure) {
-            return CompletableFuture.completedFuture(retryable(transportCode(failure), unwrap(failure)));
+            return CompletableFuture.completedFuture(retryable(transportCode(request, failure), unwrap(failure)));
         }
     }
 
@@ -693,9 +695,26 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
                 Objects.toString(failure.getMessage(), failure.getClass().getSimpleName()), null);
     }
 
-    private static String transportCode(Throwable failure) {
-        return unwrap(failure) instanceof java.net.http.HttpTimeoutException
-                ? "request_timeout" : "transport_error";
+    /**
+     * The outcome code of a call that failed in transport. A failed TLS handshake is logged once per server and
+     * reason, since retrying cannot mend it: a certificate refused, or a server the CA did not sign (transport
+     * security list, Phase 3).
+     */
+    private String transportCode(HttpRequest request, Throwable failure) {
+        Throwable cause = unwrap(failure);
+        for (Throwable current = cause; current != null; current = current.getCause()) {
+            if (current instanceof javax.net.ssl.SSLException tls) {
+                URI uri = request.uri();
+                String server = uri.getScheme() + "://" + uri.getAuthority();
+                String reason = Objects.toString(tls.getMessage(), tls.getClass().getSimpleName());
+                if (tlsWarnings.add(server + " " + reason)) {
+                    LOGGER.warn("TLS with server {} failed, so the client cannot use that server until it is fixed: "
+                            + "{}. Check client.tls and the server's certificate", server, reason);
+                }
+                break;
+            }
+        }
+        return cause instanceof java.net.http.HttpTimeoutException ? "request_timeout" : "transport_error";
     }
 
     private static Throwable unwrap(Throwable failure) {

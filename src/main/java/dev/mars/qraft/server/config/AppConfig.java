@@ -19,6 +19,7 @@ package dev.mars.qraft.server.config;
 import com.fasterxml.jackson.databind.JsonNode;
 import dev.mars.qraft.common.acl.AclDefaultPolicy;
 import dev.mars.qraft.common.config.JsonSettings;
+import dev.mars.qraft.common.tls.TlsSettings;
 import dev.mars.qraft.state.acl.AclSecrets;
 import dev.mars.qraft.server.ui.AdminUiConfig;
 import org.slf4j.Logger;
@@ -76,7 +77,21 @@ public final class AppConfig {
     /** The {@code server} object of the document, with {@code logging.directory} beside it. */
     private record Settings(String id, Http http, int apiGrpcPort, Raft raft, String operatorToken,
                             Telemetry telemetry, Shutdown shutdown, Health health, AdminUiConfig ui,
-                            Acl acl, SecurityProfile profile, String loggingDirectory) { }
+                            Acl acl, SecurityProfile profile, String loggingDirectory, Tls tls) { }
+
+    /**
+     * {@code server.tls}: the material, or {@code null} when the document has none, and each listener's switch
+     * (transport security list, decisions 1 to 4).
+     */
+    private record Tls(TlsSettings material, Listener https, Listener grpc, boolean raftEnabled,
+                       boolean raftVerifyServerHostname) {
+        static final Tls NONE = new Tls(null, Listener.OFF, Listener.OFF, false, true);
+    }
+
+    /** A listener's TLS switch, and whether it requires a client certificate. */
+    private record Listener(boolean enabled, boolean verifyIncoming) {
+        static final Listener OFF = new Listener(false, true);
+    }
 
     /** {@code server.acl}; {@code defaultPolicy} is {@code null} when the document leaves it out. */
     private record Acl(boolean enabled, AclDefaultPolicy defaultPolicy, String initialManagementTokenFile) { }
@@ -132,7 +147,7 @@ public final class AppConfig {
         JsonNode security = optionalObject(server, "security");
         JsonNode logging = optionalObject(root, "logging");
         rejectUnknown(server, "server", "id", "http", "apiGrpcPort",
-                "raft", "telemetry", "shutdown", "health", "ui", "operator", "acl", "security");
+                "raft", "telemetry", "shutdown", "health", "ui", "operator", "acl", "security", "tls");
         rejectUnknown(http, "server.http", "host", "port");
         rejectUnknown(raft, "server.raft", "port", "nodes", "electionTimeoutMs",
                 "heartbeatIntervalMs", "storage", "snapshot", "logHardLimit", "io", "membership");
@@ -182,6 +197,7 @@ public final class AppConfig {
         Acl aclSettings = new Acl(optionalBoolean(acl, "enabled", false), defaultPolicy(acl),
                 optionalText(acl, "initialManagementTokenFile", ""));
         SecurityProfile profile = securityProfile(security);
+        Tls tlsSettings = parseTls(server.get("tls"));
         String loggingDirectory = optionalText(logging, "directory", "./logs");
 
         return new AppConfig(new Settings(id, httpSettings, apiGrpcPort,
@@ -189,7 +205,33 @@ public final class AppConfig {
                         logHardLimit, ioSettings, membershipSettings),
                 operatorToken, telemetrySettings, shutdownSettings,
                 new Health(expiryIntervalMs, nodeTtlMs, nodeReapAfterMs), adminUi, aclSettings, profile,
-                loggingDirectory));
+                loggingDirectory, tlsSettings));
+    }
+
+    private static Tls parseTls(JsonNode tls) {
+        Optional<TlsSettings> material = TlsSettings.parse(tls, "server.tls", "https", "grpc", "raft");
+        if (material.isEmpty()) return Tls.NONE;
+        JsonNode https = optionalObject(tls, "https");
+        JsonNode grpc = optionalObject(tls, "grpc");
+        JsonNode raft = optionalObject(tls, "raft");
+        rejectUnknown(https, "server.tls.https", "enabled", "verifyIncoming");
+        rejectUnknown(grpc, "server.tls.grpc", "enabled", "verifyIncoming");
+        rejectUnknown(raft, "server.tls.raft", "enabled", "verifyServerHostname");
+        Listener httpsListener = new Listener(optionalBoolean(https, "enabled", false),
+                optionalBoolean(https, "verifyIncoming", true));
+        Listener grpcListener = new Listener(optionalBoolean(grpc, "enabled", false),
+                optionalBoolean(grpc, "verifyIncoming", true));
+        boolean raftEnabled = optionalBoolean(raft, "enabled", false);
+        boolean[] enabled = {httpsListener.enabled(), grpcListener.enabled(), raftEnabled};
+        String[] names = {"https", "grpc", "raft"};
+        for (int index = 0; index < names.length; index++) {
+            if (enabled[index] && material.get().certFile().isEmpty()) {
+                throw new IllegalArgumentException("server.tls.certFile and server.tls.keyFile are required for "
+                        + "server.tls." + names[index]);
+            }
+        }
+        return new Tls(material.get(), httpsListener, grpcListener, raftEnabled,
+                optionalBoolean(raft, "verifyServerHostname", true));
     }
 
     public synchronized String getNodeId() {
@@ -291,6 +333,21 @@ public final class AppConfig {
         String token = settings.operatorToken();
         return token.isBlank() ? Optional.empty() : Optional.of(token);
     }
+
+    /** The material {@code server.tls} names, if the document has it; it enables no listener by itself. */
+    public Optional<TlsSettings> getTlsSettings() { return Optional.ofNullable(settings.tls().material()); }
+    /** Whether the HTTP listener serves HTTPS only ({@code server.tls.https.enabled}, decision 2). */
+    public boolean isHttpsEnabled() { return settings.tls().https().enabled(); }
+    /** Whether HTTPS requires a client certificate; {@code true} by default (decision 3). */
+    public boolean isHttpsVerifyIncoming() { return settings.tls().https().verifyIncoming(); }
+    /** Whether the API gRPC listener serves TLS ({@code server.tls.grpc.enabled}). */
+    public boolean isGrpcTlsEnabled() { return settings.tls().grpc().enabled(); }
+    /** Whether the API gRPC listener requires a client certificate; {@code true} by default (decision 3). */
+    public boolean isGrpcVerifyIncoming() { return settings.tls().grpc().verifyIncoming(); }
+    /** Whether the Raft port uses mutual TLS ({@code server.tls.raft.enabled}, decision 4). */
+    public boolean isRaftTlsEnabled() { return settings.tls().raftEnabled(); }
+    /** Whether a peer's certificate must name the host this server dialled; {@code true} by default. */
+    public boolean isRaftVerifyServerHostname() { return settings.tls().raftVerifyServerHostname(); }
 
     /** Whether ACLs are enforced ({@code server.acl.enabled}); off by default, as in Consul. */
     public boolean isAclEnabled() { return settings.acl().enabled(); }
@@ -473,8 +530,16 @@ public final class AppConfig {
      */
     private void logSecurityWarning() {
         if (isAclEnabled()) {
-            Logging.LOGGER.warn("ACLs are enabled, but no listener uses TLS: tokens cross the network unencrypted "
-                    + "until transport security is added");
+            if (!isHttpsEnabled() && !isGrpcTlsEnabled()) {
+                Logging.LOGGER.warn("ACLs are enabled, but no listener uses TLS: tokens cross the network "
+                        + "unencrypted. Set server.tls.https and server.tls.grpc");
+            } else if (!isGrpcTlsEnabled()) {
+                Logging.LOGGER.warn("ACLs are enabled, but the API gRPC listener does not use TLS: tokens sent to "
+                        + "it cross the network unencrypted. Set server.tls.grpc");
+            } else if (!isHttpsEnabled()) {
+                Logging.LOGGER.warn("ACLs are enabled, but the HTTP listener does not use TLS: tokens sent to it "
+                        + "cross the network unencrypted. Set server.tls.https");
+            }
         } else if (getAclDefaultPolicy().orElse(null) == AclDefaultPolicy.DENY) {
             Logging.LOGGER.warn("CRITICAL ACL_DENY_NOT_ENFORCED: server.acl.defaultPolicy is deny, but ACLs are "
                     + "disabled, so nothing is denied and every call is allowed. Set server.acl.enabled to enforce it");

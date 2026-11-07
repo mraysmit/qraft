@@ -1,0 +1,75 @@
+# 3-node Raft cluster serving only TLS, using the pre-built image (transport security list, Phase 6):
+# HTTPS and API gRPC TLS requiring a client certificate, and mutual TLS on the Raft port. The test
+# certificates are mounted from src/test/resources/tls; they are public and for tests only. The health
+# check presents the test client certificate.
+# Requires qraft-runtime:test image - built by SharedDockerClusterFixture.
+
+services:
+  server1:
+    image: qraft-runtime:test
+    hostname: server1
+    command: ["server", "--config", "/etc/qraft/server.json"]
+    ports:
+      - "8080"
+    volumes:
+      - ../../../docker/config/three-node-tls/server1.json:/etc/qraft/server.json:ro
+      - ./tls:/etc/qraft/tls:ro
+      - server1-data:/app/data
+    networks:
+      - raft-cluster
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--cacert", "/etc/qraft/tls/ca.pem", "--cert", "/etc/qraft/tls/client.pem",
+             "--key", "/etc/qraft/tls/client.key", "https://localhost:8080/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  server2:
+    image: qraft-runtime:test
+    hostname: server2
+    command: ["server", "--config", "/etc/qraft/server.json"]
+    ports:
+      - "8080"
+    volumes:
+      - ../../../docker/config/three-node-tls/server2.json:/etc/qraft/server.json:ro
+      - ./tls:/etc/qraft/tls:ro
+      - server2-data:/app/data
+    networks:
+      - raft-cluster
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--cacert", "/etc/qraft/tls/ca.pem", "--cert", "/etc/qraft/tls/client.pem",
+             "--key", "/etc/qraft/tls/client.key", "https://localhost:8080/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  server3:
+    image: qraft-runtime:test
+    hostname: server3
+    command: ["server", "--config", "/etc/qraft/server.json"]
+    ports:
+      - "8080"
+    volumes:
+      - ../../../docker/config/three-node-tls/server3.json:/etc/qraft/server.json:ro
+      - ./tls:/etc/qraft/tls:ro
+      - server3-data:/app/data
+    networks:
+      - raft-cluster
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--cacert", "/etc/qraft/tls/ca.pem", "--cert", "/etc/qraft/tls/client.pem",
+             "--key", "/etc/qraft/tls/client.key", "https://localhost:8080/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+networks:
+  raft-cluster:
+    driver: bridge
+
+volumes:
+  server1-data:
+  server2-data:
+  server3-data:

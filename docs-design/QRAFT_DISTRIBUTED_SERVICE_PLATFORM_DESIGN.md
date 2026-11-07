@@ -248,9 +248,11 @@ Server mode currently owns:
     address in the configuration, which overrides `server.raft.nodes`. A
     joined server is in no server's list, and a rejoined server may have a
     new address.
-  - **The Raft port is trusted.** Anyone who can reach it can join a server
-    that is later promoted, as they can already send Raft messages. It
-    belongs on a private network until transport security exists.
+  - **The Raft port is trusted without TLS.** Anyone who can reach it can
+    join a server that is later promoted, as they can already send Raft
+    messages. With `server.tls.raft` (section 15.2) it takes part only with
+    a certificate from the cluster's CA; without it, it belongs on a private
+    network.
   - **Leader stickiness.** A leader ignores campaigns while check-quorum
     allows it to lead. A follower ignores votes, including higher terms,
     for the minimum election timeout after leader contact, measured by a
@@ -1486,7 +1488,7 @@ At request time, the server renders a small non-cacheable `index.html` template
 with a safely JSON-encoded bootstrap object containing public runtime settings,
 such as the API base path, administrative content path, enabled feature flags,
 authentication mode, and the security profile proposed by
-[`task-list-acl-and-tokens-2026-11-07.md`](task-list-acl-and-tokens-2026-11-07.md)
+[`task-list-acl-and-tokens-2026-11-07.md`](../docs/archive/task-list-acl-and-tokens-2026-11-07.md)
 (proposal 16). Secrets and bearer credentials are never included.
 Content-hashed assets are immutable and may receive long-lived cache headers;
 `index.html` and the asset manifest require revalidation so upgrades do not leave
@@ -2090,7 +2092,7 @@ certificate authentication can replace it without changing catalog commands.
 ### 15.1 Replicated ACL state
 
 Built from 2026-11-04 to 2026-11-07 by Phases 1 to 9 of
-[`task-list-acl-and-tokens-2026-11-07.md`](task-list-acl-and-tokens-2026-11-07.md),
+[`task-list-acl-and-tokens-2026-11-07.md`](../docs/archive/task-list-acl-and-tokens-2026-11-07.md),
 on Consul's model. A server enforces it on its own listeners (Phase 4) and serves
 the ACL API (Phase 5); a client sends its tokens and decides its own local API
 (Phase 6); node identity is enforced (Phase 7); and expired tokens are refused
@@ -2201,7 +2203,9 @@ and deleted (Phase 8).
   counted as synced and tried again at the next pass.
 - **Node identity** (Phase 7): the guards above, stated for the token a client holds,
   a node identity for its own node: it cannot register, renew, take over or rename
-  another node, and it removes anything planted on its own. This closes the server's
+  another node, and it removes anything planted on its own. Since the catalog holds a
+  name regardless of case, a registration that takes over or replaces another spelling
+  of its name needs `node:write` on that spelling too. This closes the server's
   half of section 22's question whether the server can trust a node's claim.
 - **Expiry and revocation** (Phase 8). A server refuses a token from its expiry on,
   by its own clock, as `token_not_found`, and while it leads deletes expired tokens
@@ -2209,6 +2213,36 @@ and deleted (Phase 8).
   is between one minute and 24 hours from its creation. A revoked token keeps working
   on a client until its cache entry expires; a client whose own token is refused logs
   why and is not ready until a valid token registers it again.
+
+### 15.2 Transport security
+
+Built on 2026-11-07 by
+[`task-list-transport-security-2026-11-08.md`](../docs/archive/task-list-transport-security-2026-11-08.md),
+on Consul's `tls` stanza. Without `server.tls` and `client.tls`, nothing changes.
+
+- **One material, read once.** `server.tls` names a PEM CA bundle, the server's
+  certificate chain and its PKCS #8 key, RSA or EC (`common.tls.TlsMaterial`). The
+  CA decides whom a server trusts; refusals name the setting and the file, never a
+  key's content. TLS 1.2 is the lowest version, or 1.3 with `minVersion`.
+- **The HTTP listener serves HTTPS or HTTP, never both** (`server.tls.https`). It
+  requires a client certificate from the CA unless `verifyIncoming` is `false`; Consul
+  defaults that to `false`, and Qraft to `true`, so that a stolen token is of no use
+  from a machine without a certificate (ACL list, proposal 14). Health probes on the
+  same listener present a certificate too.
+- **The API gRPC port** (`server.tls.grpc`) follows the same rule.
+- **The Raft port uses mutual TLS** (`server.tls.raft`): a server presents its
+  certificate and requires one from each peer, and checks that a dialled peer's
+  certificate names the host in `server.raft.nodes` unless `verifyServerHostname` is
+  `false` (`raft.GrpcTls`). A peer without a certificate from the CA, or speaking
+  without TLS, takes no part.
+- **A client calls its servers over HTTPS** with `client.tls`'s CA and certificate,
+  and an `https` server URL. A failed handshake is logged once per server and reason,
+  since retrying cannot mend it, and the client is not ready until a server accepts
+  it. Its local API stays HTTP on loopback, as Consul's does by default.
+- **The command lines** take `--ca-file`, `--client-cert` and `--client-key`, and no
+  environment variable.
+- **Not built:** certificate reloading, automatic issuance, revocation lists, and
+  HTTPS on the client's local API.
 
 ## 16. Configuration
 
@@ -2400,12 +2434,30 @@ default policy.
 - At startup a server logs its ACL settings without the secret, and one warning:
   with ACLs disabled, that every call is allowed, or, when `defaultPolicy` is
   `deny`, the critical warning `ACL_DENY_NOT_ENFORCED` in its place; with ACLs
-  enabled, that tokens cross the network unencrypted until TLS exists.
+  enabled and a listener without TLS, that tokens sent to it cross the network
+  unencrypted, naming the listener and the setting (section 15.2).
 - `PUT /v1/acl/bootstrap` creates the first management token once; afterwards it
   answers 403 `permission_denied` with the reset index, which an operator writes
   to `acl-bootstrap-reset` in the leader's data directory
   (`server.raft.storage.path`) to allow one more. With ACLs disabled it answers
   401 `acl_disabled`.
+
+`server.tls` and `client.tls` (since 2026-11-07; section 15.2) name the TLS material,
+as Consul's `tls.defaults` does: `caFile`, `certFile`, `keyFile` and `minVersion`
+(`TLSv1.2`, the default, or `TLSv1.3`). A server's also switches each listener on:
+
+```json
+"tls": {
+  "caFile": "/etc/qraft/tls/ca.pem", "certFile": "/etc/qraft/tls/server.pem",
+  "keyFile": "/etc/qraft/tls/server.key",
+  "https": {"enabled": true, "verifyIncoming": true},
+  "grpc": {"enabled": true, "verifyIncoming": true},
+  "raft": {"enabled": true, "verifyServerHostname": true}
+}
+```
+
+The material alone enables no listener, and a listener cannot be enabled without
+`certFile` and `keyFile`. A client's `tls` takes the material only.
 
 `client.acl` (since 2026-11-07, ACL list Phase 6; section 15.1), as Consul's agent
 has its `acl` block. A client decides its own local API, so it needs what a server
@@ -2845,14 +2897,15 @@ Evidence as of 2026-09-27, except where a row gives a later date:
   primary client behavior.
 - Whether the server can trust a caller's claim to a node. Proposed 2026-10-05:
   ACL tokens on Consul's model, in
-  [`task-list-acl-and-tokens-2026-11-07.md`](task-list-acl-and-tokens-2026-11-07.md),
+  [`task-list-acl-and-tokens-2026-11-07.md`](../docs/archive/task-list-acl-and-tokens-2026-11-07.md),
   started 2026-11-04. Since its Phase 4 (2026-11-06), a server with ACLs enabled
   needs `node:write` on a name to register, renew, take over or rename it
   (section 15.1); Phase 7 (2026-11-07) states those guards for a client's node
   identity, and Phase 6 has the client send it, so with ACLs enabled the server
   trusts a claim only as far as the token's grants. With ACLs disabled, any caller
-  can still claim any node name and node ID; transport security, which binds a
-  token to a machine with a client certificate, follows (proposal 14).
+  can still claim any node name and node ID. Since 2026-11-07 transport security
+  (section 15.2) binds a caller to a machine with a client certificate, which a
+  server's HTTPS listener requires by default.
 - How long legacy command and snapshot readers remain supported.
 
 Resolved on 2026-10-10: a server recovers by itself from a kill during its

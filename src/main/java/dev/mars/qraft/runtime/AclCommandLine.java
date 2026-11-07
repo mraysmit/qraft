@@ -70,8 +70,9 @@ final class AclCommandLine {
                    qraft acl role list | read (--id <id> | --name <name>) | delete --id <id>
                    qraft acl explain --accessor-id <id> --resource <resource> [--name <name>] --access (read|write) \
             [--tenant <tenant> --namespace <namespace>]
-            Every command takes --http-addr <host:port>, 127.0.0.1:8080 by default, and every command but bootstrap \
-            the caller's token as --token <token> or --token-file <path>.""";
+            Every command takes --http-addr <host:port>, 127.0.0.1:8080 by default, or https://<host:port> for a \
+            server that serves HTTPS, with --ca-file <path> [--client-cert <path> --client-key <path>]; and every \
+            command but bootstrap the caller's token as --token <token> or --token-file <path>.""";
     private static final String DEFAULT_ADDRESS = "127.0.0.1:8080";
     private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -117,7 +118,15 @@ final class AclCommandLine {
             return 1;
         }
         String base = RaftOperatorCommand.baseUri(single(options, "--http-addr", DEFAULT_ADDRESS));
-        HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+        HttpClient client;
+        try {
+            List<Option> given = options;
+            client = CommandLineTls.client(name -> single(given, name, null));
+        } catch (IllegalArgumentException misuse) {
+            err.println(misuse.getMessage());
+            err.println(USAGE);
+            return 2;
+        }
         try {
             HttpRequest.Builder http = HttpRequest.newBuilder(URI.create(base + request.path()))
                     .timeout(REQUEST_TIMEOUT)
@@ -155,6 +164,7 @@ final class AclCommandLine {
         };
         Set<String> allowed = new java.util.HashSet<>(specific);
         allowed.add("--http-addr");
+        allowed.addAll(CommandLineTls.OPTIONS);
         if (!command.equals("bootstrap")) allowed.addAll(TOKEN_OPTIONS);
         return allowed;
     }

@@ -36,6 +36,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
+import dev.mars.qraft.common.tls.TlsSettings;
 import java.util.Set;
 
 import static dev.mars.qraft.client.config.DefinitionJson.optionalText;
@@ -80,10 +82,12 @@ public final class ClientConfiguration {
     private final String loggingDirectory;
     private final ClientAclSettings acl;
     private final Map<String, Path> serviceTokenFiles;
+    private final TlsSettings tls;
 
     private ClientConfiguration(Builder builder) {
         acl = builder.acl;
         serviceTokenFiles = Map.copyOf(builder.serviceTokenFiles);
+        tls = builder.tls;
         nodeName = builder.nodeName.trim();
         dataDirectory = builder.dataDirectory;
         address = builder.address.trim();
@@ -130,7 +134,7 @@ public final class ClientConfiguration {
         JsonNode catalog = optionalObject(root, "catalog");
         JsonNode logging = optionalObject(root, "logging");
         rejectUnknown(client, "client", "nodeName", "dataDirectory", "address", "bindAddress", "httpPort",
-                "heartbeatIntervalMs", "shutdownTimeoutMs", "datacenter", "region", "acl");
+                "heartbeatIntervalMs", "shutdownTimeoutMs", "datacenter", "region", "acl", "tls");
         rejectUnknown(servers, "servers", "urls", "requestTimeoutMs");
         rejectUnknown(catalog, "catalog", "tenant", "namespace", "registrationRetryMinMs",
                 "registrationRetryMaxMs", "contactFreshnessMs", "services");
@@ -140,6 +144,7 @@ public final class ClientConfiguration {
         List<ServiceDefinition> services = parseServices(catalog.get("services"), healthChecks, serviceTokenFiles);
         return builder()
                 .acl(ClientAclSettings.parse(client.get("acl")))
+                .tls(TlsSettings.parse(client.get("tls"), "client.tls").orElse(null))
                 .serviceTokenFiles(serviceTokenFiles)
                 .nodeName(optionalText(client, "nodeName", null))
                 .dataDirectory(dataDirectory(requiredText(client, "dataDirectory")))
@@ -309,6 +314,8 @@ public final class ClientConfiguration {
     public ClientAclSettings getAcl() { return acl; }
     /** The token file a configured service names for itself, by service ID. */
     public Map<String, Path> getServiceTokenFiles() { return serviceTokenFiles; }
+    /** {@code client.tls}: the CA and certificate for calling the servers over HTTPS (transport security list). */
+    public Optional<TlsSettings> getTls() { return Optional.ofNullable(tls); }
 
     public static final class Builder {
         private String nodeName;
@@ -332,7 +339,9 @@ public final class ClientConfiguration {
         private String loggingDirectory = "./logs";
         private ClientAclSettings acl = ClientAclSettings.DISABLED;
         private Map<String, Path> serviceTokenFiles = Map.of();
+        private TlsSettings tls;
 
+        public Builder tls(TlsSettings value) { tls = value; return this; }
         public Builder acl(ClientAclSettings value) { acl = java.util.Objects.requireNonNull(value, "acl"); return this; }
         public Builder serviceTokenFiles(Map<String, Path> value) { serviceTokenFiles = Map.copyOf(value); return this; }
 

@@ -37,6 +37,7 @@ import dev.mars.qraft.raft.metrics.RaftMetrics;
 import io.grpc.ConnectivityState;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
+import io.grpc.netty.NettyChannelBuilder;
 import io.grpc.Metadata;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
@@ -60,6 +61,7 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -125,6 +127,9 @@ public class GrpcRaftTransport implements RaftTransport {
     private final int queueSize;
     private final Duration roundTripDeadline;
     private final Duration keepAliveTimeout;
+    private final Optional<RaftTls> tls;
+    /** The client context every peer channel uses, built once; {@code null} without TLS. */
+    private final io.netty.handler.ssl.SslContext peerTls;
     /** Set by {@link #stop()}; a send after it fails at once, since its reply could no longer be delivered. */
     private volatile boolean stopped;
 
@@ -152,7 +157,15 @@ public class GrpcRaftTransport implements RaftTransport {
      */
     public GrpcRaftTransport(RaftStateLoop runtime, String selfId, Map<String, String> clusterNodes,
                               int poolSize, int queueSize) {
-        this(runtime, selfId, clusterNodes, poolSize, queueSize, ROUND_TRIP_DEADLINE, KEEPALIVE_TIMEOUT);
+        this(runtime, selfId, clusterNodes, poolSize, queueSize, Optional.empty());
+    }
+
+    /**
+     * @param tls mutual TLS for every channel to a peer, or empty for plaintext (transport security list, Phase 5)
+     */
+    public GrpcRaftTransport(RaftStateLoop runtime, String selfId, Map<String, String> clusterNodes,
+                              int poolSize, int queueSize, Optional<RaftTls> tls) {
+        this(runtime, selfId, clusterNodes, poolSize, queueSize, ROUND_TRIP_DEADLINE, KEEPALIVE_TIMEOUT, tls);
     }
 
     /**
@@ -164,6 +177,15 @@ public class GrpcRaftTransport implements RaftTransport {
      */
     GrpcRaftTransport(RaftStateLoop runtime, String selfId, Map<String, String> clusterNodes,
                       int poolSize, int queueSize, Duration roundTripDeadline, Duration keepAliveTimeout) {
+        this(runtime, selfId, clusterNodes, poolSize, queueSize, roundTripDeadline, keepAliveTimeout,
+                Optional.empty());
+    }
+
+    GrpcRaftTransport(RaftStateLoop runtime, String selfId, Map<String, String> clusterNodes,
+                      int poolSize, int queueSize, Duration roundTripDeadline, Duration keepAliveTimeout,
+                      Optional<RaftTls> tls) {
+        this.tls = Objects.requireNonNull(tls, "tls");
+        this.peerTls = tls.map(GrpcTls::peerContext).orElse(null);
         this.runtime = runtime;
         this.selfId = selfId;
         this.clusterNodes = clusterNodes;
@@ -505,8 +527,10 @@ public class GrpcRaftTransport implements RaftTransport {
             int port = Integer.parseInt(parts[1]);
 
             // Pinged even with no call open, so a follower's idle connection is sound when it next campaigns.
-            ManagedChannel channel = ManagedChannelBuilder.forAddress(host, port)
-                    .usePlaintext()
+            ManagedChannelBuilder<?> builder = peerTls == null
+                    ? ManagedChannelBuilder.forAddress(host, port).usePlaintext()
+                    : NettyChannelBuilder.forAddress(host, port).sslContext(peerTls);
+            ManagedChannel channel = builder
                     .keepAliveTime(KEEPALIVE_TIME.toNanos(), TimeUnit.NANOSECONDS)
                     .keepAliveTimeout(keepAliveTimeout.toNanos(), TimeUnit.NANOSECONDS)
                     .keepAliveWithoutCalls(true)

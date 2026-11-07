@@ -16,6 +16,9 @@
 
 package dev.mars.qraft.server;
 
+import dev.mars.qraft.common.tls.ServerTls;
+import dev.mars.qraft.common.tls.TlsMaterial;
+import dev.mars.qraft.raft.RaftTls;
 import dev.mars.qraft.common.concurrent.Completions;
 import dev.mars.qraft.common.concurrent.Deadlines;
 import dev.mars.qraft.server.api.AclGrpcGuard;
@@ -94,6 +97,10 @@ public class QraftServerService {
     private Optional<RaftNode> raftNode = Optional.empty();
     private RaftStorageFactory.DurableStorage raftStorage;
     private Optional<GrpcRaftServer> raftGrpcServer = Optional.empty();
+    /** {@code server.tls}'s material, read once at start (transport security list, decision 1). */
+    private Optional<TlsMaterial> tlsMaterial = Optional.empty();
+    /** Mutual TLS on the Raft port and its channels, when {@code server.tls.raft} enables it. */
+    private Optional<RaftTls> raftTls = Optional.empty();
     private Optional<GrpcServiceServer> apiGrpcServer = Optional.empty();
     private Optional<HttpApiServer> httpApiServer = Optional.empty();
     private Optional<LeaderHealthExpiry> healthExpiry = Optional.empty();
@@ -141,7 +148,14 @@ public class QraftServerService {
             // 3. Setup Raft Transport (gRPC)
             int raftPoolSize = config.getRaftIoPoolSize();
             int raftQueueSize = config.getRaftIoQueueSize();
-            this.transport = new GrpcRaftTransport(runtime, nodeId, peerAddresses, raftPoolSize, raftQueueSize);
+            // The TLS material is read once; a listener uses it only when its own switch is on (transport security
+            // list, decisions 1 to 4).
+            this.tlsMaterial = config.getTlsSettings().map(TlsMaterial::load);
+            this.raftTls = config.isRaftTlsEnabled()
+                    ? tlsMaterial.map(material -> new RaftTls(material, config.isRaftVerifyServerHostname()))
+                    : Optional.empty();
+            this.transport = new GrpcRaftTransport(runtime, nodeId, peerAddresses, raftPoolSize, raftQueueSize,
+                    raftTls);
 
             // 4. Create Raft Storage (WAL)
             String storageType = config.getRaftStorageType();
@@ -241,18 +255,24 @@ public class QraftServerService {
                     logger.info("No server.operator.token is configured: Raft operator removals are refused");
                 }
             }
-            GrpcRaftServer internalRaftServer = new GrpcRaftServer(blockingTasks, raftPort, node, membership);
+            GrpcRaftServer internalRaftServer = new GrpcRaftServer(blockingTasks, raftPort, node, membership, raftTls);
             this.raftGrpcServer = Optional.of(internalRaftServer);
 
+            Optional<ServerTls> httpsTls = config.isHttpsEnabled()
+                    ? tlsMaterial.map(material -> new ServerTls(material, config.isHttpsVerifyIncoming()))
+                    : Optional.empty();
+            Optional<ServerTls> grpcTls = config.isGrpcTlsEnabled()
+                    ? tlsMaterial.map(material -> new ServerTls(material, config.isGrpcVerifyIncoming()))
+                    : Optional.empty();
             DistributedStateGrpcService distributedStateService = new DistributedStateGrpcService(node, stateMachine);
-            GrpcServiceServer externalApiServer = new GrpcServiceServer(blockingTasks, apiGrpcPort,
+            GrpcServiceServer externalApiServer = new GrpcServiceServer(blockingTasks, apiGrpcPort, grpcTls,
                     AclGrpcGuard.guard(distributedStateService, aclResolver));
             this.apiGrpcServer = Optional.of(externalApiServer);
             HttpApiServer healthServer = new HttpApiServer(config.getHttpPort(), node, stateMachine, Clock.systemUTC(),
                     config.getAdminUi(), UiAssets.forConfig(config.getAdminUi()), HttpApiServer.DEFAULT_RAFT_TIMEOUT,
                     membership, new AclHttpSettings(config.isAclEnabled(), Path.of(config.getRaftStoragePath()),
                             config.getAclDefaultPolicy().orElse(null),
-                            config.getInitialManagementSecret().map(AclSecrets::hash).orElse(null)));
+                            config.getInitialManagementSecret().map(AclSecrets::hash).orElse(null)), httpsTls);
             this.httpApiServer = Optional.of(healthServer);
 
             // Only the leader evaluates health-check deadlines; followers apply committed expiry commands.

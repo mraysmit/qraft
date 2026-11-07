@@ -136,6 +136,27 @@ public final class SharedDockerClusterFixture {
     }
 
     /**
+     * Starts a disposable three-node cluster that serves only TLS (transport security list, Phase 6): HTTPS and API
+     * gRPC TLS requiring a client certificate, and mutual TLS on the Raft port. A server is up once its health check,
+     * which presents the test client certificate, passes.
+     */
+    public static ComposeContainer startIsolatedThreeNodeTlsCluster() {
+        ensureImageBuilt();
+        ComposeContainer cluster = new ComposeContainer(
+                new File("src/test/resources/docker-compose-3node-tls-prebuilt.yml"))
+                .withExposedService("server1", 8080)
+                .withExposedService("server2", 8080)
+                .withExposedService("server3", 8080)
+                .waitingFor("server1", Wait.forHealthcheck())
+                .waitingFor("server2", Wait.forHealthcheck())
+                .waitingFor("server3", Wait.forHealthcheck())
+                .withStartupTimeout(Duration.ofSeconds(90));
+        cluster.start();
+        registerCluster(cluster, List.of("server1", "server2", "server3"));
+        return cluster;
+    }
+
+    /**
      * Starts a disposable three-node cluster with one client-mode {@code client} container using the expiry
      * profile: HTTP and TCP checks with a 5-second TTL, so expiry and deregistration are quick to observe.
      */
