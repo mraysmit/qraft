@@ -116,6 +116,7 @@ public final class HttpApiServer implements AutoCloseable {
     private final AclResolver resolver;
     private volatile io.opentelemetry.api.metrics.Meter meter;
     private volatile dev.mars.qraft.raft.StorageStatus storageStatus;
+    private volatile dev.mars.qraft.common.events.EventJournal eventJournal;
     private volatile RequestMetrics requestMetrics;
     /** The leader's session timers, which renewals reset (sessions list, Phase 3). */
     private volatile dev.mars.qraft.server.session.SessionTtlExpiry sessionTtl;
@@ -123,6 +124,11 @@ public final class HttpApiServer implements AutoCloseable {
     /** Reports the Raft storage's size and its snapshot's age in {@code /raft/status} (observability list, Phase 3). */
     public void useStorageStatus(dev.mars.qraft.raft.StorageStatus status) {
         this.storageStatus = Objects.requireNonNull(status, "status");
+    }
+
+    /** Records an audit event of every request answered under a token in {@code journal} (authentication list). */
+    public void useEventJournal(dev.mars.qraft.common.events.EventJournal journal) {
+        this.eventJournal = Objects.requireNonNull(journal, "journal");
     }
 
     /** The meter the request metrics come from (observability list, Phase 2). */
@@ -134,6 +140,26 @@ public final class HttpApiServer implements AutoCloseable {
      */
     public void useMeter(io.opentelemetry.api.metrics.Meter meter) {
         this.meter = Objects.requireNonNull(meter, "meter");
+    }
+
+    /** The accessor ID of the token the request presents, when it is audited; never its secret. */
+    private String auditedAccessor(HttpExchange exchange) {
+        if (eventJournal == null || stateStore == null) return null;
+        String secret = presentedToken(exchange);
+        if (secret == null || secret.isBlank()) return null;
+        return stateStore.getAcl().tokenBySecret(secret).map(dev.mars.qraft.state.acl.AclToken::accessorId)
+                .orElse("unknown");
+    }
+
+    private void audit(HttpExchange exchange, String accessor, String route, String method) {
+        String known = method == null ? "OTHER" : method.toUpperCase(java.util.Locale.ROOT);
+        try {
+            AuditEvents.publish(eventJournal, raftNode == null ? 0 : raftNode.getCurrentTerm(),
+                    new AuditEvents.Request(accessor, known, route, exchange.getResponseCode()),
+                    exchange.getResponseHeaders().getFirst(dev.mars.qraft.common.http.JsonApi.REQUEST_ID_HEADER));
+        } catch (RuntimeException failure) {
+            LOG.warn("A request could not be audited: {}", failure.toString());
+        }
     }
 
     private RequestMetrics requestMetrics() {
@@ -256,6 +282,8 @@ public final class HttpApiServer implements AutoCloseable {
         server.createContext(KvApiRoutes.CONTEXT, requestAware(kvApi::handle));
         SessionApiRoutes sessionApi = new SessionApiRoutes(this);
         server.createContext(SessionApiRoutes.CONTEXT, requestAware(sessionApi::handle));
+        AuthApiRoutes authApi = new AuthApiRoutes(this);
+        AuthApiRoutes.CONTEXTS.forEach(context -> server.createContext(context, requestAware(authApi::handle)));
         TenancyApiRoutes tenancyApi = new TenancyApiRoutes(this);
         TenancyApiRoutes.CONTEXTS.forEach(context -> server.createContext(context, requestAware(tenancyApi::handle)));
         AclApiRoutes aclApi = new AclApiRoutes(this);
@@ -542,7 +570,7 @@ public final class HttpApiServer implements AutoCloseable {
      * Consul reads {@code X-Consul-Token} before {@code Authorization}; empty without one. Qraft reads no token from
      * the query string, which reaches logs (ACL list, section 4).
      */
-    private static String presentedToken(HttpExchange exchange) {
+    static String presentedToken(HttpExchange exchange) {
         String token = exchange.getRequestHeaders().getFirst("X-Qraft-Token");
         if (token != null) return token;
         String authorization = exchange.getRequestHeaders().getFirst("Authorization");
@@ -1434,10 +1462,13 @@ public final class HttpApiServer implements AutoCloseable {
             long started = System.nanoTime();
             String route = exchange.getHttpContext().getPath();
             String method = exchange.getRequestMethod();
+            // The token is resolved before the request is handled, so a logout is audited under the token it ended.
+            String accessor = auditedAccessor(exchange);
             try {
                 handled.handle(exchange);
             } finally {
                 requestMetrics().record(route, method, exchange.getResponseCode(), System.nanoTime() - started);
+                if (accessor != null) audit(exchange, accessor, route, method);
             }
         };
     }

@@ -53,7 +53,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * @since 2026-03-15
  * @version 1.0
  */
-public final class QraftStateStore implements RaftLogApplicator {
+public final class QraftStateStore implements RaftLogApplicator, dev.mars.qraft.common.events.DomainEventSource {
     private static final String DEFAULT_VERSION = "3.0";
     /** Entity type reported when an observation names a check its registration does not declare. */
     public static final String HEALTH_CHECK_ENTITY = "HealthCheck";
@@ -67,8 +67,12 @@ public final class QraftStateStore implements RaftLogApplicator {
     /** The meter the metrics come from, or {@code null} for the global one (observability list). */
     private final io.opentelemetry.api.metrics.Meter meter;
     private volatile StateMetrics metrics;
+    /** The domain events of the change being applied, kept until the node drains them (events list, Phase 4). */
+    private final List<dev.mars.qraft.common.events.DomainEvent> pendingEvents = new java.util.ArrayList<>();
+    private boolean recordingEvents;
     /** The tenants and namespaces that exist (tenancy list, Phase 1). */
     private final dev.mars.qraft.state.tenancy.TenancyState tenancy = new dev.mars.qraft.state.tenancy.TenancyState();
+    private final dev.mars.qraft.state.acl.AuthState auth = new dev.mars.qraft.state.acl.AuthState();
     private final ServiceCatalog serviceCatalog = new ServiceCatalog();
     private final ServiceCatalogView catalogView = ServiceCatalogView.of(serviceCatalog);
     private final Map<ServiceCheckId, HealthCheckState> healthChecks = new ConcurrentHashMap<>();
@@ -103,6 +107,30 @@ public final class QraftStateStore implements RaftLogApplicator {
         this.meter = meter;
     }
 
+    /** Starts or stops recording domain events (events list, Phase 4); the node starts it when it keeps a journal. */
+    @Override
+    public void recordDomainEvents(boolean record) {
+        recordingEvents = record;
+        if (!record) pendingEvents.clear();
+    }
+
+    @Override
+    public List<dev.mars.qraft.common.events.DomainEvent> drainDomainEvents() {
+        List<dev.mars.qraft.common.events.DomainEvent> drained = List.copyOf(pendingEvents);
+        pendingEvents.clear();
+        return drained;
+    }
+
+    /** Records a domain event of the change being applied, when recording; {@code null} scope for a node's. */
+    private void event(String tenant, String namespace, dev.mars.qraft.common.events.QraftEvent event) {
+        if (recordingEvents) pendingEvents.add(new dev.mars.qraft.common.events.DomainEvent(tenant, namespace, event));
+    }
+
+    private void serviceLeft(ServiceInstance instance) {
+        event(instance.tenantId(), instance.namespace(), new CatalogEvents.ServiceDeregistered(instance.serviceId(),
+                instance.serviceName(), instance.nodeId()));
+    }
+
     private StateMetrics metrics() {
         StateMetrics current = metrics;
         if (current != null) return current;
@@ -129,6 +157,7 @@ public final class QraftStateStore implements RaftLogApplicator {
             case dev.mars.qraft.state.session.SessionCommand sessionCommand -> applySessionCommand(sessionCommand);
             case dev.mars.qraft.state.tenancy.TenancyCommand tenancyCommand -> applyTenancyCommand(tenancyCommand);
             case dev.mars.qraft.state.tenancy.ScopedWrite scopedWrite -> applyScopedWrite(scopedWrite);
+            case dev.mars.qraft.state.acl.AuthCommand authCommand -> applyAuthCommand(authCommand);
             default -> throw new IllegalArgumentException("Unsupported server command: "
                     + command.getClass().getName());
         };
@@ -283,6 +312,7 @@ public final class QraftStateStore implements RaftLogApplicator {
             if (instance.tenantId().equals(tenant) && instance.namespace().equals(namespace)) {
                 serviceCatalog.deregister(instance.identity());
                 removeHealthChecks(instance.identity());
+                serviceLeft(instance);
             }
         }
         kv.deleteTree(new dev.mars.qraft.state.kv.KvScope(tenant, namespace), "", index);
@@ -299,6 +329,9 @@ public final class QraftStateStore implements RaftLogApplicator {
                 metrics().registration("registered");
                 ServiceInstanceId identity = register.instance().identity();
                 serviceCatalog.register(register.instance());
+                event(register.instance().tenantId(), register.instance().namespace(),
+                        new CatalogEvents.ServiceRegistered(register.instance().serviceId(),
+                                register.instance().serviceName(), register.instance().nodeId()));
                 boolean pruned = false;
                 if (register.declaresChecks()) {
                     declaredChecks.put(identity, register.declaredCheckIds());
@@ -320,9 +353,14 @@ public final class QraftStateStore implements RaftLogApplicator {
                     metrics().deregistration("refused");
                     yield new RaftCommandResult.CasMismatch<>(holder);
                 }
+                List<ServiceInstance> leaving = deregister.isLegacy()
+                        ? serviceCatalog.instances().stream()
+                                .filter(instance -> instance.serviceId().equals(deregister.serviceId())).toList()
+                        : serviceCatalog.find(deregister.identity()).stream().toList();
                 boolean removed = deregister.isLegacy()
                         ? serviceCatalog.deregisterLegacy(deregister.serviceId())
                         : serviceCatalog.deregister(deregister.identity());
+                if (removed) leaving.forEach(this::serviceLeft);
                 if (removed) {
                     if (deregister.isLegacy()) {
                         healthChecks.keySet().removeIf(check ->
@@ -341,6 +379,47 @@ public final class QraftStateStore implements RaftLogApplicator {
             case CatalogCommand.ObserveHealth observe -> applyHealthObservation(observe);
             case CatalogCommand.ExpireHealth expire -> applyHealthExpiry(expire);
         };
+    }
+
+    /**
+     * Writes an auth method or binding rule, or creates or deletes a login token (authentication list, Phases 1 and 2).
+     * Deleting a method deletes its rules and the tokens its logins created, as in Consul.
+     */
+    private RaftCommandResult<?> applyAuthCommand(dev.mars.qraft.state.acl.AuthCommand command) {
+        long index = lastAppliedIndex.get() + 1;
+        if (command instanceof dev.mars.qraft.state.acl.AuthCommand.Login login) {
+            if (auth.method(login.method()).isEmpty()) {
+                return new RaftCommandResult.Refused<>("auth_method_not_found", "No auth method " + login.method());
+            }
+            RaftCommandResult<?> created = acl.createToken(login.token());
+            if (created instanceof RaftCommandResult.Success<?>) {
+                auth.recordLogin(login.token().accessorId(), login.method());
+            }
+            return created;
+        }
+        String refusal = switch (command) {
+            case dev.mars.qraft.state.acl.AuthCommand.CreateMethod create -> auth.createMethod(create.method(), index);
+            case dev.mars.qraft.state.acl.AuthCommand.UpdateMethod update -> auth.updateMethod(update.method(), index);
+            case dev.mars.qraft.state.acl.AuthCommand.DeleteMethod delete -> {
+                List<String> tokens = auth.deleteMethod(delete.name());
+                if (tokens == null) yield "auth_method_not_found";
+                tokens.forEach(acl::deleteToken);
+                yield null;
+            }
+            case dev.mars.qraft.state.acl.AuthCommand.CreateBindingRule create -> auth.createRule(create.rule(), index);
+            case dev.mars.qraft.state.acl.AuthCommand.UpdateBindingRule update -> auth.updateRule(update.rule(), index);
+            case dev.mars.qraft.state.acl.AuthCommand.DeleteBindingRule delete -> auth.deleteRule(delete.id());
+            case dev.mars.qraft.state.acl.AuthCommand.Login login ->
+                    throw new IllegalStateException("a login is applied before the switch");
+            case dev.mars.qraft.state.acl.AuthCommand.Logout logout -> {
+                if (auth.loginMethodOf(logout.accessorId()).isEmpty()) yield "not_a_login_token";
+                acl.deleteToken(logout.accessorId());
+                auth.forgetLogin(logout.accessorId());
+                yield null;
+            }
+        };
+        return refusal == null ? new RaftCommandResult.Success<>(true)
+                : new RaftCommandResult.Refused<>(refusal, refusal.replace('_', ' ') + ": " + command);
     }
 
     private RaftCommandResult<?> applyAclCommand(AclCommand command) {
@@ -394,10 +473,12 @@ public final class QraftStateStore implements RaftLogApplicator {
         ServiceInstanceId identity = command.checkId().serviceInstanceId();
         if (command.deregisterService()) {
             // Deregistration is the second phase: the same check must already have been expired.
+            Optional<ServiceInstance> leaving = serviceCatalog.find(identity);
             if (!current.expired() || !serviceCatalog.deregister(identity)) {
                 return new RaftCommandResult.NoOp<>();
             }
             removeHealthChecks(identity);
+            leaving.ifPresent(this::serviceLeft);
             return new RaftCommandResult.Success<>(identity);
         }
         HealthCheckState expired = current.asExpired();
@@ -419,7 +500,12 @@ public final class QraftStateStore implements RaftLogApplicator {
                 .filter(state -> state.checkId().serviceInstanceId().equals(identity))
                 .toList();
         ServiceHealth health = aggregateHealth(states);
-        if (instance.get().health() != health) metrics().healthTransition(instance.get().health(), health);
+        if (instance.get().health() != health) {
+            metrics().healthTransition(instance.get().health(), health);
+            event(instance.get().tenantId(), instance.get().namespace(), new CatalogEvents.HealthChanged(
+                    instance.get().serviceId(), instance.get().serviceName(), instance.get().health().name(),
+                    health.name()));
+        }
         serviceCatalog.setHealth(identity, health);
     }
 
@@ -453,6 +539,7 @@ public final class QraftStateStore implements RaftLogApplicator {
             Node changed = current.withStatus(NodeStatus.UNREACHABLE);
             nodes.put(expire.name(), changed);
             invalidateSessionsOf(expire.name(), expire.timestamp());
+            event(null, null, new CatalogEvents.NodeUnreachable(expire.name()));
             return new RaftCommandResult.Success<>(changed);
         }
         // Reaping is the second phase: the node must already have been marked unreachable.
@@ -461,6 +548,7 @@ public final class QraftStateStore implements RaftLogApplicator {
         heartbeatSequences.remove(expire.name());
         removeServicesOf(expire.name());
         invalidateSessionsOf(expire.name(), expire.timestamp());
+        event(null, null, new CatalogEvents.NodeRemoved(expire.name(), "reaped"));
         return new RaftCommandResult.Success<>(current);
     }
 
@@ -494,7 +582,9 @@ public final class QraftStateStore implements RaftLogApplicator {
         if (holder != null && (!sameNode || !holderName.equals(name))) removeNode(holderName, register.timestamp());
         if (previousName != null && !previousName.equals(holderName)) removeNode(previousName, register.timestamp());
         Node registered = register.node().registeredAt(register.timestamp());
+        boolean existed = nodes.containsKey(name);
         nodes.put(name, registered);
+        event(null, null, existed ? new CatalogEvents.NodeUpdated(name) : new CatalogEvents.NodeRegistered(name));
         heartbeatSequences.remove(name);
         return new RaftCommandResult.Success<>(registered);
     }
@@ -526,10 +616,11 @@ public final class QraftStateStore implements RaftLogApplicator {
 
     /** Removes the node registered under {@code name} with everything registered on it. */
     private void removeNode(String name, Instant at) {
-        nodes.remove(name);
+        Node removed = nodes.remove(name);
         heartbeatSequences.remove(name);
         removeServicesOf(name);
         invalidateSessionsOf(name, at);
+        if (removed != null) event(null, null, new CatalogEvents.NodeRemoved(name, "replaced"));
     }
 
     /** Removes every service instance registered on a node, in every tenant and namespace, with its checks. */
@@ -538,6 +629,7 @@ public final class QraftStateStore implements RaftLogApplicator {
             if (instance.nodeId().equals(node)) {
                 serviceCatalog.deregister(instance.identity());
                 removeHealthChecks(instance.identity());
+                serviceLeft(instance);
             }
         }
     }
@@ -565,6 +657,7 @@ public final class QraftStateStore implements RaftLogApplicator {
                 heartbeatSequences.remove(deregister.name());
                 removeServicesOf(deregister.name());
                 invalidateSessionsOf(deregister.name(), deregister.timestamp());
+                if (removed != null) event(null, null, new CatalogEvents.NodeRemoved(deregister.name(), "deregistered"));
                 yield removed == null ? new RaftCommandResult.NotFound<>(deregister.name(), "Node")
                         : new RaftCommandResult.Success<>(removed);
             }
@@ -644,7 +737,8 @@ public final class QraftStateStore implements RaftLogApplicator {
                     .toList();
             return objectMapper.writeValueAsBytes(new Snapshot(Map.copyOf(nodes), Map.copyOf(heartbeatSequences),
                     Map.copyOf(metadata), serviceCatalog.instances(), orderedHealthChecks, orderedDeclarations,
-                    acl.snapshot(), kv.snapshot(), sessions.snapshot(), tenancy.snapshot(), lastAppliedIndex.get()));
+                    acl.snapshot(), kv.snapshot(), sessions.snapshot(), tenancy.snapshot(), auth.snapshot(),
+                    lastAppliedIndex.get()));
         } catch (IOException e) {
             throw new IllegalStateException("Failed to serialize server snapshot", e);
         }
@@ -676,6 +770,8 @@ public final class QraftStateStore implements RaftLogApplicator {
             kv.restore(snapshot.kv());
             sessions.restore(snapshot.sessions());
             tenancy.restore(snapshot.tenancy());
+            auth.restore(snapshot.auth());
+            pendingEvents.clear();
             lastAppliedIndex.set(snapshot.lastAppliedIndex());
             signalIndexChange();
         } catch (IOException e) {
@@ -707,6 +803,8 @@ public final class QraftStateStore implements RaftLogApplicator {
         kv.restore(null);
         sessions.restore(null);
         tenancy.restore(null);
+        auth.restore(null);
+        pendingEvents.clear();
         lastAppliedIndex.set(0);
         signalIndexChange();
     }
@@ -779,6 +877,11 @@ public final class QraftStateStore implements RaftLogApplicator {
         }
     }
 
+    /** The replicated auth methods, binding rules and logins, for reads (authentication list). */
+    public dev.mars.qraft.state.acl.AuthState getAuth() {
+        return auth;
+    }
+
     /** The replicated tenants and namespaces, for reads (tenancy list). */
     public dev.mars.qraft.state.tenancy.TenancyState getTenancy() {
         return tenancy;
@@ -820,6 +923,7 @@ public final class QraftStateStore implements RaftLogApplicator {
                             dev.mars.qraft.state.kv.KvState.Snapshot kv,
                             java.util.List<dev.mars.qraft.state.session.Session> sessions,
                             dev.mars.qraft.state.tenancy.TenancyState.Snapshot tenancy,
+                            dev.mars.qraft.state.acl.AuthState.Snapshot auth,
                             long lastAppliedIndex) {
     }
 

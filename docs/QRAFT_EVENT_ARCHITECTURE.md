@@ -529,3 +529,22 @@ The next tranche should add only a small set of high-value sequenced system
 events and one existing replicated feature's domain events. This provides an
 end-to-end validation of ordering before the key/value and watch APIs depend on
 the architecture.
+
+## 17. Built
+
+Phases 1 to 4 were built on 2026-11-08 by
+[`task-list-events-2026-11-08.md`](archive/task-list-events-2026-11-08.md):
+
+- **Contracts** in `dev.mars.qraft.common.events`: the envelope, local and replicated
+  identities, cursors, filters, pages, and the source, subscription and consumer.
+- **`EventJournal`**: one boot's newest 4,096 events, paged with explicit gap,
+  other-boot and invalid answers; subscribers with their own queues of 1,024, ended
+  by overflow with a resume cursor, and isolated from each other's failures.
+- **System events** from `RaftNode`: leadership gained and lost, a snapshot
+  published, and fencing once.
+- **Domain events** from `QraftStateStore`: nodes registered, updated, unreachable
+  and removed; services registered and deregistered; health changed. Each carries
+  its entry's term and committed index, the same on every replica.
+
+There is no network interface yet: the bounded HTTP query and the live watch are
+phases 6 and 7, and key/value events, durable sinks and audit phases 5 and 8.

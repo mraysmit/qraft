@@ -95,7 +95,7 @@ final class AclCodec {
         };
     }
 
-    private static AclTokenProto toProto(AclToken token) {
+    static AclTokenProto toProto(AclToken token) {
         AclTokenProto.Builder builder = AclTokenProto.newBuilder()
                 .setAccessorId(token.accessorId())
                 .setSecretHash(token.secretHash())
@@ -110,7 +110,7 @@ final class AclCodec {
         return builder.build();
     }
 
-    private static AclToken fromProto(AclTokenProto proto) {
+    static AclToken fromProto(AclTokenProto proto) {
         return new AclToken(proto.getAccessorId(), proto.getSecretHash(), proto.getDescription(),
                 proto.getPolicyIdsList(), proto.getRoleIdsList(),
                 proto.getNodeIdentitiesList().stream().map(AclCodec::fromProto).toList(),

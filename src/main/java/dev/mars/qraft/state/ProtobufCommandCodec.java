@@ -77,6 +77,8 @@ public final class ProtobufCommandCodec {
             return RaftCommandMessage.getDefaultInstance().toByteString();
         }
         RaftCommandMessage raftMessage = switch (command) {
+            case dev.mars.qraft.state.acl.AuthCommand cmd -> RaftCommandMessage.newBuilder()
+                    .setAuthCommand(AuthCodec.toProto(cmd)).build();
             case dev.mars.qraft.state.tenancy.ScopedWrite cmd -> RaftCommandMessage.newBuilder()
                     .setScopedWrite(dev.mars.qraft.raft.grpc.ScopedWriteProto.newBuilder().setTenant(cmd.tenant())
                             .setNamespace(cmd.namespace()).setCommand(serialize(cmd.command()))).build();
@@ -113,6 +115,7 @@ public final class ProtobufCommandCodec {
             RaftCommandMessage raftMessage = RaftCommandMessage.parseFrom(data);
             return switch (raftMessage.getCommandCase()) {
                 case NODE_COMMAND -> NodeCodec.fromProto(raftMessage.getNodeCommand());
+                case AUTH_COMMAND -> AuthCodec.fromProto(raftMessage.getAuthCommand());
                 case SCOPED_WRITE -> new dev.mars.qraft.state.tenancy.ScopedWrite(
                         raftMessage.getScopedWrite().getTenant(), raftMessage.getScopedWrite().getNamespace(),
                         deserialize(raftMessage.getScopedWrite().getCommand()));

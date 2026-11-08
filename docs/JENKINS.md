@@ -580,6 +580,18 @@ Phase 3 of the key/value list: default 1,772 with every coverage gate met, end-t
 files clean (logs `logs/local-run-2026-11-08-kv-phase3/`). On the complete list, with `KvEndToEndTest` and
 `DockerKvTest`: default 1,782 with every coverage gate met, end-to-end 18 and Docker 47, with no failures, errors or skips; audit over 1,293 files: 3,479 error lines, all flagged, 2,430 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/local-run-2026-11-08-kv-final/`).
 
+## Local runs for events, 2026-11-08
+
+From the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted. The first run failed its default
+suite on `PackageDependencyTest`, as the new events package was outside the final layers; it moved under Common, and
+that run was stopped before its later suites. The rerun: default 1,867 with every coverage gate met, end-to-end 22 and Docker 51, with no failures, errors or skips; audit over the 275 files written since the previous attempt: 973 error lines, all flagged, 645 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/ev-final2/`).
+
+## Local runs for observability, 2026-11-08
+
+From the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted. Two attempts failed their default
+suite on `HttpApiServerRequestMetricsTest`, which found that the server's request metrics read a route the next
+request on the connection had taken over; each was stopped before its later suites. The run with the fix: default 1,851 with every coverage gate met, end-to-end 22 and Docker 51, with no failures, errors or skips; audit over the 212 files written since the previous attempt: 669 error lines, all flagged, 382 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/obs-final3/`).
+
 ## Local runs for tenancy, 2026-11-08
 
 From the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted. The first final run passed its

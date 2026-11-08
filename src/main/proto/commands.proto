@@ -338,6 +338,53 @@ message NamespaceProto {
   string description = 3;
 }
 
+// An auth method, binding rule, login or logout (authentication list, Phase 1); durations in milliseconds.
+message JwtConfigProto {
+  repeated string public_keys_pem = 1;
+  string bound_issuer = 2;
+  repeated string bound_audiences = 3;
+  map<string, string> claim_mappings = 4;
+  map<string, string> list_claim_mappings = 5;
+  int64 expiration_leeway_ms = 6;
+  int64 not_before_leeway_ms = 7;
+  int64 clock_skew_leeway_ms = 8;
+}
+
+message AuthMethodProto {
+  string name = 1;
+  string type = 2;
+  string description = 3;
+  int64 max_token_ttl_ms = 4;
+  JwtConfigProto config = 5;
+}
+
+message BindingRuleProto {
+  string id = 1;
+  string description = 2;
+  string auth_method = 3;
+  string selector = 4;
+  string bind_type = 5;
+  string bind_name = 6;
+}
+
+message LoginProto {
+  AclTokenProto token = 1;
+  string method = 2;
+}
+
+message AuthCommandProto {
+  oneof command {
+    AuthMethodProto create_method = 1;
+    AuthMethodProto update_method = 2;
+    string delete_method = 3;
+    BindingRuleProto create_binding_rule = 4;
+    BindingRuleProto update_binding_rule = 5;
+    string delete_binding_rule = 6;
+    LoginProto login = 7;
+    string logout = 8;
+  }
+}
+
 // A write that applies only where its tenant and namespace exist (tenancy list, Phase 2); command holds the
 // encoded RaftCommandMessage of the write itself.
 message ScopedWriteProto {
@@ -375,5 +422,6 @@ message RaftCommandMessage {
     SessionCommandProto session_command = 7;
     TenancyCommandProto tenancy_command = 8;
     ScopedWriteProto scoped_write = 9;
+    AuthCommandProto auth_command = 10;
   }
 }

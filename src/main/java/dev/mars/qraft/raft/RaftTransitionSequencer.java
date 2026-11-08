@@ -120,6 +120,14 @@ final class RaftTransitionSequencer {
     private Transition<?> active;
     private CompletableFuture<Void> drainPromise;
 
+    /** Told once, with the first failure, when the sequencer fences (events list, Phase 3). */
+    private volatile java.util.function.Consumer<Throwable> fenceListener = cause -> { };
+
+    /** Tells {@code listener} once, on the state loop, when the sequencer fences; it must not submit a transition. */
+    void onFenced(java.util.function.Consumer<Throwable> listener) {
+        this.fenceListener = Objects.requireNonNull(listener, "listener");
+    }
+
     RaftTransitionSequencer(RaftStateLoop runtime, int capacity) {
         this.runtime = Objects.requireNonNull(runtime, "runtime");
         if (capacity < 1) throw new IllegalArgumentException("capacity must be at least one");
@@ -316,6 +324,11 @@ final class RaftTransitionSequencer {
         fenceCause = cause;
         state = State.FENCED;
         logger.error("Raft transition sequencer fenced: {}", cause.toString(), cause);
+        try {
+            fenceListener.accept(cause);
+        } catch (RuntimeException failure) {
+            logger.warn("The fencing listener failed: {}", failure.toString());
+        }
         Transition<?> queued;
         while ((queued = queue.poll()) != null) {
             queued.result.completeExceptionally(new FencedException(cause));

@@ -77,7 +77,7 @@ public final class AppConfig {
     /** The {@code server} object of the document, with {@code logging.directory} beside it. */
     private record Settings(String id, Http http, int apiGrpcPort, Raft raft, String operatorToken,
                             Telemetry telemetry, Shutdown shutdown, Health health, AdminUiConfig ui,
-                            Acl acl, SecurityProfile profile, String loggingDirectory, Tls tls) { }
+                            Acl acl, SecurityProfile profile, String loggingDirectory, Tls tls, String auditPath) { }
 
     /**
      * {@code server.tls}: the material, or {@code null} when the document has none, and each listener's switch
@@ -147,7 +147,9 @@ public final class AppConfig {
         JsonNode security = optionalObject(server, "security");
         JsonNode logging = optionalObject(root, "logging");
         rejectUnknown(server, "server", "id", "http", "apiGrpcPort",
-                "raft", "telemetry", "shutdown", "health", "ui", "operator", "acl", "security", "tls");
+                "raft", "telemetry", "shutdown", "health", "ui", "operator", "acl", "security", "tls", "audit");
+        JsonNode audit = optionalObject(server, "audit");
+        rejectUnknown(audit, "server.audit", "path");
         rejectUnknown(http, "server.http", "host", "port");
         rejectUnknown(raft, "server.raft", "port", "nodes", "electionTimeoutMs",
                 "heartbeatIntervalMs", "storage", "snapshot", "logHardLimit", "io", "membership");
@@ -205,7 +207,7 @@ public final class AppConfig {
                         logHardLimit, ioSettings, membershipSettings),
                 operatorToken, telemetrySettings, shutdownSettings,
                 new Health(expiryIntervalMs, nodeTtlMs, nodeReapAfterMs), adminUi, aclSettings, profile,
-                loggingDirectory, tlsSettings));
+                loggingDirectory, tlsSettings, optionalText(audit, "path", "")));
     }
 
     private static Tls parseTls(JsonNode tls) {
@@ -312,6 +314,10 @@ public final class AppConfig {
     public long getNodeTtlMs() { return settings.health().nodeTtlMs(); }
     /** How long an unreachable node is kept before it and its services are reaped; zero never reaps. */
     public long getNodeReapAfterMs() { return settings.health().nodeReapAfterMs(); }
+    /** {@code server.audit.path}: the file audit events are written to, if any (authentication list, Phase 3). */
+    public Optional<java.nio.file.Path> getAuditPath() {
+        return settings.auditPath().isEmpty() ? Optional.empty() : Optional.of(java.nio.file.Path.of(settings.auditPath()));
+    }
     public boolean isTelemetryEnabled() { return settings.telemetry().enabled(); }
     public String getOtlpEndpoint() { return settings.telemetry().otlpEndpoint(); }
     public String getRedactedOtlpEndpoint() {

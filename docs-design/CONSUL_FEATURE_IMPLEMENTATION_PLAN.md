@@ -448,7 +448,9 @@ unchecked features below remain open.
   [`task-list-observability-2026-11-08.md`](../docs/archive/task-list-observability-2026-11-08.md); the leader's view
   of the servers is Consul's autopilot health, and a client publishes on its local
   API rather than on a telemetry port.
-- [ ] Implement the bounded event journal (item 8).
+- [x] Implement the bounded event journal (item 8). Done 2026-11-08, the design's
+  phases 1 to 4: [`task-list-events-2026-11-08.md`](../docs/archive/task-list-events-2026-11-08.md);
+  its HTTP query, live watch and durable sinks are left for later.
 - [ ] Implement ACL tokens, policies, token validation, and audit events
   (phase 7; item 9). Tokens, policies, roles, identities and validation on servers and
   clients are done (2026-11-07, the ACL list,

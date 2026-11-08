@@ -226,6 +226,11 @@ public class RaftNode {
 
     // ========== STATE CHANGE LISTENERS ==========
     private final List<java.util.function.Consumer<State>> stateChangeListeners = new CopyOnWriteArrayList<>();
+    /** Where this node's system events go, or {@code null} for none (events list, Phase 3). */
+    private volatile dev.mars.qraft.common.events.EventJournal events;
+    /** The state the listeners were last told of, and the term this node last led. */
+    private State notifiedState = State.FOLLOWER;
+    private long ledTerm;
 
     // ========== EDGE METRICS ==========
     private LongCounter rpcCounter;
@@ -345,6 +350,7 @@ public class RaftNode {
         private long promotionStabilizationMs = 10_000;
         private long promotionMaxTrailingEntries = 250;
         private RaftMembershipPolicy membershipPolicy;
+        private dev.mars.qraft.common.events.EventJournal events;
         private RaftTimerScheduler timerScheduler;
         private int transitionQueueCapacity = 1024;
 
@@ -414,6 +420,9 @@ public class RaftNode {
 
         /** Whether to enable automatic snapshots (default: true for durable, false for volatile). */
         public Builder snapshotEnabled(boolean enabled) { this.snapshotEnabled = enabled; return this; }
+
+        /** Records this node's system events in {@code events} (events list, Phase 3); none without it. */
+        public Builder events(dev.mars.qraft.common.events.EventJournal events) { this.events = events; return this; }
 
         /** Number of log entries between snapshots (default: 10000). */
         public Builder snapshotThreshold(long threshold) { this.snapshotThreshold = threshold; return this; }
@@ -497,11 +506,16 @@ public class RaftNode {
                     promotionStabilizationMs, promotionMaxTrailingEntries, cleanup.cleanupEnabled(),
                     cleanup.cleanupFailureTimeoutMs(), cleanup.cleanupIntervalMs(), cleanup.cleanupMinVoters());
             resolvedPolicy.validateFor(electionTimeoutMs, heartbeatIntervalMs);
-            return new RaftNode(runtime, blockingTasks, nodeId, resolvedServerId, initialConfiguration, listed,
+            RaftNode node = new RaftNode(runtime, blockingTasks, nodeId, resolvedServerId, initialConfiguration, listed,
                     clusterNodes, transport, stateMachine,
                     commandCodec, mode, electionTimeoutMs, heartbeatIntervalMs, snap,
                     snapshotThreshold, snapshotCheckIntervalMs, logHardLimit, resolvedPolicy,
                     timerScheduler, transitionQueueCapacity);
+            node.events = events;
+            if (events != null && stateMachine instanceof dev.mars.qraft.common.events.DomainEventSource source) {
+                source.recordDomainEvents(true);
+            }
+            return node;
         }
     }
 
@@ -530,6 +544,8 @@ public class RaftNode {
         this.persistence = new RaftPersistence(
                 configuredMode.storage(), configuredMode.snapshots());
         this.transitionSequencer = new RaftTransitionSequencer(runtime, transitionQueueCapacity);
+        transitionSequencer.onFenced(cause -> publishSystem(dev.mars.qraft.common.events.EventSeverity.ERROR,
+                new RaftEvents.Fenced(cause.toString())));
         this.timerScheduler = configuredTimerScheduler == null ? new RaftTimerScheduler() {
             @Override public long setTimer(long delayMs, java.util.function.Consumer<Long> action) {
                 return runtime.setTimer(delayMs, action);
@@ -1739,11 +1755,53 @@ public class RaftNode {
      * Invoked internally after every state change (becomeLeader, startElection, stepDown).
      */
     private void notifyStateChangeListeners(State newState) {
+        // Leadership gained once the election is won, and lost when the node leaves the leader's role (events list).
+        if (newState == State.LEADER && notifiedState != State.LEADER) {
+            ledTerm = currentTerm;
+            publishSystem(dev.mars.qraft.common.events.EventSeverity.INFO, new RaftEvents.LeadershipGained(currentTerm));
+        } else if (notifiedState == State.LEADER && newState != State.LEADER) {
+            publishSystem(dev.mars.qraft.common.events.EventSeverity.WARNING,
+                    new RaftEvents.LeadershipLost(ledTerm, newState.name()));
+        }
+        notifiedState = newState;
         for (java.util.function.Consumer<State> listener : stateChangeListeners) {
             try {
                 listener.accept(newState);
             } catch (Exception e) {
                 logger.warn("State change listener threw exception: {}", e.getMessage(), e);
+            }
+        }
+    }
+
+    /**
+     * Records a system event of this node, at the current term; an event that cannot be recorded is reported and never
+     * fails what the node was doing (architecture section 11).
+     */
+    private void publishSystem(dev.mars.qraft.common.events.EventSeverity severity, dev.mars.qraft.common.events.QraftEvent event) {
+        dev.mars.qraft.common.events.EventJournal journal = events;
+        if (journal == null) return;
+        try {
+            journal.publishSystem(severity, currentTerm, event);
+        } catch (RuntimeException failure) {
+            logger.warn("A system event could not be recorded: {}", failure.toString());
+        }
+    }
+
+    /**
+     * Offers the domain events of the entry just applied at {@code index}, with its term, after the state machine has
+     * applied it and before the submitter's result completes (events list, Phase 4; architecture section 6).
+     */
+    private void publishDomainEvents(long term, long index) {
+        if (!(stateMachine instanceof dev.mars.qraft.common.events.DomainEventSource source)) return;
+        List<dev.mars.qraft.common.events.DomainEvent> produced = source.drainDomainEvents();
+        dev.mars.qraft.common.events.EventJournal journal = events;
+        if (journal == null) return;
+        for (int ordinal = 0; ordinal < produced.size(); ordinal++) {
+            dev.mars.qraft.common.events.DomainEvent produced1 = produced.get(ordinal);
+            try {
+                journal.publishDomain(term, index, ordinal, produced1.tenant(), produced1.namespace(), produced1.event());
+            } catch (RuntimeException failure) {
+                logger.warn("A domain event could not be recorded: {}", failure.toString());
             }
         }
     }
@@ -3243,10 +3301,13 @@ public class RaftNode {
                 }
                 stateMachine.setLastAppliedIndex(index);
             } catch (Exception e) {
+                // A change that failed to apply produced no fact (architecture section 6).
+                if (stateMachine instanceof dev.mars.qraft.common.events.DomainEventSource source) source.drainDomainEvents();
                 fenceOnApplyFailure(index, e);
                 return;
             }
             lastApplied = index;
+            publishDomainEvents(entry.getTerm(), index);
 
             if (state == State.LEADER && entry.getCommand() instanceof ConfigurationCommand change) {
                 RaftConfiguration previous = configurationAt(index - 1);
@@ -3453,6 +3514,8 @@ public class RaftNode {
         snapshotLastIndex = snapshotIndex;
         snapshotLastTerm = snapshotTerm;
         log.set(0, new LogEntry(snapshotTerm, snapshotIndex, null));
+        publishSystem(dev.mars.qraft.common.events.EventSeverity.INFO,
+                new RaftEvents.SnapshotPublished(snapshotIndex, snapshotTerm, false));
 
         long duration = System.currentTimeMillis() - decision.startTime();
         snapshotCounter.add(1);
@@ -4090,6 +4153,8 @@ public class RaftNode {
         snapshotLastIndex = lastIncludedIndex;
         snapshotLastTerm = lastIncludedTerm;
         lastApplied = lastIncludedIndex;
+        publishSystem(dev.mars.qraft.common.events.EventSeverity.INFO,
+                new RaftEvents.SnapshotPublished(lastIncludedIndex, lastIncludedTerm, true));
         commitIndex = Math.max(commitIndex, lastIncludedIndex);
 
         logger.info("Snapshot installed: snapshotLastIndex={}, snapshotLastTerm={}, commitIndex={}",

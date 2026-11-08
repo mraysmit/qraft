@@ -26,6 +26,7 @@ import dev.mars.qraft.server.api.DistributedStateGrpcService;
 import dev.mars.qraft.server.acl.AclRemovalAuthorizer;
 import dev.mars.qraft.server.acl.AclResolver;
 import dev.mars.qraft.server.acl.AclTokenExpiry;
+import dev.mars.qraft.server.http.AuditFileSink;
 import dev.mars.qraft.server.session.SessionTtlExpiry;
 import dev.mars.qraft.server.acl.ManagementTokenInstaller;
 import dev.mars.qraft.server.config.AppConfig;
@@ -110,6 +111,9 @@ public class QraftServerService {
     private Optional<ManagementTokenInstaller> managementTokenInstaller = Optional.empty();
     private Optional<AclTokenExpiry> aclTokenExpiry = Optional.empty();
     private Optional<SessionTtlExpiry> sessionTtlExpiry = Optional.empty();
+    /** This server's events for its current boot (events list, Phase 4). */
+    private volatile dev.mars.qraft.common.events.EventJournal eventJournal;
+    private Optional<AuditFileSink> auditSink = Optional.empty();
     private Optional<ScheduledThreadPoolExecutor> healthExpiryExecutor = Optional.empty();
     private Optional<ShutdownCoordinator> shutdownCoordinator = Optional.empty();
     private volatile Optional<Long> bootstrapTimer = Optional.empty();
@@ -210,6 +214,7 @@ public class QraftServerService {
             QraftStateStore stateMachine = new QraftStateStore();
 
             // Use the builder with storage and snapshot configuration
+            this.eventJournal = dev.mars.qraft.common.events.EventJournal.forBoot(nodeId, Clock.systemUTC());
             RaftNode node = RaftNode.builder()
                     .stateLoop(runtime)
                     .blockingTasks(blockingTasks)
@@ -228,6 +233,8 @@ public class QraftServerService {
                     .snapshotThreshold(config.getSnapshotThreshold())
                     .snapshotCheckInterval(config.getSnapshotCheckIntervalMs())
                     .logHardLimit(config.getLogHardLimit())
+                    // The node's system and domain events (events list, Phases 3 and 4).
+                    .events(eventJournal)
                     .build();
             this.raftNode = Optional.of(node);
             RaftMembershipPolicy effective = node.membershipPolicy();
@@ -282,6 +289,9 @@ public class QraftServerService {
             dev.mars.qraft.raft.StorageStatus storageStatus = new dev.mars.qraft.raft.StorageStatus(
                     Path.of(config.getRaftStoragePath()), Clock.systemUTC());
             healthServer.useStorageStatus(storageStatus);
+            // Audit events of the requests answered under a token, and their file if one is configured.
+            healthServer.useEventJournal(eventJournal);
+            this.auditSink = config.getAuditPath().map(path -> AuditFileSink.start(eventJournal, path));
             io.opentelemetry.api.metrics.Meter storageMeter =
                     io.opentelemetry.api.GlobalOpenTelemetry.getMeter("qraft-raft");
             storageMeter.gaugeBuilder("qraft.raft.storage.bytes").setDescription("Bytes the Raft storage holds")
@@ -437,6 +447,7 @@ public class QraftServerService {
         managementTokenInstaller.ifPresent(ManagementTokenInstaller::close);
         aclTokenExpiry.ifPresent(AclTokenExpiry::close);
         sessionTtlExpiry.ifPresent(SessionTtlExpiry::close);
+        auditSink.ifPresent(AuditFileSink::close);
         healthExpiry.ifPresent(LeaderHealthExpiry::close);
         return healthExpiryExecutor.map(executor -> ExpiryExecutor.stop(executor, HEALTH_EXPIRY_STOP_TIMEOUT))
                 .orElseGet(QraftServerService::nothingToStop);
