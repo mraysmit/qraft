@@ -580,6 +580,28 @@ Phase 3 of the key/value list: default 1,772 with every coverage gate met, end-t
 files clean (logs `logs/local-run-2026-11-08-kv-phase3/`). On the complete list, with `KvEndToEndTest` and
 `DockerKvTest`: default 1,782 with every coverage gate met, end-to-end 18 and Docker 47, with no failures, errors or skips; audit over 1,293 files: 3,479 error lines, all flagged, 2,430 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/local-run-2026-11-08-kv-final/`).
 
+## Local runs for the client library, the endpoint metric, certificate reloading, the kubernetes auth method and write forwarding, 2026-11-08
+
+From the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted, one run for the five lists:
+default 1,918 with every coverage gate met, end-to-end 28 and Docker 51, with no failures, errors or skips; audit over the 269 files the run wrote: 911 error lines, all flagged, 624 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/five-final/`). An earlier run, `logs/trio-final/`, passed the default suite (1,905) and the end-to-end suite (26) on the client library, endpoint metric and certificate reloading work, and its Docker suite failed one class on its log audit: `DockerDurableRestartTest` kills the leader, and the new leader's snapshot to it failed five times with `UNAVAILABLE: Keepalive failed. The connection is likely gone`, a form the `RAFT_SNAPSHOT_TRANSFER_INTERRUPTED` declaration did not cover. The killed container's network went without resetting the connection, so the channel learned of it by its keepalive. The declaration now covers that form, with `DockerLogCaptureTest` seen red at it first.
+
+## Local runs for event query and watch, 2026-11-08
+
+From the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted: default 1,890 with every coverage gate met, end-to-end 24 and Docker 51, with no failures, errors or skips; audit over the 272 files the run wrote: 818 error lines, all flagged, 590 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs
+`logs/evq-final/`).
+
+## Local runs for catalog indexes, 2026-11-08
+
+From the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted: default 1,883 with every coverage gate met, end-to-end 23 and Docker 51, with no failures, errors or skips; audit over the 275 files the run wrote: 949 error lines, all flagged, 636 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs
+`logs/idx-final/`).
+
+## Local runs for authentication and audit, 2026-11-08
+
+From the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted. The default and end-to-end suites
+passed; the Docker suite was ended from outside at 16:57:52, when the runner's window closed and Maven's shutdown hook
+stopped its fork, with no test failed, and was run again alone: default 1,881 with every coverage gate met, end-to-end 23 and Docker 51, with no failures, errors or skips; audit over the 407 files written since the events list closed: 1,288 error lines, all flagged, 753 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/auth-final/` and
+`logs/auth-final-docker/`).
+
 ## Local runs for events, 2026-11-08
 
 From the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted. The first run failed its default

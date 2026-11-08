@@ -103,6 +103,29 @@ public class GrpcRaftServer {
     private final java.util.Optional<RaftTls> tls;
     private volatile Server server;
 
+    /** What answers the writes other servers forward here, or {@code null} until one is given. */
+    private volatile java.util.function.Function<dev.mars.qraft.raft.grpc.ForwardRequest,
+            CompletableFuture<dev.mars.qraft.raft.grpc.ForwardResponse>> forwardTarget;
+
+    /**
+     * Answers the writes other servers forward to this one with {@code target} (write forwarding list, decision 2);
+     * until it is given, a forwarded write is answered 503 {@code leader_unavailable}.
+     */
+    public void useForwardTarget(java.util.function.Function<dev.mars.qraft.raft.grpc.ForwardRequest,
+            CompletableFuture<dev.mars.qraft.raft.grpc.ForwardResponse>> target) {
+        this.forwardTarget = java.util.Objects.requireNonNull(target, "target");
+    }
+
+    /** The answer to a forwarded write this server cannot take: 503 {@code leader_unavailable}, in the API's form. */
+    static dev.mars.qraft.raft.grpc.ForwardResponse cannotTake(String why) {
+        String message = why.replace("\\", "\\\\").replace("\"", "\\\"");
+        return dev.mars.qraft.raft.grpc.ForwardResponse.newBuilder().setStatus(503)
+                .putHeaders("Content-Type", "application/json")
+                .setBody(com.google.protobuf.ByteString.copyFromUtf8("{\"code\":\"leader_unavailable\","
+                        + "\"error\":\"leader_unavailable\",\"message\":\"" + message + "\",\"retryable\":true}"))
+                .build();
+    }
+
     public GrpcRaftServer(BlockingTaskExecutor blockingTasks, int port, RaftNode raftNode) {
         this(blockingTasks, port, raftNode, new BindableService[0]);
     }
@@ -334,6 +357,29 @@ public class GrpcRaftServer {
         public void join(JoinRequest request, StreamObserver<MembershipResponse> responseObserver) {
             answer(membership == null ? null : membership.join(request),
                     responseObserver);
+        }
+
+        @Override
+        public void forward(dev.mars.qraft.raft.grpc.ForwardRequest request,
+                            StreamObserver<dev.mars.qraft.raft.grpc.ForwardResponse> responseObserver) {
+            var target = forwardTarget;
+            CompletableFuture<dev.mars.qraft.raft.grpc.ForwardResponse> answer;
+            try {
+                answer = target == null
+                        ? CompletableFuture.completedFuture(cannotTake(raftNode.getNodeId()
+                                + " does not take forwarded writes"))
+                        : target.apply(request);
+            } catch (RuntimeException failed) {
+                answer = CompletableFuture.failedFuture(failed);
+            }
+            answer.whenComplete(Completions.outcome(
+                    response -> {
+                        responseObserver.onNext(response);
+                        responseObserver.onCompleted();
+                    },
+                    error -> responseObserver.onError(Status.UNAVAILABLE
+                            .withDescription("The forwarded write was not answered").withCause(error)
+                            .asRuntimeException())));
         }
 
         @Override

@@ -44,6 +44,14 @@ class ServerEndpointsTest {
     }
 
     @Test
+    void thePreferredEndpointIsTheFirstSeedUntilAnotherAnswers() {
+        ServerEndpoints endpoints = new ServerEndpoints(List.of(FIRST, SECOND, THIRD));
+        assertEquals(FIRST, endpoints.preferred());
+        endpoints.markSuccessful(THIRD);
+        assertEquals(THIRD, endpoints.preferred());
+    }
+
+    @Test
     void lastSuccessfulEndpointStartsTheNextCycle() {
         ServerEndpoints endpoints = new ServerEndpoints(List.of(FIRST, SECOND, THIRD));
         endpoints.markSuccessful(THIRD);

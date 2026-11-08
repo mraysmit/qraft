@@ -126,6 +126,30 @@ public final class QraftStateStore implements RaftLogApplicator, dev.mars.qraft.
         if (recordingEvents) pendingEvents.add(new dev.mars.qraft.common.events.DomainEvent(tenant, namespace, event));
     }
 
+    /** The event of a key/value write that applied, when it changed something (event query and watch list). */
+    private void kvEvent(dev.mars.qraft.state.kv.KvCommand command, boolean existed) {
+        dev.mars.qraft.state.kv.KvScope scope = switch (command) {
+            case dev.mars.qraft.state.kv.KvCommand.Set set -> set.scope();
+            case dev.mars.qraft.state.kv.KvCommand.Delete delete -> delete.scope();
+            case dev.mars.qraft.state.kv.KvCommand.DeleteTree tree -> tree.scope();
+            case dev.mars.qraft.state.kv.KvCommand.Lock lock -> lock.scope();
+            case dev.mars.qraft.state.kv.KvCommand.Unlock unlock -> unlock.scope();
+        };
+        dev.mars.qraft.common.events.QraftEvent produced = switch (command) {
+            case dev.mars.qraft.state.kv.KvCommand.Set set -> new dev.mars.qraft.state.kv.KvEvents.KeySet(set.key(),
+                    !existed);
+            case dev.mars.qraft.state.kv.KvCommand.Delete delete -> existed
+                    ? new dev.mars.qraft.state.kv.KvEvents.KeyDeleted(delete.key()) : null;
+            case dev.mars.qraft.state.kv.KvCommand.DeleteTree tree -> existed
+                    ? new dev.mars.qraft.state.kv.KvEvents.TreeDeleted(tree.prefix()) : null;
+            case dev.mars.qraft.state.kv.KvCommand.Lock lock ->
+                    new dev.mars.qraft.state.kv.KvEvents.LockAcquired(lock.key(), lock.session());
+            case dev.mars.qraft.state.kv.KvCommand.Unlock unlock -> existed
+                    ? new dev.mars.qraft.state.kv.KvEvents.LockReleased(unlock.key(), unlock.session()) : null;
+        };
+        if (produced != null) event(scope.tenant(), scope.namespace(), produced);
+    }
+
     private void serviceLeft(ServiceInstance instance) {
         event(instance.tenantId(), instance.namespace(), new CatalogEvents.ServiceDeregistered(instance.serviceId(),
                 instance.serviceName(), instance.nodeId()));
@@ -174,6 +198,15 @@ public final class QraftStateStore implements RaftLogApplicator, dev.mars.qraft.
             return new RaftCommandResult.Refused<>("invalid_session", "No session " + lock.session()
                     + " exists to acquire " + lock.key());
         }
+        // Whether the key or tree existed, so a write that changed nothing produces no event (event list, Phase 1).
+        boolean existed = switch (command) {
+            case dev.mars.qraft.state.kv.KvCommand.Set set -> kv.get(set.scope(), set.key()).isPresent();
+            case dev.mars.qraft.state.kv.KvCommand.Delete delete -> kv.get(delete.scope(), delete.key()).isPresent();
+            case dev.mars.qraft.state.kv.KvCommand.DeleteTree tree -> !kv.list(tree.scope(), tree.prefix()).isEmpty();
+            case dev.mars.qraft.state.kv.KvCommand.Lock lock -> false;
+            case dev.mars.qraft.state.kv.KvCommand.Unlock unlock -> kv.get(unlock.scope(), unlock.key())
+                    .map(entry -> unlock.session().equals(entry.session())).orElse(false);
+        };
         boolean applied = switch (command) {
             case dev.mars.qraft.state.kv.KvCommand.Set set ->
                     kv.set(set.scope(), set.key(), set.value(), set.flags(), set.casIndex(), index);
@@ -196,6 +229,7 @@ public final class QraftStateStore implements RaftLogApplicator, dev.mars.qraft.
             case dev.mars.qraft.state.kv.KvCommand.Unlock unlock -> "unlock";
         };
         metrics().kvApply(operation, applied);
+        if (applied) kvEvent(command, existed);
         if (command instanceof dev.mars.qraft.state.kv.KvCommand.Lock) metrics().lockAcquisition(applied);
         return new RaftCommandResult.Success<>(applied);
     }
@@ -212,7 +246,12 @@ public final class QraftStateStore implements RaftLogApplicator, dev.mars.qraft.
                     yield new RaftCommandResult.Refused<>("node_not_found", "No node named " + create.session().node()
                             + " is registered to bind the session to");
                 }
-                yield new RaftCommandResult.Success<>(sessions.create(create.session(), index));
+                boolean created = sessions.create(create.session(), index);
+                if (created) {
+                    event(null, null, new dev.mars.qraft.state.session.SessionEvents.SessionCreated(
+                            create.session().id(), create.session().node()));
+                }
+                yield new RaftCommandResult.Success<>(created);
             }
             case dev.mars.qraft.state.session.SessionCommand.Destroy destroy -> {
                 invalidateSession(destroy.id(), destroy.at(), index, "destroyed");
@@ -230,6 +269,7 @@ public final class QraftStateStore implements RaftLogApplicator, dev.mars.qraft.
             kv.releaseSession(id, session.behavior() == dev.mars.qraft.state.session.SessionBehavior.DELETE, index,
                     session.lockDelay().isZero() ? null : at.plus(session.lockDelay()));
             metrics().sessionInvalidated(reason);
+            event(null, null, new dev.mars.qraft.state.session.SessionEvents.SessionDestroyed(id, reason));
         });
     }
 
@@ -328,7 +368,7 @@ public final class QraftStateStore implements RaftLogApplicator, dev.mars.qraft.
                 }
                 metrics().registration("registered");
                 ServiceInstanceId identity = register.instance().identity();
-                serviceCatalog.register(register.instance());
+                serviceCatalog.register(register.instance(), lastAppliedIndex.get() + 1);
                 event(register.instance().tenantId(), register.instance().namespace(),
                         new CatalogEvents.ServiceRegistered(register.instance().serviceId(),
                                 register.instance().serviceName(), register.instance().nodeId()));
@@ -738,6 +778,11 @@ public final class QraftStateStore implements RaftLogApplicator, dev.mars.qraft.
             return objectMapper.writeValueAsBytes(new Snapshot(Map.copyOf(nodes), Map.copyOf(heartbeatSequences),
                     Map.copyOf(metadata), serviceCatalog.instances(), orderedHealthChecks, orderedDeclarations,
                     acl.snapshot(), kv.snapshot(), sessions.snapshot(), tenancy.snapshot(), auth.snapshot(),
+                    serviceCatalog.indexes().entrySet().stream()
+                            .map(entry -> new ServiceIndexes(entry.getKey(), entry.getValue().createIndex(),
+                                    entry.getValue().modifyIndex()))
+                            .sorted(java.util.Comparator.comparing((ServiceIndexes held) -> held.instance().toString()))
+                            .toList(),
                     lastAppliedIndex.get()));
         } catch (IOException e) {
             throw new IllegalStateException("Failed to serialize server snapshot", e);
@@ -757,6 +802,14 @@ public final class QraftStateStore implements RaftLogApplicator, dev.mars.qraft.
             metadata.clear();
             metadata.putAll(snapshot.metadata());
             serviceCatalog.replaceAll(snapshot.services() == null ? java.util.List.of() : snapshot.services());
+            java.util.Map<ServiceInstanceId, dev.mars.qraft.state.catalog.ServiceCatalogView.Indexes> held =
+                    new java.util.HashMap<>();
+            if (snapshot.serviceIndexes() != null) {
+                snapshot.serviceIndexes().forEach(entry -> held.put(entry.instance(),
+                        new dev.mars.qraft.state.catalog.ServiceCatalogView.Indexes(entry.createIndex(),
+                                entry.modifyIndex())));
+            }
+            serviceCatalog.restoreIndexes(held);
             healthChecks.clear();
             if (snapshot.healthChecks() != null) {
                 snapshot.healthChecks().forEach(state -> healthChecks.put(state.checkId(), state));
@@ -924,7 +977,12 @@ public final class QraftStateStore implements RaftLogApplicator, dev.mars.qraft.
                             java.util.List<dev.mars.qraft.state.session.Session> sessions,
                             dev.mars.qraft.state.tenancy.TenancyState.Snapshot tenancy,
                             dev.mars.qraft.state.acl.AuthState.Snapshot auth,
+                            java.util.List<ServiceIndexes> serviceIndexes,
                             long lastAppliedIndex) {
+    }
+
+    /** An instance's indexes in a snapshot (catalog indexes list); absent from snapshots written earlier. */
+    private record ServiceIndexes(ServiceInstanceId instance, long createIndex, long modifyIndex) {
     }
 
     /** Check identifiers a registration declared for one instance; absent from snapshots written earlier. */

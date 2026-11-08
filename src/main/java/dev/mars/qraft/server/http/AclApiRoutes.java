@@ -107,7 +107,8 @@ final class AclApiRoutes {
     private static final Set<String> CONFLICTS = Set.of(AclRefusal.ACCESSOR_IN_USE.code(),
             AclRefusal.SECRET_IN_USE.code(), AclRefusal.ID_IN_USE.code(), AclRefusal.NAME_IN_USE.code(),
             AclRefusal.ACL_LOCKOUT.code(), AclRefusal.ACL_BOOTSTRAPPED.code(), AclRefusal.INVALID_RESET_INDEX.code());
-    private static final Pattern GO_DURATION = Pattern.compile("(\\d+)(h|m|s|ms)");
+    // ms is tried before m, or 1500ms would be read as 1500m and a stray s.
+    private static final Pattern GO_DURATION = Pattern.compile("(\\d+)(ms|h|m|s)");
 
     /** Who may call a route: the presenting token alone, or a token holding {@code acl:read} or {@code acl:write}. */
     private enum Grant { ANY, READ, WRITE }

@@ -99,6 +99,12 @@ public final class QraftClient implements AutoCloseable {
     private final LocalDefinitions definitions;
     private final HttpClient checkHttpClient;
     private final HttpClient serverHttpClient;
+    /** How often {@code client.tls}'s files are checked for a change (certificate reloading list, decision 2). */
+    private volatile java.time.Duration tlsReloadInterval = dev.mars.qraft.common.tls.TlsReloader.INTERVAL;
+    /** {@code client.tls}'s material, which the calls to the servers use, when the document has one. */
+    private final java.util.Optional<TlsMaterial> tlsMaterial;
+    /** Reloads that material when its files change, from start until shutdown. */
+    private volatile dev.mars.qraft.common.tls.TlsReloader tlsReloader;
     private final LocalHealthChecks localChecks;
     private final HealthPublisher healthPublisher;
     private final AtomicBoolean running = new AtomicBoolean();
@@ -167,7 +173,8 @@ public final class QraftClient implements AutoCloseable {
         this.checkHttpClient = HttpClient.newHttpClient();
         // An https server URL is called with client.tls's CA and certificate when the document has them
         // (transport security list, Phase 3).
-        this.serverHttpClient = config.getTls().map(TlsMaterial::load)
+        this.tlsMaterial = config.getTls().map(TlsMaterial::load);
+        this.serverHttpClient = tlsMaterial
                 .map(material -> HttpClient.newBuilder().sslContext(material.clientContext())
                         .sslParameters(material.clientParameters(true)).build())
                 .orElseGet(HttpClient::newHttpClient);
@@ -204,7 +211,7 @@ public final class QraftClient implements AutoCloseable {
         new LocalDiscoveryRoutes(serverClient::forwardRead, acl).install(localApi);
         // The client's metrics, at /v1/client/metrics (observability list, Phase 2).
         dev.mars.qraft.client.service.ClientMetrics metrics = new dev.mars.qraft.client.service.ClientMetrics(
-                localApi::isReady, serviceReconciler::lastSuccessfulContact, clock);
+                localApi::isReady, serviceReconciler::lastSuccessfulContact, serverClient::preferredServer, clock);
         serviceReconciler.onPass(metrics::pass);
         metrics.install(localApi, acl);
         new dev.mars.qraft.client.service.LocalKvRoutes(serverClient::forward, acl, config.getNodeName())
@@ -255,11 +262,22 @@ public final class QraftClient implements AutoCloseable {
         }
     }
 
+    /**
+     * Checks {@code client.tls}'s files every {@code interval} rather than every 30 seconds; given before
+     * {@link #start()}, for tests.
+     */
+    public void useTlsReloadInterval(java.time.Duration interval) {
+        this.tlsReloadInterval = java.util.Objects.requireNonNull(interval, "interval");
+    }
+
     public CompletableFuture<Boolean> start() {
         if (!running.compareAndSet(false, true)) {
             return CompletableFuture.completedFuture(registrationClient.isRegistered());
         }
         localApi.start();
+        // The calls to the servers take up a renewed certificate or CA (certificate reloading list, decision 2).
+        tlsMaterial.ifPresent(material -> tlsReloader =
+                dev.mars.qraft.common.tls.TlsReloader.start(material, tlsReloadInterval));
         // A node is a name, an address, and where it is; the version of the client's build travels in its metadata.
         Node client = Node.of(config.getNodeName(), config.getAddress(), config.getDatacenter(), config.getRegion(),
                 java.util.Map.of(Node.VERSION_METADATA_KEY, QraftVersion.current()));
@@ -405,6 +423,8 @@ public final class QraftClient implements AutoCloseable {
     }
 
     private void finishShutdown() {
+        dev.mars.qraft.common.tls.TlsReloader reloader = tlsReloader;
+        if (reloader != null) reloader.close();
         checkScheduler.shutdownNow();
         checkHttpClient.shutdownNow();
         localApi.shutdown();

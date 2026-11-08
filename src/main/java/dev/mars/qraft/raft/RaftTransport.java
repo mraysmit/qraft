@@ -87,6 +87,13 @@ public interface RaftTransport {
                 getClass().getSimpleName() + " cannot forward a join to " + targetId));
     }
 
+    /** Sends a write this server received to {@code targetId}, the leader as it knows it (write forwarding list). */
+    default CompletableFuture<dev.mars.qraft.raft.grpc.ForwardResponse> forward(String targetId,
+            dev.mars.qraft.raft.grpc.ForwardRequest request) {
+        return CompletableFuture.failedFuture(new UnsupportedOperationException(
+                getClass().getSimpleName() + " cannot forward a write to " + targetId));
+    }
+
     /** Forwards an operator's removal of a server to {@code targetId}, the leader as this server knows it. */
     default CompletableFuture<MembershipResponse> removeServer(String targetId, RemoveServerRequest request) {
         return CompletableFuture.failedFuture(new UnsupportedOperationException(

@@ -62,7 +62,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -99,6 +101,15 @@ public final class HttpApiServer implements AutoCloseable {
     private final int port;
     private final AdminUiConfig adminUi;
     private final HttpServer server;
+    /** Every route's context by the path it was registered under, which a forwarded write is answered on. */
+    private final Map<String, com.sun.net.httpserver.HttpContext> contexts =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    /** Sends a write to the leader, by its ID, when this server follows (write forwarding list); null until given. */
+    private volatile java.util.function.BiFunction<String, dev.mars.qraft.raft.grpc.ForwardRequest,
+            CompletableFuture<dev.mars.qraft.raft.grpc.ForwardResponse>> writeForwarder;
+    static final String FORWARDED_BY = "X-Qraft-Forwarded-By";
+    static final String FORWARDED_TO = "X-Qraft-Forwarded-To";
+    private static final Set<String> WRITE_METHODS = Set.of("PUT", "POST", "DELETE", "PATCH");
     private final ExecutorService executor;
     final ObjectMapper objectMapper = new ObjectMapper()
             .findAndRegisterModules()
@@ -117,13 +128,43 @@ public final class HttpApiServer implements AutoCloseable {
     private volatile io.opentelemetry.api.metrics.Meter meter;
     private volatile dev.mars.qraft.raft.StorageStatus storageStatus;
     private volatile dev.mars.qraft.common.events.EventJournal eventJournal;
+    private EventRoutes eventRoutes;
     private volatile RequestMetrics requestMetrics;
     /** The leader's session timers, which renewals reset (sessions list, Phase 3). */
     private volatile dev.mars.qraft.server.session.SessionTtlExpiry sessionTtl;
 
+    /**
+     * {@code instance} as a read answers it: its own fields, with the entry that registered it and the one that last
+     * changed it as {@code createIndex} and {@code modifyIndex} (catalog indexes list, decision 2).
+     */
+    Map<String, Object> instanceView(ServiceInstance instance) {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> view = objectMapper.convertValue(instance, LinkedHashMap.class);
+        dev.mars.qraft.state.catalog.ServiceCatalogView.Indexes indexes =
+                stateStore.getServiceCatalog().indexesOf(instance.identity());
+        view.put("createIndex", indexes.createIndex());
+        view.put("modifyIndex", indexes.modifyIndex());
+        return view;
+    }
+
     /** Reports the Raft storage's size and its snapshot's age in {@code /raft/status} (observability list, Phase 3). */
     public void useStorageStatus(dev.mars.qraft.raft.StorageStatus status) {
         this.storageStatus = Objects.requireNonNull(status, "status");
+    }
+
+    /** This server's event journal, or {@code null} before {@link #useEventJournal} gives it. */
+    dev.mars.qraft.common.events.EventJournal eventJournal() {
+        return eventJournal;
+    }
+
+    /** How many event watches are open. */
+    int openEventWatches() {
+        return eventRoutes.openWatches();
+    }
+
+    /** Sends a heartbeat on each event watch after {@code interval} without an event (event query and watch list). */
+    void useEventWatchHeartbeat(java.time.Duration interval) {
+        eventRoutes.heartbeat(interval);
     }
 
     /** Records an audit event of every request answered under a token in {@code journal} (authentication list). */
@@ -258,36 +299,38 @@ public final class HttpApiServer implements AutoCloseable {
         this.server = tls.isPresent() ? httpsServer(port, tls.get()) : HttpServer.create(new InetSocketAddress(port), 0);
         this.executor = Executors.newVirtualThreadPerTaskExecutor();
         server.setExecutor(executor);
-        server.createContext("/health/live", requestAware(this::liveness));
-        server.createContext("/health/ready", requestAware(this::readiness));
+        context("/health/live", requestAware(this::liveness));
+        context("/health/ready", requestAware(this::readiness));
         if (ui.enabled()) {
-            server.createContext(ui.path(), requestAware(new AdminUiHandler(ui.path(),
+            context(ui.path(), requestAware(new AdminUiHandler(ui.path(),
                     Objects.requireNonNull(assets, "assets are required for an enabled interface"))));
         }
-        server.createContext("/raft/status", requestAware(this::raftStatus));
-        server.createContext("/v1/operator/raft/configuration", requestAware(this::raftConfiguration));
-        server.createContext("/v1/operator/autopilot/health", requestAware(this::autopilotHealth));
-        server.createContext("/v1/operator/raft/peer", requestAware(this::removeRaftPeer));
-        server.createContext("/v1/catalog/register", requestAware(this::registerInCatalog));
-        server.createContext("/v1/catalog/deregister", requestAware(this::deregisterFromCatalog));
-        server.createContext("/v1/catalog/node/heartbeat", requestAware(this::heartbeatNode));
-        server.createContext("/v1/catalog/nodes", requestAware(this::listNodes));
-        server.createContext("/v1/catalog/check/observe", requestAware(this::observeHealth));
-        server.createContext("/v1/catalog/node-services", requestAware(this::listNodeServices));
-        server.createContext("/v1/catalog/services", requestAware(this::listServices));
-        server.createContext("/v1/catalog/service", requestAware(this::listServiceInstances));
-        server.createContext("/v1/health/service", requestAware(this::listServiceHealth));
-        server.createContext("/v1/acl/bootstrap", requestAware(this::bootstrapAcl));
+        context("/raft/status", requestAware(this::raftStatus));
+        context("/v1/operator/raft/configuration", requestAware(this::raftConfiguration));
+        context("/v1/operator/autopilot/health", requestAware(this::autopilotHealth));
+        context("/v1/operator/raft/peer", requestAware(this::removeRaftPeer));
+        context("/v1/catalog/register", requestAware(this::registerInCatalog));
+        context("/v1/catalog/deregister", requestAware(this::deregisterFromCatalog));
+        context("/v1/catalog/node/heartbeat", requestAware(this::heartbeatNode));
+        context("/v1/catalog/nodes", requestAware(this::listNodes));
+        context("/v1/catalog/check/observe", requestAware(this::observeHealth));
+        context("/v1/catalog/node-services", requestAware(this::listNodeServices));
+        context("/v1/catalog/services", requestAware(this::listServices));
+        context("/v1/catalog/service", requestAware(this::listServiceInstances));
+        context("/v1/health/service", requestAware(this::listServiceHealth));
+        context("/v1/acl/bootstrap", requestAware(this::bootstrapAcl));
         KvApiRoutes kvApi = new KvApiRoutes(this);
-        server.createContext(KvApiRoutes.CONTEXT, requestAware(kvApi::handle));
+        context(KvApiRoutes.CONTEXT, requestAware(kvApi::handle));
         SessionApiRoutes sessionApi = new SessionApiRoutes(this);
-        server.createContext(SessionApiRoutes.CONTEXT, requestAware(sessionApi::handle));
+        context(SessionApiRoutes.CONTEXT, requestAware(sessionApi::handle));
+        eventRoutes = new EventRoutes(this);
+        context(EventRoutes.CONTEXT, requestAware(eventRoutes::handle));
         AuthApiRoutes authApi = new AuthApiRoutes(this);
-        AuthApiRoutes.CONTEXTS.forEach(context -> server.createContext(context, requestAware(authApi::handle)));
+        AuthApiRoutes.CONTEXTS.forEach(context -> context(context, requestAware(authApi::handle)));
         TenancyApiRoutes tenancyApi = new TenancyApiRoutes(this);
-        TenancyApiRoutes.CONTEXTS.forEach(context -> server.createContext(context, requestAware(tenancyApi::handle)));
+        TenancyApiRoutes.CONTEXTS.forEach(context -> context(context, requestAware(tenancyApi::handle)));
         AclApiRoutes aclApi = new AclApiRoutes(this);
-        AclApiRoutes.CONTEXTS.forEach(context -> server.createContext(context, requestAware(aclApi::handle)));
+        AclApiRoutes.CONTEXTS.forEach(context -> context(context, requestAware(aclApi::handle)));
     }
 
     /**
@@ -313,6 +356,7 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     public CompletableFuture<Void> stop() {
+        eventRoutes.closeWatches();
         server.stop(0);
         executor.shutdown();
         return CompletableFuture.completedFuture(null);
@@ -340,6 +384,7 @@ public final class HttpApiServer implements AutoCloseable {
     /** The address and port this server listens on. */
     public java.net.InetSocketAddress address() { return server.getAddress(); }
     @Override public void close() {
+        eventRoutes.closeWatches();
         server.stop(0);
         executor.shutdown();
     }
@@ -435,6 +480,7 @@ public final class HttpApiServer implements AutoCloseable {
         status.put("fenced", current.fenced());
         status.put("fenceReason", current.fenceReason());
         status.put("removed", current.removed());
+        if (stateStore != null) setAppliedIndex(exchange);
         dev.mars.qraft.raft.StorageStatus storage = storageStatus;
         if (storage != null) {
             status.put("storageBytes", storage.bytes());
@@ -1021,7 +1067,7 @@ public final class HttpApiServer implements AutoCloseable {
         List<ServiceInstance> readable = principal.allows(nodeRead(node))
                 ? all.stream().filter(instance -> principal.allows(serviceRead(instance))).toList() : List.of();
         markFiltered(exchange, all, readable);
-        respondJson(exchange, 200, readable);
+        respondJson(exchange, 200, readable.stream().map(this::instanceView).toList());
     }
 
     /** A service's instances in the read's scope, leaving out those the token may not read. */
@@ -1043,7 +1089,7 @@ public final class HttpApiServer implements AutoCloseable {
         List<ServiceInstance> all = stateStore.getServiceCatalog().instances(scope.service(serviceName));
         List<ServiceInstance> readable = readableInstances(principal, all);
         markFiltered(exchange, all, readable);
-        respondJson(exchange, 200, readable);
+        respondJson(exchange, 200, readable.stream().map(this::instanceView).toList());
     }
 
     /**
@@ -1150,7 +1196,7 @@ public final class HttpApiServer implements AutoCloseable {
         List<ServiceInstance> readable = readableInstances(principal, all);
         markFiltered(exchange, all, readable);
         List<HealthServiceEntry> entries = readable.stream()
-                .map(instance -> HealthServiceEntry.from(instance,
+                .map(instance -> HealthServiceEntry.from(instance, instanceView(instance),
                         checks.getOrDefault(instance.identity(), List.of()),
                         stateStore.findNode(instance.nodeId()).map(Node::status).orElse(null)))
                 .filter(entry -> !passingOnly || entry.passing())
@@ -1453,6 +1499,7 @@ public final class HttpApiServer implements AutoCloseable {
         HttpHandler handled = api.handle(exchange -> {
             LOG.debug("HTTP request: method={}, path={}", exchange.getRequestMethod(),
                     exchange.getRequestURI().getPath());
+            if (forwarded(exchange)) return;
             delegate.handle(exchange);
         });
         // Counted by the prefix the route was registered under, never the path (observability list, decision 3). The
@@ -1471,6 +1518,145 @@ public final class HttpApiServer implements AutoCloseable {
                 if (accessor != null) audit(exchange, accessor, route, method);
             }
         };
+    }
+
+    /** Registers {@code handler} at {@code path}, remembering the context for the writes forwarded here. */
+    private com.sun.net.httpserver.HttpContext context(String path, HttpHandler handler) {
+        com.sun.net.httpserver.HttpContext created = server.createContext(path, handler);
+        contexts.put(path, created);
+        return created;
+    }
+
+    /**
+     * Sends this server's writes to the leader with {@code forwarder} while it follows (write forwarding list,
+     * decision 1); until it is given, a follower answers a write 503 {@code leader_unavailable} with the leader hint.
+     */
+    public void useWriteForwarding(java.util.function.BiFunction<String, dev.mars.qraft.raft.grpc.ForwardRequest,
+            CompletableFuture<dev.mars.qraft.raft.grpc.ForwardResponse>> forwarder) {
+        this.writeForwarder = Objects.requireNonNull(forwarder, "forwarder");
+    }
+
+    /**
+     * Forwards {@code exchange} to the leader and answers with the leader's answer, when it is a write, this server
+     * follows, and it knows the leader (decisions 1 and 3); true when it answered. A write already forwarded once is
+     * refused here, since it reached a server that does not lead.
+     */
+    private boolean forwarded(HttpExchange exchange) throws IOException {
+        var forwarder = writeForwarder;
+        // A draining server takes no new work, so its route answers 503 draining rather than forwarding the write.
+        if (forwarder == null || raftNode == null || draining.get()) return false;
+        String method = exchange.getRequestMethod().toUpperCase(java.util.Locale.ROOT);
+        if (!WRITE_METHODS.contains(method) || raftNode.isLeader()) return false;
+        if (exchange.getRequestHeaders().containsKey(FORWARDED_BY)) {
+            respondError(exchange, 503, "leader_unavailable", "A write forwarded by "
+                    + exchange.getRequestHeaders().getFirst(FORWARDED_BY) + " reached " + raftNode.getNodeId()
+                    + ", which does not lead", true);
+            return true;
+        }
+        String leader = raftNode.getLeaderId();
+        if (leader == null || leader.isBlank() || leader.equals(raftNode.getNodeId())) return false;
+        String raw = exchange.getRequestURI().getRawPath();
+        String query = exchange.getRequestURI().getRawQuery();
+        dev.mars.qraft.raft.grpc.ForwardRequest.Builder request = dev.mars.qraft.raft.grpc.ForwardRequest.newBuilder()
+                .setMethod(method).setPathAndQuery(query == null ? raw : raw + "?" + query)
+                .setBody(com.google.protobuf.ByteString.copyFrom(exchange.getRequestBody().readAllBytes()))
+                .setFrom(raftNode.getNodeId());
+        exchange.getRequestHeaders().forEach((name, values) -> {
+            if (!values.isEmpty() && !ForwardedExchange.HOP_BY_HOP.contains(name.toLowerCase(java.util.Locale.ROOT))) {
+                request.putHeaders(name, values.getFirst());
+            }
+        });
+        String requestId = exchange.getResponseHeaders().getFirst(JsonApi.REQUEST_ID_HEADER);
+        if (requestId != null) request.putHeaders(JsonApi.REQUEST_ID_HEADER, requestId);
+        request.putHeaders(FORWARDED_BY, raftNode.getNodeId());
+        dev.mars.qraft.raft.grpc.ForwardResponse answer;
+        try {
+            answer = forwarder.apply(leader, request.build()).get(raftTimeout.toMillis() * 2, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            exchange.getResponseHeaders().set("X-Qraft-Leader-Id", leader);
+            respondError(exchange, 503, "outcome_unknown", "The write sent to the leader " + leader
+                    + " was interrupted, and may have been applied", true, Map.of("leaderId", leader));
+            return true;
+        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException failed) {
+            Throwable cause = failed.getCause() == null ? failed : failed.getCause();
+            exchange.getResponseHeaders().set("X-Qraft-Leader-Id", leader);
+            if (cause instanceof dev.mars.qraft.raft.ForwardNotSentException) {
+                // Never sent, so not applied: the caller may send it to another server (decision 3).
+                LOG.info("A write was not forwarded to the leader {}: {}", leader, safeMessage(cause));
+                respondError(exchange, 503, "leader_unavailable", "The leader " + leader + " could not be reached: "
+                        + safeMessage(cause), true, Map.of("leaderId", leader));
+            } else {
+                // Sent, and perhaps applied, as a commit that times out on the leader may be.
+                LOG.info("A write forwarded to the leader {} was not answered: {}", leader, safeMessage(cause));
+                respondError(exchange, 503, "outcome_unknown", "The write sent to the leader " + leader
+                        + " was not answered, and may have been applied: " + safeMessage(cause), true,
+                        Map.of("leaderId", leader));
+            }
+            return true;
+        }
+        answer.getHeadersMap().forEach((name, value) -> {
+            String lower = name.toLowerCase(java.util.Locale.ROOT);
+            if (!ForwardedExchange.HOP_BY_HOP.contains(lower)) exchange.getResponseHeaders().set(name, value);
+        });
+        exchange.getResponseHeaders().set(FORWARDED_TO, leader);
+        // Read-your-writes: this server answers once it has applied what the leader had when it answered, so a caller
+        // that reads from it next, as a client keeps to the server that answered it, sees its own write.
+        String index = null;
+        for (var header : answer.getHeadersMap().entrySet()) {
+            // Header names are compared as HTTP compares them, whatever case the leader's server wrote them in.
+            if (header.getKey().equalsIgnoreCase("X-Qraft-Index")) index = header.getValue();
+        }
+        if (answer.getStatus() < 300 && index != null) {
+            try {
+                // The wait answers once the applied index passes the one given, so one less waits for this one.
+                stateStore.awaitAppliedIndex(Long.parseLong(index) - 1, raftTimeout);
+            } catch (NumberFormatException notIndex) {
+                LOG.debug("The leader answered a forwarded write with an index that is not one: {}", index);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        byte[] body = answer.getBody().toByteArray();
+        exchange.sendResponseHeaders(answer.getStatus(), body.length == 0 ? -1 : body.length);
+        try (OutputStream output = exchange.getResponseBody()) {
+            output.write(body);
+        }
+        return true;
+    }
+
+    /**
+     * Answers the writes other servers forward here on this server's own routes, as if they had come to its listener
+     * (write forwarding list, decision 2); for the Raft port's {@code Forward} call.
+     */
+    public java.util.function.Function<dev.mars.qraft.raft.grpc.ForwardRequest,
+            CompletableFuture<dev.mars.qraft.raft.grpc.ForwardResponse>> forwardTarget() {
+        return request -> CompletableFuture.supplyAsync(() -> answerForwarded(request), executor);
+    }
+
+    private dev.mars.qraft.raft.grpc.ForwardResponse answerForwarded(dev.mars.qraft.raft.grpc.ForwardRequest request) {
+        String path = URI.create(request.getPathAndQuery()).getPath();
+        com.sun.net.httpserver.HttpContext context = null;
+        for (var entry : contexts.entrySet()) {
+            if (path.startsWith(entry.getKey())
+                    && (context == null || entry.getKey().length() > context.getPath().length())) {
+                context = entry.getValue();
+            }
+        }
+        if (context == null) {
+            return dev.mars.qraft.raft.grpc.ForwardResponse.newBuilder().setStatus(404).build();
+        }
+        ForwardedExchange exchange = new ForwardedExchange(request, context, server.getAddress());
+        try {
+            new com.sun.net.httpserver.Filter.Chain(context.getFilters(), context.getHandler()).doFilter(exchange);
+        } catch (IOException failed) {
+            throw new java.io.UncheckedIOException(failed);
+        }
+        // What this server had applied when it answered, for the forwarding server to wait for before it answers.
+        if (exchange.getResponseHeaders().getFirst("X-Qraft-Index") == null) {
+            exchange.getResponseHeaders().set("X-Qraft-Index", Long.toString(stateStore.getLastAppliedIndex()));
+        }
+        return exchange.response();
     }
 
     void respondError(HttpExchange exchange, int status, String code, String message,

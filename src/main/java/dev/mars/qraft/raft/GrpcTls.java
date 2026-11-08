@@ -26,8 +26,6 @@ import io.netty.handler.ssl.SslProvider;
 
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLException;
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509ExtendedTrustManager;
 import javax.net.ssl.X509TrustManager;
 import java.net.Socket;
@@ -49,11 +47,11 @@ public final class GrpcTls {
     public static SslContext serverContext(ServerTls tls) {
         TlsMaterial material = tls.material();
         try {
-            SslContextBuilder builder = SslContextBuilder.forServer(material.keyManagers().orElseThrow(
+            SslContextBuilder builder = SslContextBuilder.forServer(material.keyManager().orElseThrow(
                             () -> new IllegalStateException(material.settings().location()
                                     + ".certFile and .keyFile are required to serve TLS")))
                     .sslProvider(SslProvider.JDK)
-                    .trustManager(material.trustManagers())
+                    .trustManager(material.trustManager())
                     .protocols(material.settings().protocols())
                     .clientAuth(tls.requireClientCertificate() ? ClientAuth.REQUIRE : ClientAuth.NONE);
             return GrpcSslContexts.configure(builder, SslProvider.JDK).build();
@@ -72,25 +70,18 @@ public final class GrpcTls {
         try {
             SslContextBuilder builder = GrpcSslContexts.configure(SslContextBuilder.forClient(), SslProvider.JDK)
                     .protocols(material.settings().protocols())
-                    .keyManager(material.keyManagers().orElseThrow(() -> new IllegalStateException(
+                    .keyManager(material.keyManager().orElseThrow(() -> new IllegalStateException(
                             material.settings().location() + ".certFile and .keyFile are required for the Raft port")));
             if (tls.verifyServerHostname()) {
-                builder.trustManager(material.trustManagers());
+                builder.trustManager(material.trustManager());
             } else {
-                builder.trustManager(new AnyHostTrustManager(x509(material.trustManagers())));
+                builder.trustManager(new AnyHostTrustManager(material.trustManager()));
             }
             return builder.build();
         } catch (SSLException e) {
             throw new IllegalStateException(material.settings().location() + " cannot call the Raft port over TLS: "
                     + e.getMessage(), e);
         }
-    }
-
-    private static X509TrustManager x509(TrustManagerFactory factory) {
-        for (TrustManager manager : factory.getTrustManagers()) {
-            if (manager instanceof X509TrustManager x509) return x509;
-        }
-        throw new IllegalStateException("no X.509 trust manager");
     }
 
     /**
@@ -148,9 +139,9 @@ public final class GrpcTls {
     public static SslContext clientContext(TlsMaterial material) {
         try {
             SslContextBuilder builder = GrpcSslContexts.configure(SslContextBuilder.forClient(), SslProvider.JDK)
-                    .trustManager(material.trustManagers())
+                    .trustManager(material.trustManager())
                     .protocols(material.settings().protocols());
-            material.keyManagers().ifPresent(builder::keyManager);
+            material.keyManager().ifPresent(builder::keyManager);
             return builder.build();
         } catch (SSLException e) {
             throw new IllegalStateException(material.settings().location() + " cannot call gRPC over TLS: "

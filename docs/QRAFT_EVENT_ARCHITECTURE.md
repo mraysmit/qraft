@@ -346,6 +346,10 @@ GET /v1/system/events?after=<cursor>&limit=<count>
 GET /v1/system/events/stream?after=<cursor>
 ```
 
+They were built on 2026-11-08 as `GET /v1/operator/events` and
+`GET /v1/operator/events/watch`, under `operator:read`, with the category and type
+filters (section 17).
+
 These use the `/v1/` prefix shared by the catalog and other target APIs. The
 server's older `/api/v1/` routes were removed on 2026-10-09; the node routes
 are at `/v1/catalog/` now.
@@ -546,5 +550,28 @@ Phases 1 to 4 were built on 2026-11-08 by
   and removed; services registered and deregistered; health changed. Each carries
   its entry's term and committed index, the same on every replica.
 
-There is no network interface yet: the bounded HTTP query and the live watch are
-phases 6 and 7, and key/value events, durable sinks and audit phases 5 and 8.
+Phases 5 to 7 were built on 2026-11-08 by
+[`task-list-event-query-and-watch-2026-11-08.md`](archive/task-list-event-query-and-watch-2026-11-08.md):
+
+- **Key/value, lock and session events** from `QraftStateStore`: `key.set` (with
+  whether the key was created), `key.deleted`, `key.tree_deleted`, `lock.acquired`,
+  `lock.released`, `session.created` and `session.destroyed` (with its reason). Each
+  carries the key, never the value, and a write that changed nothing produces none.
+  The model is smaller than section 7's: the indexes are read from the store, not
+  carried by the event, and there is no event for a refused compare-and-set.
+- **The query**, `GET /v1/operator/events`: the server's events after `after`
+  (`<boot>:<sequence>`), at most `limit` (100 by default, 1,000 at most), of a
+  `category` and a `type`; it answers the events, the cursor to ask from next and the
+  page's status (`complete`, `more`, `history_gap`, `other_boot`).
+- **The watch**, `GET /v1/operator/events/watch`: server-sent events with the same
+  cursor and filters, an opening comment, each event with its cursor as the `id`, a
+  comment as a heartbeat every 15 seconds without an event, and a last `end` event
+  with its `reason` (`overflow`, `history_gap`, `other_boot`, `failed` or
+  `server_stopping`) and `resumeAfter`. A client that leaves has its subscription
+  ended at the next write.
+- **One server's events:** each server answers its own journal; the same replicated
+  fact carries the same `replicatedId` on every server.
+
+The audit file of phase 8 came with the authentication list
+([`task-list-authentication-and-audit-2026-11-08.md`](archive/task-list-authentication-and-audit-2026-11-08.md));
+other durable sinks are not built.

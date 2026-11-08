@@ -20,15 +20,15 @@ import java.time.Duration;
 import java.util.Objects;
 
 /**
- * An auth method (authentication list, Phase 1), as Consul's: its name, its type, which is {@code jwt} alone
- * (decision 1), the longest a login token it mints lives (decision 3), its configuration, and the Raft indexes that
+ * An auth method (authentication list, Phase 1), as Consul's: its name, its type, {@code jwt} or, since the Kubernetes
+ * auth method list, {@code kubernetes}, with the configuration of that type, the longest a login token it mints lives (decision 3), its configuration, and the Raft indexes that
  * created and last changed it.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-08
  * @version 1.0
  */
-public record AuthMethod(String name, String type, String description, Duration maxTokenTtl, JwtConfig config,
+public record AuthMethod(String name, String type, String description, Duration maxTokenTtl, AuthMethodConfig config,
                          long createIndex, long modifyIndex) {
     /** A login token's life when the method names none. */
     public static final Duration DEFAULT_MAX_TOKEN_TTL = Duration.ofHours(1);

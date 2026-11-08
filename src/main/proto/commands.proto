@@ -350,12 +350,21 @@ message JwtConfigProto {
   int64 clock_skew_leeway_ms = 8;
 }
 
+// A kubernetes auth method's configuration (Kubernetes auth method list, decision 2).
+message KubernetesConfigProto {
+  string host = 1;
+  string ca_cert_pem = 2;
+  string service_account_jwt = 3;
+}
+
 message AuthMethodProto {
   string name = 1;
   string type = 2;
   string description = 3;
   int64 max_token_ttl_ms = 4;
+  // A jwt method's configuration; absent for a method of another type.
   JwtConfigProto config = 5;
+  KubernetesConfigProto kubernetes_config = 6;
 }
 
 message BindingRuleProto {

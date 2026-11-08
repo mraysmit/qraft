@@ -418,6 +418,64 @@ public class GrpcRaftTransport implements RaftTransport {
         }
     }
 
+    /** How long a forwarded write may take, the leader's own wait for a commit included. */
+    static final int FORWARD_TIMEOUT_SECONDS = 30;
+    /** How long a forward waits for its connection to the leader before it is given up as not sent. */
+    static final java.time.Duration FORWARD_CONNECT_WAIT = java.time.Duration.ofSeconds(2);
+
+    @Override
+    public CompletableFuture<dev.mars.qraft.raft.grpc.ForwardResponse> forward(String targetId,
+            dev.mars.qraft.raft.grpc.ForwardRequest request) {
+        if (stopped) {
+            return CompletableFuture.failedFuture(new ForwardNotSentException("Transport for " + selfId + " is stopped"));
+        }
+        RaftServiceGrpc.RaftServiceFutureStub stub;
+        try {
+            requireKnownTarget(targetId);
+            stub = getStub(targetId);
+        } catch (IllegalArgumentException unknown) {
+            return CompletableFuture.failedFuture(new ForwardNotSentException(unknown.getMessage()));
+        }
+        ManagedChannel channel = channels.get(targetId);
+        // The write is sent only on a connection that is ready, so a forward that fails before it is sent is known not
+        // to have been applied, and its caller may try another server (write forwarding list).
+        return CompletableFuture.supplyAsync(() -> awaitReady(channel, FORWARD_CONNECT_WAIT),
+                        task -> Thread.ofVirtual().name("qraft-forward-" + targetId).start(task))
+                .thenCompose(ready -> ready
+                        ? toFuture(stub.withDeadlineAfter(FORWARD_TIMEOUT_SECONDS, TimeUnit.SECONDS).forward(request))
+                        : CompletableFuture.failedFuture(new ForwardNotSentException("No connection to " + targetId
+                                + " could be made within " + FORWARD_CONNECT_WAIT.toMillis() + " ms")));
+    }
+
+    /**
+     * Whether {@code channel} becomes ready within {@code wait}. A follower seldom calls its leader, so its channel may
+     * still be waiting out a reconnect backoff from before the leader listened: the wait is cut short first. A channel
+     * that tries to connect and fails is not ready, so a stopped leader is found out at once.
+     */
+    private static boolean awaitReady(ManagedChannel channel, java.time.Duration wait) {
+        if (channel == null) return false;
+        channel.resetConnectBackoff();
+        long deadline = System.nanoTime() + wait.toNanos();
+        boolean tried = false;
+        while (true) {
+            ConnectivityState state = channel.getState(true);
+            if (state == ConnectivityState.READY) return true;
+            if (state == ConnectivityState.SHUTDOWN) return false;
+            if (state == ConnectivityState.CONNECTING) tried = true;
+            else if (state == ConnectivityState.TRANSIENT_FAILURE && tried) return false;
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0) return false;
+            java.util.concurrent.CountDownLatch changed = new java.util.concurrent.CountDownLatch(1);
+            channel.notifyWhenStateChanged(state, changed::countDown);
+            try {
+                changed.await(remaining, TimeUnit.NANOSECONDS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+    }
+
     @Override
     public CompletableFuture<MembershipResponse> removeServer(String targetId, RemoveServerRequest request) {
         if (stopped) {

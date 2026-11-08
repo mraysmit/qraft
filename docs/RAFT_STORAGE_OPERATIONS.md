@@ -590,6 +590,71 @@ holds tokens, policies and roles.
   and `client.acl` with the servers' default policy, and change the security profile
   to `production` last.
 
+## Login and audit
+
+A workload that holds a JWT from an identity provider can exchange it for a Qraft
+token, as with Consul's auth methods. An operator with `acl:write` creates a `jwt`
+method with the provider's PEM public keys (`PUT /v1/acl/auth-method`, with `name`,
+`type`, `maxTokenTtl` and `config`), and binding rules that say what a login gets
+(`PUT /v1/acl/binding-rule`, with `authMethod`, `selector`, `bindType` and
+`bindName`). The workload calls `POST /v1/acl/login` with `authMethod` and
+`bearerToken`, and gets a token that expires at the method's `maxTokenTtl`; it calls
+`POST /v1/acl/logout` with that token when done. Rotating the provider's key is an
+update of the method's keys; deleting the method revokes every token its logins
+created.
+
+A pod in Kubernetes logs in with its service account token through a `kubernetes`
+method, created with the cluster API's address, its CA, and a reviewer token that may
+create TokenReviews (the `system:auth-delegator` cluster role):
+
+```text
+PUT /v1/acl/auth-method
+{"name": "cluster", "type": "kubernetes",
+ "config": {"host": "https://kubernetes.default.svc", "caCert": "-----BEGIN CERTIFICATE-----...",
+            "serviceAccountJwt": "<reviewer token>"}}
+PUT /v1/acl/binding-rule
+{"authMethod": "cluster", "selector": "serviceaccount.namespace == \"billing\"",
+ "bindType": "service", "bindName": "${serviceaccount.name}"}
+```
+
+The pod calls `POST /v1/acl/login` with its token, which the server sends to the
+cluster's TokenReview API. A token the cluster does not authenticate is refused 403.
+If the API cannot be reached, or its certificate is not signed by `caCert`, the login
+is refused 503 `auth_method_unavailable`, the server logs why at WARN, and the pod may
+try again. The reviewer token is never answered by the API; to rotate it, write the
+method again with the new one.
+
+With `server.audit.path` set, each server writes one JSON line for every request it
+answers under a token: the time, the server, the token's accessor ID, the method,
+the route, the status and the request ID, never a secret. The file is best effort;
+if it cannot be written, the server warns once and goes on. Rotate it with the
+operating system's tools.
+
+## Events
+
+Each server keeps its newest 4,096 events in memory: Raft's leadership changes,
+snapshots and fencing; the catalog's, key/value store's, locks' and sessions'
+changes, which every server records for each committed entry; and the audit of
+requests. A key's events name the key and never its value. The journal starts
+afresh at each boot, and nothing in it is replicated or kept.
+
+With a token that has `operator:read`, ask a server for its events:
+
+- `GET /v1/operator/events?after=<boot>:<sequence>&limit=100&category=domain&type=key.set`
+  answers a page of events, the cursor to ask from next (`next`) and the page's
+  `status`: `more` while there are more, `history_gap` when the cursor is older than
+  what the server still holds, and `other_boot` when it names an earlier boot.
+- `GET /v1/operator/events/watch`, with the same parameters bar `limit`, is a
+  server-sent event stream: the events after the cursor, then each as it happens,
+  each with its cursor as its `id`, and a comment line every 15 seconds without one.
+  It ends with an `end` event saying why (`overflow` when the client read too slowly,
+  `history_gap`, `server_stopping`) and the cursor to resume after.
+
+Each server answers only its own events. To follow a whole cluster, watch each
+server; the same replicated change has the same `replicatedId` on every server. An
+event says that state may have changed: after a gap or a restart, read the state
+itself again, and then watch from the new cursor.
+
 ## Key/value
 
 The key/value store (design section 10) is part of the replicated state and of every
@@ -632,6 +697,24 @@ when its node becomes unreachable or leaves the catalog. Its keys are then relea
 or deleted with `"Behavior": "delete"`. With ACLs enabled, the token needs
 `session:write` on the node and `key:write` on the key.
 
+A Java application can leave the recipe to the client library, which follows it
+through its client's local API:
+
+```java
+try (QraftApi api = QraftApi.builder().build();
+     LeaderElection election = LeaderElection.builder(api, "service/billing/leader")
+             .value(address).ttl(Duration.ofSeconds(15)).listener(listener).start()) {
+    // listener.elected() and listener.lost() say when this process leads
+}
+```
+
+The library renews the session every half TTL. It tells the listener `lost` as soon
+as it can no longer be sure it leads: the session has ended, the key is held by
+another session, or a call has failed. It then campaigns again with a new session.
+Closing it releases the key and destroys the session. Durations are written as Go
+writes them, and since 2026-11-08 a server also reads milliseconds, such as `1500ms`,
+in a session's `TTL` and `LockDelay` and a token's `expirationTtl`.
+
 ## Tenants and namespaces
 
 Tenants and namespaces (design section 7) are part of the replicated state and of
@@ -671,13 +754,27 @@ a service, key, session or node.
 server's last contact, the index it holds and whether it is healthy: it has answered
 within an election timeout and is no more than 250 entries behind. Before removing or
 replacing a server, check that `FailureTolerance` is at least 1. Another server
-answers 503 `leader_unavailable` and names the leader. `/raft/status` on any server
+answers 503 `leader_unavailable` and names the leader.
+
+Any server takes a write: a follower forwards it to the leader over the Raft port and
+answers with the leader's answer, which carries `X-Qraft-Forwarded-To` with the
+leader's ID. The leader checks the token, writes the audit line and applies the
+limits, as for a write sent to it. The follower answers once it has applied the write
+itself, so a caller that reads from it next sees its own write. A follower that knows
+no leader, or cannot connect to it within 2 seconds, answers 503 `leader_unavailable`:
+the write was not sent, and a client tries its next server, as before. A write that was
+sent and not answered is answered 503 `outcome_unknown`, as a commit that times out on
+the leader is. A draining server forwards nothing.
+Reads are answered by the server asked. `/raft/status` on any server
 gives its `storageBytes` and `snapshotAgeSeconds`; a snapshot that keeps growing older
 while the log grows means snapshots are not being taken.
 
-A client publishes `qraft.client.ready`, `qraft.client.last_contact_age_seconds` and
-`qraft.client.reconciliations` at `GET /v1/client/metrics` on its local API, as JSON
-or with `?format=prometheus` for a scrape, with `client:read`.
+A client publishes `qraft.client.ready`, `qraft.client.last_contact_age_seconds`,
+`qraft.client.server` and `qraft.client.reconciliations` at `GET /v1/client/metrics`
+on its local API, as JSON or with `?format=prometheus` for a scrape, with
+`client:read`. `qraft.client.server` is 1, with the server the client tries first as
+its `endpoint` label (`qraft_client_server_info` in Prometheus' text): the one that
+last answered it, or its first configured server before any has.
 
 ## Transport security
 
@@ -707,9 +804,17 @@ connection that carries a token, a registration or Raft traffic.
   and is not ready. A server that cannot reach a peer over mutual TLS logs it as an
   unreachable peer, as for a partitioned one; `/raft/status` on each server shows
   whether they agree on a leader.
-- **Not yet:** certificate reloading (a server reads its files at start, so a renewed
-  certificate takes a restart), revocation lists, and HTTPS on the client's local API,
-  which listens on loopback.
+- **Renewing a certificate.** Replace the files in place; a server or a client checks
+  them every 30 seconds and takes up the new material without a restart. Write the key
+  before the certificate, or both at once, as a certificate without its key is refused
+  until the key follows. A reload is logged at INFO with the certificate's subject and
+  expiry (`server.tls reloaded: certificate CN=..., valid until ...`); one that is
+  refused is logged at WARN with the reason, and the old material stays in use. New
+  connections use the new certificate; connections already open keep theirs until
+  they close. To change the CA, add the new CA to every `caFile` first, then renew
+  the certificates, then remove the old CA.
+- **Not yet:** revocation lists, and HTTPS on the client's local API, which listens on
+  loopback.
 
 ## Upgrade and migration
 

@@ -42,15 +42,53 @@ public final class ServiceCatalog implements ServiceCatalogView {
                     .thenComparing(ServiceInstance::serviceId);
 
     private final ConcurrentMap<ServiceInstanceId, ServiceInstance> instances = new ConcurrentHashMap<>();
+    /** Each instance's indexes (catalog indexes list, decision 1). */
+    private final ConcurrentMap<ServiceInstanceId, ServiceCatalogView.Indexes> indexes = new ConcurrentHashMap<>();
 
     public void register(ServiceInstance instance) {
+        register(instance, 0);
+    }
+
+    /**
+     * Registers {@code instance} by the entry at {@code index}: a new instance takes it as both its indexes, and one
+     * already registered takes it as its modification index only when the registration changes more than the health it
+     * carries (decision 3), as Consul's does.
+     */
+    public void register(ServiceInstance instance, long index) {
         Objects.requireNonNull(instance, "instance");
-        instances.put(instance.identity(), instance);
+        ServiceInstance previous = instances.put(instance.identity(), instance);
+        ServiceCatalogView.Indexes current = indexes.get(instance.identity());
+        if (previous == null || current == null) {
+            indexes.put(instance.identity(), new ServiceCatalogView.Indexes(index, index));
+        } else if (!previous.withHealth(instance.health()).equals(instance)) {
+            indexes.put(instance.identity(), new ServiceCatalogView.Indexes(current.createIndex(), index));
+        }
     }
 
     public boolean deregister(ServiceInstanceId identity) {
         Objects.requireNonNull(identity, "identity");
+        indexes.remove(identity);
         return instances.remove(identity) != null;
+    }
+
+    public ServiceCatalogView.Indexes indexesOf(ServiceInstanceId identity) {
+        return indexes.getOrDefault(identity, new ServiceCatalogView.Indexes(0, 0));
+    }
+
+    /** Every instance's indexes, for a snapshot. */
+    public java.util.Map<ServiceInstanceId, ServiceCatalogView.Indexes> indexes() {
+        return java.util.Map.copyOf(indexes);
+    }
+
+    /** Restores the indexes a snapshot holds; an instance the snapshot gives none for keeps 0. */
+    public void restoreIndexes(java.util.Map<ServiceInstanceId, ServiceCatalogView.Indexes> restored) {
+        indexes.clear();
+        instances.keySet().forEach(identity -> indexes.put(identity, new ServiceCatalogView.Indexes(0, 0)));
+        if (restored != null) {
+            restored.forEach((identity, held) -> {
+                if (instances.containsKey(identity)) indexes.put(identity, held);
+            });
+        }
     }
 
     @Override
@@ -74,6 +112,7 @@ public final class ServiceCatalog implements ServiceCatalogView {
     public boolean deregisterLegacy(String serviceId) {
         Objects.requireNonNull(serviceId, "serviceId");
         boolean[] removed = {false};
+        indexes.keySet().removeIf(identity -> serviceId.equals(identity.serviceId()));
         instances.entrySet().removeIf(entry -> {
             boolean matches = serviceId.equals(entry.getKey().serviceId());
             removed[0] |= matches;
@@ -115,10 +154,12 @@ public final class ServiceCatalog implements ServiceCatalogView {
     public void replaceAll(List<ServiceInstance> restoredInstances) {
         Objects.requireNonNull(restoredInstances, "restoredInstances");
         instances.clear();
+        indexes.clear();
         restoredInstances.forEach(this::register);
     }
 
     public void clear() {
         instances.clear();
+        indexes.clear();
     }
 }

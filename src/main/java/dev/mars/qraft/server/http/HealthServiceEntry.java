@@ -32,10 +32,14 @@ import java.util.List;
  * @since 2026-09-26
  * @version 1.0
  */
-record HealthServiceEntry(ServiceInstance service, List<Check> checks, NodeStatus nodeStatus) {
+record HealthServiceEntry(@com.fasterxml.jackson.annotation.JsonIgnore ServiceInstance service,
+                          @com.fasterxml.jackson.annotation.JsonProperty("service") java.util.Map<String, Object> serviceView,
+                          List<Check> checks, NodeStatus nodeStatus) {
 
-    static HealthServiceEntry from(ServiceInstance service, List<HealthCheckState> states, NodeStatus nodeStatus) {
-        return new HealthServiceEntry(service, states.stream()
+    /** An entry whose service is answered as {@code serviceView}, the instance with its indexes (catalog indexes list). */
+    static HealthServiceEntry from(ServiceInstance service, java.util.Map<String, Object> serviceView,
+                                   List<HealthCheckState> states, NodeStatus nodeStatus) {
+        return new HealthServiceEntry(service, serviceView, states.stream()
                 .sorted(Comparator.comparing((HealthCheckState state) -> state.checkId().checkId()))
                 .map(Check::from)
                 .toList(), nodeStatus);

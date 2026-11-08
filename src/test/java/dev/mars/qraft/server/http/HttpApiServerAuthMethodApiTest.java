@@ -131,10 +131,43 @@ class HttpApiServerAuthMethodApiTest {
     }
 
     private static String methodBody(String name, String key) throws Exception {
-        return JSON.writeValueAsString(java.util.Map.of("Name", name, "Type", "jwt", "Description", "Workloads",
-                "MaxTokenTTL", "30m", "Config", java.util.Map.of("JWTValidationPubKeys", List.of(key),
-                        "BoundIssuer", "https://issuer.example", "BoundAudiences", List.of("qraft"),
-                        "ClaimMappings", java.util.Map.of("sub", "name"), "ExpirationLeeway", "5s")));
+        return JSON.writeValueAsString(java.util.Map.of("name", name, "type", "jwt", "description", "Workloads",
+                "maxTokenTtl", "30m", "config", java.util.Map.of("jwtValidationPubKeys", List.of(key),
+                        "boundIssuer", "https://issuer.example", "boundAudiences", List.of("qraft"),
+                        "claimMappings", java.util.Map.of("sub", "name"), "expirationLeeway", "5s")));
+    }
+
+    private static String kubernetesBody(String name, java.util.Map<String, String> config) throws Exception {
+        return JSON.writeValueAsString(java.util.Map.of("name", name, "type", "kubernetes", "maxTokenTtl", "10m",
+                "config", config));
+    }
+
+    @Test
+    void aKubernetesMethodIsWrittenAndReadWithoutItsReviewerToken() throws Exception {
+        start(false);
+        String ca = java.nio.file.Files.readString(Path.of(getClass().getResource("/tls/ca.pem").toURI()));
+        java.util.Map<String, String> config = java.util.Map.of("host", "https://kubernetes.default.svc", "caCert", ca,
+                "serviceAccountJwt", "reviewer-secret");
+        JsonNode created = ok(send("PUT", "/v1/acl/auth-method", kubernetesBody("pods", config)));
+        assertEquals("kubernetes", created.path("type").asText());
+        assertEquals("https://kubernetes.default.svc", created.path("config").path("host").asText());
+        assertEquals(ca, created.path("config").path("caCert").asText());
+        java.util.Set<String> fields = new java.util.HashSet<>();
+        created.path("config").fieldNames().forEachRemaining(fields::add);
+        assertEquals(java.util.Set.of("host", "caCert"), fields, "the reviewer token is never answered");
+        assertEquals(created, ok(send("GET", "/v1/acl/auth-method/pods", null)));
+        assertFalse(send("GET", "/v1/acl/auth-methods", null).body().contains("reviewer-secret"));
+
+        for (java.util.Map<String, String> incomplete : List.of(
+                java.util.Map.of("caCert", ca, "serviceAccountJwt", "t"),
+                java.util.Map.of("host", "https://k8s", "serviceAccountJwt", "t"),
+                java.util.Map.of("host", "https://k8s", "caCert", ca),
+                java.util.Map.of("host", "https://k8s", "caCert", "not a certificate", "serviceAccountJwt", "t"),
+                java.util.Map.of("host", "http://k8s", "caCert", ca, "serviceAccountJwt", "t"))) {
+            refused(send("PUT", "/v1/acl/auth-method", kubernetesBody("bad", incomplete)), 400, null);
+        }
+        refused(send("PUT", "/v1/acl/auth-method", JSON.writeValueAsString(java.util.Map.of("name", "o", "type",
+                "oidc", "config", config))), 400, null);
     }
 
     @Test
@@ -143,20 +176,20 @@ class HttpApiServerAuthMethodApiTest {
         String key = publicKeyPem();
 
         JsonNode created = ok(send("PUT", "/v1/acl/auth-method", methodBody("workloads", key)));
-        assertEquals("workloads", created.path("Name").asText());
-        assertEquals("30m0s", created.path("MaxTokenTTL").asText());
-        assertEquals("https://issuer.example", created.path("Config").path("BoundIssuer").asText());
-        assertEquals(List.of("workloads"), names(ok(send("GET", "/v1/acl/auth-methods", null)), "Name"));
-        assertEquals("Workloads", ok(send("GET", "/v1/acl/auth-method/workloads", null)).path("Description").asText());
+        assertEquals("workloads", created.path("name").asText());
+        assertEquals("30m0s", created.path("maxTokenTtl").asText());
+        assertEquals("https://issuer.example", created.path("config").path("boundIssuer").asText());
+        assertEquals(List.of("workloads"), names(ok(send("GET", "/v1/acl/auth-methods", null)), "name"));
+        assertEquals("Workloads", ok(send("GET", "/v1/acl/auth-method/workloads", null)).path("description").asText());
 
-        JsonNode rule = ok(send("PUT", "/v1/acl/binding-rule", "{\"AuthMethod\":\"workloads\",\"Selector\":"
-                + "\"value.name == \\\"web\\\"\",\"BindType\":\"service\",\"BindName\":\"${value.name}\"}"));
-        String id = rule.path("ID").asText();
+        JsonNode rule = ok(send("PUT", "/v1/acl/binding-rule", "{\"authMethod\":\"workloads\",\"selector\":"
+                + "\"value.name == \\\"web\\\"\",\"bindType\":\"service\",\"bindName\":\"${value.name}\"}"));
+        String id = rule.path("id").asText();
         UUID.fromString(id);
-        assertEquals("service", rule.path("BindType").asText());
-        assertEquals(List.of(id), names(ok(send("GET", "/v1/acl/binding-rules?authmethod=workloads", null)), "ID"));
-        assertEquals("role", ok(send("PUT", "/v1/acl/binding-rule/" + id, "{\"AuthMethod\":\"workloads\","
-                + "\"BindType\":\"role\",\"BindName\":\"web-role\"}")).path("BindType").asText());
+        assertEquals("service", rule.path("bindType").asText());
+        assertEquals(List.of(id), names(ok(send("GET", "/v1/acl/binding-rules?authmethod=workloads", null)), "id"));
+        assertEquals("role", ok(send("PUT", "/v1/acl/binding-rule/" + id, "{\"authMethod\":\"workloads\","
+                + "\"bindType\":\"role\",\"bindName\":\"web-role\"}")).path("bindType").asText());
 
         assertEquals("true", send("DELETE", "/v1/acl/auth-method/workloads", null).body());
         refused(send("GET", "/v1/acl/auth-method/workloads", null), 404, "auth_method_not_found");
@@ -172,14 +205,14 @@ class HttpApiServerAuthMethodApiTest {
         refused(send("PUT", "/v1/acl/auth-method", methodBody("workloads", key)), 409, "auth_method_exists");
         refused(send("PUT", "/v1/acl/auth-method", methodBody("bad-key", "-----BEGIN PUBLIC KEY-----\nAAAA\n"
                 + "-----END PUBLIC KEY-----")), 400, "invalid_auth_method");
-        refused(send("PUT", "/v1/acl/auth-method", "{\"Name\":\"k8s\",\"Type\":\"kubernetes\",\"Config\":{}}"), 400,
+        refused(send("PUT", "/v1/acl/auth-method", "{\"name\":\"k8s\",\"type\":\"kubernetes\",\"config\":{}}"), 400,
                 "invalid_auth_method");
-        refused(send("PUT", "/v1/acl/binding-rule", "{\"AuthMethod\":\"workloads\",\"Selector\":\"value.a != \\\"b\\\"\","
-                + "\"BindType\":\"service\",\"BindName\":\"x\"}"), 400, "invalid_binding_rule");
-        refused(send("PUT", "/v1/acl/binding-rule", "{\"AuthMethod\":\"absent\",\"BindType\":\"service\","
-                + "\"BindName\":\"x\"}"), 404, "auth_method_not_found");
-        refused(send("PUT", "/v1/acl/binding-rule", "{\"AuthMethod\":\"workloads\",\"BindType\":\"group\","
-                + "\"BindName\":\"x\"}"), 400, "invalid_binding_rule");
+        refused(send("PUT", "/v1/acl/binding-rule", "{\"authMethod\":\"workloads\",\"selector\":\"value.a != \\\"b\\\"\","
+                + "\"bindType\":\"service\",\"bindName\":\"x\"}"), 400, "invalid_binding_rule");
+        refused(send("PUT", "/v1/acl/binding-rule", "{\"authMethod\":\"absent\",\"bindType\":\"service\","
+                + "\"bindName\":\"x\"}"), 404, "auth_method_not_found");
+        refused(send("PUT", "/v1/acl/binding-rule", "{\"authMethod\":\"workloads\",\"bindType\":\"group\","
+                + "\"bindName\":\"x\"}"), 400, "invalid_binding_rule");
         refused(send("DELETE", "/v1/acl/auth-method/absent", null), 404, "auth_method_not_found");
     }
 
@@ -193,7 +226,7 @@ class HttpApiServerAuthMethodApiTest {
         refused(send("PUT", "/v1/acl/auth-method", methodBody("workloads", key), "X-Qraft-Token", reader), 403,
                 "permission_denied");
         ok(send("PUT", "/v1/acl/auth-method", methodBody("workloads", key), "X-Qraft-Token", writer));
-        assertFalse(names(ok(send("GET", "/v1/acl/auth-methods", null, "X-Qraft-Token", reader)), "Name").isEmpty());
+        assertFalse(names(ok(send("GET", "/v1/acl/auth-methods", null, "X-Qraft-Token", reader)), "name").isEmpty());
         refused(send("GET", "/v1/acl/auth-methods", null), 403, "permission_denied");
     }
 

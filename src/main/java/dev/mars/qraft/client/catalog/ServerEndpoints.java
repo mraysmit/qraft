@@ -56,6 +56,11 @@ public final class ServerEndpoints {
         return List.copyOf(ordered);
     }
 
+    /** The endpoint a cycle starts with: the last that answered, or the first seed before any has. */
+    public URI preferred() {
+        return seeds.get(preferredIndex.get());
+    }
+
     public void markSuccessful(URI endpoint) {
         int index = seeds.indexOf(Objects.requireNonNull(endpoint, "endpoint"));
         if (index < 0) throw new IllegalArgumentException("Unknown server endpoint: " + endpoint);

@@ -16,10 +16,14 @@
 
 package dev.mars.qraft.common.tls;
 
+import javax.net.ssl.KeyManager;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
+import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509ExtendedKeyManager;
+import javax.net.ssl.X509ExtendedTrustManager;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -45,9 +49,14 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * PEM TLS material, read once, and the contexts built from it (transport security list, Phase 1). The CA bundle
- * decides which peers are trusted; the certificate and key, when set, are what this side presents. A refusal names
- * the setting and the file, and never holds a key's content.
+ * PEM TLS material and the contexts built from it (transport security list, Phase 1). The CA bundle decides which
+ * peers are trusted; the certificate and key, when set, are what this side presents. A refusal names the setting and
+ * the file, and never holds a key's content.
+ *
+ * <p>The contexts, and the managers a TLS stack that builds its own takes, use reloading managers (certificate
+ * reloading list, decision 1): {@link #reload()} reads the files again, checks them as {@link #load} does, and swaps
+ * the trust and the key material together, so that every handshake after it uses the new material. A reload that
+ * fails a check is refused, and the material in use stays.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-07
@@ -62,21 +71,56 @@ public final class TlsMaterial {
     private final TlsSettings settings;
     private final SSLContext clientContext;
     private final SSLContext serverContext;
-    private final TrustManagerFactory trust;
-    private final KeyManagerFactory keys;
+    private final ReloadingTrustManager trust;
+    private final ReloadingKeyManager keys;
+    private volatile X509Certificate certificate;
 
-    private TlsMaterial(TlsSettings settings, SSLContext clientContext, SSLContext serverContext,
-                        TrustManagerFactory trust, KeyManagerFactory keys) {
+    /** What one reading of the files holds: the CA's trust, and this side's key material and certificate, if set. */
+    private record Read(X509ExtendedTrustManager trust, X509ExtendedKeyManager keys, X509Certificate certificate) { }
+
+    private TlsMaterial(TlsSettings settings, Read read) throws GeneralSecurityException {
         this.settings = settings;
-        this.clientContext = clientContext;
-        this.serverContext = serverContext;
-        this.trust = trust;
-        this.keys = keys;
+        this.trust = new ReloadingTrustManager(read.trust());
+        this.keys = read.keys() == null ? null : new ReloadingKeyManager(read.keys());
+        this.certificate = read.certificate();
+        KeyManager[] own = keys == null ? null : new KeyManager[] {keys};
+        TrustManager[] trusted = {trust};
+        this.clientContext = SSLContext.getInstance("TLS");
+        clientContext.init(own, trusted, null);
+        if (keys == null) {
+            this.serverContext = null;
+        } else {
+            this.serverContext = SSLContext.getInstance("TLS");
+            serverContext.init(own, trusted, null);
+        }
     }
 
     /** Reads the files {@code settings} names; refuses one that is missing or does not hold what it should. */
     public static TlsMaterial load(TlsSettings settings) {
         Objects.requireNonNull(settings, "settings");
+        Read read = read(settings);
+        try {
+            return new TlsMaterial(settings, read);
+        } catch (GeneralSecurityException e) {
+            throw new IllegalStateException(settings.location() + " cannot be used: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Reads the files again and swaps what every context and manager made from this material uses; refused, keeping
+     * what is in use, when a file is missing or does not hold what it should, or the key is not the certificate's.
+     */
+    public synchronized void reload() {
+        Read next = read(settings);
+        if ((next.keys() == null) != (keys == null)) {
+            throw new IllegalStateException(settings.location() + " cannot gain or lose its certificate on a reload");
+        }
+        trust.swap(next.trust());
+        if (keys != null) keys.swap(next.keys());
+        certificate = next.certificate();
+    }
+
+    private static Read read(TlsSettings settings) {
         try {
             KeyStore trusted = emptyStore();
             List<X509Certificate> authorities = certificates(settings, "caFile", settings.caFile());
@@ -87,6 +131,7 @@ public final class TlsMaterial {
             trust.init(trusted);
 
             KeyManagerFactory keys = null;
+            X509Certificate presented = null;
             if (settings.certFile().isPresent() && settings.keyFile().isPresent()) {
                 List<X509Certificate> chain = certificates(settings, "certFile", settings.certFile().get());
                 PrivateKey key = privateKey(settings, settings.keyFile().get());
@@ -94,19 +139,13 @@ public final class TlsMaterial {
                     throw new IllegalStateException(settings.location() + ".keyFile is not the key of "
                             + settings.location() + ".certFile: " + settings.keyFile().get());
                 }
+                presented = chain.getFirst();
                 KeyStore own = emptyStore();
                 own.setKeyEntry("qraft", key, STORE_PASSWORD, chain.toArray(new Certificate[0]));
                 keys = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
                 keys.init(own, STORE_PASSWORD);
             }
-            SSLContext client = SSLContext.getInstance("TLS");
-            client.init(keys == null ? null : keys.getKeyManagers(), trust.getTrustManagers(), null);
-            SSLContext server = null;
-            if (keys != null) {
-                server = SSLContext.getInstance("TLS");
-                server.init(keys.getKeyManagers(), trust.getTrustManagers(), null);
-            }
-            return new TlsMaterial(settings, client, server, trust, keys);
+            return new Read(extended(trust), keys == null ? null : extended(keys), presented);
         } catch (GeneralSecurityException | IOException e) {
             throw new IllegalStateException(settings.location() + " cannot be used: " + e.getMessage(), e);
         }
@@ -126,14 +165,33 @@ public final class TlsMaterial {
         return clientContext;
     }
 
-    /** The trust managers of the CA bundle, for a TLS stack that takes them rather than a context. */
-    public TrustManagerFactory trustManagers() {
+    /** The CA bundle's reloading trust manager, for a TLS stack that takes one rather than a context. */
+    public X509ExtendedTrustManager trustManager() {
         return trust;
     }
 
-    /** The key managers of this side's certificate, when one is set. */
-    public java.util.Optional<KeyManagerFactory> keyManagers() {
+    /** This side's reloading key manager, when a certificate is set. */
+    public java.util.Optional<X509ExtendedKeyManager> keyManager() {
         return java.util.Optional.ofNullable(keys);
+    }
+
+    private static X509ExtendedTrustManager extended(TrustManagerFactory factory) {
+        for (TrustManager manager : factory.getTrustManagers()) {
+            if (manager instanceof X509ExtendedTrustManager x509) return x509;
+        }
+        throw new IllegalStateException("the platform's trust managers handle no X.509 certificates");
+    }
+
+    private static X509ExtendedKeyManager extended(KeyManagerFactory factory) {
+        for (KeyManager manager : factory.getKeyManagers()) {
+            if (manager instanceof X509ExtendedKeyManager x509) return x509;
+        }
+        throw new IllegalStateException("the platform's key managers handle no X.509 keys");
+    }
+
+    /** The certificate this side presents, while one is set: the one the last load or reload read. */
+    public java.util.Optional<X509Certificate> certificate() {
+        return java.util.Optional.ofNullable(certificate);
     }
 
     /** The settings this material was read from. */

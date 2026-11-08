@@ -479,6 +479,25 @@ class DockerLogCaptureTest {
     }
 
     @Test
+    void aSnapshotToAKilledPeerWhoseConnectionFailsItsKeepaliveIsAnInterruptedTransfer() {
+        // A killed container's network goes without resetting the connection, so the leader's channel learns that the
+        // peer is gone when its keepalive ping times out, rather than from a refused connect or a name not resolved.
+        String keepalive = "2026-11-08 11:14:19.619 [qraft-state-loop] ERROR dev.mars.qraft.raft.RaftNode [server3] "
+                + "[LEADER/3] [5f4c42cb-a56e-41e7-812c-e817112f4b59] - Failed to send InstallSnapshot chunk 1/1 to server1: "
+                + "UNAVAILABLE: Keepalive failed. The connection is likely gone";
+        DockerLogCaptureHelper.Audit audit = DockerLogCaptureHelper.audit(keepalive + "\n",
+                Set.of(IntentionalErrorFixture.RAFT_SNAPSHOT_TRANSFER_INTERRUPTED), "DockerClass");
+        assertEquals(java.util.List.of(), audit.problems());
+        assertEquals(1, audit.recognised().size());
+
+        String otherReason = keepalive.replace("Keepalive failed. The connection is likely gone",
+                "Channel shutdown invoked");
+        assertEquals(java.util.List.of("undeclared container " + otherReason), DockerLogCaptureHelper.audit(otherReason
+                + "\n", Set.of(IntentionalErrorFixture.RAFT_SNAPSHOT_TRANSFER_INTERRUPTED), "DockerClass").problems(),
+                "another reason the transfer failed is not the killed peer's");
+    }
+
+    @Test
     void aFailedPreVoteRequestIsAnUnreachablePeerLikeAFailedVoteRequest() {
         String log = """
                 2026-10-24 12:00:00.000 [qraft-state-loop] ERROR dev.mars.qraft.raft.RaftNode [n1] - Failed to retrieve pre-vote from n2

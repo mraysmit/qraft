@@ -699,6 +699,12 @@ other. Re-registering the same durable identity is an idempotent update.
 Stored instance data includes the definition fields plus current health,
 registration index, modification index, and optional deregistration deadline.
 
+Built on 2026-11-08 by [`task-list-catalog-indexes-2026-11-08.md`](../docs/archive/task-list-catalog-indexes-2026-11-08.md): the
+catalog keeps each instance's `createIndex`, the entry that registered it, and
+`modifyIndex`, the entry that last changed it, as Consul's `CreateIndex` and
+`ModifyIndex`; a registration that changes only the health it carries moves neither.
+Catalog, node-services and health reads answer both with each instance.
+
 ### 7.6 Health
 
 Health is server-owned state based on observations reported by clients or produced
@@ -915,9 +921,10 @@ list (section 13) and the sessions list (section 11):
   `keys`, `separator` and `raw`; `PUT` with `flags` and `cas`; `DELETE` with
   `recurse` and `cas`; answers in Consul's field names; `X-Qraft-Index` is the
   key/value state's last index. The scope is the request's `X-Qraft-Tenant` and
-  `X-Qraft-Namespace` headers. Other parameters are refused. A follower answers a
-  write 503 `leader_unavailable`, and the client forwards to its next server only
-  a write that cannot have been applied.
+  `X-Qraft-Namespace` headers. Other parameters are refused. Since 2026-11-08 a
+  follower forwards a write to the leader (section 13); one with no reachable
+  leader answers 503 `leader_unavailable`, and the client forwards to its next
+  server only a write that cannot have been applied.
 - **ACLs**: `key` and `key_prefix` rules, scoped as `service` rules are; a read
   needs `key:read`, a recursive read leaves out what the token cannot read, a write
   needs `key:write`, and a recursive delete needs write on every key under the
@@ -963,7 +970,29 @@ Consul's sessions:
   destroying needs `session:write` on the node, reading `session:read`, and
   acquiring or releasing `key:write`.
 - **Leader election** is the recipe in `RAFT_STORAGE_OPERATIONS.md`, "Sessions and
-  locks", on the local API; there is no helper command yet.
+  locks", on the local API, and since 2026-11-08 the client library's
+  `LeaderElection`; there is no helper command.
+
+The client library, built on 2026-11-08 by
+[`task-list-client-library-2026-11-08.md`](../docs/archive/task-list-client-library-2026-11-08.md),
+is `dev.mars.qraft.client.api`, Consul's Go `api` package for Java applications:
+
+- **`QraftApi`**: the local API's address (`http://127.0.0.1:8080` by default) or a
+  server's, a token sent as `X-Qraft-Token`, and a tenant and namespace sent as the
+  scope headers. Its calls are synchronous; a refusal throws `QraftApiException`
+  with the status, the server's error code and its message.
+- **`KeyValue`**: `get`, `list`, `keys`, `put` with flags, `cas`, `acquire`,
+  `release`, `delete` and `deleteTree`, with `QueryOptions` for a blocking read past
+  an index and for the consistency; a read answers its `X-Qraft-Index`.
+- **`Sessions`**: `create` with `SessionOptions`, `renew`, which answers false for a
+  session that is gone, `destroy` and `info`.
+- **`LeaderElection`**: a contender's session, the acquisition, blocking reads of
+  the key while another holds it, renewal every half TTL while it leads, consistent
+  reads that check it still holds the key, and a
+  listener told when leadership is gained and lost. A lost renewal, a key no longer
+  held by its session, or a failed call while it leads ends its leadership, and it
+  campaigns again with a new session; `close()` releases the key and destroys the
+  session.
 
 ## 12. API design
 
@@ -1701,6 +1730,19 @@ the catalog's reads and `/v1/kv`:
   catalog, passes `N`, or `D` passes with up to a sixteenth more at random, as in
   Consul; `wait` is 5 minutes by default and at most 10. The client forwards a
   blocking read with its wait added to its request timeout.
+- **Writes are forwarded to the leader**, since 2026-11-08
+  ([`task-list-write-forwarding-2026-11-08.md`](../docs/archive/task-list-write-forwarding-2026-11-08.md)),
+  as Consul's servers forward: a follower that knows the leader sends a `PUT`,
+  `POST` or `DELETE` to it with the Raft port's `Forward` call, which carries the
+  method, path, query, headers and body under the port's mutual TLS when it is on.
+  The leader answers it on its own routes, with its ACLs, tenancy, audit and limits,
+  and the follower answers with that answer and `X-Qraft-Forwarded-To`. A forwarded
+  write carries `X-Qraft-Forwarded-By` and is never forwarded again. The follower
+  answers once it has applied the leader's index, so its own reads see the write. A
+  write is sent only on a ready connection, waited for at most 2 seconds: one never
+  sent is answered 503 `leader_unavailable` with the hint, and one sent and not
+  answered 503 `outcome_unknown`. A draining server forwards nothing. Reads are not
+  forwarded.
 
 Deterministic ordering is mandatory for service lists, instances, tags, prefix
 results, and snapshot serialization.
@@ -2336,8 +2378,43 @@ on Consul's `tls` stanza. Without `server.tls` and `client.tls`, nothing changes
   it. Its local API stays HTTP on loopback, as Consul's does by default.
 - **The command lines** take `--ca-file`, `--client-cert` and `--client-key`, and no
   environment variable.
-- **Not built:** certificate reloading, automatic issuance, revocation lists, and
-  HTTPS on the client's local API.
+- **Reloading**, since 2026-11-08 ([`task-list-certificate-reloading-2026-11-08.md`](../docs/archive/task-list-certificate-reloading-2026-11-08.md)):
+  every context and manager made from `TlsMaterial` delegates to its current
+  material, which `reload()` replaces after the checks `load` makes; a server and a
+  client check their files' modification times every 30 seconds and reload on a
+  change. New handshakes use the new material, connections already open keep
+  theirs, and a reload that fails a check is logged at WARN and leaves the material
+  in use.
+- **Not built:** automatic issuance, revocation lists, a reload command, and HTTPS on
+  the client's local API.
+
+### 15.3 Auth methods and audit
+
+Built on 2026-11-08 by [`task-list-authentication-and-audit-2026-11-08.md`](../docs/archive/task-list-authentication-and-audit-2026-11-08.md):
+
+- **Auth methods**, Consul's: a replicated `jwt` method holds PEM public keys, a
+  bound issuer and audiences, claim mappings and leeways, and the longest life it
+  gives a token, 1 hour by default and at most 24. Binding rules bind a login to a
+  service or node identity, a role or a policy, under a selector of
+  `value.<name> == "<text>"` and `"<text>" in list.<name>` clauses.
+- **Login** (`POST /v1/acl/login`) exchanges a valid JWT for a token bound by every
+  matching rule; **logout** deletes it. Deleting a method deletes its rules and its
+  logins' tokens.
+- **Audit events**: every request a server answers under a token is an `AUDIT` event
+  in its journal, with the accessor ID, method, route, status and request ID, and
+  `server.audit.path` writes them as JSON lines. No secret or body is recorded.
+- **The `kubernetes` method**, since 2026-11-08 ([`task-list-kubernetes-auth-method-2026-11-08.md`](../docs/archive/task-list-kubernetes-auth-method-2026-11-08.md)):
+  its configuration is the cluster API's `https` host, its CA and a reviewer service
+  account token, which the API never answers. The server that receives a login asks
+  the cluster's TokenReview API, trusting that CA alone, and an authenticated
+  service account gives the selectors and bind names `serviceaccount.namespace`,
+  `serviceaccount.name` and `serviceaccount.uid`. A token the review does not
+  authenticate is refused 403; an API that cannot be reached or trusted, 503
+  `auth_method_unavailable`. The configuration is replicated in its own field of the
+  method, and a snapshot tells the two types apart by their fields, so a `jwt`
+  method is written as it was before.
+- **Not built:** JWKS, OIDC and AWS methods, audit of anonymous requests, and audit
+  sinks other than a file.
 
 ## 16. Configuration
 
@@ -2752,7 +2829,10 @@ Built on 2026-11-08 by [`task-list-observability-2026-11-08.md`](../docs/archive
   was registered under, never the path.
 - **Client metrics** at `GET /v1/client/metrics`, Consul's `/v1/agent/metrics`
   under Qraft's name, as JSON or as Prometheus text: readiness, the age of the
-  last successful contact with a server, and reconciliation passes by result.
+  last successful contact with a server, reconciliation passes by result, and,
+  since 2026-11-08 ([`task-list-client-endpoint-metric-2026-11-08.md`](../docs/archive/task-list-client-endpoint-metric-2026-11-08.md)),
+  the server endpoint the client tries first as `qraft.client.server`'s
+  `endpoint` label.
 - **The leader's view of the servers** at `GET /v1/operator/autopilot/health`, in
   Consul's form: each server's last contact, term, index and health, with the
   cluster's health and failure tolerance; another server answers 503.

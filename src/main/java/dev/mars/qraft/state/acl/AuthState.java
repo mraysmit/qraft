@@ -70,8 +70,12 @@ public final class AuthState {
     /** Why {@code method} cannot be written, or {@code null}. */
     public static String refusalOf(AuthMethod method) {
         if (method.name().isBlank()) return "invalid_auth_method";
-        if (!"jwt".equals(method.type())) return "invalid_auth_method";
-        if (method.config().publicKeysPem().isEmpty()) return "invalid_auth_method";
+        boolean complete = switch (method.config()) {
+            case JwtConfig jwt -> "jwt".equals(method.type()) && !jwt.publicKeysPem().isEmpty();
+            case KubernetesConfig kubernetes -> "kubernetes".equals(method.type()) && !kubernetes.host().isBlank()
+                    && !kubernetes.caCertPem().isBlank() && !kubernetes.serviceAccountJwt().isBlank();
+        };
+        if (!complete) return "invalid_auth_method";
         if (method.maxTokenTtl().compareTo(MIN_TOKEN_TTL) < 0
                 || method.maxTokenTtl().compareTo(AuthMethod.MAX_TOKEN_TTL) > 0) return "invalid_auth_method";
         return null;

@@ -71,26 +71,38 @@ final class AuthCodec {
     }
 
     private static AuthMethodProto method(AuthMethod method) {
-        JwtConfig config = method.config();
-        return AuthMethodProto.newBuilder().setName(method.name()).setType(method.type())
-                .setDescription(method.description()).setMaxTokenTtlMs(method.maxTokenTtl().toMillis())
-                .setConfig(JwtConfigProto.newBuilder().addAllPublicKeysPem(config.publicKeysPem())
-                        .setBoundIssuer(config.boundIssuer()).addAllBoundAudiences(config.boundAudiences())
-                        .putAllClaimMappings(config.claimMappings()).putAllListClaimMappings(config.listClaimMappings())
-                        .setExpirationLeewayMs(config.expirationLeeway().toMillis())
-                        .setNotBeforeLeewayMs(config.notBeforeLeeway().toMillis())
-                        .setClockSkewLeewayMs(config.clockSkewLeeway().toMillis()))
-                .build();
+        AuthMethodProto.Builder proto = AuthMethodProto.newBuilder().setName(method.name()).setType(method.type())
+                .setDescription(method.description()).setMaxTokenTtlMs(method.maxTokenTtl().toMillis());
+        switch (method.config()) {
+            case JwtConfig config -> proto.setConfig(JwtConfigProto.newBuilder()
+                    .addAllPublicKeysPem(config.publicKeysPem())
+                    .setBoundIssuer(config.boundIssuer()).addAllBoundAudiences(config.boundAudiences())
+                    .putAllClaimMappings(config.claimMappings()).putAllListClaimMappings(config.listClaimMappings())
+                    .setExpirationLeewayMs(config.expirationLeeway().toMillis())
+                    .setNotBeforeLeewayMs(config.notBeforeLeeway().toMillis())
+                    .setClockSkewLeewayMs(config.clockSkewLeeway().toMillis()));
+            case dev.mars.qraft.state.acl.KubernetesConfig config -> proto.setKubernetesConfig(
+                    dev.mars.qraft.raft.grpc.KubernetesConfigProto.newBuilder().setHost(config.host())
+                            .setCaCertPem(config.caCertPem()).setServiceAccountJwt(config.serviceAccountJwt()));
+        }
+        return proto.build();
     }
 
     private static AuthMethod method(AuthMethodProto proto) {
-        JwtConfigProto config = proto.getConfig();
+        dev.mars.qraft.state.acl.AuthMethodConfig decoded;
+        if (proto.hasKubernetesConfig()) {
+            var kubernetes = proto.getKubernetesConfig();
+            decoded = new dev.mars.qraft.state.acl.KubernetesConfig(kubernetes.getHost(), kubernetes.getCaCertPem(),
+                    kubernetes.getServiceAccountJwt());
+        } else {
+            JwtConfigProto config = proto.getConfig();
+            decoded = new JwtConfig(config.getPublicKeysPemList(), config.getBoundIssuer(),
+                    config.getBoundAudiencesList(), config.getClaimMappingsMap(), config.getListClaimMappingsMap(),
+                    Duration.ofMillis(config.getExpirationLeewayMs()), Duration.ofMillis(config.getNotBeforeLeewayMs()),
+                    Duration.ofMillis(config.getClockSkewLeewayMs()));
+        }
         return new AuthMethod(proto.getName(), proto.getType(), proto.getDescription(),
-                Duration.ofMillis(proto.getMaxTokenTtlMs()), new JwtConfig(config.getPublicKeysPemList(),
-                config.getBoundIssuer(), config.getBoundAudiencesList(), config.getClaimMappingsMap(),
-                config.getListClaimMappingsMap(), Duration.ofMillis(config.getExpirationLeewayMs()),
-                Duration.ofMillis(config.getNotBeforeLeewayMs()), Duration.ofMillis(config.getClockSkewLeewayMs())),
-                0, 0);
+                Duration.ofMillis(proto.getMaxTokenTtlMs()), decoded, 0, 0);
     }
 
     private static BindingRuleProto rule(BindingRule rule) {

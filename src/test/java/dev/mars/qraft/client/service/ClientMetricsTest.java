@@ -49,7 +49,9 @@ class ClientMetricsTest {
     void passesAreCountedByResultBesideReadinessAndTheLastContactsAge() throws Exception {
         AtomicBoolean ready = new AtomicBoolean(true);
         AtomicReference<Instant> lastContact = new AtomicReference<>(NOW.minusSeconds(12));
-        ClientMetrics metrics = new ClientMetrics(ready::get, lastContact::get, Clock.fixed(NOW, ZoneOffset.UTC));
+        AtomicReference<java.net.URI> server = new AtomicReference<>(java.net.URI.create("http://server-1:8080"));
+        ClientMetrics metrics = new ClientMetrics(ready::get, lastContact::get, server::get,
+                Clock.fixed(NOW, ZoneOffset.UTC));
 
         metrics.pass(new ServiceReconciler.Result(1, 0, Map.of(), NOW), null);
         metrics.pass(new ServiceReconciler.Result(0, 0, Map.of(), NOW), null);
@@ -61,6 +63,7 @@ class ClientMetricsTest {
         assertEquals(NOW.toString(), json.path("Timestamp").asText());
         assertEquals(1, gauge(json, "qraft.client.ready"));
         assertEquals(12, gauge(json, "qraft.client.last_contact_age_seconds"));
+        assertEquals("http://server-1:8080", endpoint(json), "the server the client tries first");
         assertEquals(2, counter(json, "clean"));
         assertEquals(1, counter(json, "rejected"));
         assertEquals(1, counter(json, "failed"));
@@ -69,12 +72,16 @@ class ClientMetricsTest {
         assertTrue(text.contains("# TYPE qraft_client_ready gauge\nqraft_client_ready 1\n"), text);
         assertTrue(text.contains("qraft_client_reconciliations_total{result=\"clean\"} 2\n"), text);
         assertTrue(text.contains("qraft_client_last_contact_age_seconds 12\n"), text);
+        assertTrue(text.contains("# TYPE qraft_client_server_info gauge\n"
+                + "qraft_client_server_info{endpoint=\"http://server-1:8080\"} 1\n"), text);
 
         ready.set(false);
         lastContact.set(null);
         JsonNode later = JSON.valueToTree(metrics.json());
         assertEquals(0, gauge(later, "qraft.client.ready"));
         assertEquals(-1, gauge(later, "qraft.client.last_contact_age_seconds"), "no server reached yet");
+        server.set(java.net.URI.create("http://server-2:8080"));
+        assertEquals("http://server-2:8080", endpoint(JSON.valueToTree(metrics.json())));
     }
 
     private static long gauge(JsonNode json, String name) {
@@ -82,6 +89,16 @@ class ClientMetricsTest {
             if (gauge.path("Name").asText().equals(name)) return gauge.path("Value").asLong();
         }
         throw new AssertionError("no gauge " + name + " in " + json);
+    }
+
+    private static String endpoint(JsonNode json) {
+        for (JsonNode gauge : json.path("Gauges")) {
+            if (gauge.path("Name").asText().equals("qraft.client.server")) {
+                assertEquals(1, gauge.path("Value").asLong());
+                return gauge.path("Labels").path("endpoint").asText();
+            }
+        }
+        throw new AssertionError("no gauge qraft.client.server in " + json);
     }
 
     private static long counter(JsonNode json, String result) {

@@ -344,12 +344,15 @@ class ClientServerContractTest {
         assertEquals("blue", new ObjectMapper().readTree(services.body()).path("payments").path(0).textValue());
         assertEquals("request-9", services.headers().firstValue("X-Request-Id").orElseThrow());
         assertTrue(services.headers().firstValue("X-Qraft-Index").isPresent());
-        assertEquals("payments-1", readLocallyAsJson(local, "/v1/catalog/service/payments", Map.of())
-                .path(0).path("serviceId").textValue());
+        JsonNode instance = readLocallyAsJson(local, "/v1/catalog/service/payments", Map.of()).path(0);
+        assertEquals("payments-1", instance.path("serviceId").textValue());
+        assertTrue(instance.path("createIndex").asLong() > 0, "the indexes reach the application: " + instance);
+        assertTrue(instance.path("modifyIndex").asLong() >= instance.path("createIndex").asLong());
         assertEquals("contract-client", readLocallyAsJson(local, "/v1/catalog/nodes", Map.of())
                 .path(0).path("name").textValue());
         JsonNode health = readLocallyAsJson(local, "/v1/health/service/payments", Map.of());
         assertEquals("payments-1", health.path(0).path("service").path("serviceId").textValue());
+        assertEquals(instance.path("createIndex").asLong(), health.path(0).path("service").path("createIndex").asLong());
         assertTrue(health.path(0).has("nodeStatus"));
         assertEquals(0, readLocallyAsJson(local, "/v1/health/service/payments?passing", Map.of()).size(),
                 "the filter reaches the server: a service with no check result is not passing");

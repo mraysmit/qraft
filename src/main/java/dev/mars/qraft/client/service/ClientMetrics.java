@@ -40,7 +40,8 @@ import java.util.function.Supplier;
 /**
  * A client's metrics (observability list, Phase 2, decision 4), at {@code GET /v1/client/metrics}, Consul's
  * {@code /v1/agent/metrics} under Qraft's name: {@code qraft.client.ready}, {@code qraft.client.last_contact_age_seconds}
- * (-1 before any server has answered), and {@code qraft.client.reconciliations} by result, {@code clean} for a pass the
+ * (-1 before any server has answered), {@code qraft.client.server}, 1 with the {@code endpoint} the client tries first
+ * as its label (the client endpoint metric list, decision 1), and {@code qraft.client.reconciliations} by result, {@code clean} for a pass the
  * servers took whole, {@code rejected} for one they refused something in, and {@code failed} for one that reached no
  * server. Answered as Consul's JSON, or with {@code ?format=prometheus} in Prometheus' text format. A client opens no
  * telemetry port of its own; reading its metrics needs {@code client:read}.
@@ -54,14 +55,17 @@ public final class ClientMetrics {
     private static final List<String> RESULTS = List.of("clean", "rejected", "failed");
 
     private final BooleanSupplier ready;
+    private final Supplier<java.net.URI> server;
     private final Supplier<Instant> lastContact;
     private final Clock clock;
     private final Map<String, LongAdder> passes = new LinkedHashMap<>();
     private final JsonApi api = new JsonApi(new ObjectMapper());
 
-    public ClientMetrics(BooleanSupplier ready, Supplier<Instant> lastContact, Clock clock) {
+    public ClientMetrics(BooleanSupplier ready, Supplier<Instant> lastContact, Supplier<java.net.URI> server,
+                         Clock clock) {
         this.ready = Objects.requireNonNull(ready, "ready");
         this.lastContact = Objects.requireNonNull(lastContact, "lastContact");
+        this.server = Objects.requireNonNull(server, "server");
         this.clock = Objects.requireNonNull(clock, "clock");
         RESULTS.forEach(result -> passes.put(result, new LongAdder()));
     }
@@ -80,6 +84,9 @@ public final class ClientMetrics {
         List<Map<String, Object>> gauges = new ArrayList<>();
         gauges.add(gauge("qraft.client.ready", ready.getAsBoolean() ? 1 : 0));
         gauges.add(gauge("qraft.client.last_contact_age_seconds", lastContactAge()));
+        Map<String, Object> endpoint = gauge("qraft.client.server", 1);
+        endpoint.put("Labels", Map.of("endpoint", server.get().toString()));
+        gauges.add(endpoint);
         answer.put("Gauges", gauges);
         List<Map<String, Object>> counters = new ArrayList<>();
         passes.forEach((result, count) -> {
@@ -100,10 +107,17 @@ public final class ClientMetrics {
                 .append('\n');
         text.append("# TYPE qraft_client_last_contact_age_seconds gauge\nqraft_client_last_contact_age_seconds ")
                 .append(lastContactAge()).append('\n');
+        text.append("# TYPE qraft_client_server_info gauge\nqraft_client_server_info{endpoint=\"")
+                .append(labelValue(server.get().toString())).append("\"} 1\n");
         text.append("# TYPE qraft_client_reconciliations_total counter\n");
         passes.forEach((result, count) -> text.append("qraft_client_reconciliations_total{result=\"").append(result)
                 .append("\"} ").append(count.sum()).append('\n'));
         return text.toString();
+    }
+
+    /** {@code value} escaped as Prometheus' text format escapes a label's value. */
+    private static String labelValue(String value) {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
     }
 
     /** Serves {@code GET /v1/client/metrics} on {@code localApi}, under {@code acl}. */

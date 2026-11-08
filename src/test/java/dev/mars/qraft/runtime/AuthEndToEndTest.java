@@ -100,22 +100,22 @@ class AuthEndToEndTest {
         String pem = "-----BEGIN PUBLIC KEY-----\n" + Base64.getMimeEncoder(64, "\n".getBytes()).encodeToString(
                 keys.getPublic().getEncoded()) + "\n-----END PUBLIC KEY-----";
 
-        assertEquals(200, send(leader, "PUT", "/v1/acl/policy", "{\"Name\":\"kv-writer\",\"Rules\":"
-                + "\"{\\\"key_prefix\\\":{\\\"\\\":{\\\"policy\\\":\\\"write\\\"}}}\"}", MANAGEMENT).statusCode());
-        assertEquals(200, send(leader, "PUT", "/v1/acl/auth-method", JSON.writeValueAsString(Map.of("Name", "ci",
-                "Type", "jwt", "Config", Map.of("JWTValidationPubKeys", List.of(pem), "BoundIssuer", "https://ci.example",
-                        "ClaimMappings", Map.of("job", "job")))), MANAGEMENT).statusCode());
-        assertEquals(200, send(leader, "PUT", "/v1/acl/binding-rule", "{\"AuthMethod\":\"ci\",\"Selector\":"
-                + "\"value.job == \\\"deploy\\\"\",\"BindType\":\"policy\",\"BindName\":\"kv-writer\"}", MANAGEMENT)
+        assertEquals(200, send(leader, "PUT", "/v1/acl/policy", "{\"name\":\"kv-writer\",\"rules\":"
+                + "{\"key_prefix\":{\"\":{\"policy\":\"write\"}}}}", MANAGEMENT).statusCode());
+        assertEquals(200, send(leader, "PUT", "/v1/acl/auth-method", JSON.writeValueAsString(Map.of("name", "ci",
+                "type", "jwt", "config", Map.of("jwtValidationPubKeys", List.of(pem), "boundIssuer", "https://ci.example",
+                        "claimMappings", Map.of("job", "job")))), MANAGEMENT).statusCode());
+        assertEquals(200, send(leader, "PUT", "/v1/acl/binding-rule", "{\"authMethod\":\"ci\",\"selector\":"
+                + "\"value.job == \\\"deploy\\\"\",\"bindType\":\"policy\",\"bindName\":\"kv-writer\"}", MANAGEMENT)
                 .statusCode());
 
         HttpResponse<String> login = send(leader, "POST", "/v1/acl/login", JSON.writeValueAsString(Map.of(
-                "AuthMethod", "ci", "BearerToken", jwt(keys, Map.of("iss", "https://ci.example", "job", "deploy",
+                "authMethod", "ci", "bearerToken", jwt(keys, Map.of("iss", "https://ci.example", "job", "deploy",
                         "exp", Instant.now().plusSeconds(300).getEpochSecond())))), null);
         assertEquals(200, login.statusCode(), login.body());
         JsonNode token = JSON.readTree(login.body());
-        String secret = token.path("SecretID").asText();
-        String accessor = token.path("AccessorID").asText();
+        String secret = token.path("secretId").asText();
+        String accessor = token.path("accessorId").asText();
 
         assertEquals("true", send(leader, "PUT", "/v1/kv/deploy/version", "42", secret).body());
         for (int server = 0; server < 3; server++) {

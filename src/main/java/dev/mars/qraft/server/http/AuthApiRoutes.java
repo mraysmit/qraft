@@ -59,8 +59,9 @@ final class AuthApiRoutes {
     static final List<String> CONTEXTS = List.of("/v1/acl/auth-method", "/v1/acl/auth-methods",
             "/v1/acl/binding-rule", "/v1/acl/binding-rules", "/v1/acl/login", "/v1/acl/logout");
     private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(AuthApiRoutes.class);
+    /** A bind name's interpolation: a mapped claim, or a kubernetes login's service account (decision 4). */
     private static final java.util.regex.Pattern BIND_VALUE = java.util.regex.Pattern.compile(
-            "\\$\\{value\\.([A-Za-z0-9_]+)}");
+            "\\$\\{(?:value\\.([A-Za-z0-9_]+)|(serviceaccount\\.(?:namespace|name|uid)))}");
     private static final AclRequest ACL_READ = AclRequest.single(AclResource.ACL, AclAccess.READ);
     private static final AclRequest ACL_WRITE = AclRequest.single(AclResource.ACL, AclAccess.WRITE);
 
@@ -121,13 +122,14 @@ final class AuthApiRoutes {
 
     /**
      * Exchanges a bearer JWT for a token (decisions 2 and 3), as Consul's {@code POST /v1/acl/login}: it needs no token
-     * of its own; the JWT must be valid for the method; every rule whose selector its mapped claims match binds the token,
+     * of its own; the JWT must be valid for the method, or for a {@code kubernetes} method the cluster's token review
+     * must authenticate it (Kubernetes auth method list, decision 3), a review that cannot be made answering 503; every rule whose selector its mapped claims match binds the token,
      * a role or policy by name and a service or node identity by its interpolated name, a missing role or policy being
      * left out; and a login that binds nothing is refused, as Consul refuses it.
      */
     private void login(HttpExchange exchange) throws IOException {
         JsonNode body = body(exchange);
-        String methodName = text(body, "AuthMethod");
+        String methodName = text(body, "authMethod");
         var found = auth().method(methodName);
         if (found.isEmpty()) {
             server.respondError(exchange, 404, "auth_method_not_found", "No auth method " + methodName, false);
@@ -135,8 +137,17 @@ final class AuthApiRoutes {
         }
         dev.mars.qraft.server.acl.JwtValidator.Mapped mapped;
         try {
-            mapped = dev.mars.qraft.server.acl.JwtValidator.validate(text(body, "BearerToken"), found.get(),
-                    server.clock);
+            mapped = switch (found.get().config()) {
+                case JwtConfig jwt -> dev.mars.qraft.server.acl.JwtValidator.validate(text(body, "bearerToken"),
+                        found.get(), server.clock);
+                case dev.mars.qraft.state.acl.KubernetesConfig kubernetes ->
+                        dev.mars.qraft.server.acl.KubernetesTokenReviewer.review(text(body, "bearerToken"), found.get());
+            };
+        } catch (dev.mars.qraft.server.acl.KubernetesTokenReviewer.Unavailable unavailable) {
+            LOG.warn("Login through {} could not be reviewed: {}", methodName, unavailable.getMessage());
+            server.respondError(exchange, 503, "auth_method_unavailable", "The auth method " + methodName
+                    + " cannot review the token now: " + unavailable.getMessage(), true);
+            return;
         } catch (IllegalArgumentException invalid) {
             LOG.info("Login through {} refused: {}", methodName, HttpApiServer.safeMessage(invalid));
             server.respondError(exchange, 403, "permission_denied", "Permission denied: the bearer token is not "
@@ -187,19 +198,19 @@ final class AuthApiRoutes {
             return;
         }
         Map<String, Object> answer = new LinkedHashMap<>();
-        answer.put("AccessorID", token.accessorId());
-        answer.put("SecretID", secret);
-        answer.put("Description", token.description());
-        answer.put("Policies", policyIds.stream().map(id -> Map.of("ID", id, "Name",
+        answer.put("accessorId", token.accessorId());
+        answer.put("secretId", secret);
+        answer.put("description", token.description());
+        answer.put("policies", policyIds.stream().map(id -> Map.of("id", id, "name",
                 acl.policy(id).map(dev.mars.qraft.state.acl.AclPolicy::name).orElse(""))).toList());
-        answer.put("Roles", roleIds.stream().map(id -> Map.of("ID", id, "Name",
+        answer.put("roles", roleIds.stream().map(id -> Map.of("id", id, "name",
                 acl.role(id).map(dev.mars.qraft.state.acl.AclRole::name).orElse(""))).toList());
-        answer.put("ServiceIdentities", services.stream().map(identity -> Map.of("ServiceName",
+        answer.put("serviceIdentities", services.stream().map(identity -> Map.of("serviceName",
                 identity.serviceName())).toList());
-        answer.put("NodeIdentities", nodes.stream().map(identity -> Map.of("NodeName", identity.nodeName())).toList());
-        answer.put("AuthMethod", methodName);
-        answer.put("CreateTime", now.toString());
-        answer.put("ExpirationTime", token.expirationTime().toString());
+        answer.put("nodeIdentities", nodes.stream().map(identity -> Map.of("nodeName", identity.nodeName())).toList());
+        answer.put("authMethod", methodName);
+        answer.put("createTime", now.toString());
+        answer.put("expirationTime", token.expirationTime().toString());
         server.respondJson(exchange, 200, answer);
     }
 
@@ -225,7 +236,7 @@ final class AuthApiRoutes {
         java.util.regex.Matcher matcher = BIND_VALUE.matcher(bindName);
         StringBuilder bound = new StringBuilder();
         while (matcher.find()) {
-            String value = values.get(matcher.group(1));
+            String value = values.get(matcher.group(1) != null ? matcher.group(1) : matcher.group(2));
             if (value == null) return null;
             matcher.appendReplacement(bound, java.util.regex.Matcher.quoteReplacement(value));
         }
@@ -328,33 +339,73 @@ final class AuthApiRoutes {
 
     /** A method as Consul's API writes one, its keys parsed; the path's name wins over the body's. */
     private static AuthMethod method(JsonNode body, String pathName) {
-        String name = pathName != null ? pathName : text(body, "Name");
-        if (name.isBlank()) throw new IllegalArgumentException("An auth method needs a Name");
-        String type = text(body, "Type");
-        if (!"jwt".equals(type)) throw new IllegalArgumentException("Only the jwt auth method type is supported: " + type);
-        JsonNode config = body.path("Config");
-        List<String> keys = strings(config, "JWTValidationPubKeys");
-        if (keys.isEmpty()) throw new IllegalArgumentException("A jwt auth method needs JWTValidationPubKeys");
-        JwtKeys.parse(keys);
-        String ttl = text(body, "MaxTokenTTL");
-        AuthMethod method = new AuthMethod(name, type, text(body, "Description"),
-                ttl.isEmpty() ? AuthMethod.DEFAULT_MAX_TOKEN_TTL : AclApiRoutes.duration(ttl),
-                new JwtConfig(keys, text(config, "BoundIssuer"), strings(config, "BoundAudiences"),
-                        map(config, "ClaimMappings"), map(config, "ListClaimMappings"), duration(config, "ExpirationLeeway"),
-                        duration(config, "NotBeforeLeeway"), duration(config, "ClockSkewLeeway")), 0, 0);
+        String name = pathName != null ? pathName : text(body, "name");
+        if (name.isBlank()) throw new IllegalArgumentException("An auth method needs a name");
+        String type = text(body, "type");
+        JsonNode config = body.path("config");
+        dev.mars.qraft.state.acl.AuthMethodConfig parsed = switch (type) {
+            case "jwt" -> jwtConfig(config);
+            case "kubernetes" -> kubernetesConfig(config);
+            default -> throw new IllegalArgumentException(
+                    "Only the jwt and kubernetes auth method types are supported: " + type);
+        };
+        String ttl = text(body, "maxTokenTtl");
+        AuthMethod method = new AuthMethod(name, type, text(body, "description"),
+                ttl.isEmpty() ? AuthMethod.DEFAULT_MAX_TOKEN_TTL : AclApiRoutes.duration(ttl), parsed, 0, 0);
         if (AuthState.refusalOf(method) != null) {
-            throw new IllegalArgumentException("MaxTokenTTL must be between 1m and 24h: " + ttl);
+            throw new IllegalArgumentException("maxTokenTtl must be between 1m and 24h: " + ttl);
         }
         return method;
     }
 
+    private static JwtConfig jwtConfig(JsonNode config) {
+        List<String> keys = strings(config, "jwtValidationPubKeys");
+        if (keys.isEmpty()) throw new IllegalArgumentException("A jwt auth method needs jwtValidationPubKeys");
+        JwtKeys.parse(keys);
+        return new JwtConfig(keys, text(config, "boundIssuer"), strings(config, "boundAudiences"),
+                map(config, "claimMappings"), map(config, "listClaimMappings"), duration(config, "expirationLeeway"),
+                duration(config, "notBeforeLeeway"), duration(config, "clockSkewLeeway"));
+    }
+
+    /**
+     * A kubernetes method's configuration (Kubernetes auth method list, decision 2): an {@code https} host, a CA that
+     * holds a PEM certificate, and the reviewer's token, each required.
+     */
+    private static dev.mars.qraft.state.acl.KubernetesConfig kubernetesConfig(JsonNode config) {
+        String host = text(config, "host");
+        String caCert = text(config, "caCert");
+        String reviewer = text(config, "serviceAccountJwt");
+        if (host.isBlank() || caCert.isBlank() || reviewer.isBlank()) {
+            throw new IllegalArgumentException("A kubernetes auth method needs host, caCert and serviceAccountJwt");
+        }
+        java.net.URI address;
+        try {
+            address = java.net.URI.create(host);
+        } catch (IllegalArgumentException notAddress) {
+            throw new IllegalArgumentException("host must be an https address: " + host);
+        }
+        if (!"https".equalsIgnoreCase(address.getScheme()) || address.getHost() == null) {
+            throw new IllegalArgumentException("host must be an https address: " + host);
+        }
+        try {
+            if (java.security.cert.CertificateFactory.getInstance("X.509").generateCertificates(
+                    new java.io.ByteArrayInputStream(caCert.getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+                    .isEmpty()) {
+                throw new java.security.cert.CertificateException("no certificate");
+            }
+        } catch (java.security.cert.CertificateException notCertificate) {
+            throw new IllegalArgumentException("caCert must hold a PEM certificate");
+        }
+        return new dev.mars.qraft.state.acl.KubernetesConfig(host, caCert, reviewer);
+    }
+
     private static BindingRule rule(JsonNode body, String id) {
-        String selector = text(body, "Selector");
+        String selector = text(body, "selector");
         Selector.parse(selector);
-        String bindName = text(body, "BindName");
-        if (bindName.isBlank()) throw new IllegalArgumentException("A binding rule needs a BindName");
-        return new BindingRule(id, text(body, "Description"), text(body, "AuthMethod"), selector,
-                BindType.ofApiName(text(body, "BindType")), bindName, 0, 0);
+        String bindName = text(body, "bindName");
+        if (bindName.isBlank()) throw new IllegalArgumentException("A binding rule needs a bindName");
+        return new BindingRule(id, text(body, "description"), text(body, "authMethod"), selector,
+                BindType.ofApiName(text(body, "bindType")), bindName, 0, 0);
     }
 
     private static String text(JsonNode node, String field) {
@@ -389,35 +440,44 @@ final class AuthApiRoutes {
 
     static Map<String, Object> answer(AuthMethod method) {
         Map<String, Object> config = new LinkedHashMap<>();
-        config.put("JWTValidationPubKeys", method.config().publicKeysPem());
-        config.put("BoundIssuer", method.config().boundIssuer());
-        config.put("BoundAudiences", method.config().boundAudiences());
-        config.put("ClaimMappings", method.config().claimMappings());
-        config.put("ListClaimMappings", method.config().listClaimMappings());
-        config.put("ExpirationLeeway", SessionApiRoutes.goDuration(method.config().expirationLeeway()));
-        config.put("NotBeforeLeeway", SessionApiRoutes.goDuration(method.config().notBeforeLeeway()));
-        config.put("ClockSkewLeeway", SessionApiRoutes.goDuration(method.config().clockSkewLeeway()));
+        switch (method.config()) {
+            case JwtConfig jwt -> {
+                config.put("jwtValidationPubKeys", jwt.publicKeysPem());
+                config.put("boundIssuer", jwt.boundIssuer());
+                config.put("boundAudiences", jwt.boundAudiences());
+                config.put("claimMappings", jwt.claimMappings());
+                config.put("listClaimMappings", jwt.listClaimMappings());
+                config.put("expirationLeeway", SessionApiRoutes.goDuration(jwt.expirationLeeway()));
+                config.put("notBeforeLeeway", SessionApiRoutes.goDuration(jwt.notBeforeLeeway()));
+                config.put("clockSkewLeeway", SessionApiRoutes.goDuration(jwt.clockSkewLeeway()));
+            }
+            case dev.mars.qraft.state.acl.KubernetesConfig kubernetes -> {
+                // The reviewer's token is a secret, and is never answered (decision 2).
+                config.put("host", kubernetes.host());
+                config.put("caCert", kubernetes.caCertPem());
+            }
+        }
         Map<String, Object> answer = new LinkedHashMap<>();
-        answer.put("Name", method.name());
-        answer.put("Type", method.type());
-        answer.put("Description", method.description());
-        answer.put("MaxTokenTTL", SessionApiRoutes.goDuration(method.maxTokenTtl()));
-        answer.put("Config", config);
-        answer.put("CreateIndex", method.createIndex());
-        answer.put("ModifyIndex", method.modifyIndex());
+        answer.put("name", method.name());
+        answer.put("type", method.type());
+        answer.put("description", method.description());
+        answer.put("maxTokenTtl", SessionApiRoutes.goDuration(method.maxTokenTtl()));
+        answer.put("config", config);
+        answer.put("createIndex", method.createIndex());
+        answer.put("modifyIndex", method.modifyIndex());
         return answer;
     }
 
     static Map<String, Object> answer(BindingRule rule) {
         Map<String, Object> answer = new LinkedHashMap<>();
-        answer.put("ID", rule.id());
-        answer.put("Description", rule.description());
-        answer.put("AuthMethod", rule.authMethod());
-        answer.put("Selector", rule.selector());
-        answer.put("BindType", rule.bindType().apiName());
-        answer.put("BindName", rule.bindName());
-        answer.put("CreateIndex", rule.createIndex());
-        answer.put("ModifyIndex", rule.modifyIndex());
+        answer.put("id", rule.id());
+        answer.put("description", rule.description());
+        answer.put("authMethod", rule.authMethod());
+        answer.put("selector", rule.selector());
+        answer.put("bindType", rule.bindType().apiName());
+        answer.put("bindName", rule.bindName());
+        answer.put("createIndex", rule.createIndex());
+        answer.put("modifyIndex", rule.modifyIndex());
         return answer;
     }
 }

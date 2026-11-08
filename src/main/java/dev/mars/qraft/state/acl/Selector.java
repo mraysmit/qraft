@@ -25,7 +25,9 @@ import java.util.regex.Pattern;
 
 /**
  * A binding rule's selector (authentication list, decision 2): the subset of Consul's selectors this server reads,
- * clauses {@code value.<name> == "<text>"} and {@code "<text>" in list.<name>} joined by {@code and}. An empty selector
+ * clauses {@code value.<name> == "<text>"} and {@code "<text>" in list.<name>} joined by {@code and}, and for a
+ * {@code kubernetes} method {@code serviceaccount.namespace}, {@code serviceaccount.name} and {@code serviceaccount.uid}
+ * in place of {@code value.<name>}, as Consul names them (Kubernetes auth method list, decision 4). An empty selector
  * takes every login. Anything else is refused when the rule is written, so no login is decided on a misread selector.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
@@ -33,7 +35,8 @@ import java.util.regex.Pattern;
  * @version 1.0
  */
 public final class Selector {
-    private static final Pattern EQUALS = Pattern.compile("value\\.([A-Za-z0-9_]+)\\s*==\\s*\"([^\"]*)\"");
+    private static final Pattern EQUALS = Pattern.compile(
+            "(?:value\\.([A-Za-z0-9_]+)|(serviceaccount\\.(?:namespace|name|uid)))\\s*==\\s*\"([^\"]*)\"");
     private static final Pattern IN = Pattern.compile("\"([^\"]*)\"\\s+in\\s+list\\.([A-Za-z0-9_]+)");
     private static final Pattern AND = Pattern.compile("\\s+and\\s+");
 
@@ -55,7 +58,8 @@ public final class Selector {
             Matcher equals = EQUALS.matcher(selector).region(at, selector.length());
             Matcher in = IN.matcher(selector).region(at, selector.length());
             if (equals.lookingAt()) {
-                clauses.add(new Clause(false, equals.group(1), equals.group(2)));
+                String name = equals.group(1) != null ? equals.group(1) : equals.group(2);
+                clauses.add(new Clause(false, name, equals.group(3)));
                 at = equals.end();
             } else if (in.lookingAt()) {
                 clauses.add(new Clause(true, in.group(2), in.group(1)));

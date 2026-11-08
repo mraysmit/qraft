@@ -32,7 +32,8 @@ import java.util.Objects;
  */
 public record JwtConfig(List<String> publicKeysPem, String boundIssuer, List<String> boundAudiences,
                         Map<String, String> claimMappings, Map<String, String> listClaimMappings,
-                        Duration expirationLeeway, Duration notBeforeLeeway, Duration clockSkewLeeway) {
+                        Duration expirationLeeway, Duration notBeforeLeeway, Duration clockSkewLeeway)
+        implements AuthMethodConfig {
     public JwtConfig {
         publicKeysPem = List.copyOf(Objects.requireNonNull(publicKeysPem, "publicKeysPem"));
         boundIssuer = boundIssuer == null ? "" : boundIssuer;

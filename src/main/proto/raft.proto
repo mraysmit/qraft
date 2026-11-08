@@ -14,6 +14,23 @@ service RaftService {
   rpc Describe (DescribeRequest) returns (DescribeResponse) {}
   rpc Join (JoinRequest) returns (MembershipResponse) {}
   rpc RemoveServer (RemoveServerRequest) returns (MembershipResponse) {}
+  rpc Forward (ForwardRequest) returns (ForwardResponse) {}
+}
+
+// A write a follower received, sent to the leader to answer (write forwarding list, decision 1).
+message ForwardRequest {
+  string method = 1;
+  string path_and_query = 2;           // The path and raw query as the follower received them
+  map<string, string> headers = 3;     // The request's own headers, such as the token and scope
+  bytes body = 4;
+  string from = 5;                     // The forwarding server's ID
+}
+
+// The leader's answer to a forwarded write, which the follower answers with.
+message ForwardResponse {
+  int32 status = 1;
+  map<string, string> headers = 2;
+  bytes body = 3;
 }
 
 // A server with no Raft state asking an existing cluster to add it. Any server forwards it to the leader.

@@ -122,31 +122,31 @@ class HttpApiServerLoginTest {
         submit(AclCommand.createPolicy(new AclPolicy(UUID.randomUUID().toString(), "kv-reader", "",
                 AclRulesJson.parse("{\"key_prefix\":{\"\":{\"policy\":\"read\"}}}"))));
         KeyPair keys = JwtValidatorFixture.ecKeys();
-        assertEquals(200, send("PUT", "/v1/acl/auth-method", JSON.writeValueAsString(Map.of("Name", "workloads",
-                "Type", "jwt", "MaxTokenTTL", "10m", "Config", Map.of("JWTValidationPubKeys",
-                        List.of(JwtValidatorFixture.pem(keys)), "BoundIssuer", "https://issuer.example",
-                        "BoundAudiences", List.of("qraft"), "ClaimMappings", Map.of("sub", "name"),
-                        "ListClaimMappings", Map.of("groups", "groups")))), "X-Qraft-Token", admin).statusCode());
-        assertEquals(200, send("PUT", "/v1/acl/binding-rule", "{\"AuthMethod\":\"workloads\",\"Selector\":"
-                + "\"value.name == \\\"web\\\"\",\"BindType\":\"service\",\"BindName\":\"${value.name}\"}",
+        assertEquals(200, send("PUT", "/v1/acl/auth-method", JSON.writeValueAsString(Map.of("name", "workloads",
+                "type", "jwt", "maxTokenTtl", "10m", "config", Map.of("jwtValidationPubKeys",
+                        List.of(JwtValidatorFixture.pem(keys)), "boundIssuer", "https://issuer.example",
+                        "boundAudiences", List.of("qraft"), "claimMappings", Map.of("sub", "name"),
+                        "listClaimMappings", Map.of("groups", "groups")))), "X-Qraft-Token", admin).statusCode());
+        assertEquals(200, send("PUT", "/v1/acl/binding-rule", "{\"authMethod\":\"workloads\",\"selector\":"
+                + "\"value.name == \\\"web\\\"\",\"bindType\":\"service\",\"bindName\":\"${value.name}\"}",
                 "X-Qraft-Token", admin).statusCode());
-        assertEquals(200, send("PUT", "/v1/acl/binding-rule", "{\"AuthMethod\":\"workloads\",\"Selector\":"
-                + "\"\\\"dev\\\" in list.groups\",\"BindType\":\"policy\",\"BindName\":\"kv-reader\"}",
+        assertEquals(200, send("PUT", "/v1/acl/binding-rule", "{\"authMethod\":\"workloads\",\"selector\":"
+                + "\"\\\"dev\\\" in list.groups\",\"bindType\":\"policy\",\"bindName\":\"kv-reader\"}",
                 "X-Qraft-Token", admin).statusCode());
 
         String bearer = JwtValidatorFixture.jwt(keys, Map.of("iss", "https://issuer.example", "aud", "qraft",
                 "sub", "web", "groups", List.of("dev"), "exp", Instant.now().plusSeconds(300).getEpochSecond()));
         HttpResponse<String> login = send("POST", "/v1/acl/login", JSON.writeValueAsString(Map.of(
-                "AuthMethod", "workloads", "BearerToken", bearer)));
+                "authMethod", "workloads", "bearerToken", bearer)));
         assertEquals(200, login.statusCode(), login.body());
         JsonNode token = JSON.readTree(login.body());
-        assertEquals("web", token.path("ServiceIdentities").get(0).path("ServiceName").asText());
-        assertEquals("kv-reader", token.path("Policies").get(0).path("Name").asText());
-        assertEquals("workloads", token.path("AuthMethod").asText());
-        Instant expires = Instant.parse(token.path("ExpirationTime").asText());
+        assertEquals("web", token.path("serviceIdentities").get(0).path("serviceName").asText());
+        assertEquals("kv-reader", token.path("policies").get(0).path("name").asText());
+        assertEquals("workloads", token.path("authMethod").asText());
+        Instant expires = Instant.parse(token.path("expirationTime").asText());
         assertTrue(expires.isBefore(Instant.now().plusSeconds(601)) && expires.isAfter(Instant.now().plusSeconds(540)),
                 "the method's MaxTokenTTL: " + expires);
-        String secret = token.path("SecretID").asText();
+        String secret = token.path("secretId").asText();
         refused(send("GET", "/v1/kv/absent", null, "X-Qraft-Token", secret), 404, "key_not_found");
 
         assertEquals("true", send("POST", "/v1/acl/logout", null, "X-Qraft-Token", secret).body());
@@ -155,12 +155,12 @@ class HttpApiServerLoginTest {
 
         String noRule = JwtValidatorFixture.jwt(keys, Map.of("iss", "https://issuer.example", "aud", "qraft",
                 "sub", "db", "exp", Instant.now().plusSeconds(300).getEpochSecond()));
-        refused(send("POST", "/v1/acl/login", JSON.writeValueAsString(Map.of("AuthMethod", "workloads",
-                "BearerToken", noRule))), 403, "permission_denied");
-        refused(send("POST", "/v1/acl/login", JSON.writeValueAsString(Map.of("AuthMethod", "workloads",
-                "BearerToken", "not.a.jwt"))), 403, "permission_denied");
-        refused(send("POST", "/v1/acl/login", JSON.writeValueAsString(Map.of("AuthMethod", "absent",
-                "BearerToken", bearer))), 404, "auth_method_not_found");
+        refused(send("POST", "/v1/acl/login", JSON.writeValueAsString(Map.of("authMethod", "workloads",
+                "bearerToken", noRule))), 403, "permission_denied");
+        refused(send("POST", "/v1/acl/login", JSON.writeValueAsString(Map.of("authMethod", "workloads",
+                "bearerToken", "not.a.jwt"))), 403, "permission_denied");
+        refused(send("POST", "/v1/acl/login", JSON.writeValueAsString(Map.of("authMethod", "absent",
+                "bearerToken", bearer))), 404, "auth_method_not_found");
     }
 
     private void submit(RaftCommand command) throws Exception {

@@ -404,7 +404,7 @@ unchecked features below remain open.
   backups, replica replacement, and guidance for explicitly compatible upgrades
   in `RAFT_STORAGE_OPERATIONS.md`. Byte-compatible legacy payloads do not imply
   whole-node upgrade compatibility.
-- [ ] Add lost-quorum recovery and a tested whole-cluster restore contract.
+- [x] Add lost-quorum recovery and a tested whole-cluster restore contract. Built and verified as membership Step 7 (ticked 2026-11-08; the membership list was archived complete on 2026-10-24).
   Rejoining an existing cluster from an older backup under the same voter ID
   is unsupported (membership Step 7). Consul's equivalents are `peers.json`
   outage recovery and `consul snapshot restore`. Step 7's proposed contract
@@ -451,13 +451,14 @@ unchecked features below remain open.
 - [x] Implement the bounded event journal (item 8). Done 2026-11-08, the design's
   phases 1 to 4: [`task-list-events-2026-11-08.md`](../docs/archive/task-list-events-2026-11-08.md);
   its HTTP query, live watch and durable sinks are left for later.
-- [ ] Implement ACL tokens, policies, token validation, and audit events
+- [x] Implement ACL tokens, policies, token validation, and audit events
   (phase 7; item 9). Tokens, policies, roles, identities and validation on servers and
   clients are done (2026-11-07, the ACL list,
   [`task-list-acl-and-tokens-2026-11-07.md`](../docs/archive/task-list-acl-and-tokens-2026-11-07.md)),
   and TLS on every listener, with mutual TLS on the Raft port, is built (2026-11-07, [`task-list-transport-security-2026-11-08.md`](../docs/archive/task-list-transport-security-2026-11-08.md));
-  audit events wait for the events list.
-- [ ] Implement server membership change. Decided 2026-09-29, and in progress
+  and the `jwt` auth method, login and audit events are built (2026-11-08,
+  [`task-list-authentication-and-audit-2026-11-08.md`](../docs/archive/task-list-authentication-and-audit-2026-11-08.md)).
+- [x] Implement server membership change. Complete on 2026-10-24, when the membership list was archived with Steps 1 to 8 done (ticked 2026-11-08). Decided 2026-09-29, and was in progress
   in [`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md):
   server IDs, the configuration in the log, non-voter promotion, joining, and
   operator list/remove are done. The Step 4 close-out gate closed on 2026-10-11

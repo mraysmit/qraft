@@ -117,6 +117,11 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
                 tenant, namespace, datacenter, region, requestTimeout, contactTracker);
     }
 
+    /** The server this client tries first: the last that answered, or its first seed before any has. */
+    public java.net.URI preferredServer() {
+        return endpoints.preferred();
+    }
+
     private HttpCatalogClient(HttpClient httpClient, ObjectMapper objectMapper, ServerEndpoints endpoints,
                               String nodeId, String nodeUuid, String tenant, String namespace,
                               String datacenter, String region, Duration requestTimeout,

@@ -101,8 +101,12 @@ public class QraftServerService {
     private Optional<RaftNode> raftNode = Optional.empty();
     private RaftStorageFactory.DurableStorage raftStorage;
     private Optional<GrpcRaftServer> raftGrpcServer = Optional.empty();
-    /** {@code server.tls}'s material, read once at start (transport security list, decision 1). */
+    /** {@code server.tls}'s material, read at start (transport security list, decision 1). */
     private Optional<TlsMaterial> tlsMaterial = Optional.empty();
+    /** How often {@code server.tls}'s files are checked for a change (certificate reloading list, decision 2). */
+    private volatile java.time.Duration tlsReloadInterval = dev.mars.qraft.common.tls.TlsReloader.INTERVAL;
+    /** Reloads {@code server.tls}'s material when its files change, from start until stop. */
+    private Optional<dev.mars.qraft.common.tls.TlsReloader> tlsReloader = Optional.empty();
     /** Mutual TLS on the Raft port and its channels, when {@code server.tls.raft} enables it. */
     private Optional<RaftTls> raftTls = Optional.empty();
     private Optional<GrpcServiceServer> apiGrpcServer = Optional.empty();
@@ -156,9 +160,11 @@ public class QraftServerService {
             // 3. Setup Raft Transport (gRPC)
             int raftPoolSize = config.getRaftIoPoolSize();
             int raftQueueSize = config.getRaftIoQueueSize();
-            // The TLS material is read once; a listener uses it only when its own switch is on (transport security
-            // list, decisions 1 to 4).
+            // The TLS material is read at start, and again when its files change (certificate reloading list); a
+            // listener uses it only when its own switch is on (transport security list, decisions 1 to 4).
             this.tlsMaterial = config.getTlsSettings().map(TlsMaterial::load);
+            this.tlsReloader = tlsMaterial.map(material ->
+                    dev.mars.qraft.common.tls.TlsReloader.start(material, tlsReloadInterval));
             this.raftTls = config.isRaftTlsEnabled()
                     ? tlsMaterial.map(material -> new RaftTls(material, config.isRaftVerifyServerHostname()))
                     : Optional.empty();
@@ -285,6 +291,10 @@ public class QraftServerService {
                             config.getAclDefaultPolicy().orElse(null),
                             config.getInitialManagementSecret().map(AclSecrets::hash).orElse(null)), httpsTls);
             this.httpApiServer = Optional.of(healthServer);
+            // A follower sends the writes it receives to the leader over the Raft port, and the leader answers those
+            // forwarded to it on its own routes (write forwarding list, decisions 1 and 2).
+            internalRaftServer.useForwardTarget(healthServer.forwardTarget());
+            healthServer.useWriteForwarding(transport::forward);
             // The storage's size and its snapshot's age, in /raft/status and as gauges (observability list, Phase 3).
             dev.mars.qraft.raft.StorageStatus storageStatus = new dev.mars.qraft.raft.StorageStatus(
                     Path.of(config.getRaftStoragePath()), Clock.systemUTC());
@@ -448,6 +458,7 @@ public class QraftServerService {
         aclTokenExpiry.ifPresent(AclTokenExpiry::close);
         sessionTtlExpiry.ifPresent(SessionTtlExpiry::close);
         auditSink.ifPresent(AuditFileSink::close);
+        tlsReloader.ifPresent(dev.mars.qraft.common.tls.TlsReloader::close);
         healthExpiry.ifPresent(LeaderHealthExpiry::close);
         return healthExpiryExecutor.map(executor -> ExpiryExecutor.stop(executor, HEALTH_EXPIRY_STOP_TIMEOUT))
                 .orElseGet(QraftServerService::nothingToStop);
@@ -477,10 +488,29 @@ public class QraftServerService {
         return Map.of("http", http.address(), "raft", raft.address(), "apiGrpc", api.address());
     }
 
+    /** How this server sends a write to the leader, for tests in this package that replace it for a while. */
+    java.util.function.BiFunction<String, dev.mars.qraft.raft.grpc.ForwardRequest,
+            java.util.concurrent.CompletableFuture<dev.mars.qraft.raft.grpc.ForwardResponse>> forwardingTransport() {
+        return transport::forward;
+    }
+
+    /** This server's HTTP API while it runs, for tests in this package. */
+    Optional<HttpApiServer> httpApi() {
+        return httpApiServer;
+    }
+
     /** Effective policy of the constructed Raft node, for startup diagnostics and lifecycle inspection. */
     public RaftMembershipPolicy membershipPolicy() {
         return raftNode.orElseThrow(() -> new IllegalStateException("the Raft node has not been constructed"))
                 .getMembershipPolicy();
+    }
+
+    /**
+     * Checks {@code server.tls}'s files every {@code interval} rather than every 30 seconds; given before
+     * {@link #start()}, for tests.
+     */
+    public void useTlsReloadInterval(java.time.Duration interval) {
+        this.tlsReloadInterval = java.util.Objects.requireNonNull(interval, "interval");
     }
 
     public CompletableFuture<Void> stop() {

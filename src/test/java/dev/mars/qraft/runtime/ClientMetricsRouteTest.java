@@ -125,6 +125,8 @@ class ClientMetricsRouteTest {
         assertEquals(200, text.statusCode(), text.body());
         assertTrue(text.headers().firstValue("Content-Type").orElseThrow().startsWith("text/plain"));
         assertTrue(text.body().contains("qraft_client_ready 1"), text.body());
+        assertTrue(text.body().contains("qraft_client_server_info{endpoint=\"http://127.0.0.1:" + server.port()
+                + "\"} 1"), "the server it uses: " + text.body());
 
         assertEquals(400, local("GET", "/v1/client/metrics?format=xml").statusCode());
         assertEquals(405, local("PUT", "/v1/client/metrics").statusCode());

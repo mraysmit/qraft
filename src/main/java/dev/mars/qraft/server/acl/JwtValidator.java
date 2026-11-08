@@ -76,9 +76,12 @@ public final class JwtValidator {
             case "RS512" -> "SHA512withRSA";
             default -> throw new IllegalArgumentException("A JWT signed with " + alg + " is not accepted");
         };
-        verify(parts, algorithm, alg.startsWith("ES"), JwtKeys.parse(method.config().publicKeysPem()));
-        checkClaims(claims, method.config(), clock.instant());
-        return mapped(claims, method.config());
+        if (!(method.config() instanceof JwtConfig config)) {
+            throw new IllegalArgumentException("The auth method " + method.name() + " is not a jwt method");
+        }
+        verify(parts, algorithm, alg.startsWith("ES"), JwtKeys.parse(config.publicKeysPem()));
+        checkClaims(claims, config, clock.instant());
+        return mapped(claims, config);
     }
 
     private static void verify(String[] parts, String algorithm, boolean ec, List<PublicKey> keys) {

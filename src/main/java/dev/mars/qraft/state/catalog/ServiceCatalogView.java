@@ -40,11 +40,20 @@ public interface ServiceCatalogView {
     /** Every instance in every tenant and namespace, for replication and expiry rather than discovery. */
     List<ServiceInstance> instances();
 
+    /** An instance's indexes (catalog indexes list): the entry that registered it and the one that last changed it. */
+    record Indexes(long createIndex, long modifyIndex) { }
+
+    /** The indexes of {@code identity}, 0 for an instance this catalog does not know or a snapshot that had none. */
+    default Indexes indexesOf(ServiceInstanceId identity) {
+        return new Indexes(0, 0);
+    }
+
     /** Returns a view that delegates reads to {@code catalog} and cannot be cast back to it. */
     static ServiceCatalogView of(ServiceCatalog catalog) {
         Objects.requireNonNull(catalog, "catalog");
         return new ServiceCatalogView() {
             @Override public Optional<ServiceInstance> find(ServiceInstanceId identity) { return catalog.find(identity); }
+            @Override public Indexes indexesOf(ServiceInstanceId identity) { return catalog.indexesOf(identity); }
             @Override public List<String> services(String tenantId, String namespace) {
                 return catalog.services(tenantId, namespace);
             }

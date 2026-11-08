@@ -196,10 +196,14 @@ public enum IntentionalErrorFixture {
             "io\\.netty\\.handler\\.codec\\.http2\\.Http2Exception\\$StreamException:"
                     + " Stream closed before write could take place"),
 
-    /** A stopped Docker peer interrupts an in-progress snapshot transfer. */
+    /**
+     * A stopped Docker peer interrupts an in-progress snapshot transfer: the connection is refused, the peer's name no
+     * longer resolves, or, for a killed container, whose network goes without resetting the connection, the leader's
+     * channel finds the peer gone when its keepalive ping is not answered.
+     */
     RAFT_SNAPSHOT_TRANSFER_INTERRUPTED("dev.mars.qraft.raft.RaftNode", Level.ERROR,
             "Failed to send InstallSnapshot chunk \\d+/\\d+ to \\S+: UNAVAILABLE:"
-                    + " (?:io exception|Unable to resolve host \\S+)"),
+                    + " (?:io exception|Unable to resolve host \\S+|Keepalive failed\\. The connection is likely gone)"),
 
     /**
      * A partitioned Docker peer leaves a snapshot chunk unanswered, so the chunk fails at its deadline and the
