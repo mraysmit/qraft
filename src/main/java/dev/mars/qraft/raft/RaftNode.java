@@ -131,7 +131,10 @@ public class RaftNode {
     private volatile String currentLeaderId = null;
     /** Leader contact remains live for the minimum election timeout. */
     private boolean leaderContactActive;
-    private long lastLeaderContactNanos;
+    /** When this node last heard from a leader, on the timer scheduler's clock; read by HTTP threads too. */
+    private volatile long lastLeaderContactNanos;
+    /** Whether this node has ever heard from a leader, for a read's {@code X-Qraft-Last-Contact}. */
+    private volatile boolean heardFromLeader;
 
     // ========== SNAPSHOT STATE ==========
     /** The log index of the last entry included in the most recent snapshot.
@@ -172,6 +175,16 @@ public class RaftNode {
     // Leadership is measured in applied heartbeat rounds rather than wall-clock time, so a delayed
     // state loop cannot cause a false step-down.
     private long heartbeatRound;
+    /** Numbers each AppendEntries request, so a read barrier counts only answers to requests sent after it began. */
+    private long appendSequence;
+    /** The highest request sequence each peer has answered in this leadership. */
+    private final Map<String, Long> answeredSequence = new HashMap<>();
+    /** When each peer last answered in this leadership, for the leader's view of the servers (observability list). */
+    private final Map<String, Long> peerAnsweredNanos = new HashMap<>();
+    /** The barriers consistent reads wait on (consistency list, decision 3). */
+    private final List<ReadBarrier> readBarriers = new ArrayList<>();
+    /** The first log index of this node's current leadership, where its no-op goes. */
+    private long leadershipStartIndex;
     private final Map<String, Long> lastContactRound = new HashMap<>();
 
     // ========== PROMOTION (state loop only) ==========
@@ -1301,6 +1314,47 @@ public class RaftNode {
      * Captures this node's Raft state on its state loop, so every field belongs to the same moment. Fails
      * if the state loop no longer accepts work.
      */
+    /**
+     * The leader's view of each server (observability list, Phase 3, decision 5), Consul's autopilot health, captured on
+     * the state loop; empty on a server that does not lead, which knows no follower's progress. A follower is healthy
+     * when it has answered within an election timeout and holds the leader's log to within
+     * {@value ClusterHealth#MAX_TRAILING_LOGS} entries; the failure tolerance is how many healthy voters exceed a quorum.
+     */
+    public CompletableFuture<java.util.Optional<ClusterHealth>> serverHealth() {
+        CompletableFuture<java.util.Optional<ClusterHealth>> health = new CompletableFuture<>();
+        try {
+            runtime.execute(() -> health.complete(state == State.LEADER
+                    ? java.util.Optional.of(clusterHealth()) : java.util.Optional.empty()));
+        } catch (java.util.concurrent.RejectedExecutionException stopped) {
+            health.completeExceptionally(stopped);
+        }
+        return health;
+    }
+
+    private ClusterHealth clusterHealth() {
+        long now = System.nanoTime();
+        long leaderIndex = lastLogIndex();
+        List<ServerHealth> servers = new ArrayList<>();
+        for (RaftConfiguration.Server server : configuration.servers()) {
+            if (server.name().equals(nodeId)) {
+                servers.add(new ServerHealth(server.serverId(), server.name(), server.address(), true, server.voter(),
+                        0, currentTerm, leaderIndex, true));
+                continue;
+            }
+            Long answered = peerAnsweredNanos.get(server.name());
+            long contact = answered == null ? -1 : TimeUnit.NANOSECONDS.toMillis(now - answered);
+            long index = matchIndex.getOrDefault(server.name(), 0L);
+            boolean healthy = answered != null && contact <= electionTimeoutMs
+                    && leaderIndex - index <= ClusterHealth.MAX_TRAILING_LOGS;
+            servers.add(new ServerHealth(server.serverId(), server.name(), server.address(), false, server.voter(),
+                    contact, answered == null ? 0 : currentTerm, index, healthy));
+        }
+        long voters = servers.stream().filter(ServerHealth::voter).count();
+        long healthyVoters = servers.stream().filter(server -> server.voter() && server.healthy()).count();
+        int tolerance = (int) Math.max(0, healthyVoters - (voters / 2 + 1));
+        return new ClusterHealth(servers.stream().allMatch(ServerHealth::healthy), tolerance, servers);
+    }
+
     public CompletableFuture<RaftStatus> status() {
         CompletableFuture<RaftStatus> status = new CompletableFuture<>();
         try {
@@ -1311,6 +1365,93 @@ public class RaftNode {
             status.completeExceptionally(stopped);
         }
         return status;
+    }
+
+    /**
+     * Raft's ReadIndex (thesis, section 6.4), which a consistent read waits on (consistency list, decision 3): on the
+     * leader, records the commit index, or the first index of its term if that is later, so that an entry of the
+     * current term is committed first; sends a heartbeat round; and completes with that index once a quorum, this
+     * server included, has answered a request sent after the barrier began, and the index is applied. Only answers to
+     * requests sent after it count, so a late answer to an earlier request confirms nothing. Fails with an
+     * {@link IllegalStateException} on a node that does not lead, and when this node stops leading first.
+     */
+    public CompletableFuture<Long> readBarrier() {
+        CompletableFuture<Long> barrier = new CompletableFuture<>();
+        try {
+            runtime.execute(() -> beginReadBarrier(barrier));
+        } catch (java.util.concurrent.RejectedExecutionException stopped) {
+            barrier.completeExceptionally(new IllegalStateException("the Raft node is not running", stopped));
+        }
+        return barrier;
+    }
+
+    private void beginReadBarrier(CompletableFuture<Long> barrier) {
+        if (state != State.LEADER || !running) {
+            barrier.completeExceptionally(new IllegalStateException("not the leader; the leader is "
+                    + (currentLeaderId == null ? "unknown" : currentLeaderId)));
+            return;
+        }
+        readBarriers.add(new ReadBarrier(appendSequence + 1, Math.max(commitIndex, leadershipStartIndex),
+                leadershipGeneration, barrier));
+        sendHeartbeats();
+        checkReadBarriers();
+    }
+
+    /** Completes each barrier a quorum has confirmed and whose index is applied; fails those of a past leadership. */
+    private void checkReadBarriers() {
+        if (readBarriers.isEmpty()) return;
+        java.util.Iterator<ReadBarrier> pending = readBarriers.iterator();
+        while (pending.hasNext()) {
+            ReadBarrier barrier = pending.next();
+            if (state != State.LEADER || barrier.generation() != leadershipGeneration) {
+                pending.remove();
+                barrier.future().completeExceptionally(new IllegalStateException("leadership was lost"));
+                continue;
+            }
+            if (!barrier.confirmed[0] && quorumAnsweredSince(barrier.sequence())) barrier.confirmed[0] = true;
+            if (barrier.confirmed[0] && lastApplied >= barrier.readIndex()) {
+                pending.remove();
+                barrier.future().complete(barrier.readIndex());
+            }
+        }
+    }
+
+    private void failReadBarriers() {
+        List<ReadBarrier> failed = new ArrayList<>(readBarriers);
+        readBarriers.clear();
+        failed.forEach(barrier -> barrier.future().completeExceptionally(
+                new IllegalStateException("leadership was lost")));
+    }
+
+    /** Whether this server and the peers that answered a request sent at {@code sequence} or later are a quorum. */
+    private boolean quorumAnsweredSince(long sequence) {
+        RaftConfiguration current = configuration;
+        if (current == null) return false;
+        Set<String> reached = new HashSet<>();
+        reached.add(serverId);
+        for (RaftConfiguration.Server peer : peers()) {
+            Long answered = answeredSequence.get(peer.name());
+            if (answered != null && answered >= sequence) reached.add(peer.serverId());
+        }
+        return current.hasQuorum(reached);
+    }
+
+    /** A read barrier: the first send it counts, its read index, the leadership it began in, and its future. */
+    private record ReadBarrier(long sequence, long readIndex, long generation, CompletableFuture<Long> future,
+                               boolean[] confirmed) {
+        ReadBarrier(long sequence, long readIndex, long generation, CompletableFuture<Long> future) {
+            this(sequence, readIndex, generation, future, new boolean[1]);
+        }
+    }
+
+    /**
+     * The milliseconds since this node last heard from a leader, as Consul's {@code X-Consul-LastContact}: 0 on the
+     * leader, and -1 on a node that has never heard from one (consistency list, decision 4).
+     */
+    public long millisSinceLeaderContact() {
+        if (state == State.LEADER) return 0;
+        if (!heardFromLeader) return -1;
+        return java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(timerScheduler.nanoTime() - lastLeaderContactNanos);
     }
 
     public boolean isFenced() {
@@ -1981,6 +2122,9 @@ public class RaftNode {
 
             initializeLeaderState();
             heartbeatRound = 0;
+            answeredSequence.clear();
+            peerAnsweredNanos.clear();
+            leadershipStartIndex = lastLogIndex() + 1;
             lastContactRound.clear();
             for (RaftConfiguration.Server peer : peers()) lastContactRound.put(peer.name(), 0L);
             answeredPeers.clear();
@@ -2286,6 +2430,7 @@ public class RaftNode {
 
     private void recordPeerContact(String peerId) {
         if (lastContactRound.containsKey(peerId)) {
+            peerAnsweredNanos.put(peerId, System.nanoTime());
             lastContactRound.put(peerId, heartbeatRound);
             answeredPeers.add(peerId);
             configuration.serverNamed(peerId).ifPresent(peer -> cleanupContactRound.put(peer.serverId(), heartbeatRound));
@@ -2324,6 +2469,7 @@ public class RaftNode {
     private void failPendingCommands(Throwable cause) {
         pendingCommands.values().forEach(promise -> promise.completeExceptionally(cause));
         pendingCommands.clear();
+        failReadBarriers();
     }
 
     // Message Handlers running on Event Loop
@@ -2722,6 +2868,7 @@ public class RaftNode {
         currentLeaderId = request.getLeaderId();
         leaderContactActive = true;
         lastLeaderContactNanos = timerScheduler.nanoTime();
+        heardFromLeader = true;
         resetElectionTimer();
 
         if (decision.requestFailure() != null) {
@@ -2858,6 +3005,7 @@ public class RaftNode {
     private void sendAppendEntries(String target, boolean heartbeat) {
         long originatingTerm = currentTerm;
         long originatingGeneration = leadershipGeneration;
+        long sequence = ++appendSequence;
         long nextIdx = nextIndex.getOrDefault(target, 1L);
 
         // If the follower needs entries we've already compacted, send a snapshot
@@ -2900,7 +3048,7 @@ public class RaftNode {
 
         transport.sendAppendEntries(target, builder.build())
                 .whenComplete(Completions.outcome(response -> handleAppendEntriesResponse(
-                        target, response, originatingTerm, originatingGeneration),
+                        target, response, originatingTerm, originatingGeneration, sequence),
                         error -> handleAppendEntriesFailure(
                         target, error, originatingTerm, originatingGeneration)));
 
@@ -2914,12 +3062,12 @@ public class RaftNode {
 
     private void handleAppendEntriesResponse(
             String peerId, AppendEntriesResponse response,
-            long originatingTerm, long originatingGeneration) {
+            long originatingTerm, long originatingGeneration, long sequence) {
         transitionSequencer.submit(
                         "append-response:" + peerId + ":" + originatingTerm,
                         RaftTransitionSequencer.FailurePolicy.FENCE,
                         () -> prepareAppendEntriesResponse(
-                                peerId, response, originatingTerm, originatingGeneration),
+                                peerId, response, originatingTerm, originatingGeneration, sequence),
                         this::applyAppendEntriesResponse)
                 .whenComplete(Completions.onFailure(error -> TransitionFailureLog.log(logger,
                         "Failed to process AppendEntries response from {}: {}", error, peerId)));
@@ -2927,7 +3075,7 @@ public class RaftNode {
 
     private CompletableFuture<AppendResponseDecision> prepareAppendEntriesResponse(
             String peerId, AppendEntriesResponse response,
-            long originatingTerm, long originatingGeneration) {
+            long originatingTerm, long originatingGeneration, long sequence) {
         if (!fromConfiguredServer(peerId, response.getFollowerServerId())) {
             logger.warn("Ignoring an AppendEntries response from {} with server ID {}, which is not the "
                     + "configured server", peerId, response.getFollowerServerId());
@@ -2936,10 +3084,10 @@ public class RaftNode {
         if (response.getTerm() > currentTerm) {
             return persistMetadata(response.getTerm(), Optional.empty())
                     .thenApply(ignored -> new AppendResponseDecision(
-                            peerId, response, originatingTerm, originatingGeneration, true));
+                            peerId, response, originatingTerm, originatingGeneration, true, sequence));
         }
         return CompletableFuture.completedFuture(new AppendResponseDecision(
-                peerId, response, originatingTerm, originatingGeneration, false));
+                peerId, response, originatingTerm, originatingGeneration, false, sequence));
     }
 
     private Void applyAppendEntriesResponse(AppendResponseDecision decision) {
@@ -2956,6 +3104,9 @@ public class RaftNode {
         }
 
         recordPeerContact(decision.peerId());
+        // Any answer in this leadership, a refused append among them, shows the peer still takes this leader's term.
+        answeredSequence.merge(decision.peerId(), decision.sequence(), Math::max);
+        checkReadBarriers();
         if (unavailablePeers.remove(decision.peerId())) {
             logger.info("Raft peer {} is reachable again", decision.peerId());
         }
@@ -3006,7 +3157,7 @@ public class RaftNode {
 
     private record AppendResponseDecision(
             String peerId, AppendEntriesResponse response,
-            long originatingTerm, long originatingGeneration, boolean higherTerm) {}
+            long originatingTerm, long originatingGeneration, boolean higherTerm, long sequence) {}
 
     private record AppendFailureDecision(
             String peerId, Throwable error, long originatingTerm, long originatingGeneration) {}
@@ -3109,6 +3260,7 @@ public class RaftNode {
             CompletableFuture<RaftCommandResult<?>> promise = pendingCommands.remove(index);
             if (promise != null) promise.complete(result);
         }
+        checkReadBarriers();
         if (cleanupExpedited) considerFailedServerCleanup();
     }
 
@@ -3898,6 +4050,7 @@ public class RaftNode {
         currentLeaderId = request.getLeaderId();
         leaderContactActive = true;
         lastLeaderContactNanos = timerScheduler.nanoTime();
+        heardFromLeader = true;
         resetElectionTimer();
 
         if (plan.removeAssembler()) pendingInstalls.remove(request.getLeaderId());

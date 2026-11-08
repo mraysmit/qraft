@@ -89,6 +89,13 @@
             <artifactId>opentelemetry-sdk</artifactId>
             <version>1.59.0</version>
         </dependency>
+        <!-- The in-memory metric reader that the metrics tests read instruments through (observability list). -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk-testing</artifactId>
+            <version>1.59.0</version>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>io.opentelemetry</groupId>
             <artifactId>opentelemetry-exporter-otlp</artifactId>

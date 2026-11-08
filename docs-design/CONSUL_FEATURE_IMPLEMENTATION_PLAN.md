@@ -395,8 +395,11 @@ unchecked features below remain open.
   node-scoped idempotent deregistration and legacy-data defaults.
 - [x] Implement health checks and health-state propagation through Raft: HTTP,
   TCP, and TTL checks, leader-owned expiry, and automatic deregistration.
-- [ ] Implement namespaces and tenancy isolation end to end: replicated tenants
-  and namespaces, and scoped reads (feature validation item 6).
+- [x] Implement namespaces and tenancy isolation end to end: replicated tenants
+  and namespaces, and scoped reads (feature validation item 6). Done 2026-11-08:
+  [`task-list-tenancy-2026-11-08.md`](../docs/archive/task-list-tenancy-2026-11-08.md); tenants are
+  Consul's admin partitions, and a write is refused outside a tenant and namespace
+  that exist.
 - [x] Add snapshots in every role, installation, restart recovery, offline
   backups, replica replacement, and guidance for explicitly compatible upgrades
   in `RAFT_STORAGE_OPERATIONS.md`. Byte-compatible legacy payloads do not imply
@@ -427,13 +430,24 @@ unchecked features below remain open.
   command and both observability stacks in the Docker suite.
 - [x] Make server readiness reflect recovery, fencing, draining, and leadership
   (feature validation item 2).
-- [ ] Complete the key/value store: tenant and namespace scoping, indexes,
-  flags, compare-and-set, and the HTTP `/v1/kv` API (phase 2; item 3).
-- [ ] Add `default`, `stale`, and `consistent` reads, and blocking queries
-  (phase 6; item 4).
-- [ ] Implement sessions, locks, and leader-election helpers (phase 5; item 5).
-- [ ] Add catalog, health, request, client, and session metrics, and cluster
-  membership and storage status (phase 8; item 7).
+- [x] Complete the key/value store: tenant and namespace scoping, indexes,
+  flags, compare-and-set, and the HTTP `/v1/kv` API (phase 2; item 3). Done
+  2026-11-08: [`task-list-key-value-2026-11-08.md`](../docs/archive/task-list-key-value-2026-11-08.md); blocking
+  queries wait for the consistency list, and acquire and release for the sessions
+  list.
+- [x] Add `default`, `stale`, and `consistent` reads, and blocking queries
+  (phase 6; item 4). Done 2026-11-08:
+  [`task-list-consistency-2026-11-08.md`](../docs/archive/task-list-consistency-2026-11-08.md); the default is the
+  answering server's state, since the servers do not forward reads.
+- [x] Implement sessions, locks, and leader-election helpers (phase 5; item 5).
+  Done 2026-11-08: [`task-list-sessions-and-locks-2026-11-08.md`](../docs/archive/task-list-sessions-and-locks-2026-11-08.md);
+  renewals are kept by the leader alone, as in Consul, and leader election is a
+  documented recipe on the local API rather than a helper command.
+- [x] Add catalog, health, request, client, and session metrics, and cluster
+  membership and storage status (phase 8; item 7). Done 2026-11-08:
+  [`task-list-observability-2026-11-08.md`](../docs/archive/task-list-observability-2026-11-08.md); the leader's view
+  of the servers is Consul's autopilot health, and a client publishes on its local
+  API rather than on a telemetry port.
 - [ ] Implement the bounded event journal (item 8).
 - [ ] Implement ACL tokens, policies, token validation, and audit events
   (phase 7; item 9). Tokens, policies, roles, identities and validation on servers and

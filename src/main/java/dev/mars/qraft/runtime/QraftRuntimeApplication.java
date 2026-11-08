@@ -37,6 +37,9 @@ public final class QraftRuntimeApplication {
         if (args != null && args.length > 0 && "operator".equals(args[0])) {
             System.exit(RaftOperatorCommand.run(Arrays.copyOfRange(args, 1, args.length), System.out, System.err));
         }
+        if (args != null && args.length > 0 && "kv".equals(args[0])) {
+            System.exit(KvCommandLine.run(Arrays.copyOfRange(args, 1, args.length), System.out, System.err));
+        }
         if (args != null && args.length > 0 && "acl".equals(args[0])) {
             System.exit(AclCommandLine.run(Arrays.copyOfRange(args, 1, args.length), System.out, System.err));
         }

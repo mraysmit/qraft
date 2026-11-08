@@ -77,6 +77,9 @@ public final class ProtobufCommandCodec {
             return RaftCommandMessage.getDefaultInstance().toByteString();
         }
         RaftCommandMessage raftMessage = switch (command) {
+            case dev.mars.qraft.state.tenancy.ScopedWrite cmd -> RaftCommandMessage.newBuilder()
+                    .setScopedWrite(dev.mars.qraft.raft.grpc.ScopedWriteProto.newBuilder().setTenant(cmd.tenant())
+                            .setNamespace(cmd.namespace()).setCommand(serialize(cmd.command()))).build();
             case NodeCommand cmd -> RaftCommandMessage.newBuilder()
                     .setNodeCommand(NodeCodec.toProto(cmd)).build();
             case DistributedStateRaftCommand cmd -> RaftCommandMessage.newBuilder()
@@ -86,6 +89,12 @@ public final class ProtobufCommandCodec {
             case ConfigurationCommand cmd -> RaftCommandMessage.newBuilder()
                     .setConfiguration(RaftConfigurationCodec.toProto(cmd.configuration())).build();
             case AclCommand cmd -> RaftCommandMessage.newBuilder().setAclCommand(AclCodec.toProto(cmd)).build();
+            case dev.mars.qraft.state.tenancy.TenancyCommand cmd -> RaftCommandMessage.newBuilder()
+                    .setTenancyCommand(dev.mars.qraft.state.tenancy.TenancyCodec.toProto(cmd)).build();
+            case dev.mars.qraft.state.session.SessionCommand cmd -> RaftCommandMessage.newBuilder()
+                    .setSessionCommand(dev.mars.qraft.state.session.SessionCodec.toProto(cmd)).build();
+            case dev.mars.qraft.state.kv.KvCommand cmd -> RaftCommandMessage.newBuilder()
+                    .setKvCommand(dev.mars.qraft.state.kv.KvCodec.toProto(cmd)).build();
                 default -> throw new IllegalArgumentException(
                     "Unsupported RaftCommand type for protobuf codec: " + command.getClass().getName());
         };
@@ -104,10 +113,18 @@ public final class ProtobufCommandCodec {
             RaftCommandMessage raftMessage = RaftCommandMessage.parseFrom(data);
             return switch (raftMessage.getCommandCase()) {
                 case NODE_COMMAND -> NodeCodec.fromProto(raftMessage.getNodeCommand());
+                case SCOPED_WRITE -> new dev.mars.qraft.state.tenancy.ScopedWrite(
+                        raftMessage.getScopedWrite().getTenant(), raftMessage.getScopedWrite().getNamespace(),
+                        deserialize(raftMessage.getScopedWrite().getCommand()));
                 case SYSTEM_METADATA_COMMAND -> fromSystemMetadataProto(raftMessage.getSystemMetadataCommand());
                 case CATALOG_COMMAND -> fromCatalogProto(raftMessage.getCatalogCommand());
                 case CONFIGURATION -> new ConfigurationCommand(RaftConfigurationCodec.fromProto(raftMessage.getConfiguration()));
                 case ACL_COMMAND -> AclCodec.fromProto(raftMessage.getAclCommand());
+                case KV_COMMAND -> dev.mars.qraft.state.kv.KvCodec.fromProto(raftMessage.getKvCommand());
+                case SESSION_COMMAND -> dev.mars.qraft.state.session.SessionCodec.fromProto(
+                        raftMessage.getSessionCommand());
+                case TENANCY_COMMAND -> dev.mars.qraft.state.tenancy.TenancyCodec.fromProto(
+                        raftMessage.getTenancyCommand());
                 case COMMAND_NOT_SET -> noOpOrRefused(raftMessage);
                 default -> throw new IllegalArgumentException(
                         "Unsupported protobuf command case: " + raftMessage.getCommandCase());

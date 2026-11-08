@@ -384,6 +384,24 @@ class ServiceReconcilerTest {
         assertEquals(1, reconciler.registeredCount());
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"tenant_not_found", "namespace_not_found"})
+    void aServiceRefusedBecauseItsTenantOrNamespaceDoesNotExistYetIsTriedAgainOnTheNextPass(String code) {
+        FakeCatalogClientFixture client = new FakeCatalogClientFixture();
+        client.registrationOutcomes.put("web", new CatalogOutcome.Rejected(code, "No tenant acme exists", null));
+        ServiceReconciler reconciler = new ServiceReconciler(client,
+                () -> List.of(service("web", "web", 8080, true)), CLOCK);
+
+        assertEquals(code, reconciler.trigger().join().rejections().get("web").code());
+        client.registrationOutcomes.remove("web");
+        reconciler.trigger().join();
+
+        // The scope is missing for now, not the definition wrong (tenancy list): once an operator creates it, the same
+        // definition must be registered, and not suppressed as a definition the catalog refused.
+        assertEquals(List.of("web", "web"), client.registrations);
+        assertEquals(1, reconciler.registeredCount());
+    }
+
     @Test
     void rejectedDefinitionIsReportedAndSuppressedUntilItsContentChanges() {
         FakeCatalogClientFixture client = new FakeCatalogClientFixture();

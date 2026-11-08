@@ -540,7 +540,15 @@ class HttpApiServerAclApiTest {
         assertEquals(400, refused.statusCode(), refused.body());
         assertEquals("invalid_authorization", code(refused));
         assertEquals("invalid_authorization", code(send("POST", "/v1/internal/acl/authorize",
-                "[{\"resource\":\"key\",\"segment\":\"x\",\"access\":\"read\"}]", webWriter)));
+                "[{\"resource\":\"keyring\",\"segment\":\"x\",\"access\":\"read\"}]", webWriter)));
+        HttpResponse<String> session = send("POST", "/v1/internal/acl/authorize",
+                "[{\"resource\":\"session\",\"segment\":\"x\",\"access\":\"read\"}]", webWriter);
+        assertEquals(200, session.statusCode(), "session is a resource since the sessions list: " + session.body());
+        assertEquals(false, JSON.readTree(session.body()).get(0).get("allow").asBoolean());
+        HttpResponse<String> key = send("POST", "/v1/internal/acl/authorize",
+                "[{\"resource\":\"key\",\"segment\":\"x\",\"access\":\"read\"}]", webWriter);
+        assertEquals(200, key.statusCode(), "key is a resource since the key/value list: " + key.body());
+        assertEquals(false, JSON.readTree(key.body()).get(0).get("allow").asBoolean());
         assertEquals("token_not_found", code(send("POST", "/v1/internal/acl/authorize", "[]", secret())));
     }
 

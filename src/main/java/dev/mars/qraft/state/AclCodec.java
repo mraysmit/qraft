@@ -201,6 +201,8 @@ final class AclCodec {
             case CLIENT -> AclResourceProto.ACL_RESOURCE_CLIENT;
             case OPERATOR -> AclResourceProto.ACL_RESOURCE_OPERATOR;
             case ACL -> AclResourceProto.ACL_RESOURCE_ACL;
+            case KEY -> AclResourceProto.ACL_RESOURCE_KEY;
+            case SESSION -> AclResourceProto.ACL_RESOURCE_SESSION;
         };
     }
 
@@ -211,6 +213,8 @@ final class AclCodec {
             case ACL_RESOURCE_CLIENT -> AclResource.CLIENT;
             case ACL_RESOURCE_OPERATOR -> AclResource.OPERATOR;
             case ACL_RESOURCE_ACL -> AclResource.ACL;
+            case ACL_RESOURCE_KEY -> AclResource.KEY;
+            case ACL_RESOURCE_SESSION -> AclResource.SESSION;
             case ACL_RESOURCE_UNSPECIFIED, UNRECOGNIZED ->
                     throw new IllegalArgumentException("An ACL rule names an unknown resource: " + proto);
         };

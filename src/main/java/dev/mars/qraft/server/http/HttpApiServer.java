@@ -76,6 +76,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -113,6 +114,39 @@ public final class HttpApiServer implements AutoCloseable {
     final AclHttpSettings acl;
     /** Resolves a request's token against this server's applied ACL state; unrestricted with ACLs disabled. */
     private final AclResolver resolver;
+    private volatile io.opentelemetry.api.metrics.Meter meter;
+    private volatile dev.mars.qraft.raft.StorageStatus storageStatus;
+    private volatile RequestMetrics requestMetrics;
+    /** The leader's session timers, which renewals reset (sessions list, Phase 3). */
+    private volatile dev.mars.qraft.server.session.SessionTtlExpiry sessionTtl;
+
+    /** Reports the Raft storage's size and its snapshot's age in {@code /raft/status} (observability list, Phase 3). */
+    public void useStorageStatus(dev.mars.qraft.raft.StorageStatus status) {
+        this.storageStatus = Objects.requireNonNull(status, "status");
+    }
+
+    /** The meter the request metrics come from (observability list, Phase 2). */
+    public static final String METER_NAME = "qraft-http";
+
+    /**
+     * Counts this server's requests on {@code meter} rather than OpenTelemetry's global meter, which the server
+     * otherwise resolves when it answers its first request; given before {@link #start()}.
+     */
+    public void useMeter(io.opentelemetry.api.metrics.Meter meter) {
+        this.meter = Objects.requireNonNull(meter, "meter");
+    }
+
+    private RequestMetrics requestMetrics() {
+        RequestMetrics current = requestMetrics;
+        if (current != null) return current;
+        synchronized (this) {
+            if (requestMetrics == null) {
+                requestMetrics = new RequestMetrics(meter != null ? meter
+                        : io.opentelemetry.api.GlobalOpenTelemetry.getMeter(METER_NAME));
+            }
+            return requestMetrics;
+        }
+    }
 
     /** How long a request waits for the Raft node to answer a status read or commit a write. */
     public static final Duration DEFAULT_RAFT_TIMEOUT = Duration.ofSeconds(5);
@@ -206,6 +240,7 @@ public final class HttpApiServer implements AutoCloseable {
         }
         server.createContext("/raft/status", requestAware(this::raftStatus));
         server.createContext("/v1/operator/raft/configuration", requestAware(this::raftConfiguration));
+        server.createContext("/v1/operator/autopilot/health", requestAware(this::autopilotHealth));
         server.createContext("/v1/operator/raft/peer", requestAware(this::removeRaftPeer));
         server.createContext("/v1/catalog/register", requestAware(this::registerInCatalog));
         server.createContext("/v1/catalog/deregister", requestAware(this::deregisterFromCatalog));
@@ -217,8 +252,27 @@ public final class HttpApiServer implements AutoCloseable {
         server.createContext("/v1/catalog/service", requestAware(this::listServiceInstances));
         server.createContext("/v1/health/service", requestAware(this::listServiceHealth));
         server.createContext("/v1/acl/bootstrap", requestAware(this::bootstrapAcl));
+        KvApiRoutes kvApi = new KvApiRoutes(this);
+        server.createContext(KvApiRoutes.CONTEXT, requestAware(kvApi::handle));
+        SessionApiRoutes sessionApi = new SessionApiRoutes(this);
+        server.createContext(SessionApiRoutes.CONTEXT, requestAware(sessionApi::handle));
+        TenancyApiRoutes tenancyApi = new TenancyApiRoutes(this);
+        TenancyApiRoutes.CONTEXTS.forEach(context -> server.createContext(context, requestAware(tenancyApi::handle)));
         AclApiRoutes aclApi = new AclApiRoutes(this);
         AclApiRoutes.CONTEXTS.forEach(context -> server.createContext(context, requestAware(aclApi::handle)));
+    }
+
+    /**
+     * Renews sessions on {@code expiry}, the leader's TTL timers (sessions list, decision 2); until it is given, a
+     * renewal is answered as a follower's is.
+     */
+    public void useSessionTtl(dev.mars.qraft.server.session.SessionTtlExpiry expiry) {
+        this.sessionTtl = Objects.requireNonNull(expiry, "expiry");
+    }
+
+    /** The leader's session timers, or {@code null} before {@link #useSessionTtl} gives them. */
+    dev.mars.qraft.server.session.SessionTtlExpiry sessionTtl() {
+        return sessionTtl;
     }
 
     public CompletableFuture<Void> start() {
@@ -353,7 +407,56 @@ public final class HttpApiServer implements AutoCloseable {
         status.put("fenced", current.fenced());
         status.put("fenceReason", current.fenceReason());
         status.put("removed", current.removed());
+        dev.mars.qraft.raft.StorageStatus storage = storageStatus;
+        if (storage != null) {
+            status.put("storageBytes", storage.bytes());
+            status.put("snapshotAgeSeconds", storage.snapshotAgeSeconds());
+        }
         respondJson(exchange, 200, status);
+    }
+
+    /**
+     * The leader's view of each server, Consul's {@code GET /v1/operator/autopilot/health} (observability list,
+     * decision 5): answered by the leader alone, as another server knows no follower's progress; it needs
+     * {@code operator:read}.
+     */
+    private void autopilotHealth(HttpExchange exchange) throws IOException {
+        if (!prepareStateRequest(exchange, "GET")) return;
+        if (refusedForItsQuery(exchange)) return;
+        AclPrincipal principal = principal(exchange);
+        if (principal == null || refused(exchange, principal, OPERATOR_READ)) return;
+        Optional<dev.mars.qraft.raft.ClusterHealth> health;
+        try {
+            health = Deadlines.bound(raftNode.serverHealth(), raftTimeout.toNanos(), TimeUnit.NANOSECONDS).join();
+        } catch (CompletionException unavailable) {
+            respondUnavailable(exchange, unavailable);
+            return;
+        }
+        if (health.isEmpty()) {
+            respondUnavailable(exchange, new CompletionException(new IllegalStateException(
+                    "Only the leader knows each server's health")));
+            return;
+        }
+        List<Map<String, Object>> servers = new ArrayList<>();
+        for (dev.mars.qraft.raft.ServerHealth server : health.get().servers()) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("ID", server.serverId());
+            entry.put("Name", server.name());
+            entry.put("Address", server.address());
+            entry.put("Leader", server.leader());
+            entry.put("Voter", server.voter());
+            entry.put("Healthy", server.healthy());
+            entry.put("LastContact", server.lastContactMillis() < 0 ? null
+                    : SessionApiRoutes.goDuration(Duration.ofMillis(server.lastContactMillis())));
+            entry.put("LastTerm", server.lastTerm());
+            entry.put("LastIndex", server.lastIndex());
+            servers.add(entry);
+        }
+        Map<String, Object> answer = new LinkedHashMap<>();
+        answer.put("Healthy", health.get().healthy());
+        answer.put("FailureTolerance", health.get().failureTolerance());
+        answer.put("Servers", servers);
+        respondJson(exchange, 200, answer);
     }
 
     /**
@@ -496,6 +599,7 @@ public final class HttpApiServer implements AutoCloseable {
             List<String> declaredCheckIds = request.service() == null ? null : request.service().declaredCheckIds();
             if (node.isPresent() && refusedNodeRegistration(exchange, principal, node.get())) return;
             if (instance != null && refusedServiceRegistration(exchange, principal, instance)) return;
+            if (instance != null && refusedForItsScope(exchange, instance.tenantId(), instance.namespace())) return;
             Map<String, Object> answer = new LinkedHashMap<>();
             answer.put("node", context.nodeId());
             if (node.isPresent()) {
@@ -504,8 +608,9 @@ public final class HttpApiServer implements AutoCloseable {
                 answer.put("registered", true);
             }
             if (instance != null) {
-                RaftCommandResult<?> result = submit(
-                        CatalogCommand.register(instance, declaredCheckIds, context.nodeUuid()));
+                RaftCommandResult<?> result = submit(dev.mars.qraft.state.tenancy.ScopedWrite.of(instance.tenantId(),
+                        instance.namespace(), CatalogCommand.register(instance, declaredCheckIds, context.nodeUuid())));
+                if (refusedForItsScope(exchange, result)) return;
                 if (refusedAsReserved(exchange, context.nodeId(), result)) return;
                 if (!(result instanceof RaftCommandResult.Success<?>)) {
                     respondError(exchange, 409, "registration_rejected",
@@ -812,6 +917,7 @@ public final class HttpApiServer implements AutoCloseable {
         if (!prepareNodeRequest(exchange, "GET") || refusedForItsQuery(exchange)) return;
         AclPrincipal principal = principal(exchange);
         if (principal == null) return;
+        if (!readyToRead(exchange, ReadIndex.APPLIED)) return;
         setAppliedIndex(exchange);
         List<Node> all = List.copyOf(stateStore.getNodes().values());
         List<Node> readable = all.stream().filter(node -> principal.allows(nodeRead(node.name()))).toList();
@@ -846,6 +952,7 @@ public final class HttpApiServer implements AutoCloseable {
         if (principal == null) return;
         ReadScope scope = readScope(exchange);
         if (scope == null) return;
+        if (!readyToRead(exchange, ReadIndex.APPLIED)) return;
         setAppliedIndex(exchange);
         List<String> all = List.copyOf(stateStore.getServiceCatalog().services(scope.tenantId(), scope.namespace()));
         List<String> readable = all.stream().filter(service -> principal.allows(
@@ -876,6 +983,7 @@ public final class HttpApiServer implements AutoCloseable {
         if (refusedForItsQuery(exchange)) return;
         ReadScope scope = readScope(exchange);
         if (scope == null) return;
+        if (!readyToRead(exchange, ReadIndex.APPLIED)) return;
         setAppliedIndex(exchange);
         List<ServiceInstance> all = stateStore.getServiceCatalog().instances().stream()
                 .filter(instance -> node.equals(instance.nodeId())
@@ -902,6 +1010,7 @@ public final class HttpApiServer implements AutoCloseable {
         if (refusedForItsQuery(exchange)) return;
         ReadScope scope = readScope(exchange);
         if (scope == null) return;
+        if (!readyToRead(exchange, ReadIndex.APPLIED)) return;
         setAppliedIndex(exchange);
         List<ServiceInstance> all = stateStore.getServiceCatalog().instances(scope.service(serviceName));
         List<ServiceInstance> readable = readableInstances(principal, all);
@@ -1005,6 +1114,7 @@ public final class HttpApiServer implements AutoCloseable {
         }
         ReadScope scope = readScope(exchange);
         if (scope == null) return;
+        if (!readyToRead(exchange, ReadIndex.APPLIED)) return;
         setAppliedIndex(exchange);
         Map<ServiceInstanceId, List<HealthCheckState>> checks = stateStore.healthChecks().stream()
                 .collect(Collectors.groupingBy(state -> state.checkId().serviceInstanceId()));
@@ -1027,7 +1137,8 @@ public final class HttpApiServer implements AutoCloseable {
     boolean refusedForItsQuery(HttpExchange exchange) throws IOException {
         String rawQuery = exchange.getRequestURI().getRawQuery();
         if (rawQuery == null || rawQuery.isEmpty()) return false;
-        Optional<String> parameter = Arrays.stream(rawQuery.split("&")).filter(text -> !text.isEmpty()).findFirst();
+        Optional<String> parameter = Arrays.stream(rawQuery.split("&")).filter(text -> !text.isEmpty())
+                .filter(text -> !READ_OPTIONS.contains(parameterName(text))).findFirst();
         if (parameter.isEmpty()) return false;
         respondError(exchange, 400, "invalid_query", "Unsupported query parameter: "
                 + URLDecoder.decode(parameter.get().split("=", 2)[0], StandardCharsets.UTF_8), false);
@@ -1045,6 +1156,7 @@ public final class HttpApiServer implements AutoCloseable {
                     StandardCharsets.UTF_8);
             String value = separator < 0 ? "" : URLDecoder.decode(parameter.substring(separator + 1),
                     StandardCharsets.UTF_8);
+            if (READ_OPTIONS.contains(name)) continue;
             if (!"passing".equals(name)) {
                 throw new IllegalArgumentException("Unsupported query parameter: " + name);
             }
@@ -1055,6 +1167,117 @@ public final class HttpApiServer implements AutoCloseable {
             };
         }
         return passingOnly;
+    }
+
+    /** The query parameters every read takes: its consistency, and a blocking query's index and wait. */
+    static final Set<String> READ_OPTIONS = Set.of("stale", "consistent", "index", "wait");
+    private static final Duration DEFAULT_WAIT = Duration.ofMinutes(5);
+    private static final Duration MAX_WAIT = Duration.ofMinutes(10);
+    private static final java.util.regex.Pattern WAIT = java.util.regex.Pattern.compile("(\\d+)(ms|s|m|h)");
+
+    /** The index a read answers with, which its blocking query waits on (consistency list, decision 5). */
+    enum ReadIndex { APPLIED, KV }
+
+    private static String parameterName(String parameter) {
+        int equals = parameter.indexOf('=');
+        return URLDecoder.decode(equals < 0 ? parameter : parameter.substring(0, equals), StandardCharsets.UTF_8);
+    }
+
+    /**
+     * The step every catalog and key/value read takes before it answers (consistency list, Phase 3): refuses malformed
+     * options; for {@code consistent}, has the leader confirm it still leads and apply what was committed when the read
+     * began, and refuses on any other server (decision 2); for {@code index}, waits until {@code kind}'s index passes
+     * it, or {@code wait} with up to a sixteenth more at random passes (decision 5); and sets the leader-contact headers
+     * (decision 4). {@code stale}, like the default, answers from this server's applied state (decision 1). Returns
+     * {@code false} after answering a refusal.
+     */
+    boolean readyToRead(HttpExchange exchange, ReadIndex kind) throws IOException {
+        Map<String, String> options = new LinkedHashMap<>();
+        String rawQuery = exchange.getRequestURI().getRawQuery();
+        if (rawQuery != null) {
+            for (String parameter : rawQuery.split("&")) {
+                String name = parameterName(parameter);
+                if (!READ_OPTIONS.contains(name)) continue;
+                int equals = parameter.indexOf('=');
+                options.putIfAbsent(name, equals < 0 ? "" : URLDecoder.decode(parameter.substring(equals + 1),
+                        StandardCharsets.UTF_8));
+            }
+        }
+        if (options.containsKey("stale") && options.containsKey("consistent")) {
+            respondError(exchange, 400, "invalid_query", "Give stale or consistent, not both", false);
+            return false;
+        }
+        long index = 0;
+        if (options.containsKey("index")) {
+            try {
+                index = Long.parseLong(options.get("index"));
+                if (index < 0) throw new NumberFormatException("negative");
+            } catch (NumberFormatException notIndex) {
+                respondError(exchange, 400, "invalid_query", "index must be an index, 0 or more: "
+                        + options.get("index"), false);
+                return false;
+            }
+        }
+        Duration wait = DEFAULT_WAIT;
+        if (options.containsKey("wait")) {
+            java.util.regex.Matcher given = WAIT.matcher(options.get("wait"));
+            if (!given.matches()) {
+                respondError(exchange, 400, "invalid_query", "wait must be a duration such as 10s or 5m: "
+                        + options.get("wait"), false);
+                return false;
+            }
+            long amount = Long.parseLong(given.group(1));
+            wait = switch (given.group(2)) {
+                case "ms" -> Duration.ofMillis(amount);
+                case "s" -> Duration.ofSeconds(amount);
+                case "m" -> Duration.ofMinutes(amount);
+                default -> Duration.ofHours(amount);
+            };
+            if (wait.compareTo(MAX_WAIT) > 0) {
+                respondError(exchange, 400, "invalid_query", "wait is at most 10m: " + options.get("wait"), false);
+                return false;
+            }
+        }
+        if (options.containsKey("consistent") && !confirmedLeadership(exchange)) return false;
+        if (index > 0) {
+            long jitter = wait.toMillis() / 16;
+            Duration bound = wait.plusMillis(jitter == 0 ? 0 : java.util.concurrent.ThreadLocalRandom.current()
+                    .nextLong(jitter + 1));
+            try {
+                if (kind == ReadIndex.KV) stateStore.awaitKvIndex(index, bound);
+                else stateStore.awaitAppliedIndex(index, bound);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                respondError(exchange, 503, "draining", "The server stopped while the read waited", true);
+                return false;
+            }
+        }
+        String leader = raftNode.getLeaderId();
+        boolean known = leader != null && !leader.isBlank();
+        exchange.getResponseHeaders().set("X-Qraft-Known-Leader", Boolean.toString(known));
+        long contact = raftNode.millisSinceLeaderContact();
+        if (contact >= 0) exchange.getResponseHeaders().set("X-Qraft-Last-Contact", Long.toString(contact));
+        return true;
+    }
+
+    /** Whether this server leads and has passed a read barrier; answers 503 {@code leader_unavailable} when not. */
+    private boolean confirmedLeadership(HttpExchange exchange) throws IOException {
+        if (raftNode.isLeader()) {
+            try {
+                raftNode.readBarrier().get(raftTimeout.toNanos(), TimeUnit.NANOSECONDS);
+                return true;
+            } catch (java.util.concurrent.ExecutionException | TimeoutException notConfirmed) {
+                LOG.debug("A consistent read was not confirmed: {}", notConfirmed.toString());
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        String leaderId = raftNode.getLeaderId();
+        Map<String, Object> details = leaderId == null || leaderId.isBlank() ? Map.of() : Map.of("leaderId", leaderId);
+        if (!details.isEmpty()) exchange.getResponseHeaders().set("X-Qraft-Leader-Id", leaderId);
+        respondError(exchange, 503, "leader_unavailable", "A consistent read is answered by the leader, which this "
+                + "server is not, or could not confirm", true, details);
+        return false;
     }
 
     void setAppliedIndex(HttpExchange exchange) {
@@ -1117,6 +1340,37 @@ public final class HttpApiServer implements AutoCloseable {
                 Map.of("leaderId", leaderId));
     }
 
+    /**
+     * Answers 404 {@code tenant_not_found} or {@code namespace_not_found}, and returns {@code true}, when a write's scope
+     * does not exist (tenancy list, decision 3); the state machine checks again where the write is applied. Only the
+     * leader answers here, since it applies a scope's creation before acknowledging it: another server may not have
+     * applied it yet, so it proposes the write, which it cannot, and sends the client on to the leader.
+     */
+    boolean refusedForItsScope(HttpExchange exchange, String tenant, String namespace) throws IOException {
+        if (raftNode == null || !raftNode.isLeader()) return false;
+        dev.mars.qraft.state.tenancy.TenancyState tenancy = stateStore.getTenancy();
+        if (!tenancy.tenantExists(tenant)) {
+            respondError(exchange, 404, "tenant_not_found", "No tenant " + tenant + " exists", false);
+            return true;
+        }
+        if (!tenancy.namespaceExists(tenant, namespace)) {
+            respondError(exchange, 404, "namespace_not_found", "No namespace " + namespace + " exists in tenant "
+                    + tenant, false);
+            return true;
+        }
+        return false;
+    }
+
+    /** Answers the state machine's refusal of a scoped write whose scope was deleted, and returns {@code true}. */
+    boolean refusedForItsScope(HttpExchange exchange, RaftCommandResult<?> result) throws IOException {
+        if (result instanceof RaftCommandResult.Refused<?> refused
+                && (refused.code().equals("tenant_not_found") || refused.code().equals("namespace_not_found"))) {
+            respondError(exchange, 404, refused.code(), refused.message(), false);
+            return true;
+        }
+        return false;
+    }
+
     private static final AclRequest OPERATOR_READ = AclRequest.single(AclResource.OPERATOR, AclAccess.READ);
     private static final AclRequest OPERATOR_WRITE = AclRequest.single(AclResource.OPERATOR, AclAccess.WRITE);
 
@@ -1168,11 +1422,24 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     private HttpHandler requestAware(HttpHandler delegate) {
-        return api.handle(exchange -> {
+        HttpHandler handled = api.handle(exchange -> {
             LOG.debug("HTTP request: method={}, path={}", exchange.getRequestMethod(),
                     exchange.getRequestURI().getPath());
             delegate.handle(exchange);
         });
+        // Counted by the prefix the route was registered under, never the path (observability list, decision 3). The
+        // route is read before the request is handled: the server keeps it on the connection, which the next request
+        // on a kept-alive connection takes over as soon as this one's answer is sent.
+        return exchange -> {
+            long started = System.nanoTime();
+            String route = exchange.getHttpContext().getPath();
+            String method = exchange.getRequestMethod();
+            try {
+                handled.handle(exchange);
+            } finally {
+                requestMetrics().record(route, method, exchange.getResponseCode(), System.nanoTime() - started);
+            }
+        };
     }
 
     void respondError(HttpExchange exchange, int status, String code, String message,

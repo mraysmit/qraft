@@ -235,6 +235,7 @@ class DockerDurableRestartTest {
         String serviceName = "crash-retry-" + System.nanoTime();
         String serviceId = serviceName + "-1";
         String body = registrationBody(serviceId, serviceName, 8501);
+        DockerClusterApiHelper.ensureScope(endpoints, TEST_TENANT, TEST_NAMESPACE);
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(endpoints.get(oldLeaderIndex) + "/v1/catalog/register"))
                 .timeout(Duration.ofSeconds(5))
@@ -457,6 +458,7 @@ class DockerDurableRestartTest {
     private static void registerOnLeader(
             List<String> endpoints, String serviceId, String serviceName, int port) throws Exception {
         String body = registrationBody(serviceId, serviceName, port);
+        DockerClusterApiHelper.ensureScope(endpoints, TEST_TENANT, TEST_NAMESPACE);
         for (String endpoint : endpoints) {
             try {
                 HttpResponse<String> response = send(endpoint + "/v1/catalog/register", "PUT", body,

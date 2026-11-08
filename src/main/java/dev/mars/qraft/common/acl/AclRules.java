@@ -56,6 +56,8 @@ public record AclRules(List<AclRule> rules) {
                 AclRule.prefix(AclResource.SERVICE, "", access).in(AclScope.ANY, AclScope.ANY),
                 AclRule.prefix(AclResource.CLIENT, "", access),
                 AclRule.single(AclResource.OPERATOR, access),
-                AclRule.single(AclResource.ACL, access)));
+                AclRule.single(AclResource.ACL, access),
+                AclRule.prefix(AclResource.KEY, "", access).in(AclScope.ANY, AclScope.ANY),
+                AclRule.prefix(AclResource.SESSION, "", access)));
     }
 }

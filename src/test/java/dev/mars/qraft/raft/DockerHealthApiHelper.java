@@ -135,6 +135,14 @@ final class DockerHealthApiHelper {
                 {"service":{"serviceId":"filler-%d","serviceName":"filler","address":"127.0.0.1","port":%d}}
                 """.formatted(number, 10_000 + number);
         try {
+            // The filler scope is created first, as a write into one that does not exist is refused (tenancy list);
+            // a 409 for one that exists, or a follower's 503, leaves the registration to answer for itself.
+            for (String[] scope : new String[][] {{"/v1/tenant", "{\"Name\":\"filler\"}"},
+                    {"/v1/namespace", "{\"Name\":\"filler\",\"Tenant\":\"filler\"}"}}) {
+                HTTP.send(HttpRequest.newBuilder(URI.create(server + scope[0])).timeout(Duration.ofSeconds(5))
+                        .PUT(HttpRequest.BodyPublishers.ofString(scope[1])).build(),
+                        HttpResponse.BodyHandlers.discarding());
+            }
             return HTTP.send(HttpRequest.newBuilder(URI.create(server + "/v1/catalog/register"))
                     .timeout(Duration.ofSeconds(5))
                     .header("Content-Type", "application/json")

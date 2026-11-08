@@ -57,8 +57,36 @@ final class DockerClusterApiHelper {
     private DockerClusterApiHelper() {
     }
 
+    /**
+     * Creates {@code tenant} and its {@code namespace} on whichever endpoint leads, since a write into a scope that does
+     * not exist is refused (tenancy list, decision 3); one that exists already is left as it is.
+     */
+    static void ensureScope(List<String> endpoints, String tenant, String namespace) throws Exception {
+        if (!"default".equals(tenant)) create(endpoints, "/v1/tenant", "{\"Name\":\"" + tenant + "\"}");
+        if (!"default".equals(namespace)) {
+            create(endpoints, "/v1/namespace", "{\"Name\":\"" + namespace + "\",\"Tenant\":\"" + tenant + "\"}");
+        }
+    }
+
+    /** Puts {@code body} at {@code path} on whichever endpoint leads, until it is created or found to exist. */
+    private static void create(List<String> endpoints, String path, String body) throws Exception {
+        for (int attempt = 0; attempt < 30; attempt++) {
+            for (String endpoint : endpoints) {
+                try {
+                    int status = send(endpoint + path, "PUT", body, Map.of()).statusCode();
+                    if (status == 200 || status == 409) return;
+                } catch (java.io.IOException unavailable) {
+                    // A follower or a starting server answers later or not at all; the next endpoint is tried.
+                }
+            }
+            Thread.sleep(1000);
+        }
+        throw new AssertionError("no leader among " + endpoints + " created " + body + " at " + path);
+    }
+
     /** Registers {@code serviceName} on whichever endpoint leads, and returns the status that acknowledged it. */
     static int register(List<String> endpoints, String serviceName) throws Exception {
+        ensureScope(endpoints, "platform", "cluster-test");
         String body = """
                 {"service":{"serviceId":"%s-1","serviceName":"%s","address":"127.0.0.1","port":8100,
                  "tags":["cluster-test"],"metadata":{"scenario":"docker"},"health":"PASSING"}}

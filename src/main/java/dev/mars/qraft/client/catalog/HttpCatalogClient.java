@@ -397,7 +397,8 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
     private CompletableFuture<Optional<ForwardedRead>> forwardAttempt(List<URI> cycle, int index, String pathAndQuery,
             String requestId, Map<String, String> scope, Optional<ForwardedRead> lastAnswer) {
         URI endpoint = cycle.get(index);
-        HttpRequest.Builder builder = request(endpoint, pathAndQuery).setHeader("X-Request-Id", requestId);
+        HttpRequest.Builder builder = request(endpoint, pathAndQuery).setHeader("X-Request-Id", requestId)
+                .timeout(requestTimeout.plus(blockingWait(pathAndQuery)));
         scope.forEach(builder::setHeader);
         HttpRequest request = builder.GET().build();
         CompletableFuture<Optional<ForwardedRead>> answer;
@@ -417,6 +418,135 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
             return index + 1 == cycle.size() ? CompletableFuture.completedFuture(latest)
                     : forwardAttempt(cycle, index + 1, pathAndQuery, requestId, scope, latest);
         });
+    }
+
+    private static final java.util.regex.Pattern WAIT = java.util.regex.Pattern.compile("(\\d+)(ms|s|m|h)");
+
+    /**
+     * How long a server may hold a blocking read that {@code pathAndQuery} asks for, beyond answering it: its
+     * {@code wait}, 5 minutes by default, and the sixteenth the server may add, when {@code index} is above 0; zero
+     * otherwise (consistency list, decision 6).
+     */
+    static Duration blockingWait(String pathAndQuery) {
+        int query = pathAndQuery.indexOf('?');
+        if (query < 0) return Duration.ZERO;
+        boolean blocking = false;
+        Duration wait = Duration.ofMinutes(5);
+        for (String parameter : pathAndQuery.substring(query + 1).split("&")) {
+            int equals = parameter.indexOf('=');
+            String name = equals < 0 ? parameter : parameter.substring(0, equals);
+            String value = equals < 0 ? "" : parameter.substring(equals + 1);
+            if (name.equals("index")) {
+                try {
+                    blocking = Long.parseLong(value) > 0;
+                } catch (NumberFormatException notIndex) {
+                    blocking = false;
+                }
+            } else if (name.equals("wait")) {
+                java.util.regex.Matcher given = WAIT.matcher(value);
+                if (given.matches()) {
+                    long amount = Long.parseLong(given.group(1));
+                    wait = switch (given.group(2)) {
+                        case "ms" -> Duration.ofMillis(amount);
+                        case "s" -> Duration.ofSeconds(amount);
+                        case "m" -> Duration.ofMinutes(amount);
+                        default -> Duration.ofHours(amount);
+                    };
+                }
+            }
+        }
+        return blocking ? wait.plus(wait.dividedBy(16)) : Duration.ZERO;
+    }
+
+    /** The headers of a server's answer that a forwarded request passes on to the application. */
+    private static final java.util.List<String> PASSED_ON = java.util.List.of("Content-Type", "X-Qraft-Index",
+            LEADER_ID_HEADER, "X-Qraft-Results-Filtered-By-ACLs");
+
+    /**
+     * Forwards an application's request across the server seeds and keeps the answer as it came (key/value list,
+     * Phase 4). A read moves to the next seed as {@link #forwardRead} does. A write moves on only when it cannot have
+     * been applied: a seed that could not be reached, one that is busy, or one that answers that it has no leader
+     * or is draining; any other answer, an outcome the server does not know among them, is passed on, so that no
+     * write is applied twice.
+     */
+    public CompletableFuture<Optional<ForwardedResponse>> forward(String method, String pathAndQuery, byte[] body,
+                                                                  String requestId, Map<String, String> headers) {
+        ensureOpen();
+        if (endpoints == null) {
+            throw new IllegalStateException("No server seeds were configured for automatic selection");
+        }
+        return forwardAttempt(endpoints.cycle(), 0, method, pathAndQuery, body, requestId, headers, Optional.empty());
+    }
+
+    private CompletableFuture<Optional<ForwardedResponse>> forwardAttempt(List<URI> cycle, int index, String method,
+            String pathAndQuery, byte[] body, String requestId, Map<String, String> headers,
+            Optional<ForwardedResponse> lastAnswer) {
+        URI endpoint = cycle.get(index);
+        boolean read = "GET".equals(method);
+        HttpRequest.Builder builder = request(endpoint, pathAndQuery).setHeader("X-Request-Id", requestId)
+                .timeout(requestTimeout.plus(blockingWait(pathAndQuery)))
+                .method(method, body.length == 0 ? HttpRequest.BodyPublishers.noBody()
+                        : HttpRequest.BodyPublishers.ofByteArray(body));
+        headers.forEach(builder::setHeader);
+        HttpRequest request = builder.build();
+        CompletableFuture<Attempt> answer;
+        try {
+            answer = httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofByteArray())
+                    .handle((response, failure) -> {
+                        if (failure == null) return new Attempt(Optional.of(kept(response)), false);
+                        transportCode(request, failure);
+                        return new Attempt(Optional.empty(), read || notSent(failure));
+                    });
+        } catch (RuntimeException failure) {
+            answer = CompletableFuture.completedFuture(new Attempt(Optional.empty(), true));
+        }
+        return answer.thenCompose(attempt -> {
+            Optional<ForwardedResponse> response = attempt.response();
+            boolean moveOn = response.isEmpty() ? attempt.retryable() : passedOver(response.get(), read);
+            if (!moveOn) {
+                if (response.isPresent()) {
+                    endpoints.markSuccessful(endpoint);
+                    contactTracker.recordSuccessfulContact();
+                }
+                return CompletableFuture.completedFuture(response.isPresent() ? response : lastAnswer);
+            }
+            Optional<ForwardedResponse> latest = response.isPresent() ? response : lastAnswer;
+            return index + 1 == cycle.size() ? CompletableFuture.completedFuture(latest)
+                    : forwardAttempt(cycle, index + 1, method, pathAndQuery, body, requestId, headers, latest);
+        });
+    }
+
+    /** One seed's answer, or none, and whether asking the next seed is safe. */
+    private record Attempt(Optional<ForwardedResponse> response, boolean retryable) { }
+
+    /** Whether the next seed is asked after {@code response}: a busy or failed server for a read, and for a write
+     *  only a busy server, or one with no leader or draining, which applied nothing. */
+    private boolean passedOver(ForwardedResponse response, boolean read) {
+        if (response.status() == 429) return true;
+        if (response.status() < 500) return false;
+        if (read) return true;
+        if (response.status() != 503) return false;
+        try {
+            String code = objectMapper.readTree(response.body()).path("code").asText();
+            return "leader_unavailable".equals(code) || "draining".equals(code);
+        } catch (IOException notJson) {
+            return false;
+        }
+    }
+
+    /** Whether {@code failure} happened before the request reached a server, so it cannot have been applied. */
+    private static boolean notSent(Throwable failure) {
+        for (Throwable current = unwrap(failure); current != null; current = current.getCause()) {
+            if (current instanceof java.net.ConnectException) return true;
+        }
+        return false;
+    }
+
+    private static ForwardedResponse kept(HttpResponse<byte[]> response) {
+        Map<String, String> headers = new java.util.LinkedHashMap<>();
+        for (String name : PASSED_ON) response.headers().firstValue(name).ifPresent(value -> headers.put(name, value));
+        return new ForwardedResponse(response.statusCode(), response.body() == null ? new byte[0] : response.body(),
+                headers);
     }
 
     private static ForwardedRead forwarded(HttpResponse<String> response) {

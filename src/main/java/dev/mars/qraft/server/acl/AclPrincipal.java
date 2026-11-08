@@ -76,6 +76,16 @@ public final class AclPrincipal {
         return AclAuthorizer.decide(grants, defaultPolicy, request);
     }
 
+    /**
+     * Decides write on every name under {@code prefix}'s, as a recursive key delete needs (key/value list, Phase 3;
+     * {@link AclAuthorizer#decideWritePrefix}); with ACLs disabled, it is allowed.
+     */
+    public AclDecision decideWritePrefix(AclRequest prefix) {
+        Objects.requireNonNull(prefix, "prefix");
+        if (!enforced()) return new AclDecision.ByDefault(true, AclDefaultPolicy.ALLOW);
+        return AclAuthorizer.decideWritePrefix(grants, defaultPolicy, prefix);
+    }
+
     /** Whether {@code request} is allowed. */
     public boolean allows(AclRequest request) {
         return decide(request).allowed();

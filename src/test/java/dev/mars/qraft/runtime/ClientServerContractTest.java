@@ -317,6 +317,9 @@ class ClientServerContractTest {
     @Test
     void anApplicationReadsDiscoveryThroughItsLocalClientAgainstRealServer() throws Exception {
         QraftStateStore store = startServer();
+        // The client registers in acme/prod, which the tenancy list requires to exist.
+        node.submitCommand(dev.mars.qraft.state.tenancy.TenancyCommand.createTenant("acme", "")).get(10, TimeUnit.SECONDS);
+        node.submitCommand(dev.mars.qraft.state.tenancy.TenancyCommand.createNamespace("acme", "prod", "")).get(10, TimeUnit.SECONDS);
         ClientConfiguration configuration = ClientConfiguration.builder()
                 .nodeName("contract-client")
                 .dataDirectory(dataRoot)
@@ -360,7 +363,7 @@ class ClientServerContractTest {
 
         for (String refused : List.of("/v1/client/members?wan=1", "/v1/catalog/nodes?wan=1",
                 "/v1/catalog/services?dc=dc-2", "/v1/catalog/service/payments?tag=blue",
-                "/v1/health/service/payments?stale")) {
+                "/v1/health/service/payments?cached")) {
             assertLocalRefusal(readLocally(local, refused, Map.of()), 400, "invalid_query", refused);
         }
         assertLocalRefusal(readLocally(local, "/v1/catalog/services", Map.of("X-Qraft-Tenant", "")), 400,

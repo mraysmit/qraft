@@ -37,16 +37,17 @@ import java.util.Map;
  * }</pre>
  *
  * <ul>
- *   <li>{@code node}, {@code service} and {@code client}, each with a {@code _prefix} form, map names to
+ *   <li>{@code node}, {@code service}, {@code client}, {@code key} and {@code session}, each with a {@code _prefix}
+ *       form, map names to
  *       {@code {"policy": ...}}; {@code operator} and {@code acl} take the access itself. The access is
  *       {@code read}, {@code write} or {@code deny}, in lower case, as Consul writes it.</li>
  *   <li>{@code tenant} and {@code namespace}, each with a {@code _prefix} form, nest service rules, as Consul
  *       Enterprise's {@code partition} and {@code namespace} do. A tenant is given only at the top, a namespace at the
  *       top or in a tenant, and a service rule outside either is in {@code default}. No other rule is nested, because
  *       nodes have no scope (proposal 7).</li>
- *   <li>Anything else is refused: an unknown resource or field, {@code key} and {@code session}, which their own lists
- *       add, Consul's {@code intentions}, which need a mesh, a key written twice, and a rule given twice, also through
- *       {@code default}. A refusal names where in the rules it is.</li>
+ *   <li>Anything else is refused: an unknown resource or field, Consul's {@code intentions}, which need a mesh, a key
+ *       written twice, and a rule given twice, also through {@code default}. A refusal names where in the rules it
+ *       is.</li>
  * </ul>
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
@@ -56,9 +57,6 @@ import java.util.Map;
 public final class AclRulesJson {
     private static final ObjectMapper MAPPER = JsonMapper.builder()
             .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION).build();
-    private static final Map<String, String> LEFT_TO_LATER_LISTS = Map.of(
-            "key", "the key/value list", "key_prefix", "the key/value list",
-            "session", "the sessions list", "session_prefix", "the sessions list");
 
     private enum Level { TOP, TENANT, NAMESPACE }
 
@@ -124,7 +122,7 @@ public final class AclRulesJson {
             boolean prefix = key.endsWith("_prefix");
             String base = prefix ? key.substring(0, key.length() - "_prefix".length()) : key;
             switch (base) {
-                case "node", "service", "client" -> {
+                case "node", "service", "client", "key", "session" -> {
                     AclResource resource = AclResource.valueOf(base.toUpperCase(java.util.Locale.ROOT));
                     if (!resource.scoped() && level != Level.TOP) {
                         throw refused(at, "a " + base + " rule has no tenant or namespace");
@@ -147,11 +145,7 @@ public final class AclRulesJson {
                     scopes(field.getValue(), at, prefix, (scope, child, childPath) ->
                             block(child, childPath, Level.NAMESPACE, tenant, scope, rules));
                 }
-                default -> {
-                    String laterList = LEFT_TO_LATER_LISTS.get(key);
-                    throw refused(at, laterList != null ? key + " rules are added by " + laterList
-                            : "not an ACL resource or field this server knows");
-                }
+                default -> throw refused(at, "not an ACL resource or field this server knows");
             }
         }
     }

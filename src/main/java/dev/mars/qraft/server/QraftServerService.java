@@ -26,6 +26,7 @@ import dev.mars.qraft.server.api.DistributedStateGrpcService;
 import dev.mars.qraft.server.acl.AclRemovalAuthorizer;
 import dev.mars.qraft.server.acl.AclResolver;
 import dev.mars.qraft.server.acl.AclTokenExpiry;
+import dev.mars.qraft.server.session.SessionTtlExpiry;
 import dev.mars.qraft.server.acl.ManagementTokenInstaller;
 import dev.mars.qraft.server.config.AppConfig;
 import dev.mars.qraft.server.http.AclHttpSettings;
@@ -85,6 +86,8 @@ public class QraftServerService {
     private static final Duration MANAGEMENT_TOKEN_RETRY = Duration.ofSeconds(1);
     /** How often a leader looks for expired tokens to delete; they are refused from their expiry on regardless. */
     private static final Duration ACL_TOKEN_EXPIRY_INTERVAL = Duration.ofSeconds(30);
+    /** How often the leader looks for sessions whose TTL has lapsed (sessions list, Phase 2). */
+    private static final Duration SESSION_TTL_INTERVAL = Duration.ofSeconds(1);
     /** As long as {@code RaftStateLoop} waits for its thread; an evaluation that runs longer is interrupted. */
     private static final Duration HEALTH_EXPIRY_STOP_TIMEOUT = Duration.ofSeconds(5);
     private static final long BOOTSTRAP_RETRY_MS = 1_000;
@@ -106,6 +109,7 @@ public class QraftServerService {
     private Optional<LeaderHealthExpiry> healthExpiry = Optional.empty();
     private Optional<ManagementTokenInstaller> managementTokenInstaller = Optional.empty();
     private Optional<AclTokenExpiry> aclTokenExpiry = Optional.empty();
+    private Optional<SessionTtlExpiry> sessionTtlExpiry = Optional.empty();
     private Optional<ScheduledThreadPoolExecutor> healthExpiryExecutor = Optional.empty();
     private Optional<ShutdownCoordinator> shutdownCoordinator = Optional.empty();
     private volatile Optional<Long> bootstrapTimer = Optional.empty();
@@ -274,6 +278,17 @@ public class QraftServerService {
                             config.getAclDefaultPolicy().orElse(null),
                             config.getInitialManagementSecret().map(AclSecrets::hash).orElse(null)), httpsTls);
             this.httpApiServer = Optional.of(healthServer);
+            // The storage's size and its snapshot's age, in /raft/status and as gauges (observability list, Phase 3).
+            dev.mars.qraft.raft.StorageStatus storageStatus = new dev.mars.qraft.raft.StorageStatus(
+                    Path.of(config.getRaftStoragePath()), Clock.systemUTC());
+            healthServer.useStorageStatus(storageStatus);
+            io.opentelemetry.api.metrics.Meter storageMeter =
+                    io.opentelemetry.api.GlobalOpenTelemetry.getMeter("qraft-raft");
+            storageMeter.gaugeBuilder("qraft.raft.storage.bytes").setDescription("Bytes the Raft storage holds")
+                    .setUnit("By").ofLongs().buildWithCallback(measurement -> measurement.record(storageStatus.bytes()));
+            storageMeter.gaugeBuilder("qraft.raft.snapshot.age").setDescription(
+                    "Seconds since the published snapshot was written, or -1 with none").setUnit("s").ofLongs()
+                    .buildWithCallback(measurement -> measurement.record(storageStatus.snapshotAgeSeconds()));
 
             // Only the leader evaluates health-check deadlines; followers apply committed expiry commands.
             ScheduledThreadPoolExecutor expiryExecutor = ExpiryExecutor.create("qraft-health-expiry");
@@ -298,6 +313,12 @@ public class QraftServerService {
                             HEALTH_EXPIRY_PROPOSAL_TIMEOUT_MS, TimeUnit.MILLISECONDS),
                     ExpiryScheduler.of(expiryExecutor), Clock.systemUTC(), ACL_TOKEN_EXPIRY_INTERVAL))
                     : Optional.empty();
+            // Whenever this server leads, it keeps the session TTLs and destroys lapsed sessions (sessions list).
+            this.sessionTtlExpiry = Optional.of(SessionTtlExpiry.attach(node, stateMachine.getSessions(),
+                    command -> Deadlines.bound(node.submitCommand(command),
+                            HEALTH_EXPIRY_PROPOSAL_TIMEOUT_MS, TimeUnit.MILLISECONDS),
+                    ExpiryScheduler.of(expiryExecutor), Clock.systemUTC(), SESSION_TTL_INTERVAL));
+            this.sessionTtlExpiry.ifPresent(expiry -> healthServer.useSessionTtl(expiry));
 
             internalRaftServer.start().thenCompose(v1 -> {
                 logger.info("Internal Raft gRPC server started on port {}", internalRaftServer.port());
@@ -415,6 +436,7 @@ public class QraftServerService {
     private CompletableFuture<Void> stopHealthExpiry() {
         managementTokenInstaller.ifPresent(ManagementTokenInstaller::close);
         aclTokenExpiry.ifPresent(AclTokenExpiry::close);
+        sessionTtlExpiry.ifPresent(SessionTtlExpiry::close);
         healthExpiry.ifPresent(LeaderHealthExpiry::close);
         return healthExpiryExecutor.map(executor -> ExpiryExecutor.stop(executor, HEALTH_EXPIRY_STOP_TIMEOUT))
                 .orElseGet(QraftServerService::nothingToStop);

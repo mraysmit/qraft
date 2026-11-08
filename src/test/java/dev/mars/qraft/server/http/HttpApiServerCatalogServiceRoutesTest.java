@@ -66,6 +66,7 @@ class HttpApiServerCatalogServiceRoutesTest {
     private ManualRaftClusterFixture cluster;
     private QraftStateStore store;
     private HttpApiServer server;
+    private RaftNode leader;
     private final HttpClient client = HttpClient.newHttpClient();
 
     @BeforeEach
@@ -77,7 +78,7 @@ class HttpApiServerCatalogServiceRoutesTest {
         RaftNode node = cluster.add(cluster.builder("a", Set.of("a"), new InMemoryTransportSimulatorFixture("a"),
                 store, RaftNodeMode.volatileMode()));
         ManualRaftClusterFixture.startAll(node);
-        RaftNode leader = cluster.elect(node);
+        leader = cluster.elect(node);
         server = new HttpApiServer(0, leader, store);
         server.start().join();
     }
@@ -128,6 +129,8 @@ class HttpApiServerCatalogServiceRoutesTest {
         assertEquals(200, put("/v1/catalog/register", "{\"service\":" + SERVICE + "}").statusCode());
         assertEquals(200, registerAs("web-02", "default",
                 SERVICE.replace("\"web\"", "\"other-node\"")).statusCode());
+        // The tenancy list refuses a write into a namespace that does not exist, so the test namespace is created.
+        leader.submitCommand(dev.mars.qraft.state.tenancy.TenancyCommand.createNamespace("default", "test", "")).get(10, TimeUnit.SECONDS);
         assertEquals(200, registerAs("web-01", "test",
                 SERVICE.replace("\"web\"", "\"other-scope\"")).statusCode());
 

@@ -55,6 +55,11 @@ public record AclRequest(AclResource resource, String name, String tenant, Strin
     }
 
     /** A request for the service named {@code name} in {@code tenant} and {@code namespace}. */
+    /** A request for {@code key} in its tenant and namespace (key/value list, Phase 2). */
+    public static AclRequest key(String key, String tenant, String namespace, AclAccess access) {
+        return new AclRequest(AclResource.KEY, Objects.requireNonNull(key, "key"), tenant, namespace, access);
+    }
+
     public static AclRequest service(String name, String tenant, String namespace, AclAccess access) {
         return new AclRequest(AclResource.SERVICE, Objects.requireNonNull(name, "name"), tenant, namespace, access);
     }

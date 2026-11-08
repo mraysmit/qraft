@@ -86,6 +86,31 @@ public final class AclAuthorizer {
         return new AclDecision.ByRule(allows(merged, request.access()), decided.origin(), decided.rule());
     }
 
+    /**
+     * Decides write on every name under {@code prefix}'s name, as Consul's {@code KeyWritePrefix} does for a recursive
+     * key delete (key/value list, Phase 3): refused when any rule of the grants, exact or prefix, whose name starts
+     * with the prefix and whose scope covers the request's, grants less than write; otherwise decided as a write on
+     * the prefix itself, by the longest rule that covers it or, with none, by the default policy. The decision rests
+     * on the rules, not on the names that exist, so a name created under the prefix later is covered as well.
+     */
+    public static AclDecision decideWritePrefix(List<AclGrant> grants, AclDefaultPolicy defaultPolicy,
+                                                AclRequest prefix) {
+        Objects.requireNonNull(grants, "grants");
+        Objects.requireNonNull(prefix, "prefix");
+        if (prefix.access() != AclAccess.WRITE) throw new IllegalArgumentException("a prefix is decided for write");
+        for (AclGrant grant : grants) {
+            for (AclRule rule : grant.rules().rules()) {
+                if (rule.resource() != prefix.resource() || !rule.name().startsWith(prefix.name())) continue;
+                if (rule.resource().scoped() && (match(rule.tenant().name(), rule.tenant().prefix(), prefix.tenant()) < 0
+                        || match(rule.namespace().name(), rule.namespace().prefix(), prefix.namespace()) < 0)) {
+                    continue;
+                }
+                if (!allows(rule.access(), AclAccess.WRITE)) return new AclDecision.ByRule(false, grant.origin(), rule);
+            }
+        }
+        return decide(grants, defaultPolicy, prefix);
+    }
+
     /** How specifically {@code rule} matches {@code request}, or {@code null} when it does not match it. */
     private static Rank rank(AclRule rule, AclRequest request) {
         if (rule.resource() != request.resource()) return null;

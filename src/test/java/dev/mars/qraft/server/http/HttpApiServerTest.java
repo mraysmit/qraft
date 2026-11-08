@@ -251,6 +251,7 @@ class HttpApiServerTest {
                  "datacenter":"dc-1","region":"eu-west","enabled":false}
                 """;
 
+        ensureScope("acme", "payments");
         HttpResponse<String> response = request(HttpClient.newHttpClient(),
                 "/v1/catalog/register", "PUT", inService(registration),
                 Map.of("X-Qraft-Node", "node-a", "X-Qraft-Tenant", "acme",
@@ -332,10 +333,24 @@ class HttpApiServerTest {
                             String tag) throws Exception {
         Map<String, String> headers = new java.util.HashMap<>(scope);
         headers.put("X-Qraft-Node", "node-1");
+        ensureScope(scope.getOrDefault("X-Qraft-Tenant", "default"), scope.getOrDefault("X-Qraft-Namespace", "default"));
         HttpResponse<String> response = request(client, "/v1/catalog/register", "PUT", inService("""
                 {"serviceId":"%s","serviceName":"%s","address":"127.0.0.1","port":8080,"tags":["%s"]}
                 """.formatted(serviceId, serviceName, tag)), headers);
         assertEquals(200, response.statusCode(), response.body());
+    }
+
+    /**
+     * Creates {@code tenant} and its {@code namespace} for a test that writes there, as a write into a scope that does
+     * not exist is refused (tenancy list, decision 3); one that exists is left as it is.
+     */
+    private void ensureScope(String tenant, String namespace) throws Exception {
+        if (!"default".equals(tenant)) {
+            node.submitCommand(dev.mars.qraft.state.tenancy.TenancyCommand.createTenant(tenant, "")).get(10, TimeUnit.SECONDS);
+        }
+        if (!"default".equals(namespace)) {
+            node.submitCommand(dev.mars.qraft.state.tenancy.TenancyCommand.createNamespace(tenant, namespace, "")).get(10, TimeUnit.SECONDS);
+        }
     }
 
     private JsonNode readJson(HttpClient client, String path, Map<String, String> headers) throws Exception {
@@ -1171,7 +1186,7 @@ class HttpApiServerTest {
         HttpResponse<String> passingTrue = request(client, "/v1/health/service/frontend?passing=true", "GET");
         HttpResponse<String> passingFalse = request(client, "/v1/health/service/frontend?passing=false", "GET");
         HttpResponse<String> invalidFilter = request(client, "/v1/health/service/frontend?passing=maybe", "GET");
-        HttpResponse<String> unknownQuery = request(client, "/v1/health/service/frontend?stale=true", "GET");
+        HttpResponse<String> unknownQuery = request(client, "/v1/health/service/frontend?near=_agent", "GET");
         HttpResponse<String> catalog = request(client, "/v1/catalog/service/frontend", "GET");
 
         assertEquals(200, all.statusCode(), all.body());
@@ -1217,7 +1232,7 @@ class HttpApiServerTest {
         registerService(client, "web-1", "frontend", "node-a");
 
         for (String read : List.of("/v1/catalog/nodes?wan=1", "/v1/catalog/services?dc=dc-2",
-                "/v1/catalog/service/frontend?tag=blue", "/v1/catalog/node-services/node-a?stale",
+                "/v1/catalog/service/frontend?tag=blue", "/v1/catalog/node-services/node-a?cached",
                 "/v1/catalog/services?passing&dc=dc-2", "/v1/catalog/nodes?a%20b=1")) {
             HttpResponse<String> refused = request(client, read, "GET");
             assertEquals(400, refused.statusCode(), read + " " + refused.body());
@@ -1438,6 +1453,7 @@ class HttpApiServerTest {
         String registration = """
                 {"serviceId":"%s","serviceName":"%s","address":"127.0.0.1","port":8080}
                 """.formatted(serviceId, serviceName);
+        ensureScope(tenantId, namespace);
         HttpResponse<String> response = request(client, "/v1/catalog/register", "PUT", inService(registration),
                 Map.of("X-Qraft-Node", nodeId, "X-Qraft-Tenant", tenantId, "X-Qraft-Namespace", namespace));
         assertEquals(200, response.statusCode(), response.body());
@@ -1626,8 +1642,11 @@ class HttpApiServerTest {
      */
     private record RejectingRegistrationsFixture(QraftStateStore store) implements RaftLogApplicator {
         @Override public RaftCommandResult<?> apply(RaftCommand command) {
-            return command instanceof CatalogCommand.Register
-                    ? new RaftCommandResult.NoOp<>() : store.apply(command);
+            // A registration is proposed inside a scoped write since the tenancy list.
+            boolean registration = command instanceof CatalogCommand.Register
+                    || command instanceof dev.mars.qraft.state.tenancy.ScopedWrite scoped
+                    && scoped.command() instanceof CatalogCommand.Register;
+            return registration ? new RaftCommandResult.NoOp<>() : store.apply(command);
         }
         @Override public byte[] takeSnapshot() { return store.takeSnapshot(); }
         @Override public void restoreSnapshot(byte[] snapshot) { store.restoreSnapshot(snapshot); }

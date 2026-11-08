@@ -590,6 +590,95 @@ holds tokens, policies and roles.
   and `client.acl` with the servers' default policy, and change the security profile
   to `production` last.
 
+## Key/value
+
+The key/value store (design section 10) is part of the replicated state and of every
+snapshot, so it needs no step of its own in a backup, a recovery or an upgrade. A
+server from before 2026-11-08 cannot apply a key/value command and stops its recovery
+at one, so every server is upgraded before anyone writes a key. `qraft kv get`, `put`
+and `delete` read and write it, with `--tenant` and `--namespace` for a scope; with
+ACLs enabled they need a token with `key` rules.
+
+## Sessions and locks
+
+Sessions (design section 11) are part of the replicated state and of every snapshot,
+with the lock delays of the keys they held. A server from before 2026-11-08 cannot
+apply a session command or an acquisition, and stops its recovery at one, so every
+server is upgraded before anyone creates a session. The TTL timers are kept by the
+leader in memory: a new leader gives every session twice its TTL from its election,
+so a leader change never ends a session that was being renewed.
+
+A process elects itself leader of something through its client's local API, as with
+Consul:
+
+1. Create a session, which the client binds to its own node:
+   `PUT /v1/session/create` with `{"Name": "billing-leader", "TTL": "15s", "LockDelay": "15s"}`.
+   It answers `{"ID": "<session>"}`.
+2. Try to take the lock: `PUT /v1/kv/service/billing/leader?acquire=<session>` with
+   the leader's address as the body. `true` means this process leads; `false` means
+   another session holds the key, or the delay after the last holder's session ended
+   has not passed.
+3. While leading, renew the session within its TTL:
+   `PUT /v1/session/renew/<session>`. A 404 means the session has ended, and the
+   process must stop acting as leader at once.
+4. To step down, `PUT /v1/kv/service/billing/leader?release=<session>`, then
+   `PUT /v1/session/destroy/<session>`.
+5. Others watch the key with a blocking read,
+   `GET /v1/kv/service/billing/leader?index=<X-Qraft-Index>&wait=5m`. When its
+   `Session` is gone, they go back to step 2.
+
+A session ends when it is destroyed, when twice its TTL passes without a renewal, or
+when its node becomes unreachable or leaves the catalog. Its keys are then released,
+or deleted with `"Behavior": "delete"`. With ACLs enabled, the token needs
+`session:write` on the node and `key:write` on the key.
+
+## Tenants and namespaces
+
+Tenants and namespaces (design section 7) are part of the replicated state and of
+every snapshot. A server from before 2026-11-08 cannot apply a tenancy command, so
+every server is upgraded before anyone creates one.
+
+Since that version, a service registration, a key set or an acquisition into a
+tenant or namespace that does not exist is refused 404 `tenant_not_found` or
+`namespace_not_found`; only the `default` tenant and its `default` namespace exist
+from the start. What a cluster already holds elsewhere stays readable and can be
+deleted, but nothing more is written there until the scope is created. So, after the
+upgrade and before clients in other scopes register again, create each tenant and
+namespace in use, with a token that has `operator:write`:
+
+```text
+PUT /v1/tenant     {"Name": "acme", "Description": "Acme Ltd"}
+PUT /v1/namespace  {"Name": "prod", "Tenant": "acme"}
+```
+
+A client whose tenant or namespace is missing keeps retrying its registrations,
+logging each refusal at WARN, and becomes ready once the scope exists. Deleting a
+namespace (`DELETE /v1/namespace/prod` with `X-Qraft-Tenant: acme`) removes its
+services, checks and keys; deleting a tenant removes all its namespaces.
+
+## Metrics and server health
+
+A server exports its metrics on `server.telemetry.prometheusPort` when telemetry is
+enabled: the Raft node's, the state's (`qraft.catalog.*`, `qraft.health.transitions`,
+`qraft.kv.applies`, `qraft.session.*`, `qraft.lock.acquisitions`), the requests'
+(`qraft.http.requests`, `qraft.http.request.duration`), and the storage's
+(`qraft.raft.storage.bytes`, `qraft.raft.snapshot.age`). Prometheus sees them as
+OpenTelemetry's exporter writes them, with underscores for dots and the unit and
+`_total` suffixes it adds, such as `qraft_catalog_registrations_total`. No label names
+a service, key, session or node.
+
+`GET /v1/operator/autopilot/health` on the leader, with `operator:read`, shows each
+server's last contact, the index it holds and whether it is healthy: it has answered
+within an election timeout and is no more than 250 entries behind. Before removing or
+replacing a server, check that `FailureTolerance` is at least 1. Another server
+answers 503 `leader_unavailable` and names the leader. `/raft/status` on any server
+gives its `storageBytes` and `snapshotAgeSeconds`; a snapshot that keeps growing older
+while the log grows means snapshots are not being taken.
+
+A client publishes `qraft.client.ready`, `qraft.client.last_contact_age_seconds` and
+`qraft.client.reconciliations` at `GET /v1/client/metrics` on its local API, as JSON
+or with `?format=prometheus` for a scrape, with `client:read`.
+
 ## Transport security
 
 `server.tls` and `client.tls` (design section 15.2) encrypt and authenticate every

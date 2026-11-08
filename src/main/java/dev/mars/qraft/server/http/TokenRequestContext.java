@@ -72,11 +72,18 @@ final class TokenRequestContext implements RequestContext {
         throw new IllegalArgumentException(header + " must be a canonical UUID");
     }
 
-    /** Reads an optional scope header: absent means the default scope, and blank is rejected. */
+    /**
+     * Reads an optional scope header: absent means the default scope, and blank is rejected, as is a value that is not
+     * a tenant or namespace name (tenancy list, decision 2).
+     */
     static String optionalScope(HttpExchange exchange, String header) {
         String value = exchange.getRequestHeaders().getFirst(header);
         if (value == null) return ServiceInstance.DEFAULT_SCOPE;
         if (value.isBlank()) throw new IllegalArgumentException(header + " must not be blank");
+        if (!dev.mars.qraft.state.tenancy.TenancyNames.valid(value)) {
+            throw new IllegalArgumentException(header + " must be " + dev.mars.qraft.state.tenancy.TenancyNames.rule()
+                    + ": " + value);
+        }
         return value;
     }
 

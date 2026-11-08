@@ -50,6 +50,8 @@ public final class ServiceReconciler {
     private static final Logger LOGGER = LoggerFactory.getLogger(ServiceReconciler.class);
     /** The servers' refusal of a write from a node whose name a node of another ID holds. */
     private static final String NODE_NAME_RESERVED = "node_name_reserved";
+    /** The servers' refusals of a scope that does not exist yet, which an operator mends by creating it (tenancy list). */
+    private static final Set<String> SCOPE_NOT_FOUND = Set.of("tenant_not_found", "namespace_not_found");
     /** The servers' refusals of a token, which another token may mend: Consul's "permission denied" and "ACL not found". */
     private static final Set<String> TOKEN_REFUSALS = Set.of("permission_denied", "token_not_found");
     private final CatalogClient client;
@@ -68,6 +70,8 @@ public final class ServiceReconciler {
     private CompletableFuture<ShutdownResult> shutdown;
     private boolean acceptingTriggers = true;
     private volatile Instant lastSuccessfulContact;
+    /** Told of every pass's result, or of its failure (observability list, Phase 2). */
+    private volatile java.util.function.BiConsumer<Result, Throwable> passListener = (result, failure) -> { };
 
     public ServiceReconciler(CatalogClient client, Supplier<List<ServiceDefinition>> definitions, Clock clock) {
         this(client, definitions, clock, () -> true);
@@ -97,8 +101,16 @@ public final class ServiceReconciler {
         if (inFlight != null) return inFlight;
         CompletableFuture<Result> pass = reconcile(List.copyOf(definitions.get()));
         inFlight = pass;
-        pass.whenComplete((ignored, failure) -> clear(pass));
+        pass.whenComplete((result, failure) -> {
+            clear(pass);
+            passListener.accept(result, failure);
+        });
         return pass;
+    }
+
+    /** Tells {@code listener} of every pass that runs from now on: its result, or the failure it ended in. */
+    public void onPass(java.util.function.BiConsumer<Result, Throwable> listener) {
+        this.passListener = Objects.requireNonNull(listener, "listener");
     }
 
     /**
@@ -204,11 +216,12 @@ public final class ServiceReconciler {
                 pass.registered++;
                 contacted();
             } else if (outcome instanceof CatalogOutcome.Rejected failure) {
-                // A name another node holds, or a token the servers refuse, is not a fault of the definition, so
-                // the same definition is sent again on the next pass rather than suppressed until it changes.
+                // A name another node holds, a token the servers refuse, or a tenant or namespace not created yet
+                // is not a fault of the definition, so the same definition is sent again on the next pass rather
+                // than suppressed until it changes.
                 if (TOKEN_REFUSALS.contains(failure.code())) {
                     refusedForToken.put(definition.id(), fingerprint);
-                } else if (!NODE_NAME_RESERVED.equals(failure.code())) {
+                } else if (!NODE_NAME_RESERVED.equals(failure.code()) && !SCOPE_NOT_FOUND.contains(failure.code())) {
                     rejected.put(definition.id(), new Rejection(fingerprint, failure));
                 }
                 pass.rejections.put(definition.id(), failure);

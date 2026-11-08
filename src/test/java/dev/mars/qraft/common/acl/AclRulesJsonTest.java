@@ -106,8 +106,10 @@ class AclRulesJsonTest {
     void refusesWhatThisListDoesNotKnowOrDoesNotAllow() {
         Map<String, String> refused = new java.util.LinkedHashMap<>();
         refused.put("an unknown resource", "{\"keyring\": \"read\"}");
-        refused.put("key, left to the key/value list", "{\"key_prefix\": {\"\": {\"policy\": \"read\"}}}");
-        refused.put("session, left to the sessions list", "{\"session\": {\"a\": {\"policy\": \"read\"}}}");
+        refused.put("list access on keys, left out (key/value list, decision 5)",
+                "{\"key_prefix\": {\"\": {\"policy\": \"list\"}}}");
+        refused.put("a session rule in a tenant",
+                "{\"tenant\": {\"acme\": {\"session\": {\"a\": {\"policy\": \"read\"}}}}}");
         refused.put("Consul's intentions, which need a mesh",
                 "{\"service\": {\"a\": {\"policy\": \"read\", \"intentions\": \"read\"}}}");
         refused.put("list, which only keys take", "{\"service\": {\"a\": {\"policy\": \"list\"}}}");
@@ -141,8 +143,10 @@ class AclRulesJsonTest {
         assertEquals(new com.fasterxml.jackson.databind.ObjectMapper().readTree("""
                 {"node_prefix": {"": {"policy": "read"}},
                  "client_prefix": {"": {"policy": "read"}},
+                 "session_prefix": {"": {"policy": "read"}},
                  "operator": "read", "acl": "read",
-                 "tenant_prefix": {"": {"namespace_prefix": {"": {"service_prefix": {"": {"policy": "read"}}}}}}}
+                 "tenant_prefix": {"": {"namespace_prefix": {"": {"service_prefix": {"": {"policy": "read"}},
+                                                                   "key_prefix": {"": {"policy": "read"}}}}}}}
                 """), new com.fasterxml.jackson.databind.ObjectMapper().readTree(written));
     }
 
@@ -170,10 +174,10 @@ class AclRulesJsonTest {
     void aRefusalNamesWhereTheRulesWentWrong() {
         IllegalArgumentException nested = assertThrows(IllegalArgumentException.class, () -> AclRulesJson.parse(
                 "{\"tenant\": {\"acme\": {\"namespace\": {\"prod\": {\"servcie\": {}}}}}}"));
-        IllegalArgumentException reserved = assertThrows(IllegalArgumentException.class,
-                () -> AclRulesJson.parse("{\"key\": {}}"));
+        IllegalArgumentException unknown = assertThrows(IllegalArgumentException.class,
+                () -> AclRulesJson.parse("{\"keyring\": \"read\"}"));
 
         assertTrue(nested.getMessage().contains("tenant.acme.namespace.prod.servcie"), nested.getMessage());
-        assertTrue(reserved.getMessage().contains("key"), reserved.getMessage());
+        assertTrue(unknown.getMessage().contains("keyring"), unknown.getMessage());
     }
 }

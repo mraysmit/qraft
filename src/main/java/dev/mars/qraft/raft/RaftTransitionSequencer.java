@@ -98,6 +98,11 @@ final class RaftTransitionSequencer {
         DrainingException() {
             super("Raft transition sequencer is draining");
         }
+
+        /** Work the state loop refused because it has stopped: it never ran, as a drained node's does not. */
+        DrainingException(RejectedExecutionException stopped) {
+            super("Raft transition sequencer's state loop has stopped", stopped);
+        }
     }
 
     static final class FencedException extends IllegalStateException {
@@ -337,7 +342,9 @@ final class RaftTransitionSequencer {
         try {
             runtime.execute(() -> action.run());
         } catch (RejectedExecutionException error) {
-            rejectionTarget.completeExceptionally(error);
+            // The state loop refuses work only once it has stopped; the work never ran, so it is refused as draining.
+            rejectionTarget.completeExceptionally(error instanceof DrainingException ? error
+                    : new DrainingException(error));
         }
     }
 

@@ -573,6 +573,33 @@ Phase 2 of the transport security list: default 1,726 with every coverage gate m
 over 658 files clean (logs `logs/local-run-2026-11-07-tls-phase2/`). On the complete list, with `TlsEndToEndTest` and
 `DockerTlsTest`: default 1,743 with every coverage gate met, end-to-end 17 and Docker 46, with no failures, errors or skips; audit over 862 files: 2,414 error lines, all flagged, 1,678 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/local-run-2026-11-07-tls-final/`).
 
+## Local runs for key/value, 2026-11-08
+
+Two runs of the three suites from the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted. After
+Phase 3 of the key/value list: default 1,772 with every coverage gate met, end-to-end and Docker 46; audit over 1,080
+files clean (logs `logs/local-run-2026-11-08-kv-phase3/`). On the complete list, with `KvEndToEndTest` and
+`DockerKvTest`: default 1,782 with every coverage gate met, end-to-end 18 and Docker 47, with no failures, errors or skips; audit over 1,293 files: 3,479 error lines, all flagged, 2,430 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/local-run-2026-11-08-kv-final/`).
+
+## Local runs for tenancy, 2026-11-08
+
+From the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted. The first final run passed its
+default and end-to-end suites, and failed two Docker tests: one registered fillers in a scope it never created, and
+one met a follower refusing a write for a scope it had not yet applied, which is fixed. The rerun: default 1,839 with every coverage gate met, end-to-end 21 and Docker 50, with no failures, errors or skips; audit over the 264 files the run wrote: 926 error lines, all flagged, 612 stack traces, none unflagged; no `too_many_pings`; no JVM crash file
+(logs `logs/ten-final2/`).
+
+## Local runs for sessions and locks, 2026-11-08
+
+From the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted. The first run, after Phase 3,
+failed its default suite on an older test that refused `session` as an ACL resource, and its end-to-end suite only
+because that install packaged no jar; it was stopped before its Docker suite. The final run, with that test updated and
+Phase 4's tests added: default 1,819 with every coverage gate met, end-to-end 20 and Docker 49, with no failures, errors or skips; audit over the 262 files the run wrote: 997 error lines, all flagged, 643 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/sess4/`).
+
+## Local runs for consistency, 2026-11-08
+
+From the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted. The first final run failed its
+default suite on an older test that refused `?stale`, and was stopped before its Docker suite could share the copy
+with the rerun. The rerun, with that test updated: default 1,797 with every coverage gate met, end-to-end 19 and Docker 48, with no failures, errors or skips; audit over the 257 files the run wrote: 1,021 error lines, all flagged, 653 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/local-run-2026-11-08-consistency-final2/`).
+
 ## Job configuration
 
 The job loads its pipeline from the repository's default branch using the following SCM configuration.

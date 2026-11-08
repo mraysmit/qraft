@@ -25,6 +25,7 @@ import dev.mars.qraft.common.acl.NodeIdentity;
 import dev.mars.qraft.common.acl.ServiceIdentity;
 import dev.mars.qraft.raft.grpc.AclAccessProto;
 import dev.mars.qraft.raft.grpc.AclCommandProto;
+import dev.mars.qraft.common.acl.AclRulesJson;
 import dev.mars.qraft.raft.grpc.AclPolicyProto;
 import dev.mars.qraft.raft.grpc.AclResourceProto;
 import dev.mars.qraft.raft.grpc.AclRuleProto;
@@ -103,6 +104,26 @@ class AclCommandCodecTest {
             assertFalse(entry.contains(SECRET), "the entry holds the secret");
             assertTrue(entry.contains(AclSecrets.hash(SECRET)), "the entry holds the secret's hash");
         }
+    }
+
+    @Test
+    void aPolicyWithKeyRulesRoundTrips() {
+        // Key/value list, Phase 2: key and key_prefix rules are replicated in a policy as any other rule.
+        AclCommand command = AclCommand.createPolicy(new AclPolicy(POLICY, "keys", "", AclRulesJson.parse(
+                "{\"key_prefix\":{\"app/\":{\"policy\":\"read\"}},\"key\":{\"app/x\":{\"policy\":\"deny\"}}}")));
+
+        assertEquals(command, codec.deserialize(codec.serialize(command)));
+        assertEquals(6, AclResourceProto.ACL_RESOURCE_KEY_VALUE, "the key resource's number in the WAL");
+    }
+
+    @Test
+    void aPolicyWithSessionRulesRoundTrips() {
+        // Sessions list, Phase 3: session and session_prefix rules are replicated in a policy as any other rule.
+        AclCommand command = AclCommand.createPolicy(new AclPolicy(POLICY, "sessions", "", AclRulesJson.parse(
+                "{\"session_prefix\":{\"\":{\"policy\":\"read\"}},\"session\":{\"web\":{\"policy\":\"write\"}}}")));
+
+        assertEquals(command, codec.deserialize(codec.serialize(command)));
+        assertEquals(7, AclResourceProto.ACL_RESOURCE_SESSION_VALUE, "the session resource's number in the WAL");
     }
 
     @Test

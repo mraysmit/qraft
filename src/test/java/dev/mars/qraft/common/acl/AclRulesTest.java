@@ -38,10 +38,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class AclRulesTest {
 
     @Test
-    void onlyNodeServiceAndClientTakeANameAndOnlyServiceTakesAScope() {
-        assertEquals(List.of(AclResource.NODE, AclResource.SERVICE, AclResource.CLIENT),
+    void onlyNodeServiceClientKeyAndSessionTakeANameAndOnlyServiceAndKeyTakeAScope() {
+        assertEquals(List.of(AclResource.NODE, AclResource.SERVICE, AclResource.CLIENT, AclResource.KEY,
+                        AclResource.SESSION),
                 List.of(AclResource.values()).stream().filter(AclResource::named).toList());
-        assertEquals(List.of(AclResource.SERVICE),
+        assertEquals(List.of(AclResource.SERVICE, AclResource.KEY),
                 List.of(AclResource.values()).stream().filter(AclResource::scoped).toList());
 
         assertThrows(IllegalArgumentException.class,
@@ -132,13 +133,19 @@ class AclRulesTest {
                 AclRule.prefix(AclResource.SERVICE, "", AclAccess.WRITE).in(AclScope.ANY, AclScope.ANY),
                 AclRule.prefix(AclResource.CLIENT, "", AclAccess.WRITE),
                 AclRule.single(AclResource.OPERATOR, AclAccess.WRITE),
-                AclRule.single(AclResource.ACL, AclAccess.WRITE))), AclRules.GLOBAL_MANAGEMENT);
+                AclRule.single(AclResource.ACL, AclAccess.WRITE),
+                AclRule.prefix(AclResource.KEY, "", AclAccess.WRITE).in(AclScope.ANY, AclScope.ANY),
+                AclRule.prefix(AclResource.SESSION, "", AclAccess.WRITE))),
+                AclRules.GLOBAL_MANAGEMENT);
         // Consul's global-read-only includes acl = "read" (agent/structs/acl.go, aclPolicyGlobalRulesTemplate).
         assertEquals(new AclRules(List.of(
                 AclRule.prefix(AclResource.NODE, "", AclAccess.READ),
                 AclRule.prefix(AclResource.SERVICE, "", AclAccess.READ).in(AclScope.ANY, AclScope.ANY),
                 AclRule.prefix(AclResource.CLIENT, "", AclAccess.READ),
                 AclRule.single(AclResource.OPERATOR, AclAccess.READ),
-                AclRule.single(AclResource.ACL, AclAccess.READ))), AclRules.GLOBAL_READ_ONLY);
+                AclRule.single(AclResource.ACL, AclAccess.READ),
+                AclRule.prefix(AclResource.KEY, "", AclAccess.READ).in(AclScope.ANY, AclScope.ANY),
+                AclRule.prefix(AclResource.SESSION, "", AclAccess.READ))),
+                AclRules.GLOBAL_READ_ONLY);
     }
 }

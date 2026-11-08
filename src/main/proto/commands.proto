@@ -174,6 +174,8 @@ enum AclResourceProto {
   ACL_RESOURCE_CLIENT = 3;
   ACL_RESOURCE_OPERATOR = 4;
   ACL_RESOURCE_ACL = 5;
+  ACL_RESOURCE_KEY = 6;
+  ACL_RESOURCE_SESSION = 7;
 }
 
 enum AclAccessProto {
@@ -266,6 +268,102 @@ message AclCommandProto {
   }
 }
 
+// A key/value write (key/value list, Phase 1). A compare-and-set index, when present, is the entry's modify index
+// the write requires, or 0 for an absent key.
+message KvSetProto {
+  string key = 1;
+  bytes value = 2;
+  uint64 flags = 3;
+  optional uint64 cas = 4;
+}
+
+message KvDeleteProto {
+  string key = 1;
+  optional uint64 cas = 2;
+}
+
+// A session acquiring or releasing a key (sessions list, Phase 1); at_ms is the leader's time.
+message KvLockProto {
+  string key = 1;
+  bytes value = 2;
+  uint64 flags = 3;
+  string session = 4;
+  int64 at_ms = 5;
+}
+
+message KvUnlockProto {
+  string key = 1;
+  bytes value = 2;
+  uint64 flags = 3;
+  string session = 4;
+}
+
+message KvCommandProto {
+  string tenant = 1;
+  string namespace = 2;
+  oneof command {
+    KvSetProto set = 3;
+    KvDeleteProto delete = 4;
+    string delete_tree_prefix = 5;
+    KvLockProto lock = 6;
+    KvUnlockProto unlock = 7;
+  }
+}
+
+// A session (sessions list, Phase 1); durations and times in milliseconds.
+message SessionProto {
+  string id = 1;
+  string node = 2;
+  string name = 3;
+  string behavior = 4;
+  int64 ttl_ms = 5;
+  int64 lock_delay_ms = 6;
+  int64 create_time_ms = 7;
+}
+
+message SessionDestroyProto {
+  string id = 1;
+  int64 at_ms = 2;
+}
+
+// A tenant or namespace change (tenancy list, Phase 1); a deletion carries only the names.
+message TenantProto {
+  string name = 1;
+  string description = 2;
+}
+
+message NamespaceProto {
+  string tenant = 1;
+  string name = 2;
+  string description = 3;
+}
+
+// A write that applies only where its tenant and namespace exist (tenancy list, Phase 2); command holds the
+// encoded RaftCommandMessage of the write itself.
+message ScopedWriteProto {
+  string tenant = 1;
+  string namespace = 2;
+  bytes command = 3;
+}
+
+message TenancyCommandProto {
+  oneof command {
+    TenantProto create_tenant = 1;
+    TenantProto update_tenant = 2;
+    TenantProto delete_tenant = 3;
+    NamespaceProto create_namespace = 4;
+    NamespaceProto update_namespace = 5;
+    NamespaceProto delete_namespace = 6;
+  }
+}
+
+message SessionCommandProto {
+  oneof command {
+    SessionProto create = 1;
+    SessionDestroyProto destroy = 2;
+  }
+}
+
 message RaftCommandMessage {
   oneof command {
     NodeCommandProto node_command = 1;
@@ -273,5 +371,9 @@ message RaftCommandMessage {
     CatalogCommandProto catalog_command = 3;
     RaftConfigurationProto configuration = 4;
     AclCommandProto acl_command = 5;
+    KvCommandProto kv_command = 6;
+    SessionCommandProto session_command = 7;
+    TenancyCommandProto tenancy_command = 8;
+    ScopedWriteProto scoped_write = 9;
   }
 }

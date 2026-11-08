@@ -553,6 +553,24 @@ A namespace is an isolation boundary within a tenant, commonly representing an
 environment, team, or application group. Every namespaced resource defaults to
 the `default` namespace when no explicit value is supplied.
 
+Built on 2026-11-08 by [`task-list-tenancy-2026-11-08.md`](../docs/archive/task-list-tenancy-2026-11-08.md), on
+Consul's admin partitions, which Qraft calls tenants, and namespaces:
+
+- **State** (`state.tenancy`): tenants and their namespaces, each with a
+  description and the indexes that created and last changed it. The `default`
+  tenant and every tenant's `default` namespace always exist and cannot be deleted.
+  Names are lower-case DNS labels, and so are the scope headers.
+- **Enforcement**: a service registration, a key set and an acquisition into a
+  tenant or namespace that does not exist are refused 404 `tenant_not_found` or
+  `namespace_not_found`. The server checks, and the state machine checks again at
+  the entry's place in the log, through a wrapper only new servers propose, so a
+  log written before tenancy replays to the state it had.
+- **Lifecycle**: deleting a namespace removes its services, their checks and its
+  keys; deleting a tenant removes its namespaces.
+- **HTTP**: `/v1/tenant`, `/v1/tenants`, `/v1/namespace` and `/v1/namespaces`, with
+  `operator:write` to change and `operator:read` to read. A client's local API acts
+  in the client's own tenant and namespace when the caller names none.
+
 ### 7.3 Client and node
 
 A client is the client-mode process. A node is the stable logical identity that
@@ -880,6 +898,33 @@ commands. Prefix listing is deterministic. Blocking queries wait for an index
 strictly greater than the caller's observed index and terminate on timeout,
 shutdown, or leadership/consistency failure.
 
+Built on 2026-11-08 by [`task-list-key-value-2026-11-08.md`](../docs/archive/task-list-key-value-2026-11-08.md), on Consul's
+KV store, except sessions, acquire, release and blocking queries, which followed the same day with the consistency
+list (section 13) and the sessions list (section 11):
+
+- **State** (`state.kv.KvState`): entries by tenant, namespace and key, with an
+  opaque value, 64-bit flags, and creation and modification indexes, which are the
+  Raft indexes of the commands that wrote them. The store takes the entry being
+  applied at the last applied index plus one, since `RaftNode` applies entries in
+  order and gives each index after its entry. A set or delete with a
+  compare-and-set index applies only at the entry's modification index, or for 0
+  only to an absent key; deleting an absent key succeeds. The snapshot carries the
+  entries, and one written before key/value restores none. The older `metadata`
+  map and the gRPC `DistributedStateService` stay as they were.
+- **HTTP** (`/v1/kv/{key}` on the server and the client): `GET` with `recurse`,
+  `keys`, `separator` and `raw`; `PUT` with `flags` and `cas`; `DELETE` with
+  `recurse` and `cas`; answers in Consul's field names; `X-Qraft-Index` is the
+  key/value state's last index. The scope is the request's `X-Qraft-Tenant` and
+  `X-Qraft-Namespace` headers. Other parameters are refused. A follower answers a
+  write 503 `leader_unavailable`, and the client forwards to its next server only
+  a write that cannot have been applied.
+- **ACLs**: `key` and `key_prefix` rules, scoped as `service` rules are; a read
+  needs `key:read`, a recursive read leaves out what the token cannot read, a write
+  needs `key:write`, and a recursive delete needs write on every key under the
+  prefix, decided on the rules as Consul's `KeyWritePrefix` decides it. There is no
+  `list` access.
+- **`qraft kv`** `get`, `put` and `delete`, with Consul's messages.
+
 ## 11. Sessions and locks
 
 A session binds an owner identity to a TTL and optional behavior on expiry.
@@ -892,6 +937,33 @@ expiry.
 
 Leader-election helpers are library behavior built on sessions and locks rather
 than a separate consensus mechanism.
+
+Built on 2026-11-08 by [`task-list-sessions-and-locks-2026-11-08.md`](../docs/archive/task-list-sessions-and-locks-2026-11-08.md), on
+Consul's sessions:
+
+- **State** (`state.session`): sessions by ID, each bound to a registered node,
+  with a name, a behaviour (`release` or `delete`), an optional TTL, a lock delay
+  and the index that created it. Creating and destroying are Raft commands, and so
+  is a lapse, as a destroy stamped with the leader's time. A renewal is not
+  replicated, as in Consul: the leader keeps the TTL timers in memory, and a new
+  leader gives every session twice its TTL again. This differs from the paragraph
+  above, which has renewal replicated.
+- **Invalidation**: a session ends when it is destroyed, when twice its TTL passes
+  without a renewal, or when its node becomes unreachable, is reaped, deregistered
+  or replaced. Its keys are then released or deleted by its behaviour, and none can
+  be acquired again until its lock delay, counted from the invalidation's time, has
+  passed. The times come from the proposer, so every replica keeps the same delay.
+- **Locks**: `PUT /v1/kv/{key}?acquire={session}` sets the key and its session if
+  no other session holds it and its lock delay has passed. A new holder increments
+  `LockIndex`. `?release={session}` frees a key only for the session that holds it.
+- **HTTP**: `/v1/session/create`, `destroy`, `renew`, `info`, `node` and `list` on
+  the server, in Consul's form. The server requires `Node`, and a client's local API
+  binds a session without one to the client's node.
+- **ACLs**: `session` and `session_prefix` rules name a node. Creating, renewing or
+  destroying needs `session:write` on the node, reading `session:read`, and
+  acquiring or releasing `key:write`.
+- **Leader election** is the recipe in `RAFT_STORAGE_OPERATIONS.md`, "Sessions and
+  locks", on the local API; there is no helper command yet.
 
 ## 12. API design
 
@@ -1606,6 +1678,29 @@ are:
 A follower may serve stale reads. Consistent reads require leader confirmation or
 forwarding. Writes may be forwarded or rejected with a structured leader hint;
 until forwarding exists, clients rotate through configured seeds.
+
+Built on 2026-11-08 by [`task-list-consistency-2026-11-08.md`](../docs/archive/task-list-consistency-2026-11-08.md), for
+the catalog's reads and `/v1/kv`:
+
+- **`?consistent`** is answered by the leader once `RaftNode.readBarrier()` passes:
+  Raft's ReadIndex, which records the commit index, or the first index of the
+  leader's term if that is later, sends a heartbeat round, and completes once a
+  quorum has answered a request sent after it began and that index is applied.
+  Each AppendEntries request carries the sequence it was sent at, so a late answer
+  to an earlier request confirms nothing. Another server answers 503
+  `leader_unavailable` with the leader hint, and a client tries its next server.
+- **`?stale` and the default** are the answering server's applied state. Consul's
+  default reads go to the leader through server-side forwarding, which Qraft does
+  not have; making the default leader-only would refuse every read a follower
+  answers, so the default is stale reads with a known leader. A difference from
+  Consul.
+- **Every read** carries `X-Qraft-Known-Leader` and `X-Qraft-Last-Contact`, the
+  milliseconds since the answering server heard from the leader, 0 on the leader.
+- **Blocking queries**: `?index=N&wait=D` waits until the index the read answers
+  with, the key/value state's last index for `/v1/kv` and the applied index for the
+  catalog, passes `N`, or `D` passes with up to a sixteenth more at random, as in
+  Consul; `wait` is 5 minutes by default and at most 10. The client forwards a
+  blocking read with its wait added to its request timeout.
 
 Deterministic ordering is mandatory for service lists, instances, tags, prefix
 results, and snapshot serialization.
@@ -2644,6 +2739,25 @@ transition that ran before it supplies that context.
 
 Metrics avoid unbounded labels such as raw service IDs, keys, request IDs, or
 error messages.
+
+Built on 2026-11-08 by [`task-list-observability-2026-11-08.md`](../docs/archive/task-list-observability-2026-11-08.md):
+
+- **State metrics**, counted where commands are applied, so every replica counts
+  the same: `qraft.catalog.registrations` and `qraft.catalog.deregistrations` by
+  result, `qraft.health.transitions` by the states left and taken,
+  `qraft.kv.applies` by operation and result, `qraft.session.active`,
+  `qraft.session.invalidations` by reason, and `qraft.lock.acquisitions` by result.
+- **Request metrics**: `qraft.http.requests` by route, method and status, and
+  `qraft.http.request.duration` by route and method; the route is the prefix it
+  was registered under, never the path.
+- **Client metrics** at `GET /v1/client/metrics`, Consul's `/v1/agent/metrics`
+  under Qraft's name, as JSON or as Prometheus text: readiness, the age of the
+  last successful contact with a server, and reconciliation passes by result.
+- **The leader's view of the servers** at `GET /v1/operator/autopilot/health`, in
+  Consul's form: each server's last contact, term, index and health, with the
+  cluster's health and failure tolerance; another server answers 503.
+- **Storage status**: `storageBytes` and `snapshotAgeSeconds` in `/raft/status`,
+  and the gauges `qraft.raft.storage.bytes` and `qraft.raft.snapshot.age`.
 
 A server publishes its metrics on `server.telemetry.prometheusPort`, and
 Prometheus scrapes that port. The OpenTelemetry collector receives a server's

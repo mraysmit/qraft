@@ -292,6 +292,23 @@ class RaftTransitionSequencerTest {
     }
 
     @Test
+    void aTransitionSubmittedAfterTheStateLoopStoppedIsRefusedAsDraining() throws Exception {
+        // A request in flight as a server stops can submit after its state loop has shut down. The transition never
+        // ran, as one refused while draining did not, so it is refused the same way and logged at debug, not as an
+        // error (consistency list, found by ClientKvForwardingTest's teardown).
+        RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime.stateLoop(), 4);
+        runtime.shutdown().get(10, TimeUnit.SECONDS);
+
+        CompletableFuture<Void> late = sequencer.submit("late", () -> CompletableFuture.completedFuture(null));
+
+        Throwable refused = assertThrows(CompletionException.class, () -> await(late)).getCause();
+        assertInstanceOf(RaftTransitionSequencer.DrainingException.class, refused);
+        assertInstanceOf(java.util.concurrent.RejectedExecutionException.class, refused.getCause(),
+                "the state loop's refusal is kept as the cause");
+        runtime = RaftExecutorsFixture.create();
+    }
+
+    @Test
     void drainRejectsNewWorkAndWaitsForAllAcceptedTransitions() throws Exception {
         RaftTransitionSequencer sequencer = new RaftTransitionSequencer(runtime.stateLoop(), 4);
         CompletableFuture<Void> gate = new CompletableFuture<>();

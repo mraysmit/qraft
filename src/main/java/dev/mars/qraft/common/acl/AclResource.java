@@ -20,7 +20,8 @@ package dev.mars.qraft.common.acl;
  * The resources ACL rules control (ACL list, proposal 6). {@code client} is Consul's {@code agent}, under Qraft's
  * name. {@code node}, {@code service} and {@code client} rules name a resource exactly or by prefix; {@code operator}
  * and {@code acl} are single values, as in Consul. Only a {@code service} rule has a tenant and a namespace, because
- * nodes have none (proposal 7). {@code key} and {@code session} are left to the lists that add them.
+ * nodes have none (proposal 7). {@code key} rules, added by the key/value list, are scoped as {@code service}
+ * rules are; {@code session} rules, added by the sessions list, name a node, and so have no scope.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-04
@@ -31,7 +32,11 @@ public enum AclResource {
     SERVICE(true, true),
     CLIENT(true, false),
     OPERATOR(false, false),
-    ACL(false, false);
+    ACL(false, false),
+    /** A key/value key, scoped as a service is (key/value list, Phase 2). */
+    KEY(true, true),
+    /** A session, named by its node, as Consul's {@code session} rules are (sessions list, Phase 3). */
+    SESSION(true, false);
 
     private final boolean named;
     private final boolean scoped;
