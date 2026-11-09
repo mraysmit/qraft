@@ -152,7 +152,7 @@ integration classes and `DnsServerTest` passed five runs in a row.
 
 **Record (2026-11-09):** `docker/Dockerfile` exposes `8600/tcp` and `8600/udp`; the single-server example's server serves DNS on 8600, published over UDP and TCP on `${PUBLISHED_DNS_PORT:-8600}`, and its client on its loopback address. `DockerDeploymentContractTest.theImageAndTheSingleServerExampleServeDns` was seen red at the image's `EXPOSE`, then green. The design gains section 12.1.4, the operations guide a DNS section and its coverage, the Docker README a DNS section; the validation's DNS row and item 10 are done, and the Consul plan's item is ticked.
 
-**Final run, 2026-11-09.** From the copy at `C:\qx7`, against Docker Desktop: default 1,968 with every coverage gate met, end-to-end 29 and Docker 51, with no failures, errors or skips; audit over the 272 files the run wrote: 902 error lines, all flagged, 619 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/dns-final/`).
+**Final run, 2026-11-09.** From the copy at `C:\qx7`, taken at 22:12, against Docker Desktop; the owner committed the same sources as `4da64d8` at 22:19, during the run: default 1,968 with every coverage gate met, end-to-end 29 and Docker 51, with no failures, errors or skips; audit over the 272 files the run wrote: 902 error lines, all flagged, 619 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/dns-final/`).
 
 ## 7. Out of scope
 

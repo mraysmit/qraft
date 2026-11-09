@@ -580,6 +580,10 @@ Phase 3 of the key/value list: default 1,772 with every coverage gate met, end-t
 files clean (logs `logs/local-run-2026-11-08-kv-phase3/`). On the complete list, with `KvEndToEndTest` and
 `DockerKvTest`: default 1,782 with every coverage gate met, end-to-end 18 and Docker 47, with no failures, errors or skips; audit over 1,293 files: 3,479 error lines, all flagged, 2,430 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/local-run-2026-11-08-kv-final/`).
 
+## Local runs for DNS discovery, 2026-11-09
+
+From the copy at `C:\qx7`, against Docker Desktop, on the sources the owner committed during the run as `4da64d8`: default 1,968 with every coverage gate met, end-to-end 29 and Docker 51, with no failures, errors or skips; audit over the 272 files the run wrote: 902 error lines, all flagged, 619 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/dns-final/`).
+
 ## Local runs for the client library, the endpoint metric, certificate reloading, the kubernetes auth method and write forwarding, 2026-11-08
 
 From the copy at `C:\qx7`, against Docker Desktop, while the work was uncommitted, one run for the five lists:
