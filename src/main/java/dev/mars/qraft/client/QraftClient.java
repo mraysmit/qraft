@@ -90,6 +90,10 @@ public final class QraftClient implements AutoCloseable {
     private final RegistrationClient registrationClient;
     private final HeartbeatService heartbeatService;
     private final LocalApiServer localApi;
+    /** The reads the DNS interface answers from: forwarded to the servers under the default token. */
+    private final dev.mars.qraft.common.dns.DnsReads dnsReads;
+    /** The DNS interface, while the client runs with {@code client.dns} set (DNS discovery list). */
+    private volatile dev.mars.qraft.common.dns.DnsServer dnsServer;
     private final ServerRetryPolicy retryPolicy;
     private final ServiceReconciler serviceReconciler;
     private final ReadinessPolicy readinessPolicy;
@@ -184,6 +188,15 @@ public final class QraftClient implements AutoCloseable {
                 config.getNamespace(), config.getDatacenter(), config.getRegion(),
                 Duration.ofMillis(config.getRequestTimeoutMs()), contactTracker);
         serverClient.useTokens(new ServiceTokens(tokens, definitions, fileServiceTokens));
+        // DNS reads go to the servers as the local API's discovery reads do, under the client's default token, as
+        // Consul's agent reads with no dns token (DNS discovery list, decisions 2 and 3).
+        this.dnsReads = (pathAndQuery, scope) -> {
+            Map<String, String> headers = new java.util.LinkedHashMap<>(scope);
+            tokens.defaultToken().ifPresent(token -> headers.put("X-Qraft-Token", token));
+            return serverClient.forwardRead(pathAndQuery, java.util.UUID.randomUUID().toString(), headers)
+                    .thenApply(read -> read.map(answer -> new dev.mars.qraft.common.dns.DnsReads.Read(answer.status(),
+                            answer.body())));
+        };
         ClientAuthorizer acl = new ClientAuthorizer(new ClientAclResolver(config.getAcl(), config.getNodeName(), tokens,
                 serverClient::resolveAcl, clock), tokens, config.getNodeName(), config.getTenant(),
                 config.getNamespace());
@@ -275,6 +288,7 @@ public final class QraftClient implements AutoCloseable {
             return CompletableFuture.completedFuture(registrationClient.isRegistered());
         }
         localApi.start();
+        startDns();
         // The calls to the servers take up a renewed certificate or CA (certificate reloading list, decision 2).
         tlsMaterial.ifPresent(material -> tlsReloader =
                 dev.mars.qraft.common.tls.TlsReloader.start(material, tlsReloadInterval));
@@ -286,6 +300,20 @@ public final class QraftClient implements AutoCloseable {
             else if (registrationClient.shouldRetryRegistration()) scheduleRegistrationRetry(client);
             return registered;
         });
+    }
+
+    /** Serves DNS from the servers when {@code client.dns} is set (DNS discovery list, decision 1). */
+    private void startDns() {
+        java.util.Optional<dev.mars.qraft.common.dns.DnsSettings> settings = config.getDns();
+        if (settings.isEmpty()) return;
+        dev.mars.qraft.common.dns.DnsSettings dns = settings.get();
+        dev.mars.qraft.common.dns.DnsResolver resolver = new dev.mars.qraft.common.dns.DnsResolver(dnsReads,
+                dns.domain(), dns.ttlSeconds(), dns.onlyPassing(), Duration.ofSeconds(5), new java.util.Random());
+        try {
+            dnsServer = dev.mars.qraft.common.dns.DnsServer.start(dns.host(), dns.port(), resolver);
+        } catch (java.io.IOException failed) {
+            throw new java.io.UncheckedIOException(failed);
+        }
     }
 
     private void scheduleRegistrationRetry(Node client) {
@@ -427,6 +455,8 @@ public final class QraftClient implements AutoCloseable {
         if (reloader != null) reloader.close();
         checkScheduler.shutdownNow();
         checkHttpClient.shutdownNow();
+        dev.mars.qraft.common.dns.DnsServer dns = dnsServer;
+        if (dns != null) dns.close();
         localApi.shutdown();
         serverClient.closeNow();
     }
@@ -435,6 +465,11 @@ public final class QraftClient implements AutoCloseable {
     /** The node ID kept in the client's data directory. */
     public String nodeId() { return dataDirectory.nodeId(); }
     public LocalApiServer localApi() { return localApi; }
+    /** The port the DNS interface listens on while the client runs, when {@code client.dns} is set. */
+    public java.util.OptionalInt dnsPort() {
+        dev.mars.qraft.common.dns.DnsServer dns = dnsServer;
+        return dns == null ? java.util.OptionalInt.empty() : java.util.OptionalInt.of(dns.port());
+    }
 
     /** Returns the process-local status input for a running TTL check, or empty for any other check. */
     public Optional<LocalStatusReporter> statusReporter(String serviceId, String checkId) {

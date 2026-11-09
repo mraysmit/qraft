@@ -9,7 +9,10 @@
     "heartbeatIntervalMs": 5000,
     "shutdownTimeoutMs": 30000,
     "datacenter": "dc1",
-    "region": "eu-west"
+    "region": "eu-west",
+    "dns": {
+      "port": 8600
+    }
   },
   "servers": {
     "urls": [

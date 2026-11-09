@@ -1634,6 +1634,22 @@ public final class HttpApiServer implements AutoCloseable {
         return request -> CompletableFuture.supplyAsync(() -> answerForwarded(request), executor);
     }
 
+    /**
+     * The DNS interface's reads, answered on this server's own routes in memory, through their filters and handlers,
+     * under {@code token} when there is one (DNS discovery list, decisions 2 and 3).
+     */
+    public dev.mars.qraft.common.dns.DnsReads dnsReads(Optional<String> token) {
+        Objects.requireNonNull(token, "token");
+        return (pathAndQuery, scope) -> CompletableFuture.supplyAsync(() -> {
+            dev.mars.qraft.raft.grpc.ForwardRequest.Builder request = dev.mars.qraft.raft.grpc.ForwardRequest
+                    .newBuilder().setMethod("GET").setPathAndQuery(pathAndQuery).putAllHeaders(scope);
+            token.ifPresent(secret -> request.putHeaders("X-Qraft-Token", secret));
+            dev.mars.qraft.raft.grpc.ForwardResponse answer = answerForwarded(request.build());
+            return Optional.of(new dev.mars.qraft.common.dns.DnsReads.Read(answer.getStatus(),
+                    answer.getBody().toStringUtf8()));
+        }, executor);
+    }
+
     private dev.mars.qraft.raft.grpc.ForwardResponse answerForwarded(dev.mars.qraft.raft.grpc.ForwardRequest request) {
         String path = URI.create(request.getPathAndQuery()).getPath();
         com.sun.net.httpserver.HttpContext context = null;

@@ -83,6 +83,8 @@ public class QraftServerService {
     private static final Logger logger = LoggerFactory.getLogger(QraftServerService.class);
     /** Bounds an expiry proposal, so a proposal that never completes cannot suppress re-evaluation. */
     private static final long HEALTH_EXPIRY_PROPOSAL_TIMEOUT_MS = 5_000;
+    /** How long a DNS lookup's read may take before it is answered SERVFAIL. */
+    private static final java.time.Duration DNS_READ_TIMEOUT = java.time.Duration.ofSeconds(5);
     /** How long a leader waits before trying again to install the management token from its file. */
     private static final Duration MANAGEMENT_TOKEN_RETRY = Duration.ofSeconds(1);
     /** How often a leader looks for expired tokens to delete; they are refused from their expiry on regardless. */
@@ -111,6 +113,8 @@ public class QraftServerService {
     private Optional<RaftTls> raftTls = Optional.empty();
     private Optional<GrpcServiceServer> apiGrpcServer = Optional.empty();
     private Optional<HttpApiServer> httpApiServer = Optional.empty();
+    /** The DNS interface, while the server runs with {@code server.dns} set (DNS discovery list). */
+    private volatile Optional<dev.mars.qraft.common.dns.DnsServer> dnsServer = Optional.empty();
     private Optional<LeaderHealthExpiry> healthExpiry = Optional.empty();
     private Optional<ManagementTokenInstaller> managementTokenInstaller = Optional.empty();
     private Optional<AclTokenExpiry> aclTokenExpiry = Optional.empty();
@@ -349,6 +353,7 @@ public class QraftServerService {
 
                 try {
                     healthServer.start();
+                    startDns(healthServer);
                     node.start().whenComplete(Completions.outcome(v3 -> {
                         logger.info("HTTP health server started on port {}", healthServer.port());
 
@@ -438,6 +443,7 @@ public class QraftServerService {
                     .orElseGet(QraftServerService::nothingToStop);
             CompletableFuture<Void> apiStop = apiGrpcServer.map(GrpcServiceServer::stop)
                     .orElseGet(QraftServerService::nothingToStop);
+            stopDns();
             httpApiServer.ifPresent(HttpApiServer::stop);
             return CompletableFuture.allOf(raftStop, apiStop);
         });
@@ -485,7 +491,42 @@ public class QraftServerService {
         HttpApiServer http = httpApiServer.orElseThrow(() -> new IllegalStateException("the server is not running"));
         GrpcRaftServer raft = raftGrpcServer.orElseThrow(() -> new IllegalStateException("the server is not running"));
         GrpcServiceServer api = apiGrpcServer.orElseThrow(() -> new IllegalStateException("the server is not running"));
-        return Map.of("http", http.address(), "raft", raft.address(), "apiGrpc", api.address());
+        Map<String, java.net.InetSocketAddress> addresses = new java.util.HashMap<>(Map.of("http", http.address(),
+                "raft", raft.address(), "apiGrpc", api.address()));
+        dnsServer.ifPresent(dns -> addresses.put("dns", new java.net.InetSocketAddress(
+                config.getDns().orElseThrow().host(), dns.port())));
+        return Map.copyOf(addresses);
+    }
+
+    /**
+     * Serves DNS from this server's own routes when {@code server.dns} is set, under the token in its token file
+     * (DNS discovery list, decisions 1 to 3).
+     */
+    private void startDns(HttpApiServer http) throws java.io.IOException {
+        Optional<dev.mars.qraft.common.dns.DnsSettings> settings = config.getDns();
+        if (settings.isEmpty()) return;
+        dev.mars.qraft.common.dns.DnsSettings dns = settings.get();
+        Optional<String> token = dns.tokenFile().map(QraftServerService::readDnsToken);
+        dev.mars.qraft.common.dns.DnsResolver resolver = new dev.mars.qraft.common.dns.DnsResolver(
+                http.dnsReads(token), dns.domain(), dns.ttlSeconds(), dns.onlyPassing(), DNS_READ_TIMEOUT,
+                new java.util.Random());
+        dnsServer = Optional.of(dev.mars.qraft.common.dns.DnsServer.start(dns.host(), dns.port(), resolver));
+    }
+
+    private static String readDnsToken(Path file) {
+        try {
+            String token = java.nio.file.Files.readString(file).strip();
+            if (token.isEmpty()) throw new IllegalArgumentException("server.dns.tokenFile " + file + " is empty");
+            return token;
+        } catch (java.io.IOException unreadable) {
+            throw new IllegalArgumentException("server.dns.tokenFile " + file + " could not be read: "
+                    + unreadable.getMessage(), unreadable);
+        }
+    }
+
+    private void stopDns() {
+        dnsServer.ifPresent(dev.mars.qraft.common.dns.DnsServer::close);
+        dnsServer = Optional.empty();
     }
 
     /** How this server sends a write to the leader, for tests in this package that replace it for a while. */
@@ -547,6 +588,7 @@ public class QraftServerService {
                             .orElseGet(QraftServerService::nothingToStop);
                     CompletableFuture<Void> externalGrpcStop = apiGrpcServer.map(GrpcServiceServer::stop)
                             .orElseGet(QraftServerService::nothingToStop);
+                    stopDns();
                     httpApiServer.ifPresent(HttpApiServer::stop);
 
                     CompletableFuture.allOf(expiryStop, raftStop, internalGrpcStop, externalGrpcStop)

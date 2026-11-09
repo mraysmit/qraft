@@ -481,7 +481,8 @@ Operators
 Applications talk only to the client on their own host, at `localhost` (section
 12.1.3). Through it they register their services and checks, report TTL status and
 discover other services, and the client keeps those registrations in sync with the
-servers and forwards discovery reads to them. Discovery by DNS is a later list.
+servers and forwards discovery reads to them. A client and a server can also answer
+discovery by DNS (section 12.1.4).
 
 Servers are authoritative for committed cluster state. Clients are
 authoritative only for local observations and submit those observations as
@@ -1487,6 +1488,40 @@ the catalog keeps both until `nodeReapAfterMs`. What the API registered stays in
 `client.dataDirectory`, as Consul's persisted services do. Consul treats a leave as "a
 permanent intent" and does not rejoin without an explicit join or `rejoin_after_leave`;
 a client always has its server URLs, so its next start registers it again.
+
+#### 12.1.4 DNS interface
+
+Since 2026-11-09 ([`task-list-dns-discovery-2026-11-09.md`](../docs/archive/task-list-dns-discovery-2026-11-09.md)), a server and
+a client each serve DNS when `server.dns` or `client.dns` gives a port, over UDP and TCP
+on that port, for the domain `qraft` unless `domain` names another. It answers the
+names of Consul's DNS interface:
+
+| Name | Records |
+| --- | --- |
+| `[tag.]<service>.service[.<namespace>.ns][.<tenant>.ap].<domain>` | A, AAAA and SRV of the instances |
+| `_<service>._<tag>.service[...].<domain>` (RFC 2782; `_tcp` means any tag) | SRV |
+| `<node>.node.<domain>` | A or AAAA of the node's address |
+| `<hex address>.addr.<domain>` | A or AAAA of the address the name spells |
+
+A lookup asks the same reads as HTTP: a server runs `GET /v1/health/service/{name}`
+and `GET /v1/catalog/nodes` on its own routes in memory, and a client forwards them to
+the servers as its local API does, so ACLs, tenancy and readiness mean in DNS what they
+mean in HTTP. A server reads under the token in `server.dns.tokenFile`, else none; a
+client under its default token. With no `ns` or `ap` label a server reads the `default`
+tenant and namespace and a client its own. An instance is answered when its health is
+passing, warning or unknown (no checks) and its node is not unreachable; `onlyPassing`
+leaves out a warning. An SRV record's target is the instance's `addr` name, with the
+address in the additional section, or the instance's host name when its address is one;
+A and AAAA answers hold only instances whose address is an IP address. Answers are
+shuffled and carry `ttlSeconds` (0 by default).
+
+A name in the domain that names nothing is NXDOMAIN, and one that names something
+without records of the type asked is answered with none, both with the domain's SOA.
+A name outside the domain is REFUSED: there are no recursors. A read the token may not
+make is REFUSED, and one that fails or finds no server is SERVFAIL. A UDP answer fits
+512 bytes, or the query's EDNS size up to 4,096, and is marked truncated when records
+are left out, so a resolver asks again over TCP. Prepared queries, recursors, a `dns`
+token kind and other datacenters are not offered.
 
 ### 12.2 Error envelope
 

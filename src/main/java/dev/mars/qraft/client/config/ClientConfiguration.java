@@ -83,8 +83,10 @@ public final class ClientConfiguration {
     private final ClientAclSettings acl;
     private final Map<String, Path> serviceTokenFiles;
     private final TlsSettings tls;
+    private final dev.mars.qraft.common.dns.DnsSettings dns;
 
     private ClientConfiguration(Builder builder) {
+        dns = builder.dns;
         acl = builder.acl;
         serviceTokenFiles = Map.copyOf(builder.serviceTokenFiles);
         tls = builder.tls;
@@ -134,7 +136,7 @@ public final class ClientConfiguration {
         JsonNode catalog = optionalObject(root, "catalog");
         JsonNode logging = optionalObject(root, "logging");
         rejectUnknown(client, "client", "nodeName", "dataDirectory", "address", "bindAddress", "httpPort",
-                "heartbeatIntervalMs", "shutdownTimeoutMs", "datacenter", "region", "acl", "tls");
+                "heartbeatIntervalMs", "shutdownTimeoutMs", "datacenter", "region", "acl", "tls", "dns");
         rejectUnknown(servers, "servers", "urls", "requestTimeoutMs");
         rejectUnknown(catalog, "catalog", "tenant", "namespace", "registrationRetryMinMs",
                 "registrationRetryMaxMs", "contactFreshnessMs", "services");
@@ -142,7 +144,12 @@ public final class ClientConfiguration {
         List<HealthCheckDefinition> healthChecks = new ArrayList<>();
         Map<String, Path> serviceTokenFiles = new java.util.LinkedHashMap<>();
         List<ServiceDefinition> services = parseServices(catalog.get("services"), healthChecks, serviceTokenFiles);
+        InetAddress bind = bindAddress(client.get("bindAddress"));
+        // A client reads under its default token, so it takes no token file (DNS discovery list, decision 3).
+        java.util.Optional<dev.mars.qraft.common.dns.DnsSettings> dns = dev.mars.qraft.common.dns.DnsSettings.parse(
+                client.get("dns"), "client.dns", bind.getHostAddress(), false);
         return builder()
+                .dns(dns.orElse(null))
                 .acl(ClientAclSettings.parse(client.get("acl")))
                 .tls(TlsSettings.parse(client.get("tls"), "client.tls").orElse(null))
                 .serviceTokenFiles(serviceTokenFiles)
@@ -150,7 +157,7 @@ public final class ClientConfiguration {
                 .dataDirectory(dataDirectory(requiredText(client, "dataDirectory")))
                 .address(optionalText(client, "address", localAddress()))
                 .clientPort(optionalInt(client, "httpPort", 8080))
-                .bindAddress(bindAddress(client.get("bindAddress")))
+                .bindAddress(bind)
                 .heartbeatInterval(optionalLong(client, "heartbeatIntervalMs", 30_000))
                 .shutdownTimeoutMs(optionalLong(client, "shutdownTimeoutMs", 30_000))
                 .datacenter(optionalText(client, "datacenter", "default"))
@@ -295,6 +302,8 @@ public final class ClientConfiguration {
     public int getClientPort() { return clientPort; }
     /** The address the local API listens on: the loopback address unless configured, as Consul's {@code client_addr}. */
     public InetAddress getBindAddress() { return bindAddress; }
+    /** {@code client.dns}: the DNS interface's settings, or empty when it is off (DNS discovery list). */
+    public java.util.Optional<dev.mars.qraft.common.dns.DnsSettings> getDns() { return java.util.Optional.ofNullable(dns); }
     public String getRegion() { return region; }
     public String getDatacenter() { return datacenter; }
     public String getServerUrl() { return serverUrls.getFirst().toString(); }
@@ -340,8 +349,11 @@ public final class ClientConfiguration {
         private ClientAclSettings acl = ClientAclSettings.DISABLED;
         private Map<String, Path> serviceTokenFiles = Map.of();
         private TlsSettings tls;
+        private dev.mars.qraft.common.dns.DnsSettings dns;
 
         public Builder tls(TlsSettings value) { tls = value; return this; }
+        /** {@code client.dns}; {@code null} leaves DNS off. */
+        public Builder dns(dev.mars.qraft.common.dns.DnsSettings value) { dns = value; return this; }
         public Builder acl(ClientAclSettings value) { acl = java.util.Objects.requireNonNull(value, "acl"); return this; }
         public Builder serviceTokenFiles(Map<String, Path> value) { serviceTokenFiles = Map.copyOf(value); return this; }
 

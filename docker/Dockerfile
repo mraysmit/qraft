@@ -12,6 +12,6 @@ RUN mkdir -p /app/logs /app/data \
     && chown -R qraft:qraft /app
 
 USER qraft
-EXPOSE 8080 9080 10080
+EXPOSE 8080 9080 10080 8600/tcp 8600/udp
 
 ENTRYPOINT ["/docker-entrypoint.sh"]

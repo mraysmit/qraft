@@ -268,7 +268,7 @@ Add:
 - Configuration reference.
 - One container image and deployment examples for both `server` and `client` modes.
 - Docker examples for a three-node cluster.
-- Optional DNS discovery interface.
+- Optional DNS discovery interface (built 2026-11-09, design 12.1.4).
 
 ## 6. First Implementation Slice
 
@@ -474,4 +474,5 @@ unchecked features below remain open.
   to 8; the overall membership feature is still partial.
 - [x] Decide on and implement persisted generated node identity (item 10).
   Done 2026-10-30, in the client list's Phase 2.
-- [ ] Decide on and implement DNS discovery (item 10).
+- [x] Decide on and implement DNS discovery (item 10).
+  Done 2026-11-09, in [`task-list-dns-discovery-2026-11-09.md`](../docs/archive/task-list-dns-discovery-2026-11-09.md).

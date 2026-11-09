@@ -33,6 +33,16 @@ starts servers with `server --config /etc/qraft/server.json`. The client image u
 location. Operators may instead use `-Dqraft.config=<path>` or the local
 `config/<role>.json` convention. No discovery method reads an environment variable.
 
+## DNS discovery
+
+The single-server example serves DNS from its server on port 8600, published over UDP
+and TCP on `${PUBLISHED_DNS_PORT:-8600}`, and from its client on the client's own
+loopback address. From the host:
+
+```text
+dig @127.0.0.1 -p 8600 web.service.qraft SRV
+```
+
 ## Client configuration
 
 [`config/client.json`](config/client.json) is a complete client example. It

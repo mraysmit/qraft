@@ -739,6 +739,32 @@ logging each refusal at WARN, and becomes ready once the scope exists. Deleting 
 namespace (`DELETE /v1/namespace/prod` with `X-Qraft-Tenant: acme`) removes its
 services, checks and keys; deleting a tenant removes all its namespaces.
 
+## DNS discovery
+
+A server or a client serves DNS when its configuration gives `dns.port`:
+
+```json
+"dns": {"host": "0.0.0.0", "port": 8600, "domain": "qraft", "ttlSeconds": 0, "onlyPassing": false}
+```
+
+`host` defaults to the server's HTTP host or the client's bind address. The listener
+takes UDP and TCP on the same port, and the server or client does not start if it
+cannot bind both. Point a resolver's stub zone for the domain at it, or ask directly:
+
+```text
+dig @127.0.0.1 -p 8600 web.service.qraft SRV
+dig @127.0.0.1 -p 8600 primary.web.service.prod.ns.acme.ap.qraft A
+```
+
+With ACLs under `deny`, a server reads under the token in `server.dns.tokenFile`,
+which needs `service:read` on what it answers and `node:read` for node names; without
+one it reads as the anonymous token. A client reads under its default token
+(`client.acl.tokens.defaultFile`). A lookup the token may not make is answered REFUSED,
+and one whose read fails or finds no server SERVFAIL; neither is logged above debug.
+Names outside the domain are refused, so a resolver must send only the domain here.
+Each lookup is a read of `/v1/health/service/{name}` or `/v1/catalog/nodes`, so it
+counts in the HTTP request metrics, and one made under a token writes an audit line.
+
 ## Metrics and server health
 
 A server exports its metrics on `server.telemetry.prometheusPort` when telemetry is
@@ -933,6 +959,10 @@ tests:
   including the old majority restarted on purpose and the empty rejoin.
 - `HttpApiServerTest`: fenced liveness/readiness, the status reason for a
   transition or startup failure, and corruption evidence.
+- `DnsCodecTest`, `DnsResolverTest`, `DnsServerTest`, `DnsSettingsTest`, `QraftServerDnsTest`,
+  `QraftClientDnsTest` and `DnsEndToEndTest`: the DNS interface's messages, names, codes and
+  truncation, checked against the JDK's own DNS client, from a server and a client, with ACLs,
+  and following an instance through its health.
 - `RaftTransitionSequencerTest`: first-cause retention, one fence announcement,
   caller context, and unchanged later refusals.
 - `RaftNodeApplyFailureTest`: a state-machine failure is retained as the fence reason.

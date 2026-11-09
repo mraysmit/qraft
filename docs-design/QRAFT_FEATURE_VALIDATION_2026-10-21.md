@@ -81,7 +81,7 @@ Status key:
 | Operations | Offline backup, corrupt-replica replacement, compatible-upgrade guidance | Done | [`RAFT_STORAGE_OPERATIONS.md`](../docs/RAFT_STORAGE_OPERATIONS.md); clarified 2026-10-03: lower-level legacy byte compatibility does not establish whole-node startup compatibility; an older backup cannot rejoin as the same voter |
 | Operations | Lost-quorum recovery and whole-cluster backup restore | Done | Updated 2026-10-26. Built and verified in membership Step 7 on 2026-10-24: the offline `inspect` and `recover` commands, with `DockerLostQuorumRecoveryTest` recovering from current directories and from a backup (Jenkins build 33). The runbook is in `RAFT_STORAGE_OPERATIONS.md`, which also states what a restore cannot recover: a registration a client was told succeeded may be absent after a restore from a backup |
 | Operations | Event journal (design [`QRAFT_EVENT_ARCHITECTURE.md`](../docs/QRAFT_EVENT_ARCHITECTURE.md)) | Done | The design's phases 1 to 4 since 2026-11-08 ([`task-list-events-2026-11-08.md`](../docs/archive/task-list-events-2026-11-08.md)): the contracts and the bounded journal in `dev.mars.qraft.common.events`, Raft system events, and the catalog's domain events, the same on every replica; `EventContractsTest`, `EventJournalTest`, `RaftNodeSystemEventsTest`, `RaftNodeDomainEventsTest`. Phases 5 to 7 since 2026-11-08 ([`task-list-event-query-and-watch-2026-11-08.md`](../docs/archive/task-list-event-query-and-watch-2026-11-08.md)): key/value, lock and session events without values, `GET /v1/operator/events` and the server-sent watch `GET /v1/operator/events/watch`; `QraftStateStoreKvEventsTest`, `HttpApiServerEventQueryTest`, `HttpApiServerEventWatchTest`, `EventWatchEndToEndTest`. The audit file of phase 8 came with the authentication list; durable sinks other than it are not built |
-| Operations | DNS discovery (optional) | Missing | — |
+| Operations | DNS discovery (optional) | Done | Since 2026-11-09 ([`task-list-dns-discovery-2026-11-09.md`](../docs/archive/task-list-dns-discovery-2026-11-09.md)): a server and a client serve DNS over UDP and TCP when `dns.port` is set, answering Consul's `service`, RFC 2782, `node` and `addr` names with A, AAAA and SRV records from the same reads as HTTP, so ACLs, tenancy and health filtering apply; NXDOMAIN, REFUSED and SERVFAIL as a resolver expects, and UDP truncation with TCP in full (design 12.1.4). `DnsCodecTest`, `DnsResolverTest`, `DnsServerTest`, `QraftServerDnsTest`, `QraftClientDnsTest`, `DnsEndToEndTest`. Recursors, prepared queries and other datacenters are not offered |
 
 ## 3. Client features
 
@@ -203,7 +203,8 @@ need:
    2026-11-07, so servers and clients both enforce ACLs:
    [`task-list-acl-and-tokens-2026-11-07.md`](../docs/archive/task-list-acl-and-tokens-2026-11-07.md).
    Transport security followed the same day, so tokens cross the network only over TLS: [`task-list-transport-security-2026-11-08.md`](../docs/archive/task-list-transport-security-2026-11-08.md).
-10. **Deferred until decided.** DNS discovery. Persisted generated node identity
+10. **Done.** DNS discovery was decided and built on 2026-11-09 in
+    [`task-list-dns-discovery-2026-11-09.md`](../docs/archive/task-list-dns-discovery-2026-11-09.md), when the owner said to proceed with it. Persisted generated node identity
     was decided and built in the client list's Phase 2, closed on 2026-10-30.
     Server membership change was decided on 2026-09-29 and completed in
     [`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md).

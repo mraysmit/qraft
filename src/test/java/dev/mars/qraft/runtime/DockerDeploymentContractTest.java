@@ -532,6 +532,27 @@ class DockerDeploymentContractTest {
         }
     }
 
+    /**
+     * The image exposes the DNS port over UDP and TCP, and the single-server example serves DNS from its server,
+     * published on an overridable port, and from its client, on the client's own address (DNS discovery list, Phase 4).
+     */
+    @Test
+    void theImageAndTheSingleServerExampleServeDns() throws IOException {
+        Path root = Path.of("").toAbsolutePath();
+        String expose = Files.readString(root.resolve("docker/Dockerfile")).lines()
+                .filter(line -> line.startsWith("EXPOSE ")).findFirst().orElseThrow();
+        assertTrue(expose.contains(" 8600/tcp") && expose.contains(" 8600/udp"), expose);
+        String compose = Files.readString(root.resolve("docker/compose/docker-compose-single-server.yml"));
+        assertTrue(compose.contains("- \"${PUBLISHED_DNS_PORT:-8600}:8600/udp\""), "DNS over UDP is published");
+        assertTrue(compose.contains("- \"${PUBLISHED_DNS_PORT:-8600}:8600/tcp\""), "and over TCP");
+        dev.mars.qraft.server.config.AppConfig server = dev.mars.qraft.server.config.AppConfig.fromFile(
+                root.resolve("docker/config/single/server.json"));
+        assertEquals(8600, server.getDns().orElseThrow().port());
+        assertEquals("0.0.0.0", server.getDns().orElseThrow().host(), "on every address of the container");
+        ClientConfiguration client = ClientConfiguration.fromFile(root.resolve("docker/config/client.json"));
+        assertEquals(8600, client.getDns().orElseThrow().port());
+    }
+
     @Test
     @org.junit.jupiter.api.Tag("docker")
     void everyDocumentedComposeModelIsValid() throws Exception {

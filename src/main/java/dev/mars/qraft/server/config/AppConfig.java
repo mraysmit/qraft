@@ -77,7 +77,8 @@ public final class AppConfig {
     /** The {@code server} object of the document, with {@code logging.directory} beside it. */
     private record Settings(String id, Http http, int apiGrpcPort, Raft raft, String operatorToken,
                             Telemetry telemetry, Shutdown shutdown, Health health, AdminUiConfig ui,
-                            Acl acl, SecurityProfile profile, String loggingDirectory, Tls tls, String auditPath) { }
+                            Acl acl, SecurityProfile profile, String loggingDirectory, Tls tls, String auditPath,
+                            Optional<dev.mars.qraft.common.dns.DnsSettings> dns) { }
 
     /**
      * {@code server.tls}: the material, or {@code null} when the document has none, and each listener's switch
@@ -147,7 +148,7 @@ public final class AppConfig {
         JsonNode security = optionalObject(server, "security");
         JsonNode logging = optionalObject(root, "logging");
         rejectUnknown(server, "server", "id", "http", "apiGrpcPort",
-                "raft", "telemetry", "shutdown", "health", "ui", "operator", "acl", "security", "tls", "audit");
+                "raft", "telemetry", "shutdown", "health", "ui", "operator", "acl", "security", "tls", "audit", "dns");
         JsonNode audit = optionalObject(server, "audit");
         rejectUnknown(audit, "server.audit", "path");
         rejectUnknown(http, "server.http", "host", "port");
@@ -201,13 +202,15 @@ public final class AppConfig {
         SecurityProfile profile = securityProfile(security);
         Tls tlsSettings = parseTls(server.get("tls"));
         String loggingDirectory = optionalText(logging, "directory", "./logs");
+        Optional<dev.mars.qraft.common.dns.DnsSettings> dns = dev.mars.qraft.common.dns.DnsSettings.parse(
+                server.get("dns"), "server.dns", httpSettings.host(), true);
 
         return new AppConfig(new Settings(id, httpSettings, apiGrpcPort,
                 new Raft(raftPort, nodes, electionTimeoutMs, heartbeatIntervalMs, storageSettings, snapshotSettings,
                         logHardLimit, ioSettings, membershipSettings),
                 operatorToken, telemetrySettings, shutdownSettings,
                 new Health(expiryIntervalMs, nodeTtlMs, nodeReapAfterMs), adminUi, aclSettings, profile,
-                loggingDirectory, tlsSettings, optionalText(audit, "path", "")));
+                loggingDirectory, tlsSettings, optionalText(audit, "path", ""), dns));
     }
 
     private static Tls parseTls(JsonNode tls) {
@@ -264,6 +267,8 @@ public final class AppConfig {
 
     public int getHttpPort() { return settings.http().port(); }
     public String getHttpHost() { return settings.http().host(); }
+    /** {@code server.dns}: the DNS interface's settings, or empty when it is off (DNS discovery list). */
+    public Optional<dev.mars.qraft.common.dns.DnsSettings> getDns() { return settings.dns(); }
     public int getRaftPort() { return settings.raft().port(); }
     public int getApiGrpcPort() { return settings.apiGrpcPort(); }
     public long getElectionTimeoutMs() { return settings.raft().electionTimeoutMs(); }

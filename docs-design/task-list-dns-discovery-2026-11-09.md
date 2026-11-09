@@ -87,27 +87,64 @@ Taken on 2026-11-09 as the recommended options, under the owner's instruction; e
 
 ### Phase 1. The codec
 
-- [ ] Parsing a query: the header, one question, and an EDNS record's UDP size; FORMERR and NOTIMP cases.
-- [ ] Writing an answer: A, AAAA, SRV and SOA records, with name compression, and trimming to a size with the
+- [x] Parsing a query: the header, one question, and an EDNS record's UDP size; FORMERR and NOTIMP cases.
+- [x] Writing an answer: A, AAAA, SRV and SOA records, with name compression, and trimming to a size with the
   truncation flag.
 
 **Exit:** the new tests seen red first; `mvn install`.
 
+**Record (2026-11-09):** `DnsQuery`, `DnsRecord` (A, AAAA, SRV and SOA data), `DnsAnswer`, `DnsFormatException` and
+`DnsCodec` in `dev.mars.qraft.common.dns`. A query's name is followed through compression pointers that point only
+backwards, so a name cannot loop; a response packet and one shorter than a header are dropped, two questions or a
+question past the end are FORMERR, and an opcode other than QUERY is NOTIMP, each under the query's ID. An answer echoes
+the question as asked, compresses every name against those written before it, sets AA, echoes RD and never sets RA;
+answer and authority records that do not fit are left out with TC set, and additional records that do not fit are left
+out without it (RFC 2181, section 9). A query with an EDNS record is answered with one offering 4,096 bytes.
+`DnsCodecTest` reads queries written byte by byte and checks answers field by field with its own reader; it was seen
+red 14 of 14 against stubs, then green. The owner committed that red state as `36811cb`. The `mvn install` exit was
+taken with Phase 3's run.
+
 ### Phase 2. Lookups and the listener
 
-- [ ] The resolver: names, health, records, codes and shuffling, over a stub of the reads.
-- [ ] The listener: UDP and TCP, checked with the JDK's DNS client.
+- [x] The resolver: names, health, records, codes and shuffling, over a stub of the reads.
+- [x] The listener: UDP and TCP, checked with the JDK's DNS client.
 
 **Exit:** the new tests seen red first; `mvn install`.
 
+**Record (2026-11-09):** `DnsReads`, the reads a lookup is answered from; `DnsResolver`, which answers decisions 4 to
+7 over them; and `DnsServer`, which binds TCP and then UDP on the same port (port 0 tries again until both are free),
+answers each UDP query on a virtual thread and each TCP connection's queries in turn, closes an idle connection after
+10 seconds, and frees the port when closed. A malformed IPv4 address such as `999.1.1.1` is not an address, and is
+never looked up as a host name. `DnsResolverTest` (20) and `DnsServerTest` (6) were seen red 26 of 26 against stubs,
+then green with `DnsCodecTest`, 40. `DnsServerTest` checks the listener with the JDK's DNS client, JNDI, which shares
+no code with the codec: A and SRV over UDP, 60 records truncated over UDP and asked again over TCP, the codes, FORMERR
+and a dropped packet, two queries on one TCP connection, and the port freed. Two of its expectations were corrected on
+the way, not the code: its stub answered "no server" for a path it was not given, and JNDI reports REFUSED, as NOTIMP,
+as `OperationNotSupportedException`, whose message tells them apart. The `mvn install` exit was taken with Phase 3's
+run.
+
 ### Phase 3. Server mode and client mode
 
-- [ ] `server.dns` and `client.dns` read and checked.
-- [ ] A server answers from its own routes, under its DNS token; a client from the servers, under its default token.
-- [ ] End to end: a client's DNS answers a service registered through another client, and stops answering an
+- [x] `server.dns` and `client.dns` read and checked.
+- [x] A server answers from its own routes, under its DNS token; a client from the servers, under its default token.
+- [x] End to end: a client's DNS answers a service registered through another client, and stops answering an
   instance once its check is critical.
 
 **Exit:** the new tests seen red first; the three suites locally, audited.
+
+**Record (2026-11-09):** `DnsSettings` reads `server.dns` and `client.dns`; a section without a port is refused, as are
+an unknown setting, a port outside 0 to 65535, a domain that is not DNS labels and a negative TTL, and a client is
+refused `tokenFile`. `HttpApiServer.dnsReads` runs a read on the server's own routes in memory, through the same
+wrapper as a request to its listener, so it is counted in the request metrics and audited when made under a token.
+`QraftServerService` starts DNS once its HTTP API listens, reads `server.dns.tokenFile` at that start, stops DNS before
+the HTTP API, and adds `dns` to its bound addresses. `QraftClient` forwards a lookup's reads to the servers under its
+default token, starts DNS with its local API, stops it before the local API, and gives `dnsPort()`. `DnsSettingsTest`
+(6), `QraftServerDnsTest` (2), `QraftClientDnsTest` (1) and `DnsEndToEndTest` (1) were seen red 10 of 10, then green.
+`QraftServerDnsTest` had expected an instance registered with `"health": "CRITICAL"` to be left out; a registration's
+health field does not set an instance's health, which only its checks give, so the test now registers two instances
+with no checks, and `DnsEndToEndTest` covers an instance whose HTTP check fails: a second client's DNS finds it while the
+check passes, answers NXDOMAIN once it is critical, and finds it again once it recovers, as does the server's. The four
+integration classes and `DnsServerTest` passed five runs in a row.
 
 ### Phase 4. Operations
 
