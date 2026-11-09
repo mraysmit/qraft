@@ -1,16 +1,13 @@
 # Task List: DNS Discovery
 
 **Date:** 2026-11-09
-**Status:** In progress. Started on 2026-11-09 for the feature validation's last open row, DNS discovery (item 10), when
-the owner answered the report that it waited for their decision with "proceed". It runs under the owner's instruction
-of 2026-11-07 to keep working without stopping for questions, so the decisions in section 4 were taken as the
-recommended options, and the owner can reverse any of them.
-**Last updated:** 2026-11-09 (the list written)
-**Follows:** [`task-list-write-forwarding-2026-11-08.md`](../docs/archive/task-list-write-forwarding-2026-11-08.md)
-**Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), section 13
-**Validation:** [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md), the DNS discovery
+**Status:** Complete and archived on 2026-11-09. Phases 1 to 4 are done, test first, and the final local run of the three suites passed on them: default 1,968 with every coverage gate met, end-to-end 29 and Docker 51, with no failures, errors or skips; audit over the 272 files the run wrote: 902 error lines, all flagged, 619 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/dns-final/`). Started on 2026-11-09 for the feature validation's last open row, DNS discovery (item 10), when the owner answered the report that it waited for their decision with "proceed"; under the owner's instruction of 2026-11-07 to keep working without stopping for questions, the decisions in section 4 were taken as the recommended options, and the owner can reverse any of them.
+**Last updated:** 2026-11-09 (the final run recorded, and the list complete and archived. Earlier the same day: phases 1 to 4 built)
+**Follows:** [`task-list-write-forwarding-2026-11-08.md`](task-list-write-forwarding-2026-11-08.md)
+**Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), section 13
+**Validation:** [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](../../docs-design/QRAFT_FEATURE_VALIDATION_2026-10-21.md), the DNS discovery
 row and item 10
-**Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
+**Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
 ## 1. Goal
 
@@ -148,10 +145,14 @@ integration classes and `DnsServerTest` passed five runs in a row.
 
 ### Phase 4. Operations
 
-- [ ] The image exposes 8600 over UDP and TCP; the Compose example serves DNS; the operations guide, the design, the
+- [x] The image exposes 8600 over UDP and TCP; the Compose example serves DNS; the operations guide, the design, the
   validation, the Consul plan and the handover are brought up to date.
 
 **Exit:** the three suites locally, audited, and the list complete and archived.
+
+**Record (2026-11-09):** `docker/Dockerfile` exposes `8600/tcp` and `8600/udp`; the single-server example's server serves DNS on 8600, published over UDP and TCP on `${PUBLISHED_DNS_PORT:-8600}`, and its client on its loopback address. `DockerDeploymentContractTest.theImageAndTheSingleServerExampleServeDns` was seen red at the image's `EXPOSE`, then green. The design gains section 12.1.4, the operations guide a DNS section and its coverage, the Docker README a DNS section; the validation's DNS row and item 10 are done, and the Consul plan's item is ticked.
+
+**Final run, 2026-11-09.** From the copy at `C:\qx7`, against Docker Desktop: default 1,968 with every coverage gate met, end-to-end 29 and Docker 51, with no failures, errors or skips; audit over the 272 files the run wrote: 902 error lines, all flagged, 619 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/dns-final/`).
 
 ## 7. Out of scope
 
