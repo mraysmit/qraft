@@ -513,6 +513,12 @@ and are not faults.
   Before pre-votes, the same restart ran four elections and unseated the
   leader. Pre-votes are logged at info, and a failed request to a stopped peer is
   an error, as a failed vote request is.
+- **A server that missed a term catches up from a refusal.** A voter already in a
+  later term refuses a pre-vote and answers with that term; the asking server
+  takes it and becomes a follower in it, so its next round asks beyond it. Before
+  2026-11-07 it waited for a leader's heartbeat to carry the term, and two
+  servers left without a leader, one with the longer log and the older term,
+  could refuse each other indefinitely.
 - **Servers of different versions still elect.** A server that predates pre-votes
   answers `UNIMPLEMENTED`; the asking server counts it as willing, so a cluster
   being upgraded one server at a time elects as before.
@@ -520,8 +526,9 @@ and are not faults.
   server is outside the configuration the leader stops replicating to it, so it
   keeps its old configuration, does not report `removed`, and asks for pre-votes
   every election timeout. The voters refuse (it is not a voter in their
-  configuration, and they hear the leader), so it takes no term and stays where it
-  was; before pre-votes one test run found it at term 31. The cluster keeps its
+  configuration, and they hear the leader), so it never raises a term; at most it
+  takes the voters' current term from their refusals. Before pre-votes one test
+  run found it at term 31. The cluster keeps its
   leader and term. Stop it and wipe its directory; do not leave it running. A leader
   that removes itself does step down and reports `removed`.
 - **A server cut off from its leader reports unready.** After an election timeout
@@ -935,7 +942,8 @@ tests:
 - `RaftNodePreVoteReceiverTest`, `RaftNodePreVoteCandidateTest`,
   `RaftTransportPreVoteTest` and the pre-vote cases of `GrpcRaftTransportTest`
   and `GrpcRaftIntegrationTest`: how a server answers a pre-vote (it changes
-  nothing), how a follower asks before an election and forgets a silent leader,
+  nothing), how a follower asks before an election, takes the later term of a
+  refusal so that its next round asks beyond it, and forgets a silent leader,
   the old-server `UNIMPLEMENTED` case, and a deterministic reproduction of the
   term inflation a cut-off voter used to cause.
 - `GrpcRaftTransportTest` and `RaftNodePreVoteReceiverTest` also cover the
