@@ -1570,8 +1570,35 @@ public final class HttpApiServer implements AutoCloseable {
         if (requestId != null) request.putHeaders(JsonApi.REQUEST_ID_HEADER, requestId);
         request.putHeaders(FORWARDED_BY, raftNode.getNodeId());
         dev.mars.qraft.raft.grpc.ForwardResponse answer;
+        // A leader cut off by the network can take the write on a connection that still looks ready and never answer
+        // it. Once this server no longer names that leader, by hearing nothing from it for an election timeout or by
+        // learning of another, the answer is given up, so the caller can try another server while its write still
+        // matters (2026-11-13: a check's renewal waited for a cut-off leader until its client gave up, and expired).
+        CompletableFuture<String> leaderLeft = new CompletableFuture<>();
+        java.util.function.Consumer<String> watch = known -> {
+            if (!leader.equals(known)) leaderLeft.complete(known);
+        };
+        raftNode.addLeaderChangeListener(watch);
         try {
-            answer = forwarder.apply(leader, request.build()).get(raftTimeout.toMillis() * 2, TimeUnit.MILLISECONDS);
+            CompletableFuture<dev.mars.qraft.raft.grpc.ForwardResponse> forward = forwarder.apply(leader, request.build());
+            // The leader may have changed before the listener was added.
+            watch.accept(raftNode.getLeaderId());
+            try {
+                CompletableFuture.anyOf(forward, leaderLeft).get(raftTimeout.toMillis() * 2, TimeUnit.MILLISECONDS);
+            } catch (java.util.concurrent.ExecutionException failedForward) {
+                // Only the forward fails; its failure is read from it below.
+            }
+            if (!forward.isDone()) {
+                String now = leaderLeft.getNow(null);
+                LOG.info("A write forwarded to the leader {} was not answered before this server stopped following it"
+                        + " (leader now {})", leader, now == null ? "unknown" : now);
+                exchange.getResponseHeaders().set("X-Qraft-Leader-Id", leader);
+                respondError(exchange, 503, "outcome_unknown", "The write sent to the leader " + leader
+                        + " was not answered before this server stopped following it, and may have been applied",
+                        true, Map.of("leaderId", leader));
+                return true;
+            }
+            answer = forward.get();
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             exchange.getResponseHeaders().set("X-Qraft-Leader-Id", leader);
@@ -1594,6 +1621,8 @@ public final class HttpApiServer implements AutoCloseable {
                         Map.of("leaderId", leader));
             }
             return true;
+        } finally {
+            raftNode.removeLeaderChangeListener(watch);
         }
         answer.getHeadersMap().forEach((name, value) -> {
             String lower = name.toLowerCase(java.util.Locale.ROOT);
