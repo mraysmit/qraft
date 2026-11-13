@@ -186,6 +186,54 @@ class QraftServerWriteForwardingTest {
                 "a follower whose leader has gone answers promptly, so its caller can try another server");
     }
 
+    @Test
+    void aWriteForwardedToALeaderThisServerStopsFollowingIsAnsweredAtOnceAsPerhapsApplied() throws Exception {
+        startCluster();
+        waitUntil(() -> leader() >= 0, "a leader was elected");
+        int leader = leader();
+        int follower = (leader + 1) % 3;
+        waitUntil(() -> {
+            try {
+                return send(follower, "GET", "/raft/status", null).body().contains("\"leaderId\":\"server"
+                        + (leader + 1) + "\"");
+            } catch (Exception unanswered) {
+                return false;
+            }
+        }, "the follower knows the leader");
+
+        // A leader cut off by the network takes a forwarded write on a connection that still looks ready and never
+        // answers it (DockerClientTopologyTest, 2026-11-13); this forward never answers either.
+        CompletableFuture<Long> forwardedAt = new CompletableFuture<>();
+        servers.get(follower).httpApi().orElseThrow().useWriteForwarding((to, request) -> {
+            forwardedAt.complete(System.nanoTime());
+            return new CompletableFuture<>();
+        });
+        CompletableFuture<Long> answeredAt = new CompletableFuture<>();
+        CompletableFuture<HttpResponse<String>> answer = http.sendAsync(HttpRequest.newBuilder(URI.create(
+                        "http://localhost:" + httpPorts.get(follower) + "/v1/kv/app/held"))
+                .PUT(HttpRequest.BodyPublishers.ofString("x")).build(), HttpResponse.BodyHandlers.ofString())
+                .whenComplete((response, failure) -> answeredAt.complete(System.nanoTime()));
+        long sent = forwardedAt.get(10, TimeUnit.SECONDS);
+
+        // The leader is stopped on purpose; the others may log it as an unreachable peer.
+        IntentionalErrorsHelper.expectPeerShutdownDuringCleanup("server" + (leader + 1));
+        servers.get(leader).stop().get(30, TimeUnit.SECONDS);
+        servers.set(leader, null);
+        long stopped = System.nanoTime();
+
+        HttpResponse<String> held = answer.get(30, TimeUnit.SECONDS);
+        assertEquals(503, held.statusCode(), held.body());
+        assertEquals("outcome_unknown", JSON.readTree(held.body()).path("code").asText(),
+                "the write was sent, so it may have been applied");
+        long answered = answeredAt.get();
+        assertTrue(answered - stopped < TimeUnit.SECONDS.toNanos(3), "answered within "
+                + TimeUnit.NANOSECONDS.toMillis(answered - stopped) + " ms of the leader stopping: a follower answers "
+                + "once it stops following that leader, so its caller can try another server while the write's check "
+                + "still has time");
+        assertTrue(answered - sent < HttpApiServer.DEFAULT_RAFT_TIMEOUT.multipliedBy(2).toNanos(), "answered before "
+                + "the follower's own wait for the leader's answer ended");
+    }
+
     private void startCluster() throws Exception {
         Map<String, Integer> raftPorts = new LinkedHashMap<>();
         Map<String, String> nodes = new LinkedHashMap<>();
