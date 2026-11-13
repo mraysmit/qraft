@@ -60,7 +60,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Tag("docker")
 @ExpectedDockerErrorsHelper({
         dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_UNREACHABLE,
-        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_NAME_UNRESOLVED
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_PEER_NAME_UNRESOLVED,
+        // The leader-loss test kills the leader and never restarts it. A new leader that takes a snapshot while the
+        // killed server still lags sends it the snapshot, which fails on the dead connection. On 2026-11-13 the new
+        // leader compacted about a second after its election and logged it once.
+        dev.mars.qraft.testing.fault.IntentionalErrorFixture.RAFT_SNAPSHOT_TRANSFER_INTERRUPTED
 })
 // Each test starts its own cluster and then waits on bounded conditions; the method budget exceeds their sum,
 // so a failure reports the condition that was not met rather than the module's default method timeout.
