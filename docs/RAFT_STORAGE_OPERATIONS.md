@@ -797,7 +797,11 @@ itself, so a caller that reads from it next sees its own write. A follower that 
 no leader, or cannot connect to it within 2 seconds, answers 503 `leader_unavailable`:
 the write was not sent, and a client tries its next server, as before. A write that was
 sent and not answered is answered 503 `outcome_unknown`, as a commit that times out on
-the leader is. A draining server forwards nothing.
+the leader is. A follower that stops following the leader while it waits, because it
+has heard nothing from it for an election timeout or has learned of another, answers
+503 `outcome_unknown` at once: a leader cut off by the network can take the write and
+never answer, and the client then tries its next server while the write still matters.
+A draining server forwards nothing.
 Reads are answered by the server asked. `/raft/status` on any server
 gives its `storageBytes` and `snapshotAgeSeconds`; a snapshot that keeps growing older
 while the log grows means snapshots are not being taken.
