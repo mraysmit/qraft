@@ -226,6 +226,9 @@ public class RaftNode {
 
     // ========== STATE CHANGE LISTENERS ==========
     private final List<java.util.function.Consumer<State>> stateChangeListeners = new CopyOnWriteArrayList<>();
+    private final List<java.util.function.Consumer<String>> leaderChangeListeners = new CopyOnWriteArrayList<>();
+    /** The leader the leader change listeners were last told of, as {@link #getLeaderId()} answered it. */
+    private String toldLeader;
     /** Where this node's system events go, or {@code null} for none (events list, Phase 3). */
     private volatile dev.mars.qraft.common.events.EventJournal events;
     /** The state the listeners were last told of, and the term this node last led. */
@@ -1033,7 +1036,7 @@ public class RaftNode {
             failPendingCommands(new CommandOutcomeUnknownException(
                     "Node stopped before command commitment; outcome may be unknown"));
             state = State.FOLLOWER;
-            currentLeaderId = null;
+            knownLeader(null);
             pendingInstalls.clear();
             outboundSnapshotTransfers.clear();
 
@@ -1722,6 +1725,48 @@ public class RaftNode {
     }
 
     /**
+     * Registers a listener that is told the leader this node knows, as {@link #getLeaderId()} answers it, each time
+     * that changes: null when it knows none.
+     *
+     * @param listener handler that receives the leader's ID, or null
+     */
+    public void addLeaderChangeListener(java.util.function.Consumer<String> listener) {
+        leaderChangeListeners.add(requireNonNull(listener, "listener"));
+    }
+
+    /**
+     * Removes a previously registered leader change listener.
+     *
+     * @param listener the listener to remove
+     */
+    public void removeLeaderChangeListener(java.util.function.Consumer<String> listener) {
+        leaderChangeListeners.remove(listener);
+    }
+
+    /** Records the leader this node knows, which only the state loop changes, and tells the listeners of a change. */
+    private void knownLeader(String leaderId) {
+        currentLeaderId = leaderId;
+        notifyLeaderChangeListeners();
+    }
+
+    /**
+     * Tells the leader change listeners when {@link #getLeaderId()} differs from what they were last told. The known
+     * leader depends on this node's state as well as on the leader it last heard, so a state change also calls this.
+     */
+    private void notifyLeaderChangeListeners() {
+        String leader = getLeaderId();
+        if (java.util.Objects.equals(leader, toldLeader)) return;
+        toldLeader = leader;
+        for (java.util.function.Consumer<String> listener : leaderChangeListeners) {
+            try {
+                listener.accept(leader);
+            } catch (RuntimeException e) {
+                logger.warn("Leader change listener threw exception: {}", e.getMessage(), e);
+            }
+        }
+    }
+
+    /**
      * Returns a future that completes when this node transitions to the target state,
      * or fails if the timeout expires. This is the primary reactive alternative to
      * polling loops with Thread.sleep.
@@ -1771,6 +1816,7 @@ public class RaftNode {
                 logger.warn("State change listener threw exception: {}", e.getMessage(), e);
             }
         }
+        notifyLeaderChangeListeners();
     }
 
     /**
@@ -2047,7 +2093,7 @@ public class RaftNode {
         }
 
         state = State.CANDIDATE;
-        currentLeaderId = null;
+        knownLeader(null);
         currentTerm = decision.term();
         votedFor = nodeId;
         MDC.put("raftRole", "CANDIDATE");
@@ -2069,7 +2115,7 @@ public class RaftNode {
         if (state != State.FOLLOWER || currentLeaderId == null) return;
         logger.info("Leader {} has been silent for an election timeout; this server now knows no leader",
                 currentLeaderId);
-        currentLeaderId = null;
+        knownLeader(null);
     }
 
     /**
@@ -2173,7 +2219,7 @@ public class RaftNode {
             outboundSnapshotTransfers.clear();
             snapshotRetryBackoff.clear();
             leadershipGeneration++;
-            currentLeaderId = nodeId;
+            knownLeader(nodeId);
             MDC.put("raftRole", "LEADER");
             MDC.put("raftTerm", String.valueOf(currentTerm));
             cancelElectionTimer();
@@ -2502,7 +2548,7 @@ public class RaftNode {
      */
     private void stepDownForLostQuorum() {
         state = State.FOLLOWER;
-        currentLeaderId = null;
+        knownLeader(null);
         MDC.put("raftRole", "FOLLOWER");
         MDC.put("raftTerm", String.valueOf(currentTerm));
         logger.warn("Node {} stepping down in term {}: a majority has not responded for {} heartbeat rounds",
@@ -2704,7 +2750,7 @@ public class RaftNode {
         currentTerm = newTerm;
         votedFor = durableVote;
         state = State.FOLLOWER;
-        currentLeaderId = null;
+        knownLeader(null);
         leaderContactActive = false;
         MDC.put("raftRole", "FOLLOWER");
         MDC.put("raftTerm", String.valueOf(currentTerm));
@@ -2923,7 +2969,7 @@ public class RaftNode {
             notifyStateChangeListeners(State.FOLLOWER);
             cancelHeartbeatTimer();
         }
-        currentLeaderId = request.getLeaderId();
+        knownLeader(request.getLeaderId());
         leaderContactActive = true;
         lastLeaderContactNanos = timerScheduler.nanoTime();
         heardFromLeader = true;
@@ -3267,7 +3313,7 @@ public class RaftNode {
         RaftConfiguration current = configuration;
         if (state != State.LEADER || !isRemoved()) return;
         state = State.FOLLOWER;
-        currentLeaderId = null;
+        knownLeader(null);
         MDC.put("raftRole", "FOLLOWER");
         logger.info("Node {} stepping down in term {}: its removal from the configuration has committed",
                 nodeId, currentTerm);
@@ -4110,7 +4156,7 @@ public class RaftNode {
             cancelHeartbeatTimer();
         }
         if (plan.clearAssemblers()) pendingInstalls.clear();
-        currentLeaderId = request.getLeaderId();
+        knownLeader(request.getLeaderId());
         leaderContactActive = true;
         lastLeaderContactNanos = timerScheduler.nanoTime();
         heardFromLeader = true;
