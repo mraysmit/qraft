@@ -182,6 +182,26 @@ class RaftNodePreVoteCandidateTest {
     }
 
     @Test
+    void aLeaderChangeListenerIsToldWhenTheLeaderIsLearnedForgottenAndLearnedAgainButNotForEachHeartbeat()
+            throws Exception {
+        start(MEMBERS);
+        List<String> told = new CopyOnWriteArrayList<>();
+        node.addLeaderChangeListener(leader -> told.add(String.valueOf(leader)));
+
+        assertTrue(heartbeatFrom("peer-2", 1).getSuccess());
+        assertTrue(heartbeatFrom("peer-2", 1).getSuccess());
+        timers.fireElectionTimeout();
+        await(() -> transport.preVotes.size() == 2, "pre-votes held");
+        settle();
+        assertTrue(heartbeatFrom("peer-2", 1).getSuccess());
+        settle();
+
+        // A write this server forwarded to its leader waits on this: once the leader is forgotten, the write's
+        // answer may never come (2026-11-13: a renewal waited for a cut-off leader until its caller gave up).
+        assertEquals(List.of("peer-2", "null", "peer-2"), told);
+    }
+
+    @Test
     void aVoterWithNoOtherVoterElectsAtOnceWithoutAskingAnyone() throws Exception {
         start(Set.of("node-1"));
 
