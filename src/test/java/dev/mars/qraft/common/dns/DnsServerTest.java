@@ -195,6 +195,54 @@ class DnsServerTest {
     }
 
     @Test
+    void aPortHeldForUdpIsLeftForTheNextCandidate() throws Exception {
+        // On 2026-11-13 every retry of a picked port was refused for UDP: Windows gives bind(0) ports in sequence, so
+        // a run of ports another process held for UDP refused them all. Each attempt now takes a port of its own.
+        InetAddress loopback = InetAddress.getByName("127.0.0.1");
+        try (DatagramSocket first = new DatagramSocket(new InetSocketAddress(loopback, 0));
+             DatagramSocket second = new DatagramSocket(new InetSocketAddress(loopback, 0))) {
+            int free = freePort(loopback);
+            java.util.Iterator<Integer> candidates = List.of(first.getLocalPort(), second.getLocalPort(), free)
+                    .iterator();
+
+            server = DnsServer.start("127.0.0.1", 0, resolver(), candidates::next);
+
+            assertEquals(free, server.port(), "the two ports held for UDP were passed over");
+        }
+    }
+
+    @Test
+    void aFailureToListenNamesThePortsItTried() throws Exception {
+        InetAddress loopback = InetAddress.getByName("127.0.0.1");
+        try (DatagramSocket first = new DatagramSocket(new InetSocketAddress(loopback, 0));
+             DatagramSocket second = new DatagramSocket(new InetSocketAddress(loopback, 0))) {
+            int[] held = {first.getLocalPort(), second.getLocalPort()};
+            int[] next = {0};
+
+            java.net.BindException failed = assertThrows(java.net.BindException.class,
+                    () -> DnsServer.start("127.0.0.1", 0, resolver(), () -> held[next[0]++ % 2]));
+
+            assertTrue(failed.getMessage().contains(String.valueOf(held[0]))
+                    && failed.getMessage().contains(String.valueOf(held[1])), failed.getMessage());
+        }
+    }
+
+    /** A port that was free for both UDP and TCP a moment ago. */
+    private static int freePort(InetAddress loopback) throws Exception {
+        try (ServerSocket tcp = new ServerSocket()) {
+            tcp.bind(new InetSocketAddress(loopback, 0));
+            try (DatagramSocket udp = new DatagramSocket(new InetSocketAddress(loopback, tcp.getLocalPort()))) {
+                return tcp.getLocalPort();
+            }
+        }
+    }
+
+    private DnsResolver resolver() {
+        return new DnsResolver((path, scope) -> CompletableFuture.completedFuture(Optional.empty()), "qraft", 0, false,
+                Duration.ofSeconds(2), new SplittableRandom(3));
+    }
+
+    @Test
     void freesItsPortWhenClosed() throws Exception {
         int port = start().port();
         server.close();
