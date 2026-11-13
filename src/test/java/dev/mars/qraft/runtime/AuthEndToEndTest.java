@@ -21,6 +21,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.server.QraftServerService;
 import dev.mars.qraft.server.config.AppConfig;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -77,7 +78,13 @@ class AuthEndToEndTest {
     @AfterEach
     void stop() throws Exception {
         CleanupHelper cleanup = new CleanupHelper();
-        for (QraftServerService server : servers.reversed()) cleanup.run(() -> server.stop().get(30, TimeUnit.SECONDS));
+        // Each server is stopped on purpose while the others may still send to it: a leader that sends a heartbeat
+        // to one already stopped logs it as unreachable (AuthEndToEndTest, 2026-11-13).
+        for (int i = servers.size() - 1; i >= 0; i--) {
+            QraftServerService server = servers.get(i);
+            IntentionalErrorsHelper.expectPeerShutdownDuringCleanup("server" + (i + 1));
+            cleanup.run(() -> server.stop().get(30, TimeUnit.SECONDS));
+        }
         for (RaftExecutorsFixture executor : executors) cleanup.run(() -> executor.close().get(30, TimeUnit.SECONDS));
         cleanup.run(http::close);
         cleanup.rethrow();
