@@ -49,7 +49,14 @@ public final class DnsServer implements AutoCloseable {
     private static final Logger LOG = LoggerFactory.getLogger(DnsServer.class);
     /** How long a TCP connection may stay idle between queries. */
     private static final int TCP_IDLE_MILLIS = 10_000;
-    private static final int BIND_ATTEMPTS = 10;
+    /**
+     * How many random ports a listener on port 0 tries. On 2026-11-13 Windows had about 30% of the dynamic range
+     * reserved for TCP or UDP alone, so twenty attempts all fail with a chance of about one in 10^10.
+     */
+    static final int BIND_ATTEMPTS = 20;
+    /** The dynamic and private ports (RFC 6335), from which a listener on port 0 picks. */
+    static final int DYNAMIC_FIRST = 49_152;
+    static final int DYNAMIC_LAST = 65_535;
 
     private final DatagramSocket udp;
     private final ServerSocket tcp;
@@ -67,29 +74,69 @@ public final class DnsServer implements AutoCloseable {
         this.tcpLoop = Thread.ofPlatform().daemon().name("qraft-dns-tcp").start(this::acceptTcp);
     }
 
-    /** Listens on {@code host} and {@code port}, UDP and TCP both, where port 0 picks a port free for both. */
+    /**
+     * Listens on {@code host} and {@code port}, UDP and TCP both, where port 0 picks a port free for both from the
+     * dynamic range at random.
+     */
     public static DnsServer start(String host, int port, DnsResolver resolver) throws IOException {
+        return start(host, port, resolver,
+                () -> java.util.concurrent.ThreadLocalRandom.current().nextInt(DYNAMIC_FIRST, DYNAMIC_LAST + 1));
+    }
+
+    /**
+     * Listens as {@link #start(String, int, DnsResolver)} does, where port 0 takes each attempt's port from
+     * {@code candidates}, until one is free for both protocols or {@value #BIND_ATTEMPTS} have been tried.
+     * <p>The system's own pick, {@code bind(0)} for TCP, is not used: Windows gives its ports in sequence, and holds
+     * runs of ports for UDP alone (Hyper-V and WinNAT reserve them, which {@code netsh int ipv4 show
+     * excludedportrange protocol=udp} lists), so on 2026-11-13 ten picks in a row fell in one such run and were each
+     * refused for UDP. Ports chosen at random are refused independently.
+     */
+    static DnsServer start(String host, int port, DnsResolver resolver, java.util.function.IntSupplier candidates)
+            throws IOException {
         Objects.requireNonNull(resolver, "resolver");
+        Objects.requireNonNull(candidates, "candidates");
         if (port < 0 || port > 65_535) throw new IllegalArgumentException("The DNS port must be 0 to 65535: " + port);
         InetAddress address = InetAddress.getByName(Objects.requireNonNull(host, "host"));
-        for (int attempt = 1; ; attempt++) {
-            ServerSocket tcp = new ServerSocket();
+        if (port != 0) {
             try {
-                tcp.bind(new InetSocketAddress(address, port), 128);
-                DatagramSocket udp = new DatagramSocket(new InetSocketAddress(address, tcp.getLocalPort()));
-                DnsServer server = new DnsServer(udp, tcp, resolver);
-                LOG.info("DNS listening on {}:{} over UDP and TCP", address.getHostAddress(), tcp.getLocalPort());
-                return server;
+                return listen(address, port, resolver);
             } catch (IOException taken) {
-                tcp.close();
-                // A port the system picked for TCP may be taken for UDP; another is tried.
-                if (port != 0 || attempt == BIND_ATTEMPTS) {
-                    BindException failed = new BindException("DNS could not listen on " + host + ":" + port + ": "
-                            + taken.getMessage());
-                    failed.initCause(taken);
-                    throw failed;
-                }
+                BindException failed = new BindException("DNS could not listen on " + host + ":" + port + ": "
+                        + taken.getMessage());
+                failed.initCause(taken);
+                throw failed;
             }
+        }
+        java.util.List<Integer> tried = new java.util.ArrayList<>();
+        IOException last = null;
+        for (int attempt = 1; attempt <= BIND_ATTEMPTS; attempt++) {
+            int candidate = candidates.getAsInt();
+            tried.add(candidate);
+            try {
+                return listen(address, candidate, resolver);
+            } catch (IOException taken) {
+                // Taken or reserved for TCP or for UDP; the next candidate is tried.
+                last = taken;
+            }
+        }
+        BindException failed = new BindException("DNS could not listen on " + host + ":0 after trying ports " + tried
+                + ": " + last.getMessage());
+        failed.initCause(last);
+        throw failed;
+    }
+
+    /** Binds TCP and then UDP on {@code port}, closing what it bound when either is refused. */
+    private static DnsServer listen(InetAddress address, int port, DnsResolver resolver) throws IOException {
+        ServerSocket tcp = new ServerSocket();
+        try {
+            tcp.bind(new InetSocketAddress(address, port), 128);
+            DatagramSocket udp = new DatagramSocket(new InetSocketAddress(address, tcp.getLocalPort()));
+            DnsServer server = new DnsServer(udp, tcp, resolver);
+            LOG.info("DNS listening on {}:{} over UDP and TCP", address.getHostAddress(), tcp.getLocalPort());
+            return server;
+        } catch (IOException taken) {
+            tcp.close();
+            throw taken;
         }
     }
 
