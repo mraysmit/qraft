@@ -314,6 +314,7 @@ public final class HttpApiServer implements AutoCloseable {
         this.server = tls.isPresent() ? httpsServer(port, tls.get()) : HttpServer.create(new InetSocketAddress(port), 0);
         this.executor = Executors.newVirtualThreadPerTaskExecutor();
         server.setExecutor(executor);
+        context("/", requestAware(this::noRoute));
         context("/health/live", requestAware(this::liveness));
         context("/health/ready", requestAware(this::readiness));
         if (ui.enabled()) {
@@ -337,6 +338,8 @@ public final class HttpApiServer implements AutoCloseable {
         context("/v1/catalog/services", requestAware(this::listServices));
         context("/v1/catalog/service", requestAware(this::listServiceInstances));
         context("/v1/health/service", requestAware(this::listServiceHealth));
+        context("/v1/internal/ui/services", requestAware(this::listServicesSummary));
+        context("/v1/health/state", requestAware(this::listChecksInState));
         context("/v1/acl/bootstrap", requestAware(this::bootstrapAcl));
         KvApiRoutes kvApi = new KvApiRoutes(this);
         context(KvApiRoutes.CONTEXT, requestAware(kvApi::handle));
@@ -1061,6 +1064,146 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     /**
+     * The administrative interface's services summary, Consul's {@code /v1/internal/ui/services} (UI-2 task list,
+     * decision 2): each service in the read's scope that the token may read, in name order, with what is known of the
+     * instances it may read (node and service read, as {@link #readableInstances}): their tags, their count in all
+     * and in each health state, the datacenters and regions they run in, and the highest {@code modifyIndex} among
+     * them as the service's last change. Marked filtered when a service or an instance was left out.
+     */
+    private void listServicesSummary(HttpExchange exchange) throws IOException {
+        if (!prepareCatalogRequest(exchange, "GET") || refusedForItsQuery(exchange)) return;
+        AclPrincipal principal = principal(exchange);
+        if (principal == null) return;
+        ReadScope scope = readScope(exchange);
+        if (scope == null) return;
+        if (!readyToRead(exchange, ReadIndex.APPLIED)) return;
+        setAppliedIndex(exchange);
+        List<String> all = List.copyOf(stateStore.getServiceCatalog().services(scope.tenantId(), scope.namespace()));
+        List<String> readable = all.stream().filter(service -> principal.allows(
+                AclRequest.service(service, scope.tenantId(), scope.namespace(), AclAccess.READ))).sorted().toList();
+        boolean filtered = readable.size() < all.size();
+        List<Map<String, Object>> summary = new ArrayList<>();
+        for (String service : readable) {
+            List<ServiceInstance> instances = stateStore.getServiceCatalog().instances(scope.service(service));
+            List<ServiceInstance> counted = readableInstances(principal, instances);
+            filtered |= counted.size() < instances.size();
+            summary.add(serviceSummary(service, scope, counted));
+        }
+        if (filtered) exchange.getResponseHeaders().set(RESULTS_FILTERED_HEADER, "true");
+        respondJson(exchange, 200, summary);
+    }
+
+    private Map<String, Object> serviceSummary(String service, ReadScope scope, List<ServiceInstance> instances) {
+        Map<String, Integer> health = new LinkedHashMap<>();
+        for (dev.mars.qraft.state.catalog.ServiceHealth state : PUBLIC_HEALTH) {
+            health.put(state.name().toLowerCase(Locale.ROOT), 0);
+        }
+        long modifyIndex = 0;
+        for (ServiceInstance instance : instances) {
+            health.merge(publicHealth(instance.health()).name().toLowerCase(Locale.ROOT), 1, Integer::sum);
+            modifyIndex = Math.max(modifyIndex,
+                    stateStore.getServiceCatalog().indexesOf(instance.identity()).modifyIndex());
+        }
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("name", service);
+        entry.put("tenantId", scope.tenantId());
+        entry.put("namespace", scope.namespace());
+        entry.put("tags", instances.stream().flatMap(instance -> instance.tags().stream()).distinct().sorted().toList());
+        entry.put("instanceCount", instances.size());
+        entry.put("health", health);
+        entry.put("datacenters", presentValues(instances.stream().map(ServiceInstance::datacenter).toList()));
+        entry.put("regions", presentValues(instances.stream().map(ServiceInstance::region).toList()));
+        entry.put("modifyIndex", modifyIndex);
+        return entry;
+    }
+
+    /**
+     * The five health states the interface's reads name (platform design section 7.6), in the order the summary
+     * gives them. {@code FAILING} is kept only so an older snapshot loads, and is counted as {@code CRITICAL}, as the
+     * aggregate of an instance's checks counts it.
+     */
+    private static final List<dev.mars.qraft.state.catalog.ServiceHealth> PUBLIC_HEALTH = List.of(
+            dev.mars.qraft.state.catalog.ServiceHealth.UNKNOWN, dev.mars.qraft.state.catalog.ServiceHealth.PASSING,
+            dev.mars.qraft.state.catalog.ServiceHealth.WARNING, dev.mars.qraft.state.catalog.ServiceHealth.CRITICAL,
+            dev.mars.qraft.state.catalog.ServiceHealth.MAINTENANCE);
+
+    private static dev.mars.qraft.state.catalog.ServiceHealth publicHealth(
+            dev.mars.qraft.state.catalog.ServiceHealth health) {
+        return health == dev.mars.qraft.state.catalog.ServiceHealth.FAILING
+                ? dev.mars.qraft.state.catalog.ServiceHealth.CRITICAL : health;
+    }
+
+    /** The states {@code /v1/health/state/{state}} takes: {@code any}, or one of the five in lower case. */
+    private static final Set<String> CHECK_STATES = java.util.stream.Stream.concat(java.util.stream.Stream.of("any"),
+            PUBLIC_HEALTH.stream().map(state -> state.name().toLowerCase(Locale.ROOT)))
+            .collect(Collectors.toUnmodifiableSet());
+
+    /**
+     * The checks across services, Consul's {@code /v1/health/state/{state}} (UI-2 task list, decision 3): each
+     * accepted check of an instance in the read's scope that the token may read, in {@code state} or in any for
+     * {@code any}, ordered by service name, instance and check, with its instance, service, node and the node's
+     * status. Marked filtered when a check was left out because its instance could not be read.
+     */
+    private void listChecksInState(HttpExchange exchange) throws IOException {
+        if (!prepareCatalogRequest(exchange, "GET")) return;
+        AclPrincipal principal = principal(exchange);
+        if (principal == null) return;
+        String state = pathParameter(exchange, "/v1/health/state/");
+        if (state == null || !CHECK_STATES.contains(state)) {
+            respondError(exchange, 400, "invalid_state", "The state must be one of any, unknown, passing, warning, "
+                    + "critical and maintenance", false);
+            return;
+        }
+        if (refusedForItsQuery(exchange)) return;
+        ReadScope scope = readScope(exchange);
+        if (scope == null) return;
+        if (!readyToRead(exchange, ReadIndex.APPLIED)) return;
+        setAppliedIndex(exchange);
+        Map<ServiceInstanceId, ServiceInstance> inScope = new LinkedHashMap<>();
+        for (ServiceInstance instance : stateStore.getServiceCatalog().instances()) {
+            if (scope.tenantId().equals(instance.tenantId()) && scope.namespace().equals(instance.namespace())) {
+                inScope.put(instance.identity(), instance);
+            }
+        }
+        Set<ServiceInstanceId> readable = readableInstances(principal, List.copyOf(inScope.values())).stream()
+                .map(ServiceInstance::identity).collect(Collectors.toSet());
+        List<HealthCheckState> matching = stateStore.healthChecks().stream()
+                .filter(check -> inScope.containsKey(check.checkId().serviceInstanceId()))
+                .filter(check -> "any".equals(state)
+                        || publicHealth(check.observation().status()).name().toLowerCase(Locale.ROOT).equals(state))
+                .toList();
+        List<HealthCheckState> listed = matching.stream()
+                .filter(check -> readable.contains(check.checkId().serviceInstanceId())).toList();
+        markFiltered(exchange, matching, listed);
+        List<Map<String, Object>> answer = listed.stream()
+                .map(check -> checkEntry(inScope.get(check.checkId().serviceInstanceId()), check))
+                .sorted(java.util.Comparator.comparing((Map<String, Object> entry) -> (String) entry.get("serviceName"))
+                        .thenComparing(entry -> (String) entry.get("serviceId"))
+                        .thenComparing(entry -> (String) entry.get("checkId")))
+                .toList();
+        respondJson(exchange, 200, answer);
+    }
+
+    private Map<String, Object> checkEntry(ServiceInstance instance, HealthCheckState check) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("serviceId", instance.serviceId());
+        entry.put("serviceName", instance.serviceName());
+        entry.put("nodeId", instance.nodeId());
+        entry.put("nodeStatus", stateStore.findNode(instance.nodeId()).map(Node::status).orElse(null));
+        entry.put("tenantId", instance.tenantId());
+        entry.put("namespace", instance.namespace());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> fields = objectMapper.convertValue(HealthServiceEntry.Check.from(check), LinkedHashMap.class);
+        entry.putAll(fields);
+        return entry;
+    }
+
+    /** The distinct values given, sorted, without blank or absent ones. */
+    private static List<String> presentValues(List<String> values) {
+        return values.stream().filter(value -> value != null && !value.isBlank()).distinct().sorted().toList();
+    }
+
+    /**
      * One node's services in the read's scope, as Consul's {@code /v1/catalog/node-services/:node}: nothing without
      * {@code node:read} on the node, and otherwise the services the token may read.
      */
@@ -1731,6 +1874,18 @@ public final class HttpApiServer implements AutoCloseable {
     void respondError(HttpExchange exchange, int status, String code, String message,
                               boolean retryable, Map<String, ?> details) throws IOException {
         api.error(exchange, status, code, message, retryable, details);
+    }
+
+    /**
+     * Answers a path no other route serves: 404 {@code not_found} in the error envelope, after reading the request's
+     * body. Without this route the JDK server answers such a path itself and closes the connection with the body
+     * unread, which is a reset that can discard its answer before the client reads it (seen 2026-11-14).
+     */
+    private void noRoute(HttpExchange exchange) throws IOException {
+        try (var body = exchange.getRequestBody()) {
+            body.transferTo(java.io.OutputStream.nullOutputStream());
+        }
+        respondError(exchange, 404, "not_found", "No route serves this path", false);
     }
 
     private static String pathParameter(HttpExchange exchange, String prefix) {
