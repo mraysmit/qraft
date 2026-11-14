@@ -92,8 +92,21 @@ describe('Root', () => {
     detail.unmount();
 
     window.history.pushState(null, '', '/ui/nodes');
-    render(<Root bootstrap={BOOTSTRAP} api={api} />);
+    const nodes = render(<Root bootstrap={BOOTSTRAP} api={api} />);
     await screen.findByText('client-a');
+    assertEveryStyleCarriesTheNonce();
+    nodes.unmount();
+
+    // UI-2: the Health Checks page, and the scope selector's open list.
+    window.history.pushState(null, '', '/ui/checks?tenant=acme&namespace=prod');
+    const inserted = await stylesInsertedDuring(async () => {
+      render(<Root bootstrap={BOOTSTRAP} api={api} />);
+      await screen.findByRole('heading', { name: 'Health Checks' });
+      await screen.findByText('web-1');
+      fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Tenant' }));
+      await screen.findAllByTitle('acme');
+    });
+    expect(inserted.filter((style) => style.nonce !== BOOTSTRAP.cspNonce)).toEqual([]);
     assertEveryStyleCarriesTheNonce();
   });
 });
