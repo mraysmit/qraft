@@ -791,7 +791,7 @@ public final class SharedDockerClusterFixture {
         }
     }
 
-    static void assertRuntimeJarIsCurrent(Path repositoryRoot, Path runtimeJar) {
+    public static void assertRuntimeJarIsCurrent(Path repositoryRoot, Path runtimeJar) {
         if (!Files.isRegularFile(runtimeJar)) {
             throw new IllegalStateException(
                     "Host-built runtime JAR not found: " + runtimeJar.toAbsolutePath()

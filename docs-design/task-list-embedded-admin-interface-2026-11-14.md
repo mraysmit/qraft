@@ -1,8 +1,8 @@
 # Task List: Embedded Administrative Interface
 
 **Date:** 2026-09-27
-**Last updated:** 2026-11-14 (Steps 2 and 3 reviewed for untested behaviour, with one defect fixed; Step 4 built, test first, and checked in a browser under the enforced policy, with its record; build 68 recorded. Earlier, 2026-11-13: resumed at the owner's word to continue the implementation work, the backend it waited for being built; Steps 2 and 3 built, test first, with their records, the choices on Step 2's two optional items, and the `<base>` element Step 3 needed; the current state brought up to date; renamed to the date of its last change. Earlier, 2026-10-27, later the same day: Step 2's bootstrap object carries the security profile, from the ACL list's proposal 16. Earlier that day: decision 2 and Step 3: the asset manifest is written as `asset-manifest.json`, the name design section 12.4.1 gives; renamed to the date of its last change. Earlier, 2026-10-21: current-task pointer updated to membership Step 6 after Step 5 completion; this list remains paused after Step 1; renamed with linked documents. Earlier, 2026-10-14: current-task pointer updated to membership Step 5 after cleanup archival. On 2026-10-11: renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: the read APIs, the development proxy, and the reserved segments, after the single-POM list's Phase 4. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: the log audit added to Step 6)
-**Active work:** Resumed 2026-11-13, after a pause from 2026-09-27 until the backend features in [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md) were delivered; Steps 2 to 4 are done and Step 5 is next
+**Last updated:** 2026-11-14 (Step 5 built, its tests shown able to fail and passing three consecutive runs, with its record; before it, Steps 2 and 3 reviewed for untested behaviour, with one defect fixed; Step 4 built, test first, and checked in a browser under the enforced policy, with its record; build 68 recorded. Earlier, 2026-11-13: resumed at the owner's word to continue the implementation work, the backend it waited for being built; Steps 2 and 3 built, test first, with their records, the choices on Step 2's two optional items, and the `<base>` element Step 3 needed; the current state brought up to date; renamed to the date of its last change. Earlier, 2026-10-27, later the same day: Step 2's bootstrap object carries the security profile, from the ACL list's proposal 16. Earlier that day: decision 2 and Step 3: the asset manifest is written as `asset-manifest.json`, the name design section 12.4.1 gives; renamed to the date of its last change. Earlier, 2026-10-21: current-task pointer updated to membership Step 6 after Step 5 completion; this list remains paused after Step 1; renamed with linked documents. Earlier, 2026-10-14: current-task pointer updated to membership Step 5 after cleanup archival. On 2026-10-11: renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: the read APIs, the development proxy, and the reserved segments, after the single-POM list's Phase 4. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: the log audit added to Step 6)
+**Active work:** Resumed 2026-11-13, after a pause from 2026-09-27 until the backend features in [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md) were delivered; Steps 2 to 5 are done and Step 6 is next
 **Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increments UI-0 and UI-1
 **Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 12.4, 12.4.1, 19.6, and 21; [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md), sections 14 and 15
 **Predecessor:** [`archive/task-list-multi-node-container-acceptance-2026-10-21.md`](../docs/archive/task-list-multi-node-container-acceptance-2026-10-21.md)
@@ -551,6 +551,45 @@ distinguished from state, and colour never the only signal.
 
 **Exit gate.** These tests pass three consecutive runs and are shown able to
 fail.
+
+**Status, 2026-11-14: done**, uncommitted, from the check copy against the jar
+of Step 4's closing build.
+
+- Items 1 and 2: `runtime.PackagedAdminUiEndToEndTest` (`e2e`), 2 tests. Each
+  starts `target/qraft.jar` with `java -jar` from a temporary directory that
+  holds only its configuration, after the Docker fixture's check that the jar
+  is newer than every build input (`assertRuntimeJarIsCurrent`, made public
+  for it); the end-to-end stage runs after `mvn install`, so the jar is that
+  build's.
+  - The server serves `/ui/` with its bootstrap object, the manifest, and the
+    manifest's entry, immutable and byte for byte the bundle in the jar; a
+    view's address is answered with the index.
+  - A server with `server.ui.enabled` false, and a client, answer 404 for the
+    index, `index.html`, the manifest, the bundle and a view's address, while
+    the server's API answers.
+  - Each process's console output passes `SubprocessOutputAuditHelper`.
+- Item 3: `raft.DockerAdminUiTest` (`docker`), on the shared three-server
+  cluster: every server container serves the index under the policy, the
+  manifest and its entry bundle, and the API below the bootstrap object's base
+  path.
+- Shown able to fail, each by the change it guards against, made in the check
+  copy only and undone:
+  - the jar with `META-INF/qraft/ui/` stripped: the serving test failed,
+    `expected: <200> but was: <404>` for `/ui/`;
+  - `HttpApiServer` registering the interface whether or not it is enabled,
+    jar rebuilt: the disabled-interface test failed, `/ui/` answered `200`
+    where `404` was required, and the serving test passed;
+  - an image built from the stripped jar: the container test failed, `404`.
+- Three consecutive runs after the jar was rebuilt from the restored source:
+  the end-to-end class passed 2 of 2 each time, and the container class 1 of 1
+  each time, each on a newly built image.
+- Audit of the accepted runs (their Maven logs, the surefire reports and the
+  container archive `logs/docker/DockerAdminUiTest`), 571 files: 284 error
+  lines and 252 stack traces, all flagged; no JVM crash file. The three runs
+  made to fail are not accepted runs; their errors are the assertions above.
+- `mvn clean install` afterwards: default 1,997 and Vitest 49, every coverage
+  gate; neither new class runs in the default suite; audit clean
+  (`logs/step5-install-20261114-122656.log`).
 
 ## 10. Step 6: Verification and close-out
 

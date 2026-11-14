@@ -2973,14 +2973,16 @@ not expose the administrative routes.
 ## 20. Test-first delivery sequence
 
 Current progress, the active tranche's detailed steps, and the backlog are
-tracked in the current dated task list in `docs-design/`; no list is active now.
+tracked in the current dated task list in `docs-design/`; the active list is
+[`task-list-embedded-admin-interface-2026-11-14.md`](task-list-embedded-admin-interface-2026-11-14.md),
+resumed on 2026-11-13, whose Steps 1 to 5 are done (2026-11-14).
 The Pre-Vote extension,
 [`task-list-raft-pre-vote-2026-10-25.md`](../docs/archive/task-list-raft-pre-vote-2026-10-25.md),
 was completed and archived on 2026-10-25. The membership list that preceded it,
 [`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md),
 was completed and archived on 2026-10-24 (Steps 1 to 8 verified); its predecessor, [`task-list-test-suite-remediation-2026-10-21.md`](../docs/archive/task-list-test-suite-remediation-2026-10-21.md),
 was archived on 2026-10-02 with its packaged-artifact test carried forward; the
-administrative interface list is paused, see [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md)).
+administrative interface list was paused until 2026-11-13, see [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md)).
 Completed task lists are moved to `docs/archive/`.
 
 ### Tranche 0: Align the WAL and snapshot contracts

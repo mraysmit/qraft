@@ -577,6 +577,17 @@ the archived logs (24 Docker archive folders) and the test reports, 873 files, f
 and 882 stack traces, none unflagged; no `too_many_pings` and no JVM crash file. The logs are in
 `logs/jenkins/Qraft-68/`.
 
+## Build 69, 2026-11-14
+
+Build 69 ran on `75b133b`, the administrative interface's Step 4 (`7f3321d`) with its records: the first Jenkins run of
+the interface's views, its server-mode contract test, and the POM's removal of the previous bundle. Started from the
+`mraysmit` workstation at 12:03 local time, it passed in 29 min 50 s: default 1,997 with every coverage gate met,
+end-to-end 29, and Docker and `slow` 51, 2,077 in all, with no failures, errors or skips; Vitest's 49 passed in each
+of the three Maven runs. Node came from the job's Maven repository, where build 68 had put it, with no download, and
+each `npm ci` added 228 packages in 3 s. The audit, over the console, the archived logs (24 Docker archive folders)
+and the test reports, 877 files, found 1,262 error lines, all flagged, and 878 stack traces, none unflagged; no
+`too_many_pings` and no JVM crash file. The logs are in `logs/jenkins/Qraft-69/`.
+
 ## Local runs, 2026-11-07
 
 Two runs of the three suites from the copy at `C:\qx7`, against Docker Desktop, in place of Jenkins while the work
