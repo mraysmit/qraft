@@ -116,6 +116,41 @@ export const HealthEntrySchema = z.object({
   nodeStatus: NodeStatusSchema.nullable(),
 });
 
+const counts = z.number().int().nonnegative();
+
+/** `GET /v1/internal/ui/services`: a service in the read's scope, summarised from the instances the token may read. */
+export const ServiceSummarySchema = z.object({
+  name: z.string(),
+  tenantId: z.string(),
+  namespace: z.string(),
+  tags: z.array(z.string()),
+  instanceCount: counts,
+  health: z.object({ unknown: counts, passing: counts, warning: counts, critical: counts, maintenance: counts }),
+  datacenters: z.array(z.string()),
+  regions: z.array(z.string()),
+  modifyIndex: index,
+});
+
+/** `GET /v1/health/state/{state}`: an accepted check with its instance, service and node. */
+export const CheckEntrySchema = CheckSchema.extend({
+  serviceId: z.string(),
+  serviceName: z.string(),
+  nodeId: z.string().nullable(),
+  nodeStatus: NodeStatusSchema.nullable(),
+  tenantId: z.string(),
+  namespace: z.string(),
+});
+
+/** `GET /v1/tenants`, in Consul's field names. */
+export const TenantSchema = z.object({ Name: z.string().min(1), Description: z.string() });
+
+/** `GET /v1/namespaces`, of the tenant the header names. */
+export const NamespaceSchema = z.object({ Name: z.string().min(1), Tenant: z.string().min(1), Description: z.string() });
+
+export type ServiceSummary = z.infer<typeof ServiceSummarySchema>;
+export type CheckEntry = z.infer<typeof CheckEntrySchema>;
+export type Tenant = z.infer<typeof TenantSchema>;
+export type Namespace = z.infer<typeof NamespaceSchema>;
 export type RaftRole = z.infer<typeof RaftRoleSchema>;
 export type RaftStatus = z.infer<typeof RaftStatusSchema>;
 export type NodeStatus = z.infer<typeof NodeStatusSchema>;
