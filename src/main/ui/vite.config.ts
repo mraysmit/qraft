@@ -35,6 +35,20 @@ export default defineConfig({
     assetsDir: 'assets',
     manifest: 'asset-manifest.json',
     sourcemap: false,
+    // The application and its libraries in chunks of their own, so none passes Vite's 500 kB warning (UI-3 task
+    // list, decision 4): the libraries' chunks keep their names, and their hashes, while only the application changes.
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (/node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'react';
+          if (/node_modules[\\/]antd[\\/]/.test(id)) return 'antd';
+          if (/node_modules[\\/](@ant-design|@rc-component|rc-[^\\/]+)[\\/]/.test(id)) return 'antd-parts';
+          if (/node_modules[\\/]zod[\\/]/.test(id)) return 'zod';
+          return 'vendor';
+        },
+      },
+    },
   },
   server: {
     proxy: { '/v1': server, '/raft': server, '/health': server },

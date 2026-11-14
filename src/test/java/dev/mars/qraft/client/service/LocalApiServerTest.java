@@ -229,4 +229,29 @@ class LocalApiServerTest {
         return client.send(request, HttpResponse.BodyHandlers.discarding()).statusCode();
     }
 
+    @Test
+    void aPathNoRouteServesIsAnsweredNotFoundInTheEnvelopeAfterItsBodyIsRead() throws Exception {
+        // As the server's API since 2026-11-14 (UI-3 task list, decision 1): the JDK server answers a path no context
+        // serves itself, as HTML, and closes with the body unread, a reset that can discard its answer.
+        ClientConfiguration config = ClientConfiguration.builder()
+                .nodeName("client-unrouted").dataDirectory(Path.of("data"))
+                .serverUrl("http://localhost").clientPort(0).build();
+        LocalApiServer api = new LocalApiServer(config, () -> true);
+        api.start();
+        try (HttpClient client = HttpClient.newHttpClient()) {
+            for (String method : new String[] {"PUT", "GET"}) {
+                HttpResponse<String> response = client.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:"
+                                + api.port() + "/v1/nowhere")).method(method, method.equals("GET")
+                                ? HttpRequest.BodyPublishers.noBody()
+                                : HttpRequest.BodyPublishers.ofString("x".repeat(64 * 1024))).build(),
+                        HttpResponse.BodyHandlers.ofString());
+
+                assertEquals(404, response.statusCode(), method + " " + response.body());
+                assertEquals("application/json", response.headers().firstValue("Content-Type").orElse(""), method);
+                assertTrue(response.body().contains("\"code\":\"not_found\""), response.body());
+            }
+        } finally {
+            api.shutdown();
+        }
+    }
 }

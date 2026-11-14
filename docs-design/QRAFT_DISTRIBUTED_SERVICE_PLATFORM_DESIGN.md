@@ -1255,7 +1255,8 @@ counts it; no observation can carry it.
 A path no route serves is answered 404 `not_found` in the error envelope (section
 12.2), after the request's body is read (since 2026-11-14). The JDK server answers such
 a path itself, as HTML, and closes the connection with the body unread: a reset, which
-can discard the answer before the client reads it.
+can discard the answer before the client reads it. The client's local API answers an
+unrouted path the same way (since 2026-11-14).
 
 #### 12.1.2 Nodes
 
@@ -1664,8 +1665,9 @@ Vite writes the manifest under that name when its build sets
 `.vite/manifest.json`.
 
 The `/ui/` handler strips only the configured administrative path prefix before
-performing a classpath lookup. A request for `/` may redirect to `/ui/` when the
-interface is enabled. An unknown extensionless `GET` below `/ui/` falls back to
+performing a classpath lookup. A read of `/` redirects, 302, to the administrative
+path when the interface is enabled (since 2026-11-14); with it disabled `/` is not
+found like any unrouted path. An unknown extensionless `GET` below `/ui/` falls back to
 `index.html` for client-side routing. Missing named assets return `404`; API,
 metrics, health, and debugging paths must never fall back to the frontend.
 Whether a last segment has an extension is read from the path as sent, before
@@ -1691,8 +1693,13 @@ restrictive content security policy, and the same configured security headers as
 the API server. The policy allows inline styles only with the request's nonce.
 Ant Design passes it to the styles it adds; a style that a library adds to the
 head without it, such as rc-util's scrollbar measurement, is given it by the
-interface, since only scripts from the server's own origin run on the page. Compressed variants may be packaged and selected from
-`Accept-Encoding`, but the uncompressed resource remains the canonical fallback.
+interface, since only scripts from the server's own origin run on the page.
+Text assets (scripts, styles, JSON, SVG) are sent gzip to a request
+whose `Accept-Encoding` takes it, compressed once and kept in memory, with
+`Vary: Accept-Encoding` (since 2026-11-14); the uncompressed resource remains the
+canonical fallback, and the rendered index, made per request, is not compressed.
+The build splits the application from its libraries (React, Ant Design and its
+parts, zod) so that no script passes Vite's 500 kB warning.
 
 Production uses embedded resources exclusively. A filesystem resource directory
 may be supported as an explicit development-only override for rapid frontend

@@ -219,6 +219,14 @@ public enum IntentionalErrorFixture {
                     + "|Failed to establish leadership no-op for term \\d+):"
                     + " Raft transition sequencer is fenced"),
 
+    /**
+     * A test's state machine refuses to take a snapshot, so the snapshot fails before publication and the storage read
+     * records it (HttpApiServerOperatorReadsTest, UI-3 task list, Phase 1).
+     */
+    RAFT_SNAPSHOT_REFUSED_BY_TEST("dev.mars.qraft.raft.RaftNode", Level.ERROR,
+            "Snapshot failed: the test's state machine refuses to take a snapshot", null,
+            "java\\.lang\\.IllegalStateException: the test's state machine refuses to take a snapshot"),
+
     /** A test fills the bounded transition queue and verifies that client admission is rejected. */
     RAFT_TRANSITION_QUEUE_FULL("dev.mars.qraft.raft.RaftNode", Level.ERROR,
             "Failed to persist command to WAL: Raft transition queue capacity \\d+ has been reached"),

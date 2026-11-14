@@ -73,6 +73,15 @@ public final class LocalApiServer {
                 boolean ready = isReady();
                 api.json(exchange, ready ? 200 : 503, Map.of("status", ready ? "ready" : "not_ready"));
             }));
+            // A path no route serves: 404 in the envelope after the body is read. The JDK server answers it itself, as
+            // HTML, and closes with the body unread, which is a reset that can discard its answer (UI-3 task list,
+            // decision 1, as the server's API since 2026-11-14).
+            server.createContext("/", api.handle(exchange -> {
+                try (var body = exchange.getRequestBody()) {
+                    body.transferTo(java.io.OutputStream.nullOutputStream());
+                }
+                api.error(exchange, 404, "not_found", "No route serves this path", false, Map.of());
+            }));
             routes.forEach(server::createContext);
             server.start();
             running.set(true);

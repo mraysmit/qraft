@@ -88,6 +88,17 @@ class EmbeddedUiResourcesTest {
     }
 
     @Test
+    void noScriptPassesTheSizeAtWhichViteWarns() throws IOException {
+        // UI-3 task list, decision 4: the bundle was one script of 1,014 kB, above Vite's 500 kB warning, until the
+        // application and its libraries were split into chunks.
+        for (String file : listedFiles(manifest())) {
+            if (!file.endsWith(".js")) continue;
+            int size = embedded.read(file).orElseThrow().length;
+            assertTrue(size <= 500 * 1024, file + " is " + size + " bytes");
+        }
+    }
+
+    @Test
     void theIndexLinksItsEntryRelativeToThePageAndHoldsNoInlineScript() throws IOException {
         String index = new String(embedded.read("index.html").orElseThrow(), StandardCharsets.UTF_8);
         String entry = entryFile(manifest());

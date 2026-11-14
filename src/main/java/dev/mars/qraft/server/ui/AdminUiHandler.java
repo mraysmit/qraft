@@ -67,11 +67,17 @@ public final class AdminUiHandler implements HttpHandler {
             Map.entry("ico", "image/x-icon"),
             Map.entry("woff2", "font/woff2"),
             Map.entry("txt", "text/plain; charset=utf-8"));
+    /** The extensions of files sent gzip to a client that accepts it; images and fonts are compressed already. */
+    private static final java.util.Set<String> COMPRESSIBLE = java.util.Set.of("html", "js", "mjs", "css", "json", "svg",
+            "txt");
 
     private final String path;
     private final UiAssets assets;
     private final UiBootstrap bootstrap;
     private final SecureRandom random = new SecureRandom();
+    /** Each file's gzip body, made once, by its path, size and CRC so a development directory's edit is not missed. */
+    private final java.util.concurrent.ConcurrentMap<String, byte[]> compressed =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     public AdminUiHandler(String path, UiAssets assets, UiBootstrap bootstrap) {
         this.path = Objects.requireNonNull(path, "path");
@@ -102,7 +108,17 @@ public final class AdminUiHandler implements HttpHandler {
             }
             headers.set("Content-Type", contentType(relative.get()));
             headers.set("Cache-Control", cacheControl(relative.get()));
-            send(exchange, head, body.get());
+            byte[] sent = body.get();
+            if (!relative.get().equals(INDEX) && COMPRESSIBLE.contains(extension(relative.get()))) {
+                // UI-3 task list, decision 3: gzip on the fly, kept; the plain file stays the fallback. The rendered
+                // index is made per request with its nonce and stays plain.
+                headers.set("Vary", "Accept-Encoding");
+                if (acceptsGzip(exchange.getRequestHeaders().get("Accept-Encoding"))) {
+                    sent = gzip(relative.get(), sent);
+                    headers.set("Content-Encoding", "gzip");
+                }
+            }
+            send(exchange, head, sent);
         }
     }
 
@@ -202,7 +218,50 @@ public final class AdminUiHandler implements HttpHandler {
     }
 
     private static String contentType(String relativePath) {
-        String extension = relativePath.substring(relativePath.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
-        return CONTENT_TYPES.getOrDefault(extension, "application/octet-stream");
+        return CONTENT_TYPES.getOrDefault(extension(relativePath), "application/octet-stream");
+    }
+
+    private static String extension(String relativePath) {
+        return relativePath.substring(relativePath.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
+    }
+
+    /** Whether an {@code Accept-Encoding} header names gzip, or any coding, with a weight above zero. */
+    static boolean acceptsGzip(java.util.List<String> values) {
+        if (values == null) return false;
+        for (String value : values) {
+            for (String coding : value.split(",")) {
+                String[] parts = coding.trim().split(";");
+                String name = parts[0].trim().toLowerCase(Locale.ROOT);
+                if (!name.equals("gzip") && !name.equals("x-gzip") && !name.equals("*")) continue;
+                double weight = 1;
+                for (int i = 1; i < parts.length; i++) {
+                    String parameter = parts[i].trim().toLowerCase(Locale.ROOT);
+                    if (parameter.startsWith("q=")) {
+                        try {
+                            weight = Double.parseDouble(parameter.substring(2));
+                        } catch (NumberFormatException malformed) {
+                            weight = 0;
+                        }
+                    }
+                }
+                if (weight > 0) return true;
+            }
+        }
+        return false;
+    }
+
+    private byte[] gzip(String relativePath, byte[] body) {
+        java.util.zip.CRC32 crc = new java.util.zip.CRC32();
+        crc.update(body);
+        String key = relativePath + '\u0000' + body.length + '\u0000' + crc.getValue();
+        return compressed.computeIfAbsent(key, ignored -> {
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream(Math.max(64, body.length / 3));
+            try (java.util.zip.GZIPOutputStream zip = new java.util.zip.GZIPOutputStream(out)) {
+                zip.write(body);
+            } catch (IOException impossible) {
+                throw new java.io.UncheckedIOException(impossible);
+            }
+            return out.toByteArray();
+        });
     }
 }

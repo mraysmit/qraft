@@ -1885,6 +1885,20 @@ public final class HttpApiServer implements AutoCloseable {
         try (var body = exchange.getRequestBody()) {
             body.transferTo(java.io.OutputStream.nullOutputStream());
         }
+        if (adminUi.enabled() && "/".equals(exchange.getRequestURI().getPath())) {
+            // The origin's root opens the interface when it is enabled (design section 12.4.1; UI-3 task list,
+            // decision 2). Only a read is redirected.
+            String method = exchange.getRequestMethod();
+            if ("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)) {
+                exchange.getResponseHeaders().set("Location", adminUi.path());
+                exchange.sendResponseHeaders(302, -1);
+                exchange.close();
+                return;
+            }
+            exchange.getResponseHeaders().set("Allow", "GET, HEAD");
+            respondError(exchange, 405, "method_not_allowed", "The root is only read, to open the interface", false);
+            return;
+        }
         respondError(exchange, 404, "not_found", "No route serves this path", false);
     }
 

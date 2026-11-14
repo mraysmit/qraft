@@ -40,12 +40,14 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -283,6 +285,86 @@ class HttpApiServerAdminUiTest {
         int base = html.indexOf("<base href=\"/console/\">");
         assertTrue(base > 0, "no base element in " + html);
         assertTrue(base < html.indexOf("<title>"), "the base precedes the rest of the head: " + html);
+    }
+
+    @Test
+    void theRootRedirectsToTheInterfaceWhenItIsEnabledAndNoOtherPathDoes() throws Exception {
+        // UI-3 task list, decision 2; design section 12.4.1 allows it.
+        start(new AdminUiConfig(true, "/console/", Optional.empty()), FIXTURE);
+
+        HttpResponse<String> root = get("/");
+
+        assertEquals(302, root.statusCode());
+        assertEquals("/console/", root.headers().firstValue("Location").orElse(""));
+        HttpResponse<String> other = get("/elsewhere");
+        assertEquals(404, other.statusCode());
+        assertTrue(other.body().contains("\"code\":\"not_found\""), other.body());
+        assertEquals(405, http.send(HttpRequest.newBuilder(uri("/")).timeout(Duration.ofSeconds(5))
+                .POST(HttpRequest.BodyPublishers.ofString("x")).build(), HttpResponse.BodyHandlers.ofString())
+                .statusCode(), "only a read is redirected");
+    }
+
+    @Test
+    void theRootIsNotRedirectedWhenTheInterfaceIsDisabled() throws Exception {
+        start(new AdminUiConfig(false, "/ui/", Optional.empty()), FIXTURE);
+
+        HttpResponse<String> root = get("/");
+
+        assertEquals(404, root.statusCode());
+        assertTrue(root.headers().firstValue("Location").isEmpty());
+    }
+
+    @Test
+    void aTextAssetIsSentGzipToAClientThatAcceptsIt() throws Exception {
+        // UI-3 task list, decision 3: compressed on the fly and kept, the plain file the fallback.
+        start(new AdminUiConfig(true, "/ui/", Optional.empty()), FIXTURE);
+
+        HttpResponse<byte[]> plain = getBytes("/ui/assets/app-3f2a1b.js", Map.of());
+        HttpResponse<byte[]> gzip = getBytes("/ui/assets/app-3f2a1b.js", Map.of("Accept-Encoding", "gzip, deflate, br"));
+        HttpResponse<byte[]> again = getBytes("/ui/assets/app-3f2a1b.js", Map.of("Accept-Encoding", "gzip"));
+
+        assertEquals(200, gzip.statusCode());
+        assertEquals("gzip", gzip.headers().firstValue("Content-Encoding").orElse(""));
+        assertTrue(gzip.headers().firstValue("Vary").orElse("").contains("Accept-Encoding"));
+        assertArrayEquals(plain.body(), gunzip(gzip.body()), "the gzip body decodes to the file");
+        assertArrayEquals(gzip.body(), again.body(), "the compressed body is kept");
+        assertEquals("public, max-age=31536000, immutable", gzip.headers().firstValue("Cache-Control").orElse(""));
+        assertEquals("text/javascript; charset=utf-8", gzip.headers().firstValue("Content-Type").orElse(""));
+        assertTrue(plain.headers().firstValue("Content-Encoding").isEmpty());
+        assertTrue(plain.headers().firstValue("Vary").orElse("").contains("Accept-Encoding"),
+                "a cache keeps the two apart");
+        assertTrue(getBytes("/ui/asset-manifest.json", Map.of("Accept-Encoding", "gzip")).headers()
+                .firstValue("Content-Encoding").isPresent(), "the manifest is text too");
+    }
+
+    @Test
+    void gzipIsNotSentWhenRefusedNorForTheRenderedIndexNorABinaryFile() throws Exception {
+        Path root = Files.createDirectories(temporaryDirectory.resolve("dist"));
+        Files.writeString(root.resolve("index.html"), "<!doctype html><head></head><body>dev</body>");
+        Files.write(root.resolve("logo.png"), new byte[] {(byte) 0x89, 'P', 'N', 'G'});
+        Files.writeString(root.resolve("app.js"), "export const x = 1;");
+        start(new AdminUiConfig(true, "/ui/", Optional.of(root)), new DirectoryUiAssets(root));
+
+        assertTrue(getBytes("/ui/app.js", Map.of("Accept-Encoding", "gzip;q=0, br")).headers()
+                .firstValue("Content-Encoding").isEmpty(), "gzip refused with q=0");
+        assertTrue(getBytes("/ui/app.js", Map.of("Accept-Encoding", "identity")).headers()
+                .firstValue("Content-Encoding").isEmpty());
+        assertTrue(getBytes("/ui/", Map.of("Accept-Encoding", "gzip")).headers()
+                .firstValue("Content-Encoding").isEmpty(), "the index is rendered per request and stays plain");
+        assertTrue(getBytes("/ui/logo.png", Map.of("Accept-Encoding", "gzip")).headers()
+                .firstValue("Content-Encoding").isEmpty(), "an image is already compressed");
+    }
+
+    private HttpResponse<byte[]> getBytes(String path, Map<String, String> headers) throws Exception {
+        HttpRequest.Builder request = HttpRequest.newBuilder(uri(path)).timeout(Duration.ofSeconds(5)).GET();
+        headers.forEach(request::header);
+        return http.send(request.build(), HttpResponse.BodyHandlers.ofByteArray());
+    }
+
+    private static byte[] gunzip(byte[] body) throws Exception {
+        try (java.util.zip.GZIPInputStream in = new java.util.zip.GZIPInputStream(new java.io.ByteArrayInputStream(body))) {
+            return in.readAllBytes();
+        }
     }
 
     @Test
