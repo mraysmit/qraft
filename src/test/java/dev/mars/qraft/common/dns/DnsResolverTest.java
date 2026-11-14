@@ -336,6 +336,18 @@ class DnsResolverTest {
     }
 
     @Test
+    void aTimedOutReadIsAnsweredOnADeadlineThreadNotTheJdksSharedDelayScheduler() throws Exception {
+        // PROJECT_STANDARDS.md bounds waits with Deadlines, never orTimeout: what follows an orTimeout expiry runs on
+        // the JVM-wide delay scheduler, where a slow step delays every other timeout in the process. The administrative
+        // interface's Step 6 scan found the resolver using orTimeout on 2026-11-14.
+        String thread = resolver(false).resolve(query("silent.service.qraft", DnsCodec.TYPE_A))
+                .thenApply(answer -> Thread.currentThread().getName())
+                .get(5, TimeUnit.SECONDS);
+
+        assertTrue(thread.startsWith("qraft-deadlines-expiry-"), "answered on " + thread);
+    }
+
+    @Test
     void shufflesEachAnswer() throws Exception {
         List<String> instances = new ArrayList<>();
         for (int i = 1; i <= 10; i++) instances.add(instance("i" + i, "10.0.0." + i, 80, "PASSING", "healthy"));

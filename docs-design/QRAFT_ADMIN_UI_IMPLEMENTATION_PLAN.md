@@ -1,7 +1,7 @@
 # Qraft Administrative UI Implementation Plan
 
-**Status:** Agreed 2026-09-27; open questions 2 to 4 are decided when their increments start
-**Last updated:** 2026-11-13 (UI-0 resumed: section 4 notes what the backend lists built since it was last updated, to be reviewed when UI-2 starts; the embedded-interface task-list link refreshed. Earlier, 2026-11-01: `409 policy_in_use` removed, as the owner decided for the ACL list's proposal 18. Earlier the same day: the ACL list aligned with Consul; its proposal numbers stand. Earlier the same day: dated task-list link refreshed. Earlier, 2026-10-31: section 4: a health entry carries its node's status, and `?passing` leaves out an unreachable node's instances. Earlier, 2026-10-30: open question 5's facts corrected: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after the review of the interface against the ACL list: access control moves from UI-6 to UI-5 with the security profile, sign-in, status, tokens, policies and explanations; server removal joins UI-5; section 4.2 gains the profile and the explanation endpoint; the client rows' data; open questions 5 and 6. Earlier that day: section 3: the asset manifest's file name in the Vite build; sections 4.2, 5 and 6: tokens and policies come from the ACL list, and roles and authentication methods are reserved; the embedded-interface task-list link refreshed. Earlier, 2026-10-26: section 4.1, the service writes are on `PUT /v1/catalog/register` and `/deregister` after the client list's Phase 1. Earlier, 2026-10-21: dated task-list links refreshed; the administrative interface remains paused after Step 1 while backend delivery continues. Earlier, 2026-10-09: section 4.1: the node list is at `/v1/catalog/nodes`, the node writes are listed, and bare `/health` is gone, after the single-POM list's Phase 4. On 2026-10-05: the build location and the tenancy owner, after the move to one Maven project; section 4 was brought up to date with scoped reads and the Raft operator endpoints on 2026-10-02)
+**Status:** Agreed 2026-09-27; UI-0 and UI-1 delivered 2026-11-14; open questions 2 to 4 are decided when their increments start
+**Last updated:** 2026-11-14 (UI-0 and UI-1 delivered, and their task list archived, its links updated. Earlier, 2026-11-13: UI-0 resumed: section 4 notes what the backend lists built since it was last updated, to be reviewed when UI-2 starts; the embedded-interface task-list link refreshed. Earlier, 2026-11-01: `409 policy_in_use` removed, as the owner decided for the ACL list's proposal 18. Earlier the same day: the ACL list aligned with Consul; its proposal numbers stand. Earlier the same day: dated task-list link refreshed. Earlier, 2026-10-31: section 4: a health entry carries its node's status, and `?passing` leaves out an unreachable node's instances. Earlier, 2026-10-30: open question 5's facts corrected: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after the review of the interface against the ACL list: access control moves from UI-6 to UI-5 with the security profile, sign-in, status, tokens, policies and explanations; server removal joins UI-5; section 4.2 gains the profile and the explanation endpoint; the client rows' data; open questions 5 and 6. Earlier that day: section 3: the asset manifest's file name in the Vite build; sections 4.2, 5 and 6: tokens and policies come from the ACL list, and roles and authentication methods are reserved; the embedded-interface task-list link refreshed. Earlier, 2026-10-26: section 4.1, the service writes are on `PUT /v1/catalog/register` and `/deregister` after the client list's Phase 1. Earlier, 2026-10-21: dated task-list links refreshed; the administrative interface remains paused after Step 1 while backend delivery continues. Earlier, 2026-10-09: section 4.1: the node list is at `/v1/catalog/nodes`, the node writes are listed, and bare `/health` is gone, after the single-POM list's Phase 4. On 2026-10-05: the build location and the tenancy owner, after the move to one Maven project; section 4 was brought up to date with scoped reads and the Raft operator endpoints on 2026-10-02)
 **Design:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md) (what the interface is) and
 [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections
 12.4, 12.4.1, and 19.6 (how it is packaged and served)
@@ -44,7 +44,7 @@ rest of the platform is. This plan changes only when scope or ordering changes.
 ## 3. Technology baseline
 
 The stack was agreed in
-[`task-list-embedded-admin-interface-2026-11-14.md`](task-list-embedded-admin-interface-2026-11-14.md),
+[`task-list-embedded-admin-interface-2026-11-14.md`](../docs/archive/task-list-embedded-admin-interface-2026-11-14.md),
 section 4.1, after reviewing the `peegeeq-management-ui` and
 `peegeeq-utilities-ui` modules:
 
@@ -204,8 +204,10 @@ The shared frontend pieces also land here:
 
 No backend prerequisites.
 
-UI-0 and UI-1 together are the scope of
-[`task-list-embedded-admin-interface-2026-11-14.md`](task-list-embedded-admin-interface-2026-11-14.md).
+UI-0 and UI-1 together were the scope of
+[`task-list-embedded-admin-interface-2026-11-14.md`](../docs/archive/task-list-embedded-admin-interface-2026-11-14.md),
+completed and archived on 2026-11-14. UI-2 is the next increment; it waits for
+its backend work and the review of section 4.
 
 ### UI-2 Scoped discovery
 
@@ -369,7 +371,7 @@ contracts exist.
 1. **Default state before authentication.** Decided 2026-09-27. The read-only
    interface is enabled by default before UI-5, with a startup warning that it
    is unauthenticated
-   ([`task-list-embedded-admin-interface-2026-11-14.md`](task-list-embedded-admin-interface-2026-11-14.md),
+   ([`task-list-embedded-admin-interface-2026-11-14.md`](../docs/archive/task-list-embedded-admin-interface-2026-11-14.md),
    decision 4).
 2. **Source of scope options.** Until replicated tenants exist (UI-6), should
    the scope selector list only the scopes present in the catalog, or should

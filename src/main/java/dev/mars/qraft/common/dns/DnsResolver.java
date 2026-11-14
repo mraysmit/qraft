@@ -213,7 +213,8 @@ public final class DnsResolver {
 
     private CompletableFuture<DnsAnswer> read(String path, Map<String, String> scope,
                                               java.util.function.Function<JsonNode, DnsAnswer> answer) {
-        return reads.read(path, Map.copyOf(scope)).orTimeout(timeout.toMillis(), TimeUnit.MILLISECONDS)
+        return dev.mars.qraft.common.concurrent.Deadlines.bound(reads.read(path, Map.copyOf(scope)),
+                        timeout.toMillis(), TimeUnit.MILLISECONDS)
                 .thenApply(read -> {
                     if (read.isEmpty()) {
                         LOG.debug("A DNS lookup's read of {} found no server to ask", path);

@@ -2973,9 +2973,11 @@ not expose the administrative routes.
 ## 20. Test-first delivery sequence
 
 Current progress, the active tranche's detailed steps, and the backlog are
-tracked in the current dated task list in `docs-design/`; the active list is
-[`task-list-embedded-admin-interface-2026-11-14.md`](task-list-embedded-admin-interface-2026-11-14.md),
-resumed on 2026-11-13, whose Steps 1 to 5 are done (2026-11-14).
+tracked in the current dated task list in `docs-design/`; no list is active now.
+The embedded administrative interface list,
+[`task-list-embedded-admin-interface-2026-11-14.md`](../docs/archive/task-list-embedded-admin-interface-2026-11-14.md),
+resumed on 2026-11-13, was completed and archived on 2026-11-14 (tranche 8), and
+with it every initial acceptance criterion of section 21 is met.
 The Pre-Vote extension,
 [`task-list-raft-pre-vote-2026-10-25.md`](../docs/archive/task-list-raft-pre-vote-2026-10-25.md),
 was completed and archived on 2026-10-25. The membership list that preceded it,
@@ -3095,15 +3097,16 @@ reports and commits only what a request verified (sections 14.3 and 14.4).
 
 ### Tranche 8: Embedded administrative interface
 
-Status: in progress. The increments, API prerequisites, and view map are in
-[`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md).
-This tranche delivers increments UI-0 and UI-1.
+Status: complete (2026-11-14). The increments, API prerequisites, and view map
+are in [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md).
+This tranche delivered increments UI-0 and UI-1; see the archived
+[`task-list-embedded-admin-interface-2026-11-14.md`](../docs/archive/task-list-embedded-admin-interface-2026-11-14.md).
 
-1. [ ] Serve the embedded interface from the runtime JAR in server mode
+1. [x] Serve the embedded interface from the runtime JAR in server mode
    (sections 12.4.1 and 19.6).
-2. [ ] Build the frontend reproducibly within `mvn package`.
-3. [ ] Deliver read-only discovery views on the existing APIs.
-4. [ ] Prove packaged-JAR and container delivery, with no interface in client
+2. [x] Build the frontend reproducibly within `mvn package`.
+3. [x] Deliver read-only discovery views on the existing APIs.
+4. [x] Prove packaged-JAR and container delivery, with no interface in client
    mode or when it is disabled.
 
 ## 21. Initial acceptance criteria
@@ -3134,8 +3137,8 @@ Evidence as of 2026-09-27, except where a row gives a later date:
 | Catalog survives restart and snapshot recovery | Met | `DockerDurableRestartTest`, `DockerClientRecoveryTest` |
 | Leadership change keeps committed registrations | Met | `DockerDurableRestartTest.killedLeaderIsReplacedAndRejoinsWithCompleteCatalog`, `DockerClientHealthTest` |
 | Bounded graceful deregistration; expiry handles crashes | Met | `QraftClientTest.unreachableServerCannotExtendShutdownPastDeadlineAndLogsOnce`, `DockerClientHealthTest`, `CrashedClientExpiryEndToEndTest` |
-| Embedded administrative interface | Open | Not implemented (sections 12.4 and 19.6) |
-| Full default suite and container suite pass | Met | 812 default tests, 23 Docker-tagged tests, and 7 end-to-end tests, run on 2026-10-02 (membership list, full-suite run). The counts fell from 807 and 30 when the test-suite remediation deleted tests that verified nothing |
+| Embedded administrative interface | Met (2026-11-14) | `PackagedAdminUiEndToEndTest` (the shaded JAR started from a directory with no interface files; client mode and a disabled server serve none of its routes), `DockerAdminUiTest` (server containers of the runtime image), `AdminUiDataContractTest`, `HttpApiServerAdminUiTest`, `EmbeddedUiResourcesTest`; Jenkins build 70 |
+| Full default suite and container suite pass | Met (2026-11-14) | Jenkins build 70: 1,997 default tests with every coverage gate, 31 end-to-end, and 52 Docker and `slow` tests, with 49 frontend tests in each Maven run and a clean log audit. First met on 2026-10-02 with 812 default, 23 Docker-tagged and 7 end-to-end tests |
 
 ## 22. Open decisions
 

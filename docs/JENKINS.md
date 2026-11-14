@@ -588,6 +588,18 @@ each `npm ci` added 228 packages in 3 s. The audit, over the console, the archiv
 and the test reports, 877 files, found 1,262 error lines, all flagged, and 878 stack traces, none unflagged; no
 `too_many_pings` and no JVM crash file. The logs are in `logs/jenkins/Qraft-69/`.
 
+## Build 70, 2026-11-14
+
+Build 70 ran on `a3bacde`, the administrative interface's Step 5: the first Jenkins run of its packaged-artifact and
+container acceptance tests. Started from the `mraysmit` workstation at 13:07 local time, it passed in 30 min 41 s:
+default 1,997 with every coverage gate met, end-to-end 31, and Docker and `slow` 52, 2,080 in all, with no failures,
+errors or skips; Vitest's 49 passed in each of the three Maven runs. The interface's own classes passed in their
+stages: `AdminUiDataContractTest` (2) in the default suite, `PackagedAdminUiEndToEndTest` (2) in the end-to-end suite
+against the jar the default stage packaged, and `DockerAdminUiTest` (1) in the Docker suite. The audit, over the
+console, the archived logs (25 Docker archive folders) and the test reports, 895 files, found 1,289 error lines, all
+flagged, and 891 stack traces, none unflagged; no `too_many_pings` and no JVM crash file. The logs are in
+`logs/jenkins/Qraft-70/`.
+
 ## Local runs, 2026-11-07
 
 Two runs of the three suites from the copy at `C:\qx7`, against Docker Desktop, in place of Jenkins while the work

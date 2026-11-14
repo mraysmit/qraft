@@ -1,22 +1,39 @@
 # Task List: Embedded Administrative Interface
 
 **Date:** 2026-09-27
-**Last updated:** 2026-11-14 (Step 5 built, its tests shown able to fail and passing three consecutive runs, with its record; before it, Steps 2 and 3 reviewed for untested behaviour, with one defect fixed; Step 4 built, test first, and checked in a browser under the enforced policy, with its record; build 68 recorded. Earlier, 2026-11-13: resumed at the owner's word to continue the implementation work, the backend it waited for being built; Steps 2 and 3 built, test first, with their records, the choices on Step 2's two optional items, and the `<base>` element Step 3 needed; the current state brought up to date; renamed to the date of its last change. Earlier, 2026-10-27, later the same day: Step 2's bootstrap object carries the security profile, from the ACL list's proposal 16. Earlier that day: decision 2 and Step 3: the asset manifest is written as `asset-manifest.json`, the name design section 12.4.1 gives; renamed to the date of its last change. Earlier, 2026-10-21: current-task pointer updated to membership Step 6 after Step 5 completion; this list remains paused after Step 1; renamed with linked documents. Earlier, 2026-10-14: current-task pointer updated to membership Step 5 after cleanup archival. On 2026-10-11: renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: the read APIs, the development proxy, and the reserved segments, after the single-POM list's Phase 4. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: the log audit added to Step 6)
-**Active work:** Resumed 2026-11-13, after a pause from 2026-09-27 until the backend features in [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md) were delivered; Steps 2 to 5 are done and Step 6 is next
-**Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increments UI-0 and UI-1
-**Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 12.4, 12.4.1, 19.6, and 21; [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md), sections 14 and 15
-**Predecessor:** [`archive/task-list-multi-node-container-acceptance-2026-10-21.md`](../docs/archive/task-list-multi-node-container-acceptance-2026-10-21.md)
-**Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
+**Status:** Complete and archived on 2026-11-14. Steps 1 to 6 are done, test first, and Jenkins build 70, on `a3bacde`, passed the three suites with them: default 1,997 with every coverage gate met, end-to-end 31 and Docker and `slow` 52, with Vitest's 49 in each Maven run and no failures, errors or skips; audit over 895 files: 1,289 error lines, all flagged, 891 stack traces, none unflagged; no JVM crash file. The embedded administrative interface criterion of design section 21 is met, and with it every initial acceptance criterion. Step 6's scans found two older defects, fixed after build 70 and recorded in section 10.
+**Last updated:** 2026-11-14 (Step 6 done, the list complete and archived, its links rewritten from its new place. Earlier the same day: Step 5 built, its tests shown able to fail and passing three consecutive runs, with its record; before it, Steps 2 and 3 reviewed for untested behaviour, with one defect fixed; Step 4 built, test first, and checked in a browser under the enforced policy, with its record; build 68 recorded. Earlier, 2026-11-13: resumed at the owner's word to continue the implementation work, the backend it waited for being built; Steps 2 and 3 built, test first, with their records, the choices on Step 2's two optional items, and the `<base>` element Step 3 needed; the current state brought up to date; renamed to the date of its last change. Earlier, 2026-10-27, later the same day: Step 2's bootstrap object carries the security profile, from the ACL list's proposal 16. Earlier that day: decision 2 and Step 3: the asset manifest is written as `asset-manifest.json`, the name design section 12.4.1 gives; renamed to the date of its last change. Earlier, 2026-10-21: current-task pointer updated to membership Step 6 after Step 5 completion; this list remains paused after Step 1; renamed with linked documents. Earlier, 2026-10-14: current-task pointer updated to membership Step 5 after cleanup archival. On 2026-10-11: renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: the read APIs, the development proxy, and the reserved segments, after the single-POM list's Phase 4. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: the log audit added to Step 6)
+**Active work:** Resumed 2026-11-13, after a pause from 2026-09-27 until the backend features in [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](../../docs-design/QRAFT_FEATURE_VALIDATION_2026-10-21.md) were delivered; complete on 2026-11-14
+**Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](../../docs-design/QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increments UI-0 and UI-1
+**Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 12.4, 12.4.1, 19.6, and 21; [`QRAFT_ADMIN_UI_UX_DESIGN.md`](../../docs-design/QRAFT_ADMIN_UI_UX_DESIGN.md), sections 14 and 15
+**Predecessor:** [`archive/task-list-multi-node-container-acceptance-2026-10-21.md`](task-list-multi-node-container-acceptance-2026-10-21.md)
+**Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
 This list is active again. The membership list it waited for,
-[`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md),
+[`task-list-raft-membership-changes-2026-10-24.md`](task-list-raft-membership-changes-2026-10-24.md),
 was completed and archived on 2026-10-24, and the Pre-Vote list that followed it,
-[`task-list-raft-pre-vote-2026-10-25.md`](../docs/archive/task-list-raft-pre-vote-2026-10-25.md),
+[`task-list-raft-pre-vote-2026-10-25.md`](task-list-raft-pre-vote-2026-10-25.md),
 on 2026-10-25. The owner then kept it paused, on 2026-10-26, until the other backend
 work was done; by 2026-11-09 every row of the feature validation was, and Jenkins
 build 67 ran it all on 2026-11-13.
-When this list's work is complete, add a completion summary and move this file
-to `docs/archive/`.
+The list was completed on 2026-11-14, with the completion summary below, and
+moved to `docs/archive/`.
+
+**Completion summary.** Increments UI-0 and UI-1 of the implementation plan are
+built. The server serves the interface below `server.ui.path` from resources
+packaged under `META-INF/qraft/ui/`, with a rendered `index.html` carrying the
+bootstrap object and the request's nonce, strict security and cache headers,
+and a fallback for the interface's own addresses; a disabled interface, and
+client mode, serve none of it. The frontend under `src/main/ui/` (React 18, Ant
+Design 5, zod, Vite 6, TypeScript strict) is built and tested by Vitest in
+every Maven build with its own Node. The Stage 1 views read the public API
+only: the status strip, Services, service detail, and the client rows of Nodes
+and Clients. Defects found on the way and fixed test first: the doctype of a
+headless template, a service name with a dot, a style the policy blocked in
+Chrome, a stale bundle in an incremental build, and, by Step 6's scans, the DNS
+resolver's `orTimeout` and two files' copyright line. Left for later, each
+reversible: the redirect from `/`, pre-compression and bundle splitting (997
+kB, 312 kB gzipped), and a router library.
 
 ## 1. Goal
 
@@ -601,6 +618,33 @@ of Step 4's closing build.
    gate).
 2. Mark the embedded administrative interface criterion in design section 21,
    and record the tranche status.
+
+**Status, 2026-11-14: done.**
+
+- The suites: Jenkins build 70, on `a3bacde`, which holds Steps 1 to 5: default
+  1,997 with every coverage gate met, end-to-end 31 and Docker and `slow` 52,
+  2,080 in all, with Vitest's 49 in each of the three Maven runs; the
+  interface's classes passed in their stages, `AdminUiDataContractTest` (2),
+  `PackagedAdminUiEndToEndTest` (2) and `DockerAdminUiTest` (1). Audit over the
+  console, the archived logs and the test reports, 895 files: 1,289 error lines
+  and 891 stack traces, all flagged; no JVM crash file (`docs/JENKINS.md`).
+  Builds 68 and 69 had run Steps 2 to 4 the same way.
+- The scans, over `src` and `pom.xml`: no Mockito; no environment variable read
+  in production code (the frontend's `import.meta.env.DEV` is Vite's build-mode
+  constant, not a setting); `git diff --check` clean. Two older defects, both
+  fixed after build 70:
+  - `DnsResolver` bounded its reads with `orTimeout` (DNS list, 2026-11-09),
+    which `PROJECT_STANDARDS.md` forbids. It now uses `Deadlines.bound`.
+    `DnsResolverTest.aTimedOutReadIsAnsweredOnADeadlineThreadNotTheJdksSharedDelayScheduler`
+    was red first, answered on `ForkJoinPool.commonPool-delayScheduler`; the
+    resolver's and the listener's classes pass.
+  - `RaftMembershipPolicy` and its test said `Copyright 2026`; section 10.1
+    requires the line of `NOTICE`, 2025, whatever the file's year. Corrected,
+    and a search finds no other.
+  The next Jenkins build after the owner commits them runs them in the suites.
+- Design section 21: the embedded administrative interface criterion is met,
+  with its evidence, and the suite row cites build 70. Section 20: tranche 8 is
+  complete, and no list is active.
 
 ## 11. Out of scope
 
