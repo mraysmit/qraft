@@ -1011,6 +1011,8 @@ GET /v1/catalog/node-services/{nodeName}
 GET /v1/catalog/services
 GET /v1/catalog/service/{serviceName}
 GET /v1/health/service/{serviceName}
+GET /v1/internal/ui/services
+GET /v1/health/state/{state}
 ```
 
 HTTP request DTOs map explicitly to commands. They may accept documented field
@@ -1207,6 +1209,53 @@ whose node has no entry is decided by its checks. `passing=false` is the unfilte
 default. Any other query parameter or value returns `invalid_query`. Health reads
 never mutate the catalog. `GET /v1/catalog/service/{serviceName}` continues to return
 bare registrations, so it lists an unreachable node's instance until the node is reaped.
+
+`GET /v1/internal/ui/services`, Consul's name (since 2026-11-14, for the administrative
+interface's Services list), summarises each service in the read's scope in one read,
+where the catalog's reads would need one request per service. It answers the
+services the token may read, in name order, each with what is known of the instances
+the token may read, which need `node:read` and `service:read` as on the health read:
+
+```json
+[
+  {
+    "name": "web",
+    "tenantId": "default",
+    "namespace": "default",
+    "tags": ["v1", "v2"],
+    "instanceCount": 2,
+    "health": {"unknown": 0, "passing": 1, "warning": 0, "critical": 1, "maintenance": 0},
+    "datacenters": ["dc-1", "dc-2"],
+    "regions": ["eu-west"],
+    "modifyIndex": 41
+  }
+]
+```
+
+`health` counts the instances by their aggregate health, and `modifyIndex` is the
+highest among them, the service's last change. It takes the read options of every
+catalog read and no other parameter, and is marked
+`X-Qraft-Results-Filtered-By-ACLs` when a service or an instance was left out.
+
+`GET /v1/health/state/{state}`, Consul's name (since 2026-11-14, for the interface's
+Health Checks page), lists the accepted checks across the services of the read's
+scope: in `state`, one of `unknown`, `passing`, `warning`, `critical` and
+`maintenance`, or all of them for `any`; any other state is 400 `invalid_state`. A
+check is listed when its instance could be read, ordered by service name, instance
+and check. Each entry is the check as on the health read, with its instance's
+`serviceId`, `serviceName`, `nodeId`, the node's `nodeStatus` (null if the node has no
+entry), `tenantId` and `namespace`. A declared check with no accepted observation has
+no state and is not listed. Read options, refusals and the filtered header are as on
+the summary.
+
+These reads, like the rest, name five health states. `FAILING`, kept only so an older
+snapshot loads, is counted as `CRITICAL`, as the aggregate of an instance's checks
+counts it; no observation can carry it.
+
+A path no route serves is answered 404 `not_found` in the error envelope (section
+12.2), after the request's body is read (since 2026-11-14). The JDK server answers such
+a path itself, as HTML, and closes the connection with the body unread: a reset, which
+can discard the answer before the client reads it.
 
 #### 12.1.2 Nodes
 
