@@ -103,3 +103,71 @@ export const CHECK_ENTRY = {
 export const TENANT = { Name: 'acme', Description: 'Acme Ltd', CreateIndex: 3, ModifyIndex: 3 };
 
 export const NAMESPACE = { Name: 'prod', Tenant: 'acme', Description: '', CreateIndex: 4, ModifyIndex: 4 };
+
+const member = (name: string, changes: Record<string, unknown> = {}) => ({
+  serverId: `${name}-id`,
+  name,
+  address: `${name}:9080`,
+  voter: true,
+  leader: false,
+  self: false,
+  matchIndex: 42,
+  nextIndex: 43,
+  lag: 0,
+  lastContactMillis: 120,
+  reachable: true,
+  healthy: true,
+  ...changes,
+});
+
+export const MEMBERS = {
+  view: 'leader',
+  answeredBy: 'server-1',
+  leaderId: 'server-1',
+  term: 3,
+  commitIndex: 42,
+  lastLogIndex: 42,
+  quorum: { voters: 3, quorumSize: 2, reachableVoters: 3, failureTolerance: 1, healthy: true },
+  servers: [
+    member('server-1', { leader: true, self: true, lastContactMillis: 0 }),
+    member('server-2'),
+    member('server-3'),
+  ],
+};
+
+const unknownProgress = {
+  matchIndex: null,
+  nextIndex: null,
+  lag: null,
+  lastContactMillis: null,
+  reachable: null,
+  healthy: null,
+};
+
+export const FOLLOWER_MEMBERS = {
+  ...MEMBERS,
+  view: 'follower',
+  answeredBy: 'server-2',
+  quorum: null,
+  servers: [
+    member('server-1', { leader: true, ...unknownProgress }),
+    member('server-2', { self: true, ...unknownProgress }),
+    member('server-3', unknownProgress),
+  ],
+};
+
+export const STORAGE = {
+  answeredBy: 'server-1',
+  storageBytes: 1536000,
+  snapshotAgeSeconds: 90,
+  snapshotLastIndex: 30,
+  snapshotLastTerm: 2,
+  firstLogIndex: 31,
+  lastLogIndex: 42,
+  commitIndex: 42,
+  lastApplied: 42,
+  fenced: false,
+  fenceReason: null,
+  transitionQueueDepth: 0,
+  lastSnapshotFailure: null,
+};

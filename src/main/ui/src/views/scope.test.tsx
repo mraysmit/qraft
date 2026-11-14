@@ -96,23 +96,31 @@ describe('scope selector', () => {
     expect(window.location.pathname + window.location.search).toBe('/ui/nodes?tenant=acme&namespace=prod');
   });
 
-  it('reads a service, the checks and the nodes counts in the selected scope', async () => {
+  // One view per test: the three in one test took 2.2 s, at risk against Vitest's 5 s on Jenkins (build 72).
+  it('reads a service in the selected scope', async () => {
     const scopes = asked();
     at('/ui/services/web?tenant=acme&namespace=prod');
-    const { unmount } = render(<App bootstrap={BOOTSTRAP} api={fakeApi({}, undefined, scopes)} />);
-    await screen.findByRole('heading', { name: 'Service: web' });
+    render(<App bootstrap={BOOTSTRAP} api={fakeApi({}, undefined, scopes)} />);
+
+    await screen.findByText('Service: web', { selector: 'h2' });
     expect(scopes.serviceHealth).toEqual([ACME_PROD]);
     expect(screen.getByText('Read in tenant acme, namespace prod.')).toBeInTheDocument();
-    unmount();
+  });
 
+  it('reads the checks in the selected scope', async () => {
+    const scopes = asked();
     at('/ui/checks?tenant=acme&namespace=prod');
-    const checks = render(<App bootstrap={BOOTSTRAP} api={fakeApi({}, undefined, scopes)} />);
-    await screen.findByRole('heading', { name: 'Health Checks' });
-    expect(scopes.checks).toEqual([ACME_PROD]);
-    checks.unmount();
+    render(<App bootstrap={BOOTSTRAP} api={fakeApi({}, undefined, scopes)} />);
 
+    await screen.findByText('Health Checks', { selector: 'h2' });
+    expect(scopes.checks).toEqual([ACME_PROD]);
+  });
+
+  it('counts the nodes services and failing checks in the selected scope', async () => {
+    const scopes = asked();
     at('/ui/nodes?tenant=acme&namespace=prod');
     render(<App bootstrap={BOOTSTRAP} api={fakeApi({}, undefined, scopes)} />);
+
     await screen.findByText('client-a');
     expect(scopes.services).toEqual([ACME_PROD]);
     expect(screen.getByText(/counted in tenant acme, namespace prod/i)).toBeInTheDocument();

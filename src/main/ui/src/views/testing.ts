@@ -18,13 +18,17 @@
 
 import type { Bootstrap } from '../bootstrap';
 import type { CheckState, QraftApi, Read, Scope } from '../api/client';
-import { CHECK, HEALTH_ENTRY, INSTANCE, NODE, RAFT_STATUS } from '../api/fixtures';
+import { CHECK, FOLLOWER_MEMBERS, HEALTH_ENTRY, INSTANCE, MEMBERS, NODE, RAFT_STATUS, STORAGE } from '../api/fixtures';
 import {
   type CatalogNode,
   CatalogNodeSchema,
   type CheckEntry,
   type HealthEntry,
   HealthEntrySchema,
+  type Members,
+  MembersSchema,
+  type Storage,
+  StorageSchema,
   type RaftStatus,
   RaftStatusSchema,
   type ServiceSummary,
@@ -60,6 +64,15 @@ export function entry(
     nodeStatus,
   });
 }
+
+/** The membership as the leader answers it, with any field replaced. */
+export const members = (changes: Partial<Members> = {}): Members => MembersSchema.parse({ ...MEMBERS, ...changes });
+
+/** The membership as a follower answers it. */
+export const followerMembers = (): Members => MembersSchema.parse(FOLLOWER_MEMBERS);
+
+/** The storage read, with any field replaced. */
+export const storage = (changes: Partial<Storage> = {}): Storage => StorageSchema.parse({ ...STORAGE, ...changes });
 
 /** The summary the server would give for one service's entries. */
 export function summaryOf(name: string, list: HealthEntry[]): ServiceSummary {
@@ -155,6 +168,8 @@ export function fakeApi(
             ]
           : [{ Name: 'default', Tenant: tenant, Description: '' }],
       ),
+    members: () => read(members()),
+    storage: () => read(storage()),
     ...overrides,
   };
 }

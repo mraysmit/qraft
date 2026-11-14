@@ -16,7 +16,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { ApiError, createApi, MalformedResponseError } from './client';
-import { CHECK_ENTRY, HEALTH_ENTRY, NAMESPACE, NODE, RAFT_STATUS, SUMMARY_ENTRY, TENANT } from './fixtures';
+import { CHECK_ENTRY, FOLLOWER_MEMBERS, HEALTH_ENTRY, MEMBERS, NAMESPACE, NODE, RAFT_STATUS, STORAGE, SUMMARY_ENTRY, TENANT } from './fixtures';
 
 interface Call {
   url: string;
@@ -228,5 +228,40 @@ describe('scoped reads', () => {
     const { fetcher } = server(() => json([{ Name: 7 }]));
 
     await expect(createApi('/', fetcher).tenants()).rejects.toBeInstanceOf(MalformedResponseError);
+  });
+});
+
+// UI-3 task list, Phase 2: the operator reads of the Operate views.
+describe('operator reads', () => {
+  it('read the membership as the leader sees it, and as a follower does', async () => {
+    const leader = server(() => json(MEMBERS));
+    const follower = server(() => json(FOLLOWER_MEMBERS));
+
+    const seen = (await createApi('/', leader.fetcher).members()).data;
+    const partial = (await createApi('/', follower.fetcher).members()).data;
+
+    expect(leader.calls[0]?.url).toBe('/v1/operator/raft/members');
+    expect(seen.view).toBe('leader');
+    expect(seen.quorum?.failureTolerance).toBe(1);
+    expect(seen.servers[1]?.lag).toBe(0);
+    expect(partial.view).toBe('follower');
+    expect(partial.quorum).toBeNull();
+    expect(partial.servers[0]?.matchIndex).toBeNull();
+  });
+
+  it('read the storage and snapshot state', async () => {
+    const { calls, fetcher } = server(() => json({ ...STORAGE, lastSnapshotFailure: { message: 'disk full', at: '2026-11-14T08:00:00Z' } }));
+
+    const storage = (await createApi('/', fetcher).storage()).data;
+
+    expect(calls[0]?.url).toBe('/v1/operator/raft/storage');
+    expect(storage.firstLogIndex).toBe(31);
+    expect(storage.lastSnapshotFailure?.message).toBe('disk full');
+  });
+
+  it('refuse a membership answer that is not the expected shape', async () => {
+    const { fetcher } = server(() => json({ ...MEMBERS, view: 'observer' }));
+
+    await expect(createApi('/', fetcher).members()).rejects.toBeInstanceOf(MalformedResponseError);
   });
 });

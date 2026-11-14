@@ -145,9 +145,8 @@ class HttpApiServerOperatorReadsTest {
         // The leader's own check-quorum test: an answer within an election timeout of heartbeat rounds.
         IntentionalErrorsHelper.expectPeerShutdownDuringCleanup("c");
         submit(leader, "after-c-stopped");
-        long rounds = ManualRaftClusterFixture.ELECTION_TIMEOUT_MS / ManualRaftClusterFixture.HEARTBEAT_MS + 1;
-        for (long round = 0; round < rounds; round++) cluster.timers(leader).firePeriodic(ManualRaftClusterFixture.HEARTBEAT_MS);
-        cluster.settle();
+        // One settled round at a time: the heartbeat timer drops a fire while the previous round is still pending.
+        cluster.heartbeatUntil(leader, () -> !reachable(leader, "c"), "c found unreachable after its rounds pass");
 
         JsonNode members = ok(get(onLeader, "/v1/operator/raft/members", Map.of()));
 
@@ -160,6 +159,16 @@ class HttpApiServerOperatorReadsTest {
         assertEquals(2, members.path("quorum").path("reachableVoters").asInt());
         assertEquals(0, members.path("quorum").path("failureTolerance").asInt());
         assertFalse(members.path("quorum").path("healthy").asBoolean());
+    }
+
+    private static boolean reachable(RaftNode leader, String name) {
+        try {
+            return leader.membership().get(10, TimeUnit.SECONDS).servers().stream()
+                    .filter(member -> member.name().equals(name))
+                    .anyMatch(member -> Boolean.TRUE.equals(member.reachable()));
+        } catch (Exception unanswered) {
+            throw new AssertionError("the leader did not answer its membership", unanswered);
+        }
     }
 
     @Test

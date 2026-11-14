@@ -26,6 +26,9 @@ export type Route =
   | { view: 'service'; name: string }
   | { view: 'nodes' }
   | { view: 'checks' }
+  | { view: 'cluster' }
+  | { view: 'members' }
+  | { view: 'storage' }
   | { view: 'unknown' };
 
 /** The view an address below `uiPath` names. */
@@ -37,6 +40,9 @@ export function routeOf(pathname: string, uiPath: string): Route {
   if (rest === '' || rest === 'services') return { view: 'services' };
   if (rest === 'nodes') return { view: 'nodes' };
   if (rest === 'checks') return { view: 'checks' };
+  if (rest === 'cluster') return { view: 'cluster' };
+  if (rest === 'members') return { view: 'members' };
+  if (rest === 'storage') return { view: 'storage' };
   if (rest.startsWith('services/') && rest.length > 'services/'.length && !rest.slice('services/'.length).includes('/')) {
     try {
       return { view: 'service', name: decodeURIComponent(rest.slice('services/'.length)) };
@@ -73,7 +79,10 @@ export function hrefOf(route: Route, uiPath: string, scope: Scope = DEFAULT_SCOP
     case 'nodes':
       return `${root}nodes${query}`;
     case 'checks':
-      return `${root}checks${query}`;
+    case 'cluster':
+    case 'members':
+    case 'storage':
+      return `${root}${route.view}${query}`;
     case 'service':
       return `${root}services/${encodeURIComponent(route.name).replaceAll('.', '%2E')}${query}`;
   }

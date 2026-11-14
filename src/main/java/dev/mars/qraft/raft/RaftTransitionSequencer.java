@@ -341,6 +341,12 @@ final class RaftTransitionSequencer {
         }
     }
 
+    /** The transitions queued or running, read on the state loop (UI-3 task list, decision 6). */
+    int depth() {
+        assertStateLoop();
+        return outstandingCount();
+    }
+
     private int outstandingCount() {
         return queue.size() + (active == null ? 0 : 1);
     }

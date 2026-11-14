@@ -19,6 +19,7 @@ import type { QraftApi, Scope } from '../api/client';
 import type { CatalogNode, HealthEntry } from '../api/schemas';
 import { useRead } from '../useRead';
 import { Failure, formatInstant, loadServiceEntries, location, NodeStatusLabel, ReadMeta, scopeText } from './common';
+import { MembersTable } from './MembersTable';
 
 const VERSION_KEY = 'qraft.version';
 
@@ -29,8 +30,9 @@ interface Row {
 }
 
 /**
- * Client rows of Nodes and Clients (UI/UX design section 5.2). Owned services and failing checks are counted from the
- * services read in the default scope; server rows wait for the membership API.
+ * Nodes and Clients (UI/UX design section 5.2): the servers from the membership read, with their progress where the
+ * answering server leads (UI-3), and the client nodes, whose owned services and failing checks are counted from the
+ * services read in the selected scope.
  */
 export function NodesView({ api, scope }: { api: QraftApi; scope: Scope }) {
   const [state, again] = useRead(async () => {
@@ -39,13 +41,20 @@ export function NodesView({ api, scope }: { api: QraftApi; scope: Scope }) {
   }, [api, scope.tenant, scope.namespace]);
   const shown = state.status === 'ready' ? state.value : state.previous;
   const rows: Row[] = shown === undefined ? [] : shown.nodes.data.map((node) => row(node, shown.entries));
+  const [members, readMembersAgain] = useRead(() => api.members(), [api]);
 
   return (
     <Space direction="vertical" style={{ width: '100%' }}>
       <Typography.Title level={2}>Nodes and Clients</Typography.Title>
+      <Typography.Title level={3}>Servers</Typography.Title>
+      {members.status === 'failed' && (
+        <Failure title="Servers could not be read" error={members.error} onRetry={readMembersAgain} />
+      )}
+      {members.status === 'ready' && <MembersTable members={members.value.data} detailed={false} />}
+      {members.status === 'loading' && <Typography.Text>Reading servers…</Typography.Text>}
+      <Typography.Title level={3}>Clients</Typography.Title>
       <Typography.Text>
-        {`Client nodes. A node has no tenant or namespace; its services and failing checks are counted in ${scopeText(scope)}. `}
-        Server members are not listed until the API reports them.
+        {`Client nodes. A node has no tenant or namespace; its services and failing checks are counted in ${scopeText(scope)}.`}
       </Typography.Text>
       {state.status === 'failed' && <Failure title="Nodes could not be read" error={state.error} onRetry={again} />}
       {shown !== undefined && <ReadMeta index={shown.nodes.index} stale={state.status !== 'ready'} />}

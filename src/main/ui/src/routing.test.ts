@@ -69,3 +69,12 @@ describe('routes', () => {
     expect(scopeOf('?tenant=a%26b&namespace=c+d')).toEqual({ tenant: 'a&b', namespace: 'c d' });
   });
 });
+
+describe('Operate routes', () => {
+  it('read and write the Cluster Overview, Raft Members and Storage & Snapshots views', () => {
+    for (const view of ['cluster', 'members', 'storage'] as const) {
+      expect(routeOf(`/ui/${view}`, '/ui/')).toEqual({ view });
+      expect(hrefOf({ view }, '/ui/')).toBe(`/ui/${view}`);
+    }
+  });
+});

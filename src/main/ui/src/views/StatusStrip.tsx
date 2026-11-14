@@ -17,23 +17,26 @@
 import { Alert, Space, Typography } from 'antd';
 import type { ReactNode } from 'react';
 import type { QraftApi, Readiness } from '../api/client';
-import type { RaftRole, RaftStatus } from '../api/schemas';
+import type { Members, RaftRole, RaftStatus } from '../api/schemas';
 import type { Bootstrap } from '../bootstrap';
-import { useRead } from '../useRead';
+import { type ReadState, useRead } from '../useRead';
 import { Failure } from './common';
 
 const ROLE: Record<RaftRole, string> = { LEADER: 'Leader', FOLLOWER: 'Follower', CANDIDATE: 'Candidate' };
 
 /**
- * The cluster status strip (UI/UX design section 4.2), limited to what `/raft/status` and readiness provide: the
- * answering node's view, not the cluster's. Quorum and replication lag wait for the membership API. Conditions that
- * need attention are persistent messages, not notifications (section 3.4).
+ * The cluster status strip (UI/UX design section 4.2): the answering node's Raft state and readiness, and from the
+ * membership read the quorum, the failure tolerance and the largest replication lag, which only the leader knows
+ * (UI-3 task list, decision 5). The membership is read on its own, so a server that refuses it, for want of
+ * `operator:read`, still shows the rest. Conditions that need attention are persistent messages, not notifications
+ * (section 3.4).
  */
 export function StatusStrip({ api, bootstrap }: { api: QraftApi; bootstrap: Bootstrap }) {
   const [state, again] = useRead(async () => {
     const [status, readiness] = await Promise.all([api.raftStatus(), api.readiness()]);
     return { status: status.data, readiness: readiness.data };
   }, [api]);
+  const [membership] = useRead(() => api.members(), [api]);
 
   const security = (
     <>
@@ -53,7 +56,7 @@ export function StatusStrip({ api, bootstrap }: { api: QraftApi; bootstrap: Boot
         {security}
       </Space>
     ) : (
-      <Strip status={shown.status} readiness={shown.readiness} security={security} />
+      <Strip status={shown.status} readiness={shown.readiness} membership={membership} security={security} />
     );
   }
 
@@ -64,7 +67,42 @@ export function StatusStrip({ api, bootstrap }: { api: QraftApi; bootstrap: Boot
   );
 }
 
-function Strip({ status, readiness, security }: { status: RaftStatus; readiness: Readiness; security: ReactNode }) {
+/** The quorum, failure tolerance and largest lag in words, or why they are not shown. */
+function membershipItems(membership: ReadState<{ data: Members }>): string[] {
+  if (membership.status === 'failed') {
+    const reason = membership.error instanceof Error ? membership.error.message : String(membership.error);
+    return [`Quorum: not read (${reason})`];
+  }
+  const shown = membership.status === 'ready' ? membership.value.data : membership.previous?.data;
+  if (shown === undefined) return ['Quorum: reading…'];
+  if (shown.view === 'follower' || shown.quorum === null) {
+    return [`Quorum: known to the leader, ${shown.leaderId ?? 'none known'}`];
+  }
+  const lag = Math.max(0, ...shown.servers.map((server) => server.lag ?? 0));
+  return [
+    `Quorum: ${shown.quorum.reachableVoters} of ${shown.quorum.voters} voters reachable`,
+    `Failure tolerance: ${shown.quorum.failureTolerance}`,
+    `Replication lag: ${lag}`,
+  ];
+}
+
+function unreachable(membership: ReadState<{ data: Members }>): string[] {
+  if (membership.status !== 'ready') return [];
+  return membership.value.data.servers.filter((server) => server.reachable === false).map((server) => server.name);
+}
+
+function Strip({
+  status,
+  readiness,
+  membership,
+  security,
+}: {
+  status: RaftStatus;
+  readiness: Readiness;
+  membership: ReadState<{ data: Members }>;
+  security: ReactNode;
+}) {
+  const lost = unreachable(membership);
   return (
     <Space direction="vertical" style={{ width: '100%' }}>
       <Space wrap split="|">
@@ -73,8 +111,20 @@ function Strip({ status, readiness, security }: { status: RaftStatus; readiness:
         <Typography.Text>Leader: {status.leaderId ?? 'none known'}</Typography.Text>
         <Typography.Text>Term: {status.term}</Typography.Text>
         <Typography.Text>Readiness: {readiness.ready ? 'Ready' : 'Not ready'}</Typography.Text>
+        {membershipItems(membership).map((item) => (
+          <Typography.Text key={item}>{item}</Typography.Text>
+        ))}
         {security}
       </Space>
+      {lost.length > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          aria-label="Servers unreachable"
+          message="Servers unreachable"
+          description={`${lost.join(', ')} ${lost.length === 1 ? 'has' : 'have'} not answered the leader within an election timeout.`}
+        />
+      )}
       {!readiness.ready && (
         <Alert
           type="warning"

@@ -1849,6 +1849,24 @@ the catalog's reads and `/v1/kv`:
   connection that still looks ready and never answer, and a caller with a check to
   renew needs to try another server in time (2026-11-13; `RaftNode`'s leader change
   listener). A draining server forwards nothing. Reads are not forwarded.
+- **The membership** at `GET /v1/operator/raft/members` (since 2026-11-14, for the
+  administrative interface's Operate views): on the leader each configured server, in
+  name order, with its match and next index, its lag behind the leader's last log
+  index, how long since it last answered, whether it is reachable, which is the
+  leader's check-quorum test, an answer within an election timeout of heartbeat
+  rounds, and whether it is healthy, reachable and within 250 entries; and the quorum:
+  voters, the quorum's size, the reachable voters, the failure tolerance, and whether
+  every server is healthy. A follower answers its own view, `view: "follower"`, with
+  the configuration it holds and the leader it knows; the progress fields and the
+  quorum are null, since only the leader has them. Both carry the answering server's
+  name, term, commit and last log index.
+- **The storage** at `GET /v1/operator/raft/storage` (since 2026-11-14): the storage's
+  size and the snapshot's age where the server knows its directory, the snapshot's
+  last index and term, the first log index still held, the last log, commit and
+  applied indexes, fencing and its reason, the transition queue's depth, and the
+  last snapshot that failed since the server started, with its message and time. A
+  snapshot that fails before publication fences nothing; it is recorded here.
+  Both reads need `operator:read`, as the autopilot read does, and take no parameter.
 
 Deterministic ordering is mandatory for service lists, instances, tags, prefix
 results, and snapshot serialization.

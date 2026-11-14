@@ -17,7 +17,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { Root } from './Root';
-import { BOOTSTRAP, entry, fakeApi } from './views/testing';
+import { BOOTSTRAP, entry, fakeApi, read, storage } from './views/testing';
 
 // The server's policy allows inline styles only with the request's nonce, and no inline script at all: a style
 // element without the nonce is blocked, and the page renders unstyled in a browser while every other test passes.
@@ -112,4 +112,22 @@ describe('Root', () => {
     expect(inserted.filter((style) => style.nonce !== BOOTSTRAP.cspNonce)).toEqual([]);
     assertEveryStyleCarriesTheNonce();
   });
+  // UI-3: the Operate pages, each in a test of its own; the cluster page with fenced storage shows its banner.
+  for (const [path, waitFor] of [
+    ['/ui/cluster', 'Cluster Overview'],
+    ['/ui/members', 'Raft Members'],
+    ['/ui/storage', 'Storage & Snapshots'],
+  ] as const) {
+    it(`gives every style inserted on ${waitFor} the request nonce`, async () => {
+      window.history.pushState(null, '', path);
+      const fenced = storage({ fenced: true, fenceReason: 'disk full' });
+      const inserted = await stylesInsertedDuring(async () => {
+        render(<Root bootstrap={BOOTSTRAP} api={fakeApi({ storage: () => read(fenced) })} />);
+        await screen.findByText(waitFor, { selector: 'h2' });
+        await screen.findAllByText(/server-1/);
+      });
+      expect(inserted.filter((style) => style.nonce !== BOOTSTRAP.cspNonce)).toEqual([]);
+      assertEveryStyleCarriesTheNonce();
+    });
+  }
 });

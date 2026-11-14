@@ -328,6 +328,8 @@ public final class HttpApiServer implements AutoCloseable {
         context("/raft/status", requestAware(this::raftStatus));
         context("/v1/operator/raft/configuration", requestAware(this::raftConfiguration));
         context("/v1/operator/autopilot/health", requestAware(this::autopilotHealth));
+        context("/v1/operator/raft/members", requestAware(this::raftMembers));
+        context("/v1/operator/raft/storage", requestAware(this::raftStorage));
         context("/v1/operator/raft/peer", requestAware(this::removeRaftPeer));
         context("/v1/catalog/register", requestAware(this::registerInCatalog));
         context("/v1/catalog/deregister", requestAware(this::deregisterFromCatalog));
@@ -552,6 +554,100 @@ public final class HttpApiServer implements AutoCloseable {
         answer.put("Healthy", health.get().healthy());
         answer.put("FailureTolerance", health.get().failureTolerance());
         answer.put("Servers", servers);
+        respondJson(exchange, 200, answer);
+    }
+
+    /**
+     * The membership as this server sees it (UI-3 task list, decision 5): on the leader each server's progress and the
+     * quorum; on any other server the configuration it holds, labelled a follower's view, with the leader it knows and
+     * null progress. It needs {@code operator:read}, as the autopilot read does.
+     */
+    private void raftMembers(HttpExchange exchange) throws IOException {
+        if (!prepareStateRequest(exchange, "GET") || refusedForItsQuery(exchange)) return;
+        AclPrincipal principal = principal(exchange);
+        if (principal == null || refused(exchange, principal, OPERATOR_READ)) return;
+        dev.mars.qraft.raft.RaftMembership membership;
+        try {
+            membership = Deadlines.bound(raftNode.membership(), raftTimeout.toNanos(), TimeUnit.NANOSECONDS).join();
+        } catch (CompletionException unavailable) {
+            respondUnavailable(exchange, unavailable);
+            return;
+        }
+        List<Map<String, Object>> servers = new ArrayList<>();
+        for (dev.mars.qraft.raft.RaftMembership.Member member : membership.servers()) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("serverId", member.serverId());
+            entry.put("name", member.name());
+            entry.put("address", member.address());
+            entry.put("voter", member.voter());
+            entry.put("leader", member.leader());
+            entry.put("self", member.self());
+            entry.put("matchIndex", member.matchIndex());
+            entry.put("nextIndex", member.nextIndex());
+            entry.put("lag", member.lag());
+            entry.put("lastContactMillis", member.lastContactMillis());
+            entry.put("reachable", member.reachable());
+            entry.put("healthy", member.healthy());
+            servers.add(entry);
+        }
+        Map<String, Object> quorum = null;
+        if (membership.quorum() != null) {
+            quorum = new LinkedHashMap<>();
+            quorum.put("voters", membership.quorum().voters());
+            quorum.put("quorumSize", membership.quorum().quorumSize());
+            quorum.put("reachableVoters", membership.quorum().reachableVoters());
+            quorum.put("failureTolerance", membership.quorum().failureTolerance());
+            quorum.put("healthy", membership.quorum().healthy());
+        }
+        Map<String, Object> answer = new LinkedHashMap<>();
+        answer.put("view", membership.leaderView() ? "leader" : "follower");
+        answer.put("answeredBy", membership.answeredBy());
+        answer.put("leaderId", membership.leaderId());
+        answer.put("term", membership.term());
+        answer.put("commitIndex", membership.commitIndex());
+        answer.put("lastLogIndex", membership.lastLogIndex());
+        answer.put("quorum", quorum);
+        answer.put("servers", servers);
+        respondJson(exchange, 200, answer);
+    }
+
+    /**
+     * This server's storage and snapshot state (UI-3 task list, decision 6): its log's boundaries and indexes,
+     * fencing, the transition queue's depth and the last snapshot failure, with the storage's size and the snapshot's
+     * age where the server knows its storage directory. It needs {@code operator:read}.
+     */
+    private void raftStorage(HttpExchange exchange) throws IOException {
+        if (!prepareStateRequest(exchange, "GET") || refusedForItsQuery(exchange)) return;
+        AclPrincipal principal = principal(exchange);
+        if (principal == null || refused(exchange, principal, OPERATOR_READ)) return;
+        dev.mars.qraft.raft.RaftStorageState state;
+        try {
+            state = Deadlines.bound(raftNode.storageState(), raftTimeout.toNanos(), TimeUnit.NANOSECONDS).join();
+        } catch (CompletionException unavailable) {
+            respondUnavailable(exchange, unavailable);
+            return;
+        }
+        dev.mars.qraft.raft.StorageStatus storage = storageStatus;
+        Map<String, Object> answer = new LinkedHashMap<>();
+        answer.put("answeredBy", raftNode.getNodeId());
+        answer.put("storageBytes", storage == null ? null : storage.bytes());
+        answer.put("snapshotAgeSeconds", storage == null ? null : storage.snapshotAgeSeconds());
+        answer.put("snapshotLastIndex", state.snapshotLastIndex());
+        answer.put("snapshotLastTerm", state.snapshotLastTerm());
+        answer.put("firstLogIndex", state.firstLogIndex());
+        answer.put("lastLogIndex", state.lastLogIndex());
+        answer.put("commitIndex", state.commitIndex());
+        answer.put("lastApplied", state.lastApplied());
+        answer.put("fenced", state.fenced());
+        answer.put("fenceReason", state.fenceReason());
+        answer.put("transitionQueueDepth", state.transitionQueueDepth());
+        Map<String, Object> failure = null;
+        if (state.lastSnapshotFailure() != null) {
+            failure = new LinkedHashMap<>();
+            failure.put("message", state.lastSnapshotFailure().message());
+            failure.put("at", state.lastSnapshotFailure().at().toString());
+        }
+        answer.put("lastSnapshotFailure", failure);
         respondJson(exchange, 200, answer);
     }
 

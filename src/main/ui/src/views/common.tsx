@@ -163,3 +163,22 @@ export function healthCountsText(counts: Partial<Record<Lowercase<Health>, numbe
     .map(([count, health]) => `${count} ${health.toLowerCase()}`)
     .join(', ');
 }
+
+/** A size in words: bytes, kB or MB, to one decimal. */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} kB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** How long ago, from a count of milliseconds: `120 ms ago`, `12.0 s ago`, `3 min ago`. */
+export function formatSince(millis: number): string {
+  if (millis < 1000) return `${millis} ms ago`;
+  if (millis < 60_000) return `${(millis / 1000).toFixed(1)} s ago`;
+  return `${Math.round(millis / 60_000)} min ago`;
+}
+
+/** A count with its noun, singular or plural: `1 service`, `0 transitions`. */
+export function plural(count: number, noun: string, nouns = `${noun}s`): string {
+  return `${count} ${count === 1 ? noun : nouns}`;
+}

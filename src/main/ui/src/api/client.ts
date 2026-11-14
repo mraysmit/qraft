@@ -22,6 +22,10 @@ import {
   CheckEntrySchema,
   ErrorEnvelopeSchema,
   type HealthEntry,
+  type Members,
+  MembersSchema,
+  type Storage,
+  StorageSchema,
   HealthEntrySchema,
   type Namespace,
   NamespaceSchema,
@@ -104,6 +108,10 @@ export interface QraftApi {
   checks(state: CheckState, scope?: Scope): Promise<Read<CheckEntry[]>>;
   tenants(): Promise<Read<Tenant[]>>;
   namespaces(tenant: string): Promise<Read<Namespace[]>>;
+  /** The membership as the answering server sees it: progress and quorum on the leader only. */
+  members(): Promise<Read<Members>>;
+  /** The answering server's storage and snapshot state. */
+  storage(): Promise<Read<Storage>>;
 }
 
 /** A client for the API below `apiBasePath`, the bootstrap object's base path, which ends with `/`. */
@@ -169,6 +177,8 @@ export function createApi(apiBasePath: string, fetcher: typeof fetch = fetch): Q
       read(`v1/health/state/${state}`, z.array(CheckEntrySchema), scopeHeaders(scope)),
     tenants: () => read('v1/tenants', z.array(TenantSchema)),
     namespaces: (tenant) => read('v1/namespaces', z.array(NamespaceSchema), { 'X-Qraft-Tenant': tenant }),
+    members: () => read('v1/operator/raft/members', MembersSchema),
+    storage: () => read('v1/operator/raft/storage', StorageSchema),
     async readiness() {
       const path = 'health/ready';
       const response = await send(path);

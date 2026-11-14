@@ -20,10 +20,13 @@ import type { Bootstrap } from './bootstrap';
 import { RouteLink, RouterProvider, useRouter } from './routing';
 import { NodesView } from './views/NodesView';
 import { ChecksView } from './views/ChecksView';
+import { ClusterView } from './views/ClusterView';
+import { MembersView } from './views/MembersView';
 import { ScopeSelector } from './views/ScopeSelector';
 import { ServiceDetailView } from './views/ServiceDetailView';
 import { ServicesView } from './views/ServicesView';
 import { StatusStrip } from './views/StatusStrip';
+import { StorageView } from './views/StorageView';
 
 const NAV_LINK = { color: '#fff' };
 
@@ -46,6 +49,15 @@ export function App({ bootstrap, api }: { bootstrap: Bootstrap; api: QraftApi })
               </RouteLink>
               <RouteLink to={{ view: 'checks' }} style={NAV_LINK}>
                 Health Checks
+              </RouteLink>
+              <RouteLink to={{ view: 'cluster' }} style={NAV_LINK}>
+                Cluster Overview
+              </RouteLink>
+              <RouteLink to={{ view: 'members' }} style={NAV_LINK}>
+                Raft Members
+              </RouteLink>
+              <RouteLink to={{ view: 'storage' }} style={NAV_LINK}>
+                Storage & Snapshots
               </RouteLink>
             </Space>
           </nav>
@@ -82,6 +94,12 @@ function CurrentView({ api }: { api: QraftApi }) {
       return <NodesView api={api} scope={scope} />;
     case 'checks':
       return <ChecksView api={api} scope={scope} />;
+    case 'cluster':
+      return <ClusterView api={api} scope={scope} />;
+    case 'members':
+      return <MembersView api={api} />;
+    case 'storage':
+      return <StorageView api={api} />;
     case 'unknown':
       return (
         <Space direction="vertical">

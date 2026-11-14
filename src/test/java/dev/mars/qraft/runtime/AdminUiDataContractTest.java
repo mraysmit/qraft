@@ -229,6 +229,39 @@ class AdminUiDataContractTest {
         assertEquals(0, read(api, "v1/health/state/any", true, Map.of()).size(), "the default scope holds no check");
     }
 
+    @Test
+    void theOperatorReadsAreAnsweredInTheFieldsTheOperateViewsRead() throws Exception {
+        // UI-3 task list, Phase 2: the membership and storage reads, as client.ts sends them and schemas.ts reads them.
+        startServer();
+        URI origin = URI.create("http://127.0.0.1:" + server.port());
+        URI api = origin.resolve(bootstrap(get(origin, "/ui/")).path("apiBasePath").asText());
+
+        JsonNode members = read(api, "v1/operator/raft/members", false);
+        fields(members, "membership", Map.of("view", Type.TEXT, "answeredBy", Type.TEXT, "leaderId", Type.TEXT_OR_NULL,
+                "term", Type.INTEGER, "commitIndex", Type.INTEGER, "lastLogIndex", Type.INTEGER, "quorum", Type.OBJECT,
+                "servers", Type.LIST));
+        assertEquals("leader", members.path("view").asText(), "the single server leads");
+        fields(members.path("quorum"), "quorum", Map.of("voters", Type.INTEGER, "quorumSize", Type.INTEGER,
+                "reachableVoters", Type.INTEGER, "failureTolerance", Type.INTEGER, "healthy", Type.BOOLEAN));
+        fields(members.path("servers").get(0), "member", Map.ofEntries(Map.entry("serverId", Type.TEXT),
+                Map.entry("name", Type.TEXT), Map.entry("address", Type.TEXT), Map.entry("voter", Type.BOOLEAN),
+                Map.entry("leader", Type.BOOLEAN), Map.entry("self", Type.BOOLEAN), Map.entry("matchIndex", Type.INTEGER),
+                Map.entry("nextIndex", Type.INTEGER), Map.entry("lag", Type.INTEGER),
+                Map.entry("lastContactMillis", Type.INTEGER), Map.entry("reachable", Type.BOOLEAN),
+                Map.entry("healthy", Type.BOOLEAN)));
+
+        JsonNode storage = read(api, "v1/operator/raft/storage", false);
+        fields(storage, "storage", Map.ofEntries(Map.entry("answeredBy", Type.TEXT),
+                Map.entry("snapshotLastIndex", Type.INTEGER), Map.entry("snapshotLastTerm", Type.INTEGER),
+                Map.entry("firstLogIndex", Type.INTEGER), Map.entry("lastLogIndex", Type.INTEGER),
+                Map.entry("commitIndex", Type.INTEGER), Map.entry("lastApplied", Type.INTEGER),
+                Map.entry("fenced", Type.BOOLEAN), Map.entry("fenceReason", Type.TEXT_OR_NULL),
+                Map.entry("transitionQueueDepth", Type.INTEGER)));
+        for (String nullable : List.of("storageBytes", "snapshotAgeSeconds", "lastSnapshotFailure")) {
+            assertTrue(storage.has(nullable), nullable + " is present, null where unknown: " + storage);
+        }
+    }
+
     private HttpResponse<String> send(URI origin, String method, String path, String body, Map<String, String> headers)
             throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder(origin.resolve(path)).timeout(Duration.ofSeconds(5))

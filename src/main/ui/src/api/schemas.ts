@@ -147,6 +147,63 @@ export const TenantSchema = z.object({ Name: z.string().min(1), Description: z.s
 /** `GET /v1/namespaces`, of the tenant the header names. */
 export const NamespaceSchema = z.object({ Name: z.string().min(1), Tenant: z.string().min(1), Description: z.string() });
 
+/** A server in the membership read; the progress fields are null where the answering server does not lead. */
+export const MemberSchema = z.object({
+  serverId: z.string(),
+  name: z.string(),
+  address: z.string(),
+  voter: z.boolean(),
+  leader: z.boolean(),
+  self: z.boolean(),
+  matchIndex: index.nullable(),
+  nextIndex: index.nullable(),
+  lag: index.nullable(),
+  lastContactMillis: z.number().int().nonnegative().nullable(),
+  reachable: z.boolean().nullable(),
+  healthy: z.boolean().nullable(),
+});
+
+/** `GET /v1/operator/raft/members`: the leader's view with the quorum, or a follower's labelled partial view. */
+export const MembersSchema = z.object({
+  view: z.enum(['leader', 'follower']),
+  answeredBy: z.string(),
+  leaderId: z.string().nullable(),
+  term: index,
+  commitIndex: index,
+  lastLogIndex: index,
+  quorum: z
+    .object({
+      voters: counts,
+      quorumSize: counts,
+      reachableVoters: counts,
+      failureTolerance: counts,
+      healthy: z.boolean(),
+    })
+    .nullable(),
+  servers: z.array(MemberSchema),
+});
+
+/** `GET /v1/operator/raft/storage`: the answering server's log and snapshot state. */
+export const StorageSchema = z.object({
+  answeredBy: z.string(),
+  storageBytes: index.nullable(),
+  // -1 when the server knows its storage and holds no snapshot; null when it knows no storage directory.
+  snapshotAgeSeconds: z.number().int().min(-1).nullable(),
+  snapshotLastIndex: index,
+  snapshotLastTerm: index,
+  firstLogIndex: index,
+  lastLogIndex: index,
+  commitIndex: index,
+  lastApplied: index,
+  fenced: z.boolean(),
+  fenceReason: z.string().nullable(),
+  transitionQueueDepth: counts,
+  lastSnapshotFailure: z.object({ message: z.string(), at: instant }).nullable(),
+});
+
+export type Member = z.infer<typeof MemberSchema>;
+export type Members = z.infer<typeof MembersSchema>;
+export type Storage = z.infer<typeof StorageSchema>;
 export type ServiceSummary = z.infer<typeof ServiceSummarySchema>;
 export type CheckEntry = z.infer<typeof CheckEntrySchema>;
 export type Tenant = z.infer<typeof TenantSchema>;

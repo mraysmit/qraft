@@ -192,6 +192,8 @@ public class RaftNode {
     static final long PROMOTION_CONTACT_ROUNDS = 2;
     /** The peers that have answered in this leadership; a peer that has not has no contact to count. */
     private final Set<String> answeredPeers = new HashSet<>();
+    /** The last snapshot that failed since this node started, for the storage read (UI-3 task list, decision 6). */
+    private volatile RaftStorageState.SnapshotFailure lastSnapshotFailure;
     /** The round from which each non-voter has been continuously healthy. */
     private final Map<String, Long> healthySinceRound = new HashMap<>();
 
@@ -1372,6 +1374,82 @@ public class RaftNode {
         long healthyVoters = servers.stream().filter(server -> server.voter() && server.healthy()).count();
         int tolerance = (int) Math.max(0, healthyVoters - (voters / 2 + 1));
         return new ClusterHealth(servers.stream().allMatch(ServerHealth::healthy), tolerance, servers);
+    }
+
+    /**
+     * The membership as this node sees it (UI-3 task list, decision 5), captured on the state loop: on the leader each
+     * server's match and next index, lag, last contact, reachability and health, and the quorum; on any other node the
+     * configuration it holds without progress, which only the leader knows. Fails if the state loop no longer accepts
+     * work.
+     */
+    public CompletableFuture<RaftMembership> membership() {
+        CompletableFuture<RaftMembership> membership = new CompletableFuture<>();
+        try {
+            runtime.execute(() -> membership.complete(captureMembership()));
+        } catch (java.util.concurrent.RejectedExecutionException stopped) {
+            membership.completeExceptionally(stopped);
+        }
+        return membership;
+    }
+
+    private RaftMembership captureMembership() {
+        boolean leading = state == State.LEADER;
+        String leader = leading ? nodeId : currentLeaderId;
+        long now = System.nanoTime();
+        long last = lastLogIndex();
+        List<RaftMembership.Member> servers = new ArrayList<>();
+        RaftConfiguration current = configuration;
+        List<RaftConfiguration.Server> configured = current == null ? List.of() : current.servers();
+        for (RaftConfiguration.Server server : configured) {
+            boolean self = server.name().equals(nodeId);
+            boolean isLeader = server.name().equals(leader);
+            if (!leading) {
+                servers.add(new RaftMembership.Member(server.serverId(), server.name(), server.address(), server.voter(),
+                        isLeader, self, null, null, null, null, null, null));
+            } else if (self) {
+                servers.add(new RaftMembership.Member(server.serverId(), server.name(), server.address(), server.voter(),
+                        true, true, last, last + 1, 0L, 0L, true, true));
+            } else {
+                Long answered = peerAnsweredNanos.get(server.name());
+                long match = matchIndex.getOrDefault(server.name(), 0L);
+                long lag = Math.max(0, last - match);
+                Long round = lastContactRound.get(server.name());
+                boolean reachable = answeredPeers.contains(server.name()) && round != null
+                        && heartbeatRound - round <= quorumContactRounds;
+                servers.add(new RaftMembership.Member(server.serverId(), server.name(), server.address(), server.voter(),
+                        false, false, match, nextIndex.getOrDefault(server.name(), last + 1), lag,
+                        answered == null ? null : TimeUnit.NANOSECONDS.toMillis(now - answered), reachable,
+                        reachable && lag <= ClusterHealth.MAX_TRAILING_LOGS));
+            }
+        }
+        servers.sort(java.util.Comparator.comparing(RaftMembership.Member::name));
+        RaftMembership.Quorum quorum = null;
+        if (leading) {
+            int voters = (int) servers.stream().filter(RaftMembership.Member::voter).count();
+            int quorumSize = voters / 2 + 1;
+            int reachableVoters = (int) servers.stream()
+                    .filter(member -> member.voter() && Boolean.TRUE.equals(member.reachable())).count();
+            quorum = new RaftMembership.Quorum(voters, quorumSize, reachableVoters,
+                    Math.max(0, reachableVoters - quorumSize),
+                    servers.stream().allMatch(member -> Boolean.TRUE.equals(member.healthy())));
+        }
+        return new RaftMembership(leading, nodeId, leader, currentTerm, commitIndex, last, servers, quorum);
+    }
+
+    /**
+     * This node's log and snapshot state (UI-3 task list, decision 6), captured on the state loop. Fails if the state
+     * loop no longer accepts work.
+     */
+    public CompletableFuture<RaftStorageState> storageState() {
+        CompletableFuture<RaftStorageState> storage = new CompletableFuture<>();
+        try {
+            runtime.execute(() -> storage.complete(new RaftStorageState(snapshotLastIndex, snapshotLastTerm,
+                    snapshotLastIndex + 1, lastLogIndex(), commitIndex, lastApplied, isFenced(), fenceReason(),
+                    transitionSequencer.depth(), lastSnapshotFailure)));
+        } catch (java.util.concurrent.RejectedExecutionException stopped) {
+            storage.completeExceptionally(stopped);
+        }
+        return storage;
     }
 
     public CompletableFuture<RaftStatus> status() {
@@ -3476,7 +3554,15 @@ public class RaftNode {
                 .thenCompose(result -> result.failure() == null
                         ? CompletableFuture.<Void>completedFuture(null)
                         : CompletableFuture.<Void>failedFuture(result.failure()))
-                .whenComplete(Completions.onFailure(err -> TransitionFailureLog.log(logger, "Snapshot failed: {}", err)));
+                .whenComplete(Completions.onFailure(err -> {
+                    TransitionFailureLog.log(logger, "Snapshot failed: {}", err);
+                    Throwable cause = Completions.unwrap(err);
+                    if (!(cause instanceof RaftTransitionSequencer.DrainingException)) {
+                        lastSnapshotFailure = new RaftStorageState.SnapshotFailure(
+                                java.util.Objects.toString(cause.getMessage(), cause.getClass().getName()),
+                                java.time.Instant.now());
+                    }
+                }));
     }
 
     private CompletableFuture<LocalSnapshotDecision> preparePublishAndCompactLocalSnapshot() {
