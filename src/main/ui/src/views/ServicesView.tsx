@@ -15,89 +15,72 @@
  */
 
 import { Empty, Space, Table, Tag, Typography } from 'antd';
-import type { QraftApi } from '../api/client';
-import type { Health } from '../api/schemas';
+import type { QraftApi, Scope } from '../api/client';
+import type { Health, ServiceSummary } from '../api/schemas';
 import { RouteLink } from '../routing';
 import { useRead } from '../useRead';
-import {
-  distinct,
-  Failure,
-  HEALTH_ORDER,
-  HealthLabel,
-  loadServiceEntries,
-  location,
-  READ_SCOPE,
-  ReadMeta,
-  worstHealth,
-} from './common';
+import { Failure, HEALTH_ORDER, HealthLabel, healthCountsText, ReadIn, ReadMeta, scopeText } from './common';
 
 interface Row {
-  name: string;
-  health: Health | null;
-  instances: number;
-  tags: string[];
-  scope: string;
-  location: string;
+  summary: ServiceSummary;
+  worst: Health | null;
 }
 
-/** The landing page (UI/UX design section 5.1): services needing attention first. */
-export function ServicesView({ api }: { api: QraftApi }) {
-  const [state, again] = useRead(() => loadServiceEntries(api), [api]);
+/**
+ * The landing page (UI/UX design section 5.1): every service in the selected scope from one summary read (UI-2
+ * task list, decision 2), services needing attention first.
+ */
+export function ServicesView({ api, scope }: { api: QraftApi; scope: Scope }) {
+  const [state, again] = useRead(() => api.servicesSummary(scope), [api, scope.tenant, scope.namespace]);
   const shown = state.status === 'ready' ? state.value : state.previous;
 
   const rows: Row[] =
     shown === undefined
       ? []
-      : Object.entries(shown.names)
-          .map(([name, tags]) => {
-            const entries = shown.entries[name] ?? [];
-            return {
-              name,
-              health: worstHealth(entries),
-              instances: entries.length,
-              tags,
-              scope: distinct(entries.map((entry) => `${entry.service.tenantId} / ${entry.service.namespace}`)),
-              location: distinct(entries.map((entry) => location(entry.service.datacenter, entry.service.region))),
-            };
-          })
-          .sort((a, b) => rank(a.health) - rank(b.health) || a.name.localeCompare(b.name));
+      : shown.data
+          .map((summary) => ({ summary, worst: worstOf(summary) }))
+          .sort((a, b) => rank(a.worst) - rank(b.worst) || a.summary.name.localeCompare(b.summary.name));
 
   return (
     <Space direction="vertical" style={{ width: '100%' }}>
       <Typography.Title level={2}>Services</Typography.Title>
-      <Typography.Text>Read in {READ_SCOPE}.</Typography.Text>
+      <ReadIn scope={scope} />
       {state.status === 'failed' && <Failure title="Services could not be read" error={state.error} onRetry={again} />}
       {shown !== undefined && <ReadMeta index={shown.index} stale={state.status !== 'ready'} />}
       {state.status !== 'failed' && (
         <Table<Row>
-          rowKey="name"
+          rowKey={(row) => row.summary.name}
           loading={state.status === 'loading'}
           dataSource={rows}
           pagination={false}
           locale={{
             emptyText: (
-              <Empty description={shown === undefined ? 'Reading services…' : `No service is registered in ${READ_SCOPE}.`} />
+              <Empty
+                description={shown === undefined ? 'Reading services…' : `No service is registered in ${scopeText(scope)}.`}
+              />
             ),
           }}
           columns={[
             {
               title: 'Service',
-              dataIndex: 'name',
-              render: (name: string) => <RouteLink to={{ view: 'service', name }}>{name}</RouteLink>,
+              render: (_, row) => <RouteLink to={{ view: 'service', name: row.summary.name }}>{row.summary.name}</RouteLink>,
             },
             {
               title: 'Health',
-              dataIndex: 'health',
-              render: (health: Health | null) => (health === null ? 'No instances' : <HealthLabel health={health} />),
+              render: (_, row) => (row.worst === null ? 'No instances' : <HealthLabel health={row.worst} />),
             },
-            { title: 'Instances', dataIndex: 'instances' },
+            { title: 'Instances', render: (_, row) => row.summary.instanceCount },
+            { title: 'By health', render: (_, row) => healthCountsText(row.summary.health) },
+            { title: 'Tags', render: (_, row) => row.summary.tags.map((tag) => <Tag key={tag}>{tag}</Tag>) },
+            { title: 'Tenant / namespace', render: (_, row) => `${row.summary.tenantId} / ${row.summary.namespace}` },
             {
-              title: 'Tags',
-              dataIndex: 'tags',
-              render: (tags: string[]) => tags.map((tag) => <Tag key={tag}>{tag}</Tag>),
+              title: 'Datacenter / region',
+              render: (_, row) => `${list(row.summary.datacenters)} / ${list(row.summary.regions)}`,
             },
-            { title: 'Tenant / namespace', dataIndex: 'scope' },
-            { title: 'Datacenter / region', dataIndex: 'location' },
+            {
+              title: 'Last change',
+              render: (_, row) => (row.summary.instanceCount === 0 ? '—' : `Changed at index ${row.summary.modifyIndex}`),
+            },
           ]}
         />
       )}
@@ -105,6 +88,15 @@ export function ServicesView({ api }: { api: QraftApi }) {
   );
 }
 
+/** The worst health any instance of the service has, or null when it has none. */
+function worstOf(summary: ServiceSummary): Health | null {
+  return HEALTH_ORDER.find((health) => summary.health[health.toLowerCase() as Lowercase<Health>] > 0) ?? null;
+}
+
 function rank(health: Health | null): number {
   return health === null ? HEALTH_ORDER.length : HEALTH_ORDER.indexOf(health);
+}
+
+function list(values: string[]): string {
+  return values.length === 0 ? '—' : values.join(', ');
 }
