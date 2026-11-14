@@ -648,6 +648,20 @@ whose cleanups now declare the servers they stop passed in their stages. The aud
 logs (25 Docker archive folders) and the test reports, 898 files, found 1,253 error lines, all flagged, and 877 stack
 traces, none unflagged; no `too_many_pings` and no JVM crash file. The logs are in `logs/jenkins/Qraft-74/`.
 
+## Build 75, 2026-11-14
+
+Build 75 ran on `4a3f019`, UI-3 and UI-2's open items, and failed in 31 min 28 s with every Java suite passing:
+default 2,026 with every coverage gate met, end-to-end 31, and Docker and `slow` 52. Vitest passed its 94 in the
+default and end-to-end stages and failed one in the Docker stage's run: `Root.test.tsx`, "gives every style inserted
+on Health Checks and in the open scope list the request nonce", timed out at 5 s after 5.6 s. It takes 2.5 s on the
+workstation with every file running together, and 0.5 s to 1.5 s for most tests alone; the node's four executors are
+shared with other jobs. Three changes, test first where they change behaviour: the frontend tests use no role query
+(selectors, text and labels instead); that test is two, the scope list opened on the lightest page; and the
+end-to-end and Docker stages pass `-DskipVitest=true`, the default stage having run the frontend tests already, the
+pom's `skipVitest` following `-DskipTests` (`BuildPipelineContractTest`, red first). The audit, 897 files, found 1,174
+error lines, 1,166 flagged; the 8 unflagged are that failure's report and Maven's lines after it; 852 stack traces,
+all flagged. The logs are in `logs/jenkins/Qraft-75/`.
+
 ## Local runs, 2026-11-07
 
 Two runs of the three suites from the copy at `C:\qx7`, against Docker Desktop, in place of Jenkins while the work
