@@ -638,6 +638,16 @@ way, undeclared, and declare them too: `TenancyEndToEndTest`, `TlsEndToEndTest` 
 audit, 583 files, found 865 error lines and 744 stack traces; the 27 lines and 6 traces unflagged are that error,
 its report, and Maven's lines after it. The logs are in `logs/jenkins/Qraft-73/`.
 
+## Build 74, 2026-11-14
+
+Build 74 ran on `f550299`, UI-2 with the fixes of builds 72 and 73. Started from the `mraysmit` workstation at 15:35
+local time, it passed in 31 min 35 s: default 2,013 with every coverage gate met, end-to-end 31, and Docker and `slow`
+52, 2,096 in all, with no failures, errors or skips; Vitest's 73 passed in each of the three Maven runs. The services
+summary and check listing tests, the interface's contract, packaged-artifact and container tests, and the four classes
+whose cleanups now declare the servers they stop passed in their stages. The audit, over the console, the archived
+logs (25 Docker archive folders) and the test reports, 898 files, found 1,253 error lines, all flagged, and 877 stack
+traces, none unflagged; no `too_many_pings` and no JVM crash file. The logs are in `logs/jenkins/Qraft-74/`.
+
 ## Local runs, 2026-11-07
 
 Two runs of the three suites from the copy at `C:\qx7`, against Docker Desktop, in place of Jenkins while the work

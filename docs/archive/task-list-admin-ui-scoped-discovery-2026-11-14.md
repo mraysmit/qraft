@@ -1,15 +1,30 @@
 # Task List: Administrative Interface, Scoped Discovery (UI-2)
 
 **Date:** 2026-11-14
-**Last updated:** 2026-11-14 (Steps 3 and 4 built, test first, and checked in a browser under the policy in both scopes, with their records. Earlier the same day: Steps 1 and 2 built, test first, with their records, decision 7 on the legacy `FAILING` state, and a fallback for unrouted paths found on the way. Earlier the same day: written, at the owner's word to proceed with the interface's next increment)
-**Active work:** Step 5
-**Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-2
-**Source plan:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md), sections 3.2, 4.1, 5.1 and 5.3; [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), section 12.1
-**Predecessor:** [`task-list-embedded-admin-interface-2026-11-14.md`](../docs/archive/task-list-embedded-admin-interface-2026-11-14.md) (UI-0 and UI-1)
-**Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
+**Status:** Complete and archived on 2026-11-14. Steps 1 to 5 are done, test first, and Jenkins build 74, on `f550299`, passed the three suites with them: default 2,013 with every coverage gate met, end-to-end 31 and Docker and `slow` 52, with Vitest's 73 in each Maven run and no failures, errors or skips; audit over 898 files: 1,253 error lines, all flagged, 877 stack traces, none unflagged; no JVM crash file. Builds 72 and 73 failed first, on a Vitest timeout and on an undeclared cleanup stop; both causes are fixed and recorded in section 9.
+**Last updated:** 2026-11-14 (Step 5 done, the list complete and archived, its links rewritten from its new place. Earlier the same day: Steps 3 and 4 built, test first, and checked in a browser under the policy in both scopes, with their records. Earlier the same day: Steps 1 and 2 built, test first, with their records, decision 7 on the legacy `FAILING` state, and a fallback for unrouted paths found on the way. Earlier the same day: written, at the owner's word to proceed with the interface's next increment)
+**Active work:** complete on 2026-11-14
+**Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](../../docs-design/QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-2
+**Source plan:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](../../docs-design/QRAFT_ADMIN_UI_UX_DESIGN.md), sections 3.2, 4.1, 5.1 and 5.3; [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), section 12.1
+**Predecessor:** [`task-list-embedded-admin-interface-2026-11-14.md`](task-list-embedded-admin-interface-2026-11-14.md) (UI-0 and UI-1)
+**Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
-When this list's work is complete, add a completion summary and move this file
-to `docs/archive/`.
+The list was completed on 2026-11-14, with the completion summary below, and
+moved to `docs/archive/`.
+
+**Completion summary.** Increment UI-2 is built. The server answers
+`GET /v1/internal/ui/services`, one summary per service in the read's scope,
+and `GET /v1/health/state/{state}`, the checks across services, both
+ACL-filtered with the read options of every catalog read, and both naming the
+five documented health states; a path no route serves is answered 404 in the
+envelope after its body is read. The interface has a tenant and namespace
+selector whose choice is in the page's address and every scoped view's text,
+the Services list on one summary read, and a Health Checks page with status and
+text filters. Found and fixed on the way: the legacy `FAILING` state in a
+public read, a connection reset on unrouted paths, Vitest role queries slow
+enough to time out on Jenkins, and four test cleanups stopping servers they had
+not declared. Left open: the client's local API may answer unrouted paths with
+the same reset; the bundle is 1,014 kB, 317 kB gzipped.
 
 ## 1. Goal
 
@@ -234,7 +249,7 @@ view with no policy violation.
 2. The implementation plan's view map and section 4 brought up to date; this
    list completed and archived.
 
-**Status, 2026-11-14: in progress.**
+**Status, 2026-11-14: done.**
 
 - The implementation plan's sections 4 and 5 were rewritten from the review of
   section 2: each capability's state on 2026-11-14, the new reads in section
@@ -253,7 +268,15 @@ view with no policy violation.
   it had not declared, while server1 asked for its vote. Its cleanup, and those
   of `TenancyEndToEndTest`, `TlsEndToEndTest` and `WriteForwardingEndToEndTest`,
   which stopped three servers the same way, now declare each server they stop;
-  the four classes pass, audit clean. Uncommitted.
+  the four classes pass, audit clean. Committed by the owner in `f550299`.
+- Jenkins build 74, on `f550299`: default 2,013 with every coverage gate met,
+  end-to-end 31 and Docker and `slow` 52, 2,096 in all, with Vitest's 73 in
+  each Maven run; `HttpApiServerServicesSummaryTest`,
+  `HttpApiServerHealthStateTest`, `AdminUiDataContractTest`,
+  `PackagedAdminUiEndToEndTest`, `DockerAdminUiTest` and the four classes with
+  the new cleanup declarations passed in their stages. Audit over 898 files:
+  1,253 error lines and 877 stack traces, all flagged (`docs/JENKINS.md`).
+- The list completed and moved to `docs/archive/`, the links to it updated.
 
 ## 10. Out of scope
 
