@@ -77,3 +77,29 @@ export const CHECK = {
 };
 
 export const HEALTH_ENTRY = { service: INSTANCE, checks: [CHECK], nodeStatus: 'healthy' };
+
+export const SUMMARY_ENTRY = {
+  name: 'web',
+  tenantId: 'default',
+  namespace: 'default',
+  tags: ['http'],
+  instanceCount: 2,
+  health: { unknown: 0, passing: 1, warning: 0, critical: 1, maintenance: 0 },
+  datacenters: ['dc1'],
+  regions: ['eu-west'],
+  modifyIndex: 9,
+};
+
+export const CHECK_ENTRY = {
+  serviceId: 'web-1',
+  serviceName: 'web',
+  nodeId: 'client-a',
+  nodeStatus: 'healthy',
+  tenantId: 'default',
+  namespace: 'default',
+  ...CHECK,
+};
+
+export const TENANT = { Name: 'acme', Description: 'Acme Ltd', CreateIndex: 3, ModifyIndex: 3 };
+
+export const NAMESPACE = { Name: 'prod', Tenant: 'acme', Description: '', CreateIndex: 4, ModifyIndex: 4 };
