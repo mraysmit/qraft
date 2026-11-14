@@ -15,10 +15,10 @@
  */
 
 import { Empty, Space, Table, Typography } from 'antd';
-import type { QraftApi } from '../api/client';
+import type { QraftApi, Scope } from '../api/client';
 import type { CatalogNode, HealthEntry } from '../api/schemas';
 import { useRead } from '../useRead';
-import { Failure, formatInstant, loadServiceEntries, location, NodeStatusLabel, READ_SCOPE, ReadMeta } from './common';
+import { Failure, formatInstant, loadServiceEntries, location, NodeStatusLabel, ReadMeta, scopeText } from './common';
 
 const VERSION_KEY = 'qraft.version';
 
@@ -32,11 +32,11 @@ interface Row {
  * Client rows of Nodes and Clients (UI/UX design section 5.2). Owned services and failing checks are counted from the
  * services read in the default scope; server rows wait for the membership API.
  */
-export function NodesView({ api }: { api: QraftApi }) {
+export function NodesView({ api, scope }: { api: QraftApi; scope: Scope }) {
   const [state, again] = useRead(async () => {
-    const [nodes, services] = await Promise.all([api.nodes(), loadServiceEntries(api)]);
+    const [nodes, services] = await Promise.all([api.nodes(), loadServiceEntries(api, scope)]);
     return { nodes, entries: Object.values(services.entries).flat() };
-  }, [api]);
+  }, [api, scope.tenant, scope.namespace]);
   const shown = state.status === 'ready' ? state.value : state.previous;
   const rows: Row[] = shown === undefined ? [] : shown.nodes.data.map((node) => row(node, shown.entries));
 
@@ -44,7 +44,7 @@ export function NodesView({ api }: { api: QraftApi }) {
     <Space direction="vertical" style={{ width: '100%' }}>
       <Typography.Title level={2}>Nodes and Clients</Typography.Title>
       <Typography.Text>
-        {`Client nodes. A node has no tenant or namespace; its services and failing checks are counted in ${READ_SCOPE}. `}
+        {`Client nodes. A node has no tenant or namespace; its services and failing checks are counted in ${scopeText(scope)}. `}
         Server members are not listed until the API reports them.
       </Typography.Text>
       {state.status === 'failed' && <Failure title="Nodes could not be read" error={state.error} onRetry={again} />}
