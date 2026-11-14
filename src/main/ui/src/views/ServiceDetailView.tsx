@@ -16,7 +16,7 @@
 
 import { Descriptions, Empty, Space, Table, Tabs, Tag, Typography } from 'antd';
 import type { ReactNode } from 'react';
-import type { QraftApi } from '../api/client';
+import type { QraftApi, Scope } from '../api/client';
 import type { Check, HealthEntry, ServiceInstance } from '../api/schemas';
 import { RouteLink } from '../routing';
 import { useRead } from '../useRead';
@@ -27,8 +27,9 @@ import {
   HealthLabel,
   location,
   NodeStatusLabel,
-  READ_SCOPE,
+  ReadIn,
   ReadMeta,
+  scopeText,
   worstHealth,
 } from './common';
 
@@ -36,8 +37,8 @@ import {
  * A service's Overview, Instances, Health Checks and Metadata (UI/UX design section 5.1). A check's observation, made
  * by a client, is shown apart from the time the servers accepted it, the replicated state (section 3.3).
  */
-export function ServiceDetailView({ api, name }: { api: QraftApi; name: string }) {
-  const [state, again] = useRead(() => api.serviceHealth(name), [api, name]);
+export function ServiceDetailView({ api, name, scope }: { api: QraftApi; name: string; scope: Scope }) {
+  const [state, again] = useRead(() => api.serviceHealth(name, scope), [api, name, scope.tenant, scope.namespace]);
   const shown = state.status === 'ready' ? state.value : state.previous;
 
   let body: ReactNode;
@@ -46,7 +47,7 @@ export function ServiceDetailView({ api, name }: { api: QraftApi; name: string }
   } else if (shown === undefined) {
     body = <Typography.Text>Reading service {name}…</Typography.Text>;
   } else if (shown.data.length === 0) {
-    body = <Empty description={`No instance of ${name} is registered in ${READ_SCOPE}.`} />;
+    body = <Empty description={`No instance of ${name} is registered in ${scopeText(scope)}.`} />;
   } else {
     body = (
       <>
@@ -67,6 +68,7 @@ export function ServiceDetailView({ api, name }: { api: QraftApi; name: string }
     <Space direction="vertical" style={{ width: '100%' }}>
       <RouteLink to={{ view: 'services' }}>Services</RouteLink>
       <Typography.Title level={2}>Service: {name}</Typography.Title>
+      <ReadIn scope={scope} />
       {body}
     </Space>
   );
