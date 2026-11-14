@@ -132,7 +132,7 @@ fi
 set -uo pipefail
 rm -rf -- target/surefire-reports
 mvn -B -Dstyle.color=never -Dmaven.repo.local="$WORKSPACE@repository" test \
-    -Dgroups=e2e -Dtest.excludedGroups= 2>&1 \
+    -Dgroups=e2e -Dtest.excludedGroups= -DskipVitest=true 2>&1 \
     | tee "logs/qraft-e2e-$(date -u +%Y-%m-%d_%H-%M-%S)-$BUILD_NUMBER.log"
 exit "${PIPESTATUS[0]}"
 '''
@@ -159,7 +159,7 @@ fi
 set -uo pipefail
 rm -rf -- target/surefire-reports
 mvn -B -Dstyle.color=never -Dmaven.repo.local="$WORKSPACE@repository" test \
-    '-Dgroups=docker|slow' -Dtest.excludedGroups= 2>&1 \
+    '-Dgroups=docker|slow' -Dtest.excludedGroups= -DskipVitest=true 2>&1 \
     | tee "logs/qraft-docker-$(date -u +%Y-%m-%d_%H-%M-%S)-$BUILD_NUMBER.log"
 exit "${PIPESTATUS[0]}"
 '''
