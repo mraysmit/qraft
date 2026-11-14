@@ -1619,6 +1619,10 @@ performing a classpath lookup. A request for `/` may redirect to `/ui/` when the
 interface is enabled. An unknown extensionless `GET` below `/ui/` falls back to
 `index.html` for client-side routing. Missing named assets return `404`; API,
 metrics, health, and debugging paths must never fall back to the frontend.
+Whether a last segment has an extension is read from the path as sent, before
+decoding, and the interface writes a dot in a route's name as `%2E`, so a view
+such as a service named `api.v2` is still a route; the decoded path is what is
+checked and looked up.
 
 At request time, the server renders a small non-cacheable `index.html` template
 with a safely JSON-encoded bootstrap object containing public runtime settings,
@@ -1635,7 +1639,10 @@ the browser pointing at removed bundles.
 
 Responses set an explicit content type, `X-Content-Type-Options: nosniff`, a
 restrictive content security policy, and the same configured security headers as
-the API server. Compressed variants may be packaged and selected from
+the API server. The policy allows inline styles only with the request's nonce.
+Ant Design passes it to the styles it adds; a style that a library adds to the
+head without it, such as rc-util's scrollbar measurement, is given it by the
+interface, since only scripts from the server's own origin run on the page. Compressed variants may be packaged and selected from
 `Accept-Encoding`, but the uncompressed resource remains the canonical fallback.
 
 Production uses embedded resources exclusively. A filesystem resource directory

@@ -1,8 +1,8 @@
 # Task List: Embedded Administrative Interface
 
 **Date:** 2026-09-27
-**Last updated:** 2026-11-13 (resumed at the owner's word to continue the implementation work, the backend it waited for being built; Steps 2 and 3 built, test first, with their records, the choices on Step 2's two optional items, and the `<base>` element Step 3 needed; the current state brought up to date; renamed to the date of its last change. Earlier, 2026-10-27, later the same day: Step 2's bootstrap object carries the security profile, from the ACL list's proposal 16. Earlier that day: decision 2 and Step 3: the asset manifest is written as `asset-manifest.json`, the name design section 12.4.1 gives; renamed to the date of its last change. Earlier, 2026-10-21: current-task pointer updated to membership Step 6 after Step 5 completion; this list remains paused after Step 1; renamed with linked documents. Earlier, 2026-10-14: current-task pointer updated to membership Step 5 after cleanup archival. On 2026-10-11: renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: the read APIs, the development proxy, and the reserved segments, after the single-POM list's Phase 4. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: the log audit added to Step 6)
-**Active work:** Resumed 2026-11-13, after a pause from 2026-09-27 until the backend features in [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md) were delivered; Steps 2 and 3 are done and Step 4 is next
+**Last updated:** 2026-11-14 (Steps 2 and 3 reviewed for untested behaviour, with one defect fixed; Step 4 built, test first, and checked in a browser under the enforced policy, with its record; build 68 recorded. Earlier, 2026-11-13: resumed at the owner's word to continue the implementation work, the backend it waited for being built; Steps 2 and 3 built, test first, with their records, the choices on Step 2's two optional items, and the `<base>` element Step 3 needed; the current state brought up to date; renamed to the date of its last change. Earlier, 2026-10-27, later the same day: Step 2's bootstrap object carries the security profile, from the ACL list's proposal 16. Earlier that day: decision 2 and Step 3: the asset manifest is written as `asset-manifest.json`, the name design section 12.4.1 gives; renamed to the date of its last change. Earlier, 2026-10-21: current-task pointer updated to membership Step 6 after Step 5 completion; this list remains paused after Step 1; renamed with linked documents. Earlier, 2026-10-14: current-task pointer updated to membership Step 5 after cleanup archival. On 2026-10-11: renamed with the task lists it links to; nothing else changed that day. On 2026-10-10: renamed with the task lists it links to; nothing else changed that day. On 2026-10-09: the read APIs, the development proxy, and the reserved segments, after the single-POM list's Phase 4. Qraft's two retired words replaced, and the file renamed to the date of its last change. On 2026-10-08: the log audit added to Step 6)
+**Active work:** Resumed 2026-11-13, after a pause from 2026-09-27 until the backend features in [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md) were delivered; Steps 2 to 4 are done and Step 5 is next
 **Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increments UI-0 and UI-1
 **Source plan:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 12.4, 12.4.1, 19.6, and 21; [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md), sections 14 and 15
 **Predecessor:** [`archive/task-list-multi-node-container-acceptance-2026-10-21.md`](../docs/archive/task-list-multi-node-container-acceptance-2026-10-21.md)
@@ -450,6 +450,96 @@ distinguished from state, and colour never the only signal.
   interface uses.
 - The rendered page runs under the enforced content security policy with no
   inline style or script lacking the nonce.
+
+**Status, 2026-11-14: done**, test first, from the check copy; the owner committed the code and tests in `7f3321d`.
+
+- The shapes the views read were taken from a real server and client started
+  from `target/qraft.jar`, not from memory: `/raft/status`, `/health/ready`,
+  `/v1/catalog/services`, `/v1/health/service/{name}`, `/v1/catalog/nodes`,
+  and the error envelope.
+- The typed client, `src/main/ui/src/api/`: zod schemas for those answers,
+  naming only the fields the views read, so a server that adds fields does not
+  break the interface. Each read returns its data with `X-Qraft-Index` and
+  the request ID. A refusal becomes an `ApiError` with its code, retryability,
+  request ID and the `X-Qraft-Leader-Id` hint; an unreachable server is a
+  retryable error with status 0; an answer that is not the expected shape is
+  a `MalformedResponseError`, shown as a failure and never as partial data.
+  Readiness reads `503 not_ready` as an answer with its conditions.
+  `client.test.ts` (11), red first on the missing module.
+- The views, `src/main/ui/src/views/`, each at its own address below the
+  interface's path, so reload, bookmarks and the back button work; the server
+  already answers such addresses with `index.html`. No router library: a
+  small one in `routing.tsx` (reversible).
+  - The shell: the top bar with Services and Nodes and Clients; a banner that
+    cannot be dismissed on a development server without access control (UI/UX
+    design section 3.7); the status strip.
+  - The status strip: the answering node, its role, the leader, the term and
+    readiness in words, with the security profile and whether access control
+    is on. Not ready, no known leader, fenced storage and removal are
+    persistent messages. Quorum and lag wait for the membership API.
+  - Services, the landing page: health by its worst instance, in words with a
+    mark as well as colour, instance count, tags, tenant and namespace,
+    datacenter and region; services needing attention first. One read per
+    service, as decision 5 says, until UI-2's summary endpoint.
+  - Service detail: Overview, Instances (with each node's status, which is not
+    shown as health), Health Checks (the client's observation shown apart
+    from the time the servers accepted it, and an expired check said so), and
+    Metadata (tags, metadata, and the indexes).
+  - Nodes and Clients: client rows with status in words, node ID, version,
+    registration and last heartbeat ("No heartbeat yet" rather than a blank),
+    and owned services and failing checks counted from the services read.
+    The view says a node has no tenant or namespace, and that server rows wait
+    for the membership API.
+  - Every read shows its applied index, keeps the last result while it is
+    repeated, and on failure offers "Read again".
+  - `views.test.tsx` (23) and `routing.test.ts` (4). The route tests were
+    seen to fail without the encoding of a name's dots.
+- A service name with a dot, `api.v2`, would have given
+  `/ui/services/api.v2`, which the handler took for a file: a reload answered
+  404. The interface now writes a name's dots as `%2E`, and `AdminUiHandler`
+  decides "file or view" from the path as sent, while it still checks and
+  looks up the decoded path
+  (`aViewAddressWhoseNameHasAnEncodedDotIsAViewNotAFile`, red first; an
+  encoded `..` segment is still refused).
+- The server-mode test, `runtime.AdminUiDataContractTest` (2): a single-node
+  server with the interface enabled, a node registered with a service and a
+  passing check; the base path read from the page's bootstrap object; each
+  read the client makes answered below it, with the fields and JSON types the
+  schemas require and the index on catalog reads; and a refusal in the error
+  envelope. It passed when written, the server's answers being what the
+  schemas were taken from.
+- The content security policy, checked in headless Chrome against a server
+  from the jar, after the jsdom tests passed: Chrome blocked one style.
+  rc-util measures the scrollbar whenever an Ant Design table mounts
+  (`getScrollBarSize`, from rc-table), with a style it inserts and removes at
+  once and that cannot carry a nonce. jsdom enforces no policy, and the test
+  looked at the document after the style was gone. `Root.test.tsx` now
+  records every style as it is inserted, and was red on that one; `csp.ts`
+  gives a style the bundle adds to the head without a nonce the request's
+  nonce (`csp.test.ts`, 3). Only scripts from the server's origin run, so
+  such a style is the interface's own; a style in markup still needs the
+  nonce. Chrome then loaded Services, a service, Nodes and Clients, and a
+  service named with a dot, with no violation and no console message.
+- jsdom has no `matchMedia` and does not compute a pseudo-element's style, and
+  logged the second as an error; `setupTests.ts` supplies both, so the Vitest
+  output carries no error line.
+- A `mvn package` without `clean` packaged the previous bundle beside the new:
+  Vite empties its own output, not `target/classes`. `EmbeddedUiResourcesTest`
+  now requires every file below `assets/` to be one the manifest lists (red
+  on that incremental tree), and the root `pom.xml` removes
+  `target/classes/META-INF/qraft/ui` in `initialize` (`maven-clean-plugin`
+  3.5.0, already in the local repository).
+- The bundle is 997 kB, 312 kB gzipped, with the table, tabs and descriptions;
+  Vite warns above 500 kB. Pre-compression, left from Step 2, and splitting
+  are not done: decided to leave both to a later step, reversible; nothing in
+  this list's gates depends on size.
+- Exit, from the check copy with no `node` or `npm` on the `PATH`:
+  `mvn clean install` passed the default suite, 1,997, every coverage gate,
+  and Vitest, 49, in 4 min 52 s. The jar holds the index, the manifest and one
+  bundle, and no `.map` file. Audit of the surefire reports and the Maven log,
+  547 files: 568 error lines and 504 stack traces, all flagged; no JVM crash
+  file (`logs/step4-install2-20261114-114410.log`). The probe server's and
+  client's logs: no error line.
 
 ## 9. Step 5: Packaged-artifact and container acceptance
 

@@ -563,6 +563,20 @@ second line, `Channel Pipeline: [SslHandler#0, ...]`. Jenkins puts its own times
 checker took it for a new event; it now looks for an event's start after Jenkins's prefix. The same checker gives
 build 66's recorded audit exactly. The logs are in `logs/jenkins/Qraft-67/`.
 
+## Build 68, 2026-11-14
+
+Build 68 ran on `bf945df`, the administrative interface's Steps 2 and 3 with the fixes of 2026-11-13: the first
+build of the interface's frontend on the Linux node. Started from the `mraysmit` workstation at 11:10 local time, it
+passed in 28 min 33 s: default 1,993 with every coverage gate met, end-to-end 29, and Docker and `slow` 51, 2,073 in
+all, with no failures, errors or skips; Vitest's 9 passed in each of the three Maven runs.
+
+The frontend build reached the network it needs. `frontend-maven-plugin` came from Maven Central; Node v24.22.3 was
+downloaded from nodejs.org into the job's Maven repository, `Qraft@repository`, in 2 s, so later builds find it
+there; and each `npm ci` added the lockfile's 228 packages from the npm registry in 3 s. The audit, over the console,
+the archived logs (24 Docker archive folders) and the test reports, 873 files, found 1,253 error lines, all flagged,
+and 882 stack traces, none unflagged; no `too_many_pings` and no JVM crash file. The logs are in
+`logs/jenkins/Qraft-68/`.
+
 ## Local runs, 2026-11-07
 
 Two runs of the three suites from the copy at `C:\qx7`, against Docker Desktop, in place of Jenkins while the work
