@@ -662,6 +662,15 @@ pom's `skipVitest` following `-DskipTests` (`BuildPipelineContractTest`, red fir
 error lines, 1,166 flagged; the 8 unflagged are that failure's report and Maven's lines after it; 852 stack traces,
 all flagged. The logs are in `logs/jenkins/Qraft-75/`.
 
+## Build 76, 2026-11-14
+
+Build 76 ran on `541ede3`, UI-3 with build 75's fixes. Started from the `mraysmit` workstation at 19:04 local time, it
+passed in 30 min 33 s: default 2,028 with every coverage gate met, end-to-end 31, and Docker and `slow` 52, 2,111 in
+all, with no failures, errors or skips. Vitest's 95 passed in the default stage, and did not run in the end-to-end and
+Docker stages (`-DskipVitest=true`). The audit, over the console, the archived logs (25 Docker archive folders) and the
+test reports, 907 files, found 1,175 error lines, all flagged, and 857 stack traces, none unflagged; no
+`too_many_pings` and no JVM crash file. The logs are in `logs/jenkins/Qraft-76/`.
+
 ## Local runs, 2026-11-07
 
 Two runs of the three suites from the copy at `C:\qx7`, against Docker Desktop, in place of Jenkins while the work
