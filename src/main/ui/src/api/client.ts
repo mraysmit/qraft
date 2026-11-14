@@ -18,15 +18,35 @@ import { z, type ZodType } from 'zod';
 import {
   type CatalogNode,
   CatalogNodeSchema,
+  type CheckEntry,
+  CheckEntrySchema,
   ErrorEnvelopeSchema,
   type HealthEntry,
   HealthEntrySchema,
+  type Namespace,
+  NamespaceSchema,
   type RaftStatus,
   RaftStatusSchema,
   ReadySchema,
   type ServiceNames,
   ServiceNamesSchema,
+  type ServiceSummary,
+  ServiceSummarySchema,
+  type Tenant,
+  TenantSchema,
 } from './schemas';
+
+/** The tenant and namespace a catalog or health read is confined to (UI/UX design section 3.2). */
+export interface Scope {
+  tenant: string;
+  namespace: string;
+}
+
+/** The scope a server reads when a request names none. */
+export const DEFAULT_SCOPE: Scope = { tenant: 'default', namespace: 'default' };
+
+/** The states the check listing takes: every check, or those in one health state. */
+export type CheckState = 'any' | 'unknown' | 'passing' | 'warning' | 'critical' | 'maintenance';
 
 /** An answer with the read metadata the server sent with it. */
 export interface Read<T> {
@@ -70,22 +90,29 @@ export class MalformedResponseError extends Error {
   }
 }
 
-/** The reads the Stage 1 views make, all through the public HTTP API. */
+/**
+ * The reads the views make, all through the public HTTP API. Each catalog and health read names its scope, the
+ * default when none is given; a node, the Raft status and readiness have none.
+ */
 export interface QraftApi {
   raftStatus(): Promise<Read<RaftStatus>>;
   readiness(): Promise<Read<Readiness>>;
   nodes(): Promise<Read<CatalogNode[]>>;
-  services(): Promise<Read<ServiceNames>>;
-  serviceHealth(name: string): Promise<Read<HealthEntry[]>>;
+  services(scope?: Scope): Promise<Read<ServiceNames>>;
+  serviceHealth(name: string, scope?: Scope): Promise<Read<HealthEntry[]>>;
+  servicesSummary(scope?: Scope): Promise<Read<ServiceSummary[]>>;
+  checks(state: CheckState, scope?: Scope): Promise<Read<CheckEntry[]>>;
+  tenants(): Promise<Read<Tenant[]>>;
+  namespaces(tenant: string): Promise<Read<Namespace[]>>;
 }
 
 /** A client for the API below `apiBasePath`, the bootstrap object's base path, which ends with `/`. */
 export function createApi(apiBasePath: string, fetcher: typeof fetch = fetch): QraftApi {
   const base = apiBasePath.endsWith('/') ? apiBasePath : `${apiBasePath}/`;
 
-  async function send(path: string): Promise<Response> {
+  async function send(path: string, headers: Record<string, string> = {}): Promise<Response> {
     try {
-      return await fetcher(base + path, { headers: { Accept: 'application/json' } });
+      return await fetcher(base + path, { headers: { Accept: 'application/json', ...headers } });
     } catch (failure) {
       const reason = failure instanceof Error ? failure.message : String(failure);
       throw new ApiError(`/${path}`, 0, 'unreachable', `The server could not be reached: ${reason}`, true, null, null);
@@ -123,8 +150,8 @@ export function createApi(apiBasePath: string, fetcher: typeof fetch = fetch): Q
     return parsed.data;
   }
 
-  async function read<T>(path: string, schema: ZodType<T>): Promise<Read<T>> {
-    const response = await send(path);
+  async function read<T>(path: string, schema: ZodType<T>, headers: Record<string, string> = {}): Promise<Read<T>> {
+    const response = await send(path, headers);
     const content = await body(path, response);
     if (!response.ok) throw refusal(path, response, content);
     return { data: parse(path, response, schema, content), index: indexOf(response), requestId: requestIdOf(response) };
@@ -133,8 +160,15 @@ export function createApi(apiBasePath: string, fetcher: typeof fetch = fetch): Q
   return {
     raftStatus: () => read('raft/status', RaftStatusSchema),
     nodes: () => read('v1/catalog/nodes', z.array(CatalogNodeSchema)),
-    services: () => read('v1/catalog/services', ServiceNamesSchema),
-    serviceHealth: (name) => read(`v1/health/service/${encodeURIComponent(name)}`, z.array(HealthEntrySchema)),
+    services: (scope = DEFAULT_SCOPE) => read('v1/catalog/services', ServiceNamesSchema, scopeHeaders(scope)),
+    serviceHealth: (name, scope = DEFAULT_SCOPE) =>
+      read(`v1/health/service/${encodeURIComponent(name)}`, z.array(HealthEntrySchema), scopeHeaders(scope)),
+    servicesSummary: (scope = DEFAULT_SCOPE) =>
+      read('v1/internal/ui/services', z.array(ServiceSummarySchema), scopeHeaders(scope)),
+    checks: (state, scope = DEFAULT_SCOPE) =>
+      read(`v1/health/state/${state}`, z.array(CheckEntrySchema), scopeHeaders(scope)),
+    tenants: () => read('v1/tenants', z.array(TenantSchema)),
+    namespaces: (tenant) => read('v1/namespaces', z.array(NamespaceSchema), { 'X-Qraft-Tenant': tenant }),
     async readiness() {
       const path = 'health/ready';
       const response = await send(path);
@@ -151,6 +185,10 @@ export function createApi(apiBasePath: string, fetcher: typeof fetch = fetch): Q
       throw refusal(path, response, content);
     },
   };
+}
+
+function scopeHeaders(scope: Scope): Record<string, string> {
+  return { 'X-Qraft-Tenant': scope.tenant, 'X-Qraft-Namespace': scope.namespace };
 }
 
 function requestIdOf(response: Response): string | null {
