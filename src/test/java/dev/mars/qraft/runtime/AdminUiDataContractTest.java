@@ -174,11 +174,79 @@ class AdminUiDataContractTest {
         assertEquals(refused.headers().firstValue("X-Request-Id").orElse(""), envelope.path("requestId").asText());
     }
 
+    @Test
+    void theScopedReadsAreAnsweredInTheScopeTheHeadersNameInTheFieldsTheInterfaceReads() throws Exception {
+        // UI-2 task list, Step 4: the scope selector's tenancy reads, the services summary and the check listing, as
+        // client.ts sends them and schemas.ts reads them.
+        startServer();
+        URI origin = URI.create("http://127.0.0.1:" + server.port());
+        assertEquals(200, send(origin, "PUT", "/v1/tenant", "{\"Name\":\"acme\"}", Map.of()).statusCode());
+        assertEquals(200, send(origin, "PUT", "/v1/namespace", "{\"Name\":\"prod\"}", Map.of("X-Qraft-Tenant", "acme"))
+                .statusCode());
+        catalog = new HttpCatalogClient(HttpClient.newHttpClient(), JSON, List.of(origin), "client-b", "acme", "prod",
+                "dc1", "eu-west", Duration.ofSeconds(2));
+        assertInstanceOf(CatalogOutcome.Success.class, catalog.register(new ServiceDefinition("pay-1", "payments",
+                "127.0.0.1", 8082, List.of("v2"), Map.of(), true).withCheckIds(List.of("http")))
+                .get(10, TimeUnit.SECONDS));
+        assertInstanceOf(ObservationOutcome.Accepted.class, catalog.observe(new CheckObservation("pay-1", "http",
+                CheckStatus.WARNING, 1, Instant.now(), Duration.ofSeconds(30), true, "slow", Duration.ZERO))
+                .get(10, TimeUnit.SECONDS));
+        URI api = origin.resolve(bootstrap(get(origin, "/ui/")).path("apiBasePath").asText());
+        Map<String, String> acmeProd = Map.of("X-Qraft-Tenant", "acme", "X-Qraft-Namespace", "prod");
+
+        JsonNode tenants = read(api, "v1/tenants", false, Map.of());
+        for (JsonNode tenant : tenants) fields(tenant, "tenant", Map.of("Name", Type.TEXT, "Description", Type.TEXT));
+        assertTrue(tenants.findValuesAsText("Name").contains("acme"), tenants.toString());
+        JsonNode namespaces = read(api, "v1/namespaces", false, Map.of("X-Qraft-Tenant", "acme"));
+        for (JsonNode namespace : namespaces) {
+            fields(namespace, "namespace", Map.of("Name", Type.TEXT, "Tenant", Type.TEXT, "Description", Type.TEXT));
+        }
+        assertEquals(List.of("default", "prod"), namespaces.findValuesAsText("Name"));
+
+        JsonNode summary = read(api, "v1/internal/ui/services", true, acmeProd);
+        assertEquals(1, summary.size(), summary.toString());
+        fields(summary.get(0), "service summary", Map.ofEntries(Map.entry("name", Type.TEXT),
+                Map.entry("tenantId", Type.TEXT), Map.entry("namespace", Type.TEXT), Map.entry("tags", Type.TEXT_LIST),
+                Map.entry("instanceCount", Type.INTEGER), Map.entry("health", Type.OBJECT),
+                Map.entry("datacenters", Type.TEXT_LIST), Map.entry("regions", Type.TEXT_LIST),
+                Map.entry("modifyIndex", Type.INTEGER)));
+        fields(summary.get(0).path("health"), "health counts", Map.of("unknown", Type.INTEGER, "passing", Type.INTEGER,
+                "warning", Type.INTEGER, "critical", Type.INTEGER, "maintenance", Type.INTEGER));
+        assertEquals("prod", summary.get(0).path("namespace").asText());
+        assertEquals(1, summary.get(0).path("health").path("warning").asInt());
+
+        JsonNode checks = read(api, "v1/health/state/any", true, acmeProd);
+        assertEquals(1, checks.size(), checks.toString());
+        fields(checks.get(0), "check entry", Map.ofEntries(Map.entry("serviceId", Type.TEXT),
+                Map.entry("serviceName", Type.TEXT), Map.entry("nodeId", Type.TEXT_OR_NULL),
+                Map.entry("tenantId", Type.TEXT), Map.entry("namespace", Type.TEXT), Map.entry("checkId", Type.TEXT),
+                Map.entry("status", Type.TEXT), Map.entry("required", Type.BOOLEAN),
+                Map.entry("sequenceNumber", Type.INTEGER), Map.entry("observedAt", Type.TEXT),
+                Map.entry("acceptedAt", Type.TEXT), Map.entry("deadline", Type.TEXT), Map.entry("expired", Type.BOOLEAN),
+                Map.entry("output", Type.TEXT_OR_NULL), Map.entry("deregisterAfterMillis", Type.INTEGER)));
+        assertTrue(checks.get(0).has("nodeStatus"), "nodeStatus is present, null for a node with no entry");
+        assertTrue(HEALTH.contains(checks.get(0).path("status").asText()), checks.toString());
+        assertEquals(0, read(api, "v1/health/state/any", true, Map.of()).size(), "the default scope holds no check");
+    }
+
+    private HttpResponse<String> send(URI origin, String method, String path, String body, Map<String, String> headers)
+            throws Exception {
+        HttpRequest.Builder request = HttpRequest.newBuilder(origin.resolve(path)).timeout(Duration.ofSeconds(5))
+                .header("Content-Type", "application/json").method(method, HttpRequest.BodyPublishers.ofString(body));
+        headers.forEach(request::header);
+        return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
     /** A read below the API base path: 200, JSON, and, for a catalog read, the applied index the views show. */
     private JsonNode read(URI api, String path, boolean indexed) throws Exception {
-        HttpResponse<String> response = http.send(HttpRequest.newBuilder(api.resolve(path))
-                .header("Accept", "application/json").timeout(Duration.ofSeconds(5)).GET().build(),
-                HttpResponse.BodyHandlers.ofString());
+        return read(api, path, indexed, Map.of());
+    }
+
+    private JsonNode read(URI api, String path, boolean indexed, Map<String, String> headers) throws Exception {
+        HttpRequest.Builder request = HttpRequest.newBuilder(api.resolve(path))
+                .header("Accept", "application/json").timeout(Duration.ofSeconds(5)).GET();
+        headers.forEach(request::header);
+        HttpResponse<String> response = http.send(request.build(), HttpResponse.BodyHandlers.ofString());
         assertEquals(200, response.statusCode(), path + " " + response.body());
         assertTrue(response.headers().firstValue("Content-Type").orElse("").startsWith("application/json"), path);
         if (indexed) {
