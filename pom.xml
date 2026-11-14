@@ -34,6 +34,13 @@
         <test.excludedGroups>docker,slow,e2e</test.excludedGroups>
         <pitest.version>1.30.0</pitest.version>
         <pitest-junit5.version>1.2.3</pitest-junit5.version>
+        <!-- The administrative interface (src/main/ui), built in generate-resources: the plugin downloads this Node,
+             with the npm it bundles, into target/, so a machine without Node builds the same JAR -->
+        <frontend-maven-plugin.version>1.15.4</frontend-maven-plugin.version>
+        <node.version>v24.22.3</node.version>
+        <ui.directory>${project.basedir}/src/main/ui</ui.directory>
+        <!-- Vitest runs with the Java tests in mvn test, and is skipped with them -->
+        <skipTests>false</skipTests>
     </properties>
 
     <dependencyManagement>
@@ -214,7 +221,70 @@
         <!-- The one executable jar: target/qraft.jar -->
         <finalName>qraft</finalName>
 
+        <resources>
+            <resource>
+                <directory>${project.basedir}/src/main/resources</directory>
+            </resource>
+            <!-- The administrative interface's build output, below META-INF/qraft/ui/ (design section 12.4.1);
+                 it is never committed -->
+            <resource>
+                <directory>${project.build.directory}/generated-resources/ui</directory>
+            </resource>
+        </resources>
+
         <plugins>
+            <plugin>
+                <groupId>com.github.eirslett</groupId>
+                <artifactId>frontend-maven-plugin</artifactId>
+                <version>${frontend-maven-plugin.version}</version>
+                <configuration>
+                    <workingDirectory>${ui.directory}</workingDirectory>
+                    <installDirectory>${project.build.directory}/node</installDirectory>
+                    <nodeVersion>${node.version}</nodeVersion>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>install-node-and-npm</id>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>install-node-and-npm</goal>
+                        </goals>
+                    </execution>
+                    <!-- npm ci installs exactly the committed lockfile and never rewrites it -->
+                    <execution>
+                        <id>npm-ci</id>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>npm</goal>
+                        </goals>
+                        <configuration>
+                            <arguments>ci</arguments>
+                        </configuration>
+                    </execution>
+                    <!-- Type-checks and builds into target/generated-resources/ui, in every build -->
+                    <execution>
+                        <id>npm-build</id>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>npm</goal>
+                        </goals>
+                        <configuration>
+                            <arguments>run build</arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>vitest</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>npm</goal>
+                        </goals>
+                        <configuration>
+                            <arguments>test</arguments>
+                            <skip>${skipTests}</skip>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>

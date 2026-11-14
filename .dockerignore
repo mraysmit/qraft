@@ -44,3 +44,6 @@ scripts/
 LICENSE
 NOTICE
 OPEN_SOURCE_USAGE.md
+
+# npm dependencies of the administrative interface
+**/node_modules/

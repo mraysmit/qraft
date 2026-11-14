@@ -38,6 +38,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
@@ -104,7 +105,16 @@ class RaftNodeSystemEventsTest {
                     new QraftStateStore(), RaftNodeMode.volatileMode()).events(journal(ids.get(i))));
         }
         ManualRaftClusterFixture.startAll(nodes);
+        // A node records a leadership event after its state changes and before it tells its state listeners, so
+        // isLeader() can change before the event is written; a listener's call marks the event recorded.
+        CompletableFuture<RaftNode.State> led = new CompletableFuture<>();
+        CompletableFuture<RaftNode.State> leftLeadership = new CompletableFuture<>();
+        nodes[0].addStateChangeListener(state -> {
+            if (state == RaftNode.State.LEADER) led.complete(state);
+            else if (led.isDone()) leftLeadership.complete(state);
+        });
         RaftNode leader = cluster.elect(nodes[0]);
+        await(led);
         long term = leader.getCurrentTerm();
 
         assertEquals(List.of("raft.leadership_gained"), types(journal("e1")));
@@ -116,6 +126,7 @@ class RaftNodeSystemEventsTest {
         IntentionalErrorsHelper.expect(IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
         InMemoryTransportSimulatorFixture.createPartition(Set.of("e1"), Set.of("e2", "e3"));
         cluster.heartbeatUntilSteppedDown(leader);
+        await(leftLeadership);
         assertEquals(List.of("raft.leadership_gained", "raft.leadership_lost"), types(journal("e1")));
         EventEnvelope lost = events(journal("e1")).getLast();
         assertEquals(EventSeverity.WARNING, lost.severity());

@@ -94,6 +94,42 @@ class SharedDockerClusterFreshnessTest {
     }
 
     @Test
+    void theInterfacesInstalledDependenciesAreNotABuildInput() throws Exception {
+        // Every mvn test reinstalls them with npm ci, which writes files such as node_modules/.package-lock.json at
+        // the time it runs; the lockfile is the input they come from.
+        Path lockfile = repositoryRoot.resolve("src/main/ui/package-lock.json");
+        Path installed = repositoryRoot.resolve("src/main/ui/node_modules/.package-lock.json");
+        Path jar = repositoryRoot.resolve("target/qraft.jar");
+        Files.createDirectories(installed.getParent());
+        Files.createDirectories(jar.getParent());
+        Files.writeString(lockfile, "{}");
+        Files.writeString(installed, "{}");
+        Files.writeString(jar, "current jar");
+        Files.setLastModifiedTime(lockfile, FileTime.from(Instant.parse("2026-01-01T00:00:00Z")));
+        Files.setLastModifiedTime(jar, FileTime.from(Instant.parse("2026-01-02T00:00:00Z")));
+        Files.setLastModifiedTime(installed, FileTime.from(Instant.parse("2026-01-03T00:00:00Z")));
+
+        assertDoesNotThrow(() -> SharedDockerClusterFixture.assertRuntimeJarIsCurrent(repositoryRoot, jar));
+    }
+
+    @Test
+    void theInterfacesLockfileIsABuildInput() throws Exception {
+        Path lockfile = repositoryRoot.resolve("src/main/ui/package-lock.json");
+        Path jar = repositoryRoot.resolve("target/qraft.jar");
+        Files.createDirectories(lockfile.getParent());
+        Files.createDirectories(jar.getParent());
+        Files.writeString(lockfile, "{}");
+        Files.writeString(jar, "old jar");
+        Files.setLastModifiedTime(jar, FileTime.from(Instant.parse("2026-01-01T00:00:00Z")));
+        Files.setLastModifiedTime(lockfile, FileTime.from(Instant.parse("2026-01-02T00:00:00Z")));
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> SharedDockerClusterFixture.assertRuntimeJarIsCurrent(repositoryRoot, jar));
+
+        assertTrue(error.getMessage().contains("package-lock.json"), error.getMessage());
+    }
+
+    @Test
     void lifecycleCommandsUseDockerWithoutRemovingVolumes() {
         List<List<String>> commands = new ArrayList<>();
 

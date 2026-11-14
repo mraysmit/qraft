@@ -26,8 +26,11 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.InputStreamReader;
 import java.io.IOException;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermission;
@@ -40,7 +43,6 @@ import java.util.Set;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
-import java.util.stream.Stream;
 
 /**
  * Test fixture that manages shared Docker cluster containers for integration tests.
@@ -818,9 +820,21 @@ public final class SharedDockerClusterFixture {
 
         Path productionSources = repositoryRoot.resolve("src/main");
         if (Files.isDirectory(productionSources)) {
-            try (Stream<Path> sources = Files.walk(productionSources)) {
-                sources.filter(Files::isRegularFile).forEach(candidates::add);
-            }
+            // The interface's node_modules is installed from its lockfile by every mvn test (npm ci), at the time it
+            // runs; the lockfile is the input, so the installed tree is never walked.
+            Files.walkFileTree(productionSources, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) {
+                    return directory.getFileName().toString().equals("node_modules")
+                            ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
+                    if (attributes.isRegularFile()) candidates.add(file);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
         }
 
         return candidates.stream()

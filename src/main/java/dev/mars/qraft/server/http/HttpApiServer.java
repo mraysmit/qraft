@@ -44,9 +44,11 @@ import dev.mars.qraft.raft.grpc.MembershipResponse;
 import dev.mars.qraft.raft.grpc.RemoveServerRequest;
 import dev.mars.qraft.raft.RaftNode;
 import dev.mars.qraft.raft.RaftStatus;
+import dev.mars.qraft.server.config.SecurityProfile;
 import dev.mars.qraft.server.ui.AdminUiConfig;
 import dev.mars.qraft.server.ui.AdminUiHandler;
 import dev.mars.qraft.server.ui.UiAssets;
+import dev.mars.qraft.server.ui.UiBootstrap;
 import dev.mars.qraft.raft.CommandOutcomeUnknownException;
 import dev.mars.qraft.state.NodeCommand;
 import dev.mars.qraft.state.CatalogCommand;
@@ -75,6 +77,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -279,6 +282,18 @@ public final class HttpApiServer implements AutoCloseable {
     public HttpApiServer(int port, RaftNode raftNode, QraftStateStore stateStore, Clock clock,
                          AdminUiConfig ui, UiAssets assets, Duration raftTimeout, MembershipService membership,
                          AclHttpSettings acl, Optional<ServerTls> tls) throws IOException {
+        this(port, raftNode, stateStore, clock, ui, assets, raftTimeout, membership, acl, tls,
+                SecurityProfile.DEVELOPMENT);
+    }
+
+    /**
+     * @param profile {@code server.security.profile} (ACL list, proposal 16), which the administrative interface's
+     *                bootstrap object names so the interface can show it
+     */
+    public HttpApiServer(int port, RaftNode raftNode, QraftStateStore stateStore, Clock clock,
+                         AdminUiConfig ui, UiAssets assets, Duration raftTimeout, MembershipService membership,
+                         AclHttpSettings acl, Optional<ServerTls> tls, SecurityProfile profile) throws IOException {
+        Objects.requireNonNull(profile, "profile");
         this.acl = Objects.requireNonNull(acl, "acl");
         this.membership = membership;
         this.raftTimeout = Objects.requireNonNull(raftTimeout, "raftTimeout");
@@ -302,8 +317,12 @@ public final class HttpApiServer implements AutoCloseable {
         context("/health/live", requestAware(this::liveness));
         context("/health/ready", requestAware(this::readiness));
         if (ui.enabled()) {
+            // The interface calls the API on this listener at its root: /v1, /raft and /health. No feature flag is
+            // defined yet; later increments add those their views need.
+            UiBootstrap bootstrap = new UiBootstrap("/", ui.path(), Map.of(), acl.enabled() ? "token" : "none",
+                    profile.name().toLowerCase(Locale.ROOT));
             context(ui.path(), requestAware(new AdminUiHandler(ui.path(),
-                    Objects.requireNonNull(assets, "assets are required for an enabled interface"))));
+                    Objects.requireNonNull(assets, "assets are required for an enabled interface"), bootstrap)));
         }
         context("/raft/status", requestAware(this::raftStatus));
         context("/v1/operator/raft/configuration", requestAware(this::raftConfiguration));

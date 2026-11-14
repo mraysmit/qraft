@@ -8,6 +8,12 @@
 - **PowerShell 7**, for the UTF-8 log-capture commands below.
 - Optional: the **Maven daemon**, `mvnd`. It takes the same arguments as `mvn`, and keeps Maven warm between
   runs, which saves most of the start-up cost of each small run.
+- **Network access to nodejs.org and the npm registry**, for the administrative interface (`src/main/ui`). No
+  Node installation is needed: in `generate-resources` of every build, `frontend-maven-plugin` puts the Node
+  that `pom.xml` names into `target/node` (cached in the local Maven repository after the first download), runs
+  `npm ci` on the committed lockfile, and builds into `target/generated-resources/ui`. In `test`, Vitest runs the
+  interface's tests after the Java tests; `-DskipTests` skips both. `EmbeddedUiResourcesTest` reads what that
+  build embeds, so it passes only after a Maven build, not from compiled classes alone.
 
 In PowerShell, quote every `-D` argument, for example `"-Dtest=RaftNodeTest"`. Otherwise PowerShell splits
 the argument at the dot.

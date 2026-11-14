@@ -61,3 +61,6 @@ Desktop.ini
 .history/** 
 temp/**
 m2-repo/**
+
+# Administrative interface: npm dependencies (installed by the build with npm ci)
+src/main/ui/node_modules/

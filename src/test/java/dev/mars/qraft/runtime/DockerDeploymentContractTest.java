@@ -21,8 +21,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.io.IOException;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -428,12 +432,10 @@ class DockerDeploymentContractTest {
                 root.resolve("docker/Dockerfile"), root.resolve("docker/docker-entrypoint.sh"));
         for (Path candidate : roots) {
             if (Files.isDirectory(candidate)) {
-                try (var paths = Files.walk(candidate)) {
-                    for (Path file : paths.filter(Files::isRegularFile).toList()) {
-                        String content = Files.readString(file);
-                        assertFalse(content.contains("System.getenv("), file.toString());
-                        assertFalse(content.matches("(?s).*QRAFT_[A-Z0-9_]+.*"), file.toString());
-                    }
+                for (Path file : projectFiles(candidate)) {
+                    String content = Files.readString(file);
+                    assertFalse(content.contains("System.getenv("), file.toString());
+                    assertFalse(content.matches("(?s).*QRAFT_[A-Z0-9_]+.*"), file.toString());
                 }
             } else {
                 String content = Files.readString(candidate);
@@ -446,16 +448,36 @@ class DockerDeploymentContractTest {
     @Test
     void noDockerfileBuildsProjectArtifacts() throws IOException {
         Path root = Path.of("").toAbsolutePath();
-        try (var paths = Files.walk(root)) {
-            for (Path dockerfile : paths
-                    .filter(path -> path.getFileName().toString().equals("Dockerfile"))
-                    .toList()) {
-                String content = Files.readString(dockerfile);
-                assertFalse(content.contains("FROM maven:"), dockerfile.toString());
-                assertFalse(content.matches("(?s).*RUN\\s+.*\\bmvn\\b.*"), dockerfile.toString());
-                assertFalse(content.contains("COPY --from="), dockerfile.toString());
-            }
+        for (Path dockerfile : projectFiles(root).stream()
+                .filter(path -> path.getFileName().toString().equals("Dockerfile"))
+                .toList()) {
+            String content = Files.readString(dockerfile);
+            assertFalse(content.contains("FROM maven:"), dockerfile.toString());
+            assertFalse(content.matches("(?s).*RUN\\s+.*\\bmvn\\b.*"), dockerfile.toString());
+            assertFalse(content.contains("COPY --from="), dockerfile.toString());
         }
+    }
+
+    /**
+     * The regular files below {@code start}, leaving out the administrative interface's {@code node_modules}: npm
+     * installs it from the committed lockfile in every build, and it is other projects' code, binaries included.
+     */
+    private static List<Path> projectFiles(Path start) throws IOException {
+        List<Path> files = new ArrayList<>();
+        Files.walkFileTree(start, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attributes) {
+                return directory.getFileName() != null && directory.getFileName().toString().equals("node_modules")
+                        ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) {
+                if (attributes.isRegularFile()) files.add(file);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+        return files;
     }
 
     private static int occurrences(String value, String target) {

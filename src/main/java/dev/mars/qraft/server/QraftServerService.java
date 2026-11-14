@@ -293,7 +293,8 @@ public class QraftServerService {
                     config.getAdminUi(), UiAssets.forConfig(config.getAdminUi()), HttpApiServer.DEFAULT_RAFT_TIMEOUT,
                     membership, new AclHttpSettings(config.isAclEnabled(), Path.of(config.getRaftStoragePath()),
                             config.getAclDefaultPolicy().orElse(null),
-                            config.getInitialManagementSecret().map(AclSecrets::hash).orElse(null)), httpsTls);
+                            config.getInitialManagementSecret().map(AclSecrets::hash).orElse(null)), httpsTls,
+                    config.getSecurityProfile());
             this.httpApiServer = Optional.of(healthServer);
             // A follower sends the writes it receives to the leader over the Raft port, and the leader answers those
             // forwarded to it on its own routes (write forwarding list, decisions 1 and 2).

@@ -1625,7 +1625,10 @@ with a safely JSON-encoded bootstrap object containing public runtime settings,
 such as the API base path, administrative content path, enabled feature flags,
 authentication mode, and the security profile proposed by
 [`task-list-acl-and-tokens-2026-11-07.md`](../docs/archive/task-list-acl-and-tokens-2026-11-07.md)
-(proposal 16). Secrets and bearer credentials are never included.
+(proposal 16). Secrets and bearer credentials are never included. The template
+also gains a `<base>` element naming the administrative path: the build links its
+assets relative to the page, because the path is configurable, and a client-side
+route below it must still resolve them below the path.
 Content-hashed assets are immutable and may receive long-lived cache headers;
 `index.html` and the asset manifest require revalidation so upgrades do not leave
 the browser pointing at removed bundles.

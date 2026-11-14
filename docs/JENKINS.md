@@ -546,6 +546,23 @@ the collector only once Tempo is healthy (`depends_on` with `service_healthy` in
 files, pinned by `DockerDeploymentContractTest`). The Docker audit had not caught it: the collector writes
 tab-separated levels, and the error was text inside a WARN line. The logs are in `logs/jenkins/Qraft-66/`.
 
+## Build 67, 2026-11-13
+
+Build 67 ran on `4d5f6d5`, the first Jenkins run since build 66: it is the first to run transport security and
+every list after it, and the fixes of 2026-11-13, on a fresh image. Started from the `mraysmit` workstation at
+21:16 local time, it passed in 28 min 37 s: default 1,972 with every coverage gate met, end-to-end 29, and Docker
+and `slow` 51, 2,052 in all, with no failures, errors or skips. The audit, over the console, the archived logs
+(24 Docker archive folders) and the test reports, 871 files, found 1,702 error lines, all flagged, and 1,142
+stack traces, none unflagged; no `too_many_pings` and no JVM crash file.
+
+The audit's checker, written for this build, first reported six unflagged traces and 18 error lines (frames
+through `TransportContext.fatal`), all from `GrpcRaftTlsTest`. Each trace opens under a flagged event,
+`RAFT_PEER_UNREACHABLE` from `aServerWithACertificateFromAnotherCaTakesNoPart` or
+`aServerWhoseCertificateNamesAnotherHostIsNotReachedWhileTheHostIsChecked`, whose exception message runs to a
+second line, `Channel Pipeline: [SslHandler#0, ...]`. Jenkins puts its own timestamp on that line too, and the
+checker took it for a new event; it now looks for an event's start after Jenkins's prefix. The same checker gives
+build 66's recorded audit exactly. The logs are in `logs/jenkins/Qraft-67/`.
+
 ## Local runs, 2026-11-07
 
 Two runs of the three suites from the copy at `C:\qx7`, against Docker Desktop, in place of Jenkins while the work

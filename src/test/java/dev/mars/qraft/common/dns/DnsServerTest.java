@@ -198,16 +198,28 @@ class DnsServerTest {
     void aPortHeldForUdpIsLeftForTheNextCandidate() throws Exception {
         // On 2026-11-13 every retry of a picked port was refused for UDP: Windows gives bind(0) ports in sequence, so
         // a run of ports another process held for UDP refused them all. Each attempt now takes a port of its own.
+        // After the two held ports the candidates are random, as in production, and every one tried is recorded, so
+        // the test does not rely on a port staying free between choosing it and the server's bind.
         InetAddress loopback = InetAddress.getByName("127.0.0.1");
         try (DatagramSocket first = new DatagramSocket(new InetSocketAddress(loopback, 0));
              DatagramSocket second = new DatagramSocket(new InetSocketAddress(loopback, 0))) {
-            int free = freePort(loopback);
-            java.util.Iterator<Integer> candidates = List.of(first.getLocalPort(), second.getLocalPort(), free)
-                    .iterator();
+            List<Integer> tried = new ArrayList<>();
+            java.util.function.IntSupplier candidates = () -> {
+                int candidate = switch (tried.size()) {
+                    case 0 -> first.getLocalPort();
+                    case 1 -> second.getLocalPort();
+                    default -> java.util.concurrent.ThreadLocalRandom.current()
+                            .nextInt(DnsServer.DYNAMIC_FIRST, DnsServer.DYNAMIC_LAST + 1);
+                };
+                tried.add(candidate);
+                return candidate;
+            };
 
-            server = DnsServer.start("127.0.0.1", 0, resolver(), candidates::next);
+            server = DnsServer.start("127.0.0.1", 0, resolver(), candidates);
 
-            assertEquals(free, server.port(), "the two ports held for UDP were passed over");
+            assertEquals(List.of(first.getLocalPort(), second.getLocalPort()), tried.subList(0, 2), "tried first");
+            assertTrue(tried.size() >= 3, "the two ports held for UDP were passed over: " + tried);
+            assertEquals(tried.getLast(), server.port(), "the server listens on the last port it tried");
         }
     }
 
@@ -224,16 +236,6 @@ class DnsServerTest {
 
             assertTrue(failed.getMessage().contains(String.valueOf(held[0]))
                     && failed.getMessage().contains(String.valueOf(held[1])), failed.getMessage());
-        }
-    }
-
-    /** A port that was free for both UDP and TCP a moment ago. */
-    private static int freePort(InetAddress loopback) throws Exception {
-        try (ServerSocket tcp = new ServerSocket()) {
-            tcp.bind(new InetSocketAddress(loopback, 0));
-            try (DatagramSocket udp = new DatagramSocket(new InetSocketAddress(loopback, tcp.getLocalPort()))) {
-                return tcp.getLocalPort();
-            }
         }
     }
 
