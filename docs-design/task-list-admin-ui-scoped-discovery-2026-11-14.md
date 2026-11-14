@@ -234,6 +234,20 @@ view with no policy violation.
 2. The implementation plan's view map and section 4 brought up to date; this
    list completed and archived.
 
+**Status, 2026-11-14: in progress.**
+
+- The implementation plan's sections 4 and 5 were rewritten from the review of
+  section 2: each capability's state on 2026-11-14, the new reads in section
+  4.1, a Done status in the view map, and open question 2 marked settled.
+- Jenkins build 72, on `3b6a706`, failed in the default stage: the Java suite
+  passed, 2,013, and one Vitest test timed out at 5 s, the Health Checks filter
+  test, which took 3.7 s on the workstation. Its role queries over the whole
+  page took nearly all of it; with a selector for the rows and label queries
+  for the controls it takes 0.4 s. `Root.test.tsx`'s per-view nonce test, 4.8 s
+  on Jenkins, is split into one test per view, and three view tests over 2 s
+  use text and label queries. Vitest, 73, passes, the slowest 2.5 s while the
+  files run together (`docs/JENKINS.md`, build 72). Uncommitted.
+
 ## 10. Out of scope
 
 - The consistency selector and live updates (UI-4).

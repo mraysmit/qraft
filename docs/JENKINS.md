@@ -611,6 +611,19 @@ audit, over the console, the archived logs (25 Docker archive folders) and the t
 error lines, all flagged, and 882 stack traces, none unflagged; no `too_many_pings` and no JVM crash file. The logs
 are in `logs/jenkins/Qraft-71/`.
 
+## Build 72, 2026-11-14
+
+Build 72 ran on `3b6a706`, UI-2's Steps 1 to 4, started from the `mraysmit` workstation at 15:11 local time, and
+failed in the default stage after 3 min 22 s, so the end-to-end and Docker stages did not run. The Java suite passed,
+2,013 with every coverage gate met, among them the summary, listing and contract tests; Vitest failed one of its 70:
+`checks.test.tsx`, "filters by status, and by text over service, instance, node, check and output", timed out at
+Vitest's 5 s limit. It took 3.7 s on the workstation. Its five `getAllByRole('row')` and four other role queries
+computed every element's role, name and visibility over a page that holds Ant Design's styles; with a selector for
+the rows and label queries for the controls it takes 0.4 s. The per-view nonce test in `Root.test.tsx` took 4.8 s
+in this build; it is split into one test per view. Three more view tests over 2 s use text and label queries for the
+same elements. The audit, 581 files, found 849 error lines, 841 flagged; the 8 unflagged are that failure's report
+and Maven's lines after it. The logs are in `logs/jenkins/Qraft-72/`.
+
 ## Local runs, 2026-11-07
 
 Two runs of the three suites from the copy at `C:\qx7`, against Docker Desktop, in place of Jenkins while the work

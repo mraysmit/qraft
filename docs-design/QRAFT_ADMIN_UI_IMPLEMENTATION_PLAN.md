@@ -1,7 +1,7 @@
 # Qraft Administrative UI Implementation Plan
 
 **Status:** Agreed 2026-09-27; UI-0 and UI-1 delivered 2026-11-14; open questions 2 to 4 are decided when their increments start
-**Last updated:** 2026-11-14 (UI-0 and UI-1 delivered, and their task list archived, its links updated. Earlier, 2026-11-13: UI-0 resumed: section 4 notes what the backend lists built since it was last updated, to be reviewed when UI-2 starts; the embedded-interface task-list link refreshed. Earlier, 2026-11-01: `409 policy_in_use` removed, as the owner decided for the ACL list's proposal 18. Earlier the same day: the ACL list aligned with Consul; its proposal numbers stand. Earlier the same day: dated task-list link refreshed. Earlier, 2026-10-31: section 4: a health entry carries its node's status, and `?passing` leaves out an unreachable node's instances. Earlier, 2026-10-30: open question 5's facts corrected: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after the review of the interface against the ACL list: access control moves from UI-6 to UI-5 with the security profile, sign-in, status, tokens, policies and explanations; server removal joins UI-5; section 4.2 gains the profile and the explanation endpoint; the client rows' data; open questions 5 and 6. Earlier that day: section 3: the asset manifest's file name in the Vite build; sections 4.2, 5 and 6: tokens and policies come from the ACL list, and roles and authentication methods are reserved; the embedded-interface task-list link refreshed. Earlier, 2026-10-26: section 4.1, the service writes are on `PUT /v1/catalog/register` and `/deregister` after the client list's Phase 1. Earlier, 2026-10-21: dated task-list links refreshed; the administrative interface remains paused after Step 1 while backend delivery continues. Earlier, 2026-10-09: section 4.1: the node list is at `/v1/catalog/nodes`, the node writes are listed, and bare `/health` is gone, after the single-POM list's Phase 4. On 2026-10-05: the build location and the tenancy owner, after the move to one Maven project; section 4 was brought up to date with scoped reads and the Raft operator endpoints on 2026-10-02)
+**Last updated:** 2026-11-14 (sections 4 and 5 reviewed against the code as UI-2 started, and the view map given a Done status. Earlier the same day: UI-0 and UI-1 delivered, and their task list archived, its links updated. Earlier, 2026-11-13: UI-0 resumed: section 4 notes what the backend lists built since it was last updated, to be reviewed when UI-2 starts; the embedded-interface task-list link refreshed. Earlier, 2026-11-01: `409 policy_in_use` removed, as the owner decided for the ACL list's proposal 18. Earlier the same day: the ACL list aligned with Consul; its proposal numbers stand. Earlier the same day: dated task-list link refreshed. Earlier, 2026-10-31: section 4: a health entry carries its node's status, and `?passing` leaves out an unreachable node's instances. Earlier, 2026-10-30: open question 5's facts corrected: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after the review of the interface against the ACL list: access control moves from UI-6 to UI-5 with the security profile, sign-in, status, tokens, policies and explanations; server removal joins UI-5; section 4.2 gains the profile and the explanation endpoint; the client rows' data; open questions 5 and 6. Earlier that day: section 3: the asset manifest's file name in the Vite build; sections 4.2, 5 and 6: tokens and policies come from the ACL list, and roles and authentication methods are reserved; the embedded-interface task-list link refreshed. Earlier, 2026-10-26: section 4.1, the service writes are on `PUT /v1/catalog/register` and `/deregister` after the client list's Phase 1. Earlier, 2026-10-21: dated task-list links refreshed; the administrative interface remains paused after Step 1 while backend delivery continues. Earlier, 2026-10-09: section 4.1: the node list is at `/v1/catalog/nodes`, the node writes are listed, and bare `/health` is gone, after the single-POM list's Phase 4. On 2026-10-05: the build location and the tenancy owner, after the move to one Maven project; section 4 was brought up to date with scoped reads and the Raft operator endpoints on 2026-10-02)
 **Design:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md) (what the interface is) and
 [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections
 12.4, 12.4.1, and 19.6 (how it is packaged and served)
@@ -72,103 +72,102 @@ section 4.1, after reviewing the `peegeeq-management-ui` and
 
 ## 4. API readiness
 
-**Note, 2026-11-13.** The tables below were last brought up to date on
-2026-11-01, before the backend lists of 2026-11-04 to 2026-11-09 (handover,
-section 1). Since then, rows of section 4.2 have been built in part or in full:
-consistency modes and blocking queries on catalog and key/value reads; the
-key/value API with indexes and compare-and-set; sessions and locks; replicated
-tenants and namespaces with their API; ACL tokens and policies; `jwt` and
-`kubernetes` authentication methods with login; the bounded event journal with
-its query and watch; an audit file; the storage's size and snapshot age in
-`/raft/status`; each server's health on the leader; and each service instance's
-creation and modification indexes. UI-0 and UI-1 need none of them. The tables
-are to be reviewed row by row against the code when UI-2 starts, and until then
-are not a record of what is missing.
+**Reviewed against the code on 2026-11-14**, when UI-2 started
+([`task-list-admin-ui-scoped-discovery-2026-11-14.md`](task-list-admin-ui-scoped-discovery-2026-11-14.md),
+section 2). The tables had last been brought up to date on 2026-11-01, before
+the backend lists of 2026-11-04 to 2026-11-09 (handover, section 1); each row
+now states what the code provides on that date.
 
 ### 4.1 What exists
 
 | Endpoint | Provides | Gaps for the UI |
 |---|---|---|
-| `GET /raft/status` | node, server ID, role, term, leader, commit, applied, and last log index, snapshot index, fenced and removed flags, read as one consistent view | Describes only the answering node: no peers, match or next index, lag, or quorum |
-| `GET /v1/operator/raft/configuration` | each configured server: server ID, name, address, voter, leader, as the answering server holds them | No reachability, match or next index, last contact, or lag |
-| `DELETE /v1/operator/raft/peer` | removal of a server, guarded by the operator token and forwarded to the leader | A mutation: not offered by the interface before UI-5 |
+| `GET /raft/status` | node, server ID, role, term, leader, commit, applied, and last log index, snapshot index, fenced and removed flags, the storage's size and the snapshot's age, read as one consistent view | Describes only the answering node |
+| `GET /v1/operator/raft/configuration` | each configured server: server ID, name, address, voter, leader, as the answering server holds them | No reachability or lag |
+| `GET /v1/operator/autopilot/health` | the leader's view of each server: healthy, last contact, last index and term, as Consul's | No match or next index, replication lag as a figure, or quorum |
+| `DELETE /v1/operator/raft/peer` | removal of a server, guarded by the operator token and forwarded to the leader | A mutation: offered from UI-5 |
 | `GET /health/live`, `/health/ready` | liveness, and readiness with the conditions the server does not meet | None for the status strip |
-| `GET /v1/catalog/nodes` | nodes in name order: name, address, datacenter, region, metadata (the client's version is the entry `qraft.version`), status, and the registration and heartbeat times as ISO-8601 instants; carries `X-Qraft-Index` | No owned-service or failing-check counts. A node belongs to no tenant or namespace, so there is nothing to scope |
-| `GET /v1/catalog/services` | service names with their tags, in the scope of the `X-Qraft-Tenant` and `X-Qraft-Namespace` headers | No health or instance count; one request per service to learn more; no listing of the scopes that exist |
-| `GET /v1/catalog/service/{name}` | instances in the requested scope: identity, address, port, tags, metadata, health, tenant, namespace, datacenter, region, enabled | No registration source or last-change index |
-| `GET /v1/health/service/{name}` (`?passing`, which leaves out an unreachable node's instances) | instances in the requested scope with their node's status and their checks: status, sequence, observed, accepted, deadline, expired, output, deregistration delay | One service at a time; no cross-service check listing |
-| `PUT /v1/catalog/register`, `/deregister` (service bodies) | replicated service writes, scoped by `X-Qraft-Tenant`, `X-Qraft-Namespace`, and `X-Qraft-Node` headers | Unauthenticated |
-| `PUT /v1/catalog/register`, `/deregister`, `/node/heartbeat` | replicated node writes for the node that `X-Qraft-Node` names; a deregistration removes the node's services and checks too | Unauthenticated. Mutations: not offered by the interface before UI-5 |
-| Response metadata | `X-Qraft-Index` (applied index) on catalog reads; `X-Qraft-Leader-Id` and a structured error envelope (`code`, `message`, `retryable`) on errors | No answering-node header; no consistency mode |
-| gRPC `DistributedStateService` | key/value `Put`, `Get`, `Delete`, `List` | Not reachable from a browser; no HTTP equivalent |
+| `GET /v1/tenants`, `GET /v1/namespaces` | the replicated tenants, and the namespaces of the tenant `X-Qraft-Tenant` names | None for the scope selector |
+| `GET /v1/catalog/nodes` | nodes in name order: name, node ID, address, datacenter, region, metadata (the client's version is `qraft.version`), status, and the registration and heartbeat times; carries `X-Qraft-Index` | No owned-service or failing-check counts. A node has no tenant or namespace |
+| `GET /v1/catalog/services` | service names with their tags, in the scope of the `X-Qraft-Tenant` and `X-Qraft-Namespace` headers | Superseded for the Services list by the summary |
+| `GET /v1/internal/ui/services` | one entry per service in the read's scope: tags, instance count, instances by health, datacenters and regions, and the highest `modifyIndex` (since 2026-11-14) | None for the Services list |
+| `GET /v1/catalog/service/{name}` | instances in the requested scope: identity, address, port, tags, metadata, health, tenant, namespace, datacenter, region, enabled, and the creation and modification indexes | No registration source |
+| `GET /v1/health/service/{name}` (`?passing`) | instances in the requested scope with their node's status and their checks: status, sequence, observed, accepted, deadline, expired, output, deregistration delay | One service at a time |
+| `GET /v1/health/state/{state}` | the accepted checks across the services of the read's scope, in one health state or all, with instance, service, node and node status (since 2026-11-14) | A declared check without a result is not listed |
+| `GET /v1/operator/events` | the bounded event journal: query and watch, by category (system, domain, observation, audit) | Bounded; no durable history |
+| `/v1/kv`, `/v1/session` | key/value with indexes and compare-and-set; sessions and locks | Not yet in the interface (Stage 2) |
+| `/v1/acl/...`, `/v1/acl/login` | tokens, policies, roles, auth methods, binding rules, `token/self`, `explain`, tokens by policy, `409 acl_lockout`, login | Not yet in the interface (UI-5) |
+| `PUT /v1/catalog/register`, `/deregister`, `/node/heartbeat`, `/check/observe` | replicated node and service writes, scoped by `X-Qraft-Tenant`, `X-Qraft-Namespace` and `X-Qraft-Node` | Mutations: offered from UI-5 |
+| Read options and metadata | `stale`, `consistent`, `index` and `wait` on catalog and key/value reads; `X-Qraft-Index`, `X-Qraft-Known-Leader`, `X-Qraft-Last-Contact`; `X-Qraft-Leader-Id` and the error envelope (`code`, `message`, `retryable`, `requestId`) on errors | No header naming the answering server |
 | OpenTelemetry Prometheus exporter | metrics on a separate port (`prometheusPort`, default 9464) | Not on the API listener; the UI only links to it |
 
-### 4.2 What is missing
+### 4.2 What is missing, and what was built
 
-| Capability | Needed by | Owner |
+| Capability | Needed by | State on 2026-11-14 |
 |---|---|---|
-| Tenant- and namespace-scoped client reads, and a listing of the scopes present. Catalog and health reads are scoped as of 2026-09-27 | Scope selector; every Discover view | Server HTTP API |
-| Services summary: health, instance count, scope, and last change per service | Services landing page | Server HTTP API |
-| Cross-service health-check listing with filters | Health Checks page | Server HTTP API |
-| Cluster membership detail: role, match and next index, last contact, lag, reachability, quorum. The configured servers are listed as of 2026-09-29 (section 4.1) | Status strip, Cluster Overview, Raft Members, server rows in Nodes | Raft (leader-side view) and HTTP API |
-| Storage and snapshot state: WAL size and health, fenced and lock state, snapshot index, term, age, and last result, retained boundary | Storage & Snapshots, Cluster Overview | Raft persistence and HTTP API |
-| Transition-queue depth and saturation | Cluster Overview | Raft sequencer and HTTP API |
-| Bounded event journal and query | Events page, Events tabs, recent elections and failures | `qraft-events` (event architecture sections 8 to 10), not started |
-| Redacted effective configuration | Configuration page | Server HTTP API |
-| Read consistency modes (`default`, `consistent`, `stale`) and an answering-node header | Consistency selector, read metadata (UI/UX design section 12) | Server HTTP API |
-| Blocking queries (last index plus bounded wait) or watches | Live updates, Watches | Server HTTP API (platform design section 12.3) |
-| HTTP key/value API with indexes and compare-and-set | Key/Value browser | Server HTTP API over the existing replicated state |
-| Sessions and locks | Sessions, Locks | Platform design section 11, not started |
-| Replicated tenants and namespaces with an API | Tenants, Namespaces, scope selector options | Tenancy work; nothing exists today (`qraft-tenant` was removed on 2026-10-04) |
-| Authentication, authorization, and the token and policy resources | Any mutation; Tokens, Policies; permission-shaped navigation; the token menu | [`task-list-acl-and-tokens-2026-11-07.md`](../docs/archive/task-list-acl-and-tokens-2026-11-07.md), proposed to follow the client list |
-| The security profile and authentication mode in the bootstrap data; `installedFromFile` on the management token | Security status, banners, sign-in | ACL list, proposals 12 and 16; UI-0's bootstrap object |
-| Explaining a decision, `POST /v1/acl/explain`; the tokens linking to a policy, `GET /v1/acl/tokens?policy=`, which is Consul's | Explanations; policy pages; policy deletion | ACL list, proposals 18 and 19 |
-| Lock-out refusal, `409 acl_lockout` | Token and policy review steps | ACL list, proposal 17 |
-| Node ID and name conflicts | Client rows | Client list, Phase 2 |
-| A client's readiness, server endpoint, and last reconciliation | Client rows | None: only the client knows them (open question 6) |
-| Roles, authentication methods, and login | Roles, Auth Methods | None: out of the ACL list's scope (its section 7); reserved (UI/UX design section 2) |
-| Durable audit sink and query | Audit page | Events and security |
-| Topology, intentions, routing, gateways, peering, federation | Connect and Multi-cluster sections | No platform contract; reserved (UI/UX design section 2) |
+| Tenant- and namespace-scoped reads, and a listing of the scopes | Scope selector; every Discover view | Built: the headers since 2026-09-27, the tenancy API since the tenancy list; used by UI-2 |
+| Services summary | Services landing page | Built 2026-11-14 (UI-2) |
+| Cross-service health-check listing | Health Checks page | Built 2026-11-14 (UI-2) |
+| Cluster membership detail: match and next index, lag, reachability, quorum | Status strip, Cluster Overview, Raft Members, server rows in Nodes | Partial: the leader's view of each server (`/v1/operator/autopilot/health`); no match or next index, lag figure or quorum |
+| Storage and snapshot state: WAL size and health, fenced and lock state, snapshot index, term, age and last result, retained boundary | Storage & Snapshots, Cluster Overview | Partial: size, snapshot index and age, and fencing in `/raft/status` |
+| Transition-queue depth and saturation | Cluster Overview | Missing |
+| Bounded event journal and query | Events page and tabs | Built (events list): query and watch |
+| Redacted effective configuration | Configuration page | Missing |
+| Read consistency modes and an answering-node header | Consistency selector, read metadata | Partial: the modes are built; no answering-node header |
+| Blocking queries or watches | Live updates, Watches | Built: `index` and `wait` on catalog and key/value reads; the event watch |
+| HTTP key/value API with indexes and compare-and-set | Key/Value browser | Built |
+| Sessions and locks | Sessions, Locks | Built |
+| Replicated tenants and namespaces with an API | Tenants, Namespaces, scope selector | Built (tenancy list) |
+| Authentication, authorization, tokens and policies | Mutations; Tokens, Policies; the token menu | Built (ACL list) |
+| The security profile and authentication mode in the bootstrap data; `installedFromFile` | Security status, banners, sign-in | Built (UI-0's bootstrap object; the token answers) |
+| `POST /v1/acl/explain`; tokens by policy | Explanations; policy pages | Built |
+| Lock-out refusal, `409 acl_lockout` | Token and policy review steps | Built |
+| Node ID and name conflicts | Client rows | Built (client list, Phase 2): node IDs and `node_name_reserved` |
+| A client's readiness, server endpoint, and last reconciliation | Client rows | Missing: only the client knows them (open question 6) |
+| Roles, authentication methods and login | Roles, Auth Methods | Built (authentication and audit list) |
+| Durable audit sink and query | Audit page | Partial: an audit file, and audit events in the bounded journal; no durable query |
+| Topology, intentions, routing, gateways, peering, federation | Connect and Multi-cluster | Reserved: no platform contract |
 
 ## 5. View map
 
 Status key:
 
+- **Done:** the interface has the view.
 - **Ready:** existing APIs supply the view's core data.
 - **Partial:** existing APIs supply part of it; the rest waits for the named
   capability.
 - **Blocked:** the view needs a missing capability before it can exist.
 - **Reserved:** no platform contract exists; not planned.
 
-| Stage | View (UI/UX section) | Status | Needs (section 4.2) |
+| Stage | View (UI/UX section) | Status | Notes (section 4.2) |
 |---|---|---|---|
-| 1 | Shell and status strip (4.1, 4.2) | Partial | Leader, term, and role are ready. Quorum and lag need membership. The scope selector needs scoped reads. Consistency needs consistency modes. |
-| 1 | Services list (5.1) | Partial | Ready by calling the catalog and then health once per service. The summary endpoint removes that fan-out and adds last change. |
-| 1 | Service detail: Overview, Instances, Health Checks, Metadata (5.1) | Ready | Registration source and indexes need the catalog to record them. |
-| 1 | Service detail: Events tab | Blocked | Event journal |
-| 1 | Nodes and Clients: client rows (5.2) | Partial | Owned services and failing checks can be derived from the catalog; a summary field avoids that. A node has no scope. The node ID needs the client list's Phase 2. Readiness, server endpoint, and last reconciliation need clients to report them (open question 6). |
-| 1 | Nodes and Clients: server rows (5.2) | Blocked | Membership; storage state |
-| 1 | Health Checks, cross-service (5.3) | Partial | Ready by iterating services; the listing endpoint makes it scale. |
-| 1 | Cluster Overview (9.1) | Partial | Answering-node Raft state and service and client totals are ready. Quorum, lag, queue, WAL, snapshot, and recent events are blocked. |
-| 1 | Raft Members (9.2) | Blocked | Membership |
-| 1 | Storage & Snapshots (9.3) | Blocked | Storage state |
-| 1 | Events, read-only (9.4) | Blocked | Event journal |
+| 1 | Shell and status strip (4.1, 4.2) | Done, in part | UI-1 and UI-2: role, leader, term, readiness, security, and the scope selector. Quorum and lag need membership detail; the consistency selector is UI-4's. |
+| 1 | Services list (5.1) | Done | UI-2: on the summary. Registration source is not recorded. |
+| 1 | Service detail: Overview, Instances, Health Checks, Metadata (5.1) | Done | UI-1, in the selected scope since UI-2. |
+| 1 | Service detail: Events tab | Ready | The event journal |
+| 1 | Nodes and Clients: client rows (5.2) | Done, in part | UI-1. Readiness, server endpoint and last reconciliation need clients to report them (open question 6). |
+| 1 | Nodes and Clients: server rows (5.2) | Partial | The leader's view of each server; storage state in part |
+| 1 | Health Checks, cross-service (5.3) | Done | UI-2: on the check listing. |
+| 1 | Cluster Overview (9.1) | Partial | Quorum, lag and queue depth are missing. |
+| 1 | Raft Members (9.2) | Partial | The leader's view of each server; no match or next index |
+| 1 | Storage & Snapshots (9.3) | Partial | Size, snapshot age and fencing only |
+| 1 | Events, read-only (9.4) | Ready | The event journal |
 | 1 | Configuration, read-only (9.6) | Blocked | Redacted configuration |
-| 1 | Metrics (9.5) | Partial | A configured link to the external dashboard is ready. Built-in summaries wait for bounded metric reads. |
-| 2 | Service register, update, deregister (5.1, 11) | Partial | The API exists; authentication and audit must come first. |
-| 2 | Key/Value CRUD and compare-and-set (7.1) | Blocked | HTTP key/value API; authentication |
-| 2 | Sessions and Locks (7.2) | Blocked | Sessions and locks |
-| 2 | Watches (7.3) | Blocked | Blocking queries or watches; event journal |
-| 2 | Mutation outcomes and audit display (11) | Blocked | Authentication; audit events |
-| 2 | Access: Status, sign-in, token menu, banners (10.2.1, 10.2.2) | Blocked | ACL list: the profile, the bootstrap data, `GET /v1/acl/token/self` |
-| 2 | Access: Tokens, Policies, Explain (10.2.3 to 10.2.6) | Blocked | ACL list: the token and policy API, explanations, the integrity refusals |
-| 2 | Server removal (9.2) | Partial | The API exists; authentication must come first |
+| 1 | Metrics (9.5) | Partial | A configured link to the external dashboard is ready. |
+| 2 | Service register, update, deregister (5.1, 11) | Ready | Authentication and audit exist; open question 5 is undecided. |
+| 2 | Key/Value CRUD and compare-and-set (7.1) | Ready | |
+| 2 | Sessions and Locks (7.2) | Ready | |
+| 2 | Watches (7.3) | Partial | Blocking reads and the event watch |
+| 2 | Mutation outcomes and audit display (11) | Partial | Audit events in the journal; no durable query |
+| 2 | Access: Status, sign-in, token menu, banners (10.2.1, 10.2.2) | Ready | |
+| 2 | Access: Tokens, Policies, Explain (10.2.3 to 10.2.6) | Ready | |
+| 2 | Server removal (9.2) | Ready | Behind sign-in, UI-5 |
 | 3 | Topology, Intentions, Routing, Gateways (6) | Reserved | Platform contracts |
 | 4 | Datacenters, Regions, Peers, Federation (8) | Reserved | Platform contracts |
-| 4 | Tenants and Namespaces (10.1) | Blocked | Replicated tenants and namespaces |
-| 4 | Roles, Auth Methods (10.2) | Reserved | Roles, authentication methods, and login |
-| 4 | Audit (10.3) | Blocked | Durable audit sink |
-| All | Live updates and pause (12) | Blocked | Blocking queries or watches |
+| 4 | Tenants and Namespaces (10.1) | Ready | |
+| 4 | Roles, Auth Methods (10.2) | Ready | |
+| 4 | Audit (10.3) | Partial | No durable query |
+| All | Live updates and pause (12) | Ready | Blocking reads; UI-4 |
 
 ## 6. Increments
 
@@ -373,7 +372,11 @@ contracts exist.
    is unauthenticated
    ([`task-list-embedded-admin-interface-2026-11-14.md`](../docs/archive/task-list-embedded-admin-interface-2026-11-14.md),
    decision 4).
-2. **Source of scope options.** Until replicated tenants exist (UI-6), should
+2. **Source of scope options.** Settled 2026-11-14 by the code: replicated
+   tenants and namespaces exist with an API (tenancy list), and a registration
+   needs its scope to exist, so the scope selector lists them and UI-2 did not
+   wait ([`task-list-admin-ui-scoped-discovery-2026-11-14.md`](task-list-admin-ui-scoped-discovery-2026-11-14.md),
+   decision 1). The question was: until replicated tenants exist (UI-6), should
    the scope selector list only the scopes present in the catalog, or should
    UI-2 wait for replicated tenants?
 3. **Membership reads.** Only the leader knows its peers' match indexes and

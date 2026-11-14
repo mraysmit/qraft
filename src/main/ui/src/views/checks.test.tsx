@@ -34,8 +34,10 @@ const ENTRIES = {
   db: [entry({ serviceId: 'db-1', serviceName: 'db', health: 'WARNING' }, [{ checkId: 'disk', status: 'WARNING', output: '85% full' }])],
 };
 
+// The table's data rows. A selector, not getAllByRole: computing every element's role and name over the page took most
+// of the filter test's time, which passed 5 s on Jenkins build 72 and timed out.
 function rows(): HTMLElement[] {
-  return screen.getAllByRole('row').filter((row) => row.closest('tbody') !== null && !row.classList.contains('ant-table-placeholder'));
+  return Array.from(document.querySelectorAll<HTMLElement>('tbody tr.ant-table-row'));
 }
 
 beforeEach(() => at('/ui/checks'));
@@ -79,19 +81,19 @@ describe('Health Checks', () => {
     render(<App bootstrap={BOOTSTRAP} api={fakeApi({}, ENTRIES)} />);
     await screen.findByText('85% full');
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Critical' }));
+    fireEvent.click(screen.getByLabelText('Critical'));
     expect(rows()).toHaveLength(1);
     expect(within(rows()[0] as HTMLElement).getByText('web-1')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('radio', { name: 'All' }));
-    fireEvent.change(screen.getByRole('textbox', { name: 'Filter' }), { target: { value: 'client-b' } });
+    fireEvent.click(screen.getByLabelText('All'));
+    fireEvent.change(screen.getByLabelText('Filter'), { target: { value: 'client-b' } });
     expect(rows()).toHaveLength(1);
     expect(within(rows()[0] as HTMLElement).getByText('web-2')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'Filter' }), { target: { value: 'full' } });
+    fireEvent.change(screen.getByLabelText('Filter'), { target: { value: 'full' } });
     expect(within(rows()[0] as HTMLElement).getByText('db-1')).toBeInTheDocument();
 
-    fireEvent.change(screen.getByRole('textbox', { name: 'Filter' }), { target: { value: 'nothing-like-it' } });
+    fireEvent.change(screen.getByLabelText('Filter'), { target: { value: 'nothing-like-it' } });
     expect(screen.getByText('No check matches the filters.')).toBeInTheDocument();
   });
 

@@ -126,7 +126,7 @@ describe('scope selector', () => {
 
     render(<App bootstrap={BOOTSTRAP} api={api} />);
 
-    expect(await screen.findByRole('link', { name: 'web' })).toBeInTheDocument();
+    expect(await screen.findByText('web', { selector: 'a' })).toBeInTheDocument();
     expect(await screen.findByText(/the scopes could not be listed: permission denied/i)).toBeInTheDocument();
     expect(selected('Tenant')).toContain('acme');
   });

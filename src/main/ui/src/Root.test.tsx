@@ -73,35 +73,38 @@ describe('Root', () => {
     expect(await screen.findByRole('link', { name: 'web' })).toBeInTheDocument();
   });
 
-  it('gives every style element Ant Design adds the request nonce, on every view', async () => {
-    const api = fakeApi({}, { web: [entry({ health: 'CRITICAL' }, [{ status: 'CRITICAL', expired: true }])] });
+  // One test per view: walking every view in one test took 4.8 s on Jenkins build 72, against Vitest's 5 s limit.
+  const api = () => fakeApi({}, { web: [entry({ health: 'CRITICAL' }, [{ status: 'CRITICAL', expired: true }])] });
 
+  it('gives every style element Ant Design adds the request nonce, on Services with the development banner', async () => {
     window.history.pushState(null, '', '/ui/');
-    const { unmount } = render(<Root bootstrap={{ ...BOOTSTRAP, authMode: 'none', securityProfile: 'development' }} api={api} />);
-    await screen.findByRole('link', { name: 'web' });
+    render(<Root bootstrap={{ ...BOOTSTRAP, authMode: 'none', securityProfile: 'development' }} api={api()} />);
+    await screen.findByText('web', { selector: 'a' });
     assertEveryStyleCarriesTheNonce();
-    unmount();
+  });
 
+  it('gives every style element Ant Design adds the request nonce, on each tab of a service', async () => {
     window.history.pushState(null, '', '/ui/services/web');
-    const detail = render(<Root bootstrap={BOOTSTRAP} api={api} />);
+    render(<Root bootstrap={BOOTSTRAP} api={api()} />);
     for (const tab of ['Instances', 'Health Checks', 'Metadata']) {
-      fireEvent.click(await screen.findByRole('tab', { name: tab }));
-      await screen.findByRole('tabpanel', { name: tab });
+      fireEvent.click(await screen.findByText(tab, { selector: '.ant-tabs-tab-btn' }));
+      await screen.findByText(tab, { selector: '.ant-tabs-tab-active .ant-tabs-tab-btn' });
     }
     assertEveryStyleCarriesTheNonce();
-    detail.unmount();
+  });
 
+  it('gives every style element Ant Design adds the request nonce, on Nodes and Clients', async () => {
     window.history.pushState(null, '', '/ui/nodes');
-    const nodes = render(<Root bootstrap={BOOTSTRAP} api={api} />);
+    render(<Root bootstrap={BOOTSTRAP} api={api()} />);
     await screen.findByText('client-a');
     assertEveryStyleCarriesTheNonce();
-    nodes.unmount();
+  });
 
+  it('gives every style inserted on Health Checks and in the open scope list the request nonce', async () => {
     // UI-2: the Health Checks page, and the scope selector's open list.
     window.history.pushState(null, '', '/ui/checks?tenant=acme&namespace=prod');
     const inserted = await stylesInsertedDuring(async () => {
-      render(<Root bootstrap={BOOTSTRAP} api={api} />);
-      await screen.findByRole('heading', { name: 'Health Checks' });
+      render(<Root bootstrap={BOOTSTRAP} api={api()} />);
       await screen.findByText('web-1');
       fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Tenant' }));
       await screen.findAllByTitle('acme');

@@ -115,10 +115,10 @@ describe('Services', () => {
 
     render(<App bootstrap={BOOTSTRAP} api={api} />);
 
-    await screen.findByRole('link', { name: 'alpha' });
-    const order = screen.getAllByRole('link', { name: /^(alpha|beta|gamma)$/ }).map((link) => link.textContent);
+    await screen.findByText('alpha', { selector: 'a' });
+    const order = screen.getAllByText(/^(alpha|beta|gamma)$/, { selector: 'a' }).map((link) => link.textContent);
     expect(order).toEqual(['beta', 'gamma', 'alpha']);
-    expect(within(screen.getByRole('link', { name: 'beta' }).closest('tr') as HTMLElement).getByText('Critical'))
+    expect(within(screen.getByText('beta', { selector: 'a' }).closest('tr') as HTMLElement).getByText('Critical'))
       .toBeInTheDocument();
   });
 
@@ -162,10 +162,11 @@ describe('Services', () => {
     });
 
     render(<App bootstrap={BOOTSTRAP} api={api} />);
-    const failure = await screen.findByRole('alert', { name: 'Services could not be read' });
-    fireEvent.click(within(failure).getByRole('button', { name: 'Read again' }));
+    const failure = await screen.findByLabelText('Services could not be read');
+    expect(failure).toHaveAttribute('role', 'alert');
+    fireEvent.click(within(failure).getByText('Read again'));
 
-    expect(await screen.findByRole('link', { name: 'web' })).toBeInTheDocument();
+    expect(await screen.findByText('web', { selector: 'a' })).toBeInTheDocument();
   });
 
   // UI-2 task list, Step 4: one summary read, where UI-1 read each service's health in turn.
@@ -315,14 +316,14 @@ describe('Nodes and Clients', () => {
 describe('navigation', () => {
   it('moves between the views and follows the browser back button', async () => {
     render(<App bootstrap={BOOTSTRAP} api={fakeApi()} />);
-    await screen.findByRole('heading', { name: 'Services' });
+    await screen.findByText('Services', { selector: 'h2' });
 
-    fireEvent.click(within(screen.getByRole('navigation')).getByRole('link', { name: 'Nodes and Clients' }));
-    expect(await screen.findByRole('heading', { name: 'Nodes and Clients' })).toBeInTheDocument();
+    fireEvent.click(within(screen.getByLabelText('Primary')).getByText('Nodes and Clients'));
+    expect(await screen.findByText('Nodes and Clients', { selector: 'h2' })).toBeInTheDocument();
     expect(window.location.pathname).toBe('/ui/nodes');
 
     window.history.back();
-    expect(await screen.findByRole('heading', { name: 'Services' })).toBeInTheDocument();
+    expect(await screen.findByText('Services', { selector: 'h2' })).toBeInTheDocument();
   });
 
   it('says an address it does not know is not a view, and links to Services', async () => {
