@@ -15,7 +15,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { hrefOf, routeOf } from './routing';
+import { DEFAULT_SCOPE } from './api/client';
+import { hrefOf, routeOf, scopeOf } from './routing';
 
 describe('routes', () => {
   it('read the views below the interface path', () => {
@@ -44,5 +45,27 @@ describe('routes', () => {
   it('write the other views below the interface path', () => {
     expect(hrefOf({ view: 'services' }, '/console/')).toBe('/console/');
     expect(hrefOf({ view: 'nodes' }, '/console/')).toBe('/console/nodes');
+    expect(hrefOf({ view: 'checks' }, '/console/')).toBe('/console/checks');
+    expect(routeOf('/console/checks', '/console/')).toEqual({ view: 'checks' });
+  });
+
+  // UI-2 task list, decision 5: the selected scope is in the address, so a view in a scope can be reloaded and shared.
+  it('carry a scope other than the default in the query, and leave the default out', () => {
+    const acme = { tenant: 'acme', namespace: 'prod' };
+
+    expect(hrefOf({ view: 'nodes' }, '/ui/', acme)).toBe('/ui/nodes?tenant=acme&namespace=prod');
+    expect(hrefOf({ view: 'service', name: 'web' }, '/ui/', acme)).toBe('/ui/services/web?tenant=acme&namespace=prod');
+    expect(hrefOf({ view: 'nodes' }, '/ui/', DEFAULT_SCOPE)).toBe('/ui/nodes');
+    expect(hrefOf({ view: 'services' }, '/ui/', { tenant: 'a&b', namespace: 'c d' })).toBe(
+      '/ui/?tenant=a%26b&namespace=c+d',
+    );
+  });
+
+  it('read the scope from the query, the default for what is missing or blank', () => {
+    expect(scopeOf('?tenant=acme&namespace=prod')).toEqual({ tenant: 'acme', namespace: 'prod' });
+    expect(scopeOf('?tenant=acme')).toEqual({ tenant: 'acme', namespace: 'default' });
+    expect(scopeOf('')).toEqual(DEFAULT_SCOPE);
+    expect(scopeOf('?tenant=&namespace=%20')).toEqual(DEFAULT_SCOPE);
+    expect(scopeOf('?tenant=a%26b&namespace=c+d')).toEqual({ tenant: 'a&b', namespace: 'c d' });
   });
 });
