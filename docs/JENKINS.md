@@ -624,6 +624,20 @@ in this build; it is split into one test per view. Three more view tests over 2 
 same elements. The audit, 581 files, found 849 error lines, 841 flagged; the 8 unflagged are that failure's report
 and Maven's lines after it. The logs are in `logs/jenkins/Qraft-72/`.
 
+## Build 73, 2026-11-14
+
+Build 73 ran on `3bf28b1`, the Vitest fix of build 72, started at 15:26 local time, and failed in the default stage
+after 2 min 47 s; the end-to-end and Docker stages did not run. Vitest's 73 passed, the Health Checks filter test
+among them. One Java test of 2,013 failed its log audit:
+`QraftServerWriteForwardingTest.aWriteForwardedToALeaderThisServerStopsFollowingIsAnsweredAtOnceAsPerhapsApplied`
+logged `RaftNode - Failed to retrieve vote from server2` (`UNAVAILABLE`), which no test declared. The test stops the
+leader, server3, and declares it; at 15:28:40.096 server1, without a leader, asked for votes, and at 40.102 the
+test's cleanup began stopping server2, which it had not declared. The cleanup now declares each server it stops, as
+the nine end-to-end classes' cleanups were made to on 2026-11-13; three more classes stopped three servers the same
+way, undeclared, and declare them too: `TenancyEndToEndTest`, `TlsEndToEndTest` and `WriteForwardingEndToEndTest`. The
+audit, 583 files, found 865 error lines and 744 stack traces; the 27 lines and 6 traces unflagged are that error,
+its report, and Maven's lines after it. The logs are in `logs/jenkins/Qraft-73/`.
+
 ## Local runs, 2026-11-07
 
 Two runs of the three suites from the copy at `C:\qx7`, against Docker Desktop, in place of Jenkins while the work

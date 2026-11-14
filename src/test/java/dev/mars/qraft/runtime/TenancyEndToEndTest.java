@@ -23,6 +23,7 @@ import dev.mars.qraft.client.config.ClientConfiguration;
 import dev.mars.qraft.common.ServiceDefinition;
 import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.server.QraftServerService;
+import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
 import dev.mars.qraft.server.config.AppConfig;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Tag;
@@ -75,7 +76,13 @@ class TenancyEndToEndTest {
     void stop() throws Exception {
         CleanupHelper cleanup = new CleanupHelper();
         for (QraftClient client : clients.reversed()) cleanup.run(() -> client.shutdown().get(10, TimeUnit.SECONDS));
-        for (QraftServerService server : servers.reversed()) cleanup.run(() -> server.stop().get(30, TimeUnit.SECONDS));
+        // Each server is stopped on purpose while the others may still send to it: one that holds an election after
+        // another has stopped logs it as unreachable (QraftServerWriteForwardingTest, Jenkins build 73).
+        for (int i = servers.size() - 1; i >= 0; i--) {
+            QraftServerService server = servers.get(i);
+            IntentionalErrorsHelper.expectPeerShutdownDuringCleanup("server" + (i + 1));
+            cleanup.run(() -> server.stop().get(30, TimeUnit.SECONDS));
+        }
         for (RaftExecutorsFixture executor : executors) cleanup.run(() -> executor.close().get(30, TimeUnit.SECONDS));
         cleanup.run(http::close);
         cleanup.rethrow();

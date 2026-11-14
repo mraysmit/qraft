@@ -246,7 +246,14 @@ view with no policy violation.
   for the controls it takes 0.4 s. `Root.test.tsx`'s per-view nonce test, 4.8 s
   on Jenkins, is split into one test per view, and three view tests over 2 s
   use text and label queries. Vitest, 73, passes, the slowest 2.5 s while the
-  files run together (`docs/JENKINS.md`, build 72). Uncommitted.
+  files run together (`docs/JENKINS.md`, build 72). Committed by the owner in
+  `3bf28b1`.
+- Jenkins build 73, on `3bf28b1`, failed in the default stage on a test outside
+  this list: `QraftServerWriteForwardingTest`'s cleanup stopped server2, which
+  it had not declared, while server1 asked for its vote. Its cleanup, and those
+  of `TenancyEndToEndTest`, `TlsEndToEndTest` and `WriteForwardingEndToEndTest`,
+  which stopped three servers the same way, now declare each server they stop;
+  the four classes pass, audit clean. Uncommitted.
 
 ## 10. Out of scope
 

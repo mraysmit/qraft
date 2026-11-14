@@ -67,8 +67,13 @@ class QraftServerWriteForwardingTest {
     @AfterEach
     void stop() throws Exception {
         try {
-            for (QraftServerService server : servers.reversed()) {
-                if (server != null) server.stop().get(30, TimeUnit.SECONDS);
+            // Each server is stopped on purpose while the others may still send to it: on Jenkins build 73 the
+            // one left running held an election after server2 stopped, and logged it as unreachable.
+            for (int i = servers.size() - 1; i >= 0; i--) {
+                QraftServerService server = servers.get(i);
+                if (server == null) continue;
+                IntentionalErrorsHelper.expectPeerShutdownDuringCleanup("server" + (i + 1));
+                server.stop().get(30, TimeUnit.SECONDS);
             }
         } finally {
             for (RaftExecutorsFixture executor : executors) executor.close().get(30, TimeUnit.SECONDS);
