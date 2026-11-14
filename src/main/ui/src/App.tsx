@@ -19,6 +19,8 @@ import type { QraftApi } from './api/client';
 import type { Bootstrap } from './bootstrap';
 import { RouteLink, RouterProvider, useRouter } from './routing';
 import { NodesView } from './views/NodesView';
+import { ChecksView } from './views/ChecksView';
+import { ScopeSelector } from './views/ScopeSelector';
 import { ServiceDetailView } from './views/ServiceDetailView';
 import { ServicesView } from './views/ServicesView';
 import { StatusStrip } from './views/StatusStrip';
@@ -42,8 +44,14 @@ export function App({ bootstrap, api }: { bootstrap: Bootstrap; api: QraftApi })
               <RouteLink to={{ view: 'nodes' }} style={NAV_LINK}>
                 Nodes and Clients
               </RouteLink>
+              <RouteLink to={{ view: 'checks' }} style={NAV_LINK}>
+                Health Checks
+              </RouteLink>
             </Space>
           </nav>
+          <div style={{ marginLeft: 'auto' }}>
+            <ScopeSelector api={api} />
+          </div>
         </Layout.Header>
         {bootstrap.authMode === 'none' && bootstrap.securityProfile === 'development' && (
           // Persistent and not dismissible (UI/UX design section 3.7).
@@ -64,14 +72,16 @@ export function App({ bootstrap, api }: { bootstrap: Bootstrap; api: QraftApi })
 }
 
 function CurrentView({ api }: { api: QraftApi }) {
-  const { route } = useRouter();
+  const { route, scope } = useRouter();
   switch (route.view) {
     case 'services':
-      return <ServicesView api={api} />;
+      return <ServicesView api={api} scope={scope} />;
     case 'service':
-      return <ServiceDetailView key={route.name} api={api} name={route.name} />;
+      return <ServiceDetailView key={route.name} api={api} name={route.name} scope={scope} />;
     case 'nodes':
-      return <NodesView api={api} />;
+      return <NodesView api={api} scope={scope} />;
+    case 'checks':
+      return <ChecksView api={api} scope={scope} />;
     case 'unknown':
       return (
         <Space direction="vertical">
