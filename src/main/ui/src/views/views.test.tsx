@@ -137,7 +137,8 @@ describe('Services', () => {
 
   it('shows a malformed answer as a failure, not as partial data', async () => {
     const api = fakeApi({
-      services: () => Promise.reject(new MalformedResponseError('/v1/catalog/services', 'req-4', 'web: expected array')),
+      servicesSummary: () =>
+        Promise.reject(new MalformedResponseError('/v1/internal/ui/services', 'req-4', 'web: expected object')),
     });
 
     render(<App bootstrap={BOOTSTRAP} api={api} />);
@@ -152,11 +153,11 @@ describe('Services', () => {
     let attempts = 0;
     const working = fakeApi();
     const api = fakeApi({
-      services: () => {
+      servicesSummary: () => {
         attempts += 1;
         return attempts === 1
-          ? Promise.reject(new ApiError('/v1/catalog/services', 0, 'unreachable', 'The server could not be reached', true, null, null))
-          : working.services();
+          ? Promise.reject(new ApiError('/v1/internal/ui/services', 0, 'unreachable', 'The server could not be reached', true, null, null))
+          : working.servicesSummary();
       },
     });
 
@@ -165,6 +166,30 @@ describe('Services', () => {
     fireEvent.click(within(failure).getByRole('button', { name: 'Read again' }));
 
     expect(await screen.findByRole('link', { name: 'web' })).toBeInTheDocument();
+  });
+
+  // UI-2 task list, Step 4: one summary read, where UI-1 read each service's health in turn.
+  it('reads the summary once and no service one at a time', async () => {
+    const scopes = { services: [], serviceHealth: [], servicesSummary: [], checks: [] };
+    render(<App bootstrap={BOOTSTRAP} api={fakeApi({}, { web: [entry()], db: [entry({ serviceId: 'db-1', serviceName: 'db' })] }, scopes)} />);
+
+    await screen.findByRole('link', { name: 'db' });
+
+    expect(scopes.servicesSummary).toHaveLength(1);
+    expect(scopes.serviceHealth).toHaveLength(0);
+    expect(scopes.services).toHaveLength(0);
+  });
+
+  it('gives the instances of each health in words, and the last change', async () => {
+    const api = fakeApi({}, {
+      web: [entry({ health: 'PASSING', modifyIndex: 7 }), entry({ serviceId: 'web-2', health: 'CRITICAL', modifyIndex: 31 })],
+    });
+
+    render(<App bootstrap={BOOTSTRAP} api={api} />);
+
+    const row = (await screen.findByRole('link', { name: 'web' })).closest('tr') as HTMLElement;
+    expect(within(row).getByText('1 critical, 1 passing')).toBeInTheDocument();
+    expect(within(row).getByText('Changed at index 31')).toBeInTheDocument();
   });
 });
 
