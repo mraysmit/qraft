@@ -595,6 +595,26 @@ class HttpApiServerTest {
         assertTrue(store.getNodes().isEmpty());
     }
 
+    @Test
+    void aPathNoRouteServesIsAnsweredNotFoundInTheEnvelopeEvenWithABodyLeftUnread() throws Exception {
+        // On 2026-11-14 theRemovedNodeRoutesAreGone failed once with "HTTP/1.1 header parser received no bytes": the
+        // JDK server answers a path no context serves and closes the connection without reading the body, and a close
+        // with unread input is a reset, which can discard the answer before the client reads it. The race is rare and
+        // not forced here (a 2 MB body was still answered, as HTML, on Windows); the fallback route reads the body
+        // before it answers, so the close is never a reset, and answers in the envelope as every other refusal. A body
+        // over the 512 KB every request may carry is refused 413 before any route.
+        startClientApi();
+        HttpClient client = HttpClient.newHttpClient();
+
+        HttpResponse<String> large = request(client, "/api/v1/clients/register", "POST", "x".repeat(256 * 1024));
+        HttpResponse<String> plain = request(client, "/nowhere", "GET");
+
+        for (HttpResponse<String> response : List.of(large, plain)) {
+            assertRejected(response, 404, "not_found", null);
+            assertEquals("application/json", response.headers().firstValue("Content-Type").orElse(""));
+        }
+    }
+
     /** Asserts the status and the non-retryable envelope, and that the message names {@code reason} when given. */
     private static void assertRejected(HttpResponse<String> response, int status, String code, String reason)
             throws Exception {
