@@ -161,6 +161,8 @@ class HttpApiServerAclEnforcementTest {
                 new Route("GET", "/v1/catalog/services", "", Map.of()),
                 new Route("GET", "/v1/catalog/service/api", "", Map.of()),
                 new Route("GET", "/v1/health/service/api", "", Map.of()),
+                new Route("GET", "/v1/internal/ui/services", "", Map.of()),
+                new Route("GET", "/v1/health/state/any", "", Map.of()),
                 new Route("GET", "/v1/operator/raft/configuration", "", Map.of()),
                 new Route("GET", "/raft/status", "", Map.of()));
 
@@ -542,6 +544,47 @@ class HttpApiServerAclEnforcementTest {
         assertEquals(1, entries.size(), response.body());
         assertEquals("api-1", entries.get(0).get("service").get("serviceId").asText());
         assertEquals("true", response.headers().firstValue(FILTERED).orElse(""));
+    }
+
+    @Test
+    void theServicesSummaryCountsOnlyWhatTheTokenMayRead() throws Exception {
+        // UI-2 task list, Step 1: a service needs service:read, and an instance is counted only with node:read too.
+        serveDenying();
+        arrangeService("api-1", "api", "web-1");
+        arrangeService("api-2", "api", "db-1");
+        arrangeService("db-1", "db", "db-1");
+        String apiOnWeb = token("{\"node\":{\"web-1\":{\"policy\":\"read\"}},\"service\":{\"api\":{\"policy\":\"read\"}}}");
+
+        HttpResponse<String> response = send("GET", "/v1/internal/ui/services", "", Map.of("X-Qraft-Token", apiOnWeb));
+
+        assertEquals(200, response.statusCode(), response.body());
+        JsonNode summary = JSON.readTree(response.body());
+        assertEquals(List.of("api"), names(response, "name"));
+        assertEquals(1, summary.get(0).get("instanceCount").asInt(), "the instance on db-1 is not counted");
+        assertEquals("true", response.headers().firstValue(FILTERED).orElse(""));
+    }
+
+    @Test
+    void theCheckListingListsOnlyTheChecksOfInstancesTheTokenMayRead() throws Exception {
+        // UI-2 task list, Step 2: a check is listed only when its instance could be read, node:read and service:read.
+        serveDenying();
+        arrangeService("api-1", "api", "web-1");
+        arrangeService("api-2", "api", "db-1");
+        String writer = token("{\"service_prefix\":{\"\":{\"policy\":\"write\"}},\"node_prefix\":{\"\":{\"policy\":\"write\"}}}");
+        for (String[] instance : new String[][] {{"api-1", "web-1"}, {"api-2", "db-1"}}) {
+            HttpResponse<String> observed = send("PUT", "/v1/catalog/check/observe", observation(instance[0], "http"),
+                    Map.of("X-Qraft-Token", writer, "X-Qraft-Node", instance[1]));
+            assertEquals(200, observed.statusCode(), observed.body());
+        }
+        String apiOnWeb = token("{\"node\":{\"web-1\":{\"policy\":\"read\"}},\"service\":{\"api\":{\"policy\":\"read\"}}}");
+
+        HttpResponse<String> response = send("GET", "/v1/health/state/any", "", Map.of("X-Qraft-Token", apiOnWeb));
+
+        assertEquals(200, response.statusCode(), response.body());
+        assertEquals(List.of("api-1"), names(response, "serviceId"));
+        assertEquals("true", response.headers().firstValue(FILTERED).orElse(""));
+        assertEquals(2, names(send("GET", "/v1/health/state/any", "", Map.of("X-Qraft-Token", writer)), "serviceId")
+                .size(), "a token that may read both sees both");
     }
 
     // ---- Operator ----
