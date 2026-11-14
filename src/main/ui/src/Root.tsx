@@ -15,19 +15,25 @@
  */
 
 import { ConfigProvider } from 'antd';
-import { StrictMode } from 'react';
+import { StrictMode, useMemo } from 'react';
 import { App } from './App';
+import { createApi, type QraftApi } from './api/client';
 import type { Bootstrap } from './bootstrap';
+import { nonceRuntimeStyles } from './csp';
 
 /**
  * Everything the page renders. Ant Design adds its styles at run time; the request's nonce lets the server's content
- * security policy allow them.
+ * security policy allow them. The API is the server's own unless a test supplies one.
  */
-export function Root({ bootstrap }: { bootstrap: Bootstrap }) {
+export function Root({ bootstrap, api }: { bootstrap: Bootstrap; api?: QraftApi }) {
+  // While rendering, before any child mounts: a child's layout effect, where a table measures the scrollbar, runs
+  // before this component's own effects. It is idempotent.
+  nonceRuntimeStyles(document.head, bootstrap.cspNonce);
+  const client = useMemo(() => api ?? createApi(bootstrap.apiBasePath), [api, bootstrap.apiBasePath]);
   return (
     <StrictMode>
       <ConfigProvider csp={{ nonce: bootstrap.cspNonce }}>
-        <App bootstrap={bootstrap} />
+        <App bootstrap={bootstrap} api={client} />
       </ConfigProvider>
     </StrictMode>
   );

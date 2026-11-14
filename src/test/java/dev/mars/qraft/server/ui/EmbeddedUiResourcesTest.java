@@ -26,6 +26,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -69,6 +70,21 @@ class EmbeddedUiResourcesTest {
             assertFalse(new String(body, StandardCharsets.UTF_8).contains("sourceMappingURL"),
                     "a source map is referenced from " + file);
         }
+    }
+
+    @Test
+    void everyFileBelowAssetsIsOneTheManifestLists() throws Exception {
+        // On 2026-11-14 a `mvn package` without `clean` packaged the previous build's bundle beside the new one: Vite
+        // empties its own output, but the resources copied into target/classes stayed. Under `mvn test` the
+        // resources are that directory, so it can be listed here; server code reads them only as resources.
+        java.net.URL assets = getClass().getClassLoader().getResource(UiAssets.EMBEDDED_ROOT + "assets/");
+        assertTrue(assets != null && "file".equals(assets.getProtocol()), "the assets are not a directory: " + assets);
+        Set<String> present = new TreeSet<>();
+        try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.list(java.nio.file.Path.of(assets.toURI()))) {
+            files.forEach(file -> present.add("assets/" + file.getFileName()));
+        }
+
+        assertEquals(listedFiles(manifest()), present, "a file below assets/ that this build's manifest does not list");
     }
 
     @Test

@@ -233,6 +233,30 @@
         </resources>
 
         <plugins>
+            <!-- Removes the interface's files from target/classes before each build copies its own: content-hashed
+                 bundles have new names, so a build without `clean` would package the previous one beside the new -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-clean-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>remove-previous-ui</id>
+                        <phase>initialize</phase>
+                        <goals>
+                            <goal>clean</goal>
+                        </goals>
+                        <configuration>
+                            <excludeDefaultDirectories>true</excludeDefaultDirectories>
+                            <filesets>
+                                <fileset>
+                                    <directory>${project.build.outputDirectory}/META-INF/qraft/ui</directory>
+                                </fileset>
+                            </filesets>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>com.github.eirslett</groupId>
                 <artifactId>frontend-maven-plugin</artifactId>

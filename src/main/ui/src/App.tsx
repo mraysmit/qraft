@@ -14,27 +14,71 @@
  * limitations under the License.
  */
 
-import { Layout, Space, Typography } from 'antd';
+import { Alert, Layout, Space, Typography } from 'antd';
+import type { QraftApi } from './api/client';
 import type { Bootstrap } from './bootstrap';
+import { RouteLink, RouterProvider, useRouter } from './routing';
+import { NodesView } from './views/NodesView';
+import { ServiceDetailView } from './views/ServiceDetailView';
+import { ServicesView } from './views/ServicesView';
+import { StatusStrip } from './views/StatusStrip';
 
-/**
- * The application shell. Step 4 of the task list adds the status strip and the Stage 1 views; until then it names
- * the product and what the server says about its security, in words rather than colour alone.
- */
-export function App({ bootstrap }: { bootstrap: Bootstrap }) {
+const NAV_LINK = { color: '#fff' };
+
+/** The application shell: top bar with navigation, the security banner, the status strip, and the selected view. */
+export function App({ bootstrap, api }: { bootstrap: Bootstrap; api: QraftApi }) {
   return (
-    <Layout style={{ minHeight: '100vh' }}>
-      <Layout.Header style={{ display: 'flex', alignItems: 'center' }}>
-        <Typography.Title level={1} style={{ color: '#fff', margin: 0, fontSize: 20 }}>
-          Qraft
-        </Typography.Title>
-      </Layout.Header>
-      <Layout.Content style={{ padding: 24 }}>
-        <Space direction="vertical">
-          <Typography.Text>Security profile: {bootstrap.securityProfile}</Typography.Text>
-          <Typography.Text>Sign-in: {bootstrap.authMode}</Typography.Text>
-        </Space>
-      </Layout.Content>
-    </Layout>
+    <RouterProvider uiPath={bootstrap.uiPath}>
+      <Layout style={{ minHeight: '100vh' }}>
+        <Layout.Header style={{ display: 'flex', alignItems: 'center', gap: 32 }}>
+          <Typography.Title level={1} style={{ color: '#fff', margin: 0, fontSize: 20 }}>
+            Qraft
+          </Typography.Title>
+          <nav aria-label="Primary">
+            <Space size="large">
+              <RouteLink to={{ view: 'services' }} style={NAV_LINK}>
+                Services
+              </RouteLink>
+              <RouteLink to={{ view: 'nodes' }} style={NAV_LINK}>
+                Nodes and Clients
+              </RouteLink>
+            </Space>
+          </nav>
+        </Layout.Header>
+        {bootstrap.authMode === 'none' && bootstrap.securityProfile === 'development' && (
+          // Persistent and not dismissible (UI/UX design section 3.7).
+          <Alert
+            type="warning"
+            banner
+            aria-label="No access control"
+            message="This development server has no access control: anyone who can reach this server can read and change it."
+          />
+        )}
+        <StatusStrip api={api} bootstrap={bootstrap} />
+        <Layout.Content style={{ padding: 24 }}>
+          <CurrentView api={api} />
+        </Layout.Content>
+      </Layout>
+    </RouterProvider>
   );
+}
+
+function CurrentView({ api }: { api: QraftApi }) {
+  const { route } = useRouter();
+  switch (route.view) {
+    case 'services':
+      return <ServicesView api={api} />;
+    case 'service':
+      return <ServiceDetailView key={route.name} api={api} name={route.name} />;
+    case 'nodes':
+      return <NodesView api={api} />;
+    case 'unknown':
+      return (
+        <Space direction="vertical">
+          <Typography.Title level={2}>No such view</Typography.Title>
+          <Typography.Text>This address does not name a view of the interface.</Typography.Text>
+          <RouteLink to={{ view: 'services' }}>Services</RouteLink>
+        </Space>
+      );
+  }
 }

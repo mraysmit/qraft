@@ -286,6 +286,19 @@ class HttpApiServerAdminUiTest {
     }
 
     @Test
+    void aViewAddressWhoseNameHasAnEncodedDotIsAViewNotAFile() throws Exception {
+        // The interface writes a service name's dots as %2E (routing.tsx), so /ui/services/payments.v2 can be reloaded.
+        start(new AdminUiConfig(true, "/ui/", Optional.empty()), FIXTURE);
+
+        HttpResponse<String> view = get("/ui/services/payments%2Ev2");
+
+        assertEquals(200, view.statusCode());
+        assertEquals("/ui/", bootstrap(view.body()).path("uiPath").asText());
+        assertEquals(404, get("/ui/services/payments.v2").statusCode(), "a written dot still names a file");
+        assertEquals(404, get("/ui/%2e%2e/secret").statusCode(), "an encoded dot segment is still refused");
+    }
+
+    @Test
     void aTemplateWithoutAHeadKeepsItsDoctypeFirst() throws Exception {
         // Anything before <!doctype html> puts the browser into quirks mode, so the base and the bootstrap go after it.
         Path root = Files.createDirectories(temporaryDirectory.resolve("dist"));

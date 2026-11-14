@@ -20,3 +20,23 @@ import { afterEach } from 'vitest';
 
 // Vitest runs without globals here, so Testing Library cannot register its own cleanup between tests.
 afterEach(() => cleanup());
+
+// jsdom has no media queries. Ant Design's table asks for its responsive breakpoints; no query matches here.
+Object.defineProperty(window, 'matchMedia', {
+  configurable: true,
+  value: (query: string): MediaQueryList => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    dispatchEvent: () => false,
+  }),
+});
+
+// jsdom does not compute a pseudo-element's style, and reports it as an error. Ant Design asks for one to measure the
+// scrollbar; the element's own style is a sufficient answer in a page that is never laid out.
+const elementStyle = window.getComputedStyle.bind(window);
+window.getComputedStyle = (element: Element) => elementStyle(element);

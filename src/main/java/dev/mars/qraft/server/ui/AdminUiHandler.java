@@ -37,8 +37,8 @@ import java.util.Optional;
  * {@code ..} segment, a backslash, or a control character is refused, so a request can never leave the asset root.
  * Only {@code GET} and {@code HEAD} are answered.
  *
- * <p>The prefix itself, {@code index.html}, and any other path whose last segment has no extension, so that the
- * interface can route on the client, are answered with {@code index.html} rendered for the request: the path becomes
+ * <p>The prefix itself, {@code index.html}, and any other path whose last segment, as sent, has no extension, so that
+ * the interface can route on the client, are answered with {@code index.html} rendered for the request: the path becomes
  * the page's {@code <base>}, the {@link UiBootstrap} object is added before {@code </head>} in a
  * {@code <script type="application/json">} element that carries a fresh nonce, and the response is never stored. Paths below {@code assets/}, where the build puts its
  * content-hashed files, never fall back: a missing one is not found, and a present one is cached as immutable. Other
@@ -50,7 +50,7 @@ import java.util.Optional;
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-27
- * @version 1.1
+ * @version 1.2
  */
 public final class AdminUiHandler implements HttpHandler {
     private static final String INDEX = "index.html";
@@ -94,7 +94,7 @@ public final class AdminUiHandler implements HttpHandler {
                 exchange.sendResponseHeaders(405, -1);
                 return;
             }
-            Optional<String> relative = relativePath(exchange.getRequestURI().getPath());
+            Optional<String> relative = relativePath(exchange.getRequestURI());
             Optional<byte[]> body = relative.isEmpty() ? Optional.empty() : read(relative.get(), nonce);
             if (body.isEmpty()) {
                 exchange.sendResponseHeaders(404, -1);
@@ -108,9 +108,12 @@ public final class AdminUiHandler implements HttpHandler {
 
     /**
      * The file a request is answered with, below the prefix: {@code index.html} for the prefix and for a path the
-     * interface routes on the client; or empty when the request may not be served.
+     * interface routes on the client; or empty when the request may not be served. The decoded path is checked and
+     * looked up; whether its last segment names a file is read from the path as sent, so a view whose name holds a
+     * dot, sent as {@code %2E}, is still a view.
      */
-    private Optional<String> relativePath(String requestPath) {
+    private Optional<String> relativePath(java.net.URI uri) {
+        String requestPath = uri.getPath();
         if (requestPath == null || !requestPath.startsWith(path)) return Optional.empty();
         String relative = requestPath.substring(path.length());
         if (relative.isEmpty()) return Optional.of(INDEX);
@@ -119,7 +122,8 @@ public final class AdminUiHandler implements HttpHandler {
         for (String segment : segments) {
             if (segment.isEmpty() || segment.equals(".") || segment.equals("..")) return Optional.empty();
         }
-        if (segments[segments.length - 1].lastIndexOf('.') > 0) return Optional.of(relative);
+        String rawPath = uri.getRawPath();
+        if (rawPath.lastIndexOf('.') > rawPath.lastIndexOf('/') + 1) return Optional.of(relative);
         return segments[0].equals(HASHED_ROOT) ? Optional.empty() : Optional.of(INDEX);
     }
 
