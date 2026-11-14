@@ -600,6 +600,17 @@ console, the archived logs (25 Docker archive folders) and the test reports, 895
 flagged, and 891 stack traces, none unflagged; no `too_many_pings` and no JVM crash file. The logs are in
 `logs/jenkins/Qraft-70/`.
 
+## Build 71, 2026-11-14
+
+Build 71 ran on `587a315`, the embedded interface list's close-out with Step 6's two fixes (`DnsResolver` bounding its
+reads with `Deadlines`, and the copyright line of `RaftMembershipPolicy` and its test). Started from the `mraysmit`
+workstation at 13:54 local time, it passed in 30 min 36 s: default 1,998 with every coverage gate met, end-to-end 31,
+and Docker and `slow` 52, 2,081 in all, with no failures, errors or skips; Vitest's 49 passed in each of the three
+Maven runs. `DnsResolverTest` (21, with the deadline thread's test) and `RaftMembershipPolicyTest` (22) passed. The
+audit, over the console, the archived logs (25 Docker archive folders) and the test reports, 894 files, found 1,253
+error lines, all flagged, and 882 stack traces, none unflagged; no `too_many_pings` and no JVM crash file. The logs
+are in `logs/jenkins/Qraft-71/`.
+
 ## Local runs, 2026-11-07
 
 Two runs of the three suites from the copy at `C:\qx7`, against Docker Desktop, in place of Jenkins while the work
