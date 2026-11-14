@@ -46,18 +46,18 @@ describe('Health Checks', () => {
   it('opens from the navigation at its own address', async () => {
     at('/ui/');
     render(<App bootstrap={BOOTSTRAP} api={fakeApi({}, ENTRIES)} />);
-    await screen.findByRole('heading', { name: 'Services' });
+    await screen.findByText('Services', { selector: 'h2' });
 
-    fireEvent.click(within(screen.getByRole('navigation')).getByRole('link', { name: 'Health Checks' }));
+    fireEvent.click(within(screen.getByLabelText('Primary')).getByText('Health Checks'));
 
-    expect(await screen.findByRole('heading', { name: 'Health Checks' })).toBeInTheDocument();
+    expect(await screen.findByText('Health Checks', { selector: 'h2' })).toBeInTheDocument();
     expect(window.location.pathname).toBe('/ui/checks');
   });
 
   it('lists every check in the scope, needing attention first, with its service, instance, node and result', async () => {
     render(<App bootstrap={BOOTSTRAP} api={fakeApi({}, ENTRIES)} />);
 
-    await screen.findByRole('heading', { name: 'Health Checks' });
+    await screen.findByText('Health Checks', { selector: 'h2' });
     const listed = await screen.findAllByRole('row');
     expect(listed.length).toBeGreaterThan(1);
     const [first, second, third] = rows();
@@ -65,7 +65,7 @@ describe('Health Checks', () => {
     expect(within(second as HTMLElement).getByText('Warning')).toBeInTheDocument();
     expect(within(third as HTMLElement).getByText('Passing')).toBeInTheDocument();
     const critical = within(first as HTMLElement);
-    expect(critical.getByRole('link', { name: 'web' }).getAttribute('href')).toBe('/ui/services/web');
+    expect(critical.getByText('web', { selector: 'a' }).getAttribute('href')).toBe('/ui/services/web');
     expect(critical.getByText('web-1')).toBeInTheDocument();
     expect(critical.getByText('client-a')).toBeInTheDocument();
     expect(critical.getByText('Healthy')).toBeInTheDocument();
@@ -118,7 +118,8 @@ describe('Health Checks', () => {
 
     render(<App bootstrap={BOOTSTRAP} api={api} />);
 
-    const failure = await screen.findByRole('alert', { name: 'Health checks could not be read' });
+    const failure = await screen.findByLabelText('Health checks could not be read');
+    expect(failure).toHaveAttribute('role', 'alert');
     expect(failure).toHaveTextContent('Request ID: r-5');
   });
 });

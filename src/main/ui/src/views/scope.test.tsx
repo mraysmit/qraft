@@ -34,7 +34,7 @@ function asked(): ScopesAsked {
 
 /** Opens one of the selector's lists and chooses `option`. */
 async function choose(label: string, option: string) {
-  fireEvent.mouseDown(screen.getByRole('combobox', { name: label }));
+  fireEvent.mouseDown((document.querySelector(`input[aria-label=\"${label}\"]`) as HTMLElement));
   const listed = await screen.findAllByTitle(option);
   const item = listed.find((element) => element.classList.contains('ant-select-item-option'));
   if (item === undefined) throw new Error(`no option ${option} in ${label}`);
@@ -42,7 +42,7 @@ async function choose(label: string, option: string) {
 }
 
 function selected(label: string): string {
-  return screen.getByRole('combobox', { name: label }).closest('.ant-select')?.textContent ?? '';
+  return (document.querySelector(`input[aria-label=\"${label}\"]`) as HTMLElement).closest('.ant-select')?.textContent ?? '';
 }
 
 beforeEach(() => at('/ui/'));
@@ -72,7 +72,7 @@ describe('scope selector', () => {
   it('re-reads the view in the scope chosen, and puts it in the address', async () => {
     const scopes = asked();
     render(<App bootstrap={BOOTSTRAP} api={fakeApi({}, undefined, scopes)} />);
-    await screen.findByRole('link', { name: 'web' });
+    await screen.findByText('web', { selector: 'a' });
 
     await choose('Tenant', 'acme');
     await waitFor(() => expect(window.location.search).toBe('?tenant=acme&namespace=default'));
@@ -88,11 +88,11 @@ describe('scope selector', () => {
     at('/ui/?tenant=acme&namespace=prod');
     render(<App bootstrap={BOOTSTRAP} api={fakeApi()} />);
 
-    const service = await screen.findByRole('link', { name: 'web' });
+    const service = await screen.findByText('web', { selector: 'a' });
     expect(service.getAttribute('href')).toBe('/ui/services/web?tenant=acme&namespace=prod');
-    fireEvent.click(within(screen.getByRole('navigation')).getByRole('link', { name: 'Nodes and Clients' }));
+    fireEvent.click(within(screen.getByLabelText('Primary')).getByText('Nodes and Clients', { selector: 'a' }));
 
-    await screen.findByRole('heading', { name: 'Nodes and Clients' });
+    await screen.findByText('Nodes and Clients', { selector: 'h1, h2, h3' });
     expect(window.location.pathname + window.location.search).toBe('/ui/nodes?tenant=acme&namespace=prod');
   });
 

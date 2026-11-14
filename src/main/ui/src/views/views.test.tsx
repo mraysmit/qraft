@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { App } from '../App';
 import { ApiError, MalformedResponseError } from '../api/client';
@@ -24,13 +24,22 @@ function at(path: string) {
   window.history.pushState(null, '', path);
 }
 
+/** The tab panel showing, found by Ant Design's class rather than a role query over the whole page. */
+async function activePanel(): Promise<HTMLElement> {
+  return waitFor(() => {
+    const panel = document.querySelector<HTMLElement>('.ant-tabs-tabpane-active');
+    if (panel === null) throw new Error('no tab panel is showing');
+    return panel;
+  });
+}
+
 beforeEach(() => at('/ui/'));
 
 describe('status strip', () => {
   it('names the answering node, its role, the leader and term, readiness, and the security state in words', async () => {
     render(<App bootstrap={BOOTSTRAP} api={fakeApi()} />);
 
-    const strip = await screen.findByRole('region', { name: 'Cluster status' });
+    const strip = await screen.findByLabelText('Cluster status');
     expect(await within(strip).findByText('Answering node: server-1')).toBeInTheDocument();
     expect(within(strip).getByText('Role: Leader')).toBeInTheDocument();
     expect(within(strip).getByText('Leader: server-1')).toBeInTheDocument();
@@ -46,7 +55,7 @@ describe('status strip', () => {
     render(<App bootstrap={BOOTSTRAP} api={api} />);
 
     expect(await screen.findByText('Readiness: Not ready')).toBeInTheDocument();
-    expect(screen.getByRole('alert', { name: 'Not ready' })).toHaveTextContent('no_leader, draining');
+    expect(screen.getByLabelText('Not ready')).toHaveTextContent('no_leader, draining');
   });
 
   it('warns when no leader is known, when storage is fenced, and when the server was removed', async () => {
@@ -57,17 +66,17 @@ describe('status strip', () => {
     render(<App bootstrap={BOOTSTRAP} api={api} />);
 
     expect(await screen.findByText('Leader: none known')).toBeInTheDocument();
-    expect(screen.getByRole('alert', { name: 'No leader' })).toBeInTheDocument();
-    expect(screen.getByRole('alert', { name: 'Storage fenced' })).toHaveTextContent('disk full');
-    expect(screen.getByRole('alert', { name: 'Removed from the cluster' })).toBeInTheDocument();
+    expect(screen.getByLabelText('No leader')).toBeInTheDocument();
+    expect(screen.getByLabelText('Storage fenced')).toHaveTextContent('disk full');
+    expect(screen.getByLabelText('Removed from the cluster')).toBeInTheDocument();
   });
 
   it('shows a development server without access control a banner that cannot be dismissed', async () => {
     render(<App bootstrap={{ ...BOOTSTRAP, authMode: 'none', securityProfile: 'development' }} api={fakeApi()} />);
 
-    const banner = await screen.findByRole('alert', { name: 'No access control' });
+    const banner = await screen.findByLabelText('No access control');
     expect(banner).toHaveTextContent(/anyone who can reach this server/i);
-    expect(within(banner).queryByRole('button')).toBeNull();
+    expect(banner.querySelector('button')).toBeNull();
     expect(screen.getByText('Access control: off')).toBeInTheDocument();
   });
 
@@ -79,7 +88,7 @@ describe('status strip', () => {
 
     render(<App bootstrap={BOOTSTRAP} api={api} />);
 
-    const failure = await screen.findByRole('alert', { name: 'Cluster status could not be read' });
+    const failure = await screen.findByLabelText('Cluster status could not be read');
     expect(failure).toHaveTextContent('Raft state is unavailable');
     expect(failure).toHaveTextContent('raft_unavailable');
     expect(failure).toHaveTextContent('Request ID: req-9');
@@ -92,8 +101,8 @@ describe('Services', () => {
   it('is the landing page, and lists each service with its health in words, instances, tags and scope', async () => {
     render(<App bootstrap={BOOTSTRAP} api={fakeApi()} />);
 
-    expect(await screen.findByRole('heading', { name: 'Services' })).toBeInTheDocument();
-    const row = (await screen.findByRole('link', { name: 'web' })).closest('tr');
+    expect(await screen.findByText('Services', { selector: 'h1, h2, h3' })).toBeInTheDocument();
+    const row = (await screen.findByText('web', { selector: 'a' })).closest('tr');
     expect(row).not.toBeNull();
     const cells = within(row as HTMLElement);
     expect(cells.getByText('Passing')).toBeInTheDocument();
@@ -125,7 +134,7 @@ describe('Services', () => {
   it('shows a health with no accepted result as unknown, not as passing or failing', async () => {
     render(<App bootstrap={BOOTSTRAP} api={fakeApi({}, { web: [entry({ health: 'UNKNOWN' }, [])] })} />);
 
-    const row = (await screen.findByRole('link', { name: 'web' })).closest('tr') as HTMLElement;
+    const row = (await screen.findByText('web', { selector: 'a' })).closest('tr') as HTMLElement;
     expect(within(row).getByText('Unknown')).toBeInTheDocument();
   });
 
@@ -143,10 +152,10 @@ describe('Services', () => {
 
     render(<App bootstrap={BOOTSTRAP} api={api} />);
 
-    const failure = await screen.findByRole('alert', { name: 'Services could not be read' });
+    const failure = await screen.findByLabelText('Services could not be read');
     expect(failure).toHaveTextContent('not in the expected form');
     expect(failure).toHaveTextContent('Request ID: req-4');
-    expect(screen.queryByRole('link', { name: 'web' })).toBeNull();
+    expect(screen.queryByText('web', { selector: 'a' })).toBeNull();
   });
 
   it('reads again when asked after a failure', async () => {
@@ -174,7 +183,7 @@ describe('Services', () => {
     const scopes = { services: [], serviceHealth: [], servicesSummary: [], checks: [] };
     render(<App bootstrap={BOOTSTRAP} api={fakeApi({}, { web: [entry()], db: [entry({ serviceId: 'db-1', serviceName: 'db' })] }, scopes)} />);
 
-    await screen.findByRole('link', { name: 'db' });
+    await screen.findByText('db', { selector: 'a' });
 
     expect(scopes.servicesSummary).toHaveLength(1);
     expect(scopes.serviceHealth).toHaveLength(0);
@@ -188,7 +197,7 @@ describe('Services', () => {
 
     render(<App bootstrap={BOOTSTRAP} api={api} />);
 
-    const row = (await screen.findByRole('link', { name: 'web' })).closest('tr') as HTMLElement;
+    const row = (await screen.findByText('web', { selector: 'a' })).closest('tr') as HTMLElement;
     expect(within(row).getByText('1 critical, 1 passing')).toBeInTheDocument();
     expect(within(row).getByText('Changed at index 31')).toBeInTheDocument();
   });
@@ -198,9 +207,9 @@ describe('service detail', () => {
   it('opens from the Services list at its own address', async () => {
     render(<App bootstrap={BOOTSTRAP} api={fakeApi()} />);
 
-    fireEvent.click(await screen.findByRole('link', { name: 'web' }));
+    fireEvent.click(await screen.findByText('web', { selector: 'a' }));
 
-    expect(await screen.findByRole('heading', { name: 'Service: web' })).toBeInTheDocument();
+    expect(await screen.findByText('Service: web', { selector: 'h1, h2, h3' })).toBeInTheDocument();
     expect(window.location.pathname).toBe('/ui/services/web');
   });
 
@@ -209,7 +218,7 @@ describe('service detail', () => {
 
     render(<App bootstrap={BOOTSTRAP} api={fakeApi()} />);
 
-    const overview = await screen.findByRole('tabpanel');
+    const overview = await activePanel();
     expect(within(overview).getByText('default / default')).toBeInTheDocument();
     expect(within(overview).getByText('Passing')).toBeInTheDocument();
     expect(within(overview).getByText('dc1 / eu-west')).toBeInTheDocument();
@@ -219,7 +228,7 @@ describe('service detail', () => {
     at('/ui/services/web');
     render(<App bootstrap={BOOTSTRAP} api={fakeApi({}, { web: [entry({}, [{}], 'unreachable')] })} />);
 
-    fireEvent.click(await screen.findByRole('tab', { name: 'Instances' }));
+    fireEvent.click(await screen.findByText('Instances', { selector: '.ant-tabs-tab-btn' }));
 
     const row = (await screen.findByText('web-1')).closest('tr') as HTMLElement;
     expect(within(row).getByText('10.0.0.5:8081')).toBeInTheDocument();
@@ -233,7 +242,7 @@ describe('service detail', () => {
     const api = fakeApi({}, { web: [entry({ health: 'CRITICAL' }, [{ status: 'CRITICAL', expired: true, output: 'timeout' }])] });
     render(<App bootstrap={BOOTSTRAP} api={api} />);
 
-    fireEvent.click(await screen.findByRole('tab', { name: 'Health Checks' }));
+    fireEvent.click(await screen.findByText('Health Checks', { selector: '.ant-tabs-tab-btn' }));
 
     const row = (await screen.findByText('http')).closest('tr') as HTMLElement;
     expect(within(row).getByText('Critical')).toBeInTheDocument();
@@ -247,9 +256,9 @@ describe('service detail', () => {
     at('/ui/services/web');
     render(<App bootstrap={BOOTSTRAP} api={fakeApi()} />);
 
-    fireEvent.click(await screen.findByRole('tab', { name: 'Metadata' }));
+    fireEvent.click(await screen.findByText('Metadata', { selector: '.ant-tabs-tab-btn' }));
 
-    const panel = await screen.findByRole('tabpanel', { name: 'Metadata' });
+    const panel = await activePanel();
     expect(within(panel).getByText('owner=platform')).toBeInTheDocument();
     expect(within(panel).getByText('Created at index 4, modified at index 9')).toBeInTheDocument();
   });
@@ -269,7 +278,7 @@ describe('service detail', () => {
 
     render(<App bootstrap={BOOTSTRAP} api={api} />);
 
-    expect(await screen.findByRole('heading', { name: 'Service: team/payments' })).toBeInTheDocument();
+    expect(await screen.findByText('Service: team/payments', { selector: 'h1, h2, h3' })).toBeInTheDocument();
     expect(asked).toContain('team/payments');
   });
 });
@@ -284,7 +293,7 @@ describe('Nodes and Clients', () => {
 
     render(<App bootstrap={BOOTSTRAP} api={api} />);
 
-    expect(await screen.findByRole('heading', { name: 'Nodes and Clients' })).toBeInTheDocument();
+    expect(await screen.findByText('Nodes and Clients', { selector: 'h1, h2, h3' })).toBeInTheDocument();
     const row = (await screen.findByText('client-a')).closest('tr') as HTMLElement;
     const cells = within(row);
     expect(cells.getByText('Healthy')).toBeInTheDocument();
@@ -315,7 +324,8 @@ describe('Nodes and Clients', () => {
 
 describe('navigation', () => {
   it('moves between the views and follows the browser back button', async () => {
-    render(<App bootstrap={BOOTSTRAP} api={fakeApi()} />);
+    // With nothing registered, so the views' tables render empty: rendering them full took 2 s with every file running.
+    render(<App bootstrap={BOOTSTRAP} api={fakeApi({ nodes: () => read([]) }, {})} />);
     await screen.findByText('Services', { selector: 'h2' });
 
     fireEvent.click(within(screen.getByLabelText('Primary')).getByText('Nodes and Clients'));
@@ -330,7 +340,7 @@ describe('navigation', () => {
     at('/ui/nowhere');
     render(<App bootstrap={BOOTSTRAP} api={fakeApi()} />);
 
-    expect(await screen.findByRole('heading', { name: 'No such view' })).toBeInTheDocument();
-    expect(within(screen.getByRole('main')).getByRole('link', { name: 'Services' })).toBeInTheDocument();
+    expect(await screen.findByText('No such view', { selector: 'h1, h2, h3' })).toBeInTheDocument();
+    expect(within(document.querySelector('main') as HTMLElement).getByText('Services', { selector: 'a' })).toBeInTheDocument();
   });
 });

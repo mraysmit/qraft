@@ -170,7 +170,7 @@ describe('Storage & Snapshots', () => {
     });
     render(<App bootstrap={BOOTSTRAP} api={fakeApi({ storage: () => read(fenced) })} />);
 
-    const banner = await within(screen.getByRole('main')).findByLabelText('Storage fenced');
+    const banner = await within(document.querySelector('main') as HTMLElement).findByLabelText('Storage fenced');
     expect(banner).toHaveTextContent('disk full');
     expect(within(banner).queryByText('Close')).toBeNull();
     expect(await screen.findByText('Failed at 2026-11-14 08:00:00 UTC: no space left')).toBeInTheDocument();

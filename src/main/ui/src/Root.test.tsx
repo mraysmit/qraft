@@ -58,7 +58,7 @@ describe('Root', () => {
 
     const inserted = await stylesInsertedDuring(async () => {
       render(<Root bootstrap={BOOTSTRAP} api={fakeApi()} />);
-      await screen.findByRole('link', { name: 'web' });
+      await screen.findByText('web', { selector: 'a' });
     });
 
     expect(inserted.some((style) => style.css.includes('::-webkit-scrollbar')), 'the scrollbar measurement ran').toBe(true);
@@ -69,8 +69,8 @@ describe('Root', () => {
     window.history.pushState(null, '', '/ui/');
     render(<Root bootstrap={BOOTSTRAP} api={fakeApi()} />);
 
-    expect(screen.getByRole('heading', { name: 'Qraft' })).toBeInTheDocument();
-    expect(await screen.findByRole('link', { name: 'web' })).toBeInTheDocument();
+    expect(screen.getByText('Qraft', { selector: 'h1' })).toBeInTheDocument();
+    expect(await screen.findByText('web', { selector: 'a' })).toBeInTheDocument();
   });
 
   // One test per view: walking every view in one test took 4.8 s on Jenkins build 72, against Vitest's 5 s limit.
@@ -100,13 +100,25 @@ describe('Root', () => {
     assertEveryStyleCarriesTheNonce();
   });
 
-  it('gives every style inserted on Health Checks and in the open scope list the request nonce', async () => {
-    // UI-2: the Health Checks page, and the scope selector's open list.
+  // UI-2: the Health Checks page, and the scope selector's open list, in tests of their own: in one, the test passed
+  // Vitest's 5 s in the Docker stage of Jenkins build 75.
+  it('gives every style inserted on Health Checks the request nonce', async () => {
     window.history.pushState(null, '', '/ui/checks?tenant=acme&namespace=prod');
     const inserted = await stylesInsertedDuring(async () => {
       render(<Root bootstrap={BOOTSTRAP} api={api()} />);
       await screen.findByText('web-1');
-      fireEvent.mouseDown(screen.getByRole('combobox', { name: 'Tenant' }));
+    });
+    expect(inserted.filter((style) => style.nonce !== BOOTSTRAP.cspNonce)).toEqual([]);
+    assertEveryStyleCarriesTheNonce();
+  });
+
+  it('gives every style inserted for the open scope list the request nonce', async () => {
+    // The selector is in the top bar of every page; an address that is no view renders the least beside it.
+    window.history.pushState(null, '', '/ui/nowhere?tenant=acme&namespace=prod');
+    const inserted = await stylesInsertedDuring(async () => {
+      render(<Root bootstrap={BOOTSTRAP} api={api()} />);
+      await screen.findByText('No such view', { selector: 'h2' });
+      fireEvent.mouseDown(document.querySelector('input[aria-label="Tenant"]') as Element);
       await screen.findAllByTitle('acme');
     });
     expect(inserted.filter((style) => style.nonce !== BOOTSTRAP.cspNonce)).toEqual([]);
