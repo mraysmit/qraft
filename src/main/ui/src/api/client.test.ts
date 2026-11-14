@@ -16,7 +16,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { ApiError, createApi, MalformedResponseError } from './client';
-import { HEALTH_ENTRY, NODE, RAFT_STATUS } from './fixtures';
+import { CHECK_ENTRY, HEALTH_ENTRY, NAMESPACE, NODE, RAFT_STATUS, SUMMARY_ENTRY, TENANT } from './fixtures';
 
 interface Call {
   url: string;
@@ -157,5 +157,76 @@ describe('createApi', () => {
     expect((await createApi('/', ready.fetcher).readiness()).data).toEqual({ ready: true, conditions: [] });
     expect((await createApi('/', notReady.fetcher).readiness()).data).toEqual({ ready: false, conditions: ['no_leader'] });
     expect(ready.calls[0]?.url).toBe('/health/ready');
+  });
+});
+
+// UI-2 task list, Step 3: every catalog and health read names the scope it reads in.
+describe('scoped reads', () => {
+  const ACME_PROD = { tenant: 'acme', namespace: 'prod' };
+
+  function header(call: Call | undefined, name: string): string | null {
+    return new Headers(call?.init?.headers).get(name);
+  }
+
+  it('send the scope headers on every catalog and health read', async () => {
+    const { calls, fetcher } = server((url) => {
+      if (url.includes('/v1/internal/ui/services')) return json([SUMMARY_ENTRY]);
+      if (url.includes('/v1/health/state/')) return json([CHECK_ENTRY]);
+      if (url.includes('/v1/catalog/services')) return json({});
+      return json([]);
+    });
+    const api = createApi('/', fetcher);
+
+    await api.services(ACME_PROD);
+    await api.serviceHealth('web', ACME_PROD);
+    await api.servicesSummary(ACME_PROD);
+    await api.checks('any', ACME_PROD);
+
+    expect(calls).toHaveLength(4);
+    for (const call of calls) {
+      expect(header(call, 'X-Qraft-Tenant'), call.url).toBe('acme');
+      expect(header(call, 'X-Qraft-Namespace'), call.url).toBe('prod');
+    }
+  });
+
+  it('read the default scope when none is given, and name it', async () => {
+    const { calls, fetcher } = server(() => json({}));
+
+    await createApi('/', fetcher).services();
+
+    expect(header(calls[0], 'X-Qraft-Tenant')).toBe('default');
+    expect(header(calls[0], 'X-Qraft-Namespace')).toBe('default');
+  });
+
+  it('read the services summary and the checks in a state', async () => {
+    const { calls, fetcher } = server((url) =>
+      url.includes('/v1/health/state/') ? json([CHECK_ENTRY]) : json([SUMMARY_ENTRY], 200, { 'X-Qraft-Index': '9' }),
+    );
+    const api = createApi('/', fetcher);
+
+    const summary = await api.servicesSummary();
+    const checks = await api.checks('critical');
+
+    expect(calls.map((call) => call.url)).toEqual(['/v1/internal/ui/services', '/v1/health/state/critical']);
+    expect(summary.data[0]?.health.critical).toBe(1);
+    expect(summary.index).toBe(9);
+    expect(checks.data[0]?.serviceName).toBe('web');
+    expect(checks.data[0]?.nodeStatus).toBe('healthy');
+  });
+
+  it('read the tenants, and the namespaces of the tenant named', async () => {
+    const { calls, fetcher } = server((url) => (url.endsWith('/v1/tenants') ? json([TENANT]) : json([NAMESPACE])));
+    const api = createApi('/', fetcher);
+
+    expect((await api.tenants()).data.map((tenant) => tenant.Name)).toEqual(['acme']);
+    expect((await api.namespaces('acme')).data.map((namespace) => namespace.Name)).toEqual(['prod']);
+    expect(calls[1]?.url).toBe('/v1/namespaces');
+    expect(header(calls[1], 'X-Qraft-Tenant')).toBe('acme');
+  });
+
+  it('refuse a tenancy answer that is not the expected shape', async () => {
+    const { fetcher } = server(() => json([{ Name: 7 }]));
+
+    await expect(createApi('/', fetcher).tenants()).rejects.toBeInstanceOf(MalformedResponseError);
   });
 });
