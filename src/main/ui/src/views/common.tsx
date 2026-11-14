@@ -15,7 +15,7 @@
  */
 
 import { Alert, Button, Space, Tag, Typography } from 'antd';
-import { ApiError, MalformedResponseError, type QraftApi } from '../api/client';
+import { ApiError, DEFAULT_SCOPE, MalformedResponseError, type QraftApi, type Scope } from '../api/client';
 import type { Health, HealthEntry, NodeStatus, ServiceNames } from '../api/schemas';
 
 // Each health state has its own label and mark, so colour is never the only signal (UI/UX design sections 3.6, 5.3).
@@ -122,10 +122,10 @@ export interface ServiceEntries {
   index: number | null;
 }
 
-export async function loadServiceEntries(api: QraftApi): Promise<ServiceEntries> {
-  const services = await api.services();
+export async function loadServiceEntries(api: QraftApi, scope: Scope): Promise<ServiceEntries> {
+  const services = await api.services(scope);
   const names = Object.keys(services.data);
-  const reads = await Promise.all(names.map((name) => api.serviceHealth(name)));
+  const reads = await Promise.all(names.map((name) => api.serviceHealth(name, scope)));
   const entries: Record<string, HealthEntry[]> = {};
   names.forEach((name, position) => {
     entries[name] = reads[position]?.data ?? [];
@@ -144,5 +144,22 @@ export function location(datacenter: string | null, region: string | null): stri
   return `${datacenter ?? 'no datacenter'} / ${region ?? 'no region'}`;
 }
 
-/** The scope the views read in. Choosing another arrives with UI-2. */
-export const READ_SCOPE = 'the default tenant and namespace';
+/** The scope a view read in, in words: the default scope by that name, any other by its tenant and namespace. */
+export function scopeText(scope: Scope): string {
+  return scope.tenant === DEFAULT_SCOPE.tenant && scope.namespace === DEFAULT_SCOPE.namespace
+    ? 'the default tenant and namespace'
+    : `tenant ${scope.tenant}, namespace ${scope.namespace}`;
+}
+
+/** The line each scoped view starts with, naming the scope it read (UI/UX design section 3.2). */
+export function ReadIn({ scope }: { scope: Scope }) {
+  return <Typography.Text>{`Read in ${scopeText(scope)}.`}</Typography.Text>;
+}
+
+/** Counts by health in words, attention first, leaving out the states with none: `1 critical, 2 passing`. */
+export function healthCountsText(counts: Partial<Record<Lowercase<Health>, number>>): string {
+  return HEALTH_ORDER.map((health) => [counts[health.toLowerCase() as Lowercase<Health>] ?? 0, health] as const)
+    .filter(([count]) => count > 0)
+    .map(([count, health]) => `${count} ${health.toLowerCase()}`)
+    .join(', ');
+}
