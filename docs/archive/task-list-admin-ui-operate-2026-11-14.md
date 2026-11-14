@@ -1,20 +1,35 @@
 # Task List: Administrative Interface, Operate (UI-3), and UI-2's Open Items
 
 **Date:** 2026-11-14
-**Last updated:** 2026-11-14 (written, at the owner's word to close the open items and complete UI-3 without pausing)
-**Active work:** Phase 0
-**Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-3
-**Source plan:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md), sections 4.2, 5.2, 9.1 to 9.3; [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 12.4.1 and 12.5
-**Predecessor:** [`task-list-admin-ui-scoped-discovery-2026-11-14.md`](../docs/archive/task-list-admin-ui-scoped-discovery-2026-11-14.md) (UI-2)
-**Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
+**Status:** Complete and archived on 2026-11-14. Phases 0 to 3 are done, test first; the code was committed by the owner in `de1fa54` and `4a3f019`, and the three suites ran locally on `4a3f019` from the check copy: default 2,026 with every coverage gate met and Vitest 94, end-to-end 31, and Docker and `slow` 52, with no failures, errors or skips; every log audited, none unflagged (section 8).
+**Last updated:** 2026-11-14 (Phase 3 done, the list complete and archived, its links rewritten from its new place. Earlier the same day: Phases 0 to 2 built, test first, with their records; decision 7 corrected to the test the code makes. Earlier the same day: written, at the owner's word to close the open items and complete UI-3 without pausing)
+**Active work:** complete on 2026-11-14
+**Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](../../docs-design/QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-3
+**Source plan:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](../../docs-design/QRAFT_ADMIN_UI_UX_DESIGN.md), sections 4.2, 5.2, 9.1 to 9.3; [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 12.4.1 and 12.5
+**Predecessor:** [`task-list-admin-ui-scoped-discovery-2026-11-14.md`](task-list-admin-ui-scoped-discovery-2026-11-14.md) (UI-2)
+**Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
 The owner asked on 2026-11-14 to close the open items and complete UI-3 without
 pausing until the task is complete and tested without errors, test first. Under
 that instruction the decisions in section 4 were taken as the recommended
 options; each is reversible, and the owner can change any of them. The suites
 run locally from the check copy at `C:\qw`, with no commit or Jenkins run as a
-gate. When this list's work is complete, add a completion summary and move this
-file to `docs/archive/`.
+gate. The list was completed on 2026-11-14, with the completion summary below, and
+moved to `docs/archive/`.
+
+**Completion summary.** UI-2's open items are closed: the client's local API
+answers an unrouted path 404 in the envelope after reading its body; `/`
+redirects to the interface when it is enabled; text assets are sent gzip, kept
+in memory; and the bundle is split so no script passes 500 kB. UI-3 is
+delivered: `GET /v1/operator/raft/members`, the leader's view of each server's
+progress and the quorum or a follower's labelled partial view, and
+`GET /v1/operator/raft/storage`, with the last snapshot failure now recorded;
+and in the interface the full status strip, server rows in Nodes and Clients,
+Cluster Overview, Raft Members and Storage & Snapshots. Decisions 1 to 7 were
+taken under the owner's instruction not to pause; each can be reversed.
+Left for later: a WAL health figure and the storage lock state, a saturation
+figure for the transition queue, and membership changes from the interface
+(UI-5).
 
 ## 1. Goal
 
@@ -79,9 +94,14 @@ Taken 2026-11-14 under the owner's instruction not to pause; each reversible.
    queue's depth, and the last snapshot failure since the server started.
    `/raft/status` is unchanged. Both new reads need `operator:read`, as the
    autopilot read does.
-7. **Reachability is the leader's last answer within an election timeout**, the
-   test the autopilot read already makes; lag is the leader's last log index
-   less the server's match index.
+7. **Reachability is the leader's check-quorum test**: the server answered
+   within an election timeout's worth of heartbeat rounds
+   (`quorumContactRounds`), counted in rounds rather than wall time, so a test
+   drives it with the cluster fixture's timers. Lag is the leader's last log
+   index less the server's match index; a server is healthy when reachable and
+   within 250 entries, the autopilot read's limit. (Written first as "an answer
+   within an election timeout", the autopilot read's wall-clock test; corrected
+   when the round count proved the one a test can drive.)
 
 ## 5. Phase 0: UI-2's open items
 
@@ -96,6 +116,28 @@ Taken 2026-11-14 under the owner's instruction not to pause; each reversible.
 
 **Exit gate.** The new tests red first, then green; `mvn install` passes.
 
+**Status, 2026-11-14: done**, test first, committed by the owner in `de1fa54`.
+
+- `LocalApiServerTest.aPathNoRouteServesIsAnsweredNotFoundInTheEnvelopeAfterItsBodyIsRead`,
+  red first on the JDK's `text/html`: `LocalApiServer` registers a fallback
+  route for `/` that reads the body and answers 404 `not_found`.
+- `HttpApiServerAdminUiTest`: the root redirects, 302, to the interface's path
+  when it is enabled, a write to it is 405, and no other path redirects (red
+  first, 404); with the interface disabled `/` is not found.
+- `HttpApiServerAdminUiTest`: a text asset is sent gzip to a request that takes
+  it, decoding to the file, the same bytes each time, with `Vary` on both
+  answers (red first); refused with `q=0` or `identity`, for the rendered index,
+  and for an image, it is plain. `AdminUiHandler` compresses once per path,
+  size and CRC, so an edited development file is never served stale.
+- `EmbeddedUiResourcesTest.noScriptPassesTheSizeAtWhichViteWarns`, red first on
+  the 1,014 kB bundle: Vite's `manualChunks` splits the application (34 kB) from
+  React (143 kB), Ant Design (357 kB), its parts (365 kB), zod (95 kB) and the
+  rest (27 kB); the build gives no chunk warning. Served gzip, the largest is
+  125 kB.
+- `mvn clean install`: default 2,019 and Vitest 73, every gate; audit clean
+  (`logs/ui3-p0-install-20261114-171205.log`). Design section 12.4.1 records the
+  redirect, the compression and the split; section 12.1 the client's fallback.
+
 ## 6. Phase 1: Membership and storage reads
 
 1. Test first, over real HTTP against a three-server cluster: the members read
@@ -107,6 +149,25 @@ Taken 2026-11-14 under the owner's instruction not to pause; each reversible.
 3. Design section 12.5 documents both.
 
 **Exit gate.** As Phase 0.
+
+**Status, 2026-11-14: done**, test first, committed by the owner in `de1fa54`.
+
+- `RaftNode.membership()` and `RaftNode.storageState()`, captured on the state
+  loop, with the records `RaftMembership` and `RaftStorageState`;
+  `RaftTransitionSequencer.depth()`; a snapshot that fails records its message
+  and time. `HttpApiServer` serves `GET /v1/operator/raft/members` and
+  `GET /v1/operator/raft/storage`, `operator:read`, no parameter.
+- `HttpApiServerOperatorReadsTest` (6), red first on 404: the leader's view of a
+  three-server cluster with progress and quorum; a server stopped is found
+  unreachable once its rounds pass, with lag and the quorum's tolerance
+  falling; a follower's labelled partial view; `operator:read` and parameter
+  refusals; the storage read; and on a durable server a snapshot moving the
+  boundary and a refused one recorded, under the specific
+  `RAFT_SNAPSHOT_REFUSED_BY_TEST` declaration. The first run of the unreachable
+  case fired the heartbeat timer 51 times without settling; the node drops a
+  fire while a round is pending, so it advanced one round. The test drives one
+  settled round at a time.
+- Design section 12.5 documents both reads.
 
 ## 7. Phase 2: The Operate views
 
@@ -122,12 +183,50 @@ Taken 2026-11-14 under the owner's instruction not to pause; each reversible.
 
 **Exit gate.** Vitest and the Java suite green; Chrome with no console message.
 
+**Status, 2026-11-14: done**, test first, committed by the owner in `de1fa54`
+and `4a3f019`.
+
+- The client's `members()` and `storage()` with zod schemas; routes `cluster`,
+  `members` and `storage` (red first).
+- `views/operate.test.tsx` (12), red first: the strip's quorum, failure
+  tolerance and largest lag; an unreachable server in a persistent warning; a
+  follower's "known to the leader"; the strip still showing the node when the
+  membership is refused; server rows above the clients in Nodes and Clients;
+  Cluster Overview; Raft Members on the leader and on a follower; Storage &
+  Snapshots with its retained boundary, a fenced banner on the page and the
+  last snapshot failure, and what a server without a storage directory or
+  snapshot cannot say.
+- `Root.test.tsx`: every style inserted on the three new pages carries the
+  nonce. A scope test that rendered three views (2.2 s) is three tests.
+- `AdminUiDataContractTest` checks both reads against a real server.
+- Headless Chrome against a server and client from the jar: `/` (redirected),
+  Services, Nodes, Health Checks, Cluster Overview, Raft Members, Storage &
+  Snapshots and a service, each with no console message; the Ant Design chunk
+  came gzip, 97 kB for 357 kB; the client answered an unrouted `PUT` 404.
+
 ## 8. Phase 3: Verification and close-out
 
 1. The three suites run locally from the check copy (default, end-to-end,
    Docker), every log audited, with no unflagged error.
 2. The plan's view map and increments, the design, and the handover brought up
    to date; this list completed and archived.
+
+**Status, 2026-11-14: done.**
+
+- The three suites on `4a3f019` from the check copy, no Node on the `PATH`:
+  `mvn clean install`, default 2,026 with every coverage gate met and Vitest 94
+  (`logs/ui3-default-20261114-173829.log`; audit of the reports and log, 551
+  files: 562 error lines and 496 stack traces, all flagged); end-to-end, 31
+  (`logs/ui3-e2e-20261114-174327.log`; audit with the subprocess logs, 598
+  files: 3,459 error lines and 3,057 stack traces, all flagged); Docker and
+  `slow`, 52, in 27 min (`logs/ui3-docker-20261114-174652.log`; audit
+  of the reports, the log and the Docker archives, 281 files: 275 error
+  lines and 133 stack traces, all flagged). No failure, error or skip; no
+  JVM crash file.
+- The implementation plan: UI-3 delivered, open question 3 settled, section 4's
+  rows for membership, storage and the queue built, and the view map's Operate
+  rows Done. Design section 20 names UI-2's and UI-3's archived lists.
+- The list completed and moved to `docs/archive/`.
 
 ## 9. Out of scope
 

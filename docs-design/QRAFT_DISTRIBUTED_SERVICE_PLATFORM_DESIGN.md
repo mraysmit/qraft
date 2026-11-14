@@ -3051,7 +3051,11 @@ tracked in the current dated task list in `docs-design/`; no list is active now.
 The embedded administrative interface list,
 [`task-list-embedded-admin-interface-2026-11-14.md`](../docs/archive/task-list-embedded-admin-interface-2026-11-14.md),
 resumed on 2026-11-13, was completed and archived on 2026-11-14 (tranche 8), and
-with it every initial acceptance criterion of section 21 is met.
+with it every initial acceptance criterion of section 21 is met. The interface's
+increments UI-2, scoped discovery, and UI-3, operate, followed the same day, each
+in a list of its own, now archived:
+[`task-list-admin-ui-scoped-discovery-2026-11-14.md`](../docs/archive/task-list-admin-ui-scoped-discovery-2026-11-14.md)
+and [`task-list-admin-ui-operate-2026-11-14.md`](../docs/archive/task-list-admin-ui-operate-2026-11-14.md).
 The Pre-Vote extension,
 [`task-list-raft-pre-vote-2026-10-25.md`](../docs/archive/task-list-raft-pre-vote-2026-10-25.md),
 was completed and archived on 2026-10-25. The membership list that preceded it,

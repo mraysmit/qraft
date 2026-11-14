@@ -1,7 +1,7 @@
 # Qraft Administrative UI Implementation Plan
 
-**Status:** Agreed 2026-09-27; UI-0, UI-1 and UI-2 delivered 2026-11-14; open questions 2 to 4 are decided when their increments start
-**Last updated:** 2026-11-14 (UI-2 delivered and its task list archived. Earlier the same day: sections 4 and 5 reviewed against the code as UI-2 started, and the view map given a Done status. Earlier the same day: UI-0 and UI-1 delivered, and their task list archived, its links updated. Earlier, 2026-11-13: UI-0 resumed: section 4 notes what the backend lists built since it was last updated, to be reviewed when UI-2 starts; the embedded-interface task-list link refreshed. Earlier, 2026-11-01: `409 policy_in_use` removed, as the owner decided for the ACL list's proposal 18. Earlier the same day: the ACL list aligned with Consul; its proposal numbers stand. Earlier the same day: dated task-list link refreshed. Earlier, 2026-10-31: section 4: a health entry carries its node's status, and `?passing` leaves out an unreachable node's instances. Earlier, 2026-10-30: open question 5's facts corrected: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after the review of the interface against the ACL list: access control moves from UI-6 to UI-5 with the security profile, sign-in, status, tokens, policies and explanations; server removal joins UI-5; section 4.2 gains the profile and the explanation endpoint; the client rows' data; open questions 5 and 6. Earlier that day: section 3: the asset manifest's file name in the Vite build; sections 4.2, 5 and 6: tokens and policies come from the ACL list, and roles and authentication methods are reserved; the embedded-interface task-list link refreshed. Earlier, 2026-10-26: section 4.1, the service writes are on `PUT /v1/catalog/register` and `/deregister` after the client list's Phase 1. Earlier, 2026-10-21: dated task-list links refreshed; the administrative interface remains paused after Step 1 while backend delivery continues. Earlier, 2026-10-09: section 4.1: the node list is at `/v1/catalog/nodes`, the node writes are listed, and bare `/health` is gone, after the single-POM list's Phase 4. On 2026-10-05: the build location and the tenancy owner, after the move to one Maven project; section 4 was brought up to date with scoped reads and the Raft operator endpoints on 2026-10-02)
+**Status:** Agreed 2026-09-27; UI-0 to UI-3 delivered 2026-11-14; open questions 4 to 6 are decided when their increments start
+**Last updated:** 2026-11-14 (UI-3 delivered, open question 3 settled, and sections 4 and 5 brought up to date with it. Earlier the same day: UI-2 delivered and its task list archived. Earlier the same day: sections 4 and 5 reviewed against the code as UI-2 started, and the view map given a Done status. Earlier the same day: UI-0 and UI-1 delivered, and their task list archived, its links updated. Earlier, 2026-11-13: UI-0 resumed: section 4 notes what the backend lists built since it was last updated, to be reviewed when UI-2 starts; the embedded-interface task-list link refreshed. Earlier, 2026-11-01: `409 policy_in_use` removed, as the owner decided for the ACL list's proposal 18. Earlier the same day: the ACL list aligned with Consul; its proposal numbers stand. Earlier the same day: dated task-list link refreshed. Earlier, 2026-10-31: section 4: a health entry carries its node's status, and `?passing` leaves out an unreachable node's instances. Earlier, 2026-10-30: open question 5's facts corrected: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after the review of the interface against the ACL list: access control moves from UI-6 to UI-5 with the security profile, sign-in, status, tokens, policies and explanations; server removal joins UI-5; section 4.2 gains the profile and the explanation endpoint; the client rows' data; open questions 5 and 6. Earlier that day: section 3: the asset manifest's file name in the Vite build; sections 4.2, 5 and 6: tokens and policies come from the ACL list, and roles and authentication methods are reserved; the embedded-interface task-list link refreshed. Earlier, 2026-10-26: section 4.1, the service writes are on `PUT /v1/catalog/register` and `/deregister` after the client list's Phase 1. Earlier, 2026-10-21: dated task-list links refreshed; the administrative interface remains paused after Step 1 while backend delivery continues. Earlier, 2026-10-09: section 4.1: the node list is at `/v1/catalog/nodes`, the node writes are listed, and bare `/health` is gone, after the single-POM list's Phase 4. On 2026-10-05: the build location and the tenancy owner, after the move to one Maven project; section 4 was brought up to date with scoped reads and the Raft operator endpoints on 2026-10-02)
 **Design:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md) (what the interface is) and
 [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections
 12.4, 12.4.1, and 19.6 (how it is packaged and served)
@@ -84,7 +84,9 @@ now states what the code provides on that date.
 |---|---|---|
 | `GET /raft/status` | node, server ID, role, term, leader, commit, applied, and last log index, snapshot index, fenced and removed flags, the storage's size and the snapshot's age, read as one consistent view | Describes only the answering node |
 | `GET /v1/operator/raft/configuration` | each configured server: server ID, name, address, voter, leader, as the answering server holds them | No reachability or lag |
-| `GET /v1/operator/autopilot/health` | the leader's view of each server: healthy, last contact, last index and term, as Consul's | No match or next index, replication lag as a figure, or quorum |
+| `GET /v1/operator/autopilot/health` | the leader's view of each server: healthy, last contact, last index and term, as Consul's | Superseded for the interface by the members read |
+| `GET /v1/operator/raft/members` | on the leader each server's match and next index, lag, last contact, reachability and health, and the quorum; on a follower its labelled partial view (since 2026-11-14) | None for UI-3 |
+| `GET /v1/operator/raft/storage` | size, snapshot index, term and age, first log index held, log indexes, fencing, transition queue depth, last snapshot failure (since 2026-11-14) | No WAL health figure or lock state |
 | `DELETE /v1/operator/raft/peer` | removal of a server, guarded by the operator token and forwarded to the leader | A mutation: offered from UI-5 |
 | `GET /health/live`, `/health/ready` | liveness, and readiness with the conditions the server does not meet | None for the status strip |
 | `GET /v1/tenants`, `GET /v1/namespaces` | the replicated tenants, and the namespaces of the tenant `X-Qraft-Tenant` names | None for the scope selector |
@@ -108,9 +110,9 @@ now states what the code provides on that date.
 | Tenant- and namespace-scoped reads, and a listing of the scopes | Scope selector; every Discover view | Built: the headers since 2026-09-27, the tenancy API since the tenancy list; used by UI-2 |
 | Services summary | Services landing page | Built 2026-11-14 (UI-2) |
 | Cross-service health-check listing | Health Checks page | Built 2026-11-14 (UI-2) |
-| Cluster membership detail: match and next index, lag, reachability, quorum | Status strip, Cluster Overview, Raft Members, server rows in Nodes | Partial: the leader's view of each server (`/v1/operator/autopilot/health`); no match or next index, lag figure or quorum |
-| Storage and snapshot state: WAL size and health, fenced and lock state, snapshot index, term, age and last result, retained boundary | Storage & Snapshots, Cluster Overview | Partial: size, snapshot index and age, and fencing in `/raft/status` |
-| Transition-queue depth and saturation | Cluster Overview | Missing |
+| Cluster membership detail: match and next index, lag, reachability, quorum | Status strip, Cluster Overview, Raft Members, server rows in Nodes | Built 2026-11-14 (UI-3): `/v1/operator/raft/members` |
+| Storage and snapshot state: WAL size and health, fenced and lock state, snapshot index, term, age and last result, retained boundary | Storage & Snapshots, Cluster Overview | Built 2026-11-14 (UI-3), `/v1/operator/raft/storage`, except a WAL health figure and the lock state; the last result is the last failure |
+| Transition-queue depth and saturation | Cluster Overview | Built 2026-11-14 (UI-3): the depth; no saturation figure |
 | Bounded event journal and query | Events page and tabs | Built (events list): query and watch |
 | Redacted effective configuration | Configuration page | Missing |
 | Read consistency modes and an answering-node header | Consistency selector, read metadata | Partial: the modes are built; no answering-node header |
@@ -141,16 +143,16 @@ Status key:
 
 | Stage | View (UI/UX section) | Status | Notes (section 4.2) |
 |---|---|---|---|
-| 1 | Shell and status strip (4.1, 4.2) | Done, in part | UI-1 and UI-2: role, leader, term, readiness, security, and the scope selector. Quorum and lag need membership detail; the consistency selector is UI-4's. |
+| 1 | Shell and status strip (4.1, 4.2) | Done | UI-1 to UI-3: role, leader, term, readiness, security, the scope selector, quorum, failure tolerance, lag, and unreachable servers. The consistency selector is UI-4's. |
 | 1 | Services list (5.1) | Done | UI-2: on the summary. Registration source is not recorded. |
 | 1 | Service detail: Overview, Instances, Health Checks, Metadata (5.1) | Done | UI-1, in the selected scope since UI-2. |
 | 1 | Service detail: Events tab | Ready | The event journal |
 | 1 | Nodes and Clients: client rows (5.2) | Done, in part | UI-1. Readiness, server endpoint and last reconciliation need clients to report them (open question 6). |
-| 1 | Nodes and Clients: server rows (5.2) | Partial | The leader's view of each server; storage state in part |
+| 1 | Nodes and Clients: server rows (5.2) | Done | UI-3: role, vote, reachability, match index, lag, last contact |
 | 1 | Health Checks, cross-service (5.3) | Done | UI-2: on the check listing. |
-| 1 | Cluster Overview (9.1) | Partial | Quorum, lag and queue depth are missing. |
-| 1 | Raft Members (9.2) | Partial | The leader's view of each server; no match or next index |
-| 1 | Storage & Snapshots (9.3) | Partial | Size, snapshot age and fencing only |
+| 1 | Cluster Overview (9.1) | Done | UI-3: servers, quorum, services, client nodes, storage and queue. Recent events are UI-4's. |
+| 1 | Raft Members (9.2) | Done | UI-3, read-only; a follower shows its partial view (open question 3) |
+| 1 | Storage & Snapshots (9.3) | Done | UI-3, with the persistent fenced banner |
 | 1 | Events, read-only (9.4) | Ready | The event journal |
 | 1 | Configuration, read-only (9.6) | Blocked | Redacted configuration |
 | 1 | Metrics (9.5) | Partial | A configured link to the external dashboard is ready. |
@@ -242,6 +244,10 @@ Views:
 - Cluster Overview;
 - Raft Members, read-only (membership changes are not offered);
 - Storage & Snapshots, including the persistent fenced banner.
+
+Delivered 2026-11-14 in [`task-list-admin-ui-operate-2026-11-14.md`](../docs/archive/task-list-admin-ui-operate-2026-11-14.md), with UI-2's open items: the client's
+fallback for unrouted paths, the redirect from `/`, gzip for text assets, and
+the bundle split. UI-4 is the next increment.
 
 ### UI-4 Events, configuration, and live reads
 
@@ -384,9 +390,12 @@ contracts exist.
    decision 1). The question was: until replicated tenants exist (UI-6), should
    the scope selector list only the scopes present in the catalog, or should
    UI-2 wait for replicated tenants?
-3. **Membership reads.** Only the leader knows its peers' match indexes and
-   contact times. Should a follower answer membership reads with a redirect hint
-   to the leader, or with its own partial view clearly labelled?
+3. **Membership reads.** Settled 2026-11-14 ([`task-list-admin-ui-operate-2026-11-14.md`](../docs/archive/task-list-admin-ui-operate-2026-11-14.md), decision 5, taken
+   under the owner's instruction not to pause, reversible): a follower answers
+   its own partial view, labelled, with the leader it knows and null progress.
+   The question was: only the leader knows its peers' match indexes and contact
+   times; should a follower answer membership reads with a redirect hint to the
+   leader, or with its own partial view clearly labelled?
 4. **Metrics.** Should the Metrics page stay a configured link to the external
    dashboard, or read bounded summaries from the API listener?
 5. **Services registered from the interface.** Raised 2026-10-27. A client
