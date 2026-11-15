@@ -223,24 +223,27 @@ describe('explanations', () => {
     expect((panel.querySelector('input[aria-label="Accessor ID"]') as HTMLInputElement).value).toBe(TOKEN.accessorId);
   });
 
-  it("is offered on a service's Access tab for that service in its scope, and on Nodes and Clients for a node", async () => {
+  const field = (panel: HTMLElement, label: string) =>
+    (panel.querySelector(`[aria-label="${label}"]`) as HTMLInputElement).value;
+
+  // In two tests: in one, the two pages took 3.8 s on Jenkins build 82, against Vitest's 5 s.
+  it("is offered on a service's Access tab for that service in its scope", async () => {
     at('/ui/services/web?tenant=acme&namespace=prod');
-    const { unmount } = render(<Root bootstrap={BOOTSTRAP} api={writer()} session={memorySession('held')} />);
+    render(<Root bootstrap={BOOTSTRAP} api={writer()} session={memorySession('held')} />);
 
     fireEvent.click(await screen.findByText('Access', { selector: '.ant-tabs-tab-btn' }));
     const service = await screen.findByLabelText('Explain a decision');
-    const field = (panel: HTMLElement, label: string) =>
-      (panel.querySelector(`[aria-label="${label}"]`) as HTMLInputElement).value;
     expect(field(service, 'Resource')).toBe('service');
     expect(field(service, 'Resource name')).toBe('web');
     expect(field(service, 'Resource tenant')).toBe('acme');
     expect(field(service, 'Resource namespace')).toBe('prod');
-    unmount();
+  });
 
+  it('is offered on Nodes and Clients for a node', async () => {
     at('/ui/nodes');
     render(<Root bootstrap={BOOTSTRAP} api={writer()} session={memorySession('held')} />);
-    const node = await screen.findByLabelText('Explain a decision');
-    expect(field(node, 'Resource')).toBe('node');
+
+    expect(field(await screen.findByLabelText('Explain a decision'), 'Resource')).toBe('node');
   });
 
   it('is not offered on the service and node pages without acl:read', async () => {

@@ -671,6 +671,15 @@ Docker stages (`-DskipVitest=true`). The audit, over the console, the archived l
 test reports, 907 files, found 1,175 error lines, all flagged, and 857 stack traces, none unflagged; no
 `too_many_pings` and no JVM crash file. The logs are in `logs/jenkins/Qraft-76/`.
 
+## Build 82, 2026-11-15
+
+Build 82 ran on `0d2b53b`, build 81's fix with UI-5's close, and passed in 30 min 20 s: default 2,053 with every
+coverage gate met and Vitest 220, end-to-end 33, and Docker and `slow` 52. The audit, 912 files, found 1,702 error
+lines and 1,160 stack traces, every one flagged. No `too_many_pings` and no JVM crash file. Two Vitest tests took 3.8 s
+and 3.6 s, against the 5 s limit: the explanation test, which opened a service and Nodes and Clients, is split in two,
+and the management-banner test moves to the Access page, which has no table, instead of Configuration. The logs are in
+`logs/jenkins/Qraft-82/`.
+
 ## Build 81, 2026-11-15
 
 Build 81 ran on `be77ac8`, UI-5's close with build 80's fix and the test logging no longer prudent, and failed in 2 min

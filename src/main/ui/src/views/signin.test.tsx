@@ -181,8 +181,9 @@ describe('the token menu and the management banner', () => {
     expect(banner.textContent).toContain(
       'Signed in with the management token: unrestricted access. Use a scoped token for routine work.');
     expect(banner.querySelector('button'), 'it cannot be dismissed').toBeNull();
-    fireEvent.click(screen.getByText('Configuration', { selector: 'a' }));
-    await screen.findByText('Configuration', { selector: 'h2' });
+    // Another page with no table: Configuration's took the test to 3.6 s on Jenkins build 82, against Vitest's 5 s.
+    fireEvent.click(screen.getByText('Access', { selector: 'nav a' }));
+    await screen.findByText('Access control', { selector: 'h2' });
     expect(screen.getByLabelText('Management token in use')).toBeInTheDocument();
   });
 
