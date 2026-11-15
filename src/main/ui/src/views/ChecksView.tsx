@@ -18,8 +18,8 @@ import { Empty, Input, Radio, Space, Table, Typography } from 'antd';
 import { useState } from 'react';
 import type { QraftApi, Scope } from '../api/client';
 import type { CheckEntry, Health } from '../api/schemas';
-import { RouteLink } from '../routing';
-import { useRead } from '../useRead';
+import { useLiveRead } from '../live';
+import { RouteLink, useRouter } from '../routing';
 import {
   Failure,
   formatInstant,
@@ -42,7 +42,12 @@ type StatusFilter = (typeof STATUS_FILTERS)[number];
  * page's own, over the one listing read.
  */
 export function ChecksView({ api, scope }: { api: QraftApi; scope: Scope }) {
-  const [state, again] = useRead(() => api.checks('any', scope), [api, scope.tenant, scope.namespace]);
+  const { consistency } = useRouter();
+  const [state, again] = useLiveRead(
+    (wait) => api.checks('any', scope, { consistency, ...wait }),
+    [api, scope.tenant, scope.namespace, consistency],
+    (read) => read.index,
+  );
   const [status, setStatus] = useState<StatusFilter>('All');
   const [text, setText] = useState('');
   const shown = state.status === 'ready' ? state.value : state.previous;
@@ -63,7 +68,9 @@ export function ChecksView({ api, scope }: { api: QraftApi; scope: Scope }) {
       <Typography.Title level={2}>Health Checks</Typography.Title>
       <ReadIn scope={scope} />
       {state.status === 'failed' && <Failure title="Health checks could not be read" error={state.error} onRetry={again} />}
-      {shown !== undefined && <ReadMeta index={shown.index} stale={state.status !== 'ready'} />}
+      {shown !== undefined && (
+        <ReadMeta read={shown} stale={state.status !== 'ready'} resynchronized={state.status === 'ready' && state.resynchronized} />
+      )}
       {shown !== undefined && all.length > 0 && (
         <Typography.Text>{`${all.length} ${all.length === 1 ? 'check' : 'checks'}: ${healthCountsText(counts)}`}</Typography.Text>
       )}

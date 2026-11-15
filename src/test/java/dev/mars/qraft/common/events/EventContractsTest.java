@@ -50,6 +50,14 @@ class EventContractsTest {
         }
     }
 
+    /** An event that names a service, as the catalog's service events do. */
+    private record Named(String serviceName) implements ServiceEvent {
+        @Override
+        public String type() {
+            return "service.registered";
+        }
+    }
+
     private record LeadershipGained() implements QraftEvent {
         @Override
         public String type() {
@@ -138,5 +146,20 @@ class EventContractsTest {
         assertTrue(scope.matches(acme));
         assertFalse(scope.matches(system), "an event without a scope is not in one");
         assertFalse(new EventFilter(Set.of(), Set.of(), Optional.of("beta"), Optional.empty()).matches(acme));
+    }
+
+    @Test
+    void aServiceFilterMatchesOnlyTheEventsThatNameThatService() {
+        EventEnvelope web = EventEnvelope.domain(id(1), AT, 3, 42, 0, "acme", "prod", new Named("web"));
+        EventEnvelope api = EventEnvelope.domain(id(2), AT, 3, 43, 0, "acme", "prod", new Named("api"));
+        EventEnvelope unnamed = EventEnvelope.domain(id(3), AT, 3, 44, 0, "acme", "prod", new Registered("web"));
+        EventFilter service = new EventFilter(Set.of(), Set.of(), Optional.empty(), Optional.empty(),
+                Optional.of("web"));
+
+        assertTrue(service.matches(web));
+        assertFalse(service.matches(api));
+        assertFalse(service.matches(unnamed), "an event that names no service is no service's");
+        assertTrue(EventFilter.all().matches(unnamed));
+        assertEquals(Optional.empty(), EventFilter.all().service());
     }
 }

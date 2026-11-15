@@ -184,6 +184,31 @@ class HttpApiServerEventWatchTest {
     }
 
     @Test
+    void aWatchOfAServiceFollowsOnlyThatServicesEvents() throws Exception {
+        start();
+        register("api-1", "api");
+        register("web-1", "web");
+
+        BlockingQueue<String> lines = new LinkedBlockingQueue<>();
+        assertEquals(200, watch("?service=web&tenant=default&namespace=default", lines).statusCode());
+        assertEquals("web-1", JSON.readTree(next(lines, line -> line.startsWith("data: ")).substring(6))
+                .path("event").path("serviceId").asText(), "the replay holds only web's");
+        register("api-2", "api");
+        register("web-2", "web");
+        assertEquals("web-2", JSON.readTree(next(lines, line -> line.startsWith("data: ")).substring(6))
+                .path("event").path("serviceId").asText(), "and so does what follows");
+    }
+
+    private void register(String id, String name) throws Exception {
+        HttpResponse<String> answer = http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port()
+                + "/v1/catalog/register")).header("Content-Type", "application/json").header("X-Qraft-Node", "node-1")
+                .PUT(HttpRequest.BodyPublishers.ofString("""
+                        {"service":{"serviceId":"%s","serviceName":"%s","address":"10.0.0.5","port":8080}}"""
+                        .formatted(id, name))).build(), HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, answer.statusCode(), answer.body());
+    }
+
+    @Test
     void aQuietWatchIsAnsweredAtOnceRatherThanAtItsFirstHeartbeat() throws Exception {
         start(Duration.ofSeconds(30));
         HttpResponse<Stream<String>> watch = http.sendAsync(HttpRequest.newBuilder(URI.create("http://127.0.0.1:"

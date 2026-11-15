@@ -51,8 +51,9 @@ import java.util.concurrent.TimeUnit;
 /**
  * One server's events over HTTP (event query and watch list, decision 2): {@code GET /v1/operator/events} pages through
  * the server's journal after {@code after} ({@code <boot>:<sequence>}, the boot's start by default), at most
- * {@code limit} events (100 by default, 1,000 at most), of a {@code category} and {@code type} if given; it answers the
- * events, the cursor to ask from next and the page's status. It needs {@code operator:read}.
+ * {@code limit} events (100 by default, 1,000 at most), of a {@code category} and {@code type} if given, and of a
+ * {@code tenant}, a {@code namespace} and a {@code service} if given (UI-4 list, decision 2); it answers the events,
+ * the cursor to ask from next, the page's status and the journal's {@code capacity}. It needs {@code operator:read}.
  *
  * <p>{@code GET /v1/operator/events/watch} (decision 3) takes the same cursor and filters, the limit aside, and answers
  * server-sent events: each event the journal holds after the cursor, then each as it is published, with its cursor as
@@ -74,7 +75,8 @@ final class EventRoutes {
     static final int DEFAULT_LIMIT = 100;
     static final int MAX_LIMIT = 1000;
     private static final AclRequest OPERATOR_READ = AclRequest.single(AclResource.OPERATOR, AclAccess.READ);
-    private static final Set<String> PARAMETERS = Set.of("after", "limit", "category", "type");
+    private static final Set<String> PARAMETERS = Set.of("after", "limit", "category", "type", "tenant", "namespace",
+            "service");
 
     private final HttpApiServer server;
     private volatile Duration heartbeat = Duration.ofSeconds(15);
@@ -139,6 +141,7 @@ final class EventRoutes {
         answer.put("events", page.events().stream().map(this::view).toList());
         answer.put("next", cursor(page.next()));
         answer.put("status", page.status().name().toLowerCase(Locale.ROOT));
+        answer.put("capacity", journal.capacity());
         server.respondJson(exchange, 200, answer);
     }
 
@@ -287,7 +290,16 @@ final class EventRoutes {
             }
         }
         Set<String> types = query.containsKey("type") ? Set.of(query.get("type")) : Set.of();
-        return new Request(after, new EventFilter(categories, types, Optional.empty(), Optional.empty()), limit);
+        return new Request(after, new EventFilter(categories, types, named(query, "tenant"), named(query, "namespace"),
+                named(query, "service")), limit);
+    }
+
+    /** The name a parameter gives, if it is given; a blank one is refused. */
+    private static Optional<String> named(Map<String, String> query, String parameter) {
+        if (!query.containsKey(parameter)) return Optional.empty();
+        String name = query.get(parameter).trim();
+        if (name.isEmpty()) throw new IllegalArgumentException(parameter + " must not be blank");
+        return Optional.of(name);
     }
 
     static EventCursor parseCursor(String text) {

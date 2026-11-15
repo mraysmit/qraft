@@ -306,6 +306,8 @@ public class QraftServerService {
             healthServer.useStorageStatus(storageStatus);
             // Audit events of the requests answered under a token, and their file if one is configured.
             healthServer.useEventJournal(eventJournal);
+            // Its effective configuration, its secrets withheld, for the administrative interface (UI-4 list).
+            healthServer.useConfiguration(config.effective());
             this.auditSink = config.getAuditPath().map(path -> AuditFileSink.start(eventJournal, path));
             io.opentelemetry.api.metrics.Meter storageMeter =
                     io.opentelemetry.api.GlobalOpenTelemetry.getMeter("qraft-raft");

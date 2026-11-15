@@ -86,6 +86,11 @@ public final class EventJournal implements EventSource, AutoCloseable {
         return bootId;
     }
 
+    /** How many events the journal keeps: the newest, the oldest dropped first. */
+    public int capacity() {
+        return capacity;
+    }
+
     /** Publishes a system event of this node. */
     public EventEnvelope publishSystem(EventSeverity severity, long term, QraftEvent event) {
         return publish(id -> EventEnvelope.system(id, clock.instant(), severity, term, event));

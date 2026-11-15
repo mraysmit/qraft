@@ -15,8 +15,9 @@
  */
 
 import { Alert, Button, Space, Tag, Typography } from 'antd';
-import { ApiError, DEFAULT_SCOPE, MalformedResponseError, type QraftApi, type Scope } from '../api/client';
+import { ApiError, DEFAULT_SCOPE, MalformedResponseError, type QraftApi, type Read, type ReadOptions, type Scope } from '../api/client';
 import type { Health, HealthEntry, NodeStatus, ServiceNames } from '../api/schemas';
+import { useLive } from '../live';
 
 // Each health state has its own label and mark, so colour is never the only signal (UI/UX design sections 3.6, 5.3).
 const HEALTH: Record<Health, { label: string; mark: string; color: string }> = {
@@ -68,14 +69,56 @@ export function formatInstant(iso: string): string {
   return `${time.toISOString().slice(0, 19).replace('T', ' ')} UTC`;
 }
 
-/** The read metadata a view's data came with (UI/UX design section 12). */
-export function ReadMeta({ index, stale }: { index: number | null; stale?: boolean }) {
-  return (
-    <Typography.Text type="secondary">
-      {index === null ? 'Applied index not reported' : `Applied index ${index}`}
-      {stale === true ? ' · reading again, this may be out of date' : ''}
-    </Typography.Text>
-  );
+/** A count of milliseconds in words: `120 ms`, `2.5 s`. */
+function duration(millis: number): string {
+  return millis < 1000 ? `${millis} ms` : `${(millis / 1000).toFixed(1)} s`;
+}
+
+/** The consistency a read was answered in, in words (UI/UX design section 12). */
+export function consistencyText(read: Omit<Read<unknown>, 'data'>): string {
+  const noLeader = read.knownLeader === false ? ', with no known leader' : '';
+  switch (read.consistency) {
+    case 'consistent':
+      return 'Consistent read: confirmed by the leader';
+    case 'stale': {
+      const contact = read.lastContactMillis === null || read.lastContactMillis === 0 ? ''
+        : `, ${duration(read.lastContactMillis)} since it heard from the leader`;
+      return `Stale read: this server's applied state${contact}${noLeader}`;
+    }
+    case 'default':
+      return `Default consistency: this server's applied state${noLeader}`;
+    case null:
+      return 'Consistency not reported';
+  }
+}
+
+/**
+ * The read metadata a view's data came with (UI/UX design section 12): the server that answered, the consistency it
+ * applied and the applied index, or for an operator read that it is the answering server's own state; whether the
+ * view was resynchronized, is being read again, or is paused.
+ */
+export function ReadMeta({
+  read,
+  stale,
+  resynchronized,
+  operator,
+}: {
+  read: Omit<Read<unknown>, 'data'>;
+  stale?: boolean | undefined;
+  resynchronized?: boolean | undefined;
+  operator?: boolean | undefined;
+}) {
+  const { paused } = useLive();
+  const parts = [read.answeredBy === null ? 'Answering server not reported' : `Answered by ${read.answeredBy}`];
+  if (operator === true) {
+    parts.push("This server's own state; the consistency chosen does not apply to it");
+  } else {
+    parts.push(consistencyText(read), read.index === null ? 'Applied index not reported' : `Applied index ${read.index}`);
+  }
+  if (resynchronized === true) parts.push('resynchronized: the index went back, so the view was read afresh');
+  if (stale === true) parts.push('reading again, this may be out of date');
+  if (paused) parts.push('live updates paused');
+  return <Typography.Text type="secondary">{parts.join(' · ')}</Typography.Text>;
 }
 
 /** A failed read: what failed, why, whether trying again may help, and the IDs a diagnosis needs. */
@@ -122,10 +165,10 @@ export interface ServiceEntries {
   index: number | null;
 }
 
-export async function loadServiceEntries(api: QraftApi, scope: Scope): Promise<ServiceEntries> {
-  const services = await api.services(scope);
+export async function loadServiceEntries(api: QraftApi, scope: Scope, options: ReadOptions = {}): Promise<ServiceEntries> {
+  const services = await api.services(scope, options);
   const names = Object.keys(services.data);
-  const reads = await Promise.all(names.map((name) => api.serviceHealth(name, scope)));
+  const reads = await Promise.all(names.map((name) => api.serviceHealth(name, scope, options)));
   const entries: Record<string, HealthEntry[]> = {};
   names.forEach((name, position) => {
     entries[name] = reads[position]?.data ?? [];

@@ -561,8 +561,15 @@ Phases 5 to 7 were built on 2026-11-08 by
   carried by the event, and there is no event for a refused compare-and-set.
 - **The query**, `GET /v1/operator/events`: the server's events after `after`
   (`<boot>:<sequence>`), at most `limit` (100 by default, 1,000 at most), of a
-  `category` and a `type`; it answers the events, the cursor to ask from next and the
-  page's status (`complete`, `more`, `history_gap`, `other_boot`).
+  `category` and a `type`; it answers the events, the cursor to ask from next, the
+  page's status (`complete`, `more`, `history_gap`, `other_boot`) and, since
+  2026-11-15, the journal's `capacity`.
+- **Scope and service filters** (since 2026-11-15, for the administrative
+  interface's Events tabs, UI-4): the query and the watch also take `tenant`,
+  `namespace` and `service`. An event without a scope, such as a system event, is in
+  no scope, and a service's events are those that name it: `service.registered`,
+  `service.deregistered` and `health.changed`, which implement `ServiceEvent`. A
+  blank value is refused.
 - **The watch**, `GET /v1/operator/events/watch`: server-sent events with the same
   cursor and filters, an opening comment, each event with its cursor as the `id`, a
   comment as a heartbeat every 15 seconds without an event, and a last `end` event

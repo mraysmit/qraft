@@ -15,11 +15,12 @@
  */
 
 import { createContext, type CSSProperties, type MouseEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { DEFAULT_SCOPE, type Scope } from './api/client';
+import { type Consistency, DEFAULT_SCOPE, type Scope } from './api/client';
 
 // Each view has its own address below the interface's path, so reloading, bookmarking, sharing a link and the back
 // and forward buttons work (UI/UX design section 4.4). The server answers every such address with index.html. The
-// selected scope is the address's query, kept across the interface's links (UI-2 task list, decision 5).
+// selected scope is the address's query, kept across the interface's links (UI-2 task list, decision 5), and so is the
+// consistency chosen (UI-4 task list, decision 4).
 
 export type Route =
   | { view: 'services' }
@@ -29,6 +30,8 @@ export type Route =
   | { view: 'cluster' }
   | { view: 'members' }
   | { view: 'storage' }
+  | { view: 'events' }
+  | { view: 'configuration' }
   | { view: 'unknown' };
 
 /** The view an address below `uiPath` names. */
@@ -43,6 +46,8 @@ export function routeOf(pathname: string, uiPath: string): Route {
   if (rest === 'cluster') return { view: 'cluster' };
   if (rest === 'members') return { view: 'members' };
   if (rest === 'storage') return { view: 'storage' };
+  if (rest === 'events') return { view: 'events' };
+  if (rest === 'configuration') return { view: 'configuration' };
   if (rest.startsWith('services/') && rest.length > 'services/'.length && !rest.slice('services/'.length).includes('/')) {
     try {
       return { view: 'service', name: decodeURIComponent(rest.slice('services/'.length)) };
@@ -64,14 +69,28 @@ export function scopeOf(search: string): Scope {
   };
 }
 
+/** The consistency an address's query names; anything else is the default. */
+export function consistencyOf(search: string): Consistency {
+  const chosen = new URLSearchParams(search).get('consistency');
+  return chosen === 'consistent' || chosen === 'stale' ? chosen : 'default';
+}
+
 /**
- * The address of a view in a scope. A service name is one encoded segment, its dots included: the server takes a last
- * segment with a dot for a file, and a file that is not there is not found. The default scope is left out of the query.
+ * The address of a view in a scope and consistency. A service name is one encoded segment, its dots included: the server takes a last
+ * segment with a dot for a file, and a file that is not there is not found. The default scope and the default consistency
+ * are left out of the query.
  */
-export function hrefOf(route: Route, uiPath: string, scope: Scope = DEFAULT_SCOPE): string {
+export function hrefOf(route: Route, uiPath: string, scope: Scope = DEFAULT_SCOPE,
+  consistency: Consistency = 'default'): string {
   const root = uiPath.endsWith('/') ? uiPath : `${uiPath}/`;
-  const isDefault = scope.tenant === DEFAULT_SCOPE.tenant && scope.namespace === DEFAULT_SCOPE.namespace;
-  const query = isDefault ? '' : `?${new URLSearchParams({ tenant: scope.tenant, namespace: scope.namespace })}`;
+  const parameters = new URLSearchParams();
+  if (scope.tenant !== DEFAULT_SCOPE.tenant || scope.namespace !== DEFAULT_SCOPE.namespace) {
+    parameters.set('tenant', scope.tenant);
+    parameters.set('namespace', scope.namespace);
+  }
+  if (consistency !== 'default') parameters.set('consistency', consistency);
+  const text = parameters.toString();
+  const query = text === '' ? '' : `?${text}`;
   switch (route.view) {
     case 'services':
     case 'unknown':
@@ -82,6 +101,8 @@ export function hrefOf(route: Route, uiPath: string, scope: Scope = DEFAULT_SCOP
     case 'cluster':
     case 'members':
     case 'storage':
+    case 'events':
+    case 'configuration':
       return `${root}${route.view}${query}`;
     case 'service':
       return `${root}services/${encodeURIComponent(route.name).replaceAll('.', '%2E')}${query}`;
@@ -91,11 +112,14 @@ export function hrefOf(route: Route, uiPath: string, scope: Scope = DEFAULT_SCOP
 interface Router {
   route: Route;
   scope: Scope;
+  consistency: Consistency;
   uiPath: string;
-  /** Opens a view in the current scope. */
+  /** Opens a view in the current scope and consistency. */
   navigate(to: Route): void;
   /** Reads the current view in another scope. */
   selectScope(scope: Scope): void;
+  /** Reads the current view in another consistency. */
+  selectConsistency(consistency: Consistency): void;
 }
 
 const RouterContext = createContext<Router | null>(null);
@@ -111,10 +135,11 @@ export function RouterProvider({ uiPath, children }: { uiPath: string; children:
 
   const route = useMemo(() => routeOf(location.pathname, uiPath), [location.pathname, uiPath]);
   const scope = useMemo(() => scopeOf(location.search), [location.search]);
+  const consistency = useMemo(() => consistencyOf(location.search), [location.search]);
 
   const go = useCallback(
-    (to: Route, inScope: Scope) => {
-      window.history.pushState(null, '', hrefOf(to, uiPath, inScope));
+    (to: Route, inScope: Scope, inConsistency: Consistency) => {
+      window.history.pushState(null, '', hrefOf(to, uiPath, inScope, inConsistency));
       setLocation({ pathname: window.location.pathname, search: window.location.search });
     },
     [uiPath],
@@ -124,11 +149,13 @@ export function RouterProvider({ uiPath, children }: { uiPath: string; children:
     () => ({
       route,
       scope,
+      consistency,
       uiPath,
-      navigate: (to: Route) => go(to, scope),
-      selectScope: (next: Scope) => go(route, next),
+      navigate: (to: Route) => go(to, scope, consistency),
+      selectScope: (next: Scope) => go(route, next, consistency),
+      selectConsistency: (next: Consistency) => go(route, scope, next),
     }),
-    [route, scope, uiPath, go],
+    [route, scope, consistency, uiPath, go],
   );
   return <RouterContext.Provider value={router}>{children}</RouterContext.Provider>;
 }
@@ -141,14 +168,14 @@ export function useRouter(): Router {
 
 /** A link to a view in the current scope: a real address, so it can be opened in a new tab, and followed in place. */
 export function RouteLink({ to, children, style }: { to: Route; children: ReactNode; style?: CSSProperties }) {
-  const { uiPath, scope, navigate } = useRouter();
+  const { uiPath, scope, consistency, navigate } = useRouter();
   const follow = (event: MouseEvent<HTMLAnchorElement>) => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
     navigate(to);
   };
   return (
-    <a href={hrefOf(to, uiPath, scope)} onClick={follow} style={style}>
+    <a href={hrefOf(to, uiPath, scope, consistency)} onClick={follow} style={style}>
       {children}
     </a>
   );

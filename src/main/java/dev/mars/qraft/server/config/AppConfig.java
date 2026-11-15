@@ -31,12 +31,16 @@ import java.net.URI;
 import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.StringJoiner;
 
 import static dev.mars.qraft.common.config.JsonSettings.optionalBoolean;
@@ -66,12 +70,21 @@ public final class AppConfig {
     private static final long DEFAULT_NODE_REAP_AFTER_MS = 72L * 60 * 60 * 1000;
     private static final int MIN_OPERATOR_TOKEN_LENGTH = 16;
 
+    /** The settings whose value is a whole object, answered as one setting rather than one per field. */
+    private static final Set<String> SINGLE_SETTINGS = Set.of("server.raft.nodes");
+
     private final Settings settings;
+    /** The keys of the settings the document gave, such as {@code server.http.port}. */
+    private final Set<String> configured;
+    /** The file the document was read from, or {@code null} when it was given as text. */
+    private final Path source;
     private volatile String resolvedNodeId;
     private volatile String managementSecret;
 
-    private AppConfig(Settings settings) {
+    private AppConfig(Settings settings, Set<String> configured, Path source) {
         this.settings = settings;
+        this.configured = Set.copyOf(configured);
+        this.source = source;
     }
 
     /** The {@code server} object of the document, with {@code logging.directory} beside it. */
@@ -121,14 +134,20 @@ public final class AppConfig {
 
     public static AppConfig fromFile(Path path) {
         if (path == null) throw new IllegalArgumentException("configuration path is required");
+        String document;
         try {
-            return fromJson(Files.readString(path));
+            document = Files.readString(path);
         } catch (IOException error) {
             throw new IllegalArgumentException("Could not read server configuration " + path, error);
         }
+        return parse(document, path);
     }
 
     public static AppConfig fromJson(String document) {
+        return parse(document, null);
+    }
+
+    private static AppConfig parse(String document, Path source) {
         JsonNode root = JsonSettings.readDocument(document, "Server");
         rejectUnknown(root, "root", "version", "server", "logging");
         JsonSettings.requireFormatVersion(root);
@@ -205,12 +224,110 @@ public final class AppConfig {
         Optional<dev.mars.qraft.common.dns.DnsSettings> dns = dev.mars.qraft.common.dns.DnsSettings.parse(
                 server.get("dns"), "server.dns", httpSettings.host(), true);
 
+        Set<String> configured = new HashSet<>();
+        collectKeys(server, "server", configured);
+        collectKeys(logging, "logging", configured);
         return new AppConfig(new Settings(id, httpSettings, apiGrpcPort,
                 new Raft(raftPort, nodes, electionTimeoutMs, heartbeatIntervalMs, storageSettings, snapshotSettings,
                         logHardLimit, ioSettings, membershipSettings),
                 operatorToken, telemetrySettings, shutdownSettings,
                 new Health(expiryIntervalMs, nodeTtlMs, nodeReapAfterMs), adminUi, aclSettings, profile,
-                loggingDirectory, tlsSettings, optionalText(audit, "path", ""), dns));
+                loggingDirectory, tlsSettings, optionalText(audit, "path", ""), dns), configured, source);
+    }
+
+    /** Adds to {@code keys} the key of each setting {@code node}, at {@code key}, holds. */
+    private static void collectKeys(JsonNode node, String key, Set<String> keys) {
+        if (node == null || node.isNull() || node.isMissingNode()) return;
+        if (node.isObject() && !SINGLE_SETTINGS.contains(key)) {
+            node.fieldNames().forEachRemaining(name -> collectKeys(node.get(name), key + "." + name, keys));
+        } else {
+            keys.add(key);
+        }
+    }
+
+    /**
+     * Every setting in force, in the document's order, with whether the document gave it (UI-4 list, decision 3). A
+     * secret is never answered: the operator token is withheld, and the telemetry endpoint is given without its user
+     * information or query. A file's path is given, never what the file holds.
+     */
+    public EffectiveConfiguration effective() {
+        List<EffectiveSetting> list = new ArrayList<>();
+        java.util.function.BiConsumer<String, Object> add = (key, value) ->
+                list.add(new EffectiveSetting(key, value, configured.contains(key), false));
+        add.accept("server.id", getNodeId());
+        add.accept("server.http.host", getHttpHost());
+        add.accept("server.http.port", getHttpPort());
+        add.accept("server.apiGrpcPort", getApiGrpcPort());
+        add.accept("server.raft.port", getRaftPort());
+        add.accept("server.raft.nodes", new LinkedHashMap<>(getClusterMembers()));
+        add.accept("server.raft.electionTimeoutMs", getElectionTimeoutMs());
+        add.accept("server.raft.heartbeatIntervalMs", getHeartbeatIntervalMs());
+        add.accept("server.raft.logHardLimit", getLogHardLimit());
+        add.accept("server.raft.storage.type", getRaftStorageType());
+        add.accept("server.raft.storage.path", getRaftStoragePath());
+        add.accept("server.raft.storage.fsync", getRaftStorageFsync());
+        add.accept("server.raft.snapshot.enabled", isSnapshotEnabled());
+        add.accept("server.raft.snapshot.threshold", getSnapshotThreshold());
+        add.accept("server.raft.snapshot.checkIntervalMs", getSnapshotCheckIntervalMs());
+        add.accept("server.raft.io.poolSize", getRaftIoPoolSize());
+        add.accept("server.raft.io.queueSize", getRaftIoQueueSize());
+        add.accept("server.raft.membership.promotionStabilizationMs", getPromotionStabilizationMs());
+        add.accept("server.raft.membership.promotionMaxTrailingEntries", getPromotionMaxTrailingEntries());
+        add.accept("server.raft.membership.cleanup.enabled", isRaftCleanupEnabled());
+        add.accept("server.raft.membership.cleanup.failureTimeoutMs", getRaftCleanupFailureTimeoutMs());
+        add.accept("server.raft.membership.cleanup.intervalMs", getRaftCleanupIntervalMs());
+        add.accept("server.raft.membership.cleanup.minVoters", getRaftCleanupMinVoters());
+        add.accept("server.telemetry.enabled", isTelemetryEnabled());
+        String endpoint = getRedactedOtlpEndpoint();
+        list.add(new EffectiveSetting("server.telemetry.otlpEndpoint", endpoint,
+                configured.contains("server.telemetry.otlpEndpoint"), !endpoint.equals(getOtlpEndpoint())));
+        add.accept("server.telemetry.prometheusPort", getPrometheusPort());
+        add.accept("server.telemetry.serviceName", getServiceName());
+        add.accept("server.shutdown.drainTimeoutMs", getShutdownDrainTimeoutMs());
+        add.accept("server.shutdown.timeoutMs", getShutdownTimeoutMs());
+        add.accept("server.health.expiryIntervalMs", getHealthExpiryIntervalMs());
+        add.accept("server.health.nodeTtlMs", getNodeTtlMs());
+        add.accept("server.health.nodeReapAfterMs", getNodeReapAfterMs());
+        add.accept("server.ui.enabled", getAdminUi().enabled());
+        add.accept("server.ui.path", getAdminUi().path());
+        add.accept("server.ui.devAssetsDirectory", getAdminUi().devAssetsDirectory().map(Path::toString).orElse(null));
+        boolean token = !settings.operatorToken().isBlank();
+        list.add(new EffectiveSetting("server.operator.token", token ? null : "",
+                configured.contains("server.operator.token"), token));
+        add.accept("server.acl.enabled", isAclEnabled());
+        add.accept("server.acl.defaultPolicy",
+                getAclDefaultPolicy().map(policy -> policy.name().toLowerCase(Locale.ROOT)).orElse(null));
+        String managementFile = settings.acl().initialManagementTokenFile();
+        add.accept("server.acl.initialManagementTokenFile", managementFile.isBlank() ? null : managementFile);
+        add.accept("server.security.profile", getSecurityProfile().name().toLowerCase(Locale.ROOT));
+        TlsSettings material = settings.tls().material();
+        add.accept("server.tls.caFile", material == null ? null : material.caFile().toString());
+        add.accept("server.tls.certFile", material == null ? null
+                : material.certFile().map(Path::toString).orElse(null));
+        add.accept("server.tls.keyFile", material == null ? null
+                : material.keyFile().map(Path::toString).orElse(null));
+        add.accept("server.tls.minVersion", material == null ? null
+                : material.protocols().contains("TLSv1.2") ? "TLSv1.2" : "TLSv1.3");
+        add.accept("server.tls.https.enabled", isHttpsEnabled());
+        add.accept("server.tls.https.verifyIncoming", isHttpsVerifyIncoming());
+        add.accept("server.tls.grpc.enabled", isGrpcTlsEnabled());
+        add.accept("server.tls.grpc.verifyIncoming", isGrpcVerifyIncoming());
+        add.accept("server.tls.raft.enabled", isRaftTlsEnabled());
+        add.accept("server.tls.raft.verifyServerHostname", isRaftVerifyServerHostname());
+        add.accept("server.audit.path", getAuditPath().map(Path::toString).orElse(null));
+        if (settings.dns().isEmpty()) {
+            add.accept("server.dns", null);
+        } else {
+            dev.mars.qraft.common.dns.DnsSettings dns = settings.dns().get();
+            add.accept("server.dns.host", dns.host());
+            add.accept("server.dns.port", dns.port());
+            add.accept("server.dns.domain", dns.domain());
+            add.accept("server.dns.ttlSeconds", dns.ttlSeconds());
+            add.accept("server.dns.onlyPassing", dns.onlyPassing());
+            add.accept("server.dns.tokenFile", dns.tokenFile().map(Path::toString).orElse(null));
+        }
+        add.accept("logging.directory", getLoggingDirectory());
+        return new EffectiveConfiguration(Optional.ofNullable(source), list);
     }
 
     private static Tls parseTls(JsonNode tls) {

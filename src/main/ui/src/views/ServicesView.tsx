@@ -17,8 +17,8 @@
 import { Empty, Space, Table, Tag, Typography } from 'antd';
 import type { QraftApi, Scope } from '../api/client';
 import type { Health, ServiceSummary } from '../api/schemas';
-import { RouteLink } from '../routing';
-import { useRead } from '../useRead';
+import { useLiveRead } from '../live';
+import { RouteLink, useRouter } from '../routing';
 import { Failure, HEALTH_ORDER, HealthLabel, healthCountsText, ReadIn, ReadMeta, scopeText } from './common';
 
 interface Row {
@@ -28,10 +28,15 @@ interface Row {
 
 /**
  * The landing page (UI/UX design section 5.1): every service in the selected scope from one summary read (UI-2
- * task list, decision 2), services needing attention first.
+ * task list, decision 2), services needing attention first, kept up to date by a blocking query (UI-4).
  */
 export function ServicesView({ api, scope }: { api: QraftApi; scope: Scope }) {
-  const [state, again] = useRead(() => api.servicesSummary(scope), [api, scope.tenant, scope.namespace]);
+  const { consistency } = useRouter();
+  const [state, again] = useLiveRead(
+    (wait) => api.servicesSummary(scope, { consistency, ...wait }),
+    [api, scope.tenant, scope.namespace, consistency],
+    (read) => read.index,
+  );
   const shown = state.status === 'ready' ? state.value : state.previous;
 
   const rows: Row[] =
@@ -46,7 +51,9 @@ export function ServicesView({ api, scope }: { api: QraftApi; scope: Scope }) {
       <Typography.Title level={2}>Services</Typography.Title>
       <ReadIn scope={scope} />
       {state.status === 'failed' && <Failure title="Services could not be read" error={state.error} onRetry={again} />}
-      {shown !== undefined && <ReadMeta index={shown.index} stale={state.status !== 'ready'} />}
+      {shown !== undefined && (
+        <ReadMeta read={shown} stale={state.status !== 'ready'} resynchronized={state.status === 'ready' && state.resynchronized} />
+      )}
       {state.status !== 'failed' && (
         <Table<Row>
           rowKey={(row) => row.summary.name}

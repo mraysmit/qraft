@@ -1,7 +1,7 @@
 # Qraft Administrative UI Implementation Plan
 
-**Status:** Agreed 2026-09-27; UI-0 to UI-3 delivered 2026-11-14; open questions 4 to 6 are decided when their increments start
-**Last updated:** 2026-11-14 (UI-3 delivered, open question 3 settled, and sections 4 and 5 brought up to date with it. Earlier the same day: UI-2 delivered and its task list archived. Earlier the same day: sections 4 and 5 reviewed against the code as UI-2 started, and the view map given a Done status. Earlier the same day: UI-0 and UI-1 delivered, and their task list archived, its links updated. Earlier, 2026-11-13: UI-0 resumed: section 4 notes what the backend lists built since it was last updated, to be reviewed when UI-2 starts; the embedded-interface task-list link refreshed. Earlier, 2026-11-01: `409 policy_in_use` removed, as the owner decided for the ACL list's proposal 18. Earlier the same day: the ACL list aligned with Consul; its proposal numbers stand. Earlier the same day: dated task-list link refreshed. Earlier, 2026-10-31: section 4: a health entry carries its node's status, and `?passing` leaves out an unreachable node's instances. Earlier, 2026-10-30: open question 5's facts corrected: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after the review of the interface against the ACL list: access control moves from UI-6 to UI-5 with the security profile, sign-in, status, tokens, policies and explanations; server removal joins UI-5; section 4.2 gains the profile and the explanation endpoint; the client rows' data; open questions 5 and 6. Earlier that day: section 3: the asset manifest's file name in the Vite build; sections 4.2, 5 and 6: tokens and policies come from the ACL list, and roles and authentication methods are reserved; the embedded-interface task-list link refreshed. Earlier, 2026-10-26: section 4.1, the service writes are on `PUT /v1/catalog/register` and `/deregister` after the client list's Phase 1. Earlier, 2026-10-21: dated task-list links refreshed; the administrative interface remains paused after Step 1 while backend delivery continues. Earlier, 2026-10-09: section 4.1: the node list is at `/v1/catalog/nodes`, the node writes are listed, and bare `/health` is gone, after the single-POM list's Phase 4. On 2026-10-05: the build location and the tenancy owner, after the move to one Maven project; section 4 was brought up to date with scoped reads and the Raft operator endpoints on 2026-10-02)
+**Status:** Agreed 2026-09-27; UI-0 to UI-3 delivered 2026-11-14, UI-4 on 2026-11-15; open questions 4 to 6 are decided when their increments start
+**Last updated:** 2026-11-15 (UI-4 delivered, and sections 4 and 5 brought up to date with it. Earlier, 2026-11-14: UI-3 delivered, open question 3 settled, and sections 4 and 5 brought up to date with it. Earlier the same day: UI-2 delivered and its task list archived. Earlier the same day: sections 4 and 5 reviewed against the code as UI-2 started, and the view map given a Done status. Earlier the same day: UI-0 and UI-1 delivered, and their task list archived, its links updated. Earlier, 2026-11-13: UI-0 resumed: section 4 notes what the backend lists built since it was last updated, to be reviewed when UI-2 starts; the embedded-interface task-list link refreshed. Earlier, 2026-11-01: `409 policy_in_use` removed, as the owner decided for the ACL list's proposal 18. Earlier the same day: the ACL list aligned with Consul; its proposal numbers stand. Earlier the same day: dated task-list link refreshed. Earlier, 2026-10-31: section 4: a health entry carries its node's status, and `?passing` leaves out an unreachable node's instances. Earlier, 2026-10-30: open question 5's facts corrected: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after the review of the interface against the ACL list: access control moves from UI-6 to UI-5 with the security profile, sign-in, status, tokens, policies and explanations; server removal joins UI-5; section 4.2 gains the profile and the explanation endpoint; the client rows' data; open questions 5 and 6. Earlier that day: section 3: the asset manifest's file name in the Vite build; sections 4.2, 5 and 6: tokens and policies come from the ACL list, and roles and authentication methods are reserved; the embedded-interface task-list link refreshed. Earlier, 2026-10-26: section 4.1, the service writes are on `PUT /v1/catalog/register` and `/deregister` after the client list's Phase 1. Earlier, 2026-10-21: dated task-list links refreshed; the administrative interface remains paused after Step 1 while backend delivery continues. Earlier, 2026-10-09: section 4.1: the node list is at `/v1/catalog/nodes`, the node writes are listed, and bare `/health` is gone, after the single-POM list's Phase 4. On 2026-10-05: the build location and the tenancy owner, after the move to one Maven project; section 4 was brought up to date with scoped reads and the Raft operator endpoints on 2026-10-02)
 **Design:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md) (what the interface is) and
 [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections
 12.4, 12.4.1, and 19.6 (how it is packaged and served)
@@ -76,7 +76,8 @@ section 4.1, after reviewing the `peegeeq-management-ui` and
 ([`task-list-admin-ui-scoped-discovery-2026-11-14.md`](../docs/archive/task-list-admin-ui-scoped-discovery-2026-11-14.md),
 section 2). The tables had last been brought up to date on 2026-11-01, before
 the backend lists of 2026-11-04 to 2026-11-09 (handover, section 1); each row
-now states what the code provides on that date.
+now states what the code provides on that date, brought up to date with UI-3 and,
+on 2026-11-15, with UI-4.
 
 ### 4.1 What exists
 
@@ -96,11 +97,12 @@ now states what the code provides on that date.
 | `GET /v1/catalog/service/{name}` | instances in the requested scope: identity, address, port, tags, metadata, health, tenant, namespace, datacenter, region, enabled, and the creation and modification indexes | No registration source |
 | `GET /v1/health/service/{name}` (`?passing`) | instances in the requested scope with their node's status and their checks: status, sequence, observed, accepted, deadline, expired, output, deregistration delay | One service at a time |
 | `GET /v1/health/state/{state}` | the accepted checks across the services of the read's scope, in one health state or all, with instance, service, node and node status (since 2026-11-14) | A declared check without a result is not listed |
-| `GET /v1/operator/events` | the bounded event journal: query and watch, by category (system, domain, observation, audit) | Bounded; no durable history |
+| `GET /v1/operator/events` | the bounded event journal: query and watch, by category (system, domain, observation, audit) and type, and since 2026-11-15 by tenant, namespace and service, with the journal's capacity | Bounded; no durable history |
+| `GET /v1/operator/configuration` | the answering server's effective configuration: each setting's value and source, secrets withheld, every one static (since 2026-11-15) | No replicated configuration other than the Raft server configuration |
 | `/v1/kv`, `/v1/session` | key/value with indexes and compare-and-set; sessions and locks | Not yet in the interface (Stage 2) |
 | `/v1/acl/...`, `/v1/acl/login` | tokens, policies, roles, auth methods, binding rules, `token/self`, `explain`, tokens by policy, `409 acl_lockout`, login | Not yet in the interface (UI-5) |
 | `PUT /v1/catalog/register`, `/deregister`, `/node/heartbeat`, `/check/observe` | replicated node and service writes, scoped by `X-Qraft-Tenant`, `X-Qraft-Namespace` and `X-Qraft-Node` | Mutations: offered from UI-5 |
-| Read options and metadata | `stale`, `consistent`, `index` and `wait` on catalog and key/value reads; `X-Qraft-Index`, `X-Qraft-Known-Leader`, `X-Qraft-Last-Contact`; `X-Qraft-Leader-Id` and the error envelope (`code`, `message`, `retryable`, `requestId`) on errors | No header naming the answering server |
+| Read options and metadata | `stale`, `consistent`, `index` and `wait` on catalog and key/value reads; `X-Qraft-Index`, `X-Qraft-Known-Leader`, `X-Qraft-Last-Contact`; `X-Qraft-Leader-Id` and the error envelope (`code`, `message`, `retryable`, `requestId`) on errors; since 2026-11-15 `X-Qraft-Answered-By` on every answer and `X-Qraft-Consistency` on every read | None for UI-4 |
 | OpenTelemetry Prometheus exporter | metrics on a separate port (`prometheusPort`, default 9464) | Not on the API listener; the UI only links to it |
 
 ### 4.2 What is missing, and what was built
@@ -113,10 +115,10 @@ now states what the code provides on that date.
 | Cluster membership detail: match and next index, lag, reachability, quorum | Status strip, Cluster Overview, Raft Members, server rows in Nodes | Built 2026-11-14 (UI-3): `/v1/operator/raft/members` |
 | Storage and snapshot state: WAL size and health, fenced and lock state, snapshot index, term, age and last result, retained boundary | Storage & Snapshots, Cluster Overview | Built 2026-11-14 (UI-3), `/v1/operator/raft/storage`, except a WAL health figure and the lock state; the last result is the last failure |
 | Transition-queue depth and saturation | Cluster Overview | Built 2026-11-14 (UI-3): the depth; no saturation figure |
-| Bounded event journal and query | Events page and tabs | Built (events list): query and watch |
-| Redacted effective configuration | Configuration page | Missing |
-| Read consistency modes and an answering-node header | Consistency selector, read metadata | Partial: the modes are built; no answering-node header |
-| Blocking queries or watches | Live updates, Watches | Built: `index` and `wait` on catalog and key/value reads; the event watch |
+| Bounded event journal and query | Events page and tabs | Built (events list): query and watch; the scope and service filters 2026-11-15 (UI-4) |
+| Redacted effective configuration | Configuration page | Built 2026-11-15 (UI-4): `/v1/operator/configuration` |
+| Read consistency modes and an answering-node header | Consistency selector, read metadata | Built: the modes, and 2026-11-15 `X-Qraft-Answered-By` and `X-Qraft-Consistency` (UI-4) |
+| Blocking queries or watches | Live updates, Watches | Built: `index` and `wait` on catalog and key/value reads; the event watch; used for live updates since UI-4 |
 | HTTP key/value API with indexes and compare-and-set | Key/Value browser | Built |
 | Sessions and locks | Sessions, Locks | Built |
 | Replicated tenants and namespaces with an API | Tenants, Namespaces, scope selector | Built (tenancy list) |
@@ -143,18 +145,18 @@ Status key:
 
 | Stage | View (UI/UX section) | Status | Notes (section 4.2) |
 |---|---|---|---|
-| 1 | Shell and status strip (4.1, 4.2) | Done | UI-1 to UI-3: role, leader, term, readiness, security, the scope selector, quorum, failure tolerance, lag, and unreachable servers. The consistency selector is UI-4's. |
+| 1 | Shell and status strip (4.1, 4.2) | Done | UI-1 to UI-3: role, leader, term, readiness, security, the scope selector, quorum, failure tolerance, lag, and unreachable servers; UI-4: the consistency selector and the live-updates control. |
 | 1 | Services list (5.1) | Done | UI-2: on the summary. Registration source is not recorded. |
 | 1 | Service detail: Overview, Instances, Health Checks, Metadata (5.1) | Done | UI-1, in the selected scope since UI-2. |
-| 1 | Service detail: Events tab | Ready | The event journal |
+| 1 | Service detail: Events tab | Done | UI-4: the service's events in the read scope, followed live |
 | 1 | Nodes and Clients: client rows (5.2) | Done, in part | UI-1. Readiness, server endpoint and last reconciliation need clients to report them (open question 6). |
 | 1 | Nodes and Clients: server rows (5.2) | Done | UI-3: role, vote, reachability, match index, lag, last contact |
 | 1 | Health Checks, cross-service (5.3) | Done | UI-2: on the check listing. |
-| 1 | Cluster Overview (9.1) | Done | UI-3: servers, quorum, services, client nodes, storage and queue. Recent events are UI-4's. |
+| 1 | Cluster Overview (9.1) | Done | UI-3: servers, quorum, services, client nodes, storage and queue; UI-4: the last ten system events. |
 | 1 | Raft Members (9.2) | Done | UI-3, read-only; a follower shows its partial view (open question 3) |
 | 1 | Storage & Snapshots (9.3) | Done | UI-3, with the persistent fenced banner |
-| 1 | Events, read-only (9.4) | Ready | The event journal |
-| 1 | Configuration, read-only (9.6) | Blocked | Redacted configuration |
+| 1 | Events, read-only (9.4) | Done | UI-4: the whole journal, labelled ephemeral, filtered, followed live with resynchronization. Export waits for UI-5's authorization. |
+| 1 | Configuration, read-only (9.6) | Done | UI-4: every setting with its source, secrets withheld. Diagnostics correlation is the read line of each view. |
 | 1 | Metrics (9.5) | Partial | A configured link to the external dashboard is ready. |
 | 2 | Service register, update, deregister (5.1, 11) | Ready | Authentication and audit exist; open question 5 is undecided. |
 | 2 | Key/Value CRUD and compare-and-set (7.1) | Ready | |
@@ -169,7 +171,7 @@ Status key:
 | 4 | Tenants and Namespaces (10.1) | Ready | |
 | 4 | Roles, Auth Methods (10.2) | Ready | |
 | 4 | Audit (10.3) | Partial | No durable query |
-| All | Live updates and pause (12) | Ready | Blocking reads; UI-4 |
+| All | Live updates and pause (12) | Done | UI-4: blocking queries, polling of the operator reads, the event watch; one pause control; resynchronization |
 
 ## 6. Increments
 
@@ -247,7 +249,7 @@ Views:
 
 Delivered 2026-11-14 in [`task-list-admin-ui-operate-2026-11-14.md`](../docs/archive/task-list-admin-ui-operate-2026-11-14.md), with UI-2's open items: the client's
 fallback for unrouted paths, the redirect from `/`, gzip for text assets, and
-the bundle split. UI-4 is the next increment.
+the bundle split.
 
 ### UI-4 Events, configuration, and live reads
 
@@ -267,6 +269,12 @@ Views:
 - Configuration;
 - the consistency selector;
 - live updates with pause and resume, and history-gap resynchronization.
+
+Delivered 2026-11-15 in [`task-list-admin-ui-events-configuration-live-2026-11-15.md`](../docs/archive/task-list-admin-ui-events-configuration-live-2026-11-15.md).
+The event architecture's phases 1 to 4 and the event query were there already
+(events list); UI-4 added the scope and service filters, the configuration read,
+and the answering-server and consistency headers. Export of events waits for
+UI-5, being subject to authorization. UI-5 is the next increment.
 
 ### UI-5 Authentication and service mutations
 

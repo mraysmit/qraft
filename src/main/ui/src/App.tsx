@@ -17,10 +17,14 @@
 import { Alert, Layout, Space, Typography } from 'antd';
 import type { QraftApi } from './api/client';
 import type { Bootstrap } from './bootstrap';
+import { LiveProvider, PauseControl, type Scheduler } from './live';
 import { RouteLink, RouterProvider, useRouter } from './routing';
 import { NodesView } from './views/NodesView';
 import { ChecksView } from './views/ChecksView';
 import { ClusterView } from './views/ClusterView';
+import { ConfigurationView } from './views/ConfigurationView';
+import { ConsistencySelector } from './views/ConsistencySelector';
+import { EventsView } from './views/EventsView';
 import { MembersView } from './views/MembersView';
 import { ScopeSelector } from './views/ScopeSelector';
 import { ServiceDetailView } from './views/ServiceDetailView';
@@ -30,10 +34,18 @@ import { StorageView } from './views/StorageView';
 
 const NAV_LINK = { color: '#fff' };
 
-/** The application shell: top bar with navigation, the security banner, the status strip, and the selected view. */
-export function App({ bootstrap, api }: { bootstrap: Bootstrap; api: QraftApi }) {
+/**
+ * The application shell: top bar with navigation, the scope and consistency selectors and the live-updates control,
+ * the security banner, the status strip, and the selected view. A test gives the scheduler live updates wait on.
+ */
+export function App({ bootstrap, api, scheduler }: {
+  bootstrap: Bootstrap;
+  api: QraftApi;
+  scheduler?: Scheduler | undefined;
+}) {
   return (
     <RouterProvider uiPath={bootstrap.uiPath}>
+      <LiveProvider scheduler={scheduler}>
       <Layout style={{ minHeight: '100vh' }}>
         <Layout.Header style={{ display: 'flex', alignItems: 'center', gap: 32 }}>
           <Typography.Title level={1} style={{ color: '#fff', margin: 0, fontSize: 20 }}>
@@ -59,11 +71,19 @@ export function App({ bootstrap, api }: { bootstrap: Bootstrap; api: QraftApi })
               <RouteLink to={{ view: 'storage' }} style={NAV_LINK}>
                 Storage & Snapshots
               </RouteLink>
+              <RouteLink to={{ view: 'events' }} style={NAV_LINK}>
+                Events
+              </RouteLink>
+              <RouteLink to={{ view: 'configuration' }} style={NAV_LINK}>
+                Configuration
+              </RouteLink>
             </Space>
           </nav>
-          <div style={{ marginLeft: 'auto' }}>
+          <Space style={{ marginLeft: 'auto' }} wrap>
             <ScopeSelector api={api} />
-          </div>
+            <ConsistencySelector />
+            <PauseControl color="#fff" />
+          </Space>
         </Layout.Header>
         {bootstrap.authMode === 'none' && bootstrap.securityProfile === 'development' && (
           // Persistent and not dismissible (UI/UX design section 3.7).
@@ -79,6 +99,7 @@ export function App({ bootstrap, api }: { bootstrap: Bootstrap; api: QraftApi })
           <CurrentView api={api} />
         </Layout.Content>
       </Layout>
+      </LiveProvider>
     </RouterProvider>
   );
 }
@@ -100,6 +121,10 @@ function CurrentView({ api }: { api: QraftApi }) {
       return <MembersView api={api} />;
     case 'storage':
       return <StorageView api={api} />;
+    case 'events':
+      return <EventsView api={api} />;
+    case 'configuration':
+      return <ConfigurationView api={api} />;
     case 'unknown':
       return (
         <Space direction="vertical">

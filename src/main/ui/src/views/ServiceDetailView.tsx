@@ -18,8 +18,9 @@ import { Descriptions, Empty, Space, Table, Tabs, Tag, Typography } from 'antd';
 import type { ReactNode } from 'react';
 import type { QraftApi, Scope } from '../api/client';
 import type { Check, HealthEntry, ServiceInstance } from '../api/schemas';
-import { RouteLink } from '../routing';
-import { useRead } from '../useRead';
+import { useEventFeed } from '../eventFeed';
+import { useLiveRead } from '../live';
+import { RouteLink, useRouter } from '../routing';
 import {
   distinct,
   Failure,
@@ -32,13 +33,19 @@ import {
   scopeText,
   worstHealth,
 } from './common';
+import { EphemeralNote, EventsTable, FeedState } from './EventsTable';
 
 /**
  * A service's Overview, Instances, Health Checks and Metadata (UI/UX design section 5.1). A check's observation, made
  * by a client, is shown apart from the time the servers accepted it, the replicated state (section 3.3).
  */
 export function ServiceDetailView({ api, name, scope }: { api: QraftApi; name: string; scope: Scope }) {
-  const [state, again] = useRead(() => api.serviceHealth(name, scope), [api, name, scope.tenant, scope.namespace]);
+  const { consistency } = useRouter();
+  const [state, again] = useLiveRead(
+    (wait) => api.serviceHealth(name, scope, { consistency, ...wait }),
+    [api, name, scope.tenant, scope.namespace, consistency],
+    (read) => read.index,
+  );
   const shown = state.status === 'ready' ? state.value : state.previous;
 
   let body: ReactNode;
@@ -51,13 +58,14 @@ export function ServiceDetailView({ api, name, scope }: { api: QraftApi; name: s
   } else {
     body = (
       <>
-        <ReadMeta index={shown.index} stale={state.status !== 'ready'} />
+        <ReadMeta read={shown} stale={state.status !== 'ready'} resynchronized={state.status === 'ready' && state.resynchronized} />
         <Tabs
           items={[
             { key: 'overview', label: 'Overview', children: <Overview entries={shown.data} /> },
             { key: 'instances', label: 'Instances', children: <Instances entries={shown.data} /> },
             { key: 'checks', label: 'Health Checks', children: <Checks entries={shown.data} /> },
             { key: 'metadata', label: 'Metadata', children: <Metadata entries={shown.data} /> },
+            { key: 'events', label: 'Events', children: <ServiceEvents api={api} name={name} scope={scope} /> },
           ]}
         />
       </>
@@ -70,6 +78,26 @@ export function ServiceDetailView({ api, name, scope }: { api: QraftApi; name: s
       <Typography.Title level={2}>Service: {name}</Typography.Title>
       <ReadIn scope={scope} />
       {body}
+    </Space>
+  );
+}
+
+/**
+ * The service's events in the read scope (UI/UX design section 5.1; UI-4 task list, decision 7): its registrations,
+ * deregistrations and health changes, as the answering server's journal holds them, followed live.
+ */
+function ServiceEvents({ api, name, scope }: { api: QraftApi; name: string; scope: Scope }) {
+  const [feed] = useEventFeed(api, { tenant: scope.tenant, namespace: scope.namespace, service: name },
+    [name, scope.tenant, scope.namespace]);
+  return (
+    <Space direction="vertical" style={{ width: '100%' }}>
+      <EphemeralNote feed={feed} />
+      <FeedState feed={feed} />
+      <EventsTable
+        events={feed.events}
+        paged
+        empty={feed.phase === 'reading' ? 'Reading the journal…' : `The journal holds no event of ${name} in ${scopeText(scope)}.`}
+      />
     </Space>
   );
 }

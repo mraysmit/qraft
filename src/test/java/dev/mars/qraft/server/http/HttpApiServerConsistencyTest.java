@@ -42,7 +42,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Tests read consistency and blocking queries on the server (consistency list, Phase 3): {@code consistent},
  * {@code stale} and the default on the leader, {@code consistent} refused on a server without a leader, the
  * leader-contact headers, blocking key/value and catalog reads that wake on a change or answer at their wait, and the
- * refusal of malformed options.
+ * refusal of malformed options; and (UI-4 list, decision 1) the answering server's name on every answer and the
+ * consistency each read applied.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-08
@@ -193,5 +194,42 @@ class HttpApiServerConsistencyTest {
             assertEquals("invalid_query", code(nodes), query);
             assertEquals(400, send("GET", "/v1/kv/a" + query, null).statusCode(), "kv " + query);
         }
+    }
+
+    @Test
+    void everyAnswerNamesTheServerThatGaveIt() throws Exception {
+        start(Set.of("c-node"));
+
+        String[][] requests = {
+                {"GET", "/v1/catalog/nodes"}, {"GET", "/raft/status"}, {"GET", "/health/live"},
+                {"GET", "/v1/operator/raft/members"}, {"POST", "/v1/catalog/nodes"}, {"GET", "/no/such/route"},
+                {"GET", "/v1/catalog/nodes?index=x"}};
+        int[] statuses = {200, 200, 200, 200, 405, 404, 400};
+        for (int i = 0; i < requests.length; i++) {
+            HttpResponse<String> answer = send(requests[i][0], requests[i][1], null);
+            String request = requests[i][0] + " " + requests[i][1];
+            assertEquals(statuses[i], answer.statusCode(), request + ": " + answer.body());
+            assertEquals("c-node", header(answer, "X-Qraft-Answered-By"), request);
+        }
+    }
+
+    @Test
+    void aReadNamesTheConsistencyItApplied() throws Exception {
+        start(Set.of("c-node"));
+        send("PUT", "/v1/kv/a", "1");
+
+        String[][] modes = {{"", "default"}, {"?stale", "stale"}, {"?consistent", "consistent"}};
+        for (String[] mode : modes) {
+            for (String path : new String[] {"/v1/catalog/nodes", "/v1/kv/a", "/v1/internal/ui/services",
+                    "/v1/health/state/any", "/v1/tenants"}) {
+                HttpResponse<String> answer = send("GET", path + mode[0], null);
+                assertEquals(200, answer.statusCode(), path + mode[0] + ": " + answer.body());
+                assertEquals(mode[1], header(answer, "X-Qraft-Consistency"), path + mode[0]);
+            }
+        }
+        // The operator reads answer this server's own state and take no consistency option.
+        assertEquals(null, header(send("GET", "/raft/status", null), "X-Qraft-Consistency"));
+        // A refused read applied no consistency.
+        assertEquals(null, header(send("GET", "/v1/catalog/nodes?stale&consistent", null), "X-Qraft-Consistency"));
     }
 }

@@ -17,10 +17,16 @@
 import { Descriptions, Space, Typography } from 'antd';
 import type { ReactNode } from 'react';
 import type { QraftApi, Scope } from '../api/client';
-import { RouteLink } from '../routing';
-import { type ReadState, useRead } from '../useRead';
+import { useEventFeed } from '../eventFeed';
+import { useLiveRead } from '../live';
+import { RouteLink, useRouter } from '../routing';
+import type { ReadState } from '../useRead';
 import { FencedBanner } from './StorageView';
 import { formatBytes, plural, scopeText } from './common';
+import { EventsTable, FeedState } from './EventsTable';
+
+/** How many of the newest system events Cluster Overview shows. */
+const RECENT = 10;
 
 /** A read's value in words, or why it is not shown. */
 function shown<T>(state: ReadState<T>, words: (value: T) => ReactNode): ReactNode {
@@ -36,10 +42,16 @@ function shown<T>(state: ReadState<T>, words: (value: T) => ReactNode): ReactNod
  * selected scope, and the answering server's storage, each from its own read so one that fails leaves the rest.
  */
 export function ClusterView({ api, scope }: { api: QraftApi; scope: Scope }) {
-  const [members] = useRead(() => api.members(), [api]);
-  const [storage] = useRead(() => api.storage(), [api]);
-  const [services] = useRead(() => api.servicesSummary(scope), [api, scope.tenant, scope.namespace]);
-  const [nodes] = useRead(() => api.nodes(), [api]);
+  const { consistency } = useRouter();
+  const [members] = useLiveRead((wait) => api.members({ signal: wait.signal }), [api]);
+  const [storage] = useLiveRead((wait) => api.storage({ signal: wait.signal }), [api]);
+  const [services] = useLiveRead(
+    (wait) => api.servicesSummary(scope, { consistency, ...wait }),
+    [api, scope.tenant, scope.namespace, consistency],
+    (read) => read.index,
+  );
+  const [nodes] = useLiveRead((wait) => api.nodes({ consistency, ...wait }), [api, consistency], (read) => read.index);
+  const [recent] = useEventFeed(api, { category: 'system' }, []);
 
   return (
     <Space direction="vertical" style={{ width: '100%' }}>
@@ -81,6 +93,16 @@ export function ClusterView({ api, scope }: { api: QraftApi; scope: Scope }) {
         <RouteLink to={{ view: 'members' }}>Raft Members</RouteLink>
         <RouteLink to={{ view: 'storage' }}>Storage & Snapshots</RouteLink>
       </Space>
+      <Typography.Title level={3}>Recent events</Typography.Title>
+      <Typography.Text>
+        {`The newest ${RECENT} system events of the answering server's ephemeral journal: elections, leadership, snapshots and fencing.`}
+      </Typography.Text>
+      <FeedState feed={recent} />
+      <EventsTable
+        events={recent.events.slice(-RECENT)}
+        empty={recent.phase === 'reading' ? 'Reading the journal…' : 'The journal holds no system event.'}
+      />
+      <RouteLink to={{ view: 'events' }}>All events</RouteLink>
     </Space>
   );
 }

@@ -17,7 +17,8 @@
 import { Empty, Space, Table, Typography } from 'antd';
 import type { QraftApi, Scope } from '../api/client';
 import type { CatalogNode, HealthEntry } from '../api/schemas';
-import { useRead } from '../useRead';
+import { useLiveRead } from '../live';
+import { useRouter } from '../routing';
 import { Failure, formatInstant, loadServiceEntries, location, NodeStatusLabel, ReadMeta, scopeText } from './common';
 import { MembersTable } from './MembersTable';
 
@@ -32,16 +33,24 @@ interface Row {
 /**
  * Nodes and Clients (UI/UX design section 5.2): the servers from the membership read, with their progress where the
  * answering server leads (UI-3), and the client nodes, whose owned services and failing checks are counted from the
- * services read in the selected scope.
+ * services read in the selected scope. The nodes read is a blocking query: when the applied index moves, the
+ * services are read again with it (UI-4).
  */
 export function NodesView({ api, scope }: { api: QraftApi; scope: Scope }) {
-  const [state, again] = useRead(async () => {
-    const [nodes, services] = await Promise.all([api.nodes(), loadServiceEntries(api, scope)]);
-    return { nodes, entries: Object.values(services.entries).flat() };
-  }, [api, scope.tenant, scope.namespace]);
+  const { consistency } = useRouter();
+  const [state, again] = useLiveRead(
+    async (wait) => {
+      const nodes = await api.nodes({ consistency, ...wait });
+      const services = await loadServiceEntries(api, scope, { consistency, signal: wait.signal });
+      return { nodes, entries: Object.values(services.entries).flat() };
+    },
+    [api, scope.tenant, scope.namespace, consistency],
+    (value) => value.nodes.index,
+  );
   const shown = state.status === 'ready' ? state.value : state.previous;
   const rows: Row[] = shown === undefined ? [] : shown.nodes.data.map((node) => row(node, shown.entries));
-  const [members, readMembersAgain] = useRead(() => api.members(), [api]);
+  const [members, readMembersAgain] = useLiveRead((wait) => api.members({ signal: wait.signal }), [api]);
+  const membersShown = members.status === 'ready' ? members.value : members.previous;
 
   return (
     <Space direction="vertical" style={{ width: '100%' }}>
@@ -50,14 +59,21 @@ export function NodesView({ api, scope }: { api: QraftApi; scope: Scope }) {
       {members.status === 'failed' && (
         <Failure title="Servers could not be read" error={members.error} onRetry={readMembersAgain} />
       )}
-      {members.status === 'ready' && <MembersTable members={members.value.data} detailed={false} />}
-      {members.status === 'loading' && <Typography.Text>Reading servers…</Typography.Text>}
+      {membersShown !== undefined && <ReadMeta read={membersShown} stale={members.status !== 'ready'} operator />}
+      {membersShown !== undefined && <MembersTable members={membersShown.data} detailed={false} />}
+      {members.status === 'loading' && membersShown === undefined && <Typography.Text>Reading servers…</Typography.Text>}
       <Typography.Title level={3}>Clients</Typography.Title>
       <Typography.Text>
         {`Client nodes. A node has no tenant or namespace; its services and failing checks are counted in ${scopeText(scope)}.`}
       </Typography.Text>
       {state.status === 'failed' && <Failure title="Nodes could not be read" error={state.error} onRetry={again} />}
-      {shown !== undefined && <ReadMeta index={shown.nodes.index} stale={state.status !== 'ready'} />}
+      {shown !== undefined && (
+        <ReadMeta
+          read={shown.nodes}
+          stale={state.status !== 'ready'}
+          resynchronized={state.status === 'ready' && state.resynchronized}
+        />
+      )}
       {state.status !== 'failed' && (
         <Table<Row>
           rowKey={(item) => item.node.name}

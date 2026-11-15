@@ -48,7 +48,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Tests {@code GET /v1/operator/events} (event query and watch list, Phase 2, decision 2): one server's events, paged
  * by cursor and limit, filtered by category and type, with the cursor to ask from next and the page's status, a domain
  * event carrying its committed index and replicated identity; a cursor of another boot and a request that is not
- * valid are answered as such.
+ * valid are answered as such; and (UI-4 list, decision 2) the events of a tenant, a namespace or a service, and the
+ * journal's capacity.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-08
@@ -89,10 +90,13 @@ class HttpApiServerEventQueryTest {
         server.start().get(10, TimeUnit.SECONDS);
     }
 
-    private HttpResponse<String> send(String method, String path, String body) throws Exception {
-        return http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path))
+    private HttpResponse<String> send(String method, String path, String body, String... headers) throws Exception {
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path))
                 .method(method, body == null ? HttpRequest.BodyPublishers.noBody()
-                        : HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
+                        : HttpRequest.BodyPublishers.ofString(body));
+        if (body != null) request.header("Content-Type", "application/json");
+        for (int i = 0; i < headers.length; i += 2) request.header(headers[i], headers[i + 1]);
+        return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
     }
 
     private JsonNode page(String query) throws Exception {
@@ -138,5 +142,42 @@ class HttpApiServerEventQueryTest {
         assertEquals(400, send("GET", "/v1/operator/events?limit=1001", null).statusCode());
         assertEquals(400, send("GET", "/v1/operator/events?category=gossip", null).statusCode());
         assertEquals(405, send("PUT", "/v1/operator/events", "").statusCode());
+    }
+
+    @Test
+    void eventsAreFilteredByTenantNamespaceAndServiceAndTheAnswerGivesTheJournalsCapacity() throws Exception {
+        start();
+        assertEquals(200, send("PUT", "/v1/tenant", "{\"Name\":\"acme\"}").statusCode());
+        assertEquals(200, send("PUT", "/v1/namespace", "{\"Name\":\"prod\"}", "X-Qraft-Tenant", "acme")
+                .statusCode());
+        register("node-1", "web-1", "web");
+        register("node-1", "api-1", "api");
+        register("node-2", "web-3", "web", "X-Qraft-Tenant", "acme", "X-Qraft-Namespace", "prod");
+
+        JsonNode web = page("?service=web");
+        assertEquals(List.of("service.registered", "service.registered"), types(web));
+        assertEquals("web", web.path("events").get(0).path("event").path("serviceName").asText());
+        JsonNode scoped = page("?service=web&tenant=acme&namespace=prod");
+        assertEquals(1, scoped.path("events").size());
+        assertEquals("web-3", scoped.path("events").get(0).path("event").path("serviceId").asText());
+        assertEquals("prod", scoped.path("events").get(0).path("namespace").asText());
+        assertEquals(List.of(), types(page("?service=nosuch")));
+        assertEquals(List.of(), types(page("?tenant=nosuch")));
+        assertEquals(List.of("service.registered"), types(page("?tenant=acme&type=service.registered")));
+        assertTrue(types(page("?tenant=default&namespace=default")).stream().noneMatch(type -> type.startsWith("raft.")),
+                "a system event is in no scope");
+        assertEquals(EventJournal.DEFAULT_CAPACITY, page("").path("capacity").asInt());
+        assertEquals(400, send("GET", "/v1/operator/events?service=", null).statusCode(), "a blank service");
+    }
+
+    private void register(String nodeName, String id, String name, String... scope) throws Exception {
+        String[] headers = new String[scope.length + 2];
+        headers[0] = "X-Qraft-Node";
+        headers[1] = nodeName;
+        System.arraycopy(scope, 0, headers, 2, scope.length);
+        HttpResponse<String> answer = send("PUT", "/v1/catalog/register", """
+                {"service":{"serviceId":"%s","serviceName":"%s","address":"10.0.0.5","port":8080}}""".formatted(id, name),
+                headers);
+        assertEquals(200, answer.statusCode(), answer.body());
     }
 }

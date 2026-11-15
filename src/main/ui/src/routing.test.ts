@@ -16,7 +16,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_SCOPE } from './api/client';
-import { hrefOf, routeOf, scopeOf } from './routing';
+import { consistencyOf, hrefOf, routeOf, scopeOf } from './routing';
 
 describe('routes', () => {
   it('read the views below the interface path', () => {
@@ -76,5 +76,30 @@ describe('Operate routes', () => {
       expect(routeOf(`/ui/${view}`, '/ui/')).toEqual({ view });
       expect(hrefOf({ view }, '/ui/')).toBe(`/ui/${view}`);
     }
+  });
+});
+
+describe('consistency and the UI-4 views', () => {
+  // UI-4 task list, decision 4: the consistency chosen is in the address, as the scope is.
+  it('carry a consistency other than the default in the query, after the scope', () => {
+    expect(hrefOf({ view: 'nodes' }, '/ui/', DEFAULT_SCOPE, 'stale')).toBe('/ui/nodes?consistency=stale');
+    expect(hrefOf({ view: 'services' }, '/ui/', { tenant: 'acme', namespace: 'prod' }, 'consistent')).toBe(
+      '/ui/?tenant=acme&namespace=prod&consistency=consistent',
+    );
+    expect(hrefOf({ view: 'nodes' }, '/ui/', DEFAULT_SCOPE, 'default')).toBe('/ui/nodes');
+  });
+
+  it('read the consistency from the query, the default for anything else', () => {
+    expect(consistencyOf('?consistency=consistent')).toBe('consistent');
+    expect(consistencyOf('?tenant=a&consistency=stale')).toBe('stale');
+    expect(consistencyOf('')).toBe('default');
+    expect(consistencyOf('?consistency=eventual')).toBe('default');
+  });
+
+  it('read and write the Events and Configuration views', () => {
+    expect(routeOf('/ui/events', '/ui/')).toEqual({ view: 'events' });
+    expect(routeOf('/ui/configuration', '/ui/')).toEqual({ view: 'configuration' });
+    expect(hrefOf({ view: 'events' }, '/ui/')).toBe('/ui/events');
+    expect(hrefOf({ view: 'configuration' }, '/ui/', DEFAULT_SCOPE, 'stale')).toBe('/ui/configuration?consistency=stale');
   });
 });

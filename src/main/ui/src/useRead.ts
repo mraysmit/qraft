@@ -18,11 +18,12 @@ import { type DependencyList, useCallback, useEffect, useRef, useState } from 'r
 
 /**
  * A read in progress, done, or failed. While a read is repeated, the last result it gave is kept as `previous`, so a
- * view can go on showing it, marked as possibly out of date (UI/UX design section 13).
+ * view can go on showing it, marked as possibly out of date (UI/UX design section 13). A live read's answer says
+ * whether it was resynchronized, the index having gone back (`useLiveRead`).
  */
 export type ReadState<T> =
   | { status: 'loading'; previous: T | undefined }
-  | { status: 'ready'; value: T }
+  | { status: 'ready'; value: T; resynchronized?: boolean }
   | { status: 'failed'; error: unknown; previous: T | undefined };
 
 /** Runs `load` when the view opens and whenever `deps` change; the returned function runs it again. */

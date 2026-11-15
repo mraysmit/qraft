@@ -16,8 +16,8 @@
 
 import { Alert, Space, Typography } from 'antd';
 import type { QraftApi } from '../api/client';
-import { useRead } from '../useRead';
-import { Failure, plural } from './common';
+import { useLiveRead } from '../live';
+import { Failure, plural, ReadMeta } from './common';
 import { MembersTable } from './MembersTable';
 
 /**
@@ -26,13 +26,14 @@ import { MembersTable } from './MembersTable';
  * (decision 5). Membership changes are not offered before UI-5.
  */
 export function MembersView({ api }: { api: QraftApi }) {
-  const [state, again] = useRead(() => api.members(), [api]);
+  const [state, again] = useLiveRead((wait) => api.members({ signal: wait.signal }), [api]);
   const shown = state.status === 'ready' ? state.value : state.previous;
 
   return (
     <Space direction="vertical" style={{ width: '100%' }}>
       <Typography.Title level={2}>Raft Members</Typography.Title>
       {state.status === 'failed' && <Failure title="Raft members could not be read" error={state.error} onRetry={again} />}
+      {shown !== undefined && <ReadMeta read={shown} stale={state.status !== 'ready'} operator />}
       {shown !== undefined && shown.data.quorum !== null && (
         <Typography.Text>
           {`A quorum is ${shown.data.quorum.quorumSize} of ${shown.data.quorum.voters} voters; ${shown.data.quorum.reachableVoters} reachable; tolerates ${plural(shown.data.quorum.failureTolerance, 'failure')}`}

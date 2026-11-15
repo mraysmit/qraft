@@ -17,8 +17,8 @@
 import { Alert, Descriptions, Space, Typography } from 'antd';
 import type { QraftApi } from '../api/client';
 import type { Storage } from '../api/schemas';
-import { useRead } from '../useRead';
-import { Failure, formatBytes, formatInstant } from './common';
+import { useLiveRead } from '../live';
+import { Failure, formatBytes, formatInstant, ReadMeta } from './common';
 
 /** The persistent banner of fenced storage (UI/UX design section 3.4): it cannot be dismissed. */
 export function FencedBanner({ storage }: { storage: Storage }) {
@@ -46,13 +46,15 @@ function snapshot(storage: Storage): string {
  * persistent banner.
  */
 export function StorageView({ api }: { api: QraftApi }) {
-  const [state, again] = useRead(() => api.storage(), [api]);
-  const shown = state.status === 'ready' ? state.value.data : state.previous?.data;
+  const [state, again] = useLiveRead((wait) => api.storage({ signal: wait.signal }), [api]);
+  const read = state.status === 'ready' ? state.value : state.previous;
+  const shown = read?.data;
 
   return (
     <Space direction="vertical" style={{ width: '100%' }}>
       <Typography.Title level={2}>Storage & Snapshots</Typography.Title>
       {state.status === 'failed' && <Failure title="Storage could not be read" error={state.error} onRetry={again} />}
+      {read !== undefined && <ReadMeta read={read} stale={state.status !== 'ready'} operator />}
       {shown !== undefined && shown.fenced && <FencedBanner storage={shown} />}
       {shown !== undefined && (
         <Descriptions column={1} bordered size="small" title={`As ${shown.answeredBy} holds it`}>

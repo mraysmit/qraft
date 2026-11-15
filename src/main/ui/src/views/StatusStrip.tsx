@@ -19,7 +19,8 @@ import type { ReactNode } from 'react';
 import type { QraftApi, Readiness } from '../api/client';
 import type { Members, RaftRole, RaftStatus } from '../api/schemas';
 import type { Bootstrap } from '../bootstrap';
-import { type ReadState, useRead } from '../useRead';
+import { useLiveRead } from '../live';
+import type { ReadState } from '../useRead';
 import { Failure } from './common';
 
 const ROLE: Record<RaftRole, string> = { LEADER: 'Leader', FOLLOWER: 'Follower', CANDIDATE: 'Candidate' };
@@ -32,11 +33,11 @@ const ROLE: Record<RaftRole, string> = { LEADER: 'Leader', FOLLOWER: 'Follower',
  * (section 3.4).
  */
 export function StatusStrip({ api, bootstrap }: { api: QraftApi; bootstrap: Bootstrap }) {
-  const [state, again] = useRead(async () => {
-    const [status, readiness] = await Promise.all([api.raftStatus(), api.readiness()]);
+  const [state, again] = useLiveRead(async ({ signal }) => {
+    const [status, readiness] = await Promise.all([api.raftStatus({ signal }), api.readiness({ signal })]);
     return { status: status.data, readiness: readiness.data };
   }, [api]);
-  const [membership] = useRead(() => api.members(), [api]);
+  const [membership] = useLiveRead(({ signal }) => api.members({ signal }), [api]);
 
   const security = (
     <>

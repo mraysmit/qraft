@@ -49,8 +49,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * The shaded runtime JAR, started with {@code java -jar} from a directory that holds only its configuration, serves the
  * administrative interface from the resources packaged in it; a server with the interface disabled, and a client, serve
- * none of its routes (design section 19.6; the interface's task list, Step 5). Run after {@code mvn install}, as the
- * end-to-end stage is, against the {@code target/qraft.jar} that build packaged.
+ * none of its routes (design section 19.6; the interface's task list, Step 5); and the packaged server answers the
+ * configuration it was started from with its secret withheld (UI-4 task list, Phase 3). Run after {@code mvn install},
+ * as the end-to-end stage is, against the {@code target/qraft.jar} that build packaged.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-14
@@ -62,6 +63,7 @@ class PackagedAdminUiEndToEndTest {
     private static final Path REPOSITORY = Path.of("").toAbsolutePath();
     private static final Path JAR = REPOSITORY.resolve("target").resolve("qraft.jar");
     private static final String UI_ROOT = "META-INF/qraft/ui/";
+    private static final String OPERATOR_SECRET = "packaged-operator-secret-keep-out-of-answers";
 
     @TempDir
     Path directory;
@@ -110,6 +112,35 @@ class PackagedAdminUiEndToEndTest {
         assertEquals("public, max-age=31536000, immutable", asset.headers().firstValue("Cache-Control").orElse(""));
         assertArrayEquals(packaged(entry), asset.body(), "the served bundle is the one packaged in the jar");
         assertEquals(200, get(origin, "/ui/services/web").statusCode(), "a view's address is answered with the index");
+
+        server.destroyForcibly();
+        server.waitFor(30, TimeUnit.SECONDS);
+        SubprocessOutputAuditHelper.requireNoErrors("the packaged server", Files.readString(run.resolve("server.out")));
+    }
+
+    @Test
+    void thePackagedServerAnswersTheConfigurationItWasStartedFromWithItsSecretWithheld() throws Exception {
+        Path run = Files.createDirectories(directory.resolve("configured-run"));
+        int port = freePort();
+        server = start("server", run, serverConfig(run, port,
+                ", \"operator\": {\"token\": \"" + OPERATOR_SECRET + "\"}"));
+        URI origin = URI.create("http://127.0.0.1:" + port);
+        awaitReady(server, origin, "/health/ready", run.resolve("server.out"));
+
+        HttpResponse<String> answer = get(origin, "/v1/operator/configuration");
+        assertEquals(200, answer.statusCode(), answer.body());
+        assertTrue(!answer.body().contains(OPERATOR_SECRET), "the operator token is never answered: " + answer.body());
+        JsonNode configuration = JSON.readTree(answer.body());
+        assertEquals("packaged-server", configuration.path("server").asText());
+        assertEquals(run.resolve("server.json").toString(), configuration.path("file").asText());
+        boolean redacted = false;
+        for (JsonNode setting : configuration.path("settings")) {
+            if (setting.path("key").asText().equals("server.operator.token")) {
+                redacted = setting.path("redacted").asBoolean() && setting.path("value").isNull();
+            }
+        }
+        assertTrue(redacted, "the token's setting is listed and withheld: " + configuration);
+        assertEquals("packaged-server", answer.headers().firstValue("X-Qraft-Answered-By").orElse(null));
 
         server.destroyForcibly();
         server.waitFor(30, TimeUnit.SECONDS);

@@ -171,3 +171,56 @@ export const STORAGE = {
   transitionQueueDepth: 0,
   lastSnapshotFailure: null,
 };
+
+const BOOT = '6d1f0c52-8a0e-4a51-9c39-3f7a2a1b9e01';
+
+/** A cursor of the server's boot in the event fixtures. */
+export const cursor = (sequence: number): string => `${BOOT}:${sequence}`;
+
+export const SYSTEM_EVENT = {
+  cursor: cursor(1),
+  node: 'server-1',
+  observedAt: '2026-11-15T09:00:00.000Z',
+  category: 'system',
+  severity: 'info',
+  term: 3,
+  type: 'raft.leadership_gained',
+  event: { term: 3 },
+};
+
+export const SERVICE_EVENT = {
+  cursor: cursor(2),
+  node: 'server-1',
+  observedAt: '2026-11-15T09:00:01.000Z',
+  category: 'domain',
+  severity: 'info',
+  term: 3,
+  committedIndex: 7,
+  replicatedId: '7:0:service.registered',
+  tenant: 'default',
+  namespace: 'default',
+  type: 'service.registered',
+  event: { serviceId: 'web-1', serviceName: 'web', node: 'client-a' },
+};
+
+export const EVENT_PAGE = {
+  events: [SYSTEM_EVENT, SERVICE_EVENT],
+  next: cursor(2),
+  status: 'complete',
+  capacity: 4096,
+};
+
+export const CONFIGURATION = {
+  server: 'server-1',
+  file: '/etc/qraft/server.json',
+  readAt: '2026-11-15T08:59:58.000Z',
+  settings: [
+    { key: 'server.id', value: 'server-1', source: 'configured', redacted: false, restartRequired: true },
+    { key: 'server.http.port', value: 8080, source: 'default', redacted: false, restartRequired: true },
+    { key: 'server.raft.nodes', value: { 'server-1': '10.0.0.1:9080' }, source: 'configured', redacted: false,
+      restartRequired: true },
+    { key: 'server.raft.storage.fsync', value: true, source: 'default', redacted: false, restartRequired: true },
+    { key: 'server.operator.token', value: null, source: 'configured', redacted: true, restartRequired: true },
+    { key: 'server.acl.defaultPolicy', value: null, source: 'default', redacted: false, restartRequired: true },
+  ],
+};

@@ -17,6 +17,7 @@
 package dev.mars.qraft.state;
 
 import dev.mars.qraft.common.events.QraftEvent;
+import dev.mars.qraft.common.events.ServiceEvent;
 
 import java.util.Objects;
 
@@ -81,7 +82,7 @@ public final class CatalogEvents {
     }
 
     /** A service instance was registered on a node. */
-    public record ServiceRegistered(String serviceId, String serviceName, String node) implements QraftEvent {
+    public record ServiceRegistered(String serviceId, String serviceName, String node) implements ServiceEvent {
         @Override
         public String type() {
             return "service.registered";
@@ -89,7 +90,7 @@ public final class CatalogEvents {
     }
 
     /** A service instance left the catalog. */
-    public record ServiceDeregistered(String serviceId, String serviceName, String node) implements QraftEvent {
+    public record ServiceDeregistered(String serviceId, String serviceName, String node) implements ServiceEvent {
         @Override
         public String type() {
             return "service.deregistered";
@@ -97,7 +98,8 @@ public final class CatalogEvents {
     }
 
     /** A service instance's aggregate health changed, between {@code ServiceHealth} names. */
-    public record HealthChanged(String serviceId, String serviceName, String from, String to) implements QraftEvent {
+    public record HealthChanged(String serviceId, String serviceName, String from, String to)
+            implements ServiceEvent {
         @Override
         public String type() {
             return "health.changed";

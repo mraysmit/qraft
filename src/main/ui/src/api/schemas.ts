@@ -217,3 +217,65 @@ export type Health = z.infer<typeof HealthSchema>;
 export type ServiceInstance = z.infer<typeof ServiceInstanceSchema>;
 export type Check = z.infer<typeof CheckSchema>;
 export type HealthEntry = z.infer<typeof HealthEntrySchema>;
+
+/** An event's category and severity (event architecture sections 3 and 5). */
+export const EventCategorySchema = z.enum(['system', 'domain', 'observation', 'audit']);
+export const EventSeveritySchema = z.enum(['info', 'warning', 'error']);
+
+/**
+ * An event as `GET /v1/operator/events` and its watch answer it. The scope, the committed index and the correlation
+ * ID are absent, not null, where an event has none: a system event has no scope.
+ */
+export const QraftEventSchema = z.object({
+  cursor: z.string().min(1),
+  node: z.string(),
+  observedAt: instant,
+  category: EventCategorySchema,
+  severity: EventSeveritySchema,
+  term: index,
+  committedIndex: index.optional(),
+  replicatedId: z.string().optional(),
+  tenant: z.string().optional(),
+  namespace: z.string().optional(),
+  correlationId: z.string().optional(),
+  type: z.string().min(1),
+  event: z.record(z.string(), z.unknown()),
+});
+
+/** `GET /v1/operator/events`: a page of one server's bounded journal, with the cursor to ask from next. */
+export const EventPageSchema = z.object({
+  events: z.array(QraftEventSchema),
+  next: z.string().min(1),
+  status: z.enum(['complete', 'more', 'history_gap', 'other_boot', 'invalid']),
+  capacity: z.number().int().positive(),
+});
+
+/** The last event of a watch: why it ended, and the cursor to resume after. */
+export const WatchEndSchema = z.object({
+  reason: z.enum(['overflow', 'history_gap', 'other_boot', 'failed', 'server_stopping']),
+  resumeAfter: z.string().min(1),
+});
+
+/** A setting of the effective configuration; a redacted one's value is withheld, or shown without its secret. */
+export const SettingSchema = z.object({
+  key: z.string().min(1),
+  value: z.union([z.string(), z.number(), z.boolean(), z.record(z.string(), z.string()), z.null()]),
+  source: z.enum(['configured', 'default']),
+  redacted: z.boolean(),
+  restartRequired: z.boolean(),
+});
+
+/** `GET /v1/operator/configuration`: the answering server's effective configuration, its secrets withheld. */
+export const ConfigurationSchema = z.object({
+  server: z.string().nullable(),
+  file: z.string().nullable(),
+  readAt: instant,
+  settings: z.array(SettingSchema),
+});
+
+export type EventCategory = z.infer<typeof EventCategorySchema>;
+export type EventSeverity = z.infer<typeof EventSeveritySchema>;
+export type QraftEvent = z.infer<typeof QraftEventSchema>;
+export type EventPage = z.infer<typeof EventPageSchema>;
+export type Setting = z.infer<typeof SettingSchema>;
+export type Configuration = z.infer<typeof ConfigurationSchema>;

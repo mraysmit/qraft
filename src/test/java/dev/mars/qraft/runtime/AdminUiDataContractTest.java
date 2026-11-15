@@ -26,9 +26,11 @@ import dev.mars.qraft.client.health.ObservationOutcome;
 import dev.mars.qraft.common.Node;
 import dev.mars.qraft.common.ServiceDefinition;
 import dev.mars.qraft.common.async.RaftExecutorsFixture;
+import dev.mars.qraft.common.events.EventJournal;
 import dev.mars.qraft.raft.PeerlessTransportFixture;
 import dev.mars.qraft.raft.RaftNode;
 import dev.mars.qraft.raft.RaftNodeMode;
+import dev.mars.qraft.server.config.AppConfig;
 import dev.mars.qraft.server.http.HttpApiServer;
 import dev.mars.qraft.server.ui.AdminUiConfig;
 import dev.mars.qraft.server.ui.ClasspathUiAssets;
@@ -83,6 +85,7 @@ class AdminUiDataContractTest {
     private RaftNode node;
     private HttpApiServer server;
     private HttpCatalogClient catalog;
+    private final EventJournal journal = EventJournal.forBoot("server-1", Clock.systemUTC());
 
     @AfterEach
     void stop() throws Exception {
@@ -91,6 +94,7 @@ class AdminUiDataContractTest {
                 .run(() -> { if (server != null) server.close(); })
                 .run(() -> { if (node != null) node.stop().get(10, TimeUnit.SECONDS); })
                 .run(() -> { if (runtime != null) runtime.close().get(10, TimeUnit.SECONDS); })
+                .run(journal::close)
                 .run(http::close)
                 .rethrow();
     }
@@ -262,6 +266,51 @@ class AdminUiDataContractTest {
         }
     }
 
+    @Test
+    void theEventConfigurationAndReadMetadataAreAnsweredInTheFieldsTheInterfaceReads() throws Exception {
+        // UI-4 task list, Phase 0: the event query, the configuration read, and the headers naming the answering
+        // server and the consistency, as client.ts sends them and schemas.ts reads them.
+        startServer();
+        URI origin = URI.create("http://127.0.0.1:" + server.port());
+        catalog = new HttpCatalogClient(HttpClient.newHttpClient(), JSON, List.of(origin), "client-c", "default",
+                "default", "dc1", "eu-west", Duration.ofSeconds(2));
+        assertInstanceOf(CatalogOutcome.Success.class, catalog.register(new ServiceDefinition("web-1", "web",
+                "127.0.0.1", 8081, List.of(), Map.of(), true)).get(10, TimeUnit.SECONDS));
+        URI api = origin.resolve(bootstrap(get(origin, "/ui/")).path("apiBasePath").asText());
+
+        JsonNode page = read(api, "v1/operator/events?service=web&tenant=default&namespace=default&limit=1000", false);
+        fields(page, "event page", Map.of("events", Type.LIST, "next", Type.TEXT, "status", Type.TEXT,
+                "capacity", Type.INTEGER));
+        assertEquals(1, page.path("events").size(), page.toString());
+        JsonNode event = page.path("events").get(0);
+        fields(event, "event", Map.ofEntries(Map.entry("cursor", Type.TEXT), Map.entry("node", Type.TEXT),
+                Map.entry("observedAt", Type.TEXT), Map.entry("category", Type.TEXT), Map.entry("severity", Type.TEXT),
+                Map.entry("term", Type.INTEGER), Map.entry("committedIndex", Type.INTEGER),
+                Map.entry("tenant", Type.TEXT), Map.entry("namespace", Type.TEXT), Map.entry("type", Type.TEXT),
+                Map.entry("event", Type.OBJECT)));
+        assertEquals("web", event.path("event").path("serviceName").asText());
+        JsonNode system = read(api, "v1/operator/events?category=system", false).path("events").get(0);
+        fields(system, "system event", Map.of("cursor", Type.TEXT, "severity", Type.TEXT, "type", Type.TEXT));
+        assertTrue(!system.has("tenant") && !system.has("committedIndex"), "absent, not null: " + system);
+
+        JsonNode configuration = read(api, "v1/operator/configuration", false);
+        fields(configuration, "configuration", Map.of("server", Type.TEXT_OR_NULL, "file", Type.TEXT_OR_NULL,
+                "readAt", Type.TEXT, "settings", Type.LIST));
+        for (JsonNode setting : configuration.path("settings")) {
+            fields(setting, "setting", Map.of("key", Type.TEXT, "source", Type.TEXT, "redacted", Type.BOOLEAN,
+                    "restartRequired", Type.BOOLEAN));
+            assertTrue(setting.has("value"), "value is present, null where none: " + setting);
+        }
+
+        for (String query : new String[] {"", "?stale", "?consistent"}) {
+            HttpResponse<String> nodes = http.send(HttpRequest.newBuilder(api.resolve("v1/catalog/nodes" + query))
+                    .timeout(Duration.ofSeconds(5)).GET().build(), HttpResponse.BodyHandlers.ofString());
+            assertEquals("server-1", nodes.headers().firstValue("X-Qraft-Answered-By").orElse(null), query);
+            assertEquals(query.isEmpty() ? "default" : query.substring(1),
+                    nodes.headers().firstValue("X-Qraft-Consistency").orElse(null), query);
+        }
+    }
+
     private HttpResponse<String> send(URI origin, String method, String path, String body, Map<String, String> headers)
             throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder(origin.resolve(path)).timeout(Duration.ofSeconds(5))
@@ -343,6 +392,7 @@ class AdminUiDataContractTest {
                 .mode(RaftNodeMode.volatileMode())
                 .electionTimeout(25)
                 .heartbeatInterval(10_000)
+                .events(journal)
                 .build();
         node.start().get(10, TimeUnit.SECONDS);
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
@@ -350,6 +400,8 @@ class AdminUiDataContractTest {
         assertTrue(node.isLeader(), "the single server did not become leader");
         server = new HttpApiServer(0, node, store, Clock.systemUTC(), new AdminUiConfig(true, "/ui/", Optional.empty()),
                 new ClasspathUiAssets(AdminUiDataContractTest.class.getClassLoader(), "ui-fixture/"));
+        server.useEventJournal(journal);
+        server.useConfiguration(AppConfig.fromJson("{\"version\":1,\"server\":{\"id\":\"server-1\"}}").effective());
         server.start().get(10, TimeUnit.SECONDS);
     }
 }

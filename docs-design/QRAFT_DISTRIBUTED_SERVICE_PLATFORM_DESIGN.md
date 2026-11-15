@@ -1825,7 +1825,12 @@ the catalog's reads and `/v1/kv`:
   answers, so the default is stale reads with a known leader. A difference from
   Consul.
 - **Every read** carries `X-Qraft-Known-Leader` and `X-Qraft-Last-Contact`, the
-  milliseconds since the answering server heard from the leader, 0 on the leader.
+  milliseconds since the answering server heard from the leader, 0 on the leader,
+  and, since 2026-11-15, `X-Qraft-Consistency`, the mode it applied: `default`,
+  `consistent` or `stale`. A refused read carries none of the three.
+- **Every answer** of the server's HTTP API, a refusal and an unrouted path
+  included, names the server that gave it in `X-Qraft-Answered-By`, its node ID
+  (since 2026-11-15, for the administrative interface's read metadata, UI-4).
 - **Blocking queries**: `?index=N&wait=D` waits until the index the read answers
   with, the key/value state's last index for `/v1/kv` and the applied index for the
   catalog, passes `N`, or `D` passes with up to a sixteenth more at random, as in
@@ -1867,6 +1872,18 @@ the catalog's reads and `/v1/kv`:
   last snapshot that failed since the server started, with its message and time. A
   snapshot that fails before publication fences nothing; it is recorded here.
   Both reads need `operator:read`, as the autopilot read does, and take no parameter.
+- **The configuration** at `GET /v1/operator/configuration` (since 2026-11-15, for
+  the administrative interface's Configuration page): the answering server, the
+  file its configuration was read from and when the server was given it, and each
+  setting by its key in the document, such as `server.raft.electionTimeoutMs`, in
+  the document's order, with the value in force, `source` (`configured` when the
+  document gave it, `default` otherwise), `redacted`, and `restartRequired`, which
+  is true of every setting, since none changes while the server runs. A secret is
+  never answered: the operator token's value is withheld, and the telemetry
+  endpoint is given without its user information or query, both marked
+  `redacted`. A file's path is given; what the file holds is not read for it. The
+  read needs `operator:read` and takes no parameter; a server not given its
+  configuration answers 503 `configuration_unavailable`.
 
 Deterministic ordering is mandatory for service lists, instances, tags, prefix
 results, and snapshot serialization.
@@ -3052,10 +3069,12 @@ The embedded administrative interface list,
 [`task-list-embedded-admin-interface-2026-11-14.md`](../docs/archive/task-list-embedded-admin-interface-2026-11-14.md),
 resumed on 2026-11-13, was completed and archived on 2026-11-14 (tranche 8), and
 with it every initial acceptance criterion of section 21 is met. The interface's
-increments UI-2, scoped discovery, and UI-3, operate, followed the same day, each
-in a list of its own, now archived:
-[`task-list-admin-ui-scoped-discovery-2026-11-14.md`](../docs/archive/task-list-admin-ui-scoped-discovery-2026-11-14.md)
-and [`task-list-admin-ui-operate-2026-11-14.md`](../docs/archive/task-list-admin-ui-operate-2026-11-14.md).
+increments UI-2, scoped discovery, and UI-3, operate, followed the same day, and
+UI-4, events, configuration and live reads, on 2026-11-15, each in a list of its
+own, now archived:
+[`task-list-admin-ui-scoped-discovery-2026-11-14.md`](../docs/archive/task-list-admin-ui-scoped-discovery-2026-11-14.md),
+[`task-list-admin-ui-operate-2026-11-14.md`](../docs/archive/task-list-admin-ui-operate-2026-11-14.md)
+and [`task-list-admin-ui-events-configuration-live-2026-11-15.md`](../docs/archive/task-list-admin-ui-events-configuration-live-2026-11-15.md).
 The Pre-Vote extension,
 [`task-list-raft-pre-vote-2026-10-25.md`](../docs/archive/task-list-raft-pre-vote-2026-10-25.md),
 was completed and archived on 2026-10-25. The membership list that preceded it,

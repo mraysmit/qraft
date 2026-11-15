@@ -17,12 +17,30 @@
 // Test support only: nothing outside a test imports it.
 
 import type { Bootstrap } from '../bootstrap';
-import type { CheckState, QraftApi, Read, Scope } from '../api/client';
-import { CHECK, FOLLOWER_MEMBERS, HEALTH_ENTRY, INSTANCE, MEMBERS, NODE, RAFT_STATUS, STORAGE } from '../api/fixtures';
+import type { CheckState, EventQuery, QraftApi, Read, ReadOptions, Scope, WatchHandlers } from '../api/client';
+import {
+  CHECK,
+  CONFIGURATION,
+  cursor,
+  EVENT_PAGE,
+  FOLLOWER_MEMBERS,
+  HEALTH_ENTRY,
+  INSTANCE,
+  MEMBERS,
+  NODE,
+  RAFT_STATUS,
+  SERVICE_EVENT,
+  STORAGE,
+} from '../api/fixtures';
 import {
   type CatalogNode,
   CatalogNodeSchema,
   type CheckEntry,
+  ConfigurationSchema,
+  type EventPage,
+  EventPageSchema,
+  type QraftEvent,
+  QraftEventSchema,
   type HealthEntry,
   HealthEntrySchema,
   type Members,
@@ -43,8 +61,25 @@ export const BOOTSTRAP: Bootstrap = {
   cspNonce: 'dGVzdC1ub25jZQ==',
 };
 
-export function read<T>(data: T, index: number | null = 12): Promise<Read<T>> {
-  return Promise.resolve({ data, index, requestId: 'req-1' });
+export function read<T>(data: T, index: number | null = 12, meta: Partial<Omit<Read<T>, 'data' | 'index'>> = {}):
+  Promise<Read<T>> {
+  return Promise.resolve({
+    data,
+    index,
+    requestId: 'req-1',
+    answeredBy: 'server-1',
+    consistency: 'default',
+    knownLeader: true,
+    lastContactMillis: 0,
+    ...meta,
+  });
+}
+
+/** A blocking query to a server where nothing changes: it waits until the view ends it. */
+export function unchanged<T>(signal: AbortSignal | undefined): Promise<T> {
+  return new Promise((_resolve, reject) => {
+    signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+  });
 }
 
 export const raftStatus = (changes: Partial<RaftStatus> = {}): RaftStatus =>
@@ -134,7 +169,7 @@ export function fakeApi(
     Object.entries(entries).map(([name, list]) => [name, [...new Set(list.flatMap((item) => item.service.tags))]]),
   );
   const DEFAULT = { tenant: 'default', namespace: 'default' };
-  return {
+  const api: QraftApi = {
     raftStatus: () => read(raftStatus()),
     readiness: () => read({ ready: true, conditions: [] }),
     nodes: () => read([node()]),
@@ -170,6 +205,81 @@ export function fakeApi(
       ),
     members: () => read(members()),
     storage: () => read(storage()),
+    configuration: () => read(ConfigurationSchema.parse(CONFIGURATION), null),
+    events: () => read(EventPageSchema.parse(EVENT_PAGE), null),
+    watchEvents: () => () => undefined,
     ...overrides,
   };
+  return blockingWaits(api);
+}
+
+/**
+ * Each catalog read of `api`, given an index, waits as a server where nothing changes would, whatever the test's own
+ * read does, so a view's live updates send it once and then wait.
+ */
+function blockingWaits(api: QraftApi): QraftApi {
+  const waiting = <A extends unknown[], R>(at: number, read: (...args: A) => Promise<R>) => (...args: A) => {
+    const options = args[at] as ReadOptions | undefined;
+    return options?.index === undefined ? read(...args) : unchanged<R>(options.signal);
+  };
+  return {
+    ...api,
+    nodes: waiting(0, api.nodes),
+    services: waiting(1, api.services),
+    serviceHealth: waiting(2, api.serviceHealth),
+    servicesSummary: waiting(1, api.servicesSummary),
+    checks: waiting(2, api.checks),
+  };
+}
+
+/** A scheduler the test fires by hand: `pending` holds what is due, `fire` runs it all. */
+export function manualScheduler() {
+  const pending: { ms: number; run: () => void }[] = [];
+  return {
+    pending,
+    scheduler: {
+      after(ms: number, run: () => void) {
+        const entry = { ms, run };
+        pending.push(entry);
+        return () => {
+          const at = pending.indexOf(entry);
+          if (at >= 0) pending.splice(at, 1);
+        };
+      },
+    },
+    fire() {
+      pending.splice(0).forEach((entry) => entry.run());
+    },
+  };
+}
+
+/** An event of the journal at `sequence`, a service registration unless changed. */
+export function qraftEvent(sequence: number, changes: Partial<QraftEvent> = {}): QraftEvent {
+  return QraftEventSchema.parse({ ...SERVICE_EVENT, cursor: cursor(sequence), committedIndex: sequence, ...changes });
+}
+
+/** A page of the journal: its events, the cursor of the last one, complete unless said. */
+export function eventPage(events: QraftEvent[], status: EventPage['status'] = 'complete', after = 0): EventPage {
+  const last = events.at(-1);
+  return { events, next: last === undefined ? cursor(after) : last.cursor, status, capacity: 4096 };
+}
+
+/** One watch a view opened: what it asked for, what it is told through, and whether the view closed it. */
+export interface Watch {
+  query: EventQuery;
+  handlers: WatchHandlers;
+  closed: boolean;
+}
+
+/** A `watchEvents` that records each watch the views open, for the test to drive. */
+export function watchRecorder() {
+  const watches: Watch[] = [];
+  const watchEvents = (query: EventQuery, handlers: WatchHandlers) => {
+    const watch: Watch = { query, handlers, closed: false };
+    watches.push(watch);
+    return () => {
+      watch.closed = true;
+    };
+  };
+  return { watches, watchEvents };
 }

@@ -20,10 +20,17 @@ import {
   CatalogNodeSchema,
   type CheckEntry,
   CheckEntrySchema,
+  type Configuration,
+  ConfigurationSchema,
   ErrorEnvelopeSchema,
+  type EventCategory,
+  type EventPage,
+  EventPageSchema,
   type HealthEntry,
   type Members,
   MembersSchema,
+  type QraftEvent,
+  QraftEventSchema,
   type Storage,
   StorageSchema,
   HealthEntrySchema,
@@ -38,6 +45,7 @@ import {
   ServiceSummarySchema,
   type Tenant,
   TenantSchema,
+  WatchEndSchema,
 } from './schemas';
 
 /** The tenant and namespace a catalog or health read is confined to (UI/UX design section 3.2). */
@@ -52,18 +60,66 @@ export const DEFAULT_SCOPE: Scope = { tenant: 'default', namespace: 'default' };
 /** The states the check listing takes: every check, or those in one health state. */
 export type CheckState = 'any' | 'unknown' | 'passing' | 'warning' | 'critical' | 'maintenance';
 
-/** An answer with the read metadata the server sent with it. */
+/**
+ * A read's consistency (UI/UX design section 4.1): `default` and `stale` are the answering server's applied state,
+ * `consistent` is answered by the leader once it has confirmed it leads.
+ */
+export type Consistency = 'default' | 'consistent' | 'stale';
+
+/** What ends a read early: the view closing, or live updates pausing. */
+export interface Abortable {
+  signal?: AbortSignal;
+}
+
+/** How a catalog, health or tenancy read is made: its consistency, and for a blocking query its index and wait. */
+export interface ReadOptions extends Abortable {
+  consistency?: Consistency;
+  /** A blocking query answers once its index passes this one, or its wait passes. */
+  index?: number;
+  /** The longest a blocking query waits, such as `30s`. */
+  wait?: string;
+}
+
+/** An answer with the read metadata the server sent with it (UI/UX design section 12). */
 export interface Read<T> {
   data: T;
   /** The applied index the answer reflects, `X-Qraft-Index`, or null when the server sent none. */
   index: number | null;
   requestId: string | null;
+  /** The server that answered, `X-Qraft-Answered-By`. */
+  answeredBy: string | null;
+  /** The consistency the server applied, `X-Qraft-Consistency`; null for a read that takes none. */
+  consistency: Consistency | null;
+  /** Whether the answering server knew a leader, `X-Qraft-Known-Leader`. */
+  knownLeader: boolean | null;
+  /** How long since the answering server heard from the leader, `X-Qraft-Last-Contact`. */
+  lastContactMillis: number | null;
 }
 
 export interface Readiness {
   ready: boolean;
   /** The readiness conditions the server does not meet, empty when it is ready. */
   conditions: string[];
+}
+
+/** Which events to read: after a cursor, at most a limit, in a category, a scope and of a service. */
+export interface EventQuery {
+  after?: string;
+  limit?: number;
+  category?: EventCategory;
+  tenant?: string;
+  namespace?: string;
+  service?: string;
+}
+
+/** Why a watch ended, and the cursor to resume after. */
+export type WatchEnd = z.infer<typeof WatchEndSchema>;
+
+/** What a watch tells: each event, its end, or a failure. After any end or failure it says nothing more. */
+export interface WatchHandlers {
+  onEvent(event: QraftEvent): void;
+  onEnd(end: WatchEnd): void;
+  onError(error: unknown): void;
 }
 
 /** A request the server refused or could not answer, or a server that could not be reached (status 0). */
@@ -94,36 +150,53 @@ export class MalformedResponseError extends Error {
   }
 }
 
+/** Whether `error` is a read ended by its signal, which is not a failure to show. */
+export function isAbort(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
 /**
  * The reads the views make, all through the public HTTP API. Each catalog and health read names its scope, the
- * default when none is given; a node, the Raft status and readiness have none.
+ * default when none is given; a node, the Raft status and readiness have none. The operator reads answer the
+ * answering server's own state and take no consistency.
  */
 export interface QraftApi {
-  raftStatus(): Promise<Read<RaftStatus>>;
-  readiness(): Promise<Read<Readiness>>;
-  nodes(): Promise<Read<CatalogNode[]>>;
-  services(scope?: Scope): Promise<Read<ServiceNames>>;
-  serviceHealth(name: string, scope?: Scope): Promise<Read<HealthEntry[]>>;
-  servicesSummary(scope?: Scope): Promise<Read<ServiceSummary[]>>;
-  checks(state: CheckState, scope?: Scope): Promise<Read<CheckEntry[]>>;
-  tenants(): Promise<Read<Tenant[]>>;
-  namespaces(tenant: string): Promise<Read<Namespace[]>>;
+  raftStatus(options?: Abortable): Promise<Read<RaftStatus>>;
+  readiness(options?: Abortable): Promise<Read<Readiness>>;
+  nodes(options?: ReadOptions): Promise<Read<CatalogNode[]>>;
+  services(scope?: Scope, options?: ReadOptions): Promise<Read<ServiceNames>>;
+  serviceHealth(name: string, scope?: Scope, options?: ReadOptions): Promise<Read<HealthEntry[]>>;
+  servicesSummary(scope?: Scope, options?: ReadOptions): Promise<Read<ServiceSummary[]>>;
+  checks(state: CheckState, scope?: Scope, options?: ReadOptions): Promise<Read<CheckEntry[]>>;
+  tenants(options?: ReadOptions): Promise<Read<Tenant[]>>;
+  namespaces(tenant: string, options?: ReadOptions): Promise<Read<Namespace[]>>;
   /** The membership as the answering server sees it: progress and quorum on the leader only. */
-  members(): Promise<Read<Members>>;
+  members(options?: Abortable): Promise<Read<Members>>;
   /** The answering server's storage and snapshot state. */
-  storage(): Promise<Read<Storage>>;
+  storage(options?: Abortable): Promise<Read<Storage>>;
+  /** The answering server's effective configuration, its secrets withheld. */
+  configuration(options?: Abortable): Promise<Read<Configuration>>;
+  /** A page of the answering server's event journal. */
+  events(query: EventQuery, options?: Abortable): Promise<Read<EventPage>>;
+  /** Follows the answering server's events after the query's cursor; the returned function ends the watch. */
+  watchEvents(query: EventQuery, handlers: WatchHandlers): () => void;
 }
 
 /** A client for the API below `apiBasePath`, the bootstrap object's base path, which ends with `/`. */
 export function createApi(apiBasePath: string, fetcher: typeof fetch = fetch): QraftApi {
   const base = apiBasePath.endsWith('/') ? apiBasePath : `${apiBasePath}/`;
 
-  async function send(path: string, headers: Record<string, string> = {}): Promise<Response> {
+  async function send(path: string, headers: Record<string, string> = {}, signal?: AbortSignal,
+    accept = 'application/json'): Promise<Response> {
     try {
-      return await fetcher(base + path, { headers: { Accept: 'application/json', ...headers } });
+      const init: RequestInit = { headers: { Accept: accept, ...headers } };
+      if (signal !== undefined) init.signal = signal;
+      return await fetcher(base + path, init);
     } catch (failure) {
+      if (isAbort(failure)) throw failure;
       const reason = failure instanceof Error ? failure.message : String(failure);
-      throw new ApiError(`/${path}`, 0, 'unreachable', `The server could not be reached: ${reason}`, true, null, null);
+      throw new ApiError(`/${pathOf(path)}`, 0, 'unreachable', `The server could not be reached: ${reason}`, true,
+        null, null);
     }
   }
 
@@ -132,7 +205,7 @@ export function createApi(apiBasePath: string, fetcher: typeof fetch = fetch): Q
     try {
       return JSON.parse(text) as unknown;
     } catch {
-      if (response.ok) throw new MalformedResponseError(`/${path}`, requestIdOf(response), 'the body is not JSON');
+      if (response.ok) throw new MalformedResponseError(`/${pathOf(path)}`, requestIdOf(response), 'the body is not JSON');
       return undefined;
     }
   }
@@ -142,48 +215,128 @@ export function createApi(apiBasePath: string, fetcher: typeof fetch = fetch): Q
     const requestId = requestIdOf(response);
     const leaderId = response.headers.get('X-Qraft-Leader-Id');
     if (!envelope.success) {
-      return new ApiError(`/${path}`, response.status, `http_${response.status}`,
+      return new ApiError(`/${pathOf(path)}`, response.status, `http_${response.status}`,
         `The server answered ${response.status} ${response.statusText}`.trim(), false, requestId, leaderId);
     }
     const { code, message, retryable } = envelope.data;
-    return new ApiError(`/${path}`, response.status, code, message, retryable, envelope.data.requestId ?? requestId,
-      leaderId);
+    return new ApiError(`/${pathOf(path)}`, response.status, code, message, retryable,
+      envelope.data.requestId ?? requestId, leaderId);
   }
 
   function parse<T>(path: string, response: Response, schema: ZodType<T>, content: unknown): T {
     const parsed = schema.safeParse(content);
     if (!parsed.success) {
-      throw new MalformedResponseError(`/${path}`, requestIdOf(response), z.prettifyError(parsed.error));
+      throw new MalformedResponseError(`/${pathOf(path)}`, requestIdOf(response), z.prettifyError(parsed.error));
     }
     return parsed.data;
   }
 
-  async function read<T>(path: string, schema: ZodType<T>, headers: Record<string, string> = {}): Promise<Read<T>> {
-    const response = await send(path, headers);
+  async function read<T>(path: string, schema: ZodType<T>, headers: Record<string, string> = {},
+    signal?: AbortSignal): Promise<Read<T>> {
+    const response = await send(path, headers, signal);
     const content = await body(path, response);
     if (!response.ok) throw refusal(path, response, content);
-    return { data: parse(path, response, schema, content), index: indexOf(response), requestId: requestIdOf(response) };
+    return { data: parse(path, response, schema, content), ...metaOf(response) };
+  }
+
+  /** A catalog, health or tenancy read, with its consistency and blocking-query options in its query. */
+  function optioned<T>(path: string, schema: ZodType<T>, options: ReadOptions = {},
+    headers: Record<string, string> = {}): Promise<Read<T>> {
+    const query: string[] = [];
+    if (options.consistency === 'consistent' || options.consistency === 'stale') query.push(options.consistency);
+    if (options.index !== undefined) {
+      query.push(`index=${options.index}`);
+      if (options.wait !== undefined) query.push(`wait=${options.wait}`);
+    }
+    return read(query.length === 0 ? path : `${path}?${query.join('&')}`, schema, headers, options.signal);
+  }
+
+  function watchEvents(query: EventQuery, handlers: WatchHandlers): () => void {
+    const path = `v1/operator/events/watch${eventQueryText(query)}`;
+    const control = new AbortController();
+    let done = false;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+    const finish = (tell: () => void) => {
+      if (done) return;
+      done = true;
+      tell();
+    };
+
+    const follow = async () => {
+      const response = await send(path, {}, control.signal, 'text/event-stream');
+      if (!response.ok) throw refusal(path, response, await body(path, response));
+      if (response.body === null) throw closed(path, response);
+      reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      for (;;) {
+        const { value, done: ended } = await reader.read();
+        if (ended) throw closed(path, response);
+        buffer += decoder.decode(value, { stream: true }).replaceAll('\r\n', '\n');
+        let boundary = buffer.indexOf('\n\n');
+        while (boundary >= 0) {
+          const frame = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          boundary = buffer.indexOf('\n\n');
+          const { type, data } = frameOf(frame);
+          if (data === null) continue;
+          let content: unknown;
+          try {
+            content = JSON.parse(data) as unknown;
+          } catch {
+            throw new MalformedResponseError(`/${pathOf(path)}`, requestIdOf(response), 'an event is not JSON');
+          }
+          if (type === 'end') {
+            const end = parse(path, response, WatchEndSchema, content);
+            finish(() => handlers.onEnd(end));
+            return;
+          }
+          const event = parse(path, response, QraftEventSchema, content);
+          if (done) return;
+          handlers.onEvent(event);
+        }
+      }
+    };
+
+    follow().catch((error: unknown) => {
+      if (isAbort(error) || control.signal.aborted) return;
+      finish(() => handlers.onError(error));
+    }).finally(() => {
+      reader?.cancel().catch(() => undefined);
+    });
+
+    return () => {
+      done = true;
+      control.abort();
+      reader?.cancel().catch(() => undefined);
+    };
   }
 
   return {
-    raftStatus: () => read('raft/status', RaftStatusSchema),
-    nodes: () => read('v1/catalog/nodes', z.array(CatalogNodeSchema)),
-    services: (scope = DEFAULT_SCOPE) => read('v1/catalog/services', ServiceNamesSchema, scopeHeaders(scope)),
-    serviceHealth: (name, scope = DEFAULT_SCOPE) =>
-      read(`v1/health/service/${encodeURIComponent(name)}`, z.array(HealthEntrySchema), scopeHeaders(scope)),
-    servicesSummary: (scope = DEFAULT_SCOPE) =>
-      read('v1/internal/ui/services', z.array(ServiceSummarySchema), scopeHeaders(scope)),
-    checks: (state, scope = DEFAULT_SCOPE) =>
-      read(`v1/health/state/${state}`, z.array(CheckEntrySchema), scopeHeaders(scope)),
-    tenants: () => read('v1/tenants', z.array(TenantSchema)),
-    namespaces: (tenant) => read('v1/namespaces', z.array(NamespaceSchema), { 'X-Qraft-Tenant': tenant }),
-    members: () => read('v1/operator/raft/members', MembersSchema),
-    storage: () => read('v1/operator/raft/storage', StorageSchema),
-    async readiness() {
+    raftStatus: (options = {}) => read('raft/status', RaftStatusSchema, {}, options.signal),
+    nodes: (options) => optioned('v1/catalog/nodes', z.array(CatalogNodeSchema), options),
+    services: (scope = DEFAULT_SCOPE, options) =>
+      optioned('v1/catalog/services', ServiceNamesSchema, options, scopeHeaders(scope)),
+    serviceHealth: (name, scope = DEFAULT_SCOPE, options) =>
+      optioned(`v1/health/service/${encodeURIComponent(name)}`, z.array(HealthEntrySchema), options, scopeHeaders(scope)),
+    servicesSummary: (scope = DEFAULT_SCOPE, options) =>
+      optioned('v1/internal/ui/services', z.array(ServiceSummarySchema), options, scopeHeaders(scope)),
+    checks: (state, scope = DEFAULT_SCOPE, options) =>
+      optioned(`v1/health/state/${state}`, z.array(CheckEntrySchema), options, scopeHeaders(scope)),
+    tenants: (options) => optioned('v1/tenants', z.array(TenantSchema), options),
+    namespaces: (tenant, options) =>
+      optioned('v1/namespaces', z.array(NamespaceSchema), options, { 'X-Qraft-Tenant': tenant }),
+    members: (options = {}) => read('v1/operator/raft/members', MembersSchema, {}, options.signal),
+    storage: (options = {}) => read('v1/operator/raft/storage', StorageSchema, {}, options.signal),
+    configuration: (options = {}) => read('v1/operator/configuration', ConfigurationSchema, {}, options.signal),
+    events: (query, options = {}) =>
+      read(`v1/operator/events${eventQueryText(query)}`, EventPageSchema, {}, options.signal),
+    watchEvents,
+    async readiness(options = {}) {
       const path = 'health/ready';
-      const response = await send(path);
+      const response = await send(path, {}, options.signal);
       const content = await body(path, response);
-      const meta = { index: indexOf(response), requestId: requestIdOf(response) };
+      const meta = metaOf(response);
       if (response.ok) {
         parse(path, response, ReadySchema, content);
         return { data: { ready: true, conditions: [] }, ...meta };
@@ -197,6 +350,44 @@ export function createApi(apiBasePath: string, fetcher: typeof fetch = fetch): Q
   };
 }
 
+/** A request's path without its query, as errors name it. */
+function pathOf(path: string): string {
+  const query = path.indexOf('?');
+  return query < 0 ? path : path.slice(0, query);
+}
+
+function closed(path: string, response: Response): ApiError {
+  return new ApiError(`/${pathOf(path)}`, response.status, 'watch_closed', 'The event watch closed without its end',
+    true, requestIdOf(response), null);
+}
+
+/** A server-sent event frame's type and data; data is null for a comment or a frame without data. */
+function frameOf(frame: string): { type: string; data: string | null } {
+  let type = 'message';
+  const data: string[] = [];
+  for (const line of frame.split('\n')) {
+    if (line === '' || line.startsWith(':')) continue;
+    const colon = line.indexOf(':');
+    const field = colon < 0 ? line : line.slice(0, colon);
+    const value = colon < 0 ? '' : line.slice(colon + 1).replace(/^ /, '');
+    if (field === 'event') type = value;
+    else if (field === 'data') data.push(value);
+  }
+  return { type, data: data.length === 0 ? null : data.join('\n') };
+}
+
+function eventQueryText(query: EventQuery): string {
+  const parameters = new URLSearchParams();
+  if (query.after !== undefined) parameters.set('after', query.after);
+  if (query.limit !== undefined) parameters.set('limit', String(query.limit));
+  if (query.category !== undefined) parameters.set('category', query.category);
+  if (query.tenant !== undefined) parameters.set('tenant', query.tenant);
+  if (query.namespace !== undefined) parameters.set('namespace', query.namespace);
+  if (query.service !== undefined) parameters.set('service', query.service);
+  const text = parameters.toString();
+  return text === '' ? '' : `?${text}`;
+}
+
 function scopeHeaders(scope: Scope): Record<string, string> {
   return { 'X-Qraft-Tenant': scope.tenant, 'X-Qraft-Namespace': scope.namespace };
 }
@@ -205,8 +396,20 @@ function requestIdOf(response: Response): string | null {
   return response.headers.get('X-Request-Id');
 }
 
-function indexOf(response: Response): number | null {
-  const header = response.headers.get('X-Qraft-Index');
+function metaOf(response: Response): Omit<Read<unknown>, 'data'> {
+  const consistency = response.headers.get('X-Qraft-Consistency');
+  const known = response.headers.get('X-Qraft-Known-Leader');
+  return {
+    index: numberOf(response.headers.get('X-Qraft-Index')),
+    requestId: requestIdOf(response),
+    answeredBy: response.headers.get('X-Qraft-Answered-By'),
+    consistency: consistency === 'default' || consistency === 'consistent' || consistency === 'stale' ? consistency : null,
+    knownLeader: known === 'true' ? true : known === 'false' ? false : null,
+    lastContactMillis: numberOf(response.headers.get('X-Qraft-Last-Contact')),
+  };
+}
+
+function numberOf(header: string | null): number | null {
   if (header === null || !/^\d+$/.test(header)) return null;
   return Number(header);
 }

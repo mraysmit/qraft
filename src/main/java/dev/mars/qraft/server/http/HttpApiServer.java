@@ -155,6 +155,15 @@ public final class HttpApiServer implements AutoCloseable {
         this.storageStatus = Objects.requireNonNull(status, "status");
     }
 
+    /**
+     * Answers {@code configuration} at {@code GET /v1/operator/configuration}, read now (UI-4 list, decision 3); until
+     * it is given, the read answers 503 {@code configuration_unavailable}.
+     */
+    public void useConfiguration(dev.mars.qraft.server.config.EffectiveConfiguration configuration) {
+        this.configurationReadAt = clock.instant();
+        this.configuration = Objects.requireNonNull(configuration, "configuration");
+    }
+
     /** This server's event journal, or {@code null} before {@link #useEventJournal} gives it. */
     dev.mars.qraft.common.events.EventJournal eventJournal() {
         return eventJournal;
@@ -330,6 +339,7 @@ public final class HttpApiServer implements AutoCloseable {
         context("/v1/operator/autopilot/health", requestAware(this::autopilotHealth));
         context("/v1/operator/raft/members", requestAware(this::raftMembers));
         context("/v1/operator/raft/storage", requestAware(this::raftStorage));
+        context(CONFIGURATION, requestAware(this::configuration));
         context("/v1/operator/raft/peer", requestAware(this::removeRaftPeer));
         context("/v1/catalog/register", requestAware(this::registerInCatalog));
         context("/v1/catalog/deregister", requestAware(this::deregisterFromCatalog));
@@ -562,6 +572,46 @@ public final class HttpApiServer implements AutoCloseable {
      * quorum; on any other server the configuration it holds, labelled a follower's view, with the leader it knows and
      * null progress. It needs {@code operator:read}, as the autopilot read does.
      */
+    /**
+     * {@code GET /v1/operator/configuration}: this server's effective configuration, its secrets withheld, each setting
+     * with its source, and since no setting changes while the server runs, each taking a restart to change.
+     */
+    private void configuration(HttpExchange exchange) throws IOException {
+        if (!exchange.getRequestURI().getPath().equals(CONFIGURATION)) {
+            respondError(exchange, 404, "not_found", "No such route: " + exchange.getRequestURI().getPath(), false);
+            return;
+        }
+        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            respondError(exchange, 405, "method_not_allowed", "Method not allowed", false);
+            return;
+        }
+        if (refusedForItsQuery(exchange)) return;
+        AclPrincipal principal = principal(exchange);
+        if (principal == null || refused(exchange, principal, OPERATOR_READ)) return;
+        dev.mars.qraft.server.config.EffectiveConfiguration current = configuration;
+        if (current == null) {
+            respondError(exchange, 503, "configuration_unavailable", "This server was not given its configuration",
+                    false);
+            return;
+        }
+        List<Map<String, Object>> settings = new ArrayList<>();
+        for (dev.mars.qraft.server.config.EffectiveSetting setting : current.settings()) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("key", setting.key());
+            entry.put("value", setting.value());
+            entry.put("source", setting.configured() ? "configured" : "default");
+            entry.put("redacted", setting.redacted());
+            entry.put("restartRequired", true);
+            settings.add(entry);
+        }
+        Map<String, Object> answer = new LinkedHashMap<>();
+        answer.put("server", raftNode == null ? null : raftNode.getNodeId());
+        answer.put("file", current.file().map(Object::toString).orElse(null));
+        answer.put("readAt", configurationReadAt.toString());
+        answer.put("settings", settings);
+        respondJson(exchange, 200, answer);
+    }
+
     private void raftMembers(HttpExchange exchange) throws IOException {
         if (!prepareStateRequest(exchange, "GET") || refusedForItsQuery(exchange)) return;
         AclPrincipal principal = principal(exchange);
@@ -1510,6 +1560,16 @@ public final class HttpApiServer implements AutoCloseable {
     /** The index a read answers with, which its blocking query waits on (consistency list, decision 5). */
     enum ReadIndex { APPLIED, KV }
 
+    /** The effective configuration's read (UI-4 list, decision 3). */
+    static final String CONFIGURATION = "/v1/operator/configuration";
+    private volatile dev.mars.qraft.server.config.EffectiveConfiguration configuration;
+    private volatile java.time.Instant configurationReadAt;
+
+    /** The server that gave an answer, by node ID, on every answer (UI-4 list, decision 1). */
+    static final String ANSWERED_BY_HEADER = "X-Qraft-Answered-By";
+    /** The consistency a read applied: {@code default}, {@code consistent} or {@code stale} (UI-4 list, decision 1). */
+    static final String CONSISTENCY_HEADER = "X-Qraft-Consistency";
+
     private static String parameterName(String parameter) {
         int equals = parameter.indexOf('=');
         return URLDecoder.decode(equals < 0 ? parameter : parameter.substring(0, equals), StandardCharsets.UTF_8);
@@ -1520,8 +1580,8 @@ public final class HttpApiServer implements AutoCloseable {
      * options; for {@code consistent}, has the leader confirm it still leads and apply what was committed when the read
      * began, and refuses on any other server (decision 2); for {@code index}, waits until {@code kind}'s index passes
      * it, or {@code wait} with up to a sixteenth more at random passes (decision 5); and sets the leader-contact headers
-     * (decision 4). {@code stale}, like the default, answers from this server's applied state (decision 1). Returns
-     * {@code false} after answering a refusal.
+     * (decision 4). {@code stale}, like the default, answers from this server's applied state (decision 1). The answer
+     * names the consistency applied (UI-4 list, decision 1). Returns {@code false} after answering a refusal.
      */
     boolean readyToRead(HttpExchange exchange, ReadIndex kind) throws IOException {
         Map<String, String> options = new LinkedHashMap<>();
@@ -1571,6 +1631,8 @@ public final class HttpApiServer implements AutoCloseable {
             }
         }
         if (options.containsKey("consistent") && !confirmedLeadership(exchange)) return false;
+        String consistency = options.containsKey("consistent") ? "consistent"
+                : options.containsKey("stale") ? "stale" : "default";
         if (index > 0) {
             long jitter = wait.toMillis() / 16;
             Duration bound = wait.plusMillis(jitter == 0 ? 0 : java.util.concurrent.ThreadLocalRandom.current()
@@ -1587,6 +1649,7 @@ public final class HttpApiServer implements AutoCloseable {
         String leader = raftNode.getLeaderId();
         boolean known = leader != null && !leader.isBlank();
         exchange.getResponseHeaders().set("X-Qraft-Known-Leader", Boolean.toString(known));
+        exchange.getResponseHeaders().set(CONSISTENCY_HEADER, consistency);
         long contact = raftNode.millisSinceLeaderContact();
         if (contact >= 0) exchange.getResponseHeaders().set("X-Qraft-Last-Contact", Long.toString(contact));
         return true;
@@ -1765,6 +1828,7 @@ public final class HttpApiServer implements AutoCloseable {
         // on a kept-alive connection takes over as soon as this one's answer is sent.
         return exchange -> {
             long started = System.nanoTime();
+            if (raftNode != null) exchange.getResponseHeaders().set(ANSWERED_BY_HEADER, raftNode.getNodeId());
             String route = exchange.getHttpContext().getPath();
             String method = exchange.getRequestMethod();
             // The token is resolved before the request is handled, so a logout is audited under the token it ended.
