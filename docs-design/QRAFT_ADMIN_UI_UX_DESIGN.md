@@ -1,7 +1,7 @@
 # Qraft Administrative UI and UX Design
 
 **Status:** Draft  
-**Last updated:** 2026-11-15 (UI-5 delivered: sections 5.1 and 10.2.2 record what the implementation plan's open question 5 and the secret's keeping were decided to be, and section 9.2 what the removal's review shows; the UI-5 task list's decisions 1, 7 and 8. Earlier, 2026-11-01: a policy that tokens link to can now be deleted, as the owner decided for the ACL list's proposal 18: sections 10.2 and the refusals changed. Earlier the same day: section 10.2 follows the ACL list's alignment with Consul: the first sign-in, a secret shown once and stored only as a hash, 403 for a bad token, the form of a policy's rules, and recovery. Earlier the same day: dated task-list links refreshed. Earlier, 2026-10-30: section 5.1: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after a review of the interface's logic against the ACL list and the platform design: access control rewritten as section 10.2's subsections, with the owner's decisions on the security profile, the lock-out guard, policy deletion and the explanation endpoint; principle 3.7; access control moved to Stage 2; section 11's integrity refusals and operations that are not idempotent; nodes, health states, unscoped views, and operations without an API in sections 3.2, 5 and 9. Earlier that day, after a review of the reference implementation against this document: workspace tabs, section 4.4; access control on the token model of the ACL list, sections 4.1, 10.2, 11 and 15, with Roles and Auth Methods reserved, section 2; the reference implementation follows section 4.3 and labels reserved views. Earlier, 2026-10-09: a client row shows the version from the node's metadata; a node has no capabilities any more. Before: 2026-09-25)
+**Last updated:** 2026-11-15 (section 7.1: what the Key/Value pages do as UI-6's first list built them. Earlier the same day: UI-5 delivered: sections 5.1 and 10.2.2 record what the implementation plan's open question 5 and the secret's keeping were decided to be, and section 9.2 what the removal's review shows; the UI-5 task list's decisions 1, 7 and 8. Earlier, 2026-11-01: a policy that tokens link to can now be deleted, as the owner decided for the ACL list's proposal 18: sections 10.2 and the refusals changed. Earlier the same day: section 10.2 follows the ACL list's alignment with Consul: the first sign-in, a secret shown once and stored only as a hash, 403 for a bad token, the form of a policy's rules, and recovery. Earlier the same day: dated task-list links refreshed. Earlier, 2026-10-30: section 5.1: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after a review of the interface's logic against the ACL list and the platform design: access control rewritten as section 10.2's subsections, with the owner's decisions on the security profile, the lock-out guard, policy deletion and the explanation endpoint; principle 3.7; access control moved to Stage 2; section 11's integrity refusals and operations that are not idempotent; nodes, health states, unscoped views, and operations without an API in sections 3.2, 5 and 9. Earlier that day, after a review of the reference implementation against this document: workspace tabs, section 4.4; access control on the token model of the ACL list, sections 4.1, 10.2, 11 and 15, with Roles and Auth Methods reserved, section 2; the reference implementation follows section 4.3 and labels reserved views. Earlier, 2026-10-09: a client row shows the version from the node's metadata; a node has no capabilities any more. Before: 2026-09-25)
 
 ## 1. Purpose
 
@@ -410,6 +410,25 @@ The editor supports plain text and JSON presentation, create, update, delete,
 compare-and-set, acquire, and release operations. Compare-and-set workflows show
 the expected index, current index, and a difference view when a stale write is
 rejected.
+
+As built on 2026-11-15
+([`task-list-admin-ui-key-value-2026-11-15.md`](../docs/archive/task-list-admin-ui-key-value-2026-11-15.md)):
+
+- the address is `/ui/kv?path=<folder or key>`: a key may end in `/` or hold a
+  dot, which the server's address rules do not take in a path;
+- a folder lists one level, folders first; a value appears only on its entry's
+  page, laid out when it is a JSON object or list, and in base64 when it is not
+  UTF-8 text; the hash is left out, since Web Crypto needs HTTPS or the local
+  host;
+- an entry's recent events need `operator:read`, and come from the answering
+  server's ephemeral journal;
+- every update and deletion is a compare-and-set at the index the page read, and
+  a creation is one at 0; the editor refuses a value over the server's 512 KiB
+  limit and flags it cannot write back exactly, and says when the entry changed
+  under it, keeping the draft;
+- changes follow `key:write` on the key, or on a folder's prefix, in the selected
+  scope; the whole store is not offered for deletion;
+- acquire and release wait for the sessions list (UI-6's second).
 
 ### 7.2 Sessions and locks
 

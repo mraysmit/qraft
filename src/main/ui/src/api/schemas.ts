@@ -407,6 +407,21 @@ export const DeregistrationSchema = z.object({
 /** `DELETE /v1/operator/raft/peer`: the leader's answer to a removal. */
 export const RemovalSchema = z.object({ status: z.string().min(1), message: z.string() });
 
+/**
+ * `GET /v1/kv/{key}`: an entry in Consul's form (key/value list, decision 4), its value in base64, `Session` only
+ * while one holds it. Flags are an unsigned 64-bit number, which JSON reads rounded above the safe integers.
+ */
+export const KvEntrySchema = z.object({
+  Key: z.string(),
+  Value: z.string(),
+  Flags: z.number().nonnegative(),
+  CreateIndex: z.number().int().nonnegative(),
+  ModifyIndex: z.number().int().nonnegative(),
+  LockIndex: z.number().int().nonnegative(),
+  Session: z.string().optional(),
+});
+
+export type KvEntry = z.infer<typeof KvEntrySchema>;
 export type Registration = z.infer<typeof RegistrationSchema>;
 export type Deregistration = z.infer<typeof DeregistrationSchema>;
 export type Removal = z.infer<typeof RemovalSchema>;

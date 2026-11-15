@@ -33,11 +33,13 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Base64;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.jar.JarFile;
@@ -45,6 +47,7 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -214,6 +217,75 @@ class PackagedAdminUiEndToEndTest {
         String output = Files.readString(run.resolve("server.out"));
         assertTrue(!output.contains(management) && !output.contains(secret), "no secret reaches the server's output");
         SubprocessOutputAuditHelper.requireNoErrors("the packaged server with ACLs on", output);
+    }
+
+    @Test
+    void aPackagedServerWithAclsOnAnswersTheKeyValuePagesCallsUnderAKeyPrefixToken() throws Exception {
+        // UI-6 Key/Value task list, Phase 3: what the browser and the editor send, under a token that may write app/.
+        Path run = Files.createDirectories(directory.resolve("kv-run"));
+        String management = UUID.randomUUID().toString();
+        Path secretFile = run.resolve("management-token");
+        Files.writeString(secretFile, management);
+        int port = freePort();
+        server = start("server", run, serverConfig(run, port, ", \"acl\": {\"enabled\": true, \"defaultPolicy\": \"deny\","
+                + " \"initialManagementTokenFile\": " + path(secretFile) + "}"));
+        URI origin = URI.create("http://127.0.0.1:" + port);
+        awaitReady(server, origin, "/health/ready", run.resolve("server.out"));
+        Map<String, String> signedIn = Map.of("X-Qraft-Token", management);
+        awaitOk(origin, "GET", "/v1/acl/token/self", "", signedIn);
+        String policy = ok(origin, "PUT", "/v1/acl/policy", "{\"name\":\"app-keys\",\"rules\":"
+                + "{\"key_prefix\":{\"app/\":{\"policy\":\"write\"}}}}", signedIn).path("id").asText();
+        String secret = ok(origin, "PUT", "/v1/acl/token", "{\"policies\":[{\"id\":\"" + policy + "\"}]}", signedIn)
+                .path("secretId").asText();
+        Map<String, String> writer = Map.of("X-Qraft-Token", secret, "X-Qraft-Tenant", "default",
+                "X-Qraft-Namespace", "default");
+        assertTrue(ok(origin, "PUT", "/v1/kv/other?flags=0&cas=0", "kv-e2e-other", signedIn).asBoolean());
+
+        // The editor: a creation, refused once the key exists; an update at the index read, refused once stale.
+        assertTrue(ok(origin, "PUT", "/v1/kv/app/config?flags=0&cas=0", "kv-e2e-first", writer).asBoolean());
+        assertFalse(ok(origin, "PUT", "/v1/kv/app/config?flags=0&cas=0", "kv-e2e-again", writer).asBoolean());
+        long read = ok(origin, "GET", "/v1/kv/app/config", "", writer).path(0).path("ModifyIndex").asLong();
+        assertTrue(ok(origin, "PUT", "/v1/kv/app/config?flags=1&cas=" + read, "kv-e2e-second", writer).asBoolean());
+        assertFalse(ok(origin, "PUT", "/v1/kv/app/config?flags=1&cas=" + read, "kv-e2e-stale", writer).asBoolean(),
+                "a write at an index the entry has moved past is refused, false");
+        JsonNode entry = ok(origin, "GET", "/v1/kv/app/config", "", writer).path(0);
+        assertEquals("kv-e2e-second", new String(Base64.getDecoder().decode(entry.path("Value").asText()),
+                StandardCharsets.UTF_8));
+        assertEquals(1, entry.path("Flags").asLong());
+
+        // The browser: a level, filtered to what the token may read, and the authorize answers its controls follow.
+        HttpResponse<String> level = send(origin, "GET", "/v1/kv/?keys&separator=/", "", writer);
+        assertEquals(200, level.statusCode(), level.body());
+        assertEquals(JSON.readTree("[\"app/\"]"), JSON.readTree(level.body()));
+        assertEquals("true", level.headers().firstValue("X-Qraft-Results-Filtered-By-ACLs").orElse(null));
+        JsonNode allowed = ok(origin, "POST", "/v1/internal/acl/authorize",
+                "[{\"resource\":\"key\",\"segment\":\"app/config\",\"access\":\"write\"},"
+                        + "{\"resource\":\"key\",\"segment\":\"other\",\"access\":\"write\"}]", writer);
+        assertTrue(allowed.path(0).path("allow").asBoolean() && !allowed.path(1).path("allow").asBoolean(),
+                allowed.toString());
+
+        // An entry's recent events, read with operator:read, never carry its value.
+        JsonNode events = ok(origin, "GET", "/v1/operator/events?key=app/config&tenant=default&namespace=default", "",
+                signedIn).path("events");
+        assertEquals(2, events.size(), events.toString());
+        assertFalse(events.toString().contains("kv-e2e") || events.toString().contains(Base64.getEncoder()
+                .encodeToString("kv-e2e-second".getBytes(StandardCharsets.UTF_8))), events.toString());
+
+        // A deletion at the index read, and a folder's.
+        long modified = entry.path("ModifyIndex").asLong();
+        assertTrue(ok(origin, "DELETE", "/v1/kv/app/config?cas=" + modified, "", writer).asBoolean());
+        assertTrue(ok(origin, "PUT", "/v1/kv/app/db/url?flags=0&cas=0", "kv-e2e-url", writer).asBoolean());
+        assertTrue(ok(origin, "DELETE", "/v1/kv/app/?recurse", "", writer).asBoolean());
+        assertEquals(404, send(origin, "GET", "/v1/kv/app/db/url", "", writer).statusCode());
+        assertEquals(403, send(origin, "DELETE", "/v1/kv/?recurse", "", writer).statusCode(),
+                "the whole store needs write on every key");
+
+        server.destroyForcibly();
+        server.waitFor(30, TimeUnit.SECONDS);
+        String output = Files.readString(run.resolve("server.out"));
+        assertFalse(output.contains("kv-e2e") || output.contains(management) || output.contains(secret),
+                "no value and no secret reaches the server's output");
+        SubprocessOutputAuditHelper.requireNoErrors("the packaged server serving key/value", output);
     }
 
     @Test

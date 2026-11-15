@@ -29,6 +29,7 @@ import dev.mars.qraft.common.acl.AclDefaultPolicy;
 import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.common.events.EventJournal;
 import dev.mars.qraft.raft.PeerlessTransportFixture;
+import dev.mars.qraft.raft.RaftCommandResult;
 import dev.mars.qraft.raft.RaftNode;
 import dev.mars.qraft.raft.RaftNodeMode;
 import dev.mars.qraft.server.config.AppConfig;
@@ -37,6 +38,7 @@ import dev.mars.qraft.server.http.AclHttpSettings;
 import dev.mars.qraft.server.http.HttpApiServer;
 import dev.mars.qraft.server.ui.AdminUiConfig;
 import dev.mars.qraft.server.ui.ClasspathUiAssets;
+import dev.mars.qraft.state.NodeCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
 import org.junit.jupiter.api.AfterEach;
@@ -421,6 +423,61 @@ class AdminUiDataContractTest {
     }
 
     /** A token's answer in the fields the token menu, the token pages and sign-in read. */
+    @Test
+    void theKeyValueAnswersAreAnsweredInTheFieldsTheInterfaceReads() throws Exception {
+        // UI-6 Key/Value task list, Phase 0: a folder's keys, an entry, a held entry, a filtered listing, a write's
+        // true and a stale compare-and-set's false, and a key's events, as client.ts will send and read them.
+        startServer(new AclHttpSettings(true, dataDirectory, AclDefaultPolicy.DENY), SecurityProfile.PRODUCTION);
+        URI origin = URI.create("http://127.0.0.1:" + server.port());
+        URI api = origin.resolve(bootstrap(get(origin, "/ui/")).path("apiBasePath").asText());
+        HttpResponse<String> bootstrapped = send(origin, "PUT", "/v1/acl/bootstrap", "", Map.of());
+        assertEquals(200, bootstrapped.statusCode(), bootstrapped.body());
+        Map<String, String> management = Map.of("X-Qraft-Token",
+                JSON.readTree(bootstrapped.body()).path("secretId").asText());
+
+        assertEquals(JSON.readTree("true"), written(origin, "PUT", "/v1/kv/app/config?flags=3", "{\"a\":1}", management));
+        assertEquals(JSON.readTree("true"), written(origin, "PUT", "/v1/kv/app/db/url", "jdbc", management));
+        assertEquals(JSON.readTree("true"), written(origin, "PUT", "/v1/kv/other", "x", management));
+        assertEquals(JSON.readTree("false"), written(origin, "PUT", "/v1/kv/app/config?cas=0", "{}", management),
+                "a stale compare-and-set is answered false, 200");
+
+        JsonNode level = read(api, "v1/kv/app/?keys&separator=/", true, management);
+        assertEquals(JSON.readTree("[\"app/config\",\"app/db/\"]"), level, "a folder's keys, a folder ending in /");
+        JsonNode entry = read(api, "v1/kv/app/config", true, management).get(0);
+        fields(entry, "entry", Map.of("Key", Type.TEXT, "Value", Type.TEXT, "Flags", Type.INTEGER,
+                "CreateIndex", Type.INTEGER, "ModifyIndex", Type.INTEGER, "LockIndex", Type.INTEGER));
+        assertFalse(entry.has("Session"), "absent while no session holds it: " + entry);
+
+        assertInstanceOf(RaftCommandResult.Success.class, node.submitCommand(NodeCommand.register(
+                Node.of("node-a", "10.0.0.1", null, null, Map.of()), Instant.now())).get(10, TimeUnit.SECONDS));
+        String session = written(origin, "PUT", "/v1/session/create", "{\"Node\":\"node-a\"}", management).path("ID")
+                .asText();
+        assertEquals(JSON.readTree("true"), written(origin, "PUT", "/v1/kv/app/lock?acquire=" + session, "", management));
+        JsonNode held = read(api, "v1/kv/app/lock", true, management).get(0);
+        fields(held, "held entry", Map.of("Session", Type.TEXT, "LockIndex", Type.INTEGER));
+
+        written(origin, "PUT", "/v1/acl/policy", "{\"name\":\"app-reader\",\"rules\":"
+                + "{\"key_prefix\":{\"app/\":{\"policy\":\"read\"}}}}", management);
+        String reader = written(origin, "PUT", "/v1/acl/token", "{\"policies\":[{\"name\":\"app-reader\"}]}",
+                management).path("secretId").asText();
+        HttpResponse<String> filtered = http.send(HttpRequest.newBuilder(api.resolve("v1/kv/?keys&separator=/"))
+                .header("X-Qraft-Token", reader).timeout(Duration.ofSeconds(5)).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, filtered.statusCode(), filtered.body());
+        assertEquals(JSON.readTree("[\"app/\"]"), JSON.readTree(filtered.body()));
+        assertEquals("true", filtered.headers().firstValue("X-Qraft-Results-Filtered-By-ACLs").orElse(null),
+                "the browser says the server left keys out");
+
+        JsonNode events = read(api, "v1/operator/events?key=app/config&tenant=default&namespace=default", false,
+                management).path("events");
+        assertEquals(1, events.size(), events.toString());
+        fields(events.get(0), "key event", Map.of("type", Type.TEXT, "committedIndex", Type.INTEGER,
+                "event", Type.OBJECT));
+        assertEquals("app/config", events.get(0).path("event").path("key").asText());
+        assertFalse(events.toString().contains("{\\\"a\\\":1}") || events.toString().contains("eyJhIjoxfQ"),
+                "an event never carries the value");
+    }
+
     private static void token(JsonNode token, String what) {
         fields(token, what, Map.ofEntries(Map.entry("accessorId", Type.TEXT), Map.entry("secretId", Type.TEXT),
                 Map.entry("description", Type.TEXT_OR_NULL), Map.entry("policies", Type.LIST),

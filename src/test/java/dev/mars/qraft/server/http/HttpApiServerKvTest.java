@@ -259,6 +259,24 @@ class HttpApiServerKvTest {
         assertRefused(send("GET", "/v1/kv/?keys", null, "X-Qraft-Token", admin), 404, null);
     }
 
+    @Test
+    void aValueIsAtMostTheRequestBodysLimitOf512KiBAndALargerOneIsNeverSubmitted() throws Exception {
+        start(false, Set.of("kv-node"));
+        byte[] largest = new byte[512 * 1024];
+        java.util.Arrays.fill(largest, (byte) 'x');
+
+        HttpResponse<byte[]> set = send("PUT", "/v1/kv/big", largest);
+        assertEquals("true", text(set));
+        assertArrayEquals(largest, send("GET", "/v1/kv/big?raw", null).body());
+
+        long index = node.getLastLogIndex();
+        byte[] larger = java.util.Arrays.copyOf(largest, largest.length + 1);
+        assertRefused(send("PUT", "/v1/kv/bigger", larger), 413, "request_too_large");
+        assertRefused(send("PUT", "/v1/kv/big?cas=0", larger), 413, "request_too_large");
+        assertEquals(index, node.getLastLogIndex(), "nothing was submitted");
+        assertRefused(send("GET", "/v1/kv/bigger", null), 404, "key_not_found");
+    }
+
     private static void assertRefused(HttpResponse<byte[]> response, int status, String code) throws Exception {
         assertEquals(status, response.statusCode(), text(response));
         if (code != null) assertEquals(code, JSON.readTree(response.body()).path("code").asText(), text(response));

@@ -39,6 +39,8 @@ export type Route =
   | { view: 'policies' }
   | { view: 'policy'; id: string }
   | { view: 'explain' }
+  /** The Key/Value browser at a folder, empty or ending in `/`, or at a key (UI-6 Key/Value task list, decision 3). */
+  | { view: 'kv'; path: string }
   | { view: 'unknown' };
 
 /**
@@ -58,6 +60,9 @@ export function routeOf(pathname: string, uiPath: string, search = ''): Route {
   if (rest === 'storage') return { view: 'storage' };
   if (rest === 'events') return eventsOf(search);
   if (rest === 'configuration') return { view: 'configuration' };
+  // The folder or key is in the query: the server takes an address with an empty segment for none, and one whose
+  // last segment has a dot for a file, and a key may have either.
+  if (rest === 'kv') return { view: 'kv', path: new URLSearchParams(search).get('path') ?? '' };
   if (rest === 'access') return { view: 'access' };
   if (rest === 'access/tokens') return { view: 'tokens' };
   if (rest === 'access/policies') return { view: 'policies' };
@@ -133,6 +138,7 @@ export function hrefOf(route: Route, uiPath: string, scope: Scope = DEFAULT_SCOP
     if (route.category !== undefined) parameters.set('category', route.category);
     if (route.correlation !== undefined) parameters.set('correlation', route.correlation);
   }
+  if (route.view === 'kv' && route.path !== '') parameters.set('path', route.path);
   const text = parameters.toString();
   const query = text === '' ? '' : `?${text}`;
   switch (route.view) {
@@ -148,6 +154,7 @@ export function hrefOf(route: Route, uiPath: string, scope: Scope = DEFAULT_SCOP
     case 'events':
     case 'configuration':
     case 'access':
+    case 'kv':
       return `${root}${route.view}${query}`;
     case 'tokens':
     case 'policies':

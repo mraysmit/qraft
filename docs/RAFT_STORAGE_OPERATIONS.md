@@ -651,6 +651,8 @@ With a token that has `operator:read`, ask a server for its events:
   answers a page of events, the cursor to ask from next (`next`) and the page's
   `status`: `more` while there are more, `history_gap` when the cursor is older than
   what the server still holds, and `other_boot` when it names an earlier boot.
+  `tenant`, `namespace`, `service` and `key` narrow it further: `key=app/config`
+  gives that key's writes, locks and deletions, never its value.
 - `GET /v1/operator/events/watch`, with the same parameters bar `limit`, is a
   server-sent event stream: the events after the cursor, then each as it happens,
   each with its cursor as its `id`, and a comment line every 15 seconds without one.

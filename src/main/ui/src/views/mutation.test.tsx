@@ -19,7 +19,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { AccessProvider, unrestricted } from '../access';
 import { ApiError, type Read } from '../api/client';
 import { RouterProvider } from '../routing';
-import { Mutation } from './Mutation';
+import { Mutation, outcomeOf } from './Mutation';
 import { read } from './testing';
 
 // UI-5 task list, decision 6: every mutation shows what it changes and where, reviews its impact, and reports the
@@ -160,5 +160,39 @@ describe('the mutation workflow', () => {
     await screen.findByText('One token has this description.');
 
     expect(screen.queryByText('Submit again', { selector: 'button, button span' })).toBeNull();
+  });
+
+  // UI-6 Key/Value task list, decision 5: a stale compare-and-set answers false, 200, and was not applied.
+  it('tells an answer that refuses the change as the outcome it stands for, with what the page says of it', async () => {
+    render(
+      <RouterProvider uiPath="/ui/">
+        <AccessProvider value={unrestricted('token')}>
+          <Mutation
+            title="Update app/config"
+            identity={[['Key', 'app/config']]}
+            action="Save"
+            idempotent
+            submit={() => read(false, null, { requestId: 'req-43' })}
+            judge={(answer) => (answer.data === false
+              ? { kind: 'conflict', code: 'stale', message: 'the entry changed after it was read' } : null)}
+            detail={() => <p>Expected index 24, now at 25.</p>}
+            onClose={() => undefined}
+          />
+        </AccessProvider>
+      </RouterProvider>,
+    );
+
+    fireEvent.click(screen.getByText('Save', { selector: 'button, button span' }));
+    const reported = await outcome();
+    expect(reported.textContent).toContain(
+      'Rejected: it conflicts with the current state (stale): the entry changed after it was read');
+    expect(reported.textContent).toContain('Expected index 24, now at 25.');
+    expect(reported.textContent).not.toContain('Committed');
+    expect(screen.getByText('Audit events of this request')).toBeInTheDocument();
+  });
+
+  it('reads a request body over the server limit as a validation refusal, which was not applied', () => {
+    expect(outcomeOf(new ApiError('/v1/kv/a', 413, 'request_too_large', 'The request body is longer than 524288 bytes',
+      false, 'req-44', null))).toMatchObject({ kind: 'validation', code: 'request_too_large' });
   });
 });

@@ -570,6 +570,12 @@ Phases 5 to 7 were built on 2026-11-08 by
   no scope, and a service's events are those that name it: `service.registered`,
   `service.deregistered` and `health.changed`, which implement `ServiceEvent`. A
   blank value is refused.
+- **A key filter** (since 2026-11-15, for an entry's recent events on the
+  administrative interface's Key/Value pages, UI-6): the query and the watch also
+  take `key`, and answer the events about it: `key.set`, `key.deleted`,
+  `lock.acquired` and `lock.released` that name it, and `key.tree_deleted` whose
+  prefix covers it, all of which implement `KeyEvent`. The key is read as given,
+  not trimmed, and an empty one is refused.
 - **The watch**, `GET /v1/operator/events/watch`: server-sent events with the same
   cursor and filters, an opening comment, each event with its cursor as the `id`, a
   comment as a heartbeat every 15 seconds without an event, and a last `end` event

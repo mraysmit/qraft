@@ -20,6 +20,7 @@ import type { Bootstrap } from '../bootstrap';
 import { createSession, type Session } from '../session';
 import { ApiError, type CheckState, type EventQuery, type QraftApi, type Read, type ReadOptions, type Scope,
   type WatchHandlers } from '../api/client';
+import type { KvEntry } from '../api/schemas';
 import {
   ACL_STATUS,
   ANONYMOUS_TOKEN,
@@ -88,6 +89,7 @@ export function read<T>(data: T, index: number | null = 12, meta: Partial<Omit<R
     consistency: 'default',
     knownLeader: true,
     lastContactMillis: 0,
+    filtered: false,
     ...meta,
   });
 }
@@ -253,9 +255,39 @@ export function fakeApi(
       serviceName: body.serviceName, nodeId: nodeName, tenantId: scope.tenant, namespace: scope.namespace, registered: true } }, 61),
     deregisterService: (nodeName, _scope, serviceId) => read({ node: nodeName, serviceId, deregistered: true }, 62),
     removeServer: (serverId) => read({ status: 'REMOVED', message: `${serverId} removed` }, 70),
+    kvLevel: (prefix) => read(levelKeys(KV(), prefix), 30),
+    kvEntry: (key) => read(KV().find((entry) => entry.Key === key) ?? null, 30),
+    kvKeys: (prefix) => read(KV().map((entry) => entry.Key).filter((key) => key.startsWith(prefix)), 30),
+    // A key/value write answers true or false, with no index, as the server does.
+    kvPut: () => read(true, null),
+    kvDelete: () => read(true, null),
+    kvDeleteTree: () => read(true, null),
     ...overrides,
   };
   return blockingWaits(api);
+}
+
+/** An entry of the key/value store, its value given as text. */
+export function kvEntry(key: string, text: string, fields: Partial<KvEntry> = {}): KvEntry {
+  return { Key: key, Value: btoa(String.fromCharCode(...new TextEncoder().encode(text))), Flags: 0, CreateIndex: 20,
+    ModifyIndex: 24, LockIndex: 0, ...fields };
+}
+
+/** The fake API's key/value store: two keys and a folder of one in `app/`, and a key at the top. */
+export const KV = (): KvEntry[] => [
+  kvEntry('app/config', '{"replicas":3}', { Flags: 7 }),
+  kvEntry('app/db/url', 'jdbc:postgresql://db/app'),
+  kvEntry('app/name', 'shop'),
+  kvEntry('readme', 'hello'),
+];
+
+/** What the server answers for one level below `prefix` with the `/` separator: keys, and folders ending in `/`. */
+export function levelKeys(entries: readonly KvEntry[], prefix: string): string[] {
+  const keys = entries.map((entry) => entry.Key).filter((key) => key.startsWith(prefix)).map((key) => {
+    const slash = key.indexOf('/', prefix.length);
+    return slash < 0 ? key : key.slice(0, slash + 1);
+  });
+  return [...new Set(keys)];
 }
 
 /**
@@ -274,6 +306,8 @@ function blockingWaits(api: QraftApi): QraftApi {
     serviceHealth: waiting(2, api.serviceHealth),
     servicesSummary: waiting(1, api.servicesSummary),
     checks: waiting(2, api.checks),
+    kvLevel: waiting(2, api.kvLevel),
+    kvEntry: waiting(2, api.kvEntry),
   };
 }
 

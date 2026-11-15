@@ -46,7 +46,8 @@ export function outcomeOf(error: unknown): Outcome {
   if (INTEGRITY.has(code)) return { kind: 'integrity', code, message };
   if (error.status === 404) return { kind: 'not-found', code, message };
   if (error.status === 409) return { kind: 'conflict', code, message };
-  if (error.status === 400) return { kind: 'validation', code, message };
+  // A body over the server's limit is refused before it is read (UI-6 Key/Value task list, decision 7).
+  if (error.status === 400 || error.status === 413) return { kind: 'validation', code, message };
   return { kind: 'retryable', code, message };
 }
 
@@ -83,7 +84,8 @@ type Phase =
  * submission, and the structured outcome with a link to the request's audit events. An unknown outcome is never shown
  * as a failure: the interface offers to read the current state, and then to submit again only an idempotent change.
  */
-export function Mutation<T>({ title, identity, review, action, idempotent, submit, refresh, committed, onClose }: {
+export function Mutation<T>({ title, identity, review, action, idempotent, submit, refresh, committed, judge, detail,
+  onClose }: {
   title: string;
   /** The resource's identity and scope, each a label and value. */
   identity: [string, string][];
@@ -97,6 +99,13 @@ export function Mutation<T>({ title, identity, review, action, idempotent, submi
   refresh?: (() => Promise<ReactNode>) | undefined;
   /** What a commit shows beside its index, such as a new secret. */
   committed?: (read: Read<T>) => ReactNode;
+  /**
+   * The outcome an answer stands for when it refuses the change, as a stale compare-and-set's `false` does; null for
+   * a commit (UI-6 Key/Value task list, decision 5).
+   */
+  judge?: ((read: Read<T>) => Outcome | null) | undefined;
+  /** What the page says of an outcome that is not a commit, such as a stale write's difference. */
+  detail?: ((outcome: Outcome) => ReactNode) | undefined;
   onClose: () => void;
 }) {
   const { mode } = useAccess();
@@ -107,7 +116,7 @@ export function Mutation<T>({ title, identity, review, action, idempotent, submi
     setPhase({ status: 'submitting' });
     setState({ reading: false, shown: null });
     submit().then(
-      (answer) => setPhase({ status: 'done', outcome: { kind: 'committed', index: answer.index },
+      (answer) => setPhase({ status: 'done', outcome: judge?.(answer) ?? { kind: 'committed', index: answer.index },
         requestId: answer.requestId, read: answer }),
       (error: unknown) => setPhase({ status: 'done', outcome: outcomeOf(error),
         requestId: error instanceof ApiError || error instanceof MalformedResponseError ? error.requestId : null, read: null }),
@@ -158,6 +167,7 @@ export function Mutation<T>({ title, identity, review, action, idempotent, submi
             description={phase.outcome.kind === 'unknown' ? phase.outcome.detail : undefined}
           />
           {phase.outcome.kind === 'committed' && phase.read !== null && committed?.(phase.read as Read<T>)}
+          {phase.outcome.kind !== 'committed' && detail?.(phase.outcome)}
           {phase.requestId !== null && (
             <p>
               <RouteLink to={{ view: 'events', category: 'audit', correlation: phase.requestId }}>

@@ -26,6 +26,7 @@ import { ClusterView } from './views/ClusterView';
 import { ConfigurationView } from './views/ConfigurationView';
 import { ConsistencySelector } from './views/ConsistencySelector';
 import { EventsView } from './views/EventsView';
+import { KvView } from './views/KvView';
 import { MembersView } from './views/MembersView';
 import { ScopeSelector } from './views/ScopeSelector';
 import { ExplainView, PoliciesView, PolicyView } from './views/PoliciesView';
@@ -71,6 +72,9 @@ export function App({ bootstrap, api, scheduler, access }: {
               </RouteLink>
               <RouteLink to={{ view: 'checks' }} style={NAV_LINK}>
                 Health Checks
+              </RouteLink>
+              <RouteLink to={{ view: 'kv', path: '' }} style={NAV_LINK}>
+                Key/Value
               </RouteLink>
               {operatorRead && OPERATOR_VIEWS.map(([view, title]) => (
                 <RouteLink key={view} to={{ view }} style={NAV_LINK}>
@@ -161,6 +165,8 @@ function CurrentView({ api, bootstrap }: { api: QraftApi; bootstrap: Bootstrap }
       return <NodesView api={api} scope={scope} />;
     case 'checks':
       return <ChecksView api={api} scope={scope} />;
+    case 'kv':
+      return <KvView key={route.path} api={api} scope={scope} path={route.path} />;
     case 'cluster':
       return <ClusterView api={api} scope={scope} />;
     case 'members':

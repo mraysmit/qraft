@@ -129,4 +129,17 @@ describe('the Access routes and the audit link', () => {
     expect(hrefOf({ view: 'events', category: 'audit', correlation: 'req-7' }, '/ui/', DEFAULT_SCOPE, 'stale')).toBe(
       '/ui/events?consistency=stale&category=audit&correlation=req-7');
   });
+
+  // UI-6 Key/Value task list, decision 3: the folder or key is in the query, since the server takes an address with
+  // an empty segment for none and one whose last segment has a dot for a file, and a key may have either.
+  it('read and write the Key/Value browser, a folder or a key in the query, after the scope and consistency', () => {
+    expect(routeOf('/ui/kv', '/ui/')).toEqual({ view: 'kv', path: '' });
+    expect(routeOf('/ui/kv', '/ui/', '?path=app%2Fdb%2F')).toEqual({ view: 'kv', path: 'app/db/' });
+    expect(routeOf('/ui/kv', '/ui/', '?path=app//a b.json')).toEqual({ view: 'kv', path: 'app//a b.json' });
+    expect(routeOf('/ui/kv/app', '/ui/')).toEqual({ view: 'unknown' });
+    expect(hrefOf({ view: 'kv', path: '' }, '/ui/')).toBe('/ui/kv');
+    expect(hrefOf({ view: 'kv', path: 'app/config.json' }, '/ui/')).toBe('/ui/kv?path=app%2Fconfig.json');
+    expect(hrefOf({ view: 'kv', path: 'app/' }, '/ui/', { tenant: 'acme', namespace: 'prod' }, 'stale')).toBe(
+      '/ui/kv?tenant=acme&namespace=prod&consistency=stale&path=app%2F');
+  });
 });

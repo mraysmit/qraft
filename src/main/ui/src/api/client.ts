@@ -35,6 +35,8 @@ import {
   type EventPage,
   EventPageSchema,
   type HealthEntry,
+  type KvEntry,
+  KvEntrySchema,
   type Members,
   MembersSchema,
   type QraftEvent,
@@ -110,6 +112,8 @@ export interface Read<T> {
   knownLeader: boolean | null;
   /** How long since the answering server heard from the leader, `X-Qraft-Last-Contact`. */
   lastContactMillis: number | null;
+  /** Whether the server left out what the token may not read, `X-Qraft-Results-Filtered-By-ACLs`. */
+  filtered: boolean;
 }
 
 export interface Readiness {
@@ -118,7 +122,7 @@ export interface Readiness {
   conditions: string[];
 }
 
-/** Which events to read: after a cursor, at most a limit, in a category, a scope and of a service. */
+/** Which events to read: after a cursor, at most a limit, in a category, a scope, of a service and of a key. */
 export interface EventQuery {
   after?: string;
   limit?: number;
@@ -126,6 +130,8 @@ export interface EventQuery {
   tenant?: string;
   namespace?: string;
   service?: string;
+  /** The key's events, and the tree deletions that covered it (UI-6 Key/Value task list, decision 8). */
+  key?: string;
 }
 
 /** Why a watch ended, and the cursor to resume after. */
@@ -286,6 +292,24 @@ export interface QraftApi {
    * with it, the session's token with `operator:write`.
    */
   removeServer(serverId: string, operatorToken?: string): Promise<Read<Removal>>;
+  /**
+   * The keys of one level below `prefix`, a folder ending in `/` (UI-6 Key/Value task list, decision 3); an empty
+   * folder, which the server answers 404, has none.
+   */
+  kvLevel(prefix: string, scope?: Scope, options?: ReadOptions): Promise<Read<string[]>>;
+  /** An entry, or null when the key does not exist. */
+  kvEntry(key: string, scope?: Scope, options?: ReadOptions): Promise<Read<KvEntry | null>>;
+  /** Every key under `prefix`, at any depth. */
+  kvKeys(prefix: string, scope?: Scope, options?: Abortable): Promise<Read<string[]>>;
+  /**
+   * Writes `value` as the key's raw body with its flags, if the key is still at `cas`, 0 for one that does not exist
+   * (UI-6 Key/Value task list, decision 5): true when written, false when the entry had moved on.
+   */
+  kvPut(key: string, scope: Scope | undefined, value: string, at: { flags: number; cas: number }): Promise<Read<boolean>>;
+  /** Deletes the key if it is still at `cas`: true when deleted, false when the entry had moved on. */
+  kvDelete(key: string, scope: Scope | undefined, cas: number): Promise<Read<boolean>>;
+  /** Deletes every key under `prefix`; the server refuses it unless the token may write every one. */
+  kvDeleteTree(prefix: string, scope?: Scope): Promise<Read<boolean>>;
 }
 
 /**
@@ -306,7 +330,10 @@ export function createApi(apiBasePath: string, fetcher: typeof fetch = fetch, cr
     accept = 'application/json', method = 'GET', payload?: unknown): Promise<Response> {
     try {
       const init: RequestInit = { method, headers: { Accept: accept, ...presenting(headers) } };
-      if (payload !== undefined) {
+      if (payload instanceof RawBody) {
+        init.headers = { ...init.headers, 'Content-Type': 'application/octet-stream' };
+        init.body = payload.text;
+      } else if (payload !== undefined) {
         init.headers = { ...init.headers, 'Content-Type': 'application/json' };
         init.body = JSON.stringify(payload);
       }
@@ -391,13 +418,25 @@ export function createApi(apiBasePath: string, fetcher: typeof fetch = fetch, cr
   /** A catalog, health or tenancy read, with its consistency and blocking-query options in its query. */
   function optioned<T>(path: string, schema: ZodType<T>, options: ReadOptions = {},
     headers: Record<string, string> = {}): Promise<Read<T>> {
-    const query: string[] = [];
-    if (options.consistency === 'consistent' || options.consistency === 'stale') query.push(options.consistency);
-    if (options.index !== undefined) {
-      query.push(`index=${options.index}`);
-      if (options.wait !== undefined) query.push(`wait=${options.wait}`);
-    }
+    const query = optionsQuery(options);
     return read(query.length === 0 ? path : `${path}?${query.join('&')}`, schema, headers, options.signal);
+  }
+
+  /**
+   * A key/value read: `missing` stands for the 404 `key_not_found` of a key or prefix that does not exist, which is
+   * an answer, with its index, and not a failure.
+   */
+  async function kv<T>(key: string, given: string[], schema: ZodType<T>, missing: T, scope: Scope,
+    options: ReadOptions): Promise<Read<T>> {
+    const query = [...given, ...optionsQuery(options)];
+    const path = `v1/kv/${kvPath(key)}${query.length === 0 ? '' : `?${query.join('&')}`}`;
+    const response = await send(path, scopeHeaders(scope), options.signal);
+    const content = await body(path, response);
+    if (response.status === 404 && ErrorEnvelopeSchema.safeParse(content).data?.code === 'key_not_found') {
+      return { data: missing, ...metaOf(response) };
+    }
+    if (!response.ok) throw refusal(path, response, content);
+    return { data: parse(path, response, schema, content), ...metaOf(response) };
   }
 
   function watchEvents(query: EventQuery, handlers: WatchHandlers): () => void {
@@ -506,6 +545,19 @@ export function createApi(apiBasePath: string, fetcher: typeof fetch = fetch, cr
       { 'X-Qraft-Node': node, ...scopeHeaders(scope) }),
     removeServer: (serverId, operatorToken) => write(`v1/operator/raft/peer?id=${encodeURIComponent(serverId)}`,
       RemovalSchema, 'DELETE', undefined, operatorToken === undefined ? {} : { [TOKEN_HEADER]: operatorToken }),
+    kvLevel: (prefix, scope = DEFAULT_SCOPE, options = {}) =>
+      kv(prefix, ['keys', 'separator=/'], z.array(z.string()), [], scope, options),
+    kvEntry: async (key, scope = DEFAULT_SCOPE, options = {}) => {
+      const answer = await kv<KvEntry[] | null>(key, [], z.array(KvEntrySchema), null, scope, options);
+      return { ...answer, data: answer.data?.[0] ?? null };
+    },
+    kvKeys: (prefix, scope = DEFAULT_SCOPE, options = {}) => kv(prefix, ['keys'], z.array(z.string()), [], scope, options),
+    kvPut: (key, scope = DEFAULT_SCOPE, value, at) => write(`v1/kv/${kvPath(key)}?flags=${at.flags}&cas=${at.cas}`,
+      z.boolean(), 'PUT', new RawBody(value), scopeHeaders(scope)),
+    kvDelete: (key, scope = DEFAULT_SCOPE, cas) => write(`v1/kv/${kvPath(key)}?cas=${cas}`, z.boolean(), 'DELETE',
+      undefined, scopeHeaders(scope)),
+    kvDeleteTree: (prefix, scope = DEFAULT_SCOPE) => write(`v1/kv/${kvPath(prefix)}?recurse`, z.boolean(), 'DELETE',
+      undefined, scopeHeaders(scope)),
     async readiness(options = {}) {
       const path = 'health/ready';
       const response = await send(path, {}, options.signal);
@@ -566,6 +618,7 @@ function eventQueryText(query: EventQuery): string {
   if (query.tenant !== undefined) parameters.set('tenant', query.tenant);
   if (query.namespace !== undefined) parameters.set('namespace', query.namespace);
   if (query.service !== undefined) parameters.set('service', query.service);
+  if (query.key !== undefined) parameters.set('key', query.key);
   const text = parameters.toString();
   return text === '' ? '' : `?${text}`;
 }
@@ -588,7 +641,29 @@ function metaOf(response: Response): Omit<Read<unknown>, 'data'> {
     consistency: consistency === 'default' || consistency === 'consistent' || consistency === 'stale' ? consistency : null,
     knownLeader: known === 'true' ? true : known === 'false' ? false : null,
     lastContactMillis: numberOf(response.headers.get('X-Qraft-Last-Contact')),
+    filtered: response.headers.get('X-Qraft-Results-Filtered-By-ACLs') === 'true',
   };
+}
+
+/** A request body sent as it is, not as JSON: a key/value value. */
+class RawBody {
+  constructor(readonly text: string) {}
+}
+
+/** The consistency and blocking-query options of a read, as query parameters. */
+function optionsQuery(options: ReadOptions): string[] {
+  const query: string[] = [];
+  if (options.consistency === 'consistent' || options.consistency === 'stale') query.push(options.consistency);
+  if (options.index !== undefined) {
+    query.push(`index=${options.index}`);
+    if (options.wait !== undefined) query.push(`wait=${options.wait}`);
+  }
+  return query;
+}
+
+/** A key in an address: each segment encoded, its `/` separators kept. */
+function kvPath(key: string): string {
+  return key.split('/').map(encodeURIComponent).join('/');
 }
 
 function numberOf(header: string | null): number | null {
