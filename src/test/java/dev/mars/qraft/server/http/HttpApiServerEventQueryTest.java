@@ -18,12 +18,15 @@ package dev.mars.qraft.server.http;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.mars.qraft.common.Node;
 import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.common.events.EventJournal;
 import dev.mars.qraft.raft.PeerlessTransportFixture;
+import dev.mars.qraft.raft.RaftCommandResult;
 import dev.mars.qraft.raft.RaftNode;
 import dev.mars.qraft.raft.RaftNodeMode;
 import dev.mars.qraft.server.ui.AdminUiConfig;
+import dev.mars.qraft.state.NodeCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
 import org.junit.jupiter.api.AfterEach;
@@ -34,14 +37,17 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -173,7 +179,9 @@ class HttpApiServerEventQueryTest {
     @Test
     void eventsAreFilteredByTheKeyTheyNameAndTheTreeDeletionsThatCoverIt() throws Exception {
         start();
-        register("node-1", "web-1", "web");
+        // A session is bound to a node the catalog has.
+        assertInstanceOf(RaftCommandResult.Success.class, node.submitCommand(NodeCommand.register(
+                Node.of("node-1", "10.0.0.1", null, null, Map.of()), Instant.now())).get(10, TimeUnit.SECONDS));
         HttpResponse<String> created = send("PUT", "/v1/session/create", "{\"Node\":\"node-1\"}");
         assertEquals(200, created.statusCode(), created.body());
         String session = JSON.readTree(created.body()).path("ID").asText();

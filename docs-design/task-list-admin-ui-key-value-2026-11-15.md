@@ -1,9 +1,9 @@
 # Task List: Administrative Interface, Key/Value (UI-6, part 1)
 
 **Date:** 2026-11-15
-**Status:** In progress. Phase 0 is next.
-**Last updated:** 2026-11-15 (started)
-**Active work:** Phase 0
+**Status:** In progress. Phase 0 is under way: step 1 is done, test first.
+**Last updated:** 2026-11-15 (Phase 0 step 1 done, the key filter. Earlier the same day: started)
+**Active work:** Phase 0, step 2
 **Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-6
 **Source plan:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md), sections 4.3, 7.1, 11 and 12; [`task-list-key-value-2026-11-08.md`](../docs/archive/task-list-key-value-2026-11-08.md)
 **Predecessor:** [`task-list-admin-ui-access-mutations-2026-11-15.md`](../docs/archive/task-list-admin-ui-access-mutations-2026-11-15.md) (UI-5)
@@ -122,8 +122,9 @@ Taken 2026-11-15 as the recommended options; each reversible.
 
 ## 5. Phase 0: The server's answers
 
-1. Test first: the event query and watch take `key`, answering the events that
-   name it and the tree deletions whose prefix covers it; a blank key refused.
+1. Test first: the event query takes `key`, answering the events that name it
+   and the tree deletions whose prefix covers it; an empty key refused. The
+   watch reads the same filters.
 2. Test first: a value over 512 KiB is answered 413 `value_too_large` and not
    submitted; one of exactly 512 KiB is written and read back.
 3. The data contract test writes the key/value answers the interface reads as
@@ -133,6 +134,19 @@ Taken 2026-11-15 as the recommended options; each reversible.
 
 **Exit gate.** The new tests red first, then green; `mvn install` passes and
 its logs are clean.
+
+**Status, 2026-11-15: step 1 done**, test first.
+
+- `EventContractsTest` (1 new), red first as it did not compile: a key filter
+  takes the `key.set`, `key.deleted`, `lock.acquired` and `lock.released`
+  events of the key, and the `key.tree_deleted` events whose prefix covers it,
+  the whole store's included, and not a key that only begins with it.
+  `HttpApiServerEventQueryTest` (1 new), red first on the 400 of the unknown
+  parameter: a key's events through a write, an acquisition, a release, a
+  deletion and a tree deletion, with the type and scope filters, and an empty
+  key refused. The key/value events are `common.events.KeyEvent`s, and the key
+  is read as given, not trimmed, since a key may begin or end with a space
+  (`logs/kv-p0-key-red-route-*.log`, `logs/kv-p0-key-green-*.log`).
 
 ## 6. Phase 1: Browsing and reading
 
