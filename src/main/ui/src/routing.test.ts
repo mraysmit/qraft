@@ -103,3 +103,30 @@ describe('consistency and the UI-4 views', () => {
     expect(hrefOf({ view: 'configuration' }, '/ui/', DEFAULT_SCOPE, 'stale')).toBe('/ui/configuration?consistency=stale');
   });
 });
+
+describe('the Access routes and the audit link', () => {
+  // UI-5 task list, Phase 2: the Access section's pages, and the Events page filtered to a request's audit events.
+  it('read and write the Status, Tokens, Policies and Explain pages, and a token and a policy', () => {
+    const id = '6a1f0c2e-3b7d-4c55-9a10-2f4e8d1b7c90';
+    expect(routeOf('/ui/access', '/ui/')).toEqual({ view: 'access' });
+    expect(routeOf('/ui/access/tokens', '/ui/')).toEqual({ view: 'tokens' });
+    expect(routeOf(`/ui/access/tokens/${id}`, '/ui/')).toEqual({ view: 'token', accessorId: id });
+    expect(routeOf('/ui/access/policies', '/ui/')).toEqual({ view: 'policies' });
+    expect(routeOf(`/ui/access/policies/${id}`, '/ui/')).toEqual({ view: 'policy', id });
+    expect(routeOf('/ui/access/explain', '/ui/')).toEqual({ view: 'explain' });
+    expect(routeOf('/ui/access/tokens/a/b', '/ui/')).toEqual({ view: 'unknown' });
+    expect(hrefOf({ view: 'tokens' }, '/ui/')).toBe('/ui/access/tokens');
+    expect(hrefOf({ view: 'token', accessorId: id }, '/ui/')).toBe(`/ui/access/tokens/${id}`);
+    expect(hrefOf({ view: 'policies' }, '/ui/')).toBe('/ui/access/policies');
+    expect(hrefOf({ view: 'policy', id }, '/ui/')).toBe(`/ui/access/policies/${id}`);
+    expect(hrefOf({ view: 'explain' }, '/ui/')).toBe('/ui/access/explain');
+  });
+
+  it("read and write the Events page's category and correlation ID, after the scope and consistency", () => {
+    expect(routeOf('/ui/events', '/ui/', '?category=audit&correlation=req-7')).toEqual(
+      { view: 'events', category: 'audit', correlation: 'req-7' });
+    expect(routeOf('/ui/events', '/ui/', '?category=everything')).toEqual({ view: 'events' });
+    expect(hrefOf({ view: 'events', category: 'audit', correlation: 'req-7' }, '/ui/', DEFAULT_SCOPE, 'stale')).toBe(
+      '/ui/events?consistency=stale&category=audit&correlation=req-7');
+  });
+});

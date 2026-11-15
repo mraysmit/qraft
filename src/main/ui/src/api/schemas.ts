@@ -279,3 +279,134 @@ export type QraftEvent = z.infer<typeof QraftEventSchema>;
 export type EventPage = z.infer<typeof EventPageSchema>;
 export type Setting = z.infer<typeof SettingSchema>;
 export type Configuration = z.infer<typeof ConfigurationSchema>;
+
+/** A link from a token or role to a policy or role: its ID, and its name while it exists. */
+export const LinkSchema = z.object({ id: z.string().min(1), name: z.string().nullable() });
+
+export const NodeIdentitySchema = z.object({ nodeName: z.string().min(1) });
+
+export const ServiceIdentitySchema = z.object({
+  serviceName: z.string().min(1),
+  tenant: z.string(),
+  namespace: z.string(),
+});
+
+/**
+ * An ACL token as `GET /v1/acl/token/self`, the token list and a token's read answer it: the secret is `<hidden>`
+ * except in the answer of the create or clone that made it.
+ */
+export const TokenSchema = z.object({
+  accessorId: z.string().min(1),
+  secretId: z.string().min(1),
+  description: z.string().nullable(),
+  policies: z.array(LinkSchema),
+  roles: z.array(LinkSchema),
+  nodeIdentities: z.array(NodeIdentitySchema),
+  serviceIdentities: z.array(ServiceIdentitySchema),
+  createTime: instant,
+  expirationTime: instant.nullable(),
+  installedFromFile: z.boolean(),
+});
+
+/** One answer of `POST /v1/internal/acl/authorize`: whether the presenting token may make the request checked. */
+export const AuthorizationSchema = z.object({
+  resource: z.string().min(1),
+  segment: z.string().optional(),
+  access: z.enum(['read', 'write']),
+  tenant: z.string().optional(),
+  namespace: z.string().optional(),
+  allow: z.boolean(),
+});
+
+const DescribedTokenSchema = z.object({ accessorId: z.string().min(1), description: z.string().nullable() });
+
+/** `GET /v1/internal/ui/acl/status`: whether the cluster's access control can be trusted (UI-5, decision 4). */
+export const AclStatusSchema = z.object({
+  enabled: z.boolean(),
+  defaultPolicy: z.enum(['allow', 'deny']),
+  securityProfile: z.enum(['production', 'development']),
+  transport: z.object({ https: z.boolean(), clientCertificateRequired: z.boolean() }),
+  readAt: instant,
+  expiringWithinMinutes: z.number().int().positive(),
+  managementTokens: z.array(DescribedTokenSchema.extend({
+    installedFromFile: z.boolean(),
+    expirationTime: instant.nullable(),
+  })),
+  anonymous: z.object({
+    accessorId: z.string().min(1),
+    policies: z.array(LinkSchema),
+    writes: z.array(z.string()),
+  }).optional(),
+  aclWriters: z.array(DescribedTokenSchema),
+  expiringSoon: z.array(DescribedTokenSchema.extend({
+    expirationTime: instant,
+    nodeIdentities: z.array(NodeIdentitySchema),
+    serviceIdentities: z.array(ServiceIdentitySchema),
+    holdsAclWrite: z.boolean(),
+  })),
+});
+
+/** An ACL policy: its rules in Consul's JSON form, as the server gives and takes them. */
+export const PolicySchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().nullable(),
+  rules: z.record(z.string(), z.unknown()),
+});
+
+const RuleScopeSchema = z.object({ name: z.string(), prefix: z.boolean() });
+
+/** `POST /v1/acl/explain`: allow or deny, and what decided it: a rule of a policy or identity, or the default policy. */
+export const ExplanationSchema = z.object({
+  accessorId: z.string().min(1),
+  allowed: z.boolean(),
+  defaultPolicy: z.enum(['allow', 'deny']),
+  decidedBy: z.enum(['rule', 'default']),
+  policy: LinkSchema.optional(),
+  role: LinkSchema.optional(),
+  nodeIdentity: NodeIdentitySchema.optional(),
+  serviceIdentity: ServiceIdentitySchema.optional(),
+  rule: z.object({
+    resource: z.string().min(1),
+    name: z.string().optional(),
+    prefix: z.boolean(),
+    access: z.enum(['read', 'write', 'deny']),
+    tenant: RuleScopeSchema.optional(),
+    namespace: RuleScopeSchema.optional(),
+  }).optional(),
+});
+
+export type Policy = z.infer<typeof PolicySchema>;
+export type Explanation = z.infer<typeof ExplanationSchema>;
+export type Link = z.infer<typeof LinkSchema>;
+export type Token = z.infer<typeof TokenSchema>;
+export type Authorization = z.infer<typeof AuthorizationSchema>;
+export type AclStatus = z.infer<typeof AclStatusSchema>;
+
+/** `PUT /v1/catalog/register`: the node registered on, and the instance as the catalog accepted it. */
+export const RegistrationSchema = z.object({
+  node: z.string().min(1),
+  registered: z.boolean().optional(),
+  service: z.object({
+    serviceId: z.string().min(1),
+    serviceName: z.string().min(1),
+    nodeId: z.string().nullable(),
+    tenantId: z.string(),
+    namespace: z.string(),
+    registered: z.boolean(),
+  }).optional(),
+});
+
+/** `PUT /v1/catalog/deregister` of one instance. */
+export const DeregistrationSchema = z.object({
+  node: z.string().min(1),
+  serviceId: z.string().min(1),
+  deregistered: z.boolean(),
+});
+
+/** `DELETE /v1/operator/raft/peer`: the leader's answer to a removal. */
+export const RemovalSchema = z.object({ status: z.string().min(1), message: z.string() });
+
+export type Registration = z.infer<typeof RegistrationSchema>;
+export type Deregistration = z.infer<typeof DeregistrationSchema>;
+export type Removal = z.infer<typeof RemovalSchema>;

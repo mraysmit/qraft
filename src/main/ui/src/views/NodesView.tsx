@@ -15,11 +15,13 @@
  */
 
 import { Empty, Space, Table, Typography } from 'antd';
+import { useAccess } from '../access';
 import type { QraftApi, Scope } from '../api/client';
 import type { CatalogNode, HealthEntry } from '../api/schemas';
 import { useLiveRead } from '../live';
 import { useRouter } from '../routing';
 import { Failure, formatInstant, loadServiceEntries, location, NodeStatusLabel, ReadMeta, scopeText } from './common';
+import { ExplainPanel } from './ExplainPanel';
 import { MembersTable } from './MembersTable';
 
 const VERSION_KEY = 'qraft.version';
@@ -34,7 +36,7 @@ interface Row {
  * Nodes and Clients (UI/UX design section 5.2): the servers from the membership read, with their progress where the
  * answering server leads (UI-3), and the client nodes, whose owned services and failing checks are counted from the
  * services read in the selected scope. The nodes read is a blocking query: when the applied index moves, the
- * services are read again with it (UI-4).
+ * services are read again with it (UI-4). The servers need `operator:read`, and are not read without it (UI-5).
  */
 export function NodesView({ api, scope }: { api: QraftApi; scope: Scope }) {
   const { consistency } = useRouter();
@@ -49,19 +51,13 @@ export function NodesView({ api, scope }: { api: QraftApi; scope: Scope }) {
   );
   const shown = state.status === 'ready' ? state.value : state.previous;
   const rows: Row[] = shown === undefined ? [] : shown.nodes.data.map((node) => row(node, shown.entries));
-  const [members, readMembersAgain] = useLiveRead((wait) => api.members({ signal: wait.signal }), [api]);
-  const membersShown = members.status === 'ready' ? members.value : members.previous;
+  const { may, mode } = useAccess();
 
   return (
     <Space direction="vertical" style={{ width: '100%' }}>
       <Typography.Title level={2}>Nodes and Clients</Typography.Title>
       <Typography.Title level={3}>Servers</Typography.Title>
-      {members.status === 'failed' && (
-        <Failure title="Servers could not be read" error={members.error} onRetry={readMembersAgain} />
-      )}
-      {membersShown !== undefined && <ReadMeta read={membersShown} stale={members.status !== 'ready'} operator />}
-      {membersShown !== undefined && <MembersTable members={membersShown.data} detailed={false} />}
-      {members.status === 'loading' && membersShown === undefined && <Typography.Text>Reading servers…</Typography.Text>}
+      {may.operatorRead ? <Servers api={api} /> : <Typography.Text>The servers are listed with operator:read.</Typography.Text>}
       <Typography.Title level={3}>Clients</Typography.Title>
       <Typography.Text>
         {`Client nodes. A node has no tenant or namespace; its services and failing checks are counted in ${scopeText(scope)}.`}
@@ -104,7 +100,24 @@ export function NodesView({ api, scope }: { api: QraftApi; scope: Scope }) {
           ]}
         />
       )}
+      {mode === 'token' && may.aclRead && <ExplainPanel api={api} defaults={{ resource: 'node' }} />}
     </Space>
+  );
+}
+
+/** The servers, from the membership read. */
+function Servers({ api }: { api: QraftApi }) {
+  const [members, readMembersAgain] = useLiveRead((wait) => api.members({ signal: wait.signal }), [api]);
+  const membersShown = members.status === 'ready' ? members.value : members.previous;
+  return (
+    <>
+      {members.status === 'failed' && (
+        <Failure title="Servers could not be read" error={members.error} onRetry={readMembersAgain} />
+      )}
+      {membersShown !== undefined && <ReadMeta read={membersShown} stale={members.status !== 'ready'} operator />}
+      {membersShown !== undefined && <MembersTable members={membersShown.data} detailed={false} />}
+      {members.status === 'loading' && membersShown === undefined && <Typography.Text>Reading servers…</Typography.Text>}
+    </>
   );
 }
 

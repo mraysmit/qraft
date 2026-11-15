@@ -133,7 +133,8 @@ describe('Raft Members', () => {
     expect(behind.getByText('42')).toBeInTheDocument();
     expect(behind.getByText('43')).toBeInTheDocument();
     expect(within(rowOf('server-2')).getByText('120 ms ago')).toBeInTheDocument();
-    expect(screen.getByText(/membership changes are not offered here/i)).toBeInTheDocument();
+    // UI-5, decision 8: a removal is the one membership change offered; servers join and are promoted by configuration.
+    expect(screen.getByText(/only a removal is offered here/i)).toBeInTheDocument();
   });
 
   it('says on a follower who it follows and that the progress is known only to the leader', async () => {

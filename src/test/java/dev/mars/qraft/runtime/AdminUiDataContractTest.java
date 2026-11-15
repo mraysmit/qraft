@@ -25,12 +25,15 @@ import dev.mars.qraft.client.health.CheckStatus;
 import dev.mars.qraft.client.health.ObservationOutcome;
 import dev.mars.qraft.common.Node;
 import dev.mars.qraft.common.ServiceDefinition;
+import dev.mars.qraft.common.acl.AclDefaultPolicy;
 import dev.mars.qraft.common.async.RaftExecutorsFixture;
 import dev.mars.qraft.common.events.EventJournal;
 import dev.mars.qraft.raft.PeerlessTransportFixture;
 import dev.mars.qraft.raft.RaftNode;
 import dev.mars.qraft.raft.RaftNodeMode;
 import dev.mars.qraft.server.config.AppConfig;
+import dev.mars.qraft.server.config.SecurityProfile;
+import dev.mars.qraft.server.http.AclHttpSettings;
 import dev.mars.qraft.server.http.HttpApiServer;
 import dev.mars.qraft.server.ui.AdminUiConfig;
 import dev.mars.qraft.server.ui.ClasspathUiAssets;
@@ -38,11 +41,13 @@ import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -56,6 +61,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -86,6 +92,9 @@ class AdminUiDataContractTest {
     private HttpApiServer server;
     private HttpCatalogClient catalog;
     private final EventJournal journal = EventJournal.forBoot("server-1", Clock.systemUTC());
+
+    @TempDir
+    Path dataDirectory;
 
     @AfterEach
     void stop() throws Exception {
@@ -311,6 +320,124 @@ class AdminUiDataContractTest {
         }
     }
 
+    @Test
+    void theAccessAnswersAndTheWritesAreAnsweredInTheFieldsTheInterfaceReads() throws Exception {
+        // UI-5 task list, Phase 0: sign-in by self, the token menu, permission-shaped navigation, the security status,
+        // Tokens, Policies, explanations, and a service's registration and deregistration, as client.ts sends them.
+        startServer(new AclHttpSettings(true, dataDirectory, AclDefaultPolicy.DENY), SecurityProfile.PRODUCTION);
+        URI origin = URI.create("http://127.0.0.1:" + server.port());
+        assertEquals("token", bootstrap(get(origin, "/ui/")).path("authMode").asText());
+        HttpResponse<String> bootstrapped = send(origin, "PUT", "/v1/acl/bootstrap", "", Map.of());
+        assertEquals(200, bootstrapped.statusCode(), bootstrapped.body());
+        Map<String, String> management = Map.of("X-Qraft-Token",
+                JSON.readTree(bootstrapped.body()).path("secretId").asText());
+
+        HttpResponse<String> unknown = send(origin, "GET", "/v1/acl/token/self", "",
+                Map.of("X-Qraft-Token", "00000000-0000-4000-8000-00000000abcd"));
+        assertEquals(403, unknown.statusCode());
+        assertEquals("token_not_found", JSON.readTree(unknown.body()).path("code").asText(),
+                "sign-in tells an unknown secret by its code");
+
+        JsonNode self = written(origin, "GET", "/v1/acl/token/self", "", management);
+        token(self, "self");
+        assertEquals("<hidden>", self.path("secretId").asText());
+        assertEquals("global-management", self.path("policies").path(0).path("name").asText());
+
+        JsonNode authorized = written(origin, "POST", "/v1/internal/acl/authorize",
+                "[{\"resource\":\"operator\",\"access\":\"write\"},{\"resource\":\"acl\",\"access\":\"read\"},"
+                        + "{\"resource\":\"service\",\"segment\":\"web\",\"access\":\"write\","
+                        + "\"tenant\":\"default\",\"namespace\":\"default\"}]", management);
+        assertEquals(3, authorized.size(), authorized.toString());
+        authorized.forEach(check -> fields(check, "authorization", Map.of("resource", Type.TEXT, "access", Type.TEXT,
+                "allow", Type.BOOLEAN)));
+
+        JsonNode policy = written(origin, "PUT", "/v1/acl/policy",
+                "{\"name\":\"web-writer\",\"description\":\"writes web\",\"rules\":"
+                        + "{\"service\":{\"web\":{\"policy\":\"write\"}}}}", management);
+        fields(policy, "policy", Map.of("id", Type.TEXT, "name", Type.TEXT, "description", Type.TEXT_OR_NULL,
+                "rules", Type.OBJECT));
+        JsonNode policies = written(origin, "GET", "/v1/acl/policies", "", management);
+        assertTrue(policies.size() >= 3, "the two built-ins and the new one: " + policies);
+
+        JsonNode created = written(origin, "PUT", "/v1/acl/token", "{\"description\":\"web deployer\","
+                + "\"policies\":[{\"name\":\"web-writer\"}],\"nodeIdentities\":[{\"nodeName\":\"node-a\"}],"
+                + "\"serviceIdentities\":[{\"serviceName\":\"api\",\"tenant\":\"default\","
+                + "\"namespace\":\"default\"}],\"expirationTtl\":\"30m\"}", management);
+        token(created, "created token");
+        assertFalse(created.path("secretId").asText().equals("<hidden>"), "the create answers the secret once");
+        assertTrue(created.path("expirationTime").isTextual());
+        String accessor = created.path("accessorId").asText();
+        JsonNode linked = written(origin, "GET", "/v1/acl/tokens?policy=" + policy.path("id").asText(), "", management);
+        assertEquals(accessor, linked.path(0).path("accessorId").asText());
+        assertEquals("<hidden>", linked.path(0).path("secretId").asText());
+        token(written(origin, "PUT", "/v1/acl/token/" + accessor, "{\"description\":\"web deployer, renamed\","
+                + "\"policies\":[{\"name\":\"web-writer\"}]}", management), "updated token");
+
+        JsonNode explained = written(origin, "POST", "/v1/acl/explain", "{\"accessorId\":\"" + accessor + "\","
+                + "\"resource\":\"service\",\"name\":\"web\",\"access\":\"write\"}", management);
+        fields(explained, "explanation", Map.of("accessorId", Type.TEXT, "allowed", Type.BOOLEAN,
+                "defaultPolicy", Type.TEXT, "decidedBy", Type.TEXT, "policy", Type.OBJECT, "rule", Type.OBJECT));
+        fields(explained.path("rule"), "explained rule", Map.of("resource", Type.TEXT, "prefix", Type.BOOLEAN,
+                "access", Type.TEXT));
+
+        JsonNode status = written(origin, "GET", "/v1/internal/ui/acl/status", "", management);
+        fields(status, "security status", Map.ofEntries(Map.entry("enabled", Type.BOOLEAN),
+                Map.entry("defaultPolicy", Type.TEXT), Map.entry("securityProfile", Type.TEXT),
+                Map.entry("transport", Type.OBJECT), Map.entry("readAt", Type.TEXT),
+                Map.entry("expiringWithinMinutes", Type.INTEGER), Map.entry("managementTokens", Type.LIST),
+                Map.entry("anonymous", Type.OBJECT), Map.entry("aclWriters", Type.LIST),
+                Map.entry("expiringSoon", Type.LIST)));
+        fields(status.path("transport"), "transport", Map.of("https", Type.BOOLEAN,
+                "clientCertificateRequired", Type.BOOLEAN));
+        fields(status.path("managementTokens").path(0), "management token", Map.of("accessorId", Type.TEXT,
+                "description", Type.TEXT_OR_NULL, "installedFromFile", Type.BOOLEAN, "expirationTime",
+                Type.TEXT_OR_NULL));
+        fields(status.path("anonymous"), "anonymous", Map.of("accessorId", Type.TEXT, "policies", Type.LIST,
+                "writes", Type.TEXT_LIST));
+        fields(status.path("aclWriters").path(0), "acl writer", Map.of("accessorId", Type.TEXT,
+                "description", Type.TEXT_OR_NULL));
+        JsonNode expiring = status.path("expiringSoon").path(0);
+        fields(expiring, "expiring token", Map.of("accessorId", Type.TEXT, "description", Type.TEXT_OR_NULL,
+                "expirationTime", Type.TEXT, "nodeIdentities", Type.LIST, "serviceIdentities", Type.LIST,
+                "holdsAclWrite", Type.BOOLEAN));
+        assertEquals(accessor, expiring.path("accessorId").asText());
+
+        Map<String, String> onNode = new LinkedHashMap<>(management);
+        onNode.put("X-Qraft-Node", "node-a");
+        onNode.put("X-Qraft-Tenant", "default");
+        onNode.put("X-Qraft-Namespace", "default");
+        JsonNode registered = written(origin, "PUT", "/v1/catalog/register", "{\"node\":{\"address\":\"127.0.0.1\"},"
+                + "\"service\":{\"serviceId\":\"web-1\",\"serviceName\":\"web\",\"address\":\"127.0.0.1\","
+                + "\"port\":8081,\"tags\":[\"http\"],\"metadata\":{},\"enabled\":false}}", onNode);
+        fields(registered, "registration", Map.of("node", Type.TEXT, "service", Type.OBJECT));
+        fields(registered.path("service"), "registered service", Map.of("serviceId", Type.TEXT,
+                "serviceName", Type.TEXT, "tenantId", Type.TEXT, "namespace", Type.TEXT, "registered", Type.BOOLEAN));
+        JsonNode deregistered = written(origin, "PUT", "/v1/catalog/deregister", "{\"serviceId\":\"web-1\"}", onNode);
+        fields(deregistered, "deregistration", Map.of("node", Type.TEXT, "serviceId", Type.TEXT,
+                "deregistered", Type.BOOLEAN));
+
+        assertTrue(written(origin, "DELETE", "/v1/acl/token/" + accessor, "", management).asBoolean(),
+                "a deletion answers true");
+    }
+
+    /** A token's answer in the fields the token menu, the token pages and sign-in read. */
+    private static void token(JsonNode token, String what) {
+        fields(token, what, Map.ofEntries(Map.entry("accessorId", Type.TEXT), Map.entry("secretId", Type.TEXT),
+                Map.entry("description", Type.TEXT_OR_NULL), Map.entry("policies", Type.LIST),
+                Map.entry("roles", Type.LIST), Map.entry("nodeIdentities", Type.LIST),
+                Map.entry("serviceIdentities", Type.LIST), Map.entry("createTime", Type.TEXT),
+                Map.entry("expirationTime", Type.TEXT_OR_NULL), Map.entry("installedFromFile", Type.BOOLEAN)));
+    }
+
+    /** A request the interface sends, answered 200 with JSON and the answering server named. */
+    private JsonNode written(URI origin, String method, String path, String body, Map<String, String> headers)
+            throws Exception {
+        HttpResponse<String> response = send(origin, method, path, body, headers);
+        assertEquals(200, response.statusCode(), method + " " + path + ": " + response.body());
+        assertEquals("server-1", response.headers().firstValue("X-Qraft-Answered-By").orElse(null), path);
+        return JSON.readTree(response.body());
+    }
+
     private HttpResponse<String> send(URI origin, String method, String path, String body, Map<String, String> headers)
             throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder(origin.resolve(path)).timeout(Duration.ofSeconds(5))
@@ -380,6 +507,10 @@ class AdminUiDataContractTest {
     }
 
     private void startServer() throws Exception {
+        startServer(AclHttpSettings.disabled(), SecurityProfile.DEVELOPMENT);
+    }
+
+    private void startServer(AclHttpSettings acl, SecurityProfile profile) throws Exception {
         runtime = RaftExecutorsFixture.create();
         QraftStateStore store = new QraftStateStore();
         node = RaftNode.builder()
@@ -399,7 +530,8 @@ class AdminUiDataContractTest {
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.sleep(10);
         assertTrue(node.isLeader(), "the single server did not become leader");
         server = new HttpApiServer(0, node, store, Clock.systemUTC(), new AdminUiConfig(true, "/ui/", Optional.empty()),
-                new ClasspathUiAssets(AdminUiDataContractTest.class.getClassLoader(), "ui-fixture/"));
+                new ClasspathUiAssets(AdminUiDataContractTest.class.getClassLoader(), "ui-fixture/"),
+                HttpApiServer.DEFAULT_RAFT_TIMEOUT, null, acl, Optional.empty(), profile);
         server.useEventJournal(journal);
         server.useConfiguration(AppConfig.fromJson("{\"version\":1,\"server\":{\"id\":\"server-1\"}}").effective());
         server.start().get(10, TimeUnit.SECONDS);

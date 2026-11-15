@@ -15,6 +15,7 @@
  */
 
 import { Alert, Button, Space, Tag, Typography } from 'antd';
+import type { ReactNode } from 'react';
 import { ApiError, DEFAULT_SCOPE, MalformedResponseError, type QraftApi, type Read, type ReadOptions, type Scope } from '../api/client';
 import type { Health, HealthEntry, NodeStatus, ServiceNames } from '../api/schemas';
 import { useLive } from '../live';
@@ -224,4 +225,41 @@ export function formatSince(millis: number): string {
 /** A count with its noun, singular or plural: `1 service`, `0 transitions`. */
 export function plural(count: number, noun: string, nouns = `${noun}s`): string {
   return `${count} ${count === 1 ? noun : nouns}`;
+}
+
+/** A column of a {@link PlainTable}: its heading, and what a row shows in it. */
+export interface PlainColumn<T> {
+  title: string;
+  render: (row: T) => ReactNode;
+}
+
+/**
+ * A plain HTML table, for the Access lists (UI-5): Ant Design's table took close to a second to mount in jsdom, past
+ * Testing Library's wait, as its button did in UI-4.
+ */
+export function PlainTable<T>({ rows, columns, rowKey, empty, label }: {
+  rows: readonly T[];
+  columns: PlainColumn<T>[];
+  rowKey: (row: T) => string;
+  empty: string;
+  label: string;
+}) {
+  const cell = { padding: '8px 12px', borderBottom: '1px solid #f0f0f0', textAlign: 'left' as const, verticalAlign: 'top' as const };
+  return (
+    <table aria-label={label} style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <thead>
+        <tr>{columns.map((column) => <th key={column.title} style={{ ...cell, background: '#fafafa' }}>{column.title}</th>)}</tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={rowKey(row)}>{columns.map((column) => <td key={column.title} style={cell}>{column.render(row)}</td>)}</tr>
+        ))}
+      </tbody>
+      {rows.length === 0 && (
+        <tfoot>
+          <tr><td colSpan={columns.length} style={cell}>{empty}</td></tr>
+        </tfoot>
+      )}
+    </table>
+  );
 }

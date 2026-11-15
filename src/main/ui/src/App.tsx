@@ -15,6 +15,7 @@
  */
 
 import { Alert, Layout, Space, Typography } from 'antd';
+import { type Access, AccessProvider, ManagementBanner, TokenMenu, unrestricted, useAccess } from './access';
 import type { QraftApi } from './api/client';
 import type { Bootstrap } from './bootstrap';
 import { LiveProvider, PauseControl, type Scheduler } from './live';
@@ -27,6 +28,9 @@ import { ConsistencySelector } from './views/ConsistencySelector';
 import { EventsView } from './views/EventsView';
 import { MembersView } from './views/MembersView';
 import { ScopeSelector } from './views/ScopeSelector';
+import { ExplainView, PoliciesView, PolicyView } from './views/PoliciesView';
+import { SecurityView } from './views/SecurityView';
+import { TokensView, TokenView } from './views/TokensView';
 import { ServiceDetailView } from './views/ServiceDetailView';
 import { ServicesView } from './views/ServicesView';
 import { StatusStrip } from './views/StatusStrip';
@@ -35,15 +39,21 @@ import { StorageView } from './views/StorageView';
 const NAV_LINK = { color: '#fff' };
 
 /**
- * The application shell: top bar with navigation, the scope and consistency selectors and the live-updates control,
- * the security banner, the status strip, and the selected view. A test gives the scheduler live updates wait on.
+ * The application shell: top bar with navigation, the scope and consistency selectors, the live-updates control and
+ * the token menu, the security banners, the status strip, and the selected view. Navigation offers the views the
+ * token may read (UI-5 task list, decision 3). A test gives the scheduler live updates wait on; given no access, the
+ * shell offers every view.
  */
-export function App({ bootstrap, api, scheduler }: {
+export function App({ bootstrap, api, scheduler, access }: {
   bootstrap: Bootstrap;
   api: QraftApi;
   scheduler?: Scheduler | undefined;
+  access?: Access | undefined;
 }) {
+  const granted = access ?? unrestricted(bootstrap.authMode);
+  const { operatorRead, aclRead } = granted.may;
   return (
+    <AccessProvider value={granted}>
     <RouterProvider uiPath={bootstrap.uiPath}>
       <LiveProvider scheduler={scheduler}>
       <Layout style={{ minHeight: '100vh' }}>
@@ -62,27 +72,23 @@ export function App({ bootstrap, api, scheduler }: {
               <RouteLink to={{ view: 'checks' }} style={NAV_LINK}>
                 Health Checks
               </RouteLink>
-              <RouteLink to={{ view: 'cluster' }} style={NAV_LINK}>
-                Cluster Overview
-              </RouteLink>
-              <RouteLink to={{ view: 'members' }} style={NAV_LINK}>
-                Raft Members
-              </RouteLink>
-              <RouteLink to={{ view: 'storage' }} style={NAV_LINK}>
-                Storage & Snapshots
-              </RouteLink>
-              <RouteLink to={{ view: 'events' }} style={NAV_LINK}>
-                Events
-              </RouteLink>
-              <RouteLink to={{ view: 'configuration' }} style={NAV_LINK}>
-                Configuration
-              </RouteLink>
+              {operatorRead && OPERATOR_VIEWS.map(([view, title]) => (
+                <RouteLink key={view} to={{ view }} style={NAV_LINK}>
+                  {title}
+                </RouteLink>
+              ))}
+              {aclRead && (
+                <RouteLink to={{ view: 'access' }} style={NAV_LINK}>
+                  Access
+                </RouteLink>
+              )}
             </Space>
           </nav>
           <Space style={{ marginLeft: 'auto' }} wrap>
             <ScopeSelector api={api} />
             <ConsistencySelector />
             <PauseControl color="#fff" />
+            <TokenMenu color="#fff" />
           </Space>
         </Layout.Header>
         {bootstrap.authMode === 'none' && bootstrap.securityProfile === 'development' && (
@@ -94,18 +100,46 @@ export function App({ bootstrap, api, scheduler }: {
             message="This development server has no access control: anyone who can reach this server can read and change it."
           />
         )}
+        <ManagementBanner />
         <StatusStrip api={api} bootstrap={bootstrap} />
         <Layout.Content style={{ padding: 24 }}>
-          <CurrentView api={api} />
+          <CurrentView api={api} bootstrap={bootstrap} />
         </Layout.Content>
       </Layout>
       </LiveProvider>
     </RouterProvider>
+    </AccessProvider>
   );
 }
 
-function CurrentView({ api }: { api: QraftApi }) {
+/** The views that need `operator:read`, in navigation order, with their titles. */
+const OPERATOR_VIEWS = [
+  ['cluster', 'Cluster Overview'],
+  ['members', 'Raft Members'],
+  ['storage', 'Storage & Snapshots'],
+  ['events', 'Events'],
+  ['configuration', 'Configuration'],
+] as const;
+
+/** The Access section's views, which need `acl:read`. */
+const ACCESS_VIEWS = new Set(['access', 'tokens', 'token', 'policies', 'policy', 'explain']);
+
+/** What a view whose permission the token lacks shows in its place, naming the permission (principle 3.5). */
+function NotPermitted({ title, permission }: { title: string; permission: string }) {
+  return (
+    <Space direction="vertical">
+      <Typography.Title level={2}>{title}</Typography.Title>
+      <Typography.Text>{`Your token may not read ${title}: it needs ${permission}.`}</Typography.Text>
+    </Space>
+  );
+}
+
+function CurrentView({ api, bootstrap }: { api: QraftApi; bootstrap: Bootstrap }) {
   const { route, scope } = useRouter();
+  const { may } = useAccess();
+  const operator = OPERATOR_VIEWS.find(([view]) => view === route.view);
+  if (operator !== undefined && !may.operatorRead) return <NotPermitted title={operator[1]} permission="operator:read" />;
+  if (ACCESS_VIEWS.has(route.view) && !may.aclRead) return <NotPermitted title="Access control" permission="acl:read" />;
   switch (route.view) {
     case 'services':
       return <ServicesView api={api} scope={scope} />;
@@ -122,9 +156,24 @@ function CurrentView({ api }: { api: QraftApi }) {
     case 'storage':
       return <StorageView api={api} />;
     case 'events':
-      return <EventsView api={api} />;
+      return (
+        <EventsView key={`${route.category ?? ''}:${route.correlation ?? ''}`} api={api}
+          initial={{ category: route.category, correlation: route.correlation }} />
+      );
     case 'configuration':
       return <ConfigurationView api={api} />;
+    case 'access':
+      return <SecurityView api={api} bootstrap={bootstrap} />;
+    case 'tokens':
+      return <TokensView api={api} />;
+    case 'token':
+      return <TokenView key={route.accessorId} api={api} accessorId={route.accessorId} />;
+    case 'policies':
+      return <PoliciesView api={api} />;
+    case 'policy':
+      return <PolicyView key={route.id} api={api} id={route.id} />;
+    case 'explain':
+      return <ExplainView api={api} />;
     case 'unknown':
       return (
         <Space direction="vertical">

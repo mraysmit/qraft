@@ -16,6 +16,7 @@
 
 import { createContext, type CSSProperties, type MouseEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { type Consistency, DEFAULT_SCOPE, type Scope } from './api/client';
+import { type EventCategory, EventCategorySchema } from './api/schemas';
 
 // Each view has its own address below the interface's path, so reloading, bookmarking, sharing a link and the back
 // and forward buttons work (UI/UX design section 4.4). The server answers every such address with index.html. The
@@ -30,12 +31,21 @@ export type Route =
   | { view: 'cluster' }
   | { view: 'members' }
   | { view: 'storage' }
-  | { view: 'events' }
+  | { view: 'events'; category?: EventCategory; correlation?: string }
   | { view: 'configuration' }
+  | { view: 'access' }
+  | { view: 'tokens' }
+  | { view: 'token'; accessorId: string }
+  | { view: 'policies' }
+  | { view: 'policy'; id: string }
+  | { view: 'explain' }
   | { view: 'unknown' };
 
-/** The view an address below `uiPath` names. */
-export function routeOf(pathname: string, uiPath: string): Route {
+/**
+ * The view an address below `uiPath` names. The Events page also takes its category and correlation ID from the
+ * query, so that a mutation's outcome can link its audit events (UI-5 task list, decision 6).
+ */
+export function routeOf(pathname: string, uiPath: string, search = ''): Route {
   const root = uiPath.endsWith('/') ? uiPath : `${uiPath}/`;
   if (pathname === root.slice(0, -1)) return { view: 'services' };
   if (!pathname.startsWith(root)) return { view: 'unknown' };
@@ -46,8 +56,16 @@ export function routeOf(pathname: string, uiPath: string): Route {
   if (rest === 'cluster') return { view: 'cluster' };
   if (rest === 'members') return { view: 'members' };
   if (rest === 'storage') return { view: 'storage' };
-  if (rest === 'events') return { view: 'events' };
+  if (rest === 'events') return eventsOf(search);
   if (rest === 'configuration') return { view: 'configuration' };
+  if (rest === 'access') return { view: 'access' };
+  if (rest === 'access/tokens') return { view: 'tokens' };
+  if (rest === 'access/policies') return { view: 'policies' };
+  if (rest === 'access/explain') return { view: 'explain' };
+  const token = single(rest, 'access/tokens/');
+  if (token !== null) return { view: 'token', accessorId: token };
+  const policy = single(rest, 'access/policies/');
+  if (policy !== null) return { view: 'policy', id: policy };
   if (rest.startsWith('services/') && rest.length > 'services/'.length && !rest.slice('services/'.length).includes('/')) {
     try {
       return { view: 'service', name: decodeURIComponent(rest.slice('services/'.length)) };
@@ -56,6 +74,28 @@ export function routeOf(pathname: string, uiPath: string): Route {
     }
   }
   return { view: 'unknown' };
+}
+
+/** The one segment after `prefix` in `rest`, decoded; null when there is not exactly one. */
+function single(rest: string, prefix: string): string | null {
+  if (!rest.startsWith(prefix)) return null;
+  const value = rest.slice(prefix.length);
+  if (value === '' || value.includes('/')) return null;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
+}
+
+function eventsOf(search: string): Route {
+  const query = new URLSearchParams(search);
+  const route: { view: 'events'; category?: EventCategory; correlation?: string } = { view: 'events' };
+  const category = EventCategorySchema.safeParse(query.get('category'));
+  if (category.success) route.category = category.data;
+  const correlation = query.get('correlation')?.trim();
+  if (correlation) route.correlation = correlation;
+  return route;
 }
 
 /** The scope an address's query names; a tenant or namespace that is missing or blank is the default's. */
@@ -89,6 +129,10 @@ export function hrefOf(route: Route, uiPath: string, scope: Scope = DEFAULT_SCOP
     parameters.set('namespace', scope.namespace);
   }
   if (consistency !== 'default') parameters.set('consistency', consistency);
+  if (route.view === 'events') {
+    if (route.category !== undefined) parameters.set('category', route.category);
+    if (route.correlation !== undefined) parameters.set('correlation', route.correlation);
+  }
   const text = parameters.toString();
   const query = text === '' ? '' : `?${text}`;
   switch (route.view) {
@@ -103,7 +147,16 @@ export function hrefOf(route: Route, uiPath: string, scope: Scope = DEFAULT_SCOP
     case 'storage':
     case 'events':
     case 'configuration':
+    case 'access':
       return `${root}${route.view}${query}`;
+    case 'tokens':
+    case 'policies':
+    case 'explain':
+      return `${root}access/${route.view}${query}`;
+    case 'token':
+      return `${root}access/tokens/${encodeURIComponent(route.accessorId)}${query}`;
+    case 'policy':
+      return `${root}access/policies/${encodeURIComponent(route.id)}${query}`;
     case 'service':
       return `${root}services/${encodeURIComponent(route.name).replaceAll('.', '%2E')}${query}`;
   }
@@ -115,7 +168,8 @@ interface Router {
   consistency: Consistency;
   uiPath: string;
   /** Opens a view in the current scope and consistency. */
-  navigate(to: Route): void;
+  /** Opens `to` in the current scope, or in `inScope`. */
+  navigate(to: Route, inScope?: Scope): void;
   /** Reads the current view in another scope. */
   selectScope(scope: Scope): void;
   /** Reads the current view in another consistency. */
@@ -133,7 +187,8 @@ export function RouterProvider({ uiPath, children }: { uiPath: string; children:
     return () => window.removeEventListener('popstate', follow);
   }, []);
 
-  const route = useMemo(() => routeOf(location.pathname, uiPath), [location.pathname, uiPath]);
+  const route = useMemo(() => routeOf(location.pathname, uiPath, location.search),
+    [location.pathname, location.search, uiPath]);
   const scope = useMemo(() => scopeOf(location.search), [location.search]);
   const consistency = useMemo(() => consistencyOf(location.search), [location.search]);
 
@@ -151,7 +206,7 @@ export function RouterProvider({ uiPath, children }: { uiPath: string; children:
       scope,
       consistency,
       uiPath,
-      navigate: (to: Route) => go(to, scope, consistency),
+      navigate: (to: Route, inScope?: Scope) => go(to, inScope ?? scope, consistency),
       selectScope: (next: Scope) => go(route, next, consistency),
       selectConsistency: (next: Consistency) => go(route, scope, next),
     }),
@@ -166,16 +221,25 @@ export function useRouter(): Router {
   return router;
 }
 
-/** A link to a view in the current scope: a real address, so it can be opened in a new tab, and followed in place. */
-export function RouteLink({ to, children, style }: { to: Route; children: ReactNode; style?: CSSProperties }) {
+/**
+ * A link to a view in the current scope, or in `scope`, such as a service identity's: a real address, so it can be
+ * opened in a new tab, and followed in place.
+ */
+export function RouteLink({ to, children, style, scope: inScope }: {
+  to: Route;
+  children: ReactNode;
+  style?: CSSProperties;
+  scope?: Scope;
+}) {
   const { uiPath, scope, consistency, navigate } = useRouter();
+  const target = inScope ?? scope;
   const follow = (event: MouseEvent<HTMLAnchorElement>) => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
-    navigate(to);
+    navigate(to, target);
   };
   return (
-    <a href={hrefOf(to, uiPath, scope, consistency)} onClick={follow} style={style}>
+    <a href={hrefOf(to, uiPath, target, consistency)} onClick={follow} style={style}>
       {children}
     </a>
   );

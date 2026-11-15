@@ -16,14 +16,22 @@
 
 import { z, type ZodType } from 'zod';
 import {
+  type AclStatus,
+  AclStatusSchema,
+  type Authorization,
+  AuthorizationSchema,
   type CatalogNode,
   CatalogNodeSchema,
+  type Deregistration,
+  DeregistrationSchema,
   type CheckEntry,
   CheckEntrySchema,
   type Configuration,
   ConfigurationSchema,
   ErrorEnvelopeSchema,
   type EventCategory,
+  type Explanation,
+  ExplanationSchema,
   type EventPage,
   EventPageSchema,
   type HealthEntry,
@@ -36,8 +44,14 @@ import {
   HealthEntrySchema,
   type Namespace,
   NamespaceSchema,
+  type Policy,
+  PolicySchema,
   type RaftStatus,
   RaftStatusSchema,
+  type Registration,
+  RegistrationSchema,
+  type Removal,
+  RemovalSchema,
   ReadySchema,
   type ServiceNames,
   ServiceNamesSchema,
@@ -45,6 +59,8 @@ import {
   ServiceSummarySchema,
   type Tenant,
   TenantSchema,
+  type Token,
+  TokenSchema,
   WatchEndSchema,
 } from './schemas';
 
@@ -122,6 +138,64 @@ export interface WatchHandlers {
   onError(error: unknown): void;
 }
 
+/**
+ * The token every request presents as `X-Qraft-Token` (UI/UX design section 10.2.2), and what is done when the server
+ * no longer knows it: the session ends. A request that names its own secret, as sign-in does, does not end it.
+ */
+export interface Credentials {
+  /** The session's secret, or null when no one is signed in. */
+  secret(): string | null;
+  /** The server answered 403 `token_not_found` to a request that presented the session's secret. */
+  onTokenNotFound(error: ApiError): void;
+}
+
+/** One check of `POST /v1/internal/acl/authorize`: may the token in use make this request? */
+export interface AuthorizationCheck {
+  resource: string;
+  segment?: string;
+  access: 'read' | 'write';
+  tenant?: string;
+  namespace?: string;
+}
+
+/** A token as a create or update gives it: links name a policy by ID or by name. */
+export interface TokenBody {
+  description?: string;
+  policies?: { id?: string; name?: string }[];
+  nodeIdentities?: { nodeName: string }[];
+  serviceIdentities?: { serviceName: string; tenant: string; namespace: string }[];
+  /** How long the token lives, such as `30m` or `1h`; a create only. */
+  expirationTtl?: string;
+}
+
+/** An instance as the interface registers it: on a node the catalog has, in a scope; its checks are kept as they are. */
+export interface ServiceBody {
+  serviceId: string;
+  serviceName: string;
+  address: string;
+  port: number;
+  tags: string[];
+  metadata: Record<string, string>;
+  enabled: boolean;
+}
+
+/** A policy as a create or update gives it. */
+export interface PolicyBody {
+  name: string;
+  description?: string;
+  rules: Record<string, unknown>;
+}
+
+/** What to explain: may this token make this request? */
+export interface ExplainQuery {
+  accessorId: string;
+  resource: string;
+  name?: string;
+  access: 'read' | 'write';
+  tenant?: string;
+  namespace?: string;
+}
+
 /** A request the server refused or could not answer, or a server that could not be reached (status 0). */
 export class ApiError extends Error {
   constructor(
@@ -180,16 +254,62 @@ export interface QraftApi {
   events(query: EventQuery, options?: Abortable): Promise<Read<EventPage>>;
   /** Follows the answering server's events after the query's cursor; the returned function ends the watch. */
   watchEvents(query: EventQuery, handlers: WatchHandlers): () => void;
+  /** The token in use, `GET /v1/acl/token/self`; or the token of `secret`, a secret being signed in with. */
+  self(options?: Abortable & { secret?: string }): Promise<Read<Token>>;
+  /** What the token in use may do, each check answered in order. */
+  authorize(checks: AuthorizationCheck[], options?: Abortable): Promise<Read<Authorization[]>>;
+  /** The security status: whether the cluster's access control can be trusted. */
+  aclStatus(options?: Abortable): Promise<Read<AclStatus>>;
+  /** The tokens, or those linked to a policy; every secret hidden. */
+  tokens(filter?: { policy?: string }, options?: Abortable): Promise<Read<Token[]>>;
+  token(accessorId: string, options?: Abortable): Promise<Read<Token>>;
+  /** Creates a token; the answer holds its secret, once. Not idempotent: never sent again unasked. */
+  createToken(body: TokenBody): Promise<Read<Token>>;
+  updateToken(accessorId: string, body: TokenBody): Promise<Read<Token>>;
+  /** A new token with the same links and expiry, and a new secret, answered once. */
+  cloneToken(accessorId: string, description?: string): Promise<Read<Token>>;
+  /** Deletes, which is revocation. */
+  deleteToken(accessorId: string): Promise<Read<boolean>>;
+  policies(options?: Abortable): Promise<Read<Policy[]>>;
+  policy(id: string, options?: Abortable): Promise<Read<Policy>>;
+  createPolicy(body: PolicyBody): Promise<Read<Policy>>;
+  updatePolicy(id: string, body: PolicyBody): Promise<Read<Policy>>;
+  deletePolicy(id: string): Promise<Read<boolean>>;
+  /** The server's explanation of whether a token may make a request, and why. */
+  explain(query: ExplainQuery, options?: Abortable): Promise<Read<Explanation>>;
+  /** Registers, or registers again, an instance on `node` in `scope`. Idempotent for the same instance ID. */
+  registerService(node: string, scope: Scope, service: ServiceBody): Promise<Read<Registration>>;
+  /** Deregisters an instance from `node` in `scope`. Idempotent. */
+  deregisterService(node: string, scope: Scope, serviceId: string): Promise<Read<Deregistration>>;
+  /**
+   * Removes a server by its ID. Without access control it needs the operator token, given for this request only;
+   * with it, the session's token with `operator:write`.
+   */
+  removeServer(serverId: string, operatorToken?: string): Promise<Read<Removal>>;
 }
 
-/** A client for the API below `apiBasePath`, the bootstrap object's base path, which ends with `/`. */
-export function createApi(apiBasePath: string, fetcher: typeof fetch = fetch): QraftApi {
+/**
+ * A client for the API below `apiBasePath`, the bootstrap object's base path, which ends with `/`. Every request
+ * presents the token `credentials` hold, if any.
+ */
+export function createApi(apiBasePath: string, fetcher: typeof fetch = fetch, credentials?: Credentials): QraftApi {
   const base = apiBasePath.endsWith('/') ? apiBasePath : `${apiBasePath}/`;
 
+  /** `headers` with the session's token, unless they name a secret of their own. */
+  function presenting(headers: Record<string, string>): Record<string, string> {
+    if (TOKEN_HEADER in headers) return headers;
+    const secret = credentials?.secret() ?? null;
+    return secret === null ? headers : { ...headers, [TOKEN_HEADER]: secret };
+  }
+
   async function send(path: string, headers: Record<string, string> = {}, signal?: AbortSignal,
-    accept = 'application/json'): Promise<Response> {
+    accept = 'application/json', method = 'GET', payload?: unknown): Promise<Response> {
     try {
-      const init: RequestInit = { headers: { Accept: accept, ...headers } };
+      const init: RequestInit = { method, headers: { Accept: accept, ...presenting(headers) } };
+      if (payload !== undefined) {
+        init.headers = { ...init.headers, 'Content-Type': 'application/json' };
+        init.body = JSON.stringify(payload);
+      }
       if (signal !== undefined) init.signal = signal;
       return await fetcher(base + path, init);
     } catch (failure) {
@@ -210,7 +330,19 @@ export function createApi(apiBasePath: string, fetcher: typeof fetch = fetch): Q
     }
   }
 
-  function refusal(path: string, response: Response, content: unknown): ApiError {
+  /**
+   * The error for a refused request. A 403 `token_not_found` to a request that presented the session's secret ends
+   * the session; one to a request that named its own secret, `ownSecret`, does not.
+   */
+  function refusal(path: string, response: Response, content: unknown, ownSecret = false): ApiError {
+    const error = refusalOf(path, response, content);
+    if (!ownSecret && error.status === 403 && error.code === 'token_not_found' && credentials?.secret() != null) {
+      credentials.onTokenNotFound(error);
+    }
+    return error;
+  }
+
+  function refusalOf(path: string, response: Response, content: unknown): ApiError {
     const envelope = ErrorEnvelopeSchema.safeParse(content);
     const requestId = requestIdOf(response);
     const leaderId = response.headers.get('X-Qraft-Leader-Id');
@@ -232,11 +364,28 @@ export function createApi(apiBasePath: string, fetcher: typeof fetch = fetch): Q
   }
 
   async function read<T>(path: string, schema: ZodType<T>, headers: Record<string, string> = {},
-    signal?: AbortSignal): Promise<Read<T>> {
-    const response = await send(path, headers, signal);
+    signal?: AbortSignal, method = 'GET', payload?: unknown): Promise<Read<T>> {
+    const response = await send(path, headers, signal, 'application/json', method, payload);
     const content = await body(path, response);
-    if (!response.ok) throw refusal(path, response, content);
+    if (!response.ok) throw refusal(path, response, content, TOKEN_HEADER in headers);
     return { data: parse(path, response, schema, content), ...metaOf(response) };
+  }
+
+  /**
+   * A request that changes state. Sent and never answered, its outcome is unknown, not a failure: it may have been
+   * applied (UI/UX design section 11), and a request that is not idempotent must not be sent again blindly.
+   */
+  async function write<T>(path: string, schema: ZodType<T>, method: string, payload?: unknown,
+    headers: Record<string, string> = {}): Promise<Read<T>> {
+    try {
+      return await read(path, schema, headers, undefined, method, payload);
+    } catch (failure) {
+      if (failure instanceof ApiError && failure.status === 0) {
+        throw new ApiError(failure.path, 0, 'outcome_unknown',
+          `No answer came after the request was sent: ${failure.message}`, false, null, null);
+      }
+      throw failure;
+    }
   }
 
   /** A catalog, health or tenancy read, with its consistency and blocking-query options in its query. */
@@ -332,6 +481,31 @@ export function createApi(apiBasePath: string, fetcher: typeof fetch = fetch): Q
     events: (query, options = {}) =>
       read(`v1/operator/events${eventQueryText(query)}`, EventPageSchema, {}, options.signal),
     watchEvents,
+    self: (options = {}) => read('v1/acl/token/self', TokenSchema,
+      options.secret === undefined ? {} : { [TOKEN_HEADER]: options.secret }, options.signal),
+    authorize: (checks, options = {}) =>
+      read('v1/internal/acl/authorize', z.array(AuthorizationSchema), {}, options.signal, 'POST', checks),
+    aclStatus: (options = {}) => read('v1/internal/ui/acl/status', AclStatusSchema, {}, options.signal),
+    tokens: (filter = {}, options = {}) => read(filter.policy === undefined ? 'v1/acl/tokens'
+      : `v1/acl/tokens?policy=${encodeURIComponent(filter.policy)}`, z.array(TokenSchema), {}, options.signal),
+    token: (accessorId, options = {}) => read(`v1/acl/token/${segment(accessorId)}`, TokenSchema, {}, options.signal),
+    createToken: (body) => write('v1/acl/token', TokenSchema, 'PUT', body),
+    updateToken: (accessorId, body) => write(`v1/acl/token/${segment(accessorId)}`, TokenSchema, 'PUT', body),
+    cloneToken: (accessorId, description) => write(`v1/acl/token/${segment(accessorId)}/clone`, TokenSchema, 'PUT',
+      description === undefined ? {} : { description }),
+    deleteToken: (accessorId) => write(`v1/acl/token/${segment(accessorId)}`, z.boolean(), 'DELETE'),
+    policies: (options = {}) => read('v1/acl/policies', z.array(PolicySchema), {}, options.signal),
+    policy: (id, options = {}) => read(`v1/acl/policy/${segment(id)}`, PolicySchema, {}, options.signal),
+    createPolicy: (body) => write('v1/acl/policy', PolicySchema, 'PUT', body),
+    updatePolicy: (id, body) => write(`v1/acl/policy/${segment(id)}`, PolicySchema, 'PUT', body),
+    deletePolicy: (id) => write(`v1/acl/policy/${segment(id)}`, z.boolean(), 'DELETE'),
+    explain: (query, options = {}) => read('v1/acl/explain', ExplanationSchema, {}, options.signal, 'POST', query),
+    registerService: (node, scope, service) => write('v1/catalog/register', RegistrationSchema, 'PUT', { service },
+      { 'X-Qraft-Node': node, ...scopeHeaders(scope) }),
+    deregisterService: (node, scope, serviceId) => write('v1/catalog/deregister', DeregistrationSchema, 'PUT', { serviceId },
+      { 'X-Qraft-Node': node, ...scopeHeaders(scope) }),
+    removeServer: (serverId, operatorToken) => write(`v1/operator/raft/peer?id=${encodeURIComponent(serverId)}`,
+      RemovalSchema, 'DELETE', undefined, operatorToken === undefined ? {} : { [TOKEN_HEADER]: operatorToken }),
     async readiness(options = {}) {
       const path = 'health/ready';
       const response = await send(path, {}, options.signal);
@@ -348,6 +522,14 @@ export function createApi(apiBasePath: string, fetcher: typeof fetch = fetch): Q
       throw refusal(path, response, content);
     },
   };
+}
+
+/** The header a request's token is presented in; never a query parameter, which reaches logs. */
+const TOKEN_HEADER = 'X-Qraft-Token';
+
+/** One path segment, encoded. */
+function segment(value: string): string {
+  return encodeURIComponent(value);
 }
 
 /** A request's path without its query, as errors name it. */

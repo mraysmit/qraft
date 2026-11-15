@@ -224,3 +224,117 @@ export const CONFIGURATION = {
     { key: 'server.acl.defaultPolicy', value: null, source: 'default', redacted: false, restartRequired: true },
   ],
 };
+
+// UI-5: the access answers, in the shapes AdminUiDataContractTest's server answered on 2026-11-15. No fixture holds a
+// real secret: a read shows `<hidden>`, and a create's secret here is made up.
+
+export const MANAGEMENT_POLICY_ID = '00000000-0000-0000-0000-000000000001';
+
+export const TOKEN = {
+  accessorId: '6a1f0c2e-3b7d-4c55-9a10-2f4e8d1b7c90',
+  secretId: '<hidden>',
+  description: 'web deployer',
+  policies: [{ id: '5e0b8a3c-1d2f-4a6b-8c9d-0e1f2a3b4c5d', name: 'web-writer' }],
+  roles: [],
+  nodeIdentities: [{ nodeName: 'client-a' }],
+  serviceIdentities: [{ serviceName: 'web', tenant: 'default', namespace: 'default' }],
+  createTime: '2026-11-15T07:00:00Z',
+  expirationTime: null,
+  installedFromFile: false,
+};
+
+export const MANAGEMENT_TOKEN = {
+  accessorId: '2b7e4f1a-9c3d-4e8f-a1b2-c3d4e5f6a7b8',
+  secretId: '<hidden>',
+  description: 'Bootstrap Token (Global Management)',
+  policies: [{ id: MANAGEMENT_POLICY_ID, name: 'global-management' }],
+  roles: [],
+  nodeIdentities: [],
+  serviceIdentities: [],
+  createTime: '2026-11-15T06:00:00Z',
+  expirationTime: null,
+  installedFromFile: false,
+};
+
+export const AUTHORIZATIONS = [
+  { resource: 'operator', access: 'read', allow: true },
+  { resource: 'operator', access: 'write', allow: false },
+  { resource: 'acl', access: 'read', allow: true },
+  { resource: 'acl', access: 'write', allow: false },
+];
+
+export const POLICY = {
+  id: '5e0b8a3c-1d2f-4a6b-8c9d-0e1f2a3b4c5d',
+  name: 'web-writer',
+  description: 'writes web',
+  rules: { service: { web: { policy: 'write' } } },
+};
+
+export const EXPLANATION = {
+  accessorId: TOKEN.accessorId,
+  allowed: true,
+  defaultPolicy: 'deny',
+  decidedBy: 'rule',
+  policy: { id: POLICY.id, name: 'web-writer' },
+  rule: { resource: 'service', name: 'web', prefix: false, access: 'write',
+    tenant: { name: 'default', prefix: false }, namespace: { name: 'default', prefix: false } },
+};
+
+export const ACL_STATUS = {
+  enabled: true,
+  defaultPolicy: 'deny',
+  securityProfile: 'production',
+  transport: { https: false, clientCertificateRequired: false },
+  readAt: '2026-11-15T09:00:00Z',
+  expiringWithinMinutes: 60,
+  managementTokens: [
+    { accessorId: MANAGEMENT_TOKEN.accessorId, description: MANAGEMENT_TOKEN.description, installedFromFile: false,
+      expirationTime: null },
+    { accessorId: '9d8c7b6a-5f4e-4d3c-b2a1-0f9e8d7c6b5a', description: 'management file', installedFromFile: true,
+      expirationTime: null },
+  ],
+  anonymous: {
+    accessorId: '00000000-0000-0000-0000-000000000002',
+    policies: [{ id: '7c6b5a4f-3e2d-4c1b-a09f-8e7d6c5b4a3f', name: 'open-services' }],
+    writes: ['service'],
+  },
+  aclWriters: [{ accessorId: MANAGEMENT_TOKEN.accessorId, description: MANAGEMENT_TOKEN.description }],
+  expiringSoon: [
+    { accessorId: '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5e', description: 'ci deploy', expirationTime: '2026-11-15T09:30:00Z',
+      nodeIdentities: [{ nodeName: 'client-b' }], serviceIdentities: [], holdsAclWrite: true },
+  ],
+};
+
+export const ANONYMOUS_TOKEN = {
+  accessorId: '00000000-0000-0000-0000-000000000002',
+  secretId: '<hidden>',
+  description: 'Anonymous Token',
+  policies: [],
+  roles: [],
+  nodeIdentities: [],
+  serviceIdentities: [],
+  createTime: '2026-11-15T06:00:00Z',
+  expirationTime: null,
+  installedFromFile: false,
+};
+
+export const FILE_TOKEN = {
+  ...MANAGEMENT_TOKEN,
+  accessorId: '9d8c7b6a-5f4e-4d3c-b2a1-0f9e8d7c6b5a',
+  description: 'management file',
+  installedFromFile: true,
+};
+
+export const GLOBAL_MANAGEMENT_POLICY = {
+  id: MANAGEMENT_POLICY_ID,
+  name: 'global-management',
+  description: 'Builtin Policy that grants unlimited access',
+  rules: { acl: 'write', operator: 'write', node_prefix: { '': { policy: 'write' } } },
+};
+
+export const READ_ONLY_POLICY = {
+  id: '00000000-0000-0000-0000-000000000002',
+  name: 'builtin/global-read-only',
+  description: 'Builtin Policy that grants unlimited read-only access',
+  rules: { operator: 'read', node_prefix: { '': { policy: 'read' } } },
+};

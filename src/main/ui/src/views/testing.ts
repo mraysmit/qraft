@@ -17,27 +17,40 @@
 // Test support only: nothing outside a test imports it.
 
 import type { Bootstrap } from '../bootstrap';
-import type { CheckState, EventQuery, QraftApi, Read, ReadOptions, Scope, WatchHandlers } from '../api/client';
+import { createSession, type Session } from '../session';
+import { ApiError, type CheckState, type EventQuery, type QraftApi, type Read, type ReadOptions, type Scope,
+  type WatchHandlers } from '../api/client';
 import {
+  ACL_STATUS,
+  ANONYMOUS_TOKEN,
   CHECK,
   CONFIGURATION,
   cursor,
   EVENT_PAGE,
+  EXPLANATION,
+  FILE_TOKEN,
   FOLLOWER_MEMBERS,
+  GLOBAL_MANAGEMENT_POLICY,
   HEALTH_ENTRY,
   INSTANCE,
+  MANAGEMENT_TOKEN,
   MEMBERS,
   NODE,
+  POLICY,
   RAFT_STATUS,
+  READ_ONLY_POLICY,
   SERVICE_EVENT,
   STORAGE,
+  TOKEN,
 } from '../api/fixtures';
 import {
+  AclStatusSchema,
   type CatalogNode,
   CatalogNodeSchema,
   type CheckEntry,
   ConfigurationSchema,
   type EventPage,
+  ExplanationSchema,
   EventPageSchema,
   type QraftEvent,
   QraftEventSchema,
@@ -49,7 +62,11 @@ import {
   StorageSchema,
   type RaftStatus,
   RaftStatusSchema,
+  type Policy,
+  PolicySchema,
   type ServiceSummary,
+  type Token,
+  TokenSchema,
 } from '../api/schemas';
 
 export const BOOTSTRAP: Bootstrap = {
@@ -208,6 +225,34 @@ export function fakeApi(
     configuration: () => read(ConfigurationSchema.parse(CONFIGURATION), null),
     events: () => read(EventPageSchema.parse(EVENT_PAGE), null),
     watchEvents: () => () => undefined,
+    self: () => read(TokenSchema.parse(TOKEN), null),
+    authorize: (checks) => read(checks.map((check) => ({ ...check, allow: true })), null),
+    aclStatus: () => read(AclStatusSchema.parse(ACL_STATUS), null),
+    tokens: (filter) => read(TOKENS().filter((token) => filter?.policy === undefined
+      || token.policies.some((policy) => policy.id === filter.policy)), null),
+    token: (accessorId) => {
+      const found = TOKENS().find((token) => token.accessorId === accessorId);
+      return found === undefined ? Promise.reject(missing(`/v1/acl/token/${accessorId}`)) : read(found, null);
+    },
+    createToken: (body) => read(TokenSchema.parse({ ...TOKEN, accessorId: CREATED_ACCESSOR, secretId: CREATED_SECRET,
+      description: body.description ?? '' }), 50),
+    updateToken: (accessorId) => read(TokenSchema.parse({ ...TOKEN, accessorId }), 51),
+    cloneToken: (_accessorId, description) => read(TokenSchema.parse({ ...TOKEN, accessorId: CLONE_ACCESSOR,
+      secretId: CLONE_SECRET, description: description ?? TOKEN.description }), 52),
+    deleteToken: () => read(true, 53),
+    policies: () => read(POLICIES(), null),
+    policy: (id) => {
+      const found = POLICIES().find((policy) => policy.id === id);
+      return found === undefined ? Promise.reject(missing(`/v1/acl/policy/${id}`)) : read(found, null);
+    },
+    createPolicy: (body) => read(PolicySchema.parse({ id: 'c0ffee00-0000-4000-8000-000000000001', ...body }), 54),
+    updatePolicy: (id, body) => read(PolicySchema.parse({ id, ...body }), 55),
+    deletePolicy: () => read(true, 56),
+    explain: () => read(ExplanationSchema.parse(EXPLANATION), null),
+    registerService: (nodeName, scope, body) => read({ node: nodeName, service: { serviceId: body.serviceId,
+      serviceName: body.serviceName, nodeId: nodeName, tenantId: scope.tenant, namespace: scope.namespace, registered: true } }, 61),
+    deregisterService: (nodeName, _scope, serviceId) => read({ node: nodeName, serviceId, deregistered: true }, 62),
+    removeServer: (serverId) => read({ status: 'REMOVED', message: `${serverId} removed` }, 70),
     ...overrides,
   };
   return blockingWaits(api);
@@ -282,4 +327,48 @@ export function watchRecorder() {
     };
   };
   return { watches, watchEvents };
+}
+
+/** A session held in memory, signed in with `secret` when one is given. */
+export function memorySession(secret?: string): Session {
+  const items = new Map<string, string>();
+  const session = createSession({
+    getItem: (key) => items.get(key) ?? null,
+    setItem: (key, value) => void items.set(key, value),
+    removeItem: (key) => void items.delete(key),
+  });
+  if (secret !== undefined) session.signIn(secret);
+  return session;
+}
+
+/** `api`, recording the name of each of its calls in order. */
+export function recordingApi(api: QraftApi): { api: QraftApi; calls: string[] } {
+  const calls: string[] = [];
+  const recorded = new Proxy(api, {
+    get(target, property, receiver) {
+      const value: unknown = Reflect.get(target, property, receiver);
+      if (typeof value !== 'function') return value;
+      return (...args: unknown[]) => {
+        calls.push(String(property));
+        return (value as (...given: unknown[]) => unknown).apply(target, args);
+      };
+    },
+  });
+  return { api: recorded, calls };
+}
+
+/** The secret a test's created token is answered with; made up, never a real secret. */
+export const CREATED_SECRET = 'made-up-secret-of-a-created-token';
+export const CREATED_ACCESSOR = 'a11ce000-0000-4000-8000-000000000001';
+export const CLONE_SECRET = 'made-up-secret-of-a-clone';
+export const CLONE_ACCESSOR = 'c1011e00-0000-4000-8000-000000000001';
+
+/** The tokens the test API holds: a scoped token, the bootstrap and file management tokens, and the anonymous token. */
+export const TOKENS = (): Token[] => [TOKEN, MANAGEMENT_TOKEN, FILE_TOKEN, ANONYMOUS_TOKEN].map((token) => TokenSchema.parse(token));
+
+/** The policies the test API holds: one of the operator's, and the two built-ins. */
+export const POLICIES = (): Policy[] => [POLICY, GLOBAL_MANAGEMENT_POLICY, READ_ONLY_POLICY].map((policy) => PolicySchema.parse(policy));
+
+function missing(path: string): ApiError {
+  return new ApiError(path, 404, 'acl_not_found', `ACL not found: ${path}`, false, 'req-404', null);
 }

@@ -17,7 +17,9 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { Root } from './Root';
-import { BOOTSTRAP, entry, fakeApi, read, storage } from './views/testing';
+import { MANAGEMENT_TOKEN } from './api/fixtures';
+import { TokenSchema } from './api/schemas';
+import { BOOTSTRAP, entry, fakeApi, memorySession, read, storage } from './views/testing';
 
 // The server's policy allows inline styles only with the request's nonce, and no inline script at all: a style
 // element without the nonce is blocked, and the page renders unstyled in a browser while every other test passes.
@@ -57,7 +59,7 @@ describe('Root', () => {
     window.history.pushState(null, '', '/ui/');
 
     const inserted = await stylesInsertedDuring(async () => {
-      render(<Root bootstrap={BOOTSTRAP} api={fakeApi()} />);
+      render(<Root bootstrap={BOOTSTRAP} api={fakeApi()} session={memorySession('held')} />);
       await screen.findByText('web', { selector: 'a' });
     });
 
@@ -67,10 +69,11 @@ describe('Root', () => {
 
   it('renders the application', async () => {
     window.history.pushState(null, '', '/ui/');
-    render(<Root bootstrap={BOOTSTRAP} api={fakeApi()} />);
+    render(<Root bootstrap={BOOTSTRAP} api={fakeApi()} session={memorySession('held')} />);
 
-    expect(screen.getByText('Qraft', { selector: 'h1' })).toBeInTheDocument();
+    // The token is checked first (UI-5), then the shell renders.
     expect(await screen.findByText('web', { selector: 'a' })).toBeInTheDocument();
+    expect(screen.getByText('Qraft', { selector: 'h1' })).toBeInTheDocument();
   });
 
   // One test per view: walking every view in one test took 4.8 s on Jenkins build 72, against Vitest's 5 s limit.
@@ -85,7 +88,7 @@ describe('Root', () => {
 
   it('gives every style element Ant Design adds the request nonce, on each tab of a service', async () => {
     window.history.pushState(null, '', '/ui/services/web');
-    render(<Root bootstrap={BOOTSTRAP} api={api()} />);
+    render(<Root bootstrap={BOOTSTRAP} api={api()} session={memorySession('held')} />);
     for (const tab of ['Instances', 'Health Checks', 'Metadata']) {
       fireEvent.click(await screen.findByText(tab, { selector: '.ant-tabs-tab-btn' }));
       await screen.findByText(tab, { selector: '.ant-tabs-tab-active .ant-tabs-tab-btn' });
@@ -95,7 +98,7 @@ describe('Root', () => {
 
   it('gives every style element Ant Design adds the request nonce, on Nodes and Clients', async () => {
     window.history.pushState(null, '', '/ui/nodes');
-    render(<Root bootstrap={BOOTSTRAP} api={api()} />);
+    render(<Root bootstrap={BOOTSTRAP} api={api()} session={memorySession('held')} />);
     await screen.findByText('client-a');
     assertEveryStyleCarriesTheNonce();
   });
@@ -105,7 +108,7 @@ describe('Root', () => {
   it('gives every style inserted on Health Checks the request nonce', async () => {
     window.history.pushState(null, '', '/ui/checks?tenant=acme&namespace=prod');
     const inserted = await stylesInsertedDuring(async () => {
-      render(<Root bootstrap={BOOTSTRAP} api={api()} />);
+      render(<Root bootstrap={BOOTSTRAP} api={api()} session={memorySession('held')} />);
       await screen.findByText('web-1');
     });
     expect(inserted.filter((style) => style.nonce !== BOOTSTRAP.cspNonce)).toEqual([]);
@@ -116,7 +119,7 @@ describe('Root', () => {
     // The selector is in the top bar of every page; an address that is no view renders the least beside it.
     window.history.pushState(null, '', '/ui/nowhere?tenant=acme&namespace=prod');
     const inserted = await stylesInsertedDuring(async () => {
-      render(<Root bootstrap={BOOTSTRAP} api={api()} />);
+      render(<Root bootstrap={BOOTSTRAP} api={api()} session={memorySession('held')} />);
       await screen.findByText('No such view', { selector: 'h2' });
       fireEvent.mouseDown(document.querySelector('input[aria-label="Tenant"]') as Element);
       await screen.findAllByTitle('acme');
@@ -124,6 +127,52 @@ describe('Root', () => {
     expect(inserted.filter((style) => style.nonce !== BOOTSTRAP.cspNonce)).toEqual([]);
     assertEveryStyleCarriesTheNonce();
   });
+  // UI-5: sign-in, before any session, and the Access section's Status page.
+  it('gives every style inserted on the sign-in page the request nonce', async () => {
+    window.history.pushState(null, '', '/ui/');
+    const inserted = await stylesInsertedDuring(async () => {
+      render(<Root bootstrap={BOOTSTRAP} api={api()} session={memorySession()} />);
+      await screen.findByText('Sign in', { selector: 'h2' });
+    });
+    expect(inserted.filter((style) => style.nonce !== BOOTSTRAP.cspNonce)).toEqual([]);
+    assertEveryStyleCarriesTheNonce();
+  });
+
+  it('gives every style inserted on the Status page, with the management banner, the request nonce', async () => {
+    window.history.pushState(null, '', '/ui/access');
+    const inserted = await stylesInsertedDuring(async () => {
+      render(<Root bootstrap={BOOTSTRAP} api={fakeApi({ self: () => read(TokenSchema.parse(MANAGEMENT_TOKEN), null) })}
+        session={memorySession('held')} />);
+      await screen.findByLabelText('Security status');
+      await screen.findByLabelText('Management token in use');
+    });
+    expect(inserted.filter((style) => style.nonce !== BOOTSTRAP.cspNonce)).toEqual([]);
+    assertEveryStyleCarriesTheNonce();
+  });
+
+  it("gives every style inserted on Tokens, with a token's review and its outcome, the request nonce", async () => {
+    window.history.pushState(null, '', '/ui/access/tokens/2b7e4f1a-9c3d-4e8f-a1b2-c3d4e5f6a7b8');
+    const inserted = await stylesInsertedDuring(async () => {
+      render(<Root bootstrap={BOOTSTRAP} api={api()} session={memorySession('held')} />);
+      fireEvent.click(await screen.findByText('Delete', { selector: 'button, button span' }));
+      fireEvent.click(await screen.findByText('Delete', { selector: '[aria-label="Delete token"] button span' }));
+      await screen.findByLabelText('Outcome');
+    });
+    expect(inserted.filter((style) => style.nonce !== BOOTSTRAP.cspNonce)).toEqual([]);
+    assertEveryStyleCarriesTheNonce();
+  });
+
+  it('gives every style inserted on a policy, with its editor open, the request nonce', async () => {
+    window.history.pushState(null, '', '/ui/access/policies/5e0b8a3c-1d2f-4a6b-8c9d-0e1f2a3b4c5d');
+    const inserted = await stylesInsertedDuring(async () => {
+      render(<Root bootstrap={BOOTSTRAP} api={api()} session={memorySession('held')} />);
+      fireEvent.click(await screen.findByText('Edit', { selector: 'button, button span' }));
+      await screen.findByLabelText('Rules (JSON)');
+    });
+    expect(inserted.filter((style) => style.nonce !== BOOTSTRAP.cspNonce)).toEqual([]);
+    assertEveryStyleCarriesTheNonce();
+  });
+
   // UI-3: the Operate pages, each in a test of its own; the cluster page with fenced storage shows its banner.
   for (const [path, waitFor] of [
     ['/ui/cluster', 'Cluster Overview'],
@@ -134,7 +183,7 @@ describe('Root', () => {
       window.history.pushState(null, '', path);
       const fenced = storage({ fenced: true, fenceReason: 'disk full' });
       const inserted = await stylesInsertedDuring(async () => {
-        render(<Root bootstrap={BOOTSTRAP} api={fakeApi({ storage: () => read(fenced) })} />);
+        render(<Root bootstrap={BOOTSTRAP} api={fakeApi({ storage: () => read(fenced) })} session={memorySession('held')} />);
         await screen.findByText(waitFor, { selector: 'h2' });
         await screen.findAllByText(/server-1/);
       });

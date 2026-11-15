@@ -16,6 +16,7 @@
 
 import { Alert, Space, Typography } from 'antd';
 import type { ReactNode } from 'react';
+import { useAccess } from '../access';
 import type { QraftApi, Readiness } from '../api/client';
 import type { Members, RaftRole, RaftStatus } from '../api/schemas';
 import type { Bootstrap } from '../bootstrap';
@@ -30,21 +31,38 @@ const ROLE: Record<RaftRole, string> = { LEADER: 'Leader', FOLLOWER: 'Follower',
  * membership read the quorum, the failure tolerance and the largest replication lag, which only the leader knows
  * (UI-3 task list, decision 5). The membership is read on its own, so a server that refuses it, for want of
  * `operator:read`, still shows the rest. Conditions that need attention are persistent messages, not notifications
- * (section 3.4).
+ * (section 3.4). A token without `operator:read` is not offered the strip's reads at all (UI-5 task list, decision 3).
  */
 export function StatusStrip({ api, bootstrap }: { api: QraftApi; bootstrap: Bootstrap }) {
+  const { may } = useAccess();
+  if (may.operatorRead) return <LiveStatusStrip api={api} bootstrap={bootstrap} />;
+  return (
+    <section aria-label="Cluster status" style={{ padding: '8px 24px', borderBottom: '1px solid #f0f0f0' }}>
+      <Space wrap split="|">
+        <Typography.Text>The cluster&apos;s status needs operator:read.</Typography.Text>
+        <Security bootstrap={bootstrap} />
+      </Space>
+    </section>
+  );
+}
+
+function Security({ bootstrap }: { bootstrap: Bootstrap }) {
+  return (
+    <>
+      <Typography.Text>Security profile: {bootstrap.securityProfile}</Typography.Text>
+      <Typography.Text>Access control: {bootstrap.authMode === 'none' ? 'off' : 'on'}</Typography.Text>
+    </>
+  );
+}
+
+function LiveStatusStrip({ api, bootstrap }: { api: QraftApi; bootstrap: Bootstrap }) {
   const [state, again] = useLiveRead(async ({ signal }) => {
     const [status, readiness] = await Promise.all([api.raftStatus({ signal }), api.readiness({ signal })]);
     return { status: status.data, readiness: readiness.data };
   }, [api]);
   const [membership] = useLiveRead(({ signal }) => api.members({ signal }), [api]);
 
-  const security = (
-    <>
-      <Typography.Text>Security profile: {bootstrap.securityProfile}</Typography.Text>
-      <Typography.Text>Access control: {bootstrap.authMode === 'none' ? 'off' : 'on'}</Typography.Text>
-    </>
-  );
+  const security = <Security bootstrap={bootstrap} />;
 
   let body: ReactNode;
   if (state.status === 'failed') {

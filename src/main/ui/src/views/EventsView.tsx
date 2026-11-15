@@ -60,18 +60,36 @@ function matches(event: QraftEvent, filters: Filters): boolean {
 }
 
 /**
+ * Saves `events`, newest first, as a JSON file named for the answering server and the time (UI-5 task list, decision
+ * 10). Nothing is sent to the server: the file holds what the page holds.
+ */
+function exportEvents(events: readonly QraftEvent[], server: string | null) {
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+  const url = URL.createObjectURL(new Blob([JSON.stringify([...events].reverse(), null, 2)], { type: 'application/json' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `qraft-events-${server ?? 'server'}-${stamp}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+/**
  * Events, read-only (UI/UX design section 9.4; UI-4 task list, decision 6): the answering server's whole journal in
  * the category chosen, newest first, followed live, labelled ephemeral. The other filters narrow the events read,
- * which are the whole journal, so none is missed.
+ * which are the whole journal, so none is missed. The address may name the category and correlation ID to open with,
+ * as a mutation's link to its audit events does (UI-5 task list, decision 6).
  */
-export function EventsView({ api }: { api: QraftApi }) {
-  const [category, setCategory] = useState<EventCategory | 'all'>('all');
+export function EventsView({ api, initial = {} }: {
+  api: QraftApi;
+  initial?: { category?: EventCategory | undefined; correlation?: string | undefined };
+}) {
+  const [category, setCategory] = useState<EventCategory | 'all'>(initial.category ?? 'all');
   const [filters, setFilters] = useState<Filters>({
     severity: 'info',
     tenant: '',
     namespace: '',
     term: '',
-    correlationId: '',
+    correlationId: initial.correlation ?? '',
     leastIndex: '',
   });
   const [feed] = useEventFeed(api, category === 'all' ? {} : { category }, [category]);
@@ -115,7 +133,13 @@ export function EventsView({ api }: { api: QraftApi }) {
         {text('leastIndex', 'Least committed index', 180)}
       </Space>
       <FeedState feed={feed} />
-      <Typography.Text>{`${shown.length} of ${feed.events.length} events shown`}</Typography.Text>
+      <Space>
+        <Typography.Text>{`${shown.length} of ${feed.events.length} events shown`}</Typography.Text>
+        {/* A plain button: Ant Design's beside a table slowed the table in jsdom (UI-4). */}
+        <button type="button" disabled={shown.length === 0} onClick={() => exportEvents(shown, feed.answeredBy)}>
+          Export the events shown
+        </button>
+      </Space>
       <EventsTable
         events={shown}
         paged

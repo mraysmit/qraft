@@ -15,7 +15,7 @@
  */
 
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import type { EventQuery } from '../api/client';
 import { cursor } from '../api/fixtures';
@@ -171,6 +171,62 @@ describe('Events', () => {
     expect(watches[0]?.closed).toBe(true);
     expect(asked.at(-1)).toEqual({ limit: 1000, category: 'domain' });
     expect(watches[1]?.query).toEqual({ after: cursor(1), category: 'domain' });
+  });
+
+  it("opens in the category and with the correlation ID its address names, as a mutation's audit link gives them", async () => {
+    // UI-5 task list, decision 6.
+    window.history.pushState(null, '', '/ui/events?category=audit&correlation=req-42');
+    const audited = qraftEvent(2, { category: 'audit', correlationId: 'req-42', type: 'audit.request' });
+    const other = qraftEvent(3, { category: 'audit', correlationId: 'req-43', type: 'audit.request' });
+    const { api, asked } = journal([eventPage([audited, other])]);
+    renderApp(api);
+
+    await waitFor(() => expect(asked.at(-1)).toEqual({ limit: 1000, category: 'audit' }));
+    expect((document.querySelector('input[aria-label="Correlation ID"]') as HTMLInputElement).value).toBe('req-42');
+    expect(await screen.findByText('1 of 2 events shown')).toBeInTheDocument();
+  });
+});
+
+describe('exporting events', () => {
+  // UI-5 task list, decision 10: the events the page holds, as filtered, saved as JSON; nothing is sent to the server.
+  const created: Blob[] = [];
+  const saved: string[] = [];
+  beforeEach(() => {
+    created.length = 0;
+    saved.length = 0;
+    // jsdom has no object URLs, and follows no download: both are recorded instead.
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: (blob: Blob) => {
+      created.push(blob);
+      return 'blob:events';
+    } });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: () => undefined });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function record(this: HTMLAnchorElement) {
+      saved.push(this.download);
+    });
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it('saves the events shown, newest first, as a JSON file named for the server and the time', async () => {
+    window.history.pushState(null, '', '/ui/events?correlation=req-42');
+    const audited = qraftEvent(2, { correlationId: 'req-42' });
+    const other = qraftEvent(3, { correlationId: 'req-43' });
+    const { api, watches } = journal([eventPage([audited, other])]);
+    renderApp(api);
+    await waitFor(() => expect(watches).toHaveLength(1));
+    await screen.findByText('1 of 2 events shown');
+
+    fireEvent.click(screen.getByText('Export the events shown', { selector: 'button, button span' }));
+
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatch(/^qraft-events-server-1-\d{8}T\d{6}Z\.json$/);
+    // jsdom's Blob has no text(); a FileReader reads it.
+    const text = await new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.readAsText(created[0] as Blob);
+    });
+    const exported = JSON.parse(text) as { cursor: string }[];
+    expect(exported.map((event) => event.cursor)).toEqual([cursor(2)]);
   });
 });
 

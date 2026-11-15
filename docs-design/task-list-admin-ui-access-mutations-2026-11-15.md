@@ -1,9 +1,9 @@
 # Task List: Administrative Interface, Access Control and Mutations (UI-5)
 
 **Date:** 2026-11-15
-**Status:** In progress. Phase 0 is next.
-**Last updated:** 2026-11-15 (written, at the owner's word to proceed after Jenkins build 78)
-**Active work:** Phase 0, the security status read
+**Status:** In progress. Phases 0 to 2 are done, test first; Phase 3 is next.
+**Last updated:** 2026-11-15 (Phases 1 and 2 done, with their records; Jenkins build 79 passed `9b8b8a8`. Earlier the same day: Phase 0 done, decision 4's window corrected to the hour. Earlier the same day: written, at the owner's word to proceed after Jenkins build 78)
+**Active work:** Phase 3, service changes, server removal and export
 **Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-5
 **Source plan:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md), sections 3.5, 3.7, 5.1, 9.2, 9.4, 10.2 and 11; [`task-list-acl-and-tokens-2026-11-07.md`](../docs/archive/task-list-acl-and-tokens-2026-11-07.md), proposals 3 and 10 to 19
 **Predecessor:** [`task-list-admin-ui-events-configuration-live-2026-11-15.md`](../docs/archive/task-list-admin-ui-events-configuration-live-2026-11-15.md) (UI-4)
@@ -110,8 +110,10 @@ Taken 2026-11-15 as the recommended options; each reversible.
    which was installed from the file; the anonymous token's policies and
    whether any of them grants `write`; the tokens that hold `acl:write` without
    an expiry, decided by the authorizer enforcement uses; and the tokens that
-   expire within 24 hours, with their node and service identities and whether
-   they hold `acl:write`. Without ACLs it answers 401 `acl_disabled`, as the
+   expire within the hour, with their node and service identities and whether
+   they hold `acl:write`. (Written first as within 24 hours; no token lives
+   longer than that, so every token with an expiry would have been listed.)
+   Without ACLs it answers 401 `acl_disabled`, as the
    other ACL routes; the interface then shows the security profile and the
    no-access-control state from the bootstrap.
 5. **A management token** is one linked to the built-in `global-management`
@@ -173,7 +175,7 @@ Taken 2026-11-15 as the recommended options; each reversible.
 
 1. Test first: `GET /v1/internal/ui/acl/status` answers as decision 4, the
    writers decided by the authorizer, a token with an expiry not counted, the
-   anonymous token's write found, the expiring tokens within 24 hours of the
+   anonymous token's write found, the expiring tokens within the hour of the
    server's clock; `acl:read` needed; 401 without ACLs.
 2. The data contract test writes the ACL answers the interface reads as
    fixtures: a token list, `self`, a created token's answer (its secret
@@ -183,6 +185,33 @@ Taken 2026-11-15 as the recommended options; each reversible.
 
 **Exit gate.** The new tests red first, then green; `mvn install` passes and
 its logs are clean.
+
+**Status, 2026-11-15: done**, test first. The owner committed the read, its
+test and this list in `9b8b8a8`.
+
+- `HttpApiServerAclStatusTest` (5), red first on the 404 of the missing route:
+  the settings, the management tokens (the bootstrap token and one installed
+  from the file), the writers without an expiry (a writer with an expiry and a
+  reader left out), the anonymous token's policies and the resources they let
+  it write, the tokens expiring within the hour with their identities and
+  `holdsAclWrite`, `acl:read` needed, 400 on a parameter, 405, 401 without
+  ACLs, and HTTPS with a required client certificate. Two expectations of the
+  test were corrected: a token lives at most 24 hours, so the window is the
+  hour (decision 4), and a token's policies are answered in the order the
+  server keeps them. `AclApiRoutes` serves it; `HttpApiServer` keeps the
+  profile and the TLS settings.
+- `AdminUiDataContractTest` (1 new), on a server with ACLs on: the bootstrap's
+  `authMode`, `self` and an unknown secret's `token_not_found`, the authorize
+  answer, a policy, a created token with its secret once and a listed one
+  hidden, an update, the explanation, the status, a registration and a
+  deregistration with the token, and a deletion, in the fields the interface
+  will read. It passed at once: every answer but the status existed, and the
+  status had been built red first.
+- Platform design section 15 documents the read.
+- `mvn clean install` in the check copy: default 2,047 and Vitest 132, every
+  gate; the audit of the files the run wrote, 598, found 856 error lines and
+  756 stack traces, every one flagged
+  (`logs/ui5-p0-install-20261115-152835.log`).
 
 ## 6. Phase 1: Sign-in, the token menu, banners, navigation and status
 
@@ -198,6 +227,50 @@ its logs are clean.
 
 **Exit gate.** Vitest and the Java suite green.
 
+**Status, 2026-11-15: done**, test first. The writes of item 1 moved to Phase 2,
+with the workflow that uses them.
+
+- `api/access.test.ts` (8), red first: every read and the event watch present the
+  session's secret as `X-Qraft-Token`, none without one; a 403
+  `token_not_found` ends the session, a `permission_denied` does not, nor does
+  an unknown secret given to `self` at sign-in; `self` with the session's or a
+  typed secret, one authorize call, and the status, each read with its zod
+  schema (`TokenSchema`, `AuthorizationSchema`, `AclStatusSchema`).
+- `session.test.ts` (5), red first: the secret is kept in the tab's storage
+  under `qraft.token` and found again on reload; signing out and the server's
+  refusal forget it, the second saying why until the next sign-in; listeners
+  are told; a browser refusing its storage holds it in memory (`session.ts`).
+- `views/signin.test.tsx` (11), red first: no API call before sign-in; a
+  secret the server knows is kept and opens the interface, `self` then
+  `authorize`; an unknown one is refused and nothing kept; a reload with a held
+  secret checks it with `self`; a `token_not_found` on any later request, sent
+  through the real client, ends the session and returns to sign-in with the
+  reason; sign-out from the token menu; no sign-in without access control, the
+  menu saying so; the menu's accessor ID, policies, identities and expiry, and
+  its warning within the hour; the management-token banner on every page, not
+  dismissible, and none for another token (`access.tsx`: `AccessGate`,
+  `TokenMenu`, `ManagementBanner`; `Root` holds the session and gives the
+  client its credentials).
+- `views/security.test.tsx` (7), red first: without `operator:read` only the
+  catalog views are offered and the status strip reads nothing; with it the
+  operator views, with `acl:read` Access; a view opened by its address without
+  its permission says which it needs and reads nothing; Nodes and Clients lists
+  its clients and says the servers need `operator:read`; the Status page from
+  the status read, its warnings for plain HTTP, the anonymous token's write and
+  a single writer, and without access control from the bootstrap
+  (`SecurityView`).
+- `Root.test.tsx` (2 new): the nonce on the sign-in page and on the Status page
+  with the management banner; the other Root tests sign in first, and one
+  waits for the view before the shell's title, as the token is checked first.
+- One expectation of the tests was corrected: the management-banner test's
+  second render began at the page the first had opened. Five slow tests were
+  moved to the page of an unknown address, which renders no table: the Services
+  table took over a second to appear under the whole suite's load, past
+  Testing Library's wait.
+- `mvn install` in the check copy: default 2,047 and Vitest 165, every gate; the
+  audit of the files the run wrote, 600, found 844 error lines and 744 stack
+  traces, every one flagged (`logs/ui5-p1-install-20261115-154356.log`).
+
 ## 7. Phase 2: The mutation workflow, Tokens, Policies and explanations
 
 1. The mutation workflow: review step, outcomes, unknown outcome, audit link;
@@ -211,7 +284,55 @@ its logs are clean.
 
 **Exit gate.** As Phase 1.
 
-## 8. Phase 3: Service changes, server removal and export
+**Status, 2026-11-15: done**, test first, in four steps.
+
+- **The client and the routes.** `api/writes.test.ts` (4) and `routing.test.ts`
+  (2 new): the token reads and writes (list, by policy, read, create, update,
+  clone, delete), the policy reads and writes, the explanation, and a write sent
+  and never answered, `outcome_unknown` and not retryable where a read stays
+  `unreachable`; the Access pages' addresses, and the Events page's `category`
+  and `correlation` in its query. These were written before their code and run
+  red only after it, against Phase 1's code in the check copy: all six new tests
+  failed there, the ten others passed.
+- **The workflow.** `views/mutation.test.tsx` (7), red the same way: the review
+  names the resource and its impact and sends nothing until confirmed, and
+  without access control repeats the warning; a commit with its index and the
+  link to its audit events; validation, integrity, conflict, permission and
+  not-found refusals told apart; a retryable refusal offers to submit again; an
+  unknown outcome is never a failure, and an idempotent change is offered again
+  only after the state is read, one that is not never (`Mutation.tsx`,
+  `outcomeOf`).
+- **Tokens.** `views/tokens.test.tsx` (12), red first: the list by accessor ID
+  with its marks and filters; no change without `acl:write`; a create reviewed,
+  its secret shown once and gone when the panel closes; an unknown create
+  settled by the tokens with its description, linked for deletion, never sent
+  again; the detail's links to its policies, its node and its service in the
+  identity's scope; an update reviewed by what it adds and removes, the expiry
+  fixed; a deletion reviewed by its node identity's client, what revocation
+  does, the only writer's lock-out, and the file token's revocation order; no
+  deletion of the anonymous token or the token in use; replacement by clone,
+  secret, then deletion (`TokensView.tsx`). Two expectations were corrected: the
+  operator's own token is not the one listed first, and the Access pages' own
+  navigation is labelled apart from the explanation's Access field.
+- **Policies and explanations.** `views/policies.test.tsx` (11), red first: the
+  list with rule summaries, linked-token counts and built-ins; a create; the
+  detail's structured rules, scopes and precedence, and its linked tokens; the
+  editor's local JSON check, the linked tokens in the update's review, and the
+  server's refusal shown as it came; a deletion reviewed by the linked tokens;
+  no deletion of a built-in; the Explain page asking the server and naming the
+  policy and rule, an identity, or the default policy; the panel on a token's
+  page, on a service's Access tab in its scope, and on Nodes and Clients, none
+  without `acl:read` (`PoliciesView.tsx`, `ExplainPanel.tsx`, `rules.ts`, which
+  lays the rules out for reading and decides nothing).
+- `events.test.tsx` (1 new), red first: the Events page opens in the category
+  and with the correlation ID its address names. `Root.test.tsx` (2 new): the
+  nonce on a token's deletion with its outcome and on a policy's editor.
+- **A slow table found and replaced.** The Tokens and Policies lists, on Ant
+  Design's table, took about a second to appear in jsdom, past Testing
+  Library's wait, alone as well as under load; the token detail, with no table,
+  took 0.1 s. The Access lists are plain tables (`PlainTable`); the lists'
+  tests now take 0.3 s.
+- Vitest 204, all passing; the type check clean.: Service changes, server removal and export
 
 1. Service register, update, enable and disable, and deregister, as decision 7.
 2. Server removal from Raft Members, as decision 8.

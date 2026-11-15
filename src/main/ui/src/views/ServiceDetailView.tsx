@@ -16,6 +16,7 @@
 
 import { Descriptions, Empty, Space, Table, Tabs, Tag, Typography } from 'antd';
 import type { ReactNode } from 'react';
+import { useAccess } from '../access';
 import type { QraftApi, Scope } from '../api/client';
 import type { Check, HealthEntry, ServiceInstance } from '../api/schemas';
 import { useEventFeed } from '../eventFeed';
@@ -34,12 +35,16 @@ import {
   worstHealth,
 } from './common';
 import { EphemeralNote, EventsTable, FeedState } from './EventsTable';
+import { ExplainPanel } from './ExplainPanel';
+import { ServiceChanges, useServiceWrite } from './ServiceChanges';
 
 /**
  * A service's Overview, Instances, Health Checks and Metadata (UI/UX design section 5.1). A check's observation, made
  * by a client, is shown apart from the time the servers accepted it, the replicated state (section 3.3).
  */
 export function ServiceDetailView({ api, name, scope }: { api: QraftApi; name: string; scope: Scope }) {
+  const access = useAccess();
+  const writable = useServiceWrite(api, name, scope);
   const { consistency } = useRouter();
   const [state, again] = useLiveRead(
     (wait) => api.serviceHealth(name, scope, { consistency, ...wait }),
@@ -66,6 +71,18 @@ export function ServiceDetailView({ api, name, scope }: { api: QraftApi; name: s
             { key: 'checks', label: 'Health Checks', children: <Checks entries={shown.data} /> },
             { key: 'metadata', label: 'Metadata', children: <Metadata entries={shown.data} /> },
             { key: 'events', label: 'Events', children: <ServiceEvents api={api} name={name} scope={scope} /> },
+            // UI-5: the service's changes, to a token with service:write on it in the selected scope.
+            ...(writable ? [{
+              key: 'changes',
+              label: 'Changes',
+              children: <ServiceChanges api={api} name={name} scope={scope} entries={shown.data} />,
+            }] : []),
+            // UI-5: what a token may do with this service, explained by the server, to a token with acl:read.
+            ...(access.mode === 'token' && access.may.aclRead ? [{
+              key: 'access',
+              label: 'Access',
+              children: <ExplainPanel api={api} defaults={{ resource: 'service', name, tenant: scope.tenant, namespace: scope.namespace }} />,
+            }] : []),
           ]}
         />
       </>
