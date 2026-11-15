@@ -671,6 +671,20 @@ Docker stages (`-DskipVitest=true`). The audit, over the console, the archived l
 test reports, 907 files, found 1,175 error lines, all flagged, and 857 stack traces, none unflagged; no
 `too_many_pings` and no JVM crash file. The logs are in `logs/jenkins/Qraft-76/`.
 
+## Build 77, 2026-11-15
+
+Build 77 ran on `67ea3c4`, UI-4, and failed in 29 min 14 s on one end-to-end test, every other suite passing: default
+2,041 with every coverage gate met and Vitest 132, end-to-end 31 of 32, and Docker and `slow` 52.
+`SessionEndToEndTest.whenTheHoldersSessionLapsesTheOtherClientAcquiresTheLockAfterItsDelay` read the lock through
+host-a's client 13 ms after host-b's client had acquired it, and found no holder. The leader, server3, committed the
+acquire at index 485; host-a's client asked its first server, server1, a follower that then knew 484 as committed and
+answered its applied state, as a default read does (platform design section 12.5). The test, not the platform, was
+wrong: its three reads through one client of what the other wrote, the session's information and the lock twice, are
+now `?consistent`, which a follower refuses and the client takes to its next server, and the leader answers after a
+read barrier. It passed in the check copy. The audit, 908 files, found 1,723 error lines, 1,690 flagged, and 1,154 stack
+traces, 1,150 flagged; the unflagged are that failure's report and Maven's lines after it. No `too_many_pings` and no
+JVM crash file. The logs are in `logs/jenkins/Qraft-77/`.
+
 ## Local runs, 2026-11-07
 
 Two runs of the three suites from the copy at `C:\qx7`, against Docker Desktop, in place of Jenkins while the work

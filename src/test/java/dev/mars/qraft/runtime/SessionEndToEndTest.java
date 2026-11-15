@@ -106,15 +106,18 @@ class SessionEndToEndTest {
         String holder = ok(local(hostA, "PUT", "/v1/session/create",
                 "{\"Name\":\"leader\",\"TTL\":\"10s\",\"LockDelay\":\"2s\"}")).path("ID").asText();
         String waiter = ok(local(hostB, "PUT", "/v1/session/create", "{\"Name\":\"leader\"}")).path("ID").asText();
-        assertEquals("host-a", ok(local(hostB, "GET", "/v1/session/info/" + holder, null)).get(0).path("Node").asText(),
-                "each session is bound to its own client's node");
+        // A read through one client of what the other client wrote is consistent: each client asks its own first server,
+        // and a follower answers its applied state, which may not yet hold a write the leader has just committed
+        // (Jenkins build 77). A follower refuses a consistent read, and the client asks its next server.
+        assertEquals("host-a", ok(local(hostB, "GET", "/v1/session/info/" + holder + "?consistent", null)).get(0)
+                .path("Node").asText(), "each session is bound to its own client's node");
 
         assertEquals("true", text(local(hostA, "PUT", LOCK + "?acquire=" + holder, "host-a")));
         assertEquals("false", text(local(hostB, "PUT", LOCK + "?acquire=" + waiter, "host-b")), "the lock is held");
         assertEquals(holder, ok(local(hostA, "PUT", "/v1/session/renew/" + holder, null)).get(0).path("ID").asText());
         assertEquals(holder, ok(local(hostB, "PUT", "/v1/session/renew/" + holder, null)).get(0).path("ID").asText(),
                 "a renewal reaches the leader through either client");
-        JsonNode held = ok(local(hostB, "GET", LOCK, null)).get(0);
+        JsonNode held = ok(local(hostB, "GET", LOCK + "?consistent", null)).get(0);
         assertEquals(1, held.path("LockIndex").asLong());
 
         // host-a stops renewing: its session lapses at twice its TTL, and its key is released.
@@ -126,7 +129,7 @@ class SessionEndToEndTest {
 
         waitUntil(() -> "true".equals(text(local(hostB, "PUT", LOCK + "?acquire=" + waiter, "host-b"))), 10,
                 "host-b acquires once the lock delay has passed");
-        JsonNode acquired = ok(local(hostA, "GET", LOCK, null)).get(0);
+        JsonNode acquired = ok(local(hostA, "GET", LOCK + "?consistent", null)).get(0);
         assertEquals(waiter, acquired.path("Session").asText());
         assertEquals(2, acquired.path("LockIndex").asLong(), "a new holder increments the lock index");
         HttpResponse<byte[]> lapsed = local(hostA, "PUT", LOCK + "?acquire=" + holder, "host-a");
