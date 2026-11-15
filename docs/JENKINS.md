@@ -671,6 +671,23 @@ Docker stages (`-DskipVitest=true`). The audit, over the console, the archived l
 test reports, 907 files, found 1,175 error lines, all flagged, and 857 stack traces, none unflagged; no
 `too_many_pings` and no JVM crash file. The logs are in `logs/jenkins/Qraft-76/`.
 
+## Build 83, 2026-11-15
+
+Build 83 ran on `1a4ca7d`, build 82's record with the two Vitest tests lightened, and failed in 3 min 27 s in the
+default stage on one Vitest test, `security.test.tsx` "lists the client rows of Nodes and Clients without
+operator:read, and says the server rows need it": its first wait, Testing Library's 1 s, ended at 1,171 ms before
+the clients table showed, the other 220 Vitest tests and the 2,053 Java tests passing. Build 82 had run it in 825 ms.
+Measured in the check copy, the cost was not the table but jsdom's `getComputedStyle`, which rc-util's scrollbar
+measurement calls as a table mounts and which evaluates every rule of every style element in the page: Ant Design
+leaves its style elements after its components unmount, so they gathered through a file, and the explanation test on
+Nodes and Clients spent 795 ms of its 879 in four calls over 298,000 characters of CSS, 3.7 s on Jenkins. Each test
+now starts with no style element (`setupTests.ts`), the explanation test taking 403 ms under the whole local suite
+instead of 1,484, and the suite's test time 50.7 s instead of 64.8; and every wait lasts up to 3 s, the first one
+spanning the whole interface mounting, as the Root first-table test's already did. `testSetup.test.tsx` (4) holds both
+rules, each red first. The audit, 600 files, found no unflagged line but Maven's and Jenkins' report of the failure, and
+1,004 stack traces, every one flagged; no `too_many_pings` and no JVM crash file. The logs are in
+`logs/jenkins/Qraft-83/`.
+
 ## Build 82, 2026-11-15
 
 Build 82 ran on `0d2b53b`, build 81's fix with UI-5's close, and passed in 30 min 20 s: default 2,053 with every

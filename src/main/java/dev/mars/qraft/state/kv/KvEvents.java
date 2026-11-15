@@ -16,11 +16,12 @@
 
 package dev.mars.qraft.state.kv;
 
-import dev.mars.qraft.common.events.QraftEvent;
+import dev.mars.qraft.common.events.KeyEvent;
 
 /**
  * The key/value store's domain events (event query and watch list, Phase 1, decision 1): each carries the key, and
- * never the value (architecture section 13).
+ * never the value (architecture section 13). Each is a {@link KeyEvent}, so one key's events can be read (UI-6 Key/Value
+ * list, decision 8).
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-08
@@ -30,39 +31,65 @@ public final class KvEvents {
     private KvEvents() { }
 
     /** A key was written; {@code created} when it did not exist. */
-    public record KeySet(String key, boolean created) implements QraftEvent {
+    public record KeySet(String key, boolean created) implements KeyEvent {
         @Override
         public String type() {
             return "key.set";
         }
+
+        @Override
+        public boolean concerns(String named) {
+            return key.equals(named);
+        }
     }
 
-    public record KeyDeleted(String key) implements QraftEvent {
+    public record KeyDeleted(String key) implements KeyEvent {
         @Override
         public String type() {
             return "key.deleted";
         }
+
+        @Override
+        public boolean concerns(String named) {
+            return key.equals(named);
+        }
     }
 
     /** Every key under {@code prefix} was deleted. */
-    public record TreeDeleted(String prefix) implements QraftEvent {
+    public record TreeDeleted(String prefix) implements KeyEvent {
         @Override
         public String type() {
             return "key.tree_deleted";
         }
+
+        /** Whether {@code named} was under the prefix, so this deletion removed it if it existed. */
+        @Override
+        public boolean concerns(String named) {
+            return named.startsWith(prefix);
+        }
     }
 
-    public record LockAcquired(String key, String session) implements QraftEvent {
+    public record LockAcquired(String key, String session) implements KeyEvent {
         @Override
         public String type() {
             return "lock.acquired";
         }
+
+        @Override
+        public boolean concerns(String named) {
+            return key.equals(named);
+        }
     }
 
-    public record LockReleased(String key, String session) implements QraftEvent {
+    public record LockReleased(String key, String session) implements KeyEvent {
         @Override
         public String type() {
             return "lock.released";
+        }
+
+        @Override
+        public boolean concerns(String named) {
+            return key.equals(named);
         }
     }
 }

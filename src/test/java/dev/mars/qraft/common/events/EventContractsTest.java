@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.common.events;
 
+import dev.mars.qraft.state.kv.KvEvents;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -161,5 +162,26 @@ class EventContractsTest {
         assertFalse(service.matches(unnamed), "an event that names no service is no service's");
         assertTrue(EventFilter.all().matches(unnamed));
         assertEquals(Optional.empty(), EventFilter.all().service());
+    }
+
+    @Test
+    void aKeyFilterMatchesTheEventsThatNameTheKeyAndTheTreeDeletionsThatCoverIt() {
+        EventFilter key = new EventFilter(Set.of(), Set.of(), Optional.empty(), Optional.empty(), Optional.empty(),
+                Optional.of("app/db"));
+
+        assertTrue(key.matches(domain(1, new KvEvents.KeySet("app/db", true))));
+        assertTrue(key.matches(domain(2, new KvEvents.KeyDeleted("app/db"))));
+        assertTrue(key.matches(domain(3, new KvEvents.LockAcquired("app/db", "s"))));
+        assertTrue(key.matches(domain(4, new KvEvents.LockReleased("app/db", "s"))));
+        assertTrue(key.matches(domain(5, new KvEvents.TreeDeleted("app/"))));
+        assertTrue(key.matches(domain(6, new KvEvents.TreeDeleted(""))), "the whole store's deletion covers every key");
+        assertFalse(key.matches(domain(7, new KvEvents.KeySet("app/dbx", true))));
+        assertFalse(key.matches(domain(8, new KvEvents.TreeDeleted("app/dbx"))));
+        assertFalse(key.matches(domain(9, new Named("app/db"))), "an event that names no key is no key's");
+        assertEquals(Optional.empty(), EventFilter.all().key());
+    }
+
+    private static EventEnvelope domain(long index, QraftEvent event) {
+        return EventEnvelope.domain(id(index), AT, 3, index, 0, "acme", "prod", event);
     }
 }

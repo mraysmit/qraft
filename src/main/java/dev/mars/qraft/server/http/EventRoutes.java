@@ -52,7 +52,9 @@ import java.util.concurrent.TimeUnit;
  * One server's events over HTTP (event query and watch list, decision 2): {@code GET /v1/operator/events} pages through
  * the server's journal after {@code after} ({@code <boot>:<sequence>}, the boot's start by default), at most
  * {@code limit} events (100 by default, 1,000 at most), of a {@code category} and {@code type} if given, and of a
- * {@code tenant}, a {@code namespace} and a {@code service} if given (UI-4 list, decision 2); it answers the events,
+ * {@code tenant}, a {@code namespace} and a {@code service} if given (UI-4 list, decision 2), and of a {@code key} if
+ * given: the events that name it and the tree deletions whose prefix covers it (UI-6 Key/Value list, decision 8),
+ * read as given, not trimmed; it answers the events,
  * the cursor to ask from next, the page's status and the journal's {@code capacity}. It needs {@code operator:read}.
  *
  * <p>{@code GET /v1/operator/events/watch} (decision 3) takes the same cursor and filters, the limit aside, and answers
@@ -76,7 +78,7 @@ final class EventRoutes {
     static final int MAX_LIMIT = 1000;
     private static final AclRequest OPERATOR_READ = AclRequest.single(AclResource.OPERATOR, AclAccess.READ);
     private static final Set<String> PARAMETERS = Set.of("after", "limit", "category", "type", "tenant", "namespace",
-            "service");
+            "service", "key");
 
     private final HttpApiServer server;
     private volatile Duration heartbeat = Duration.ofSeconds(15);
@@ -291,7 +293,14 @@ final class EventRoutes {
         }
         Set<String> types = query.containsKey("type") ? Set.of(query.get("type")) : Set.of();
         return new Request(after, new EventFilter(categories, types, named(query, "tenant"), named(query, "namespace"),
-                named(query, "service")), limit);
+                named(query, "service"), key(query)), limit);
+    }
+
+    /** The key a request names, as it is given, since a key may begin or end with a space; an empty one is refused. */
+    private static Optional<String> key(Map<String, String> query) {
+        if (!query.containsKey("key")) return Optional.empty();
+        if (query.get("key").isEmpty()) throw new IllegalArgumentException("key must not be empty");
+        return Optional.of(query.get("key"));
     }
 
     /** The name a parameter gives, if it is given; a blank one is refused. */

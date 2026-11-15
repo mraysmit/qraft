@@ -61,9 +61,9 @@ describe('Root', () => {
     const inserted = await stylesInsertedDuring(async () => {
       render(<Root bootstrap={BOOTSTRAP} api={fakeApi()} session={memorySession('held')} />);
       // The first Ant Design table of the file mounts cold, as it must for the scrollbar to be measured during it: 0.5 s
-      // alone, 1.4 s on Jenkins before UI-5 (build 79), 1.6 s under the whole local suite after UI-5's sign-in gate,
-      // past the 1 s default wait. The test's own 5 s limit still bounds it.
-      await screen.findByText('web', { selector: 'a' }, { timeout: 3000 });
+      // alone, 1.4 s on Jenkins before UI-5 (build 79), 1.6 s under the whole local suite after UI-5's sign-in gate.
+      // Every wait now lasts up to 3 s (setupTests.ts).
+      await screen.findByText('web', { selector: 'a' });
     });
 
     expect(inserted.some((style) => style.css.includes('::-webkit-scrollbar')), 'the scrollbar measurement ran').toBe(true);

@@ -23,31 +23,40 @@ import java.util.Set;
 /**
  * Which events a reader wants (architecture section 8): an empty set of categories or types takes every one, and a
  * tenant or namespace, when given, takes only the events in it, so an event without a scope matches no scope. A
- * service, when given, takes only the {@link ServiceEvent}s that name it (UI-4 list, decision 2).
+ * service, when given, takes only the {@link ServiceEvent}s that name it (UI-4 list, decision 2), and a key only the
+ * {@link KeyEvent}s about it (UI-6 Key/Value list, decision 8).
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-08
  * @version 1.0
  */
 public record EventFilter(Set<EventCategory> categories, Set<String> types, Optional<String> tenant,
-                          Optional<String> namespace, Optional<String> service) {
+                          Optional<String> namespace, Optional<String> service, Optional<String> key) {
     public EventFilter {
         categories = Set.copyOf(Objects.requireNonNull(categories, "categories"));
         types = Set.copyOf(Objects.requireNonNull(types, "types"));
         Objects.requireNonNull(tenant, "tenant");
         Objects.requireNonNull(namespace, "namespace");
         Objects.requireNonNull(service, "service");
+        Objects.requireNonNull(key, "key");
+    }
+
+    /** The events of the categories, types and scope given, of any key, and of the service given if one is. */
+    public EventFilter(Set<EventCategory> categories, Set<String> types, Optional<String> tenant,
+                       Optional<String> namespace, Optional<String> service) {
+        this(categories, types, tenant, namespace, service, Optional.empty());
     }
 
     /** The events of the categories, types and scope given, of any service. */
     public EventFilter(Set<EventCategory> categories, Set<String> types, Optional<String> tenant,
                        Optional<String> namespace) {
-        this(categories, types, tenant, namespace, Optional.empty());
+        this(categories, types, tenant, namespace, Optional.empty(), Optional.empty());
     }
 
     /** Every event. */
     public static EventFilter all() {
-        return new EventFilter(Set.of(), Set.of(), Optional.empty(), Optional.empty(), Optional.empty());
+        return new EventFilter(Set.of(), Set.of(), Optional.empty(), Optional.empty(), Optional.empty(),
+                Optional.empty());
     }
 
     public boolean matches(EventEnvelope envelope) {
@@ -55,6 +64,7 @@ public record EventFilter(Set<EventCategory> categories, Set<String> types, Opti
         if (!types.isEmpty() && !types.contains(envelope.event().type())) return false;
         if (tenant.isPresent() && !tenant.equals(envelope.tenant())) return false;
         if (namespace.isPresent() && !namespace.equals(envelope.namespace())) return false;
+        if (key.isPresent() && !(envelope.event() instanceof KeyEvent about && about.concerns(key.get()))) return false;
         return service.isEmpty() || envelope.event() instanceof ServiceEvent named
                 && service.get().equals(named.serviceName());
     }

@@ -48,8 +48,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * Tests {@code GET /v1/operator/events} (event query and watch list, Phase 2, decision 2): one server's events, paged
  * by cursor and limit, filtered by category and type, with the cursor to ask from next and the page's status, a domain
  * event carrying its committed index and replicated identity; a cursor of another boot and a request that is not
- * valid are answered as such; and (UI-4 list, decision 2) the events of a tenant, a namespace or a service, and the
- * journal's capacity.
+ * valid are answered as such; (UI-4 list, decision 2) the events of a tenant, a namespace or a service, and the
+ * journal's capacity; and (UI-6 Key/Value list, decision 8) the events of a key.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-08
@@ -168,6 +168,31 @@ class HttpApiServerEventQueryTest {
                 "a system event is in no scope");
         assertEquals(EventJournal.DEFAULT_CAPACITY, page("").path("capacity").asInt());
         assertEquals(400, send("GET", "/v1/operator/events?service=", null).statusCode(), "a blank service");
+    }
+
+    @Test
+    void eventsAreFilteredByTheKeyTheyNameAndTheTreeDeletionsThatCoverIt() throws Exception {
+        start();
+        register("node-1", "web-1", "web");
+        HttpResponse<String> created = send("PUT", "/v1/session/create", "{\"Node\":\"node-1\"}");
+        assertEquals(200, created.statusCode(), created.body());
+        String session = JSON.readTree(created.body()).path("ID").asText();
+        for (String key : List.of("app/db", "app/dbx", "other")) {
+            assertEquals("true", send("PUT", "/v1/kv/" + key, "v").body());
+        }
+        assertEquals("true", send("PUT", "/v1/kv/app/db?acquire=" + session, "v").body());
+        assertEquals("true", send("PUT", "/v1/kv/app/db?release=" + session, "v").body());
+        assertEquals("true", send("DELETE", "/v1/kv/app/db", null).body());
+        assertEquals("true", send("DELETE", "/v1/kv/app/?recurse", null).body());
+
+        JsonNode db = page("?key=app/db");
+        assertEquals(List.of("key.set", "lock.acquired", "lock.released", "key.deleted", "key.tree_deleted"), types(db));
+        assertEquals("app/", db.path("events").get(4).path("event").path("prefix").asText());
+        assertEquals(List.of("key.set", "key.tree_deleted"), types(page("?key=app/dbx")), "not another key's prefix");
+        assertEquals(List.of("key.set"), types(page("?key=other")));
+        assertEquals(List.of("key.deleted"), types(page("?key=app/db&type=key.deleted")));
+        assertEquals(List.of(), types(page("?key=app/db&tenant=acme")));
+        assertEquals(400, send("GET", "/v1/operator/events?key=", null).statusCode(), "a blank key");
     }
 
     private void register(String nodeName, String id, String name, String... scope) throws Exception {

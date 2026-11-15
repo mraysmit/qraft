@@ -15,11 +15,21 @@
  */
 
 import '@testing-library/jest-dom/vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
 import { afterEach } from 'vitest';
 
-// Vitest runs without globals here, so Testing Library cannot register its own cleanup between tests.
-afterEach(() => cleanup());
+// A view's first wait spans the whole interface mounting: its sign-in gate, its authorize call and its first table. That
+// took past Testing Library's 1 s on Jenkins (builds 79 and 83). A test's own limit, 5 s, still bounds every wait.
+configure({ asyncUtilTimeout: 3000 });
+
+// Vitest runs without globals here, so Testing Library cannot register its own cleanup between tests. Ant Design keeps
+// the style elements it added after its components unmount, and jsdom's getComputedStyle evaluates every rule of every
+// one: a table mounted late in a file spent most of its time measuring itself against the styles of the tests before
+// it (Jenkins build 83). Each test starts with a head as a fresh page has it; what it mounts adds its styles again.
+afterEach(() => {
+  cleanup();
+  document.head.querySelectorAll('style').forEach((element) => element.remove());
+});
 
 // jsdom has no media queries. Ant Design's table asks for its responsive breakpoints; no query matches here.
 Object.defineProperty(window, 'matchMedia', {
