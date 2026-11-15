@@ -1338,7 +1338,7 @@ public class RaftNode {
     /**
      * The leader's view of each server (observability list, Phase 3, decision 5), Consul's autopilot health, captured on
      * the state loop; empty on a server that does not lead, which knows no follower's progress. A follower is healthy
-     * when it has answered within an election timeout and holds the leader's log to within
+     * when it has answered within an election timeout's worth of heartbeat rounds and holds the leader's log to within
      * {@value ClusterHealth#MAX_TRAILING_LOGS} entries; the failure tolerance is how many healthy voters exceed a quorum.
      */
     public CompletableFuture<java.util.Optional<ClusterHealth>> serverHealth() {
@@ -1365,7 +1365,11 @@ public class RaftNode {
             Long answered = peerAnsweredNanos.get(server.name());
             long contact = answered == null ? -1 : TimeUnit.NANOSECONDS.toMillis(now - answered);
             long index = matchIndex.getOrDefault(server.name(), 0L);
-            boolean healthy = answered != null && contact <= electionTimeoutMs
+            // Answered within an election timeout's worth of heartbeat rounds, as the members read and check-quorum
+            // count it, and not by the wall clock: Jenkins build 81 lost a race between a 10 s silence and a 10 s wait.
+            Long round = lastContactRound.get(server.name());
+            boolean healthy = answeredPeers.contains(server.name()) && round != null
+                    && heartbeatRound - round <= quorumContactRounds
                     && leaderIndex - index <= ClusterHealth.MAX_TRAILING_LOGS;
             servers.add(new ServerHealth(server.serverId(), server.name(), server.address(), false, server.voter(),
                     contact, answered == null ? 0 : currentTerm, index, healthy));

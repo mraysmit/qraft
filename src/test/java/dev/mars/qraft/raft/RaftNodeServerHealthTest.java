@@ -133,14 +133,13 @@ class RaftNodeServerHealthTest {
         // The leader logs h3 as unreachable once the partition refuses its AppendEntries.
         IntentionalErrorsHelper.expect(IntentionalErrorFixture.RAFT_PEER_UNREACHABLE);
         InMemoryTransportSimulatorFixture.createPartition(Set.of("h1", "h2"), Set.of("h3"));
-        cluster.heartbeatUntil(leader, () -> {
-            try {
-                return !of(health(leader), "h3").healthy();
-            } catch (Exception notYet) {
-                return false;
-            }
-        }, "h3 has not answered for an election timeout");
+        // An election timeout's worth of heartbeat rounds, as the members read counts reachability: Jenkins build 81
+        // waited for h3 to be 10 s silent on the wall clock against the fixture's own 10 s wait, and lost the race.
+        long rounds = Math.ceilDiv(ManualRaftClusterFixture.ELECTION_TIMEOUT_MS, ManualRaftClusterFixture.HEARTBEAT_MS);
+        int[] fired = {0};
+        cluster.heartbeatUntil(leader, () -> fired[0]++ > rounds, "an election timeout of heartbeat rounds passed");
 
+        assertFalse(of(health(leader), "h3").healthy(), "h3 has not answered for an election timeout");
         ClusterHealth health = health(leader);
         assertFalse(health.healthy());
         assertEquals(0, health.failureTolerance(), "two healthy voters of three survive no further loss");

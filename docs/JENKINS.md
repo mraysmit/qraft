@@ -671,6 +671,17 @@ Docker stages (`-DskipVitest=true`). The audit, over the console, the archived l
 test reports, 907 files, found 1,175 error lines, all flagged, and 857 stack traces, none unflagged; no
 `too_many_pings` and no JVM crash file. The logs are in `logs/jenkins/Qraft-76/`.
 
+## Build 81, 2026-11-15
+
+Build 81 ran on `be77ac8`, UI-5's close with build 80's fix and the test logging no longer prudent, and failed in 2 min
+51 s in the default stage on one test, `RaftNodeServerHealthTest.aFollowerCutOffForAnElectionTimeoutIsUnhealthyAndLowersTheFailureTolerance`,
+the other 2,052 passing. The partition held, every append to h3 refused, but the leader judged h3's health by the wall
+clock, healthy until 10 s silent, the fixture's election timeout, while the fixture's `heartbeatUntil` waits at most
+10 s: the test raced two equal clocks, and lost by 40 ms. The health is now counted in heartbeat rounds, an election
+timeout's worth, as the members read's reachability and check-quorum count it; the test drives that many rounds, red
+first on the wall-clock rule, and takes 1.2 s instead of over 10. The audit found no unflagged line but the failure's
+report and Maven's lines after it. The logs are in `logs/jenkins/Qraft-81/`.
+
 ## Build 80, 2026-11-15
 
 Build 80 ran on `851331c`, UI-5's Phases 1 to 3, and failed in 3 min 23 s in the default stage on one test,

@@ -1,13 +1,13 @@
 # Task List: Administrative Interface, Access Control and Mutations (UI-5)
 
 **Date:** 2026-11-15
-**Status:** In progress. Phases 0 to 3 are done, test first; Phase 4 is next.
-**Last updated:** 2026-11-15 (Phase 3 done, with its record. Earlier the same day: Phases 1 and 2 done, with their records; Jenkins build 79 passed `9b8b8a8`. Earlier the same day: Phase 0 done, decision 4's window corrected to the hour. Earlier the same day: written, at the owner's word to proceed after Jenkins build 78)
-**Active work:** Phase 4, close
-**Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-5
-**Source plan:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md), sections 3.5, 3.7, 5.1, 9.2, 9.4, 10.2 and 11; [`task-list-acl-and-tokens-2026-11-07.md`](../docs/archive/task-list-acl-and-tokens-2026-11-07.md), proposals 3 and 10 to 19
-**Predecessor:** [`task-list-admin-ui-events-configuration-live-2026-11-15.md`](../docs/archive/task-list-admin-ui-events-configuration-live-2026-11-15.md) (UI-4)
-**Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
+**Status:** Complete and archived on 2026-11-15. Phases 0 to 4 are done, test first; Phase 0 is in `9b8b8a8`, Phases 1 to 3 in `851331c`, and Phase 4 with two fixes Jenkins build 80 and the check copy found is uncommitted. `mvn install`, the end-to-end stage and headless Chrome passed in the check copy with every log audited, none unflagged (section 9).
+**Last updated:** 2026-11-15 (Phase 4 done, the list complete and archived, its links rewritten from its new place; two defects found on the way fixed, test first: a forwarded write withdrawn before it was sent, and the test log lost after an interrupt. Earlier the same day: Phase 3 done, with its record. Earlier the same day: Phases 1 and 2 done, with their records; Jenkins build 79 passed `9b8b8a8`. Earlier the same day: Phase 0 done, decision 4's window corrected to the hour. Earlier the same day: written, at the owner's word to proceed after Jenkins build 78)
+**Active work:** complete on 2026-11-15
+**Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](../../docs-design/QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-5
+**Source plan:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](../../docs-design/QRAFT_ADMIN_UI_UX_DESIGN.md), sections 3.5, 3.7, 5.1, 9.2, 9.4, 10.2 and 11; [`task-list-acl-and-tokens-2026-11-07.md`](task-list-acl-and-tokens-2026-11-07.md), proposals 3 and 10 to 19
+**Predecessor:** [`task-list-admin-ui-events-configuration-live-2026-11-15.md`](task-list-admin-ui-events-configuration-live-2026-11-15.md) (UI-4)
+**Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
 The owner asked on 2026-11-15 to proceed after Jenkins build 78, which passed
 UI-4; the plan names UI-5 as the next increment, at the owner's word. The
@@ -15,7 +15,27 @@ decisions in section 4 were taken as the recommended options; each is
 reversible, and the owner can change any of them. Decision 7 answers the plan's
 open question 5. Each phase ends with `mvn install` in the check copy at
 `C:\qw` and an audit of its logs; Jenkins runs the three suites once the owner
-has committed and pushed the work.
+has committed and pushed the work. The list was completed on 2026-11-15, with the
+completion summary below, and moved to `docs/archive/`.
+
+**Completion summary.** UI-5 is delivered. On the server: the security status
+read, `GET /v1/internal/ui/acl/status`. In the interface: sign-in before any API
+call, the secret held for the tab, the session ended when the server no longer
+knows the token; the token menu and the management-token banner;
+navigation shaped by one authorize call; the Access section's Status, Tokens,
+Policies and Explain pages, with the one-time secret, revocation, replacement,
+the management token's revocation order, policy reviews by their linked tokens,
+and explanations on the token, policy, service and node pages; the mutation
+workflow, its review, its outcomes, an unknown outcome never shown as a failure,
+and a link to the request's audit events; service registration, update, enable,
+disable and deregistration on existing nodes (open question 5); server removal
+with its quorum review; and the export of events. Decisions 1 to 11 were taken
+as the recommended options; each can be reversed. Two defects were found and
+fixed on the way, test first: a follower answered a forwarded write that it had
+withdrawn before sending as perhaps applied (Jenkins build 80), and the test
+logging's prudent appender lost the rest of a run's log after an interrupt.
+Left for later: roles and auth methods in the interface (reserved), a durable
+audit query, and browser end-to-end automation (decision 11).
 
 ## 1. Goal
 
@@ -400,3 +420,64 @@ with the workflow that uses them.
 
 **Exit gate.** `mvn install` and the end-to-end tests pass with clean logs; the
 owner's commit, then Jenkins.
+
+**Status, 2026-11-15: done.**
+
+- `PackagedAdminUiEndToEndTest.aPackagedServerWithAclsOnAnswersTheInterfacesCallsUnderTheTokenSignedInWith`:
+  the shaded jar with ACLs on and a management file answers the bootstrap's
+  `authMode` `token`, `self` once the leader has installed the token, an unknown
+  secret's `token_not_found`, the authorize call and the status; refuses a
+  request without a token; creates a policy and a token, its secret once,
+  updates and explains it; registers and deregisters a service under the new
+  token; deletes both, after which the token's session ends; and its output has
+  no error and no secret. It passed at once: it accepts behaviour built test
+  first in Phases 0 to 3.
+- `security.test.tsx` (1 new), red first: without access control the Access
+  section offers only its Status page, and the token pages say there are no
+  tokens or policies, reading none of the ACL routes, which answer 401 there.
+- **A forwarded write withdrawn before it was sent** (Jenkins build 80,
+  `docs/JENKINS.md`): `raft.ForwardCall`, sent or withdrawn, never both;
+  `ForwardCallTest` (3), `GrpcRaftForwardTest` (1 new) and
+  `QraftServerWriteForwardingTest` (1 new), red first, the last on
+  `outcome_unknown` against the old server; platform design section 12.5.
+- **The test log lost after an interrupt.** An install's `mvn` run failed
+  `IntentionalErrorConfigurationTest`, its line missing from the log file: at
+  16:40:40 a transport fixture's sender, interrupted while it waited for the
+  prudent appender's file lock, made the channel close, and the rest of the run
+  went unwritten (`logs/ui5-p4-install-20261115-163804.log`), as in Jenkins
+  build 64. `LogbackConfigurationAuditHelper` now finds a prudent appender, red
+  first in `LogbackConfigurationAuditTest` and then in
+  `IntentionalErrorConfigurationTest.theTestConfigurationCannotDropAnError`
+  against the real file, and `logback-test.xml` is no longer prudent. A first
+  reproduction, a child process holding the file's lock, was dropped: on
+  Windows that lock refuses a plain write as well, so it could not tell the two
+  apart; its runs are `logs/log-red-*` and `logs/log-green-20261115-170235.log`.
+- **A slow first table given its time.** The Root test that measures the
+  scrollbar while the first table of its file mounts, cold as it must be, took
+  1.4 s on Jenkins before UI-5 (build 79) and 1.6 s under the whole local suite
+  after the sign-in gate, past Testing Library's 1 s wait, and failed one
+  install (`logs/ui5-p4-install-20261115-163102.log`); its wait is 3 s, its
+  test's limit still 5 s. One expectation of the UI-3 Raft Members test now
+  reads the removal note.
+- `mvn install` on the final tree: default 2,053 and Vitest 220, every gate; the
+  audit of the files the run wrote, 605, found 844 error lines and 747 stack
+  traces, every one flagged (`logs/ui5-p4-install-20261115-170537.log`). The
+  end-to-end stage as Jenkins runs it: 33 tests, all passing, its audit of 60
+  files clean (`logs/ui5-p4-e2e-20261115-171137.log`).
+- Headless Chrome against the packaged server, over the DevTools protocol,
+  without ACLs (Services, Raft Members, the Access Status and Tokens pages,
+  Events) and with them (Services, Status, Tokens, a token, Policies, Explain,
+  Raft Members, a service): each showed its data, with ACLs only after sign-in
+  through the tab's storage; every style carried the nonce, Chrome logged no
+  console message, no secret appeared on any page or in the server's output,
+  and the server logged no error. Two mistakes of the probe were corrected: it
+  gave the ACL server the operator token, which such a server refuses, and
+  looked for a removal on a single voter.
+- The implementation plan, the UI/UX design (sections 5.1, 9.2 and 10.2.2), the
+  platform design and the handover record UI-5.
+- **After the owner's commit `be77ac8`**, Jenkins build 81 failed on
+  `RaftNodeServerHealthTest`: the leader judged a follower's health by the wall
+  clock, 10 s, against the fixture's 10 s wait. It is now counted in heartbeat
+  rounds, as the members read counts reachability; the test, red first on the
+  wall-clock rule, drives an election timeout's worth of rounds
+  (`docs/JENKINS.md`).
