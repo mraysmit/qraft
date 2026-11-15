@@ -126,6 +126,10 @@ public final class HttpApiServer implements AutoCloseable {
     private final Duration raftTimeout;
     private final MembershipService membership;
     final AclHttpSettings acl;
+    /** {@code server.security.profile}, which the interface's bootstrap object and security status name. */
+    final SecurityProfile profile;
+    /** How the listener serves HTTPS, or empty for plain HTTP; the security status reports it. */
+    final Optional<ServerTls> tls;
     /** Resolves a request's token against this server's applied ACL state; unrestricted with ACLs disabled. */
     private final AclResolver resolver;
     private volatile io.opentelemetry.api.metrics.Meter meter;
@@ -302,7 +306,8 @@ public final class HttpApiServer implements AutoCloseable {
     public HttpApiServer(int port, RaftNode raftNode, QraftStateStore stateStore, Clock clock,
                          AdminUiConfig ui, UiAssets assets, Duration raftTimeout, MembershipService membership,
                          AclHttpSettings acl, Optional<ServerTls> tls, SecurityProfile profile) throws IOException {
-        Objects.requireNonNull(profile, "profile");
+        this.profile = Objects.requireNonNull(profile, "profile");
+        this.tls = Objects.requireNonNull(tls, "tls");
         this.acl = Objects.requireNonNull(acl, "acl");
         this.membership = membership;
         this.raftTimeout = Objects.requireNonNull(raftTimeout, "raftTimeout");

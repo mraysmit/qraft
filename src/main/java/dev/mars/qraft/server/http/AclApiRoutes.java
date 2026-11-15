@@ -22,6 +22,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.sun.net.httpserver.HttpExchange;
 import dev.mars.qraft.common.acl.AclAccess;
 import dev.mars.qraft.common.acl.AclAuthorizer;
+import dev.mars.qraft.common.acl.AclDefaultPolicy;
 import dev.mars.qraft.common.acl.AclDecision;
 import dev.mars.qraft.common.acl.AclOrigin;
 import dev.mars.qraft.common.acl.AclRequest;
@@ -32,10 +33,12 @@ import dev.mars.qraft.common.acl.AclRulesJson;
 import dev.mars.qraft.common.acl.AclScope;
 import dev.mars.qraft.common.acl.NodeIdentity;
 import dev.mars.qraft.common.acl.ServiceIdentity;
+import dev.mars.qraft.common.tls.ServerTls;
 import dev.mars.qraft.raft.RaftCommand;
 import dev.mars.qraft.raft.RaftCommandResult;
 import dev.mars.qraft.server.acl.AclPrincipal;
 import dev.mars.qraft.state.AclCommand;
+import dev.mars.qraft.state.acl.AclBuiltins;
 import dev.mars.qraft.state.acl.AclPolicy;
 import dev.mars.qraft.state.acl.AclRefusal;
 import dev.mars.qraft.state.acl.AclRole;
@@ -52,6 +55,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -59,6 +63,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.CompletionException;
 import java.util.function.Function;
@@ -77,7 +82,11 @@ import java.util.regex.Pattern;
  *       list takes {@code policy};</li>
  *   <li>{@code POST /v1/internal/acl/authorize} and {@code POST /v1/internal/acl/resolve}, which answer only for the
  *       presenting token and need no grant, as {@code self} does; and {@code POST /v1/acl/explain}, which needs
- *       {@code acl:read} and decides through the same authorizer that enforcement uses (proposal 19).</li>
+ *       {@code acl:read} and decides through the same authorizer that enforcement uses (proposal 19);</li>
+ *   <li>{@code GET /v1/internal/ui/acl/status}, the administrative interface's security status (UI-5 task list,
+ *       decision 4), which needs {@code acl:read}: the settings, the management tokens, what the anonymous token may
+ *       write, the tokens holding {@code acl:write} without an expiry as the lock-out guard decides them, and the
+ *       tokens that expire within the hour with what they hold.</li>
  * </ul>
  *
  * <p>Every other route needs {@code acl:read} to read or {@code acl:write} to change. A secret is answered only by the
@@ -95,9 +104,11 @@ final class AclApiRoutes {
     /** The paths this class serves; each is a context of the server's HTTP listener. */
     static final List<String> CONTEXTS = List.of("/v1/acl/token", "/v1/acl/tokens", "/v1/acl/policy",
             "/v1/acl/policies", "/v1/acl/role", "/v1/acl/roles", "/v1/acl/explain", "/v1/internal/acl/authorize",
-            "/v1/internal/acl/resolve");
+            "/v1/internal/acl/resolve", "/v1/internal/ui/acl/status");
     /** What every answer after the first shows for a secret. */
     static final String HIDDEN = "<hidden>";
+    /** How soon a token expires for the security status to list it; no token lives more than 24 hours. */
+    static final Duration EXPIRING_WITHIN = Duration.ofHours(1);
     /** As many checks as one authorize call takes, as Consul's {@code maxAuthorizationRequests}. */
     static final int MAX_AUTHORIZATIONS = 64;
 
@@ -156,7 +167,8 @@ final class AclApiRoutes {
                         (e, p, x) -> delete(e, AclCommand.deleteRole(canonicalOrMissing(x)), "role", x)),
                 route("POST", "/v1/acl/explain", Grant.READ, Set.of(), (e, p, x) -> explain(e)),
                 route("POST", "/v1/internal/acl/authorize", Grant.ANY, Set.of(), (e, p, x) -> authorize(e, p)),
-                route("POST", "/v1/internal/acl/resolve", Grant.ANY, Set.of(), (e, p, x) -> resolve(e, p)));
+                route("POST", "/v1/internal/acl/resolve", Grant.ANY, Set.of(), (e, p, x) -> resolve(e, p)),
+                route("GET", "/v1/internal/ui/acl/status", Grant.READ, Set.of(), (e, p, x) -> status(e)));
     }
 
     private static Route route(String method, String path, Grant grant, Set<String> query, Action action) {
@@ -528,6 +540,73 @@ final class AclApiRoutes {
             answer.put("decidedBy", "default");
         }
         answer(exchange, answer);
+    }
+
+    /** The security status (decision 4), decided from this server's applied ACL state and its own settings. */
+    private void status(HttpExchange exchange) throws IOException {
+        AclView acl = view();
+        Instant now = server.clock.instant();
+        Instant soon = now.plus(EXPIRING_WITHIN);
+        List<AclToken> live = acl.tokens().stream()
+                .filter(token -> token.expirationTime() == null || token.expirationTime().isAfter(now)).toList();
+        Map<String, Object> answer = new LinkedHashMap<>();
+        answer.put("enabled", true);
+        answer.put("defaultPolicy", server.acl.defaultPolicy().name().toLowerCase(Locale.ROOT));
+        answer.put("securityProfile", server.profile.name().toLowerCase(Locale.ROOT));
+        answer.put("transport", Map.of("https", server.tls.isPresent(),
+                "clientCertificateRequired", server.tls.map(ServerTls::requireClientCertificate).orElse(false)));
+        answer.put("readAt", now.toString());
+        answer.put("expiringWithinMinutes", EXPIRING_WITHIN.toMinutes());
+        answer.put("managementTokens", live.stream().filter(token -> management(acl, token)).map(token -> {
+            Map<String, Object> entry = described(token);
+            entry.put("installedFromFile", token.installedFromFile());
+            entry.put("expirationTime", token.expirationTime() == null ? null : token.expirationTime().toString());
+            return entry;
+        }).toList());
+        acl.token(AclBuiltins.ANONYMOUS_TOKEN_ID).ifPresent(anonymous -> {
+            AclTokenAnswer links = hidden(anonymous);
+            Set<String> writes = new TreeSet<>();
+            acl.grants(anonymous).forEach(grant -> grant.rules().rules().stream()
+                    .filter(rule -> rule.access() == AclAccess.WRITE)
+                    .forEach(rule -> writes.add(rule.resource().ruleName())));
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("accessorId", anonymous.accessorId());
+            entry.put("policies", links.policies());
+            entry.put("writes", List.copyOf(writes));
+            answer.put("anonymous", entry);
+        });
+        answer.put("aclWriters", live.stream().filter(token -> token.expirationTime() == null && aclWriter(acl, token))
+                .map(AclApiRoutes::described).toList());
+        answer.put("expiringSoon", live.stream()
+                .filter(token -> token.expirationTime() != null && !token.expirationTime().isAfter(soon))
+                .sorted(Comparator.comparing(AclToken::expirationTime)).map(token -> {
+                    AclTokenAnswer links = hidden(token);
+                    Map<String, Object> entry = described(token);
+                    entry.put("expirationTime", token.expirationTime().toString());
+                    entry.put("nodeIdentities", links.nodeIdentities());
+                    entry.put("serviceIdentities", links.serviceIdentities());
+                    entry.put("holdsAclWrite", aclWriter(acl, token));
+                    return entry;
+                }).toList());
+        answer(exchange, answer);
+    }
+
+    /** Whether {@code token} holds the built-in {@code global-management} policy, directly or through a role. */
+    private static boolean management(AclView acl, AclToken token) {
+        return acl.grants(token).stream().anyMatch(grant -> grant.origin() instanceof AclOrigin.Policy policy
+                && AclBuiltins.GLOBAL_MANAGEMENT_ID.equals(policy.policyId()));
+    }
+
+    /** Whether {@code token} holds {@code acl:write}, decided as the lock-out guard decides it. */
+    private static boolean aclWriter(AclView acl, AclToken token) {
+        return AclAuthorizer.decide(acl.grants(token), AclDefaultPolicy.DENY, ACL_WRITE).allowed();
+    }
+
+    private static Map<String, Object> described(AclToken token) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("accessorId", token.accessorId());
+        entry.put("description", token.description());
+        return entry;
     }
 
     private static Map<String, Object> ruleAnswer(AclRule rule) {
