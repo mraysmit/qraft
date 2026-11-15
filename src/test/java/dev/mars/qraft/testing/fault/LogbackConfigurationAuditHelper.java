@@ -31,7 +31,8 @@ import java.util.List;
  * Test audit helper used by logging-configuration tests to find settings that could
  * stop an ERROR event from being written: a filter or
  * turbo filter, an included file this audit cannot see, an asynchronous appender that discards events when its
- * queue is full, a level of {@code OFF}, a logger that does not pass events to the root, or a root without an
+ * queue is full, a prudent file appender, whose interruptible file lock closes the file on an interrupt and loses every
+ * later line (2026-11-15), a level of {@code OFF}, a logger that does not pass events to the root, or a root without an
  * appender. Used for both the production and the test configuration.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
@@ -63,6 +64,9 @@ public final class LogbackConfigurationAuditHelper {
         }
         for (Element neverBlock : elements(configuration, "neverBlock")) {
             if ("true".equalsIgnoreCase(neverBlock.getTextContent().trim())) found.add("<neverBlock>true</neverBlock>");
+        }
+        for (Element prudent : elements(configuration, "prudent")) {
+            if ("true".equalsIgnoreCase(prudent.getTextContent().trim())) found.add("<prudent>true</prudent>");
         }
         for (String element : List.of("logger", "root")) {
             for (Element logger : elements(configuration, element)) {

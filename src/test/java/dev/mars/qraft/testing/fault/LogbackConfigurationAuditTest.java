@@ -74,6 +74,23 @@ class LogbackConfigurationAuditTest {
     }
 
     @Test
+    void aPrudentFileAppenderIsFound() throws Exception {
+        // A prudent appender takes an interruptible file lock for each write: a thread interrupted while it held or
+        // waited for the lock closed the file's channel, and every later line of the run was lost (Jenkins build 64;
+        // 2026-11-15, IntentionalErrorConfigurationTest failing on its own line).
+        assertEquals(List.of("<prudent>true</prudent>"),
+                LogbackConfigurationAuditHelper.settingsThatCanDropErrors(parse("""
+                        <configuration>
+                          <appender name="FILE" class="ch.qos.logback.core.FileAppender">
+                            <file>run.log</file>
+                            <prudent>true</prudent>
+                          </appender>
+                          <root level="INFO"><appender-ref ref="FILE"/></root>
+                        </configuration>
+                        """)));
+    }
+
+    @Test
     void aSecondRootIsFound() throws Exception {
         assertEquals(List.of("the configuration needs exactly one root with at least one appender"),
                 LogbackConfigurationAuditHelper.settingsThatCanDropErrors(parse("""

@@ -21,6 +21,7 @@ import type { AclStatus } from '../api/schemas';
 import type { Bootstrap } from '../bootstrap';
 import { useLiveRead } from '../live';
 import { Failure, formatInstant, ReadMeta } from './common';
+import { AccessNav } from './TokensView';
 
 /**
  * The Access section's Status page (UI/UX design section 10.2.1): whether the cluster's access control can be trusted.
@@ -32,6 +33,7 @@ export function SecurityView({ api, bootstrap }: { api: QraftApi; bootstrap: Boo
   return (
     <Space direction="vertical" style={{ width: '100%' }}>
       <Typography.Title level={2}>Access control</Typography.Title>
+      <AccessNav />
       {mode === 'none' ? (
         <section aria-label="Security status">
           <p>{`Security profile: ${bootstrap.securityProfile}`}</p>

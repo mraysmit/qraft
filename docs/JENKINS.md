@@ -671,6 +671,21 @@ Docker stages (`-DskipVitest=true`). The audit, over the console, the archived l
 test reports, 907 files, found 1,175 error lines, all flagged, and 857 stack traces, none unflagged; no
 `too_many_pings` and no JVM crash file. The logs are in `logs/jenkins/Qraft-76/`.
 
+## Build 80, 2026-11-15
+
+Build 80 ran on `851331c`, UI-5's Phases 1 to 3, and failed in 3 min 23 s in the default stage on one test,
+`QraftServerWriteForwardingTest.aFollowerAnswersAWriteWithTheLeadersAnswer`, which expected `leader_unavailable` from a
+follower whose leader and third server had been stopped and was answered `outcome_unknown`; the other 2,046 passed. The
+cause was in the server, not the test. The follower still named the stopped leader, so it forwarded the write; while the
+forward waited for its connection, the follower stopped following that leader, and `HttpApiServer` answered every
+forward not yet done as perhaps applied, though this one had never been sent (its log: "was not answered before this
+server stopped following it"). A forward is now a `raft.ForwardCall`, either sent or withdrawn, never both: the
+transport sends it only if it was not withdrawn first, and the follower withdraws it on leaving the leader, answering
+`leader_unavailable` when it was never sent. `ForwardCallTest` (3), `GrpcRaftForwardTest` (1 new) and
+`QraftServerWriteForwardingTest` (1 new) were red first, the last on `outcome_unknown` against the old server. The audit
+of the build's files found no unflagged line but the failure's report and Maven's lines after it. The logs are in
+`logs/jenkins/Qraft-80/`.
+
 ## Build 79, 2026-11-15
 
 Build 79 ran on `9b8b8a8`, UI-5's Phase 0, the security status read, and passed in 31 min 1 s: default 2,046 with

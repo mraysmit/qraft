@@ -30,7 +30,7 @@ import { MembersView } from './views/MembersView';
 import { ScopeSelector } from './views/ScopeSelector';
 import { ExplainView, PoliciesView, PolicyView } from './views/PoliciesView';
 import { SecurityView } from './views/SecurityView';
-import { TokensView, TokenView } from './views/TokensView';
+import { AccessNav, TokensView, TokenView } from './views/TokensView';
 import { ServiceDetailView } from './views/ServiceDetailView';
 import { ServicesView } from './views/ServicesView';
 import { StatusStrip } from './views/StatusStrip';
@@ -124,6 +124,17 @@ const OPERATOR_VIEWS = [
 /** The Access section's views, which need `acl:read`. */
 const ACCESS_VIEWS = new Set(['access', 'tokens', 'token', 'policies', 'policy', 'explain']);
 
+/** The token pages of a server without access control, which has neither tokens nor policies. */
+function NoAccessControl() {
+  return (
+    <Space direction="vertical">
+      <Typography.Title level={2}>Access control</Typography.Title>
+      <AccessNav />
+      <Typography.Text>This server has no access control, so it has no tokens or policies to show.</Typography.Text>
+    </Space>
+  );
+}
+
 /** What a view whose permission the token lacks shows in its place, naming the permission (principle 3.5). */
 function NotPermitted({ title, permission }: { title: string; permission: string }) {
   return (
@@ -136,10 +147,11 @@ function NotPermitted({ title, permission }: { title: string; permission: string
 
 function CurrentView({ api, bootstrap }: { api: QraftApi; bootstrap: Bootstrap }) {
   const { route, scope } = useRouter();
-  const { may } = useAccess();
+  const { may, mode } = useAccess();
   const operator = OPERATOR_VIEWS.find(([view]) => view === route.view);
   if (operator !== undefined && !may.operatorRead) return <NotPermitted title={operator[1]} permission="operator:read" />;
   if (ACCESS_VIEWS.has(route.view) && !may.aclRead) return <NotPermitted title="Access control" permission="acl:read" />;
+  if (ACCESS_VIEWS.has(route.view) && route.view !== 'access' && mode === 'none') return <NoAccessControl />;
   switch (route.view) {
     case 'services':
       return <ServicesView api={api} scope={scope} />;

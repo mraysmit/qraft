@@ -31,15 +31,19 @@ export const ANONYMOUS_ACCESSOR = '00000000-0000-0000-0000-000000000002';
 /** How soon a token expires for the list's filter and the token menu to warn of it. */
 const SOON_MILLIS = 60 * 60_000;
 
-/** The Access section's own navigation: Status, Tokens, Policies, Explain. */
+/**
+ * The Access section's own navigation: Status, Tokens, Policies, Explain; without access control only Status, since
+ * the server then has no tokens or policies.
+ */
 export function AccessNav() {
+  const { mode } = useAccess();
   return (
     <nav aria-label="Access pages">
       <Space split="|">
         <RouteLink to={{ view: 'access' }}>Status</RouteLink>
-        <RouteLink to={{ view: 'tokens' }}>Tokens</RouteLink>
-        <RouteLink to={{ view: 'policies' }}>Policies</RouteLink>
-        <RouteLink to={{ view: 'explain' }}>Explain</RouteLink>
+        {mode === 'token' && <RouteLink to={{ view: 'tokens' }}>Tokens</RouteLink>}
+        {mode === 'token' && <RouteLink to={{ view: 'policies' }}>Policies</RouteLink>}
+        {mode === 'token' && <RouteLink to={{ view: 'explain' }}>Explain</RouteLink>}
       </Space>
     </nav>
   );

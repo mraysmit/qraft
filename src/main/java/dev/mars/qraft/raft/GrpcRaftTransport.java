@@ -423,28 +423,56 @@ public class GrpcRaftTransport implements RaftTransport {
     /** How long a forward waits for its connection to the leader before it is given up as not sent. */
     static final java.time.Duration FORWARD_CONNECT_WAIT = java.time.Duration.ofSeconds(2);
 
+    /** Forwards {@code request} as a {@link ForwardCall}, which its caller may withdraw until it is sent. */
     @Override
     public CompletableFuture<dev.mars.qraft.raft.grpc.ForwardResponse> forward(String targetId,
             dev.mars.qraft.raft.grpc.ForwardRequest request) {
+        return forward(targetId, request, new ForwardCall());
+    }
+
+    /**
+     * Sends {@code request} as {@code call}, once its connection is ready and only if the call was not withdrawn first:
+     * a forward that fails before it is sent, or is withdrawn, is known not to have been applied, and its caller may
+     * try another server (write forwarding list; Jenkins build 80).
+     */
+    ForwardCall forward(String targetId, dev.mars.qraft.raft.grpc.ForwardRequest request, ForwardCall call) {
+        if (call.isDone()) return call;
         if (stopped) {
-            return CompletableFuture.failedFuture(new ForwardNotSentException("Transport for " + selfId + " is stopped"));
+            call.completeExceptionally(new ForwardNotSentException("Transport for " + selfId + " is stopped"));
+            return call;
         }
         RaftServiceGrpc.RaftServiceFutureStub stub;
         try {
             requireKnownTarget(targetId);
             stub = getStub(targetId);
         } catch (IllegalArgumentException unknown) {
-            return CompletableFuture.failedFuture(new ForwardNotSentException(unknown.getMessage()));
+            call.completeExceptionally(new ForwardNotSentException(unknown.getMessage()));
+            return call;
         }
         ManagedChannel channel = channels.get(targetId);
-        // The write is sent only on a connection that is ready, so a forward that fails before it is sent is known not
-        // to have been applied, and its caller may try another server (write forwarding list).
-        return CompletableFuture.supplyAsync(() -> awaitReady(channel, FORWARD_CONNECT_WAIT),
+        CompletableFuture.supplyAsync(() -> awaitReady(channel, FORWARD_CONNECT_WAIT),
                         task -> Thread.ofVirtual().name("qraft-forward-" + targetId).start(task))
-                .thenCompose(ready -> ready
-                        ? toFuture(stub.withDeadlineAfter(FORWARD_TIMEOUT_SECONDS, TimeUnit.SECONDS).forward(request))
-                        : CompletableFuture.failedFuture(new ForwardNotSentException("No connection to " + targetId
-                                + " could be made within " + FORWARD_CONNECT_WAIT.toMillis() + " ms")));
+                .thenCompose(ready -> {
+                    if (!ready) {
+                        return CompletableFuture.<dev.mars.qraft.raft.grpc.ForwardResponse>failedFuture(
+                                new ForwardNotSentException("No connection to " + targetId + " could be made within "
+                                        + FORWARD_CONNECT_WAIT.toMillis() + " ms"));
+                    }
+                    if (!call.markSent()) {
+                        return CompletableFuture.<dev.mars.qraft.raft.grpc.ForwardResponse>failedFuture(
+                                new ForwardNotSentException("The write was withdrawn before it was sent"));
+                    }
+                    return toFuture(stub.withDeadlineAfter(FORWARD_TIMEOUT_SECONDS, TimeUnit.SECONDS).forward(request));
+                })
+                .whenComplete((answer, failure) -> {
+                    if (failure == null) {
+                        call.complete(answer);
+                    } else {
+                        call.completeExceptionally(failure instanceof java.util.concurrent.CompletionException wrapped
+                                && wrapped.getCause() != null ? wrapped.getCause() : failure);
+                    }
+                });
+        return call;
     }
 
     /**

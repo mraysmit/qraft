@@ -1,7 +1,7 @@
 # Qraft Administrative UI and UX Design
 
 **Status:** Draft  
-**Last updated:** 2026-11-01 (a policy that tokens link to can now be deleted, as the owner decided for the ACL list's proposal 18: sections 10.2 and the refusals changed. Earlier the same day: section 10.2 follows the ACL list's alignment with Consul: the first sign-in, a secret shown once and stored only as a hash, 403 for a bad token, the form of a policy's rules, and recovery. Earlier the same day: dated task-list links refreshed. Earlier, 2026-10-30: section 5.1: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after a review of the interface's logic against the ACL list and the platform design: access control rewritten as section 10.2's subsections, with the owner's decisions on the security profile, the lock-out guard, policy deletion and the explanation endpoint; principle 3.7; access control moved to Stage 2; section 11's integrity refusals and operations that are not idempotent; nodes, health states, unscoped views, and operations without an API in sections 3.2, 5 and 9. Earlier that day, after a review of the reference implementation against this document: workspace tabs, section 4.4; access control on the token model of the ACL list, sections 4.1, 10.2, 11 and 15, with Roles and Auth Methods reserved, section 2; the reference implementation follows section 4.3 and labels reserved views. Earlier, 2026-10-09: a client row shows the version from the node's metadata; a node has no capabilities any more. Before: 2026-09-25)
+**Last updated:** 2026-11-15 (UI-5 delivered: sections 5.1 and 10.2.2 record what the implementation plan's open question 5 and the secret's keeping were decided to be, and section 9.2 what the removal's review shows; the UI-5 task list's decisions 1, 7 and 8. Earlier, 2026-11-01: a policy that tokens link to can now be deleted, as the owner decided for the ACL list's proposal 18: sections 10.2 and the refusals changed. Earlier the same day: section 10.2 follows the ACL list's alignment with Consul: the first sign-in, a secret shown once and stored only as a hash, 403 for a bad token, the form of a policy's rules, and recovery. Earlier the same day: dated task-list links refreshed. Earlier, 2026-10-30: section 5.1: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after a review of the interface's logic against the ACL list and the platform design: access control rewritten as section 10.2's subsections, with the owner's decisions on the security profile, the lock-out guard, policy deletion and the explanation endpoint; principle 3.7; access control moved to Stage 2; section 11's integrity refusals and operations that are not idempotent; nodes, health states, unscoped views, and operations without an API in sections 3.2, 5 and 9. Earlier that day, after a review of the reference implementation against this document: workspace tabs, section 4.4; access control on the token model of the ACL list, sections 4.1, 10.2, 11 and 15, with Roles and Auth Methods reserved, section 2; the reference implementation follows section 4.3 and labels reserved views. Earlier, 2026-10-09: a client row shows the version from the node's metadata; a node has no capabilities any more. Before: 2026-09-25)
 
 ## 1. Purpose
 
@@ -278,8 +278,11 @@ the interface must not present it as lasting. A service registered on a
 client's node by someone other than that client does not last either if it is in
 the client's tenant and namespace: since 2026-10-30 the client removes it at its
 next reconciliation (platform design section 8.2). In another tenant or namespace
-it stays until it is deregistered or its node is removed. Which services the interface may register, and
-on which nodes, is open: implementation plan, open question 5.
+it stays until it is deregistered or its node is removed. The interface registers, updates, enables,
+disables and deregisters instances on nodes the catalog already has, in the selected scope, and creates no
+node, since a node without a client is reaped; each review says what a client on the node does to the
+change, as the catalog does not record which client registered an instance (implementation plan, open
+question 5, decided 2026-11-15 in the UI-5 task list, decision 7).
 
 Maintenance is set through a client's local API, which listens on the client's
 own host only (client list, decision 6). The interface shows maintenance and
@@ -484,9 +487,13 @@ Unsafe operations are not offered merely because an API exists.
 
 Removing a server (`DELETE /v1/operator/raft/peer`, platform design section
 12.5) is the one membership change with an API. The interface offers it from
-increment UI-5 of the implementation plan, with the quorum before and after,
-and reports the server's refusals (`409 refused`, with its reason) as they
-come. Servers join, and non-voters are promoted, through server configuration
+increment UI-5 of the implementation plan to a token with `operator:write`,
+never for the last voter, with the voters and the quorum before and after, the
+failure tolerance after, the server's reachability, a warning when it is the
+leader, and that a removed server still running must be stopped; without access
+control it asks for the operator token for that one request and keeps it for
+none other. It reports the server's refusals (`409 refused`, with its reason) as
+they come. Servers join, and non-voters are promoted, through server configuration
 and the leader's own policy; the interface shows these changes and does not
 offer them.
 
@@ -624,8 +631,10 @@ Two states carry a persistent banner on every page (principle 3.7):
 - The token menu shows the token in use: accessor ID, description, policies,
   identities, and expiry, from `GET /v1/acl/token/self`, with a warning when it
   expires soon. It lets the operator change token.
-- How the browser holds the secret between page loads is decided with
-  increment UI-5 of the implementation plan.
+- The browser holds the secret in the tab's `sessionStorage`: it lasts across reloads of that tab, is
+  not shared with other tabs, and goes when the tab closes; signing out and `403 token_not_found`
+  remove it at once. It is never put in `localStorage`, a cookie or an address (UI-5 task list,
+  decision 1).
 
 #### 10.2.3 Tokens
 

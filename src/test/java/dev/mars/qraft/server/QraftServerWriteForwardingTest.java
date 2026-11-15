@@ -239,6 +239,47 @@ class QraftServerWriteForwardingTest {
                 + "the follower's own wait for the leader's answer ended");
     }
 
+    @Test
+    void aWriteNotYetSentWhenThisServerStopsFollowingItsLeaderIsAnsweredAsNotApplied() throws Exception {
+        // Jenkins build 80: the leader stopped while a forward waited for its connection; the follower stopped
+        // following it before the write was sent, and answered outcome_unknown, though the write was never sent.
+        startCluster();
+        waitUntil(() -> leader() >= 0, "a leader was elected");
+        int leader = leader();
+        int follower = (leader + 1) % 3;
+        waitUntil(() -> {
+            try {
+                return send(follower, "GET", "/raft/status", null).body().contains("\"leaderId\":\"server"
+                        + (leader + 1) + "\"");
+            } catch (Exception unanswered) {
+                return false;
+            }
+        }, "the follower knows the leader");
+
+        // A forward still waiting for its connection: a call that is never sent.
+        CompletableFuture<dev.mars.qraft.raft.ForwardCall> waiting = new CompletableFuture<>();
+        servers.get(follower).httpApi().orElseThrow().useWriteForwarding((to, request) -> {
+            dev.mars.qraft.raft.ForwardCall call = new dev.mars.qraft.raft.ForwardCall();
+            waiting.complete(call);
+            return call;
+        });
+        CompletableFuture<HttpResponse<String>> answer = http.sendAsync(HttpRequest.newBuilder(URI.create(
+                        "http://localhost:" + httpPorts.get(follower) + "/v1/kv/app/waiting"))
+                .PUT(HttpRequest.BodyPublishers.ofString("x")).build(), HttpResponse.BodyHandlers.ofString());
+        dev.mars.qraft.raft.ForwardCall call = waiting.get(10, TimeUnit.SECONDS);
+
+        // The leader is stopped on purpose; the others may log it as an unreachable peer.
+        IntentionalErrorsHelper.expectPeerShutdownDuringCleanup("server" + (leader + 1));
+        servers.get(leader).stop().get(30, TimeUnit.SECONDS);
+        servers.set(leader, null);
+
+        HttpResponse<String> unsent = answer.get(30, TimeUnit.SECONDS);
+        assertEquals(503, unsent.statusCode(), unsent.body());
+        assertEquals("leader_unavailable", JSON.readTree(unsent.body()).path("code").asText(),
+                "a write withdrawn before it was sent was not applied, so the caller may send it elsewhere");
+        assertTrue(!call.markSent(), "the write was withdrawn, and is never sent");
+    }
+
     private void startCluster() throws Exception {
         Map<String, Integer> raftPorts = new LinkedHashMap<>();
         Map<String, String> nodes = new LinkedHashMap<>();

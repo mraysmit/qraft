@@ -1,7 +1,7 @@
 # Qraft Administrative UI Implementation Plan
 
-**Status:** Agreed 2026-09-27; UI-0 to UI-3 delivered 2026-11-14, UI-4 on 2026-11-15; open questions 4 to 6 are decided when their increments start
-**Last updated:** 2026-11-15 (UI-4 delivered, and sections 4 and 5 brought up to date with it. Earlier, 2026-11-14: UI-3 delivered, open question 3 settled, and sections 4 and 5 brought up to date with it. Earlier the same day: UI-2 delivered and its task list archived. Earlier the same day: sections 4 and 5 reviewed against the code as UI-2 started, and the view map given a Done status. Earlier the same day: UI-0 and UI-1 delivered, and their task list archived, its links updated. Earlier, 2026-11-13: UI-0 resumed: section 4 notes what the backend lists built since it was last updated, to be reviewed when UI-2 starts; the embedded-interface task-list link refreshed. Earlier, 2026-11-01: `409 policy_in_use` removed, as the owner decided for the ACL list's proposal 18. Earlier the same day: the ACL list aligned with Consul; its proposal numbers stand. Earlier the same day: dated task-list link refreshed. Earlier, 2026-10-31: section 4: a health entry carries its node's status, and `?passing` leaves out an unreachable node's instances. Earlier, 2026-10-30: open question 5's facts corrected: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after the review of the interface against the ACL list: access control moves from UI-6 to UI-5 with the security profile, sign-in, status, tokens, policies and explanations; server removal joins UI-5; section 4.2 gains the profile and the explanation endpoint; the client rows' data; open questions 5 and 6. Earlier that day: section 3: the asset manifest's file name in the Vite build; sections 4.2, 5 and 6: tokens and policies come from the ACL list, and roles and authentication methods are reserved; the embedded-interface task-list link refreshed. Earlier, 2026-10-26: section 4.1, the service writes are on `PUT /v1/catalog/register` and `/deregister` after the client list's Phase 1. Earlier, 2026-10-21: dated task-list links refreshed; the administrative interface remains paused after Step 1 while backend delivery continues. Earlier, 2026-10-09: section 4.1: the node list is at `/v1/catalog/nodes`, the node writes are listed, and bare `/health` is gone, after the single-POM list's Phase 4. On 2026-10-05: the build location and the tenancy owner, after the move to one Maven project; section 4 was brought up to date with scoped reads and the Raft operator endpoints on 2026-10-02)
+**Status:** Agreed 2026-09-27; UI-0 to UI-3 delivered 2026-11-14, UI-4 and UI-5 on 2026-11-15; open question 5 decided with UI-5, questions 4 and 6 when their increments start
+**Last updated:** 2026-11-15 (UI-5 delivered: sections 4 to 7 brought up to date with it, open question 5 decided, browser automation deferred again. Earlier the same day: UI-4 delivered, and sections 4 and 5 brought up to date with it. Earlier, 2026-11-14: UI-3 delivered, open question 3 settled, and sections 4 and 5 brought up to date with it. Earlier the same day: UI-2 delivered and its task list archived. Earlier the same day: sections 4 and 5 reviewed against the code as UI-2 started, and the view map given a Done status. Earlier the same day: UI-0 and UI-1 delivered, and their task list archived, its links updated. Earlier, 2026-11-13: UI-0 resumed: section 4 notes what the backend lists built since it was last updated, to be reviewed when UI-2 starts; the embedded-interface task-list link refreshed. Earlier, 2026-11-01: `409 policy_in_use` removed, as the owner decided for the ACL list's proposal 18. Earlier the same day: the ACL list aligned with Consul; its proposal numbers stand. Earlier the same day: dated task-list link refreshed. Earlier, 2026-10-31: section 4: a health entry carries its node's status, and `?passing` leaves out an unreachable node's instances. Earlier, 2026-10-30: open question 5's facts corrected: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after the review of the interface against the ACL list: access control moves from UI-6 to UI-5 with the security profile, sign-in, status, tokens, policies and explanations; server removal joins UI-5; section 4.2 gains the profile and the explanation endpoint; the client rows' data; open questions 5 and 6. Earlier that day: section 3: the asset manifest's file name in the Vite build; sections 4.2, 5 and 6: tokens and policies come from the ACL list, and roles and authentication methods are reserved; the embedded-interface task-list link refreshed. Earlier, 2026-10-26: section 4.1, the service writes are on `PUT /v1/catalog/register` and `/deregister` after the client list's Phase 1. Earlier, 2026-10-21: dated task-list links refreshed; the administrative interface remains paused after Step 1 while backend delivery continues. Earlier, 2026-10-09: section 4.1: the node list is at `/v1/catalog/nodes`, the node writes are listed, and bare `/health` is gone, after the single-POM list's Phase 4. On 2026-10-05: the build location and the tenancy owner, after the move to one Maven project; section 4 was brought up to date with scoped reads and the Raft operator endpoints on 2026-10-02)
 **Design:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md) (what the interface is) and
 [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections
 12.4, 12.4.1, and 19.6 (how it is packaged and served)
@@ -88,7 +88,7 @@ on 2026-11-15, with UI-4.
 | `GET /v1/operator/autopilot/health` | the leader's view of each server: healthy, last contact, last index and term, as Consul's | Superseded for the interface by the members read |
 | `GET /v1/operator/raft/members` | on the leader each server's match and next index, lag, last contact, reachability and health, and the quorum; on a follower its labelled partial view (since 2026-11-14) | None for UI-3 |
 | `GET /v1/operator/raft/storage` | size, snapshot index, term and age, first log index held, log indexes, fencing, transition queue depth, last snapshot failure (since 2026-11-14) | No WAL health figure or lock state |
-| `DELETE /v1/operator/raft/peer` | removal of a server, guarded by the operator token and forwarded to the leader | A mutation: offered from UI-5 |
+| `DELETE /v1/operator/raft/peer` | removal of a server, guarded by the operator token and forwarded to the leader | None: Raft Members offers it since UI-5 |
 | `GET /health/live`, `/health/ready` | liveness, and readiness with the conditions the server does not meet | None for the status strip |
 | `GET /v1/tenants`, `GET /v1/namespaces` | the replicated tenants, and the namespaces of the tenant `X-Qraft-Tenant` names | None for the scope selector |
 | `GET /v1/catalog/nodes` | nodes in name order: name, node ID, address, datacenter, region, metadata (the client's version is `qraft.version`), status, and the registration and heartbeat times; carries `X-Qraft-Index` | No owned-service or failing-check counts. A node has no tenant or namespace |
@@ -100,8 +100,9 @@ on 2026-11-15, with UI-4.
 | `GET /v1/operator/events` | the bounded event journal: query and watch, by category (system, domain, observation, audit) and type, and since 2026-11-15 by tenant, namespace and service, with the journal's capacity | Bounded; no durable history |
 | `GET /v1/operator/configuration` | the answering server's effective configuration: each setting's value and source, secrets withheld, every one static (since 2026-11-15) | No replicated configuration other than the Raft server configuration |
 | `/v1/kv`, `/v1/session` | key/value with indexes and compare-and-set; sessions and locks | Not yet in the interface (Stage 2) |
-| `/v1/acl/...`, `/v1/acl/login` | tokens, policies, roles, auth methods, binding rules, `token/self`, `explain`, tokens by policy, `409 acl_lockout`, login | Not yet in the interface (UI-5) |
-| `PUT /v1/catalog/register`, `/deregister`, `/node/heartbeat`, `/check/observe` | replicated node and service writes, scoped by `X-Qraft-Tenant`, `X-Qraft-Namespace` and `X-Qraft-Node` | Mutations: offered from UI-5 |
+| `/v1/acl/...`, `/v1/acl/login` | tokens, policies, roles, auth methods, binding rules, `token/self`, `explain`, tokens by policy, `409 acl_lockout`, login | Tokens, policies, `self`, `explain` and `authorize` in the interface since UI-5; roles and auth methods reserved |
+| `GET /v1/internal/ui/acl/status` | the security status: settings, transport, management tokens, what the anonymous token may write, the tokens holding `acl:write` without an expiry, those expiring within the hour (since 2026-11-15) | None for the Status page |
+| `PUT /v1/catalog/register`, `/deregister`, `/node/heartbeat`, `/check/observe` | replicated node and service writes, scoped by `X-Qraft-Tenant`, `X-Qraft-Namespace` and `X-Qraft-Node` | Service registration, update and deregistration on existing nodes in the interface since UI-5; no registration source recorded |
 | Read options and metadata | `stale`, `consistent`, `index` and `wait` on catalog and key/value reads; `X-Qraft-Index`, `X-Qraft-Known-Leader`, `X-Qraft-Last-Contact`; `X-Qraft-Leader-Id` and the error envelope (`code`, `message`, `retryable`, `requestId`) on errors; since 2026-11-15 `X-Qraft-Answered-By` on every answer and `X-Qraft-Consistency` on every read | None for UI-4 |
 | OpenTelemetry Prometheus exporter | metrics on a separate port (`prometheusPort`, default 9464) | Not on the API listener; the UI only links to it |
 
@@ -123,7 +124,7 @@ on 2026-11-15, with UI-4.
 | Sessions and locks | Sessions, Locks | Built |
 | Replicated tenants and namespaces with an API | Tenants, Namespaces, scope selector | Built (tenancy list) |
 | Authentication, authorization, tokens and policies | Mutations; Tokens, Policies; the token menu | Built (ACL list) |
-| The security profile and authentication mode in the bootstrap data; `installedFromFile` | Security status, banners, sign-in | Built (UI-0's bootstrap object; the token answers) |
+| The security profile and authentication mode in the bootstrap data; `installedFromFile` | Security status, banners, sign-in | Built (UI-0's bootstrap object; the token answers); the security status read 2026-11-15 (UI-5) |
 | `POST /v1/acl/explain`; tokens by policy | Explanations; policy pages | Built |
 | Lock-out refusal, `409 acl_lockout` | Token and policy review steps | Built |
 | Node ID and name conflicts | Client rows | Built (client list, Phase 2): node IDs and `node_name_reserved` |
@@ -155,17 +156,17 @@ Status key:
 | 1 | Cluster Overview (9.1) | Done | UI-3: servers, quorum, services, client nodes, storage and queue; UI-4: the last ten system events. |
 | 1 | Raft Members (9.2) | Done | UI-3, read-only; a follower shows its partial view (open question 3) |
 | 1 | Storage & Snapshots (9.3) | Done | UI-3, with the persistent fenced banner |
-| 1 | Events, read-only (9.4) | Done | UI-4: the whole journal, labelled ephemeral, filtered, followed live with resynchronization. Export waits for UI-5's authorization. |
+| 1 | Events, read-only (9.4) | Done | UI-4: the whole journal, labelled ephemeral, filtered, followed live with resynchronization; UI-5: the events shown exported as JSON, and the page opened at a request's audit events. |
 | 1 | Configuration, read-only (9.6) | Done | UI-4: every setting with its source, secrets withheld. Diagnostics correlation is the read line of each view. |
 | 1 | Metrics (9.5) | Partial | A configured link to the external dashboard is ready. |
-| 2 | Service register, update, deregister (5.1, 11) | Ready | Authentication and audit exist; open question 5 is undecided. |
+| 2 | Service register, update, deregister (5.1, 11) | Done | UI-5: on existing nodes, in the selected scope, with `service:write`; enable and disable too (open question 5). |
 | 2 | Key/Value CRUD and compare-and-set (7.1) | Ready | |
 | 2 | Sessions and Locks (7.2) | Ready | |
 | 2 | Watches (7.3) | Partial | Blocking reads and the event watch |
-| 2 | Mutation outcomes and audit display (11) | Partial | Audit events in the journal; no durable query |
-| 2 | Access: Status, sign-in, token menu, banners (10.2.1, 10.2.2) | Ready | |
-| 2 | Access: Tokens, Policies, Explain (10.2.3 to 10.2.6) | Ready | |
-| 2 | Server removal (9.2) | Ready | Behind sign-in, UI-5 |
+| 2 | Mutation outcomes and audit display (11) | Done, in part | UI-5: the review step, structured outcomes, unknown outcomes, and a link to the request's audit events in the journal; no durable audit query |
+| 2 | Access: Status, sign-in, token menu, banners (10.2.1, 10.2.2) | Done | UI-5, with permission-shaped navigation |
+| 2 | Access: Tokens, Policies, Explain (10.2.3 to 10.2.6) | Done | UI-5; explanations also on the service and node pages |
+| 2 | Server removal (9.2) | Done | UI-5, with its quorum review, to `operator:write` |
 | 3 | Topology, Intentions, Routing, Gateways (6) | Reserved | Platform contracts |
 | 4 | Datacenters, Regions, Peers, Federation (8) | Reserved | Platform contracts |
 | 4 | Tenants and Namespaces (10.1) | Ready | |
@@ -310,6 +311,17 @@ Access control comes here, not with governance in UI-6, because every
 mutation depends on it and an operator needs to manage tokens from the first
 mutation onwards.
 
+Delivered 2026-11-15 in [`task-list-admin-ui-access-mutations-2026-11-15.md`](../docs/archive/task-list-admin-ui-access-mutations-2026-11-15.md).
+The ACL list had built the authentication, authorization, explanation and lock-out
+features, and every request under a token was already audited; UI-5 added the
+security status read, the interface's sign-in, session, token menu, banners and
+permission-shaped navigation, the mutation workflow, Tokens, Policies and
+explanations, service changes, server removal and the export of events. Its
+decisions 1 to 11 were taken as the recommended options, each reversible: among
+them, the secret is kept in the tab's `sessionStorage` (decision 1), open question
+5 is answered (decision 7), and browser automation stays deferred (decision 11).
+UI-6 is the next increment.
+
 ### UI-6 Coordination and governance
 
 Backend first:
@@ -360,7 +372,7 @@ precede every mutation.
 | Server APIs | Java over real HTTP, the existing pattern | Each endpoint's behaviour, scoping, errors, and read metadata |
 | API contract | Java tests write the JSON responses they receive to fixture files under `target/`; Vitest validates each fixture with the frontend's zod schema | The frontend schema and the server response cannot drift apart unnoticed |
 | Frontend logic and views | Vitest, jsdom, Testing Library | Rendering, formatting, state handling, error and empty states, and accessible names |
-| Browser end to end | Playwright | Deferred. Introduce it with UI-5, when mutation workflows make full journeys worth automating |
+| Browser end to end | Playwright | Deferred again with UI-5 (its task list, decision 11): a browser download in every build. Journeys are proved by Vitest over the client, the packaged server's end-to-end tests with ACLs on, and a local headless Chrome check |
 
 The platform's rules apply to frontend tests as they do to Java:
 
@@ -406,7 +418,10 @@ contracts exist.
    leader, or with its own partial view clearly labelled?
 4. **Metrics.** Should the Metrics page stay a configured link to the external
    dashboard, or read bounded summaries from the API listener?
-5. **Services registered from the interface.** Raised 2026-10-27. A client
+5. **Services registered from the interface.** Decided 2026-11-15 with UI-5 (its task list, decision 7,
+   taken as the recommended option, reversible): the interface registers, updates and deregisters
+   instances on nodes the catalog already has, also a client's, with a warning in each review of what
+   the client does to the change, and creates no node. The question was raised 2026-10-27. A client
    re-registers the services it owns and, since 2026-10-30, removes at its next
    reconciliation any other service on its node in its own tenant and namespace
    (UI/UX design section 5.1). Should the interface register only services on

@@ -1,9 +1,9 @@
 # Task List: Administrative Interface, Access Control and Mutations (UI-5)
 
 **Date:** 2026-11-15
-**Status:** In progress. Phases 0 to 2 are done, test first; Phase 3 is next.
-**Last updated:** 2026-11-15 (Phases 1 and 2 done, with their records; Jenkins build 79 passed `9b8b8a8`. Earlier the same day: Phase 0 done, decision 4's window corrected to the hour. Earlier the same day: written, at the owner's word to proceed after Jenkins build 78)
-**Active work:** Phase 3, service changes, server removal and export
+**Status:** In progress. Phases 0 to 3 are done, test first; Phase 4 is next.
+**Last updated:** 2026-11-15 (Phase 3 done, with its record. Earlier the same day: Phases 1 and 2 done, with their records; Jenkins build 79 passed `9b8b8a8`. Earlier the same day: Phase 0 done, decision 4's window corrected to the hour. Earlier the same day: written, at the owner's word to proceed after Jenkins build 78)
+**Active work:** Phase 4, close
 **Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-5
 **Source plan:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md), sections 3.5, 3.7, 5.1, 9.2, 9.4, 10.2 and 11; [`task-list-acl-and-tokens-2026-11-07.md`](../docs/archive/task-list-acl-and-tokens-2026-11-07.md), proposals 3 and 10 to 19
 **Predecessor:** [`task-list-admin-ui-events-configuration-live-2026-11-15.md`](../docs/archive/task-list-admin-ui-events-configuration-live-2026-11-15.md) (UI-4)
@@ -332,13 +332,61 @@ with the workflow that uses them.
   Library's wait, alone as well as under load; the token detail, with no table,
   took 0.1 s. The Access lists are plain tables (`PlainTable`); the lists'
   tests now take 0.3 s.
-- Vitest 204, all passing; the type check clean.: Service changes, server removal and export
+- Vitest 204, all passing; the type check clean. `mvn install` in the check copy:
+  default 2,047 and Vitest 204, every gate; the audit of the files the run
+  wrote, 600, found 838 error lines and 738 stack traces, every one flagged
+  (`logs/ui5-p2-install-20261115-160427.log`). The owner committed Phases 1 to 3
+  in `851331c`.: Service changes, server removal and export
 
 1. Service register, update, enable and disable, and deregister, as decision 7.
 2. Server removal from Raft Members, as decision 8.
 3. Export of events, as decision 10.
 
 **Exit gate.** As Phase 1.
+
+**Status, 2026-11-15: done**, test first, every new test red before its code.
+
+- `api/writes.test.ts` (2 new): a registration and a deregistration on the node
+  and in the scope given (`X-Qraft-Node`, `X-Qraft-Tenant`,
+  `X-Qraft-Namespace`), and a removal by server ID under the session's token or
+  the operator token given (`registerService`, `deregisterService`,
+  `removeServer`, with `RegistrationSchema`, `DeregistrationSchema` and
+  `RemovalSchema`).
+- `views/changes.test.tsx` (7): the Changes tab of a service, offered with
+  `service:write` on it in the selected scope and not without; a registration on
+  a node the catalog has, its review saying what a client on that node does; the
+  nodes offered are the catalog's, and none is created; an update registers the
+  instance again, its checks kept (a registration that declares none keeps
+  them), the node and instance ID fixed, the review saying a client may
+  register its own again; a disable and a deregistration; and without access
+  control, under the warning, asking nothing (`ServiceChanges.tsx`). One test,
+  that the tab is not offered without `service:write`, could not fail before the
+  tab existed; it guards the permission since.
+- `views/removal.test.tsx` (5): the removal's review of the voters, the quorum
+  before and after, the failure tolerance after and the reachability; the
+  leader's warning and a refusal reported with its reason; no removal of the
+  last voter, nor without `operator:write`; and without access control the
+  operator token asked for the one removal and kept for none other
+  (`MembersView.tsx`). The test of the last voter and of a token without the
+  permission was split in two: with two renders it took 2.2 s.
+- `views/events.test.tsx` (1 new): the events shown, newest first, saved as a
+  JSON file named for the server and the time, nothing sent; jsdom has no
+  object URL and follows no download, so the test records both.
+- `operate.test.tsx`: UI-3's expectation that Raft Members offers no membership
+  change is now that a removal is the only one offered (decision 8).
+- **Two slow tests found and their cause fixed.** The Explain panel's Ant Design
+  button below the Nodes and Clients table made the Root test of that page take
+  1.5 to 1.9 s alone, 3 s under load; a plain button took it to 0.2 s, as the
+  pause control did in UI-4. The removal list's and the export's buttons are
+  plain for the same reason.
+- An install begun after the owner's commit was stopped: the check copy's sync
+  copies the files git lists as changed, and after `851331c` it listed two, so
+  the copy lacked Phase 3. Its partial log, `logs/ui5-p3-install-20261115-161608.log`,
+  is not a record of the code. The check copy was reset to `851331c`, and
+  `mvn clean install` run again with the two uncommitted speed fixes: default
+  2,047 and Vitest 219, every gate; the audit of the files the run wrote, 601,
+  found 838 error lines and 738 stack traces, every one flagged
+  (`logs/ui5-p3-install-20261115-161708.log`).
 
 ## 9. Phase 4: Close
 

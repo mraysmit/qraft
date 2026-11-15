@@ -148,6 +148,7 @@ describe('sign-in', () => {
 
 describe('the token menu and the management banner', () => {
   it("shows the token in use: its accessor ID, description, policies, identities and expiry", async () => {
+    at('/ui/nowhere');
     render(<Root bootstrap={BOOTSTRAP} api={fakeApi()} session={memorySession('held-secret')} />);
 
     fireEvent.click(await screen.findByLabelText('Token in use'));
@@ -162,6 +163,7 @@ describe('the token menu and the management banner', () => {
 
   it('warns when the token in use expires within the hour', async () => {
     const expiring = TokenSchema.parse({ ...TOKEN, expirationTime: new Date(Date.now() + 30 * 60_000 + 20_000).toISOString() });
+    at('/ui/nowhere');
     render(<Root bootstrap={BOOTSTRAP} api={fakeApi({ self: () => read(expiring, null) })}
       session={memorySession('held-secret')} />);
 

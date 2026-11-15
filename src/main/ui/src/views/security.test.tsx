@@ -141,4 +141,23 @@ describe('the Status page', () => {
     expect(page.textContent).toContain('No access control: anyone who can reach this API can change the cluster.');
     expect(calls).not.toContain('aclStatus');
   });
+
+  it('offers only the Status page of the Access section without access control, the token pages saying why', async () => {
+    const bootstrap = { ...BOOTSTRAP, authMode: 'none' as const, securityProfile: 'development' as const };
+    for (const path of ['/ui/access', '/ui/access/tokens', '/ui/access/policies/x', '/ui/access/explain']) {
+      at(path);
+      const { api, calls } = recordingApi(fakeApi());
+      const { unmount } = render(<Root bootstrap={bootstrap} api={api} session={memorySession()} />);
+
+      await screen.findByText('Access control', { selector: 'h2' });
+      const links = Array.from(document.querySelectorAll('nav[aria-label="Access pages"] a')).map((link) => link.textContent);
+      expect(links, path).toEqual(['Status']);
+      if (path !== '/ui/access') {
+        expect(screen.getByText('This server has no access control, so it has no tokens or policies to show.')).toBeInTheDocument();
+      }
+      expect(calls.filter((call) => ['tokens', 'token', 'policies', 'policy', 'explain', 'aclStatus'].includes(call)), path)
+        .toEqual([]);
+      unmount();
+    }
+  });
 });

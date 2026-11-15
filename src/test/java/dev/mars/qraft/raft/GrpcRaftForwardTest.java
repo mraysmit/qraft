@@ -31,9 +31,12 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -100,6 +103,29 @@ class GrpcRaftForwardTest {
         assertEquals(201, answer.getStatus());
         assertEquals("42", answer.getHeadersOrThrow("X-Qraft-Index"));
         assertEquals("true", answer.getBody().toStringUtf8());
+    }
+
+    @Test
+    void aForwardIsACallThatIsSentOnlyIfItWasNotWithdrawnFirst() throws Exception {
+        // Jenkins build 80: a follower that stops following its leader withdraws a write still waiting for its
+        // connection, and answers that it was not applied; the transport then never sends it.
+        AtomicInteger received = new AtomicInteger();
+        targetServer.useForwardTarget(forwarded -> {
+            received.incrementAndGet();
+            return CompletableFuture.completedFuture(ForwardResponse.newBuilder().setStatus(200).build());
+        });
+
+        ForwardCall sent = assertInstanceOf(ForwardCall.class, transport.forward("target", request()));
+        assertEquals(200, sent.get(10, TimeUnit.SECONDS).getStatus());
+        assertFalse(sent.withdraw(), "a call that was sent cannot be withdrawn");
+        ForwardCall withdrawn = new ForwardCall();
+        assertTrue(withdrawn.withdraw());
+        ExecutionException notSent = assertThrows(ExecutionException.class,
+                () -> transport.forward("target", request(), withdrawn).get(10, TimeUnit.SECONDS));
+        assertInstanceOf(ForwardNotSentException.class, notSent.getCause());
+        assertEquals(200, transport.forward("target", request()).get(10, TimeUnit.SECONDS).getStatus());
+
+        assertEquals(2, received.get(), "the withdrawn call reached nothing");
     }
 
     @Test

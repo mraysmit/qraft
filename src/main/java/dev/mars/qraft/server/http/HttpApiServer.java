@@ -1917,6 +1917,17 @@ public final class HttpApiServer implements AutoCloseable {
             }
             if (!forward.isDone()) {
                 String now = leaderLeft.getNow(null);
+                if (forward instanceof dev.mars.qraft.raft.ForwardCall call && call.withdraw()) {
+                    // Still waiting for its connection, the write was never sent, so it was not applied (Jenkins
+                    // build 80): the caller may send it to another server.
+                    LOG.info("A write for the leader {} was withdrawn before it was sent: this server stopped following"
+                            + " it (leader now {})", leader, now == null ? "unknown" : now);
+                    exchange.getResponseHeaders().set("X-Qraft-Leader-Id", leader);
+                    respondError(exchange, 503, "leader_unavailable", "This server stopped following the leader "
+                            + leader + " before the write was sent to it, so it was not applied", true,
+                            Map.of("leaderId", leader));
+                    return true;
+                }
                 LOG.info("A write forwarded to the leader {} was not answered before this server stopped following it"
                         + " (leader now {})", leader, now == null ? "unknown" : now);
                 exchange.getResponseHeaders().set("X-Qraft-Leader-Id", leader);

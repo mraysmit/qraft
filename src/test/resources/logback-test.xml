@@ -21,7 +21,11 @@
     <appender name="FILE" class="ch.qos.logback.core.FileAppender">
         <file>${TEST_LOG_DIR}/qraft-maven-tests-${testRunTimestamp:-local}.log</file>
         <append>true</append>
-        <prudent>true</prudent>
+        <!-- Not prudent: a prudent appender takes an interruptible file lock for each write, and a thread interrupted
+             while it held or waited for that lock closed the file's channel, losing every later line of the run
+             (Jenkins build 64; 2026-11-15). Each JVM writes its own file, named for the second it started, and each
+             event is written in one call. LogbackConfigurationAuditHelper refuses prudent mode. -->
+        <prudent>false</prudent>
         <encoder>
             <charset>UTF-8</charset>
             <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %intentional%logger{48}%replace( [%X{remediationId}]){' \[\]', ''}%replace( [%X{nodeId}]){' \[\]', ''}%replace( [%X{clientId}]){' \[\]', ''}%replace( [%X{raftRole}/%X{raftTerm}]){' \[/\]', ''}%replace( [%X{requestId}]){' \[\]', ''}%replace( [%X{rpcType}]){' \[\]', ''} - %msg%n</pattern>

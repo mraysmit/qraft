@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { Alert, Button, Space, Typography } from 'antd';
+import { Alert, Space, Typography } from 'antd';
 import { useState } from 'react';
 import type { ExplainQuery, QraftApi } from '../api/client';
 import { explanationText } from './rules';
@@ -100,7 +100,8 @@ export function ExplainPanel({ api, accessorId, defaults = {} }: {
         )}
       </Space>
       <div>
-        <Button onClick={explain} loading={asking} disabled={accessor.trim() === ''}>Explain</Button>
+        {/* A plain button: the panel sits beside tables, and Ant Design's slowed them in jsdom (UI-4). */}
+        <button type="button" onClick={explain} disabled={asking || accessor.trim() === ''}>Explain</button>
       </div>
       {answer !== null && <Alert type={answer.failed ? 'error' : 'info'} message={answer.text} />}
     </section>

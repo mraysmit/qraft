@@ -37,6 +37,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.jar.JarFile;
 import java.util.stream.Stream;
@@ -50,7 +52,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * The shaded runtime JAR, started with {@code java -jar} from a directory that holds only its configuration, serves the
  * administrative interface from the resources packaged in it; a server with the interface disabled, and a client, serve
  * none of its routes (design section 19.6; the interface's task list, Step 5); and the packaged server answers the
- * configuration it was started from with its secret withheld (UI-4 task list, Phase 3). Run after {@code mvn install},
+ * configuration it was started from with its secret withheld (UI-4 task list, Phase 3); and, with ACLs on, answers the
+ * calls the interface makes once signed in with the management token from its file (UI-5 task list, Phase 4). Run
+ * after {@code mvn install},
  * as the end-to-end stage is, against the {@code target/qraft.jar} that build packaged.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
@@ -148,6 +152,71 @@ class PackagedAdminUiEndToEndTest {
     }
 
     @Test
+    void aPackagedServerWithAclsOnAnswersTheInterfacesCallsUnderTheTokenSignedInWith() throws Exception {
+        Path run = Files.createDirectories(directory.resolve("acl-run"));
+        String management = UUID.randomUUID().toString();
+        Path secretFile = run.resolve("management-token");
+        Files.writeString(secretFile, management);
+        int port = freePort();
+        server = start("server", run, serverConfig(run, port, ", \"acl\": {\"enabled\": true, \"defaultPolicy\": \"deny\","
+                + " \"initialManagementTokenFile\": " + path(secretFile) + "}"));
+        URI origin = URI.create("http://127.0.0.1:" + port);
+        awaitReady(server, origin, "/health/ready", run.resolve("server.out"));
+        assertTrue(get(origin, "/ui/").body().contains("\"authMode\":\"token\""), "the interface asks for sign-in");
+        Map<String, String> signedIn = Map.of("X-Qraft-Token", management);
+
+        // Sign-in: self, once the leader has installed the token from the file; an unknown secret is refused.
+        JsonNode self = awaitOk(origin, "GET", "/v1/acl/token/self", "", signedIn);
+        assertTrue(self.path("installedFromFile").asBoolean(), self.toString());
+        assertEquals("<hidden>", self.path("secretId").asText());
+        assertEquals("token_not_found", JSON.readTree(send(origin, "GET", "/v1/acl/token/self", "",
+                Map.of("X-Qraft-Token", UUID.randomUUID().toString())).body()).path("code").asText());
+        JsonNode allowed = ok(origin, "POST", "/v1/internal/acl/authorize",
+                "[{\"resource\":\"operator\",\"access\":\"write\"},{\"resource\":\"acl\",\"access\":\"write\"}]", signedIn);
+        assertTrue(allowed.path(0).path("allow").asBoolean() && allowed.path(1).path("allow").asBoolean(), allowed.toString());
+        JsonNode status = ok(origin, "GET", "/v1/internal/ui/acl/status", "", signedIn);
+        assertTrue(status.path("managementTokens").path(0).path("installedFromFile").asBoolean(), status.toString());
+        assertEquals(403, send(origin, "GET", "/v1/operator/configuration", "", Map.of()).statusCode(),
+                "a request without the token acts as the anonymous token, which reads nothing");
+
+        // Tokens and policies, as the Access pages change them.
+        String policy = ok(origin, "PUT", "/v1/acl/policy", "{\"name\":\"web-writer\",\"rules\":"
+                + "{\"service\":{\"web\":{\"policy\":\"write\"}},\"node\":{\"node-a\":{\"policy\":\"write\"}}}}", signedIn)
+                .path("id").asText();
+        JsonNode created = ok(origin, "PUT", "/v1/acl/token",
+                "{\"description\":\"web deployer\",\"policies\":[{\"id\":\"" + policy + "\"}]}", signedIn);
+        String secret = created.path("secretId").asText();
+        String accessor = created.path("accessorId").asText();
+        assertTrue(!secret.equals("<hidden>"), "the create answers the secret once");
+        assertEquals("web deployer, renamed", ok(origin, "PUT", "/v1/acl/token/" + accessor,
+                "{\"description\":\"web deployer, renamed\",\"policies\":[{\"id\":\"" + policy + "\"}]}", signedIn)
+                .path("description").asText());
+        assertTrue(ok(origin, "POST", "/v1/acl/explain", "{\"accessorId\":\"" + accessor + "\",\"resource\":\"service\","
+                + "\"name\":\"web\",\"access\":\"write\"}", signedIn).path("allowed").asBoolean());
+
+        // A service registered and deregistered under the new token, as the Changes tab does.
+        Map<String, String> deployer = Map.of("X-Qraft-Token", secret, "X-Qraft-Node", "node-a",
+                "X-Qraft-Tenant", "default", "X-Qraft-Namespace", "default");
+        JsonNode registered = ok(origin, "PUT", "/v1/catalog/register", "{\"node\":{\"address\":\"127.0.0.1\"},"
+                + "\"service\":{\"serviceId\":\"web-1\",\"serviceName\":\"web\",\"address\":\"127.0.0.1\",\"port\":8081,"
+                + "\"tags\":[],\"metadata\":{},\"enabled\":true}}", deployer);
+        assertTrue(registered.path("service").path("registered").asBoolean(), registered.toString());
+        assertTrue(ok(origin, "PUT", "/v1/catalog/deregister", "{\"serviceId\":\"web-1\"}", deployer)
+                .path("deregistered").asBoolean());
+
+        assertTrue(ok(origin, "DELETE", "/v1/acl/token/" + accessor, "", signedIn).asBoolean());
+        assertTrue(ok(origin, "DELETE", "/v1/acl/policy/" + policy, "", signedIn).asBoolean());
+        assertEquals("token_not_found", JSON.readTree(send(origin, "GET", "/v1/acl/token/self", "",
+                Map.of("X-Qraft-Token", secret)).body()).path("code").asText(), "a deleted token ends its session");
+
+        server.destroyForcibly();
+        server.waitFor(30, TimeUnit.SECONDS);
+        String output = Files.readString(run.resolve("server.out"));
+        assertTrue(!output.contains(management) && !output.contains(secret), "no secret reaches the server's output");
+        SubprocessOutputAuditHelper.requireNoErrors("the packaged server with ACLs on", output);
+    }
+
+    @Test
     void aServerWithTheInterfaceDisabledAndAClientServeNoneOfItsRoutes() throws Exception {
         String entry = entryFile(JSON.readTree(packaged("asset-manifest.json")));
         Path serverRun = Files.createDirectories(directory.resolve("server-run"));
@@ -233,6 +302,38 @@ class PackagedAdminUiEndToEndTest {
             if (notYet instanceof InterruptedException) Thread.currentThread().interrupt();
             return -1;
         }
+    }
+
+    private HttpResponse<String> send(URI origin, String method, String path, String body, Map<String, String> headers)
+            throws IOException, InterruptedException {
+        HttpRequest.Builder request = HttpRequest.newBuilder(origin.resolve(path)).timeout(Duration.ofSeconds(10))
+                .header("Content-Type", "application/json")
+                .method(method, body.isEmpty() ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(body));
+        headers.forEach(request::header);
+        return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    /** A request answered 200, its body read. */
+    private JsonNode ok(URI origin, String method, String path, String body, Map<String, String> headers) throws Exception {
+        HttpResponse<String> answer = send(origin, method, path, body, headers);
+        assertEquals(200, answer.statusCode(), method + " " + path + ": " + answer.body());
+        return JSON.readTree(answer.body());
+    }
+
+    /**
+     * A request answered 200 within 30 s: the leader installs the management token from its file once it leads, after
+     * the server reports ready; until then the secret is unknown.
+     */
+    private JsonNode awaitOk(URI origin, String method, String path, String body, Map<String, String> headers)
+            throws Exception {
+        long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+        HttpResponse<String> answer = send(origin, method, path, body, headers);
+        while (answer.statusCode() != 200 && System.nanoTime() < deadline) {
+            Thread.sleep(100);
+            answer = send(origin, method, path, body, headers);
+        }
+        assertEquals(200, answer.statusCode(), method + " " + path + ": " + answer.body());
+        return JSON.readTree(answer.body());
     }
 
     private HttpResponse<String> get(URI origin, String path) throws IOException, InterruptedException {
