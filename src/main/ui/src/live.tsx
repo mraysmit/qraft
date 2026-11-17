@@ -40,9 +40,14 @@ export const RETRY_MILLIS = 5000;
 /** The longest a blocking query waits at the server. */
 export const BLOCKING_WAIT = '30s';
 
-/** Runs `run` after `ms` milliseconds; the returned function cancels it. Tests give one they fire by hand. */
+/**
+ * Runs `run` after `ms` milliseconds; the returned function cancels it. `now` is the interface's clock, in epoch
+ * milliseconds, which counts a session's time left (UI-6 Sessions, Locks and Watches task list, Phase 1). Tests give
+ * one they fire and advance by hand.
+ */
 export interface Scheduler {
   after(ms: number, run: () => void): () => void;
+  now?(): number;
 }
 
 const TIMERS: Scheduler = {
@@ -50,6 +55,7 @@ const TIMERS: Scheduler = {
     const timer = setTimeout(run, ms);
     return () => clearTimeout(timer);
   },
+  now: () => Date.now(),
 };
 
 interface Live {
@@ -100,6 +106,26 @@ export function PauseControl({ color }: { color?: string }) {
       </button>
     </Space>
   );
+}
+
+/**
+ * The interface's clock, in epoch milliseconds, moved on every `tickMillis` by the scheduler, so a countdown follows it
+ * (UI-6 Sessions, Locks and Watches task list, Phase 1). It is this browser's clock, not the server's.
+ */
+export function useNow(tickMillis = 1000): number {
+  const { scheduler } = useLive();
+  const clock = useCallback(() => scheduler.now?.() ?? Date.now(), [scheduler]);
+  const [now, setNow] = useState(clock);
+  useEffect(() => {
+    let cancel = () => undefined as void;
+    const tick = () => {
+      setNow(clock());
+      cancel = scheduler.after(tickMillis, tick);
+    };
+    cancel = scheduler.after(tickMillis, tick);
+    return () => cancel();
+  }, [scheduler, clock, tickMillis]);
+  return now;
 }
 
 /** What a live read is given: for a blocking query the index to wait past and how long; the signal that ends it. */
