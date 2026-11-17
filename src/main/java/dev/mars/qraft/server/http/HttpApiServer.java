@@ -212,11 +212,21 @@ public final class HttpApiServer implements AutoCloseable {
         String known = method == null ? "OTHER" : method.toUpperCase(java.util.Locale.ROOT);
         try {
             AuditEvents.publish(eventJournal, raftNode == null ? 0 : raftNode.getCurrentTerm(),
-                    new AuditEvents.Request(accessor, known, route, exchange.getResponseCode()),
+                    new AuditEvents.Request(accessor, known, route, exchange.getResponseCode(),
+                            auditedScope(exchange, "X-Qraft-Tenant"), auditedScope(exchange, "X-Qraft-Namespace")),
                     exchange.getResponseHeaders().getFirst(dev.mars.qraft.common.http.JsonApi.REQUEST_ID_HEADER));
         } catch (RuntimeException failure) {
             LOG.warn("A request could not be audited: {}", failure.toString());
         }
+    }
+
+    /**
+     * The tenant or namespace a request named in {@code header}, as an audit record keeps it (UI-6 Tenants, Namespaces
+     * and Audit task list, decision 4): the default where it named none.
+     */
+    private static String auditedScope(HttpExchange exchange, String header) {
+        String named = exchange.getRequestHeaders().getFirst(header);
+        return named == null || named.isBlank() ? "default" : named.trim();
     }
 
     private RequestMetrics requestMetrics() {
@@ -362,6 +372,12 @@ public final class HttpApiServer implements AutoCloseable {
         context(KvApiRoutes.CONTEXT, requestAware(kvApi::handle));
         SessionApiRoutes sessionApi = new SessionApiRoutes(this);
         context(SessionApiRoutes.CONTEXT, requestAware(sessionApi::handle));
+        CoordinationUiRoutes coordinationUi = new CoordinationUiRoutes(this);
+        context(CoordinationUiRoutes.LOCKS, requestAware(coordinationUi::locks));
+        context(CoordinationUiRoutes.SESSIONS, requestAware(coordinationUi::sessions));
+        GovernUiRoutes governUi = new GovernUiRoutes(this);
+        context(GovernUiRoutes.SCOPES, requestAware(governUi::scopes));
+        context(GovernUiRoutes.AUDIT, requestAware(governUi::audit));
         eventRoutes = new EventRoutes(this);
         context(EventRoutes.CONTEXT, requestAware(eventRoutes::handle));
         AuthApiRoutes authApi = new AuthApiRoutes(this);
@@ -370,6 +386,30 @@ public final class HttpApiServer implements AutoCloseable {
         TenancyApiRoutes.CONTEXTS.forEach(context -> context(context, requestAware(tenancyApi::handle)));
         AclApiRoutes aclApi = new AclApiRoutes(this);
         AclApiRoutes.CONTEXTS.forEach(context -> context(context, requestAware(aclApi::handle)));
+    }
+
+    /** The audit file this server writes, which the audit read answers (UI-6 Tenants, Namespaces and Audit list). */
+    private volatile java.nio.file.Path auditFile;
+    /** How much of the audit file one read scans from its end, 64 MiB unless a test sets less. */
+    private volatile long auditScanLimit = 64L * 1024 * 1024;
+
+    /** Answers the audit read from {@code file}, {@code server.audit.path}, which this server's audit sink writes. */
+    public void useAuditFile(java.nio.file.Path file) {
+        this.auditFile = Objects.requireNonNull(file, "file");
+    }
+
+    /** Scans at most {@code bytes} of the audit file in one read. */
+    void useAuditScanLimit(long bytes) {
+        if (bytes <= 0) throw new IllegalArgumentException("the scan limit must be positive");
+        this.auditScanLimit = bytes;
+    }
+
+    java.nio.file.Path auditFile() {
+        return auditFile;
+    }
+
+    long auditScanLimit() {
+        return auditScanLimit;
     }
 
     /**
