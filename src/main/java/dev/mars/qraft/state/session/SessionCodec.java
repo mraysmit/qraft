@@ -42,8 +42,13 @@ public final class SessionCodec {
                         .setTtlMs(session.ttl().toMillis()).setLockDelayMs(session.lockDelay().toMillis())
                         .setCreateTimeMs(session.createTime().toEpochMilli())).build();
             }
-            case SessionCommand.Destroy destroy -> SessionCommandProto.newBuilder().setDestroy(SessionDestroyProto
-                    .newBuilder().setId(destroy.id()).setAtMs(destroy.at().toEpochMilli())).build();
+            case SessionCommand.Destroy destroy -> {
+                SessionDestroyProto.Builder proto = SessionDestroyProto.newBuilder().setId(destroy.id())
+                        .setAtMs(destroy.at().toEpochMilli());
+                // An API destroy is written as before, so a server without causes reads it the same way.
+                if (destroy.cause() != SessionCommand.Cause.DESTROYED) proto.setCause(destroy.cause().reason());
+                yield SessionCommandProto.newBuilder().setDestroy(proto).build();
+            }
         };
     }
 
@@ -56,8 +61,17 @@ public final class SessionCodec {
                         Duration.ofMillis(session.getLockDelayMs()), 0, Instant.ofEpochMilli(session.getCreateTimeMs())));
             }
             case DESTROY -> new SessionCommand.Destroy(proto.getDestroy().getId(),
-                    Instant.ofEpochMilli(proto.getDestroy().getAtMs()));
+                    Instant.ofEpochMilli(proto.getDestroy().getAtMs()), cause(proto.getDestroy().getCause()));
             case COMMAND_NOT_SET -> throw new IllegalArgumentException("a session command holds no change");
         };
+    }
+
+    /** A destroy's cause as written; none is a destroy through the API, as every entry written before causes is. */
+    private static SessionCommand.Cause cause(String written) {
+        if (written.isEmpty()) return SessionCommand.Cause.DESTROYED;
+        for (SessionCommand.Cause cause : SessionCommand.Cause.values()) {
+            if (cause.reason().equals(written)) return cause;
+        }
+        throw new IllegalArgumentException("a session destroy names an unknown cause: " + written);
     }
 }
