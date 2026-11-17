@@ -1,7 +1,7 @@
 # Qraft Administrative UI and UX Design
 
 **Status:** Draft  
-**Last updated:** 2026-11-15 (section 7.1: what the Key/Value pages do as UI-6's first list built them. Earlier the same day: UI-5 delivered: sections 5.1 and 10.2.2 record what the implementation plan's open question 5 and the secret's keeping were decided to be, and section 9.2 what the removal's review shows; the UI-5 task list's decisions 1, 7 and 8. Earlier, 2026-11-01: a policy that tokens link to can now be deleted, as the owner decided for the ACL list's proposal 18: sections 10.2 and the refusals changed. Earlier the same day: section 10.2 follows the ACL list's alignment with Consul: the first sign-in, a secret shown once and stored only as a hash, 403 for a bad token, the form of a policy's rules, and recovery. Earlier the same day: dated task-list links refreshed. Earlier, 2026-10-30: section 5.1: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after a review of the interface's logic against the ACL list and the platform design: access control rewritten as section 10.2's subsections, with the owner's decisions on the security profile, the lock-out guard, policy deletion and the explanation endpoint; principle 3.7; access control moved to Stage 2; section 11's integrity refusals and operations that are not idempotent; nodes, health states, unscoped views, and operations without an API in sections 3.2, 5 and 9. Earlier that day, after a review of the reference implementation against this document: workspace tabs, section 4.4; access control on the token model of the ACL list, sections 4.1, 10.2, 11 and 15, with Roles and Auth Methods reserved, section 2; the reference implementation follows section 4.3 and labels reserved views. Earlier, 2026-10-09: a client row shows the version from the node's metadata; a node has no capabilities any more. Before: 2026-09-25)
+**Last updated:** 2026-11-17 (sections 7.1 to 7.3: what the Sessions, Locks and Watches pages, and acquire and release, do as UI-6's second list built them. Earlier, 2026-11-15: section 7.1: what the Key/Value pages do as UI-6's first list built them. Earlier the same day: UI-5 delivered: sections 5.1 and 10.2.2 record what the implementation plan's open question 5 and the secret's keeping were decided to be, and section 9.2 what the removal's review shows; the UI-5 task list's decisions 1, 7 and 8. Earlier, 2026-11-01: a policy that tokens link to can now be deleted, as the owner decided for the ACL list's proposal 18: sections 10.2 and the refusals changed. Earlier the same day: section 10.2 follows the ACL list's alignment with Consul: the first sign-in, a secret shown once and stored only as a hash, 403 for a bad token, the form of a policy's rules, and recovery. Earlier the same day: dated task-list links refreshed. Earlier, 2026-10-30: section 5.1: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after a review of the interface's logic against the ACL list and the platform design: access control rewritten as section 10.2's subsections, with the owner's decisions on the security profile, the lock-out guard, policy deletion and the explanation endpoint; principle 3.7; access control moved to Stage 2; section 11's integrity refusals and operations that are not idempotent; nodes, health states, unscoped views, and operations without an API in sections 3.2, 5 and 9. Earlier that day, after a review of the reference implementation against this document: workspace tabs, section 4.4; access control on the token model of the ACL list, sections 4.1, 10.2, 11 and 15, with Roles and Auth Methods reserved, section 2; the reference implementation follows section 4.3 and labels reserved views. Earlier, 2026-10-09: a client row shows the version from the node's metadata; a node has no capabilities any more. Before: 2026-09-25)
 
 ## 1. Purpose
 
@@ -428,7 +428,7 @@ As built on 2026-11-15
   under it, keeping the draft;
 - changes follow `key:write` on the key, or on a folder's prefix, in the selected
   scope; the whole store is not offered for deletion;
-- acquire and release wait for the sessions list (UI-6's second).
+- acquire and release came with the sessions list (UI-6's second), below.
 
 ### 7.2 Sessions and locks
 
@@ -440,12 +440,42 @@ Lock views show the key, owning session, acquisition index, waiters or contentio
 summary where available, and invalidation reason. The UI never bypasses session
 ownership rules.
 
+As built on 2026-11-17
+([`task-list-admin-ui-sessions-locks-watches-2026-11-17.md`](../docs/archive/task-list-admin-ui-sessions-locks-watches-2026-11-17.md)):
+
+- sessions belong to no tenant or namespace, so the scope selector does not
+  apply to them; a held key is shown and linked in its own scope;
+- the remaining lifetime and the last renewal come from the leader, which alone
+  keeps the timers; a follower's page says it cannot tell them, and the time
+  left counts down by the browser's clock;
+- a session is created on a node the catalog has, with its limits checked
+  before the review, and is not renewed by the interface; destroying one is
+  reviewed with the keys it holds and what its behaviour does to them; each
+  needs `session:write` on its node;
+- the Locks page lists the held keys and the lock delays still running across
+  every scope the token may read, and the reasons of recent invalidations from
+  the journal (`destroyed`, `ttl` or `node`); waiters are not shown, as a
+  contender waits with a blocking read of its own, which the server cannot
+  count;
+- on a Key/Value entry, acquiring needs `key:write` and a live session chosen,
+  and releasing is offered only with the session that holds the key and with
+  `session:write` on its node as well; a refused acquisition shows the holder
+  or the lock delay that runs.
+
 ### 7.3 Watches
 
 Watch views use the authoritative applied or modification index as the correctness
 cursor. A history-gap response causes the UI to re-read current state and resume
 from the new index. The interface reports this resynchronization instead of
 silently implying uninterrupted delivery.
+
+As built on 2026-11-17 (the same list): a watch runs in the tab alone, with no
+server-side registration, on a key, the keys under a prefix, a service's health,
+the sessions, or the event journal with `operator:read`. Its log lists each
+delivery with its index and what changed, never a value, and each
+resynchronization as a row of its own: an index that went back, a history gap,
+another boot, or an overflow. The live-updates control pauses it, and choosing
+another target, scope or consistency starts a new watch.
 
 ## 8. Multi-cluster
 
