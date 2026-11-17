@@ -101,4 +101,23 @@ class QraftStateStoreKvEventsTest {
                 apply(SessionCommand.destroy("s1", T0)));
         assertEquals(List.of(), apply(SessionCommand.destroy("s1", T0)), "a session that is gone");
     }
+
+    /** A session's end names its cause: an API destroy, a lapsed TTL, or its node (Sessions, Locks and Watches list, decision 3). */
+    @Test
+    void aSessionsEndNamesItsCause() {
+        apply(NodeCommand.register(Node.of("host-a", "10.0.0.1", null, null, Map.of()), T0));
+        for (String id : List.of("by-api", "by-ttl", "by-node")) {
+            apply(SessionCommand.create(new Session(id, "host-a", id, SessionBehavior.RELEASE, Duration.ofSeconds(10),
+                    Duration.ZERO, 0, T0)));
+        }
+        store.recordDomainEvents(true);
+
+        assertEquals(List.of(new DomainEvent(null, null, new SessionEvents.SessionDestroyed("by-api", "destroyed"))),
+                apply(SessionCommand.destroy("by-api", T0)));
+        assertEquals(List.of(new DomainEvent(null, null, new SessionEvents.SessionDestroyed("by-ttl", "ttl"))),
+                apply(SessionCommand.lapse("by-ttl", T0)));
+        assertEquals(List.of(new DomainEvent(null, null, new SessionEvents.SessionDestroyed("by-node", "node"))),
+                apply(NodeCommand.deregister("host-a")).stream()
+                        .filter(event -> event.event() instanceof SessionEvents.SessionDestroyed).toList());
+    }
 }
