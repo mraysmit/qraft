@@ -309,6 +309,8 @@ public class QraftServerService {
             // Its effective configuration, its secrets withheld, for the administrative interface (UI-4 list).
             healthServer.useConfiguration(config.effective());
             this.auditSink = config.getAuditPath().map(path -> AuditFileSink.start(eventJournal, path));
+            // The audit read answers that file (UI-6 Tenants, Namespaces and Audit list, decision 5).
+            config.getAuditPath().ifPresent(healthServer::useAuditFile);
             io.opentelemetry.api.metrics.Meter storageMeter =
                     io.opentelemetry.api.GlobalOpenTelemetry.getMeter("qraft-raft");
             storageMeter.gaugeBuilder("qraft.raft.storage.bytes").setDescription("Bytes the Raft storage holds")
