@@ -37,6 +37,15 @@ import {
   type HealthEntry,
   type KvEntry,
   KvEntrySchema,
+  type ConsulSession,
+  ConsulSessionSchema,
+  type Locks,
+  LocksSchema,
+  type Scopes,
+  ScopesSchema,
+  type Audit,
+  type Sessions,
+  SessionsSchema,
   type Members,
   MembersSchema,
   type QraftEvent,
@@ -65,6 +74,7 @@ import {
   TokenSchema,
   WatchEndSchema,
 } from './schemas';
+import type { LocksFilter } from './sessions';
 
 /** The tenant and namespace a catalog or health read is confined to (UI/UX design section 3.2). */
 export interface Scope {
@@ -132,6 +142,10 @@ export interface EventQuery {
   service?: string;
   /** The key's events, and the tree deletions that covered it (UI-6 Key/Value task list, decision 8). */
   key?: string;
+  /** The session's own events and the locks it took and gave up (UI-6 Sessions list, decision 6). */
+  session?: string;
+  /** The events of one type, such as `session.destroyed`. */
+  type?: string;
 }
 
 /** Why a watch ended, and the cursor to resume after. */
@@ -299,8 +313,8 @@ export interface QraftApi {
   kvLevel(prefix: string, scope?: Scope, options?: ReadOptions): Promise<Read<string[]>>;
   /** An entry, or null when the key does not exist. */
   kvEntry(key: string, scope?: Scope, options?: ReadOptions): Promise<Read<KvEntry | null>>;
-  /** Every key under `prefix`, at any depth. */
-  kvKeys(prefix: string, scope?: Scope, options?: Abortable): Promise<Read<string[]>>;
+  /** Every key under `prefix`, at any depth; a blocking query when given an index, as a watch of the prefix is. */
+  kvKeys(prefix: string, scope?: Scope, options?: ReadOptions): Promise<Read<string[]>>;
   /**
    * Writes `value` as the key's raw body with its flags, if the key is still at `cas`, 0 for one that does not exist
    * (UI-6 Key/Value task list, decision 5): true when written, false when the entry had moved on.
@@ -310,6 +324,68 @@ export interface QraftApi {
   kvDelete(key: string, scope: Scope | undefined, cas: number): Promise<Read<boolean>>;
   /** Deletes every key under `prefix`; the server refuses it unless the token may write every one. */
   kvDeleteTree(prefix: string, scope?: Scope): Promise<Read<boolean>>;
+  /**
+   * Every session the token may read, which belong to no scope, with the leader's timers (UI-6 Sessions, Locks and
+   * Watches task list, decision 2); a server that does not lead answers them unknown.
+   */
+  sessions(options?: ReadOptions): Promise<Read<Sessions>>;
+  /** The keys sessions hold across scopes, or one session's, and the lock delays still running (decision 4). */
+  locks(filter?: LocksFilter, options?: ReadOptions): Promise<Read<Locks>>;
+  /** Creates a session bound to a node; the answer names it. Not idempotent: never sent again unasked (decision 7). */
+  createSession(body: SessionBody): Promise<Read<{ ID: string }>>;
+  /** Renews a session on the leader, which a follower forwards; 404 `session_not_found` once it has ended. */
+  renewSession(id: string): Promise<Read<ConsulSession[]>>;
+  /** Destroys a session, releasing or deleting its keys; idempotent, as one that has ended is destroyed already. */
+  destroySession(id: string): Promise<Read<boolean>>;
+  /**
+   * Acquires the key for `session`, writing `value` with its flags (decision 9): true when the session holds it, false
+   * when another does or its lock delay runs. The server takes no compare-and-set with it, as Consul's does not.
+   */
+  kvAcquire(key: string, scope: Scope | undefined, value: string, at: { flags: number; session: string }): Promise<Read<boolean>>;
+  /** Releases the key `session` holds, writing `value`: true when released, false when the session did not hold it. */
+  kvRelease(key: string, scope: Scope | undefined, value: string, at: { flags: number; session: string }): Promise<Read<boolean>>;
+  /** Every tenant with what each of its namespaces holds (UI-6 Tenants, Namespaces and Audit task list, decision 2). */
+  scopes(options?: ReadOptions): Promise<Read<Scopes>>;
+  /** Creates a tenant with its default namespace; 409 `tenant_exists` for one that exists. Not sent again unasked. */
+  createTenant(name: string, description: string): Promise<Read<Tenant>>;
+  updateTenant(name: string, description: string): Promise<Read<Tenant>>;
+  /** Deletes a tenant with all its namespaces hold; 404 for one that is gone. */
+  deleteTenant(name: string): Promise<Read<boolean>>;
+  /** Creates a namespace in a tenant; 409 `namespace_exists` for one that exists. Not sent again unasked. */
+  createNamespace(tenant: string, name: string, description: string): Promise<Read<Namespace>>;
+  updateNamespace(tenant: string, name: string, description: string): Promise<Read<Namespace>>;
+  /** Deletes a namespace with what it holds; 404 for one that is gone. */
+  deleteNamespace(tenant: string, name: string): Promise<Read<boolean>>;
+  /** The answering server's audit records, newest first, as `query` filters them (decision 5). */
+  audit(query: AuditQuery, options?: Abortable): Promise<Read<Audit>>;
+}
+
+/** What the audit read takes besides its limit (UI-6 Tenants, Namespaces and Audit task list, decision 5). */
+export interface AuditQuery {
+  accessor?: string;
+  requestId?: string;
+  method?: string;
+  route?: string;
+  tenant?: string;
+  namespace?: string;
+  result?: 'allowed' | 'denied' | 'failed';
+  /** An instant: the records written before it, the next page back. */
+  before?: string;
+}
+
+/** The audit read's filters in the order they are sent and written into an address. */
+export const AUDIT_FILTERS = ['accessor', 'requestId', 'method', 'route', 'tenant', 'namespace', 'result', 'before'] as const;
+
+/** How many records one audit read answers. */
+export const AUDIT_PAGE = 100;
+
+/** A session as a create gives it, in Consul's fields: durations as Go writes them, such as `30s`; a TTL empty for none. */
+export interface SessionBody {
+  Node: string;
+  Name: string;
+  TTL: string;
+  LockDelay: string;
+  Behavior: 'release' | 'delete';
 }
 
 /**
@@ -419,7 +495,8 @@ export function createApi(apiBasePath: string, fetcher: typeof fetch = fetch, cr
   function optioned<T>(path: string, schema: ZodType<T>, options: ReadOptions = {},
     headers: Record<string, string> = {}): Promise<Read<T>> {
     const query = optionsQuery(options);
-    return read(query.length === 0 ? path : `${path}?${query.join('&')}`, schema, headers, options.signal);
+    const joined = query.length === 0 ? path : `${path}${path.includes('?') ? '&' : '?'}${query.join('&')}`;
+    return read(joined, schema, headers, options.signal);
   }
 
   /**
@@ -558,6 +635,28 @@ export function createApi(apiBasePath: string, fetcher: typeof fetch = fetch, cr
       undefined, scopeHeaders(scope)),
     kvDeleteTree: (prefix, scope = DEFAULT_SCOPE) => write(`v1/kv/${kvPath(prefix)}?recurse`, z.boolean(), 'DELETE',
       undefined, scopeHeaders(scope)),
+    sessions: (options) => optioned('v1/internal/ui/sessions', SessionsSchema, options),
+    locks: (filter = {}, options) => optioned(filter.session === undefined ? 'v1/internal/ui/locks'
+      : `v1/internal/ui/locks?session=${encodeURIComponent(filter.session)}`, LocksSchema, options),
+    createSession: (body) => write('v1/session/create', z.object({ ID: z.string().min(1) }), 'PUT', body),
+    renewSession: (id) => write(`v1/session/renew/${segment(id)}`, z.array(ConsulSessionSchema), 'PUT'),
+    destroySession: (id) => write(`v1/session/destroy/${segment(id)}`, z.boolean(), 'PUT'),
+    kvAcquire: (key, scope = DEFAULT_SCOPE, value, at) => write(`v1/kv/${kvPath(key)}?flags=${at.flags}&acquire=${
+      encodeURIComponent(at.session)}`, z.boolean(), 'PUT', new RawBody(value), scopeHeaders(scope)),
+    kvRelease: (key, scope = DEFAULT_SCOPE, value, at) => write(`v1/kv/${kvPath(key)}?flags=${at.flags}&release=${
+      encodeURIComponent(at.session)}`, z.boolean(), 'PUT', new RawBody(value), scopeHeaders(scope)),
+    scopes: (options) => optioned('v1/internal/ui/scopes', ScopesSchema, options),
+    createTenant: (name, description) => write('v1/tenant', TenantSchema, 'PUT', { Name: name, Description: description }),
+    updateTenant: (name, description) => write(`v1/tenant/${segment(name)}`, TenantSchema, 'PUT',
+      { Description: description }),
+    deleteTenant: (name) => write(`v1/tenant/${segment(name)}`, z.boolean(), 'DELETE'),
+    createNamespace: (tenant, name, description) => write('v1/namespace', NamespaceSchema, 'PUT',
+      { Name: name, Tenant: tenant, Description: description }),
+    updateNamespace: (tenant, name, description) => write(`v1/namespace/${segment(name)}`, NamespaceSchema, 'PUT',
+      { Description: description }, { 'X-Qraft-Tenant': tenant }),
+    deleteNamespace: (tenant, name) => write(`v1/namespace/${segment(name)}`, z.boolean(), 'DELETE', undefined,
+      { 'X-Qraft-Tenant': tenant }),
+    audit: () => Promise.reject(new Error('not built')),
     async readiness(options = {}) {
       const path = 'health/ready';
       const response = await send(path, {}, options.signal);
@@ -619,6 +718,8 @@ function eventQueryText(query: EventQuery): string {
   if (query.namespace !== undefined) parameters.set('namespace', query.namespace);
   if (query.service !== undefined) parameters.set('service', query.service);
   if (query.key !== undefined) parameters.set('key', query.key);
+  if (query.session !== undefined) parameters.set('session', query.session);
+  if (query.type !== undefined) parameters.set('type', query.type);
   const text = parameters.toString();
   return text === '' ? '' : `?${text}`;
 }
