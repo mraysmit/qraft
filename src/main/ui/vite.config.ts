@@ -57,5 +57,10 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/setupTests.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
+    // A test renders the whole interface, Ant Design's tables included, in jsdom, and drives time with a scheduler it
+    // fires by hand, so how long it runs is CPU alone: the slowest took 1.9 s by itself and 4.2 s with one worker for
+    // each core but one at a12393d, and 6.2 s once UI-6's Sessions tests joined them (Sessions, Locks and Watches
+    // task list, decision 13). The limit guards against a test that never ends, not against a slow machine.
+    testTimeout: 15_000,
   },
 });
