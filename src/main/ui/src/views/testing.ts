@@ -66,6 +66,13 @@ import {
   type Policy,
   PolicySchema,
   type ServiceSummary,
+  type HeldKey,
+  HeldKeySchema,
+  type NamespaceHoldings,
+  type Scopes,
+  type SessionEntry,
+  SessionEntrySchema,
+  type Sessions,
   type Token,
   TokenSchema,
 } from '../api/schemas';
@@ -262,6 +269,23 @@ export function fakeApi(
     kvPut: () => read(true, null),
     kvDelete: () => read(true, null),
     kvDeleteTree: () => read(true, null),
+    sessions: () => read(SESSIONS(), 44),
+    createSession: () => read({ ID: '7e570000-0000-4000-8000-000000000003' }, null),
+    renewSession: () => read([], null),
+    destroySession: () => read(true, null),
+    scopes: () => read(SCOPES(), 40),
+    createTenant: (name, description) => read({ Name: name, Description: description }, null),
+    updateTenant: (name, description) => read({ Name: name, Description: description }, null),
+    deleteTenant: () => read(true, null),
+    createNamespace: (tenant, name, description) => read({ Name: name, Tenant: tenant, Description: description }, null),
+    updateNamespace: (tenant, name, description) => read({ Name: name, Tenant: tenant, Description: description }, null),
+    deleteNamespace: () => read(true, null),
+    audit: () => read({ Configured: true, File: '/data/qraft-audit.json', Size: 0, Scanned: 0, Complete: true,
+      Records: [] }, null),
+    kvAcquire: () => read(true, null),
+    kvRelease: () => read(true, null),
+    locks: (filter) => read({ Held: [heldKey()].filter((held) => filter?.session === undefined
+      || held.Session === filter.session), Delays: [] }, 43),
     ...overrides,
   };
   return blockingWaits(api);
@@ -308,12 +332,22 @@ function blockingWaits(api: QraftApi): QraftApi {
     checks: waiting(2, api.checks),
     kvLevel: waiting(2, api.kvLevel),
     kvEntry: waiting(2, api.kvEntry),
+    sessions: waiting(0, api.sessions),
+    scopes: waiting(0, api.scopes),
+    locks: waiting(1, api.locks),
   };
 }
 
-/** A scheduler the test fires by hand: `pending` holds what is due, `fire` runs it all. */
+/** The instant a test's clock starts at: a session of {@link sessionEntry} lapses 25 s later. */
+export const TEST_NOW = Date.parse('2026-11-17T12:00:00Z');
+
+/**
+ * A scheduler the test fires by hand: `pending` holds what is due, `fire` runs it all; its clock starts at
+ * {@link TEST_NOW} and moves only with `advance`.
+ */
 export function manualScheduler() {
   const pending: { ms: number; run: () => void }[] = [];
+  let millis = TEST_NOW;
   return {
     pending,
     scheduler: {
@@ -325,12 +359,53 @@ export function manualScheduler() {
           if (at >= 0) pending.splice(at, 1);
         };
       },
+      now: () => millis,
     },
     fire() {
       pending.splice(0).forEach((entry) => entry.run());
     },
+    advance(ms: number) {
+      millis += ms;
+    },
   };
 }
+
+/** The test API's sessions: one with a TTL that holds a key, and one without. */
+export const SESSION_A = '4f3c2a10-0000-4000-8000-000000000001';
+export const SESSION_B = '4f3c2a10-0000-4000-8000-000000000002';
+
+/** A session as the sessions read answers it, worker on node-a unless changed. */
+export function sessionEntry(fields: Partial<SessionEntry> = {}): SessionEntry {
+  return SessionEntrySchema.parse({ ID: SESSION_A, Name: 'worker', Node: 'node-a', LockDelay: 15_000_000_000,
+    Behavior: 'release', TTL: '30s', CreateIndex: 40, ModifyIndex: 40, RenewedAt: null,
+    ExpiresAt: '2026-11-17T12:00:25Z', ...fields });
+}
+
+/** The key session A holds in acme/prod, unless changed. */
+export function heldKey(fields: Partial<HeldKey> = {}): HeldKey {
+  return HeldKeySchema.parse({ Tenant: 'acme', Namespace: 'prod', Key: 'app/leader', Session: SESSION_A, LockIndex: 2,
+    CreateIndex: 41, ModifyIndex: 43, ...fields });
+}
+
+/** A namespace's holdings, empty unless changed. */
+export function holdings(name: string, fields: Partial<NamespaceHoldings> = {}): NamespaceHoldings {
+  return { Name: name, Description: '', CreateIndex: 4, ModifyIndex: 4, Services: 0, Instances: 0, Keys: 0,
+    HeldKeys: 0, Sessions: [], ...fields };
+}
+
+/** The test API's scopes: acme with an empty default namespace and a busy prod, and the default tenant. */
+export const SCOPES = (): Scopes => ({ Tenants: [
+  { Name: 'acme', Description: 'Acme Ltd', CreateIndex: 4, ModifyIndex: 4, Namespaces: [holdings('default'),
+    holdings('prod', { Description: 'production', CreateIndex: 5, ModifyIndex: 6, Services: 2, Instances: 3, Keys: 3,
+      HeldKeys: 1, Sessions: [SESSION_A] })] },
+  { Name: 'default', Description: '', CreateIndex: 0, ModifyIndex: 0, Namespaces: [holdings('default',
+    { Services: 1, Instances: 1, Keys: 4, CreateIndex: 0, ModifyIndex: 0 })] },
+] });
+
+/** The test API's sessions read. */
+export const SESSIONS = (): Sessions => ({ Sessions: [sessionEntry(), sessionEntry({ ID: SESSION_B, Name: '',
+  Node: 'node-b', Behavior: 'delete', TTL: '', LockDelay: 0, CreateIndex: 41, ModifyIndex: 41, ExpiresAt: null })],
+TtlKnown: true });
 
 /** An event of the journal at `sequence`, a service registration unless changed. */
 export function qraftEvent(sequence: number, changes: Partial<QraftEvent> = {}): QraftEvent {
