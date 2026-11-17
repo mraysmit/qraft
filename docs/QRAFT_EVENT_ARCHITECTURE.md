@@ -576,6 +576,28 @@ Phases 5 to 7 were built on 2026-11-08 by
   `lock.acquired` and `lock.released` that name it, and `key.tree_deleted` whose
   prefix covers it, all of which implement `KeyEvent`. The key is read as given,
   not trimmed, and an empty one is refused.
+- **A session filter** (since 2026-11-17, for a session's recent events on the
+  administrative interface's Sessions pages, UI-6): the query and the watch also
+  take `session`, and answer the session's own `session.created` and
+  `session.destroyed`, and the `lock.acquired` and `lock.released` it took part
+  in, all of which implement `SessionEvent`. A blank one is refused. The keys a
+  destroy releases or deletes produce no `lock.released` of their own; the
+  `session.destroyed` stands for them.
+- **A destroy's reason** (since 2026-11-17, UI-6): `session.destroyed` carries
+  `destroyed` for a destroy through the API, `ttl` when the leader's timer
+  destroyed it, and `node` when its node failed or left. Before, a lapse was
+  recorded as `destroyed`. The cause travels in the replicated destroy command,
+  so every replica records the same reason; an entry written before the change,
+  or by a server that predates it, reads as `destroyed`.
+- **Tenancy events** (since 2026-11-17, UI-6's third list): `tenant.created`,
+  `tenant.updated` and `tenant.deleted`, in the tenant's `default` namespace, and
+  `namespace.created`, `namespace.updated` and `namespace.deleted`, in the
+  namespace. Each names its scope, and none carries a description. A deletion's
+  event comes after what the deletion removed. A refused change produces none.
+- **The audit event's scope** (since 2026-11-17): `audit.http_request` carries the
+  request's `tenant` and `namespace`, the default ones where the request named
+  none, and the envelope carries them too. So the scope filters take a scope's
+  requests with its other events.
 - **The watch**, `GET /v1/operator/events/watch`: server-sent events with the same
   cursor and filters, an opening comment, each event with its cursor as the `id`, a
   comment as a heartbeat every 15 seconds without an event, and a last `end` event
