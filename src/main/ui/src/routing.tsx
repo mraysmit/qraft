@@ -15,7 +15,7 @@
  */
 
 import { createContext, type CSSProperties, type MouseEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { type Consistency, DEFAULT_SCOPE, type Scope } from './api/client';
+import { type AuditQuery, type Consistency, DEFAULT_SCOPE, type Scope } from './api/client';
 import { type EventCategory, EventCategorySchema } from './api/schemas';
 
 // Each view has its own address below the interface's path, so reloading, bookmarking, sharing a link and the back
@@ -41,7 +41,23 @@ export type Route =
   | { view: 'explain' }
   /** The Key/Value browser at a folder, empty or ending in `/`, or at a key (UI-6 Key/Value task list, decision 3). */
   | { view: 'kv'; path: string }
+  /** The Sessions page, and a session by its ID (UI-6 Sessions, Locks and Watches task list, decision 12). */
+  | { view: 'sessions' }
+  | { view: 'sessionInfo'; id: string }
+  | { view: 'locks' }
+  /** The Watches page, and what it watches; the name is in the query, as a key may hold a `/` or a dot. */
+  | { view: 'watches'; target?: WatchTarget; name?: string }
+  /** The Govern pages (UI-6 Tenants, Namespaces and Audit task list, decision 9). */
+  | { view: 'tenants' }
+  | { view: 'tenant'; name: string }
+  | { view: 'namespaces' }
+  | { view: 'namespace'; tenant: string; name: string }
+  /** The Audit page, its filters in the query, the scope's as `inTenant` and `inNamespace`. */
+  | { view: 'audit'; filter: AuditQuery }
   | { view: 'unknown' };
+
+/** What a watch follows (UI-6 Sessions, Locks and Watches task list, decision 10). */
+export type WatchTarget = 'key' | 'prefix' | 'service' | 'sessions' | 'events';
 
 /**
  * The view an address below `uiPath` names. The Events page also takes its category and correlation ID from the
@@ -52,34 +68,53 @@ export function routeOf(pathname: string, uiPath: string, search = ''): Route {
   if (pathname === root.slice(0, -1)) return { view: 'services' };
   if (!pathname.startsWith(root)) return { view: 'unknown' };
   const rest = pathname.slice(root.length);
-  if (rest === '' || rest === 'services') return { view: 'services' };
-  if (rest === 'nodes') return { view: 'nodes' };
-  if (rest === 'checks') return { view: 'checks' };
-  if (rest === 'cluster') return { view: 'cluster' };
-  if (rest === 'members') return { view: 'members' };
-  if (rest === 'storage') return { view: 'storage' };
+  const plain = PLAIN_VIEWS.get(rest);
+  if (plain !== undefined) return plain;
   if (rest === 'events') return eventsOf(search);
-  if (rest === 'configuration') return { view: 'configuration' };
   // The folder or key is in the query: the server takes an address with an empty segment for none, and one whose
   // last segment has a dot for a file, and a key may have either.
   if (rest === 'kv') return { view: 'kv', path: new URLSearchParams(search).get('path') ?? '' };
-  if (rest === 'access') return { view: 'access' };
-  if (rest === 'access/tokens') return { view: 'tokens' };
-  if (rest === 'access/policies') return { view: 'policies' };
-  if (rest === 'access/explain') return { view: 'explain' };
-  const token = single(rest, 'access/tokens/');
-  if (token !== null) return { view: 'token', accessorId: token };
-  const policy = single(rest, 'access/policies/');
-  if (policy !== null) return { view: 'policy', id: policy };
-  if (rest.startsWith('services/') && rest.length > 'services/'.length && !rest.slice('services/'.length).includes('/')) {
-    try {
-      return { view: 'service', name: decodeURIComponent(rest.slice('services/'.length)) };
-    } catch {
-      return { view: 'unknown' };
-    }
-  }
-  return { view: 'unknown' };
+  if (rest === 'watches') return watchesOf(search);
+  return namespaceOf(rest) ?? oneNamedOf(rest) ?? { view: 'unknown' };
 }
+
+/** The pages of one thing named by the one segment after their prefix, its dots included. */
+const ONE_NAMED: readonly [string, (name: string) => Route][] = [
+  ['sessions/', (id) => ({ view: 'sessionInfo', id })],
+  ['tenants/', (name) => ({ view: 'tenant', name })],
+  ['access/tokens/', (accessorId) => ({ view: 'token', accessorId })],
+  ['access/policies/', (id) => ({ view: 'policy', id })],
+  ['services/', (name) => ({ view: 'service', name })],
+];
+
+function oneNamedOf(rest: string): Route | null {
+  for (const [prefix, route] of ONE_NAMED) {
+    const name = single(rest, prefix);
+    if (name !== null) return route(name);
+  }
+  return null;
+}
+
+/** The views an address names by its path alone, with nothing read from the path or the query. */
+// A Map, not an object: an object would answer `constructor` or `__proto__` with Object's own members.
+const PLAIN_VIEWS: ReadonlyMap<string, Route> = new Map<string, Route>([
+  ['', { view: 'services' }],
+  ['services', { view: 'services' }],
+  ['nodes', { view: 'nodes' }],
+  ['checks', { view: 'checks' }],
+  ['cluster', { view: 'cluster' }],
+  ['members', { view: 'members' }],
+  ['storage', { view: 'storage' }],
+  ['configuration', { view: 'configuration' }],
+  ['sessions', { view: 'sessions' }],
+  ['locks', { view: 'locks' }],
+  ['tenants', { view: 'tenants' }],
+  ['namespaces', { view: 'namespaces' }],
+  ['access', { view: 'access' }],
+  ['access/tokens', { view: 'tokens' }],
+  ['access/policies', { view: 'policies' }],
+  ['access/explain', { view: 'explain' }],
+]);
 
 /** The one segment after `prefix` in `rest`, decoded; null when there is not exactly one. */
 function single(rest: string, prefix: string): string | null {
@@ -91,6 +126,29 @@ function single(rest: string, prefix: string): string | null {
   } catch {
     return null;
   }
+}
+
+/** A namespace's page, `namespaces/<tenant>/<namespace>`: exactly two segments, neither empty. */
+function namespaceOf(rest: string): Route | null {
+  if (!rest.startsWith('namespaces/')) return null;
+  const parts = rest.slice('namespaces/'.length).split('/');
+  if (parts.length !== 2 || parts.includes('')) return null;
+  try {
+    return { view: 'namespace', tenant: decodeURIComponent(parts[0]!), name: decodeURIComponent(parts[1]!) };
+  } catch {
+    return null;
+  }
+}
+
+const WATCH_TARGETS: readonly WatchTarget[] = ['key', 'prefix', 'service', 'sessions', 'events'];
+
+/** The Watches page's target and name from its query; an unknown target is none. */
+function watchesOf(search: string): Route {
+  const query = new URLSearchParams(search);
+  const target = WATCH_TARGETS.find((known) => known === query.get('target'));
+  if (target === undefined) return { view: 'watches' };
+  const name = query.get('name');
+  return name === null ? { view: 'watches', target } : { view: 'watches', target, name };
 }
 
 function eventsOf(search: string): Route {
@@ -120,6 +178,19 @@ export function consistencyOf(search: string): Consistency {
   return chosen === 'consistent' || chosen === 'stale' ? chosen : 'default';
 }
 
+/** What a view keeps in its address's query, after the scope and consistency. */
+function viewQuery(route: Route, parameters: URLSearchParams): void {
+  if (route.view === 'events') {
+    if (route.category !== undefined) parameters.set('category', route.category);
+    if (route.correlation !== undefined) parameters.set('correlation', route.correlation);
+  } else if (route.view === 'kv' && route.path !== '') {
+    parameters.set('path', route.path);
+  } else if (route.view === 'watches' && route.target !== undefined) {
+    parameters.set('target', route.target);
+    if (route.name !== undefined) parameters.set('name', route.name);
+  }
+}
+
 /**
  * The address of a view in a scope and consistency. A service name is one encoded segment, its dots included: the server takes a last
  * segment with a dot for a file, and a file that is not there is not found. The default scope and the default consistency
@@ -134,17 +205,29 @@ export function hrefOf(route: Route, uiPath: string, scope: Scope = DEFAULT_SCOP
     parameters.set('namespace', scope.namespace);
   }
   if (consistency !== 'default') parameters.set('consistency', consistency);
-  if (route.view === 'events') {
-    if (route.category !== undefined) parameters.set('category', route.category);
-    if (route.correlation !== undefined) parameters.set('correlation', route.correlation);
-  }
-  if (route.view === 'kv' && route.path !== '') parameters.set('path', route.path);
+  viewQuery(route, parameters);
   const text = parameters.toString();
   const query = text === '' ? '' : `?${text}`;
   switch (route.view) {
     case 'services':
+    case 'audit':
     case 'unknown':
       return root + query;
+    case 'tenants':
+    case 'namespaces':
+      return `${root}${route.view}${query}`;
+    case 'tenant':
+      return `${root}tenants/${encodeURIComponent(route.name)}${query}`;
+    case 'namespace':
+      return `${root}namespaces/${encodeURIComponent(route.tenant)}/${encodeURIComponent(route.name)}${query}`;
+    case 'locks':
+      return `${root}locks${query}`;
+    case 'watches':
+      return `${root}watches${query}`;
+    case 'sessions':
+      return `${root}sessions${query}`;
+    case 'sessionInfo':
+      return `${root}sessions/${encodeURIComponent(route.id)}${query}`;
     case 'nodes':
       return `${root}nodes${query}`;
     case 'checks':
