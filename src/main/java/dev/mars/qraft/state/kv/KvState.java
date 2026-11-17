@@ -151,6 +151,28 @@ public final class KvState {
         }
     }
 
+    /** Every key a session holds, in every scope, in key order (UI-6 Sessions, Locks and Watches list, decision 4). */
+    public List<KvEntry> held() {
+        lock.readLock().lock();
+        try {
+            return entries.values().stream().filter(entry -> entry.session() != null).toList();
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
+
+    /** The lock delays that run past {@code now}, in key order (UI-6 Sessions, Locks and Watches list, decision 4). */
+    public List<LockDelay> lockDelaysAfter(java.time.Instant now) {
+        lock.readLock().lock();
+        try {
+            return lockDelays.entrySet().stream().filter(entry -> entry.getValue().isAfter(now))
+                    .map(entry -> new LockDelay(entry.getKey().tenant(), entry.getKey().namespace(),
+                            entry.getKey().key(), entry.getValue())).toList();
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
+
     /** Deletes {@code key} unless {@code cas} refuses it; an absent key is deleted already, as in Consul. */
     public boolean delete(KvScope scope, String key, OptionalLong cas, long index) {
         requireKey(key);
