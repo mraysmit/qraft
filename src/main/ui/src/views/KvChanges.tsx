@@ -41,7 +41,7 @@ const scopeLabel = (scope: Scope) => `${scope.tenant}/${scope.namespace}`;
  * Whether the token may write `segment`, a key or a folder's prefix, in `scope`: asked once when the page opens
  * (decision 9); null until answered. Without access control, always.
  */
-function useKeyWrite(api: QraftApi, segment: string, scope: Scope): boolean | null {
+export function useKeyWrite(api: QraftApi, segment: string, scope: Scope): boolean | null {
   const access = useAccess();
   const [state] = useRead(async () => {
     if (access.mode === 'none') return true;
@@ -131,9 +131,14 @@ type EntryPanel =
  * An entry's changes (decisions 5, 6, 9 and 10): its value and flags edited, and its deletion, each a compare-and-set
  * at the index the editor opened with. A live update never replaces the draft: the editor says the entry changed.
  */
-export function EntryChanges({ api, scope, entry }: { api: QraftApi; scope: Scope; entry: KvEntry }) {
+export function EntryChanges({ api, scope, entry, writable }: {
+  api: QraftApi;
+  scope: Scope;
+  entry: KvEntry;
+  /** Whether the token may write the key, asked once for the page (`useKeyWrite`); null until answered. */
+  writable: boolean | null;
+}) {
   const keyName = entry.Key;
-  const writable = useKeyWrite(api, keyName, scope);
   const [panel, setPanel] = useState<EntryPanel>({ kind: 'none' });
   const close = () => setPanel({ kind: 'none' });
   if (writable === null) return null;
@@ -172,6 +177,7 @@ export function EntryChanges({ api, scope, entry }: { api: QraftApi; scope: Scop
           <p>{`Value: ${bytesText(valueOf(base.Value).size)} → ${bytesText(bytesOf(value))}`}</p>
           <p>{`Flags: ${base.Flags} → ${Number(flags)}`}</p>
           <p>{`Saved only if the entry is still at index ${base.ModifyIndex}, as read.`}</p>
+          {base.Session !== undefined && <p>{`It is held by session ${base.Session}: saving keeps the lock.`}</p>}
           {changed}
         </>}
         action="Save"
@@ -192,6 +198,7 @@ export function EntryChanges({ api, scope, entry }: { api: QraftApi; scope: Scop
         identity={[...identity, ['Expected index', String(base.ModifyIndex)]]}
         review={<>
           <p>{`The key and its value are removed, only if the entry is still at index ${base.ModifyIndex}, as read.`}</p>
+          {base.Session !== undefined && <p>{`It is held by session ${base.Session}: deleting the key ends the lock.`}</p>}
           {changed}
         </>}
         action="Delete"
