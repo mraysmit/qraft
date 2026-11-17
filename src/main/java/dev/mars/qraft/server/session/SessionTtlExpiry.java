@@ -50,8 +50,8 @@ import java.util.function.Function;
  *   <li>renewals touch only this server's memory and are not replicated, so a follower refuses them, and a new leader
  *       gives every session the full {@value #TTL_MULTIPLIER} times its TTL again;</li>
  *   <li>at each interval, every lapsed session is destroyed through the replicated {@code Destroy} command stamped with
- *       the leader's time, so every replica releases or deletes its keys and starts their lock delay alike; a
- *       proposal that fails is tried again at the next interval;</li>
+ *       the leader's time and the {@code ttl} cause, so every replica releases or deletes its keys and starts their
+ *       lock delay alike, and records why; a proposal that fails is tried again at the next interval;</li>
  *   <li>a session without a TTL never lapses; it ends when it is destroyed or its node fails or leaves.</li>
  * </ul>
  *
@@ -72,6 +72,8 @@ public final class SessionTtlExpiry implements AutoCloseable {
     private final Duration interval;
     /** When each tracked session lapses, while this server leads. */
     private final Map<String, Instant> deadlines = new HashMap<>();
+    /** When each session was last renewed in this leadership, for the administrative interface alone. */
+    private final Map<String, Instant> renewals = new HashMap<>();
     private Runnable detach = () -> { };
     private boolean leader;
     private boolean closed;
@@ -109,6 +111,7 @@ public final class SessionTtlExpiry implements AutoCloseable {
         term++;
         cancel();
         deadlines.clear();
+        renewals.clear();
         leaderSince = nowLeader ? clock.instant() : null;
         if (nowLeader) arm(Duration.ZERO, term);
     }
@@ -124,10 +127,39 @@ public final class SessionTtlExpiry implements AutoCloseable {
         Optional<Session> session = sessions.get(id);
         if (session.isEmpty()) {
             deadlines.remove(id);
+            renewals.remove(id);
             return session;
         }
-        if (hasTtl(session.get())) deadlines.put(id, clock.instant().plus(lifetime(session.get())));
+        if (hasTtl(session.get())) {
+            Instant now = clock.instant();
+            deadlines.put(id, now.plus(lifetime(session.get())));
+            renewals.put(id, now);
+        }
         return session;
+    }
+
+    /**
+     * A session's timer on this leader (UI-6 Sessions, Locks and Watches list, decision 2): when it was last renewed in
+     * this leadership, or null, and when it lapses unless renewed.
+     */
+    public record Timer(Instant renewedAt, Instant expiresAt) {
+        public Timer {
+            Objects.requireNonNull(expiresAt, "expiresAt");
+        }
+    }
+
+    /** Each session with a TTL's timer while this server leads, by ID; empty when it does not lead. */
+    public synchronized Optional<Map<String, Timer>> timers() {
+        if (closed || !leader) return Optional.empty();
+        Map<String, Timer> timers = new HashMap<>();
+        for (Session session : sessions.list()) {
+            if (!hasTtl(session)) continue;
+            // A session not yet checked gets the deadline its first check will give it.
+            Instant expiresAt = deadlines.getOrDefault(session.id(),
+                    later(session.createTime(), leaderSince).plus(lifetime(session)));
+            timers.put(session.id(), new Timer(renewals.get(session.id()), expiresAt));
+        }
+        return Optional.of(Map.copyOf(timers));
     }
 
     @Override
@@ -139,6 +171,7 @@ public final class SessionTtlExpiry implements AutoCloseable {
             term++;
             cancel();
             deadlines.clear();
+            renewals.clear();
         }
     }
 
@@ -162,6 +195,7 @@ public final class SessionTtlExpiry implements AutoCloseable {
                 if (!deadline.isAfter(now)) lapsed.add(session.id());
             }
             deadlines.keySet().retainAll(present);
+            renewals.keySet().retainAll(present);
         }
         destroy(armedTerm, lapsed, 0, now).whenComplete((ignored, failure) -> {
             synchronized (this) {
@@ -180,7 +214,7 @@ public final class SessionTtlExpiry implements AutoCloseable {
         String id = lapsed.get(from);
         CompletableFuture<RaftCommandResult<?>> outcome;
         try {
-            outcome = proposer.apply(SessionCommand.destroy(id, now));
+            outcome = proposer.apply(SessionCommand.lapse(id, now));
         } catch (RuntimeException e) {
             outcome = CompletableFuture.failedFuture(e);
         }
@@ -189,6 +223,7 @@ public final class SessionTtlExpiry implements AutoCloseable {
                 LOG.info("Session {} lapsed without renewal and was destroyed", id);
                 synchronized (this) {
                     deadlines.remove(id);
+                    renewals.remove(id);
                 }
             } else {
                 LOG.warn("Lapsed session {} could not be destroyed, and is tried again at the next interval: {}", id,
