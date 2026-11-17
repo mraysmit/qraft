@@ -109,6 +109,18 @@ class EmbeddedUiResourcesTest {
         assertFalse(INLINE_SCRIPT.matcher(index).find(), "an inline script: " + index);
     }
 
+    /**
+     * The index declares an icon the page's policy allows, so a browser asks the server for no {@code /favicon.ico},
+     * which it does not serve: headless Chrome logged that 404 on its first visit to the interface (UI-6 Sessions, Locks
+     * and Watches task list, Phase 5).
+     */
+    @Test
+    void theIndexDeclaresAnIconSoTheBrowserAsksForNoFavicon() throws IOException {
+        String index = new String(embedded.read("index.html").orElseThrow(), StandardCharsets.UTF_8);
+
+        assertTrue(index.contains("<link rel=\"icon\" href=\"data:,\""), "no icon declared in " + index);
+    }
+
     private JsonNode manifest() throws IOException {
         return JSON.readTree(embedded.read("asset-manifest.json")
                 .orElseThrow(() -> new AssertionError("the asset manifest is not embedded")));
