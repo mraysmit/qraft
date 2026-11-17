@@ -17,6 +17,7 @@
 package dev.mars.qraft.common.events;
 
 import dev.mars.qraft.state.kv.KvEvents;
+import dev.mars.qraft.state.session.SessionEvents;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -179,6 +180,28 @@ class EventContractsTest {
         assertFalse(key.matches(domain(8, new KvEvents.TreeDeleted("app/dbx"))));
         assertFalse(key.matches(domain(9, new Named("app/db"))), "an event that names no key is no key's");
         assertEquals(Optional.empty(), EventFilter.all().key());
+    }
+
+    /** A session filter takes the session's own events and the locks it took part in (Sessions, Locks and Watches list, decision 6). */
+    @Test
+    void aSessionFilterMatchesTheSessionsOwnEventsAndTheLocksItTookPartIn() {
+        EventFilter session = new EventFilter(Set.of(), Set.of(), Optional.empty(), Optional.empty(), Optional.empty(),
+                Optional.empty(), Optional.of("s1"));
+
+        assertTrue(session.matches(global(1, new SessionEvents.SessionCreated("s1", "host-a"))));
+        assertTrue(session.matches(domain(2, new KvEvents.LockAcquired("app/db", "s1"))));
+        assertTrue(session.matches(domain(3, new KvEvents.LockReleased("app/db", "s1"))));
+        assertTrue(session.matches(global(4, new SessionEvents.SessionDestroyed("s1", "ttl"))));
+        assertFalse(session.matches(global(5, new SessionEvents.SessionCreated("s10", "host-a"))), "not a longer ID");
+        assertFalse(session.matches(domain(6, new KvEvents.LockAcquired("app/db", "s2"))), "another session's lock");
+        assertFalse(session.matches(domain(7, new KvEvents.KeySet("app/db", true))), "an event that names no session");
+        assertEquals(Optional.empty(), EventFilter.all().session());
+        assertEquals(Optional.empty(), new EventFilter(Set.of(), Set.of(), Optional.empty(), Optional.empty(),
+                Optional.empty(), Optional.of("app/db")).session(), "a key filter names no session");
+    }
+
+    private static EventEnvelope global(long index, QraftEvent event) {
+        return EventEnvelope.domain(id(index), AT, 3, index, 0, null, null, event);
     }
 
     private static EventEnvelope domain(long index, QraftEvent event) {
