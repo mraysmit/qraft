@@ -21,6 +21,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import dev.mars.qraft.common.Node;
 import dev.mars.qraft.raft.RaftCommand;
 import dev.mars.qraft.raft.RaftCommandResult;
+import dev.mars.qraft.raft.grpc.SessionCommandProto;
+import dev.mars.qraft.raft.grpc.SessionDestroyProto;
 import dev.mars.qraft.state.NodeCommand;
 import dev.mars.qraft.state.ProtobufRaftCommandCodec;
 import dev.mars.qraft.state.QraftStateStore;
@@ -211,9 +213,20 @@ class QraftStateStoreSessionTest {
                 SessionCommand.create(new Session("s2", "host-b", "", SessionBehavior.RELEASE, Duration.ZERO,
                         Duration.ZERO, 0, T0)),
                 SessionCommand.destroy("s1", T0),
+                SessionCommand.lapse("s1", T0),
                 KvCommand.lock(SCOPE, "k", new byte[] {0, 1}, 3, "s1", T0),
                 KvCommand.unlock(new KvScope("acme", "prod"), "k", new byte[0], 0, "s1"))) {
             assertEquals(command, codec.deserialize(codec.serialize(command)), command.toString());
         }
+    }
+
+    /** An entry written before a destroy carried its cause reads as an API destroy (Sessions, Locks and Watches list, decision 3). */
+    @Test
+    void aDestroyWrittenWithoutACauseReadsAsAnApiDestroy() {
+        SessionCommandProto older = SessionCommandProto.newBuilder().setDestroy(SessionDestroyProto.newBuilder()
+                .setId("s1").setAtMs(T0.toEpochMilli())).build();
+
+        assertEquals(SessionCommand.destroy("s1", T0), SessionCodec.fromProto(older));
+        assertEquals(SessionCommand.Cause.DESTROYED, ((SessionCommand.Destroy) SessionCodec.fromProto(older)).cause());
     }
 }
