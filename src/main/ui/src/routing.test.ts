@@ -29,7 +29,7 @@ describe('routes', () => {
   });
 
   it('take anything else for an unknown view', () => {
-    for (const path of ['/ui/nowhere', '/ui/services/a/b', '/ui/services/', '/other/', '/ui/services/%E0%A4%A']) {
+    for (const path of ['/ui/nowhere', '/ui/constructor', '/ui/__proto__', '/ui/services/a/b', '/ui/services/', '/other/', '/ui/services/%E0%A4%A']) {
       expect(routeOf(path, '/ui/'), path).toEqual({ view: 'unknown' });
     }
   });
@@ -141,5 +141,69 @@ describe('the Access routes and the audit link', () => {
     expect(hrefOf({ view: 'kv', path: 'app/config.json' }, '/ui/')).toBe('/ui/kv?path=app%2Fconfig.json');
     expect(hrefOf({ view: 'kv', path: 'app/' }, '/ui/', { tenant: 'acme', namespace: 'prod' }, 'stale')).toBe(
       '/ui/kv?tenant=acme&namespace=prod&consistency=stale&path=app%2F');
+  });
+});
+
+describe('the Sessions routes', () => {
+  // UI-6 Sessions, Locks and Watches task list, Phase 1 (decision 12): the list, and a session by its ID.
+  it('read and write the Sessions page and a session', () => {
+    const id = '4f3c2a10-0000-4000-8000-000000000001';
+    expect(routeOf('/ui/sessions', '/ui/')).toEqual({ view: 'sessions' });
+    expect(routeOf(`/ui/sessions/${id}`, '/ui/')).toEqual({ view: 'sessionInfo', id });
+    expect(routeOf('/ui/sessions/a/b', '/ui/')).toEqual({ view: 'unknown' });
+    expect(routeOf('/ui/sessions/', '/ui/')).toEqual({ view: 'unknown' });
+    expect(hrefOf({ view: 'sessions' }, '/ui/', DEFAULT_SCOPE, 'stale')).toBe('/ui/sessions?consistency=stale');
+    expect(hrefOf({ view: 'sessionInfo', id }, '/ui/')).toBe(`/ui/sessions/${id}`);
+  });
+});
+
+describe('the Locks route', () => {
+  // UI-6 Sessions, Locks and Watches task list, Phase 3 (decision 12).
+  it('reads and writes the Locks page', () => {
+    expect(routeOf('/ui/locks', '/ui/')).toEqual({ view: 'locks' });
+    expect(hrefOf({ view: 'locks' }, '/ui/', DEFAULT_SCOPE, 'consistent')).toBe('/ui/locks?consistency=consistent');
+  });
+});
+
+describe('the Watches route', () => {
+  // UI-6 Sessions, Locks and Watches task list, Phase 4 (decision 12): the target and its name in the query.
+  it('reads and writes the Watches page with its target', () => {
+    expect(routeOf('/ui/watches', '/ui/')).toEqual({ view: 'watches' });
+    expect(routeOf('/ui/watches', '/ui/', '?target=key&name=app%2Fconfig.json')).toEqual(
+      { view: 'watches', target: 'key', name: 'app/config.json' });
+    expect(routeOf('/ui/watches', '/ui/', '?target=sessions')).toEqual({ view: 'watches', target: 'sessions' });
+    expect(routeOf('/ui/watches', '/ui/', '?target=nonsense&name=x')).toEqual({ view: 'watches' });
+    expect(hrefOf({ view: 'watches', target: 'prefix', name: 'app/' }, '/ui/', { tenant: 'acme', namespace: 'prod' }))
+      .toBe('/ui/watches?tenant=acme&namespace=prod&target=prefix&name=app%2F');
+    expect(hrefOf({ view: 'watches' }, '/ui/')).toBe('/ui/watches');
+  });
+});
+
+describe('the Govern routes', () => {
+  // UI-6 Tenants, Namespaces and Audit task list, Phase 1 (decision 9).
+  it('read and write the Tenants and Namespaces pages, a tenant and a namespace', () => {
+    expect(routeOf('/ui/tenants', '/ui/')).toEqual({ view: 'tenants' });
+    expect(routeOf('/ui/tenants/acme', '/ui/')).toEqual({ view: 'tenant', name: 'acme' });
+    expect(routeOf('/ui/namespaces', '/ui/')).toEqual({ view: 'namespaces' });
+    expect(routeOf('/ui/namespaces/acme/prod', '/ui/')).toEqual({ view: 'namespace', tenant: 'acme', name: 'prod' });
+    for (const path of ['/ui/tenants/a/b', '/ui/namespaces/acme', '/ui/namespaces/acme/prod/x', '/ui/namespaces//prod']) {
+      expect(routeOf(path, '/ui/'), path).toEqual({ view: 'unknown' });
+    }
+    expect(hrefOf({ view: 'tenants' }, '/ui/')).toBe('/ui/tenants');
+    expect(hrefOf({ view: 'tenant', name: 'acme' }, '/ui/', DEFAULT_SCOPE, 'stale')).toBe('/ui/tenants/acme?consistency=stale');
+    expect(hrefOf({ view: 'namespaces' }, '/ui/')).toBe('/ui/namespaces');
+    expect(hrefOf({ view: 'namespace', tenant: 'acme', name: 'prod' }, '/ui/')).toBe('/ui/namespaces/acme/prod');
+  });
+});
+
+describe('the Audit route', () => {
+  // UI-6 Tenants, Namespaces and Audit task list, Phase 3: the filters in the query.
+  it('reads and writes the Audit page with its filters', () => {
+    expect(routeOf('/ui/audit', '/ui/')).toEqual({ view: 'audit', filter: {} });
+    expect(routeOf('/ui/audit', '/ui/', '?accessor=a1&result=denied&route=%2Fv1%2Fkv&other=x&result2=y')).toEqual(
+      { view: 'audit', filter: { accessor: 'a1', result: 'denied', route: '/v1/kv' } });
+    expect(routeOf('/ui/audit', '/ui/', '?result=sometimes&accessor=')).toEqual({ view: 'audit', filter: {} });
+    expect(hrefOf({ view: 'audit', filter: { requestId: 'req-1', tenant: 'acme' } }, '/ui/'))
+      .toBe('/ui/audit?requestId=req-1&inTenant=acme');
   });
 });
