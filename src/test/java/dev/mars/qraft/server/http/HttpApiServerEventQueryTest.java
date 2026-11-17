@@ -203,6 +203,30 @@ class HttpApiServerEventQueryTest {
         assertEquals(400, send("GET", "/v1/operator/events?key=", null).statusCode(), "a blank key");
     }
 
+    /** The session filter (Sessions, Locks and Watches list, decision 6): a session's own events and its locks'. */
+    @Test
+    void eventsAreFilteredByTheSessionTheyConcern() throws Exception {
+        start();
+        assertInstanceOf(RaftCommandResult.Success.class, node.submitCommand(NodeCommand.register(
+                Node.of("node-1", "10.0.0.1", null, null, Map.of()), Instant.now())).get(10, TimeUnit.SECONDS));
+        String first = JSON.readTree(send("PUT", "/v1/session/create", "{\"Node\":\"node-1\"}").body()).path("ID")
+                .asText();
+        String second = JSON.readTree(send("PUT", "/v1/session/create", "{\"Node\":\"node-1\"}").body()).path("ID")
+                .asText();
+        assertEquals("true", send("PUT", "/v1/kv/a?acquire=" + first, "v").body());
+        assertEquals("true", send("PUT", "/v1/kv/b?acquire=" + second, "v").body());
+        assertEquals("true", send("PUT", "/v1/kv/a?release=" + first, "v").body());
+        assertEquals("true", send("PUT", "/v1/session/destroy/" + first, null).body());
+
+        JsonNode own = page("?session=" + first);
+        assertEquals(List.of("session.created", "lock.acquired", "lock.released", "session.destroyed"), types(own));
+        assertEquals("destroyed", own.path("events").get(3).path("event").path("reason").asText());
+        assertEquals(List.of("session.created", "lock.acquired"), types(page("?session=" + second)));
+        assertEquals(List.of("lock.acquired"), types(page("?session=" + second + "&key=b")));
+        assertEquals(List.of(), types(page("?session=" + second + "&key=a")));
+        assertEquals(400, send("GET", "/v1/operator/events?session=", null).statusCode(), "a blank session");
+    }
+
     private void register(String nodeName, String id, String name, String... scope) throws Exception {
         String[] headers = new String[scope.length + 2];
         headers[0] = "X-Qraft-Node";
