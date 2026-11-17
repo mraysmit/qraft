@@ -637,6 +637,24 @@ the route, the status and the request ID, never a secret. The file is best effor
 if it cannot be written, the server warns once and goes on. Rotate it with the
 operating system's tools.
 
+Since 2026-11-17 each line also names the request's `tenant` and `namespace`, the
+default ones where the request named none; a line from before has neither. The
+administrative interface reads the file through `GET /v1/internal/ui/audit`, which
+needs `operator:read` and is answered by the server that wrote the file, from its
+end, newest first. It takes the following:
+
+- `limit`, 100 by default and 1,000 at most;
+- `accessor`, `requestId`, `method`, `tenant`, `namespace`, and `route` as a prefix;
+- `result`, which is `allowed`, `denied` for 403, or `failed` for 5xx;
+- `before`, an instant, to page back.
+
+A read stops after 64 MiB of the file. It answers how much it scanned and whether it
+reached the start. A lost stretch (`audit.events_lost`) and a line that is not JSON
+are always answered, since what they hide may have matched.
+
+Each server holds only the requests it answered, so to see a cluster's requests,
+read each server.
+
 ## Events
 
 Each server keeps its newest 4,096 events in memory: Raft's leadership changes,
@@ -651,8 +669,10 @@ With a token that has `operator:read`, ask a server for its events:
   answers a page of events, the cursor to ask from next (`next`) and the page's
   `status`: `more` while there are more, `history_gap` when the cursor is older than
   what the server still holds, and `other_boot` when it names an earlier boot.
-  `tenant`, `namespace`, `service` and `key` narrow it further: `key=app/config`
-  gives that key's writes, locks and deletions, never its value.
+  `tenant`, `namespace`, `service`, `key` and `session` narrow it further:
+  `key=app/config` gives that key's writes, locks and deletions, never its value,
+  and `session=<id>` the session's creation, the locks it took and gave up, and
+  its end, whose `reason` is `destroyed`, `ttl` or `node`.
 - `GET /v1/operator/events/watch`, with the same parameters bar `limit`, is a
   server-sent event stream: the events after the cursor, then each as it happens,
   each with its cursor as its `id`, and a comment line every 15 seconds without one.
@@ -706,6 +726,25 @@ when its node becomes unreachable or leaves the catalog. Its keys are then relea
 or deleted with `"Behavior": "delete"`. With ACLs enabled, the token needs
 `session:write` on the node and `key:write` on the key.
 
+Since 2026-11-17 the administrative interface reads two more answers, which an
+operator can read too (UI-6's Sessions, Locks and Watches list):
+
+- `GET /v1/internal/ui/sessions` lists the sessions as `/v1/session/list` does, and
+  adds each one's `RenewedAt` and `ExpiresAt` from the leader's timer. Only the
+  leader keeps the timers, so a follower answers both as null with
+  `"TtlKnown": false`; ask the leader for them.
+- `GET /v1/internal/ui/locks` lists every key a session holds, in every tenant and
+  namespace, with its session and indexes but not its value, and the lock delays
+  still running with their end. `?session=<id>` narrows it to one session's keys.
+  With ACLs enabled, a key appears only where the token may read it in its scope.
+  The server cannot see who is waiting for a lock: a contender waits with a
+  blocking read of its own.
+
+A destroy's reason is replicated since the same day, so `session.destroyed` and
+`qraft.session.invalidations` say `ttl` for a lapse. During a rolling upgrade, a
+server from before 2026-11-17 records a lapse as `destroyed`; only that reason
+differs between servers, never the state.
+
 A Java application can leave the recipe to the client library, which follows it
 through its client's local API:
 
@@ -747,6 +786,15 @@ A client whose tenant or namespace is missing keeps retrying its registrations,
 logging each refusal at WARN, and becomes ready once the scope exists. Deleting a
 namespace (`DELETE /v1/namespace/prod` with `X-Qraft-Tenant: acme`) removes its
 services, checks and keys; deleting a tenant removes all its namespaces.
+
+Since 2026-11-17 every tenancy change produces a domain event in the scope it
+names: `tenant.created`, `tenant.updated` and `tenant.deleted` in the tenant's
+`default` namespace, and `namespace.created`, `namespace.updated` and
+`namespace.deleted` in the namespace. `GET /v1/internal/ui/scopes`, with
+`operator:read`, answers every tenant and namespace with what it holds: its
+services, instances and keys, and the keys held in it with the sessions holding
+them. A session that held a key in a deleted namespace goes on, holding nothing
+there.
 
 ## DNS discovery
 
