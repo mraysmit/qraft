@@ -421,7 +421,121 @@ export const KvEntrySchema = z.object({
   Session: z.string().optional(),
 });
 
+/**
+ * A session in Consul's form (UI-6 Sessions, Locks and Watches task list): its lock delay in nanoseconds and its TTL as
+ * Go writes a duration, empty for none; with the leader's timer, null where the answering server does not know it.
+ */
+export const SessionEntrySchema = z.object({
+  ID: z.string().min(1),
+  Name: z.string(),
+  Node: z.string().min(1),
+  LockDelay: index,
+  Behavior: z.enum(['release', 'delete']),
+  TTL: z.string(),
+  CreateIndex: index,
+  ModifyIndex: index,
+  RenewedAt: instant.nullable(),
+  ExpiresAt: instant.nullable(),
+});
+
+/** A session as Consul's own session API answers it, without the leader's timer: a renewal's answer. */
+export const ConsulSessionSchema = SessionEntrySchema.omit({ RenewedAt: true, ExpiresAt: true });
+
+/** `GET /v1/internal/ui/sessions`: every session the token may read, and whether the answering server knows the timers. */
+export const SessionsSchema = z.object({
+  Sessions: z.array(SessionEntrySchema),
+  TtlKnown: z.boolean(),
+});
+
+/** A key a session holds, in its scope; never its value. */
+export const HeldKeySchema = z.object({
+  Tenant: z.string().min(1),
+  Namespace: z.string().min(1),
+  Key: z.string().min(1),
+  Session: z.string().min(1),
+  LockIndex: index,
+  CreateIndex: index,
+  ModifyIndex: index,
+});
+
+/** A key that cannot be acquired until its lock delay ends. */
+export const LockDelaySchema = z.object({
+  Tenant: z.string().min(1),
+  Namespace: z.string().min(1),
+  Key: z.string().min(1),
+  Until: instant,
+});
+
+/** `GET /v1/internal/ui/locks`: the held keys, across scopes, and the lock delays still running. */
+export const LocksSchema = z.object({
+  Held: z.array(HeldKeySchema),
+  Delays: z.array(LockDelaySchema),
+});
+
+/** What a namespace holds, in `GET /v1/internal/ui/scopes` (UI-6 Tenants, Namespaces and Audit task list, decision 2). */
+export const NamespaceHoldingsSchema = z.object({
+  Name: z.string().min(1),
+  Description: z.string(),
+  CreateIndex: index,
+  ModifyIndex: index,
+  Services: index,
+  Instances: index,
+  Keys: index,
+  HeldKeys: index,
+  Sessions: z.array(z.string()),
+});
+
+/** A tenant with what each of its namespaces holds. */
+export const TenantHoldingsSchema = z.object({
+  Name: z.string().min(1),
+  Description: z.string(),
+  CreateIndex: index,
+  ModifyIndex: index,
+  Namespaces: z.array(NamespaceHoldingsSchema),
+});
+
+/** `GET /v1/internal/ui/scopes`: every tenant, with what it holds. */
+export const ScopesSchema = z.object({ Tenants: z.array(TenantHoldingsSchema) });
+
+/**
+ * A record of the audit read: a request, or a lost stretch or a line that could not be read, which carry only their type
+ * (UI-6 Tenants, Namespaces and Audit task list, decision 5). A record written before its scope was recorded has none.
+ */
+export const AuditRecordSchema = z.object({
+  Type: z.string().min(1),
+  Timestamp: z.string().nullable().optional(),
+  Node: z.string().nullable().optional(),
+  AccessorId: z.string().nullable().optional(),
+  Method: z.string().nullable().optional(),
+  Route: z.string().nullable().optional(),
+  Status: z.number().int().nullable().optional(),
+  Tenant: z.string().nullable().optional(),
+  Namespace: z.string().nullable().optional(),
+  RequestId: z.string().nullable().optional(),
+});
+
+/** `GET /v1/internal/ui/audit`: the answering server's audit file, read from its end. */
+export const AuditSchema = z.object({
+  Configured: z.boolean(),
+  File: z.string().nullable(),
+  Size: index,
+  Scanned: index,
+  Complete: z.boolean(),
+  Records: z.array(AuditRecordSchema),
+});
+
 export type KvEntry = z.infer<typeof KvEntrySchema>;
+export type Audit = z.infer<typeof AuditSchema>;
+export type AuditRecord = z.infer<typeof AuditRecordSchema>;
+export type NamespaceHoldings = z.infer<typeof NamespaceHoldingsSchema>;
+export type TenantHoldings = z.infer<typeof TenantHoldingsSchema>;
+export type Scopes = z.infer<typeof ScopesSchema>;
+export type SessionEntry = z.infer<typeof SessionEntrySchema>;
+export type ConsulSession = z.infer<typeof ConsulSessionSchema>;
+export type Sessions = z.infer<typeof SessionsSchema>;
+export type HeldKey = z.infer<typeof HeldKeySchema>;
+export type LockDelay = z.infer<typeof LockDelaySchema>;
+export type Locks = z.infer<typeof LocksSchema>;
 export type Registration = z.infer<typeof RegistrationSchema>;
 export type Deregistration = z.infer<typeof DeregistrationSchema>;
 export type Removal = z.infer<typeof RemovalSchema>;
