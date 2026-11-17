@@ -113,6 +113,8 @@ public final class AuditFileSink implements AutoCloseable {
         line.put("method", request.method());
         line.put("route", request.route());
         line.put("status", request.status());
+        line.put("tenant", request.tenant());
+        line.put("namespace", request.namespace());
         line.put("requestId", event.correlationId().orElse(""));
         try {
             return JSON.writeValueAsString(line);
