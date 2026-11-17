@@ -38,12 +38,34 @@ public sealed interface SessionCommand extends RaftCommand permits SessionComman
         }
     }
 
-    record Destroy(String id, Instant at) implements SessionCommand {
+    record Destroy(String id, Instant at, Cause cause) implements SessionCommand {
         private static final long serialVersionUID = 1L;
 
         public Destroy {
             if (id == null || id.isBlank()) throw new IllegalArgumentException("a session needs an ID");
             Objects.requireNonNull(at, "at");
+            Objects.requireNonNull(cause, "cause");
+        }
+
+        public Destroy(String id, Instant at) {
+            this(id, at, Cause.DESTROYED);
+        }
+    }
+
+    /** Why a session was destroyed (Sessions, Locks and Watches list, decision 3); a node's failure is not a command. */
+    enum Cause {
+        DESTROYED("destroyed"),
+        TTL("ttl");
+
+        private final String reason;
+
+        Cause(String reason) {
+            this.reason = reason;
+        }
+
+        /** The reason a {@code session.destroyed} event and the invalidation metric give. */
+        public String reason() {
+            return reason;
         }
     }
 
@@ -51,7 +73,13 @@ public sealed interface SessionCommand extends RaftCommand permits SessionComman
         return new Create(session);
     }
 
+    /** A destroy through the API. */
     static SessionCommand destroy(String id, Instant at) {
-        return new Destroy(id, at);
+        return new Destroy(id, at, Cause.DESTROYED);
+    }
+
+    /** A destroy by the leader's timer, for a session whose TTL lapsed without renewal. */
+    static SessionCommand lapse(String id, Instant at) {
+        return new Destroy(id, at, Cause.TTL);
     }
 }
