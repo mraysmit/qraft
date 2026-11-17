@@ -60,7 +60,8 @@ class AuditFileSinkTest {
         try (EventJournal journal = EventJournal.forBoot("server1", Clock.systemUTC());
              AuditFileSink sink = AuditFileSink.start(journal, file)) {
             journal.publishSystem(EventSeverity.INFO, 1, new Other());
-            AuditEvents.publish(journal, 1, new AuditEvents.Request("a1b2", "PUT", "/v1/kv", 200), "req-1");
+            AuditEvents.publish(journal, 1, new AuditEvents.Request("a1b2", "PUT", "/v1/kv", 200, "acme", "prod"),
+                    "req-1");
             AuditEvents.publish(journal, 1, new AuditEvents.Request("a1b2", "GET", "/v1/acl/tokens", 403), "req-2");
 
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
@@ -77,6 +78,10 @@ class AuditFileSinkTest {
             assertEquals("req-1", first.path("requestId").asText());
             assertTrue(first.path("timestamp").asText().endsWith("Z"));
             assertEquals(403, JSON.readTree(lines.get(1)).path("status").asInt());
+            // UI-6 Tenants, Namespaces and Audit task list, decision 4: each line names the request's scope.
+            assertEquals("acme", first.path("tenant").asText());
+            assertEquals("prod", first.path("namespace").asText());
+            assertEquals("default", JSON.readTree(lines.get(1)).path("tenant").asText());
         }
     }
 
