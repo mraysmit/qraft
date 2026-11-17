@@ -17,11 +17,13 @@
 package dev.mars.qraft.state.kv;
 
 import dev.mars.qraft.common.events.KeyEvent;
+import dev.mars.qraft.common.events.SessionEvent;
 
 /**
  * The key/value store's domain events (event query and watch list, Phase 1, decision 1): each carries the key, and
  * never the value (architecture section 13). Each is a {@link KeyEvent}, so one key's events can be read (UI-6 Key/Value
- * list, decision 8).
+ * list, decision 8), and a lock's is also a {@link SessionEvent}, so one session's can be (UI-6 Sessions, Locks and
+ * Watches list, decision 6).
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-08
@@ -69,7 +71,7 @@ public final class KvEvents {
         }
     }
 
-    public record LockAcquired(String key, String session) implements KeyEvent {
+    public record LockAcquired(String key, String session) implements KeyEvent, SessionEvent {
         @Override
         public String type() {
             return "lock.acquired";
@@ -79,9 +81,14 @@ public final class KvEvents {
         public boolean concerns(String named) {
             return key.equals(named);
         }
+
+        @Override
+        public String sessionId() {
+            return session;
+        }
     }
 
-    public record LockReleased(String key, String session) implements KeyEvent {
+    public record LockReleased(String key, String session) implements KeyEvent, SessionEvent {
         @Override
         public String type() {
             return "lock.released";
@@ -90,6 +97,11 @@ public final class KvEvents {
         @Override
         public boolean concerns(String named) {
             return key.equals(named);
+        }
+
+        @Override
+        public String sessionId() {
+            return session;
         }
     }
 }
