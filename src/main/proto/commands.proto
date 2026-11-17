@@ -324,6 +324,9 @@ message SessionProto {
 message SessionDestroyProto {
   string id = 1;
   int64 at_ms = 2;
+  // Why it was destroyed: "ttl" for a lapse; empty, as every entry before 2026-11-17 is, for a destroy through the API
+  // (Sessions, Locks and Watches list, decision 3).
+  string cause = 3;
 }
 
 // A tenant or namespace change (tenancy list, Phase 1); a deletion carries only the names.
