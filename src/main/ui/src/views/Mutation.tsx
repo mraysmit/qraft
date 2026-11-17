@@ -151,7 +151,8 @@ export function Mutation<T>({ title, identity, review, action, idempotent, submi
         )}
         {phase.status !== 'done' && (
           <Space style={{ marginTop: 12 }}>
-            <Button type="primary" danger={action === 'Delete' || action === 'Remove'} loading={phase.status === 'submitting'}
+            <Button type="primary" danger={action === 'Delete' || action === 'Remove' || action === 'Destroy'}
+              loading={phase.status === 'submitting'}
               onClick={send}>
               {action}
             </Button>
