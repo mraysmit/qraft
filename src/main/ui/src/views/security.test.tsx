@@ -50,7 +50,7 @@ describe('navigation', () => {
     render(<Root bootstrap={BOOTSTRAP} api={api} session={memorySession('held')} />);
 
     await opened();
-    expect(nav()).toEqual(['Services', 'Nodes and Clients', 'Health Checks', 'Key/Value']);
+    expect(nav()).toEqual(['Services', 'Nodes and Clients', 'Health Checks', 'Key/Value', 'Sessions', 'Locks', 'Watches']);
     expect(screen.getByText("The cluster's status needs operator:read.")).toBeInTheDocument();
     expect(calls).not.toContain('raftStatus');
   });
@@ -61,8 +61,8 @@ describe('navigation', () => {
       session={memorySession('held')} />);
 
     await opened();
-    expect(nav()).toEqual(['Services', 'Nodes and Clients', 'Health Checks', 'Key/Value', 'Cluster Overview', 'Raft Members',
-      'Storage & Snapshots', 'Events', 'Configuration', 'Access']);
+    expect(nav()).toEqual(['Services', 'Nodes and Clients', 'Health Checks', 'Key/Value', 'Sessions', 'Locks', 'Watches', 'Cluster Overview', 'Raft Members',
+      'Storage & Snapshots', 'Events', 'Configuration', 'Tenants', 'Namespaces', 'Audit', 'Access']);
     expect(screen.getByText('Access', { selector: 'nav a' }).getAttribute('href')).toBe('/ui/access');
   });
 
