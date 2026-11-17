@@ -87,6 +87,8 @@ class SessionTtlExpiryTest {
         assertEquals(Optional.empty(), store.getSessions().get("s1"));
         assertEquals(1, destroyed.size());
         assertTrue(!destroyed.getFirst().at().isBefore(START.plusSeconds(20)), "stamped with the leader's time");
+        assertEquals(SessionCommand.Cause.TTL, destroyed.getFirst().cause(),
+                "a lapse is recorded as one (Sessions, Locks and Watches list, decision 3)");
     }
 
     @Test
@@ -125,6 +127,35 @@ class SessionTtlExpiryTest {
         session("s2", TTL);
         time.advance(Duration.ofMinutes(5));
         assertTrue(store.getSessions().get("s2").isPresent(), "nothing lapses while this server does not lead");
+        expiry.close();
+    }
+
+    /** The leader answers each session's timer (UI-6 Sessions, Locks and Watches list, decision 2); a follower none. */
+    @Test
+    void theLeaderAnswersEachSessionsTimerAndAFollowerNone() {
+        SessionTtlExpiry expiry = expiry();
+        session("s1", TTL);
+        session("forever", Duration.ZERO);
+        assertEquals(Optional.empty(), expiry.timers(), "a follower keeps no timers");
+
+        time.advance(Duration.ofMinutes(5));
+        expiry.leadershipChanged(true);
+        Instant leading = time.instant();
+        assertEquals(Optional.of(Map.of("s1", new SessionTtlExpiry.Timer(null, leading.plus(TTL.multipliedBy(2))))),
+                expiry.timers(), "twice the TTL from the leadership's start, unrenewed, and none without a TTL");
+
+        time.advance(Duration.ofSeconds(5));
+        Instant renewed = time.instant();
+        expiry.renew("s1");
+        assertEquals(Optional.of(Map.of("s1", new SessionTtlExpiry.Timer(renewed, renewed.plus(TTL.multipliedBy(2))))),
+                expiry.timers(), "a renewal moves the deadline");
+
+        session("s2", TTL);
+        assertEquals(time.instant().plus(TTL.multipliedBy(2)), expiry.timers().orElseThrow().get("s2").expiresAt(),
+                "a session created while leading, before the next check");
+
+        expiry.leadershipChanged(false);
+        assertEquals(Optional.empty(), expiry.timers(), "no timers once the leadership is lost");
         expiry.close();
     }
 }
