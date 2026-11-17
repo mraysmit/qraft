@@ -91,6 +91,7 @@ class AdminUiDataContractTest {
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private RaftExecutorsFixture runtime;
     private RaftNode node;
+    private QraftStateStore store;
     private HttpApiServer server;
     private HttpCatalogClient catalog;
     private final EventJournal journal = EventJournal.forBoot("server-1", Clock.systemUTC());
@@ -478,6 +479,133 @@ class AdminUiDataContractTest {
                 "an event never carries the value");
     }
 
+    @Test
+    void theCoordinationAnswersAreAnsweredInTheFieldsTheInterfaceReads() throws Exception {
+        // UI-6 Sessions, Locks and Watches task list, Phase 0: a session with the leader's timer, a renewal, a held key,
+        // an acquisition's true and a refused one's false, a running lock delay, and a session's events.
+        startServer(new AclHttpSettings(true, dataDirectory, AclDefaultPolicy.DENY), SecurityProfile.PRODUCTION);
+        java.util.concurrent.ScheduledExecutorService timers = java.util.concurrent.Executors
+                .newSingleThreadScheduledExecutor();
+        try (dev.mars.qraft.server.session.SessionTtlExpiry ttl = dev.mars.qraft.server.session.SessionTtlExpiry.attach(
+                node, store.getSessions(), node::submitCommand,
+                dev.mars.qraft.server.health.ExpiryScheduler.of(timers), Clock.systemUTC(), Duration.ofSeconds(1))) {
+            server.useSessionTtl(ttl);
+            URI origin = URI.create("http://127.0.0.1:" + server.port());
+            URI api = origin.resolve(bootstrap(get(origin, "/ui/")).path("apiBasePath").asText());
+            HttpResponse<String> bootstrapped = send(origin, "PUT", "/v1/acl/bootstrap", "", Map.of());
+            assertEquals(200, bootstrapped.statusCode(), bootstrapped.body());
+            Map<String, String> management = Map.of("X-Qraft-Token",
+                    JSON.readTree(bootstrapped.body()).path("secretId").asText());
+            assertInstanceOf(RaftCommandResult.Success.class, node.submitCommand(NodeCommand.register(
+                    Node.of("node-a", "10.0.0.1", null, null, Map.of()), Instant.now())).get(10, TimeUnit.SECONDS));
+
+            String holder = written(origin, "PUT", "/v1/session/create",
+                    "{\"Node\":\"node-a\",\"Name\":\"worker\",\"TTL\":\"30s\",\"LockDelay\":\"5s\"}", management)
+                    .path("ID").asText();
+            String other = written(origin, "PUT", "/v1/session/create", "{\"Node\":\"node-a\"}", management).path("ID")
+                    .asText();
+            JsonNode sessions = read(api, "v1/internal/ui/sessions", true, management);
+            fields(sessions, "sessions read", Map.of("Sessions", Type.LIST, "TtlKnown", Type.BOOLEAN));
+            assertTrue(sessions.path("TtlKnown").asBoolean(), "the leader keeps the timers");
+            Map<String, Type> session = Map.of("ID", Type.TEXT, "Name", Type.TEXT, "Node", Type.TEXT,
+                    "LockDelay", Type.INTEGER, "Behavior", Type.TEXT, "TTL", Type.TEXT, "CreateIndex", Type.INTEGER,
+                    "ModifyIndex", Type.INTEGER, "RenewedAt", Type.TEXT_OR_NULL, "ExpiresAt", Type.TEXT_OR_NULL);
+            sessions.path("Sessions").forEach(entry -> fields(entry, "session", session));
+            JsonNode timed = sessions.path("Sessions").get(holder.compareTo(other) < 0 ? 0 : 1);
+            assertEquals(holder, timed.path("ID").asText());
+            assertTrue(timed.path("ExpiresAt").isTextual(), "a session with a TTL lapses: " + timed);
+            JsonNode renewed = written(origin, "PUT", "/v1/session/renew/" + holder, "", management);
+            fields(renewed.get(0), "renewed session", Map.of("ID", Type.TEXT, "TTL", Type.TEXT));
+            fields(read(api, "v1/session/info/" + holder, true, management).get(0), "session info",
+                    Map.of("ID", Type.TEXT, "Node", Type.TEXT, "Behavior", Type.TEXT, "LockDelay", Type.INTEGER));
+
+            assertEquals(JSON.readTree("true"), written(origin, "PUT", "/v1/kv/app/lock?acquire=" + holder, "",
+                    management), "an acquisition answers true");
+            assertEquals(JSON.readTree("false"), written(origin, "PUT", "/v1/kv/app/lock?acquire=" + other, "",
+                    management), "a key another session holds is refused false, 200");
+            JsonNode locks = read(api, "v1/internal/ui/locks", true, management);
+            fields(locks, "locks read", Map.of("Held", Type.LIST, "Delays", Type.LIST));
+            fields(locks.path("Held").get(0), "held key", Map.of("Tenant", Type.TEXT, "Namespace", Type.TEXT,
+                    "Key", Type.TEXT, "Session", Type.TEXT, "LockIndex", Type.INTEGER, "CreateIndex", Type.INTEGER,
+                    "ModifyIndex", Type.INTEGER));
+
+            assertEquals(JSON.readTree("true"), written(origin, "PUT", "/v1/session/destroy/" + holder, "", management));
+            JsonNode delayed = read(api, "v1/internal/ui/locks", true, management);
+            assertEquals(0, delayed.path("Held").size(), delayed.toString());
+            fields(delayed.path("Delays").get(0), "lock delay", Map.of("Tenant", Type.TEXT, "Namespace", Type.TEXT,
+                    "Key", Type.TEXT, "Until", Type.TEXT));
+            Instant.parse(delayed.path("Delays").get(0).path("Until").asText());
+
+            JsonNode events = read(api, "v1/operator/events?session=" + holder, false, management).path("events");
+            List<String> types = new java.util.ArrayList<>();
+            events.forEach(event -> types.add(event.path("type").asText()));
+            assertEquals(List.of("session.created", "lock.acquired", "session.destroyed"), types);
+            fields(events.get(2).path("event"), "session event", Map.of("id", Type.TEXT, "reason", Type.TEXT));
+            assertEquals("destroyed", events.get(2).path("event").path("reason").asText());
+        } finally {
+            timers.shutdownNow();
+        }
+    }
+
+    @Test
+    void theGovernanceAnswersAreAnsweredInTheFieldsTheInterfaceReads() throws Exception {
+        // UI-6 Tenants, Namespaces and Audit task list, Phase 0: the tenancy reads and writes, what each scope holds,
+        // a scope's events, and the audit read of a file this server writes.
+        startServer(new AclHttpSettings(true, dataDirectory, AclDefaultPolicy.DENY), SecurityProfile.PRODUCTION);
+        Path auditFile = dataDirectory.resolve("audit").resolve("qraft-audit.json");
+        try (dev.mars.qraft.server.http.AuditFileSink sink = dev.mars.qraft.server.http.AuditFileSink.start(journal,
+                auditFile)) {
+            server.useAuditFile(auditFile);
+            URI origin = URI.create("http://127.0.0.1:" + server.port());
+            URI api = origin.resolve(bootstrap(get(origin, "/ui/")).path("apiBasePath").asText());
+            HttpResponse<String> bootstrapped = send(origin, "PUT", "/v1/acl/bootstrap", "", Map.of());
+            assertEquals(200, bootstrapped.statusCode(), bootstrapped.body());
+            Map<String, String> management = Map.of("X-Qraft-Token",
+                    JSON.readTree(bootstrapped.body()).path("secretId").asText());
+
+            fields(written(origin, "PUT", "/v1/tenant", "{\"Name\":\"acme\",\"Description\":\"Acme Ltd\"}", management),
+                    "created tenant", Map.of("Name", Type.TEXT, "Description", Type.TEXT, "CreateIndex", Type.INTEGER,
+                            "ModifyIndex", Type.INTEGER));
+            fields(written(origin, "PUT", "/v1/namespace", "{\"Name\":\"prod\",\"Tenant\":\"acme\",\"Description\":\"\"}",
+                    management), "created namespace", Map.of("Name", Type.TEXT, "Tenant", Type.TEXT,
+                    "Description", Type.TEXT, "CreateIndex", Type.INTEGER, "ModifyIndex", Type.INTEGER));
+            assertEquals(JSON.readTree("true"), written(origin, "PUT", "/v1/kv/app/a", "x", Map.of("X-Qraft-Token",
+                    management.get("X-Qraft-Token"), "X-Qraft-Tenant", "acme", "X-Qraft-Namespace", "prod")));
+
+            JsonNode scopes = read(api, "v1/internal/ui/scopes", true, management);
+            JsonNode acme = scopes.path("Tenants").get(0);
+            fields(acme, "tenant's holdings", Map.of("Name", Type.TEXT, "Description", Type.TEXT,
+                    "CreateIndex", Type.INTEGER, "ModifyIndex", Type.INTEGER, "Namespaces", Type.LIST));
+            fields(acme.path("Namespaces").get(1), "namespace's holdings", Map.of("Name", Type.TEXT,
+                    "Description", Type.TEXT, "CreateIndex", Type.INTEGER, "ModifyIndex", Type.INTEGER,
+                    "Services", Type.INTEGER, "Instances", Type.INTEGER, "Keys", Type.INTEGER, "HeldKeys", Type.INTEGER,
+                    "Sessions", Type.TEXT_LIST));
+            assertEquals(1, acme.path("Namespaces").get(1).path("Keys").asInt(), scopes.toString());
+
+            JsonNode events = read(api, "v1/operator/events?tenant=acme&namespace=prod&category=domain", false, management)
+                    .path("events");
+            fields(events.get(0), "tenancy event", Map.of("type", Type.TEXT, "event", Type.OBJECT, "tenant", Type.TEXT,
+                    "namespace", Type.TEXT));
+            assertEquals("namespace.created", events.get(0).path("type").asText(), events.toString());
+
+            assertEquals(JSON.readTree("true"), written(origin, "DELETE", "/v1/namespace/prod", "",
+                    Map.of("X-Qraft-Token", management.get("X-Qraft-Token"), "X-Qraft-Tenant", "acme")),
+                    "a deletion answers true");
+
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            JsonNode audit = read(api, "v1/internal/ui/audit?tenant=acme", false, management);
+            while (audit.path("Records").isEmpty() && System.nanoTime() < deadline) {
+                Thread.sleep(50);
+                audit = read(api, "v1/internal/ui/audit?tenant=acme", false, management);
+            }
+            fields(audit, "audit read", Map.of("Configured", Type.BOOLEAN, "File", Type.TEXT, "Size", Type.INTEGER,
+                    "Scanned", Type.INTEGER, "Complete", Type.BOOLEAN, "Records", Type.LIST));
+            fields(audit.path("Records").get(0), "audit record", Map.of("Type", Type.TEXT, "Timestamp", Type.TEXT,
+                    "Node", Type.TEXT, "AccessorId", Type.TEXT, "Method", Type.TEXT, "Route", Type.TEXT,
+                    "Status", Type.INTEGER, "Tenant", Type.TEXT, "Namespace", Type.TEXT, "RequestId", Type.TEXT));
+        }
+    }
+
     private static void token(JsonNode token, String what) {
         fields(token, what, Map.ofEntries(Map.entry("accessorId", Type.TEXT), Map.entry("secretId", Type.TEXT),
                 Map.entry("description", Type.TEXT_OR_NULL), Map.entry("policies", Type.LIST),
@@ -569,7 +697,7 @@ class AdminUiDataContractTest {
 
     private void startServer(AclHttpSettings acl, SecurityProfile profile) throws Exception {
         runtime = RaftExecutorsFixture.create();
-        QraftStateStore store = new QraftStateStore();
+        store = new QraftStateStore();
         node = RaftNode.builder()
                 .stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
                 .nodeId("server-1")
