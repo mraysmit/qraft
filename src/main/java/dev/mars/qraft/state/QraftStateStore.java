@@ -254,7 +254,7 @@ public final class QraftStateStore implements RaftLogApplicator, dev.mars.qraft.
                 yield new RaftCommandResult.Success<>(created);
             }
             case dev.mars.qraft.state.session.SessionCommand.Destroy destroy -> {
-                invalidateSession(destroy.id(), destroy.at(), index, "destroyed");
+                invalidateSession(destroy.id(), destroy.at(), index, destroy.cause().reason());
                 yield new RaftCommandResult.Success<>(true);
             }
         };
@@ -312,8 +312,34 @@ public final class QraftStateStore implements RaftLogApplicator, dev.mars.qraft.
                 yield tenancy.deleteNamespace(delete.tenant(), delete.name());
             }
         };
-        if (refusal == null) return new RaftCommandResult.Success<>(true);
-        return new RaftCommandResult.Refused<>(refusal, tenancyRefusal(refusal, command));
+        if (refusal != null) return new RaftCommandResult.Refused<>(refusal, tenancyRefusal(refusal, command));
+        tenancyEvent(command);
+        return new RaftCommandResult.Success<>(true);
+    }
+
+    /**
+     * A tenancy change's domain event (UI-6 Tenants, Namespaces and Audit task list, decision 1): a tenant's in its own
+     * tenant and its default namespace, a namespace's in its scope, after what a deletion removed.
+     */
+    private void tenancyEvent(dev.mars.qraft.state.tenancy.TenancyCommand command) {
+        String home = dev.mars.qraft.state.tenancy.TenancyState.DEFAULT;
+        switch (command) {
+            case dev.mars.qraft.state.tenancy.TenancyCommand.CreateTenant create ->
+                    event(create.name(), home, new dev.mars.qraft.state.tenancy.TenancyEvents.TenantCreated(create.name()));
+            case dev.mars.qraft.state.tenancy.TenancyCommand.UpdateTenant update ->
+                    event(update.name(), home, new dev.mars.qraft.state.tenancy.TenancyEvents.TenantUpdated(update.name()));
+            case dev.mars.qraft.state.tenancy.TenancyCommand.DeleteTenant delete ->
+                    event(delete.name(), home, new dev.mars.qraft.state.tenancy.TenancyEvents.TenantDeleted(delete.name()));
+            case dev.mars.qraft.state.tenancy.TenancyCommand.CreateNamespace create ->
+                    event(create.tenant(), create.name(),
+                            new dev.mars.qraft.state.tenancy.TenancyEvents.NamespaceCreated(create.tenant(), create.name()));
+            case dev.mars.qraft.state.tenancy.TenancyCommand.UpdateNamespace update ->
+                    event(update.tenant(), update.name(),
+                            new dev.mars.qraft.state.tenancy.TenancyEvents.NamespaceUpdated(update.tenant(), update.name()));
+            case dev.mars.qraft.state.tenancy.TenancyCommand.DeleteNamespace delete ->
+                    event(delete.tenant(), delete.name(),
+                            new dev.mars.qraft.state.tenancy.TenancyEvents.NamespaceDeleted(delete.tenant(), delete.name()));
+        }
     }
 
     /**
