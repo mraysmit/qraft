@@ -39,12 +39,23 @@ import java.util.OptionalLong;
 public final class AuditEvents {
     private AuditEvents() { }
 
-    /** A request answered under the token {@code accessorId}. */
-    public record Request(String accessorId, String method, String route, int status) implements QraftEvent {
+    /**
+     * A request answered under the token {@code accessorId}, in the tenant and namespace it named, the default ones
+     * where it named none (UI-6 Tenants, Namespaces and Audit task list, decision 4).
+     */
+    public record Request(String accessorId, String method, String route, int status, String tenant, String namespace)
+            implements QraftEvent {
         public Request {
             Objects.requireNonNull(accessorId, "accessorId");
             Objects.requireNonNull(method, "method");
             Objects.requireNonNull(route, "route");
+            Objects.requireNonNull(tenant, "tenant");
+            Objects.requireNonNull(namespace, "namespace");
+        }
+
+        /** A request in the default tenant and namespace. */
+        public Request(String accessorId, String method, String route, int status) {
+            this(accessorId, method, route, status, "default", "default");
         }
 
         @Override
@@ -56,7 +67,7 @@ public final class AuditEvents {
     /** Records {@code request} in {@code journal} as an audit event at {@code term}. */
     public static EventEnvelope publish(EventJournal journal, long term, Request request, String requestId) {
         return journal.publish(id -> new EventEnvelope(id, Clock.systemUTC().instant(), EventCategory.AUDIT,
-                EventSeverity.INFO, term, OptionalLong.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
-                Optional.ofNullable(requestId), request));
+                EventSeverity.INFO, term, OptionalLong.empty(), Optional.empty(), Optional.of(request.tenant()),
+                Optional.of(request.namespace()), Optional.ofNullable(requestId), request));
     }
 }
