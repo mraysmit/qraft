@@ -136,6 +136,22 @@ class HttpApiServerAuditTest {
         assertEquals(Optional.of("req-42"), audit.correlationId());
         assertFalse(audit.toString().contains(secret), "the secret is never recorded");
         assertTrue(audit.committedIndex().isEmpty(), "an audit event is not a replicated fact");
+        // UI-6 Tenants, Namespaces and Audit task list, decision 4: the scope the request named, the default otherwise.
+        assertEquals("default", request.tenant());
+        assertEquals("default", request.namespace());
+        assertEquals(Optional.of("default"), audit.tenant());
+        assertEquals(Optional.of("default"), audit.namespace());
+
+        http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + "/v1/kv/app/config"))
+                .header("X-Qraft-Token", secret).header("X-Qraft-Tenant", "acme").header("X-Qraft-Namespace", "prod")
+                .GET().build(), HttpResponse.BodyHandlers.ofString());
+        deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (audits().size() < 2 && System.nanoTime() < deadline) Thread.sleep(10);
+        AuditEvents.Request scoped = (AuditEvents.Request) audits().get(1).event();
+        assertEquals("acme", scoped.tenant());
+        assertEquals("prod", scoped.namespace());
+        assertEquals(Optional.of("acme"), audits().get(1).tenant());
+        assertEquals(Optional.of("prod"), audits().get(1).namespace());
     }
 
     private void submit(RaftCommand command) throws Exception {
