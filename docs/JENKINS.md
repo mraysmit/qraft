@@ -794,6 +794,23 @@ Phase 3 of the key/value list: default 1,772 with every coverage gate met, end-t
 files clean (logs `logs/local-run-2026-11-08-kv-phase3/`). On the complete list, with `KvEndToEndTest` and
 `DockerKvTest`: default 1,782 with every coverage gate met, end-to-end 18 and Docker 47, with no failures, errors or skips; audit over 1,293 files: 3,479 error lines, all flagged, 2,430 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/local-run-2026-11-08-kv-final/`).
 
+## Local runs for UI-6's Sessions, Locks and Watches, 2026-11-17
+
+Jenkins does not answer from the `markr` workstation, so the three suites ran in its place. They ran from the clone at
+`C:\qx8`, refreshed to `a12393d` with the list's uncommitted work copied over it, against Docker Desktop. The machine was
+on mains power, with no standby event in any run. The logs are in `logs/local-run-2026-11-17-slw/`.
+
+- **`mvn clean install`, 17:15:** default 2,070 with every coverage gate met, and Vitest 329, no failures, errors or
+  skips. The audit read the 614 files the run wrote: 859 error lines and 792 stack traces, all flagged.
+- **End-to-end, 17:25:** 35 tests, no failures, errors or skips. The audit read 63 files: 18 error lines and 18 stack
+  traces, all flagged.
+- **Docker and `slow`, 17:31 to 18:09:** 52 tests in 38 min 20 s, no failures, errors or skips. The audit read 282
+  files, the 25 Docker archive folders included: 382 error lines and 123 stack traces, all flagged. There was no
+  `too_many_pings` and no JVM crash file.
+
+The audit's checker is a Perl script, written afresh to the handover's rules (section 5, "Auditing a run"). It was
+shown to catch an unflagged error line and an unflagged trace at WARN in a planted file.
+
 ## Local runs, 2026-11-13
 
 The first run of the committed sources since build 66, in its place: Jenkins does not answer from the `markr` workstation. From a fresh clone of `653e2ce` at `C:\qx8`, against Docker Desktop, on mains power with no standby in any run. Another project's integration tests (`peegeeq`, with Testcontainers) ran on the same machine from 12:04. The logs are in `logs/local-run-2026-11-13-first/`, `-second-stopped/` and `-final/`.
