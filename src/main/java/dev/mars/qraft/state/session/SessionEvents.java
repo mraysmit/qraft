@@ -16,10 +16,11 @@
 
 package dev.mars.qraft.state.session;
 
-import dev.mars.qraft.common.events.QraftEvent;
+import dev.mars.qraft.common.events.SessionEvent;
 
 /**
- * The sessions' domain events (event query and watch list, Phase 1, decision 1).
+ * The sessions' domain events (event query and watch list, Phase 1, decision 1). Each is a {@link SessionEvent}, so one
+ * session's events can be read (UI-6 Sessions, Locks and Watches list, decision 6).
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-08
@@ -28,18 +29,32 @@ import dev.mars.qraft.common.events.QraftEvent;
 public final class SessionEvents {
     private SessionEvents() { }
 
-    public record SessionCreated(String id, String node) implements QraftEvent {
+    public record SessionCreated(String id, String node) implements SessionEvent {
         @Override
         public String type() {
             return "session.created";
         }
+
+        @Override
+        public String sessionId() {
+            return id;
+        }
     }
 
-    /** A session ended: {@code destroyed}, which a lapsed TTL also is, or {@code node}, when its node failed or left. */
-    public record SessionDestroyed(String id, String reason) implements QraftEvent {
+    /**
+     * A session ended: {@code destroyed} through the API, {@code ttl} when its TTL lapsed without renewal, or
+     * {@code node}, when its node failed or left (Sessions, Locks and Watches list, decision 3). A replica that
+     * predates the {@code ttl} cause records a lapse as {@code destroyed}.
+     */
+    public record SessionDestroyed(String id, String reason) implements SessionEvent {
         @Override
         public String type() {
             return "session.destroyed";
+        }
+
+        @Override
+        public String sessionId() {
+            return id;
         }
     }
 }
