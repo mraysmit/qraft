@@ -25,7 +25,8 @@ import { useLiveRead } from '../live';
 import { RouteLink, useRouter } from '../routing';
 import { Failure, PlainTable, ReadMeta, scopeText } from './common';
 import { EphemeralNote, EventsTable, FeedState } from './EventsTable';
-import { EntryChanges, FolderChanges } from './KvChanges';
+import { EntryChanges, FolderChanges, useKeyWrite } from './KvChanges';
+import { LockChanges } from './LockChanges';
 
 /**
  * The Key/Value pages (UI/UX design section 7.1; UI-6 Key/Value task list): a folder, empty or ending in `/`, lists
@@ -103,6 +104,8 @@ function Folder({ api, scope, prefix }: { api: QraftApi; scope: Scope; prefix: s
 function Entry({ api, scope, keyName }: { api: QraftApi; scope: Scope; keyName: string }) {
   const { consistency } = useRouter();
   const { may } = useAccess();
+  // Asked once for the page's changes and its lock (UI-6 Key/Value task list, decision 9).
+  const writable = useKeyWrite(api, keyName, scope);
   const [state, again] = useLiveRead(
     (wait) => api.kvEntry(keyName, scope, { consistency, ...wait }),
     [api, keyName, scope.tenant, scope.namespace, consistency],
@@ -122,7 +125,12 @@ function Entry({ api, scope, keyName }: { api: QraftApi; scope: Scope; keyName: 
         <Typography.Text>{`No key ${keyName} is stored in ${scopeText(scope)}.`}</Typography.Text>
       )}
       {shown !== undefined && shown.data !== null && <EntryFields entry={shown.data} scope={scope} />}
-      {shown !== undefined && shown.data !== null && <EntryChanges api={api} scope={scope} entry={shown.data} />}
+      {shown !== undefined && shown.data !== null && (
+        <EntryChanges api={api} scope={scope} entry={shown.data} writable={writable} />
+      )}
+      {shown !== undefined && shown.data !== null && (
+        <LockChanges api={api} scope={scope} entry={shown.data} writable={writable} />
+      )}
       <Typography.Title level={3}>Recent events</Typography.Title>
       {may.operatorRead ? <KeyEvents api={api} keyName={keyName} scope={scope} />
         : <Typography.Text>The key's events are listed with operator:read.</Typography.Text>}
