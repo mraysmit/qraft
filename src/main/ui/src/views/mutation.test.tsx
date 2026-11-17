@@ -101,6 +101,9 @@ describe('the mutation workflow', () => {
     expect(reported.textContent).toContain('Committed and applied at index 41.');
     const audit = screen.getByText('Audit events of this request', { selector: 'a' });
     expect(audit.getAttribute('href')).toBe('/ui/events?category=audit&correlation=req-42');
+    // UI-6 Tenants, Namespaces and Audit task list, Phase 3: and its durable records, in the audit file.
+    expect(screen.getByText('Audit records of this request', { selector: 'a' }).getAttribute('href'))
+      .toBe('/ui/audit?requestId=req-42');
   });
 
   it('tells a validation refusal, an integrity refusal and a missing permission apart', async () => {
