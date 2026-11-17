@@ -289,6 +289,95 @@ class PackagedAdminUiEndToEndTest {
     }
 
     @Test
+    void aPackagedServerWithAclsOnAnswersTheSessionsAndLocksPagesCallsUnderASessionToken() throws Exception {
+        // UI-6 Sessions, Locks and Watches task list, Phase 5: what the Sessions, Locks and Key/Value pages send, under a
+        // token that may write sessions on one node and keys under jobs/.
+        Path run = Files.createDirectories(directory.resolve("sessions-run"));
+        String management = UUID.randomUUID().toString();
+        Path secretFile = run.resolve("management-token");
+        Files.writeString(secretFile, management);
+        int port = freePort();
+        server = start("server", run, serverConfig(run, port, ", \"acl\": {\"enabled\": true, \"defaultPolicy\": \"deny\","
+                + " \"initialManagementTokenFile\": " + path(secretFile) + "}"));
+        URI origin = URI.create("http://127.0.0.1:" + port);
+        awaitReady(server, origin, "/health/ready", run.resolve("server.out"));
+        Map<String, String> signedIn = Map.of("X-Qraft-Token", management);
+        awaitOk(origin, "GET", "/v1/acl/token/self", "", signedIn);
+        for (String node : List.of("lock-node", "other-node")) {
+            assertTrue(ok(origin, "PUT", "/v1/catalog/register", "{\"node\":{\"address\":\"127.0.0.1\"},\"service\":"
+                    + "{\"serviceId\":\"svc-" + node + "\",\"serviceName\":\"svc\",\"address\":\"127.0.0.1\",\"port\":8081,"
+                    + "\"tags\":[],\"metadata\":{},\"enabled\":true}}", Map.of("X-Qraft-Token", management,
+                    "X-Qraft-Node", node, "X-Qraft-Tenant", "default", "X-Qraft-Namespace", "default"))
+                    .path("service").path("registered").asBoolean(), node);
+        }
+        String policy = ok(origin, "PUT", "/v1/acl/policy", "{\"name\":\"locker\",\"rules\":{\"session\":{\"lock-node\":"
+                + "{\"policy\":\"write\"}},\"key_prefix\":{\"jobs/\":{\"policy\":\"write\"}}}}", signedIn).path("id").asText();
+        String secret = ok(origin, "PUT", "/v1/acl/token", "{\"policies\":[{\"id\":\"" + policy + "\"}]}", signedIn)
+                .path("secretId").asText();
+        Map<String, String> locker = Map.of("X-Qraft-Token", secret, "X-Qraft-Tenant", "default",
+                "X-Qraft-Namespace", "default");
+
+        // The Sessions pages: a creation, the sessions with the leader's deadline, filtered, and a renewal.
+        String holder = ok(origin, "PUT", "/v1/session/create",
+                "{\"Node\":\"lock-node\",\"Name\":\"sl-e2e\",\"TTL\":\"30s\",\"LockDelay\":\"5s\"}", locker).path("ID").asText();
+        String contender = ok(origin, "PUT", "/v1/session/create", "{\"Node\":\"lock-node\"}", locker).path("ID").asText();
+        assertEquals(403, send(origin, "PUT", "/v1/session/create", "{\"Node\":\"other-node\"}", locker).statusCode(),
+                "a session on another node needs session:write on it");
+        String outsider = ok(origin, "PUT", "/v1/session/create", "{\"Node\":\"other-node\"}", signedIn).path("ID").asText();
+        HttpResponse<String> listed = send(origin, "GET", "/v1/internal/ui/sessions", "", locker);
+        assertEquals(200, listed.statusCode(), listed.body());
+        JsonNode sessions = JSON.readTree(listed.body());
+        assertTrue(sessions.path("TtlKnown").asBoolean(), sessions.toString());
+        assertEquals("true", listed.headers().firstValue("X-Qraft-Results-Filtered-By-ACLs").orElse(null));
+        assertFalse(sessions.toString().contains(outsider), "a session on a node the token cannot read is left out");
+        JsonNode timed = null;
+        for (JsonNode session : sessions.path("Sessions")) {
+            if (session.path("ID").asText().equals(holder)) timed = session;
+        }
+        assertTrue(timed != null && timed.path("ExpiresAt").isTextual() && timed.path("RenewedAt").isNull(),
+                sessions.toString());
+        assertEquals(holder, ok(origin, "PUT", "/v1/session/renew/" + holder, "", locker).path(0).path("ID").asText());
+
+        // The Key/Value page's lock: acquired, refused to another session, released only by its holder.
+        assertTrue(ok(origin, "PUT", "/v1/kv/jobs/leader?flags=0&acquire=" + holder, "sl-e2e-value", locker).asBoolean());
+        assertFalse(ok(origin, "PUT", "/v1/kv/jobs/leader?flags=0&acquire=" + contender, "sl-e2e-value", locker)
+                .asBoolean(), "a key another session holds");
+        assertFalse(ok(origin, "PUT", "/v1/kv/jobs/leader?flags=0&release=" + contender, "sl-e2e-value", locker)
+                .asBoolean(), "a session that does not hold the key cannot release it");
+        assertTrue(ok(origin, "PUT", "/v1/kv/outside?flags=0&acquire=" + outsider, "sl-e2e-outside", signedIn).asBoolean());
+
+        // The Locks page: the held keys the token may read, filtered, and a session's own.
+        HttpResponse<String> locks = send(origin, "GET", "/v1/internal/ui/locks", "", locker);
+        assertEquals(200, locks.statusCode(), locks.body());
+        JsonNode held = JSON.readTree(locks.body()).path("Held");
+        assertEquals(1, held.size(), held.toString());
+        assertEquals("jobs/leader", held.path(0).path("Key").asText());
+        assertEquals(holder, held.path(0).path("Session").asText());
+        assertEquals("true", locks.headers().firstValue("X-Qraft-Results-Filtered-By-ACLs").orElse(null));
+        assertEquals(1, ok(origin, "GET", "/v1/internal/ui/locks?session=" + holder, "", locker).path("Held").size());
+        assertTrue(ok(origin, "PUT", "/v1/kv/jobs/leader?flags=0&release=" + holder, "sl-e2e-value", locker).asBoolean());
+
+        // A destroy releases what its session holds and starts the lock delay, and its event says why it ended.
+        assertTrue(ok(origin, "PUT", "/v1/kv/jobs/leader?flags=0&acquire=" + holder, "sl-e2e-value", locker).asBoolean());
+        assertTrue(ok(origin, "PUT", "/v1/session/destroy/" + holder, "", locker).asBoolean());
+        JsonNode after = ok(origin, "GET", "/v1/internal/ui/locks?consistent", "", locker);
+        assertEquals(0, after.path("Held").size(), after.toString());
+        assertEquals("jobs/leader", after.path("Delays").path(0).path("Key").asText(), after.toString());
+        JsonNode events = ok(origin, "GET", "/v1/operator/events?session=" + holder, "", signedIn).path("events");
+        JsonNode last = events.path(events.size() - 1);
+        assertEquals("session.destroyed", last.path("type").asText(), events.toString());
+        assertEquals("destroyed", last.path("event").path("reason").asText());
+        assertFalse(events.toString().contains("sl-e2e-value"), "no event carries a value");
+
+        server.destroyForcibly();
+        server.waitFor(30, TimeUnit.SECONDS);
+        String output = Files.readString(run.resolve("server.out"));
+        assertFalse(output.contains("sl-e2e-value") || output.contains("sl-e2e-outside") || output.contains(management)
+                || output.contains(secret), "no value and no secret reaches the server's output");
+        SubprocessOutputAuditHelper.requireNoErrors("the packaged server serving sessions and locks", output);
+    }
+
+    @Test
     void aServerWithTheInterfaceDisabledAndAClientServeNoneOfItsRoutes() throws Exception {
         String entry = entryFile(JSON.readTree(packaged("asset-manifest.json")));
         Path serverRun = Files.createDirectories(directory.resolve("server-run"));
