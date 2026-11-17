@@ -19,7 +19,7 @@ import { type Access, AccessProvider, ManagementBanner, TokenMenu, unrestricted,
 import type { QraftApi } from './api/client';
 import type { Bootstrap } from './bootstrap';
 import { LiveProvider, PauseControl, type Scheduler } from './live';
-import { RouteLink, RouterProvider, useRouter } from './routing';
+import { type Route, RouteLink, RouterProvider, useRouter } from './routing';
 import { NodesView } from './views/NodesView';
 import { ChecksView } from './views/ChecksView';
 import { ClusterView } from './views/ClusterView';
@@ -27,6 +27,7 @@ import { ConfigurationView } from './views/ConfigurationView';
 import { ConsistencySelector } from './views/ConsistencySelector';
 import { EventsView } from './views/EventsView';
 import { KvView } from './views/KvView';
+import { LocksView } from './views/LocksView';
 import { MembersView } from './views/MembersView';
 import { ScopeSelector } from './views/ScopeSelector';
 import { ExplainView, PoliciesView, PolicyView } from './views/PoliciesView';
@@ -34,8 +35,11 @@ import { SecurityView } from './views/SecurityView';
 import { AccessNav, TokensView, TokenView } from './views/TokensView';
 import { ServiceDetailView } from './views/ServiceDetailView';
 import { ServicesView } from './views/ServicesView';
+import { SessionsView, SessionView } from './views/SessionsView';
 import { StatusStrip } from './views/StatusStrip';
 import { StorageView } from './views/StorageView';
+import { NamespacesView, NamespaceView, TenantsView, TenantView } from './views/TenancyView';
+import { WatchesView } from './views/WatchesView';
 
 const NAV_LINK = { color: '#fff' };
 
@@ -63,29 +67,17 @@ export function App({ bootstrap, api, scheduler, access }: {
             Qraft
           </Typography.Title>
           <nav aria-label="Primary">
-            <Space size="large">
-              <RouteLink to={{ view: 'services' }} style={NAV_LINK}>
-                Services
-              </RouteLink>
-              <RouteLink to={{ view: 'nodes' }} style={NAV_LINK}>
-                Nodes and Clients
-              </RouteLink>
-              <RouteLink to={{ view: 'checks' }} style={NAV_LINK}>
-                Health Checks
-              </RouteLink>
-              <RouteLink to={{ view: 'kv', path: '' }} style={NAV_LINK}>
-                Key/Value
-              </RouteLink>
-              {operatorRead && OPERATOR_VIEWS.map(([view, title]) => (
-                <RouteLink key={view} to={{ view }} style={NAV_LINK}>
-                  {title}
-                </RouteLink>
+            <Space size="large" wrap>
+              {navigation(operatorRead, aclRead).map(([group, links]) => (
+                <Space key={group} size="middle">
+                  <span data-nav-group={group} style={NAV_GROUP}>{group}</span>
+                  {links.map(([to, title]) => (
+                    <RouteLink key={title} to={to} style={NAV_LINK}>
+                      {title}
+                    </RouteLink>
+                  ))}
+                </Space>
               ))}
-              {aclRead && (
-                <RouteLink to={{ view: 'access' }} style={NAV_LINK}>
-                  Access
-                </RouteLink>
-              )}
             </Space>
           </nav>
           <Space style={{ marginLeft: 'auto' }} wrap>
@@ -125,6 +117,35 @@ const OPERATOR_VIEWS = [
   ['configuration', 'Configuration'],
 ] as const;
 
+/** The Govern views, which need `operator:read` as the tenancy and audit reads do, with their titles. */
+const GOVERN_VIEWS = [
+  ['tenants', 'Tenants'],
+  ['namespaces', 'Namespaces'],
+] as const;
+
+/** Each Govern page's title, a detail page's the same as its list's. */
+const GOVERN_TITLES: Readonly<Record<string, string>> = { tenants: 'Tenants', tenant: 'Tenants',
+  namespaces: 'Namespaces', namespace: 'Namespaces' };
+
+const NAV_GROUP = { color: 'rgba(255, 255, 255, 0.65)', fontSize: 12, textTransform: 'uppercase' as const };
+
+/**
+ * The navigation in the groups of UI/UX design section 4.3 (UI-6 Tenants, Namespaces and Audit task list, decision 8),
+ * the links in one order; a group with no link the token may use is left out.
+ */
+function navigation(operatorRead: boolean, aclRead: boolean): [string, [Route, string][]][] {
+  const groups: [string, [Route, string][]][] = [
+    ['Discover', [[{ view: 'services' }, 'Services'], [{ view: 'nodes' }, 'Nodes and Clients'],
+      [{ view: 'checks' }, 'Health Checks']]],
+    ['Coordinate', [[{ view: 'kv', path: '' }, 'Key/Value'], [{ view: 'sessions' }, 'Sessions'],
+      [{ view: 'locks' }, 'Locks'], [{ view: 'watches' }, 'Watches']]],
+    ['Operate', operatorRead ? OPERATOR_VIEWS.map(([view, title]) => [{ view }, title] as [Route, string]) : []],
+    ['Govern', operatorRead ? GOVERN_VIEWS.map(([view, title]) => [{ view }, title] as [Route, string]) : []],
+    ['Access', aclRead ? [[{ view: 'access' }, 'Access']] : []],
+  ];
+  return groups.filter(([, links]) => links.length > 0);
+}
+
 /** The Access section's views, which need `acl:read`. */
 const ACCESS_VIEWS = new Set(['access', 'tokens', 'token', 'policies', 'policy', 'explain']);
 
@@ -154,6 +175,10 @@ function CurrentView({ api, bootstrap }: { api: QraftApi; bootstrap: Bootstrap }
   const { may, mode } = useAccess();
   const operator = OPERATOR_VIEWS.find(([view]) => view === route.view);
   if (operator !== undefined && !may.operatorRead) return <NotPermitted title={operator[1]} permission="operator:read" />;
+  const govern = GOVERN_TITLES[route.view];
+  if (govern !== undefined && Object.hasOwn(GOVERN_TITLES, route.view) && !may.operatorRead) {
+    return <NotPermitted title={govern} permission="operator:read" />;
+  }
   if (ACCESS_VIEWS.has(route.view) && !may.aclRead) return <NotPermitted title="Access control" permission="acl:read" />;
   if (ACCESS_VIEWS.has(route.view) && route.view !== 'access' && mode === 'none') return <NoAccessControl />;
   switch (route.view) {
@@ -167,6 +192,24 @@ function CurrentView({ api, bootstrap }: { api: QraftApi; bootstrap: Bootstrap }
       return <ChecksView api={api} scope={scope} />;
     case 'kv':
       return <KvView key={route.path} api={api} scope={scope} path={route.path} />;
+    case 'sessions':
+      return <SessionsView api={api} />;
+    case 'sessionInfo':
+      return <SessionView key={route.id} api={api} id={route.id} />;
+    case 'locks':
+      return <LocksView api={api} />;
+    case 'audit':
+      return null;
+    case 'tenants':
+      return <TenantsView api={api} />;
+    case 'tenant':
+      return <TenantView key={route.name} api={api} name={route.name} />;
+    case 'namespaces':
+      return <NamespacesView api={api} />;
+    case 'namespace':
+      return <NamespaceView key={`${route.tenant}/${route.name}`} api={api} tenant={route.tenant} name={route.name} />;
+    case 'watches':
+      return <WatchesView key={`${route.target ?? ''}:${route.name ?? ''}`} api={api} target={route.target} name={route.name} />;
     case 'cluster':
       return <ClusterView api={api} scope={scope} />;
     case 'members':
