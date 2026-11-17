@@ -169,4 +169,28 @@ class KvStateTest {
         assertEquals(List.of(), restored.list(DEFAULT, ""), "a snapshot from before key/value restores none");
         assertEquals(0, restored.lastIndex());
     }
+
+    /** The administrative interface's locks read (UI-6 Sessions, Locks and Watches list, decision 4). */
+    @Test
+    void theHeldKeysAndTheRunningLockDelaysAreReadAcrossScopes() {
+        KvState kv = new KvState();
+        java.time.Instant t0 = java.time.Instant.parse("2026-11-17T12:00:00Z");
+        kv.set(DEFAULT, "free", bytes("f"), 0, ANY, 1);
+        assertTrue(kv.lock(DEFAULT, "leader", bytes("a"), 0, "s1", 2, t0));
+        assertTrue(kv.lock(ACME, "leader", bytes("b"), 0, "s2", 3, t0));
+        assertTrue(kv.lock(ACME, "other", bytes("c"), 0, "s1", 4, t0));
+
+        assertEquals(List.of("acme/prod/leader:s2", "acme/prod/other:s1", "default/default/leader:s1"),
+                kv.held().stream().map(entry -> entry.tenant() + "/" + entry.namespace() + "/" + entry.key() + ":"
+                        + entry.session()).toList(), "every scope's, in key order, and no free key");
+        assertEquals(List.of(), kv.lockDelaysAfter(t0), "no delay before a session is invalidated");
+
+        kv.releaseSession("s1", false, 5, t0.plusSeconds(15));
+        assertEquals(List.of("acme/prod/leader:s2"), kv.held().stream().map(entry -> entry.tenant() + "/"
+                + entry.namespace() + "/" + entry.key() + ":" + entry.session()).toList());
+        assertEquals(List.of(new KvState.LockDelay("acme", "prod", "other", t0.plusSeconds(15)),
+                new KvState.LockDelay("default", "default", "leader", t0.plusSeconds(15))),
+                kv.lockDelaysAfter(t0.plusSeconds(14)));
+        assertEquals(List.of(), kv.lockDelaysAfter(t0.plusSeconds(15)), "a delay that has ended is not running");
+    }
 }
