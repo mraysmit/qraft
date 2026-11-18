@@ -45,7 +45,7 @@ const request = (fields: Partial<Audit['Records'][number]>) => ({ Type: 'audit.h
   Namespace: 'default', RequestId: 'r5', ...fields });
 
 const FILE: Audit = { Configured: true, File: '/data/qraft-audit.json', Size: 2048, Scanned: 2048, Complete: true,
-  Records: [
+  Next: null, Records: [
     request({}),
     request({ Timestamp: '2026-11-17T10:00:04Z', AccessorId: 'a1', Method: 'DELETE', Route: '/v1/tenant', Status: 500,
       Tenant: 'acme', RequestId: 'r4' }),
@@ -103,31 +103,55 @@ describe('the Audit page', () => {
     expect(asked[0]).toEqual({ accessor: 'a1', result: 'denied' });
     expect((screen.getByLabelText('Principal') as HTMLInputElement).value).toBe('a1');
     fireEvent.change(screen.getByLabelText('Principal'), { target: { value: '' } });
-    fireEvent.change(screen.getByLabelText('Tenant'), { target: { value: 'acme' } });
+    // The top bar's scope selector is labelled Tenant; the filter is named for the record's scope.
+    fireEvent.change(screen.getByLabelText('In tenant'), { target: { value: 'acme' } });
     fireEvent.change(screen.getByLabelText('Result'), { target: { value: '' } });
     fireEvent.click(screen.getByText('Apply', { selector: 'button' }));
     expect(window.location.search).toBe('?inTenant=acme');
     await waitFor(() => expect(asked.at(-1)).toEqual({ tenant: 'acme' }));
   });
 
-  it('reads older records before the oldest one shown', async () => {
+  it('reads older records from where the last read stopped, as the server names it', async () => {
+    // The server pages by the byte its read stopped at (`Next`): a page asked by time would scan again what the last
+    // read covered, and could never reach a record beyond the scan's limit.
     at('/ui/audit?accessor=a1');
     const asked: AuditQuery[] = [];
     renderApp(fakeApi({ audit: (query) => {
       asked.push(query);
-      return read({ ...FILE, Complete: false }, null);
+      return read({ ...FILE, Scanned: 1024, Complete: false, Next: 1024 }, null);
     } }));
 
     fireEvent.click(await screen.findByText('Older records', { selector: 'button' }));
-    expect(window.location.search).toBe('?accessor=a1&before=2026-11-17T10%3A00%3A00Z');
-    await waitFor(() => expect(asked.at(-1)).toEqual({ accessor: 'a1', before: '2026-11-17T10:00:00Z' }));
+    expect(window.location.search).toBe('?accessor=a1&from=1024');
+    await waitFor(() => expect(asked.at(-1)).toEqual({ accessor: 'a1', from: '1024' }));
+  });
+
+  it('offers no older records once a read has reached the start of the file', async () => {
+    at('/ui/audit');
+    renderApp(fakeApi({ audit: () => read(FILE, null) }));
+
+    expect(await screen.findByText('Read the whole file, 2.0 kB.')).toBeInTheDocument();
+    expect(screen.queryByText('Older records', { selector: 'button' })).toBeNull();
+  });
+
+  it('starts again from the newest record when the filters are applied', async () => {
+    at('/ui/audit?accessor=a1&from=1024');
+    const asked: AuditQuery[] = [];
+    renderApp(fakeApi({ audit: (query) => {
+      asked.push(query);
+      return read(FILE, null);
+    } }));
+
+    await waitFor(() => expect(asked[0]).toEqual({ accessor: 'a1', from: '1024' }));
+    fireEvent.click(screen.getByText('Apply', { selector: 'button' }));
+    expect(window.location.search).toBe('?accessor=a1');
   });
 
   it('says a server writes no audit file, and lists its bounded journal instead, labelled as such', async () => {
     at('/ui/audit');
     const asked: EventQuery[] = [];
     renderApp(fakeApi({
-      audit: () => read({ Configured: false, File: null, Size: 0, Scanned: 0, Complete: true, Records: [] }, null),
+      audit: () => read({ Configured: false, File: null, Size: 0, Scanned: 0, Complete: true, Next: null, Records: [] }, null),
       events: (query) => {
         asked.push(query);
         return read(eventPage([qraftEvent(1, { category: 'audit', type: 'audit.http_request',

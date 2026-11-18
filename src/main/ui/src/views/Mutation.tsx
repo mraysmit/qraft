@@ -174,6 +174,10 @@ export function Mutation<T>({ title, identity, review, action, idempotent, submi
               <RouteLink to={{ view: 'events', category: 'audit', correlation: phase.requestId }}>
                 Audit events of this request
               </RouteLink>
+              {' · '}
+              <RouteLink to={{ view: 'audit', filter: { requestId: phase.requestId } }}>
+                Audit records of this request
+              </RouteLink>
             </p>
           )}
           {state.shown !== null && <p>{state.shown}</p>}

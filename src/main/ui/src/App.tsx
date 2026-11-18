@@ -20,6 +20,7 @@ import type { QraftApi } from './api/client';
 import type { Bootstrap } from './bootstrap';
 import { LiveProvider, PauseControl, type Scheduler } from './live';
 import { type Route, RouteLink, RouterProvider, useRouter } from './routing';
+import { AuditView, auditKey } from './views/AuditView';
 import { NodesView } from './views/NodesView';
 import { ChecksView } from './views/ChecksView';
 import { ClusterView } from './views/ClusterView';
@@ -118,14 +119,15 @@ const OPERATOR_VIEWS = [
 ] as const;
 
 /** The Govern views, which need `operator:read` as the tenancy and audit reads do, with their titles. */
-const GOVERN_VIEWS = [
-  ['tenants', 'Tenants'],
-  ['namespaces', 'Namespaces'],
-] as const;
+const GOVERN_VIEWS: readonly [Route, string][] = [
+  [{ view: 'tenants' }, 'Tenants'],
+  [{ view: 'namespaces' }, 'Namespaces'],
+  [{ view: 'audit', filter: {} }, 'Audit'],
+];
 
 /** Each Govern page's title, a detail page's the same as its list's. */
 const GOVERN_TITLES: Readonly<Record<string, string>> = { tenants: 'Tenants', tenant: 'Tenants',
-  namespaces: 'Namespaces', namespace: 'Namespaces' };
+  namespaces: 'Namespaces', namespace: 'Namespaces', audit: 'Audit' };
 
 const NAV_GROUP = { color: 'rgba(255, 255, 255, 0.65)', fontSize: 12, textTransform: 'uppercase' as const };
 
@@ -140,7 +142,7 @@ function navigation(operatorRead: boolean, aclRead: boolean): [string, [Route, s
     ['Coordinate', [[{ view: 'kv', path: '' }, 'Key/Value'], [{ view: 'sessions' }, 'Sessions'],
       [{ view: 'locks' }, 'Locks'], [{ view: 'watches' }, 'Watches']]],
     ['Operate', operatorRead ? OPERATOR_VIEWS.map(([view, title]) => [{ view }, title] as [Route, string]) : []],
-    ['Govern', operatorRead ? GOVERN_VIEWS.map(([view, title]) => [{ view }, title] as [Route, string]) : []],
+    ['Govern', operatorRead ? [...GOVERN_VIEWS] : []],
     ['Access', aclRead ? [[{ view: 'access' }, 'Access']] : []],
   ];
   return groups.filter(([, links]) => links.length > 0);
@@ -199,7 +201,7 @@ function CurrentView({ api, bootstrap }: { api: QraftApi; bootstrap: Bootstrap }
     case 'locks':
       return <LocksView api={api} />;
     case 'audit':
-      return null;
+      return <AuditView key={auditKey(route.filter)} api={api} filter={route.filter} />;
     case 'tenants':
       return <TenantsView api={api} />;
     case 'tenant':
