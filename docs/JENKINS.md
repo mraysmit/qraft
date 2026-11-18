@@ -794,6 +794,33 @@ Phase 3 of the key/value list: default 1,772 with every coverage gate met, end-t
 files clean (logs `logs/local-run-2026-11-08-kv-phase3/`). On the complete list, with `KvEndToEndTest` and
 `DockerKvTest`: default 1,782 with every coverage gate met, end-to-end 18 and Docker 47, with no failures, errors or skips; audit over 1,293 files: 3,479 error lines, all flagged, 2,430 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/local-run-2026-11-08-kv-final/`).
 
+## Local runs for UI-6's Tenants, Namespaces and Audit, 2026-11-18
+
+Jenkins does not answer from the `markr` workstation, so the three suites ran in its place. They ran from a fresh clone
+at `C:\qx9` of `5aab391`, with the list's uncommitted work copied over it, against Docker Desktop. The machine was on
+mains power, with no standby event from 11:00 to 16:20. The logs are in `logs/local-run-2026-11-18-gov/`.
+
+- **`mvn clean install`, 11:44 to 11:52:** default 2,078 with every coverage gate met, and Vitest 373, no failures,
+  errors or skips.
+- **End-to-end, 11:52 to 11:58:** 36 tests, no failures, errors or skips.
+- **Docker and `slow`, 11:58 to 12:31:** 52 tests in 33 min 26 s, no failures, errors or skips. The stage still exited
+  1. The runner had left out the `-DskipVitest=true` the Jenkinsfile gives the end-to-end and Docker stages, so Vitest
+  ran again after each. After the end-to-end tests it passed 373. After the Docker tests two tests ran past Vitest's
+  15 s limit: the first of `configuration.test.tsx` and the first of `checks.test.tsx`, about 3 s each in install. The
+  whole run was slow, not those two: unrelated files took four to seven times as long as in install, and collection
+  384 s against 283 s, so the machine was short of CPU. Vitest alone at 13:16, twice, while other projects' tests ran
+  on the machine (CPU 85 to 97%, a kind cluster and Testcontainers), failed the first of `Root.test.tsx` each time, on
+  its 3 s wait for the first table. Vitest alone at 16:10, twice, once no other project's test JVM or container had run
+  for three minutes, passed 373 each. The runner now passes the flag.
+
+An earlier run, 11:09 to 11:22, before the back/forward cache fix (UI/UX design, section 12), passed install (2,078,
+and Vitest 369) and end-to-end (36).
+
+The audit read the 1,509 files the day's runs wrote, the 25 Docker archive folders included: 2,178 error lines and
+1,671 stack traces. Every one was flagged but nine lines, the Docker stage's Vitest timeouts and Maven's report of
+them. There was no `too_many_pings` and no JVM crash file. The audit's checker is a Node script, calibrated on the
+2026-11-17 runs' logs, which it found clean, and on that list's red runs, whose unflagged lines and traces it caught.
+
 ## Local runs for UI-6's Sessions, Locks and Watches, 2026-11-17
 
 Jenkins does not answer from the `markr` workstation, so the three suites ran in its place. They ran from the clone at
