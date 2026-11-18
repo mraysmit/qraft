@@ -1,7 +1,7 @@
 # Qraft Administrative UI and UX Design
 
 **Status:** Draft  
-**Last updated:** 2026-11-17 (sections 7.1 to 7.3: what the Sessions, Locks and Watches pages, and acquire and release, do as UI-6's second list built them. Earlier, 2026-11-15: section 7.1: what the Key/Value pages do as UI-6's first list built them. Earlier the same day: UI-5 delivered: sections 5.1 and 10.2.2 record what the implementation plan's open question 5 and the secret's keeping were decided to be, and section 9.2 what the removal's review shows; the UI-5 task list's decisions 1, 7 and 8. Earlier, 2026-11-01: a policy that tokens link to can now be deleted, as the owner decided for the ACL list's proposal 18: sections 10.2 and the refusals changed. Earlier the same day: section 10.2 follows the ACL list's alignment with Consul: the first sign-in, a secret shown once and stored only as a hash, 403 for a bad token, the form of a policy's rules, and recovery. Earlier the same day: dated task-list links refreshed. Earlier, 2026-10-30: section 5.1: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after a review of the interface's logic against the ACL list and the platform design: access control rewritten as section 10.2's subsections, with the owner's decisions on the security profile, the lock-out guard, policy deletion and the explanation endpoint; principle 3.7; access control moved to Stage 2; section 11's integrity refusals and operations that are not idempotent; nodes, health states, unscoped views, and operations without an API in sections 3.2, 5 and 9. Earlier that day, after a review of the reference implementation against this document: workspace tabs, section 4.4; access control on the token model of the ACL list, sections 4.1, 10.2, 11 and 15, with Roles and Auth Methods reserved, section 2; the reference implementation follows section 4.3 and labels reserved views. Earlier, 2026-10-09: a client row shows the version from the node's metadata; a node has no capabilities any more. Before: 2026-09-25)
+**Last updated:** 2026-11-18 (sections 4.3, 10.1 and 10.3: the grouped navigation, and what the Tenants, Namespaces and Audit pages do as UI-6's third list built them; section 12: a hidden page releases its live reads and watches. Earlier, 2026-11-17: sections 7.1 to 7.3: what the Sessions, Locks and Watches pages, and acquire and release, do as UI-6's second list built them. Earlier, 2026-11-15: section 7.1: what the Key/Value pages do as UI-6's first list built them. Earlier the same day: UI-5 delivered: sections 5.1 and 10.2.2 record what the implementation plan's open question 5 and the secret's keeping were decided to be, and section 9.2 what the removal's review shows; the UI-5 task list's decisions 1, 7 and 8. Earlier, 2026-11-01: a policy that tokens link to can now be deleted, as the owner decided for the ACL list's proposal 18: sections 10.2 and the refusals changed. Earlier the same day: section 10.2 follows the ACL list's alignment with Consul: the first sign-in, a secret shown once and stored only as a hash, 403 for a bad token, the form of a policy's rules, and recovery. Earlier the same day: dated task-list links refreshed. Earlier, 2026-10-30: section 5.1: a client now removes other services on its node, in its own tenant and namespace. Earlier, 2026-10-27, later the same day, after a review of the interface's logic against the ACL list and the platform design: access control rewritten as section 10.2's subsections, with the owner's decisions on the security profile, the lock-out guard, policy deletion and the explanation endpoint; principle 3.7; access control moved to Stage 2; section 11's integrity refusals and operations that are not idempotent; nodes, health states, unscoped views, and operations without an API in sections 3.2, 5 and 9. Earlier that day, after a review of the reference implementation against this document: workspace tabs, section 4.4; access control on the token model of the ACL list, sections 4.1, 10.2, 11 and 15, with Roles and Auth Methods reserved, section 2; the reference implementation follows section 4.3 and labels reserved views. Earlier, 2026-10-09: a client row shows the version from the node's metadata; a node has no capabilities any more. Before: 2026-09-25)
 
 ## 1. Purpose
 
@@ -205,6 +205,17 @@ reserved (section 2).
 Navigation entries are controlled by server-provided feature flags and the
 permissions of the token in use. Features that are not enabled do not
 produce dead navigation entries.
+
+As built on 2026-11-18
+([`task-list-admin-ui-tenants-namespaces-audit-2026-11-18.md`](../docs/archive/task-list-admin-ui-tenants-namespaces-audit-2026-11-18.md),
+decision 8): the groups are in one bar, each group's name a label before its
+links, and a group with no link the token may use is not shown. Discover has
+Services, Nodes and Clients and Health Checks; Coordinate has Key/Value,
+Sessions, Locks and Watches; Operate has Cluster Overview, Raft Members,
+Storage & Snapshots, Events and Configuration; Govern has Tenants, Namespaces
+and Audit, with `operator:read`; Access has one link, Access, with
+`acl:read`, whose pages lead on to the others. Connect, Multi-cluster,
+Metrics, Diagnostics and Quotas have no page yet, so they have no entry.
 
 ### 4.4 Workspace tabs
 
@@ -624,6 +635,23 @@ enabled state, metadata, policy assignments, quotas, resource totals, and recent
 events. Disabling or removing a scope shows the affected services, sessions,
 locks, routes, and peer exports before confirmation.
 
+As built on 2026-11-18
+([`task-list-admin-ui-tenants-namespaces-audit-2026-11-18.md`](../docs/archive/task-list-admin-ui-tenants-namespaces-audit-2026-11-18.md)):
+
+- a tenant or namespace has a name, a description and its indexes; the
+  platform has no enabled state, metadata, policy assignments or quotas for
+  one, so the pages show none;
+- the totals, services, instances, keys and held keys with their sessions,
+  come from one read of every scope, `GET /v1/internal/ui/scopes`, followed
+  live; a namespace's page links its services in its scope and its held keys;
+- recent events are the answering server's journal, in the scope, including
+  the scope's own `tenant.*` and `namespace.*` events;
+- creation, a change of description and deletion need `operator:write`
+  through the authorize call; a deletion's review counts what it removes, and
+  says that a session holding a key there goes on, holding nothing there;
+  routes and peer exports do not exist, and the default scopes are not offered
+  for deletion.
+
 ### 10.2 Access control
 
 Access control is part of the system's integrity, not a list of resources to
@@ -802,6 +830,33 @@ Audit records need the event journal (event architecture, sections 4.4 and
 available, and where ACL changes and denials are logged instead. It does not
 present an empty list as a record.
 
+As built on 2026-11-18
+([`task-list-admin-ui-tenants-namespaces-audit-2026-11-18.md`](../docs/archive/task-list-admin-ui-tenants-namespaces-audit-2026-11-18.md),
+decisions 5 to 7 and 11):
+
+- the page reads the answering server's audit file, `server.audit.path`,
+  through `GET /v1/internal/ui/audit`, newest first, with `operator:read`;
+- its filters are principal, request ID, method, route prefix, tenant,
+  namespace, result and a time before which records were written, all in the
+  address. The scope's are `inTenant` and `inNamespace` there and are labelled
+  "In tenant" and "In namespace", since the scope selector holds `tenant` and
+  `namespace`;
+- each record shows its time, principal, scope, request ID linked to its
+  journal events, operation, status and decision: allowed, denied for 403, or
+  failed for a 5xx. A record written before scopes were recorded shows its
+  scope as not recorded;
+- a lost stretch and a line that could not be read each take a row of their
+  own, where they are in the file;
+- the page states that the record is best effort, kept on each server for the
+  requests it answered until an operator removes or rotates the file, and
+  carries no committed index, so that filter is not offered, nor a target;
+- it says how much of the file a read covered; the older records go on from
+  the byte offset the last read stopped at, which the server answers;
+- without a file, the page says so and how to configure one, and lists the
+  server's bounded journal of audit events instead, labelled as not a
+  complete record;
+- a mutation's outcome links both its audit events and its audit records.
+
 ## 11. Mutation workflow and safety
 
 Every mutation form follows this sequence:
@@ -848,6 +903,16 @@ resources.
 Blocking queries or feature-specific watches keep lists and detail pages current.
 Users can pause live updates when investigating a stable snapshot or operating a
 large cluster.
+
+A page the browser hides releases its live reads and watches at once, and a
+page the browser's back/forward cache shows again reads afresh and follows the
+server again (2026-11-18, UI-6's third list,
+[`task-list-admin-ui-tenants-namespaces-audit-2026-11-18.md`](../docs/archive/task-list-admin-ui-tenants-namespaces-audit-2026-11-18.md)).
+The server answers over HTTP/1.1, where a browser opens six connections to it.
+A blocking query holds one for up to 30 s and a watch for good, and Chrome kept
+pages it had navigated from with their requests open, so after a few pages the
+next one waited for every read. Several tabs open on pages that follow the
+server still share those six connections.
 
 Every administrative read exposes:
 
