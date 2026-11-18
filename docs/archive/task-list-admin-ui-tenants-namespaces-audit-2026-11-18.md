@@ -1,13 +1,41 @@
 # Task List: Administrative Interface, Tenants, Namespaces and Audit (UI-6, part 3)
 
 **Date:** 2026-11-17
-**Status:** In progress. Phase 0 next.
-**Last updated:** 2026-11-17 (written, from a survey of the code with UI-6's second list in the working tree)
-**Active work:** Phase 0, the server's answers
-**Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-6
-**Source plan:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](QRAFT_ADMIN_UI_UX_DESIGN.md), sections 4.3, 10.1, 10.3, 11, 12 and 13; [`task-list-tenancy-2026-11-08.md`](../docs/archive/task-list-tenancy-2026-11-08.md); [`task-list-authentication-and-audit-2026-11-08.md`](../docs/archive/task-list-authentication-and-audit-2026-11-08.md)
-**Predecessor:** [`task-list-admin-ui-sessions-locks-watches-2026-11-17.md`](../docs/archive/task-list-admin-ui-sessions-locks-watches-2026-11-17.md) (UI-6, part 2)
-**Standards:** [`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md)
+**Status:** Complete and archived on 2026-11-18. Phases 0 to 2 and Phase 3's tests are in the owner's commits of 2026-11-17; Phase 3's code and Phase 4 are done, test first, and uncommitted. Locally, `mvn install`, the end-to-end and Docker stages and headless Chrome passed, with every log audited and none unflagged but a Vitest run the Jenkinsfile does not make (section 11).
+**Last updated:** 2026-11-18 (Phases 0 to 2 recorded from the commits, Phases 3 and 4 done, the list complete and archived, its links rewritten from its new place. Earlier: written on 2026-11-17, from a survey of the code with UI-6's second list in the working tree)
+**Active work:** complete on 2026-11-18
+**Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](../../docs-design/QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-6
+**Source plan:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](../../docs-design/QRAFT_ADMIN_UI_UX_DESIGN.md), sections 4.3, 10.1, 10.3, 11, 12 and 13; [`task-list-tenancy-2026-11-08.md`](task-list-tenancy-2026-11-08.md); [`task-list-authentication-and-audit-2026-11-08.md`](task-list-authentication-and-audit-2026-11-08.md)
+**Predecessor:** [`task-list-admin-ui-sessions-locks-watches-2026-11-17.md`](task-list-admin-ui-sessions-locks-watches-2026-11-17.md) (UI-6, part 2)
+**Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
+
+**Completion summary.** UI-6's Govern pages, Tenants, Namespaces and Audit, are
+delivered, and with them UI-6. The owner said on 2026-11-17 to proceed, and on
+2026-11-18 to go on with the list.
+
+- On the server (Phase 0):
+  - tenancy changes are events;
+  - each audit record carries its tenant and namespace;
+  - the audit file is read backwards, newest first, bounded at 64 MiB a read;
+  - `GET /v1/internal/ui/scopes` counts what each scope holds, and
+    `GET /v1/internal/ui/audit` answers the file's records, filtered, with the
+    offset the next page goes on from (`Next`).
+- In the interface:
+  - Tenants and Namespaces, each with what it holds and its recent events, and
+    creation, a change of description, and a deletion reviewed with what it
+    removes; a grouped navigation;
+  - Audit, its filters in the address, saying how much of the file it read and
+    that the records are best effort, and the bounded journal's audit events
+    when a server keeps no file; a mutation's outcome links to its records.
+
+Decisions 1 to 11 were taken as the recommended options, each reversible.
+Decision 5 was amended in Phase 3, to page by the server's offset; decision 11
+was added in Phase 3, for the filters' labels. One defect was found and fixed,
+test first: a page in Chrome's back/forward cache held its long reads, and over
+HTTP/1.1's six connections starved the next page.
+
+Left for the owner: open tabs still share the six connections, and the
+interface's own reads fill the audit file (handover, section 6).
 
 The owner said on 2026-11-17 to proceed after UI-6's second list. This is UI-6's
 third and last list (the Key/Value list's decision 1). The decisions in
@@ -126,10 +154,17 @@ Taken 2026-11-17 as the recommended options; each reversible.
    - `accessor`, `requestId`, `method`, `tenant` and `namespace` match exactly;
    - `route` matches as a prefix;
    - `result` is one of `allowed`, `denied` (403) or `failed` (5xx);
-   - `before` gives the time a page ends at, for the next page.
+   - `before` keeps only the records written before a time;
+   - `from` gives the byte offset a page goes on from, back towards the start.
 
-   The read stops after 64 MiB of the file, and says how much it read and
-   whether it reached the start. It answers the file's path, its size, and the
+   The read stops after 64 MiB of the file, and says how much it read,
+   whether it reached the start, and `Next`, the offset the page before it
+   goes on from, null once the read reached the start. *Amended in Phase 3:*
+   the next page was to be asked by `before`, the oldest time shown. The
+   server's Phase 3 pages by offset instead, because a page asked by time
+   scans again what the last read covered, so it could never go past 64 MiB,
+   and it would skip a record written in the same instant as the oldest one
+   shown. The interface follows the server's offset. It answers the file's path, its size, and the
    durability below. It needs `operator:read`, as the journal's audit events
    do. Without `server.audit.path` it answers that no file is configured.
 6. **The Audit page states what the record is:**
@@ -164,6 +199,12 @@ Taken 2026-11-17 as the recommended options; each reversible.
     outcome is settled by reading the tenancy, never by sending it again; a
     creation of a scope that already exists answers 409, which is shown as the
     conflict it is.
+11. **The Audit page's scope filters are labelled "In tenant" and "In
+    namespace"** (taken 2026-11-18, in Phase 3). The top bar's scope selector
+    is labelled Tenant and Namespace and is on every page, so filters with the
+    same labels would be two fields of one name. As decision 9 puts them in the
+    address as `inTenant` and `inNamespace`, the labels follow, as the Explain
+    panel's "Resource tenant" did in UI-5.
 
 ## 5. Phase 0: The server's answers
 
@@ -273,3 +314,116 @@ clean.
 - Routes and peer exports (Connect and Multi-cluster are reserved).
 - An audit store shared by the servers, and the file's rotation.
 - Roles and Auth Methods pages.
+
+## 11. Record
+
+**Phases 0 to 2, and Phase 3's tests, 2026-11-17.** Built test first in the
+check copy on 2026-11-17, after the second list. The owner committed them on
+2026-11-17 with the second list, in the 75 commits after `a12393d`, through
+`5aab391`:
+- Phase 0: the tenancy events (`ea341f3`, `9df19e7`), each audit record's scope
+  (`bacadcc`, `26493e3`), the audit file read backwards (`4216de9`), and the
+  scopes and audit reads (`b2cfbfb`, `75e5204`, `341b136`), with their tests
+  and documents;
+- Phases 1 and 2: the Tenants and Namespaces pages, their changes and the
+  grouped navigation (`90d0365`, `962027b`, `8c64148`), with their tests;
+- Phase 3: its tests only (`bcde524`, `bb0a8f5`, `1cd5974`, and the routing,
+  client and schema tests). Its code was not written: the client's audit read
+  answered `not built` and the `audit` route rendered nothing.
+
+No record of those phases reached this list or the handover, and none of the
+recorded runs, the second list's included, ran their tests. On 2026-11-18, `main` at `5aab391` failed Vitest on 13 tests in 6
+files, all of them Phase 3's.
+
+**Phase 3, 2026-11-18,** in a new clone at `C:\qx9`, since `C:\qx8` held the
+second list's copied files:
+- The interface's paging was brought in line with the server's first (decision
+  5, amended). Phase 0's server pages by the byte offset a read stopped at
+  (`Next`, sent back as `from`), but Phase 3's tests paged by `before`, the
+  oldest time shown. These were changed first and seen to fail:
+  - the client sends `from` and reads `Next`;
+  - the route keeps `from`, as digits only;
+  - "Older records" goes on from `Next`, and is not offered once a read
+    reached the start;
+  - applying the filters reads from the newest record again;
+  - the data contract test checks `Next`, which it did not.
+- Decision 11 was taken: the scope selector's labels, Tenant and Namespace,
+  would have made the filters' labels ambiguous.
+- The client's audit read, the route's filters, the schema's `Next`, the Audit
+  page (`AuditView`), the Govern navigation's Audit link and a mutation's link
+  to its audit records were built. The 15 failing tests passed, with Vitest's
+  369 and `tsc`.
+- The page's rows are keyed by their fields and an occurrence count: two lines
+  of the file may be the same.
+
+**Phase 4, 2026-11-18:**
+- `PackagedAdminUiEndToEndTest.aPackagedServerWithAclsOnAndAnAuditFileAnswersTheTenancyAndAuditPagesCalls`,
+  with ACLs on and an audit file:
+  - a tenant and a namespace are created, a second creation is a conflict;
+  - they are counted with a service of two instances, two keys and a held key;
+  - they are described, and deleted, the namespace with what was counted, its
+    session going on;
+  - a second deletion answers 404;
+  - the audit read finds a refused request by principal and result, the
+    namespace's deletions by principal, scope, method and route, and the key
+    writes by scope;
+  - neither the audit file nor the server's output holds a value or a secret,
+    and the output holds no error.
+
+  It passed at its first run: it accepts what Phases 0 to 3 built test first.
+- Headless Chrome against the packaged server, over the DevTools protocol,
+  without ACLs and no audit file, and signed in with ACLs on and an audit file,
+  opened every new page: the Tenants and Namespaces pages, a tenant, a
+  namespace, and the Audit page unfiltered and filtered. It found one defect:
+  - **A page kept in the back/forward cache held its connections.** Run after
+    the pages before it, the filtered Audit page stayed at "Reading the audit
+    records…", with every read waiting, the status strip's too. The server
+    answered `curl` at once and its handlers run on virtual threads.
+  - Chrome held nine connections to the server from the documents it had
+    navigated from, each a 30 s blocking query or a watch. Over HTTP/1.1 a
+    browser opens six to a server. With Chrome's back/forward cache disabled,
+    the same run passed.
+  - Fixed test first in the live layer. `LiveProvider` listens for `pagehide`
+    and tells every live read and event feed to release its request and its
+    timer at once, and for `pageshow` from the cache to read again. Paused
+    views stay paused.
+  - Four tests were seen red first:
+    - a blocking read released and read again;
+    - a poll cancelled;
+    - paused stays paused, which passed at once, as it guards what pause
+      already did;
+    - the Events page's watch closed and followed again from its cursor.
+  - After the fix, four runs of the sequence that had failed six times in six
+    passed, and the connections fell to three as the pages went on.
+- Both Chrome runs then passed:
+  - each page showed its data;
+  - every style carried the nonce;
+  - Chrome logged no console message;
+  - no value or secret appeared;
+  - the servers' output, their logs and the audit file held no error, no
+    value and no secret.
+
+  One expectation of the second run was the check's own error, not the page's.
+  The interface's own reads, every one audited, had grown the file past one
+  page, so the unfiltered page rightly said it had read part of the file. Its
+  check was rewritten to expect that.
+
+**The three suites, 2026-11-18,** in `C:\qx9` against Docker Desktop, in place
+of Jenkins (`docs/JENKINS.md`, "Local runs for UI-6's Tenants, Namespaces and
+Audit, 2026-11-18"):
+- `mvn clean install`: default 2,078 with every coverage gate met, and Vitest
+  373;
+- end-to-end: 36;
+- Docker and `slow`: 52;
+- no failures, errors or skips in any of them.
+
+The Docker stage still exited 1. The runner had left out the
+`-DskipVitest=true` the Jenkinsfile gives that stage, and Vitest, run again
+after the Docker tests on a machine short of CPU, ran two tests past its 15 s
+limit; every file was slowed, some seven times. Vitest alone passed 373 twice
+on an idle machine. The runner now passes the flag. The audit read 1,509 files,
+the 25 Docker archive folders included: 2,178 error lines and 1,671 stack
+traces, every one flagged but the nine lines of that Vitest failure. There was
+no `too_many_pings` and no JVM crash file.
+
+Then the records were made (section 9, step 4) and the list archived.
