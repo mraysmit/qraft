@@ -86,7 +86,7 @@ class AdminUiDataContractTest {
     private static final Set<String> NODE_STATUS = Set.of("registering", "healthy", "unreachable");
 
     /** The JSON types of schemas.ts. */
-    private enum Type { TEXT, TEXT_OR_NULL, INTEGER, BOOLEAN, TEXT_MAP, TEXT_LIST, LIST, OBJECT }
+    private enum Type { TEXT, TEXT_OR_NULL, INTEGER, INTEGER_OR_NULL, BOOLEAN, TEXT_MAP, TEXT_LIST, LIST, OBJECT }
 
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private RaftExecutorsFixture runtime;
@@ -599,7 +599,8 @@ class AdminUiDataContractTest {
                 audit = read(api, "v1/internal/ui/audit?tenant=acme", false, management);
             }
             fields(audit, "audit read", Map.of("Configured", Type.BOOLEAN, "File", Type.TEXT, "Size", Type.INTEGER,
-                    "Scanned", Type.INTEGER, "Complete", Type.BOOLEAN, "Records", Type.LIST));
+                    "Scanned", Type.INTEGER, "Complete", Type.BOOLEAN, "Next", Type.INTEGER_OR_NULL,
+                    "Records", Type.LIST));
             fields(audit.path("Records").get(0), "audit record", Map.of("Type", Type.TEXT, "Timestamp", Type.TEXT,
                     "Node", Type.TEXT, "AccessorId", Type.TEXT, "Method", Type.TEXT, "Route", Type.TEXT,
                     "Status", Type.INTEGER, "Tenant", Type.TEXT, "Namespace", Type.TEXT, "RequestId", Type.TEXT));
@@ -664,6 +665,7 @@ class AdminUiDataContractTest {
             case TEXT -> value.isTextual();
             case TEXT_OR_NULL -> value.isTextual() || value.isNull();
             case INTEGER -> value.isIntegralNumber();
+            case INTEGER_OR_NULL -> value.isIntegralNumber() || value.isNull();
             case BOOLEAN -> value.isBoolean();
             case OBJECT -> value.isObject();
             case LIST -> value.isArray();
