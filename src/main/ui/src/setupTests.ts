@@ -19,8 +19,10 @@ import { cleanup, configure } from '@testing-library/react';
 import { afterEach } from 'vitest';
 
 // A view's first wait spans the whole interface mounting: its sign-in gate, its authorize call and its first table. That
-// took past Testing Library's 1 s on Jenkins (builds 79 and 83). A test's own limit, 5 s, still bounds every wait.
-configure({ asyncUtilTimeout: 3000 });
+// took past Testing Library's 1 s on Jenkins (builds 79 and 83), and past 3 s on a machine short of CPU (2026-11-18).
+// Time in a test is driven by hand, so a wait is CPU alone, and its limit guards against what never appears, not
+// against a slow machine. A test's own limit, 60 s (vite.config.ts), bounds several such waits.
+configure({ asyncUtilTimeout: 15_000 });
 
 // Vitest runs without globals here, so Testing Library cannot register its own cleanup between tests. Ant Design keeps
 // the style elements it added after its components unmount, and jsdom's getComputedStyle evaluates every rule of every

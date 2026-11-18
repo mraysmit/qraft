@@ -62,7 +62,8 @@ describe('Root', () => {
       render(<Root bootstrap={BOOTSTRAP} api={fakeApi()} session={memorySession('held')} />);
       // The first Ant Design table of the file mounts cold, as it must for the scrollbar to be measured during it: 0.5 s
       // alone, 1.4 s on Jenkins before UI-5 (build 79), 1.6 s under the whole local suite after UI-5's sign-in gate.
-      // Every wait now lasts up to 3 s (setupTests.ts).
+      // It passed 3 s with twelve threads spinning beside the suite (2026-11-18); every wait now lasts up to 15 s
+      // (setupTests.ts).
       await screen.findByText('web', { selector: 'a' });
     });
 

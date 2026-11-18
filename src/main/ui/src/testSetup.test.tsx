@@ -20,11 +20,21 @@ import { describe, expect, it } from 'vitest';
 
 // The rules setupTests.ts gives every test.
 
+// Both limits guard against a test that never ends, not against a slow machine: a test's time is CPU alone, since each
+// drives time with a scheduler it fires by hand. On 2026-11-18 a machine short of CPU ran waits past 3 s and tests past
+// 15 s, and with twelve threads spinning beside the suite one wait in each run passed 3 s, a different test each time.
 describe('a wait', () => {
   // A view's first wait spans the whole interface mounting, its sign-in gate, its authorize call and its first table:
-  // past Testing Library's 1 s on Jenkins (builds 79 and 83). A test's own limit, 5 s, still bounds it.
-  it('lasts up to 3 s', () => {
-    expect(getConfig().asyncUtilTimeout).toBe(3000);
+  // past Testing Library's 1 s on Jenkins (builds 79 and 83), and past 3 s on a busy machine.
+  it('lasts up to 15 s', () => {
+    expect(getConfig().asyncUtilTimeout).toBe(15_000);
+  });
+});
+
+describe("a test's own limit", () => {
+  // Longer than several waits, so a wait that fails reports what it was waiting for before the test's own limit ends it.
+  it('lasts up to 60 s', ({ task }) => {
+    expect(task.timeout).toBe(60_000);
   });
 });
 
