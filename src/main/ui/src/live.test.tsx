@@ -162,3 +162,63 @@ describe('live reads', () => {
     expect(shown()).toBe('value 3');
   });
 });
+
+/** The page put into the browser's back/forward cache (`persisted`), or left for good, and shown again. */
+function transition(type: 'pagehide' | 'pageshow', persisted: boolean) {
+  act(() => {
+    window.dispatchEvent(new PageTransitionEvent(type, { persisted }));
+  });
+}
+
+describe('live reads in the back/forward cache', () => {
+  // UI-6 Tenants, Namespaces and Audit task list, Phase 4: Chrome keeps a page it navigates from in its back/forward
+  // cache with its requests open. A blocking query holds a connection for up to 30 s and a watch for good, and a
+  // browser opens six to a server over HTTP/1.1, so after a few pages a new one waited for every read it sent.
+  it('release a blocking read when the page is hidden, and read again at once when it is shown from the cache', async () => {
+    const { calls, load } = deferredLoad();
+    const { time, shown } = view(load, true);
+    await calls[0]?.answer({ value: 1, index: 40 });
+    const waiting = calls[1];
+
+    transition('pagehide', true);
+
+    expect(waiting?.wait.signal.aborted).toBe(true);
+    expect(calls).toHaveLength(2);
+    expect(time.pending).toHaveLength(0);
+    expect(shown()).toBe('value 1');
+    expect(screen.getByText('Live updates on')).toBeInTheDocument();
+
+    transition('pageshow', true);
+
+    expect(calls).toHaveLength(3);
+    expect(calls[2]?.wait.index).toBeUndefined();
+    await calls[2]?.answer({ value: 2, index: 42 });
+    expect(shown()).toBe('value 2');
+  });
+
+  it('cancel the next poll while the page is hidden, and start nothing for an answer that comes after', async () => {
+    const { calls, load } = deferredLoad();
+    const { time } = view(load, false);
+    await calls[0]?.answer({ value: 1, index: 40 });
+    expect(time.pending.map((entry) => entry.ms)).toEqual([POLL_MILLIS]);
+
+    transition('pagehide', false);
+
+    expect(time.pending).toHaveLength(0);
+    transition('pageshow', false);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('stay paused when shown from the cache while paused', async () => {
+    const { calls, load } = deferredLoad();
+    view(load, true);
+    await calls[0]?.answer({ value: 1, index: 40 });
+    fireEvent.click(screen.getByText('Pause live updates'));
+
+    transition('pagehide', true);
+    transition('pageshow', true);
+
+    expect(calls).toHaveLength(2);
+    expect(screen.getByText('Live updates paused')).toBeInTheDocument();
+  });
+});

@@ -58,6 +58,8 @@ const INITIAL: EventFeed = {
 
 interface Session {
   alive: boolean;
+  /** Whether its page is hidden, so nothing more is read until the browser's cache shows it again. */
+  held: boolean;
   feed: EventFeed;
   reading?: AbortController | undefined;
   closeWatch?: (() => void) | undefined;
@@ -158,7 +160,7 @@ function follow(session: Session, settings: MutableRefObject<Settings>): void {
 function retry(session: Session, settings: MutableRefObject<Settings>, error: unknown): void {
   update(session, settings, { phase: 'retrying', error });
   const { live } = settings.current;
-  if (live.paused) return;
+  if (live.paused || session.held) return;
   session.cancelRetry = live.scheduler.after(RETRY_MILLIS, () => {
     session.cancelRetry = undefined;
     if (session.alive) void catchUp(session, settings, session.feed.cursor);
@@ -187,13 +189,29 @@ export function useEventFeed(api: QraftApi, query: FeedQuery, deps: DependencyLi
   const current = useRef<Session | null>(null);
 
   useEffect(() => {
-    const session: Session = { alive: true, feed: INITIAL };
+    const session: Session = { alive: true, held: false, feed: INITIAL };
     current.current = session;
     setFeed(INITIAL);
     void catchUp(session, settings, null);
+    // Hidden into the browser's back/forward cache, the feed closes its watch; shown again, it reads from its cursor
+    // and follows, as it does on resuming (UI-6 Tenants, Namespaces and Audit task list, Phase 4).
+    const unhold = settings.current.live.hold({
+      release() {
+        session.held = true;
+        stop(session);
+      },
+      resume() {
+        if (!session.alive || !session.held) return;
+        session.held = false;
+        if (session.feed.phase === 'paused') return;
+        update(session, settings, { phase: 'reading' });
+        void catchUp(session, settings, session.feed.cursor);
+      },
+    });
     return () => {
       session.alive = false;
       stop(session);
+      unhold();
     };
     // `query` is a new object on every render; `deps` name what it holds.
   }, [api, ...deps, attempt]);

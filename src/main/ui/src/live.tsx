@@ -58,18 +58,59 @@ const TIMERS: Scheduler = {
   now: () => Date.now(),
 };
 
+/**
+ * What a live read or an event feed does when its page is hidden, into the browser's back/forward cache or for good,
+ * and when the cache shows it again (UI-6 Tenants, Namespaces and Audit task list, Phase 4).
+ */
+export interface Hold {
+  /** Ends the request in flight and the timer waiting, at once: the page may be frozen before React renders again. */
+  release(): void;
+  /** Reads again, as the page shown from the cache may be long out of date. */
+  resume(): void;
+}
+
 interface Live {
   paused: boolean;
   setPaused(paused: boolean): void;
   scheduler: Scheduler;
+  /** Registers what to release and resume with the page; the returned function unregisters it. */
+  hold(hold: Hold): () => void;
 }
 
-const LiveContext = createContext<Live>({ paused: false, setPaused: () => undefined, scheduler: TIMERS });
+const LiveContext = createContext<Live>({ paused: false, setPaused: () => undefined, scheduler: TIMERS,
+  hold: () => () => undefined });
 
-/** Live updates for the views inside it, on until paused. */
+/**
+ * Live updates for the views inside it, on until paused. A page the browser keeps in its back/forward cache keeps its
+ * requests open: a blocking query holds a connection for up to 30 s and a watch for good, and a browser opens six to a
+ * server over HTTP/1.1, so a few such pages left the next one waiting for every read. So every live read and feed is
+ * released when the page is hidden, and read again when the cache shows it.
+ */
 export function LiveProvider({ scheduler = TIMERS, children }: { scheduler?: Scheduler | undefined; children: ReactNode }) {
   const [paused, setPaused] = useState(false);
-  const live = useMemo(() => ({ paused, setPaused, scheduler }), [paused, scheduler]);
+  const holds = useRef(new Set<Hold>());
+  const hold = useCallback((held: Hold) => {
+    holds.current.add(held);
+    return () => {
+      holds.current.delete(held);
+    };
+  }, []);
+  useEffect(() => {
+    const hide = () => {
+      for (const held of holds.current) held.release();
+    };
+    const show = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      for (const held of holds.current) held.resume();
+    };
+    window.addEventListener('pagehide', hide);
+    window.addEventListener('pageshow', show);
+    return () => {
+      window.removeEventListener('pagehide', hide);
+      window.removeEventListener('pageshow', show);
+    };
+  }, []);
+  const live = useMemo(() => ({ paused, setPaused, scheduler, hold }), [paused, scheduler, hold]);
   return <LiveContext.Provider value={live}>{children}</LiveContext.Provider>;
 }
 
@@ -137,6 +178,8 @@ export interface LiveWait {
 
 interface Loop<T> {
   alive: boolean;
+  /** Whether its page is hidden, so nothing more is read until the cache shows it again. */
+  held: boolean;
   /** Whether the first read has answered: only then do pause and resume stop and start the reads that follow. */
   started: boolean;
   /** The index of the last answer, which the next blocking query waits past. */
@@ -177,7 +220,7 @@ function read<T>(loop: Loop<T>, index: number | undefined): void {
       loop.started = true;
       loop.publish({ status: 'failed', error, previous: loop.last.current });
       const { live } = loop.settings.current;
-      if (!live.paused) loop.cancel = live.scheduler.after(RETRY_MILLIS, () => read(loop, undefined));
+      if (!live.paused && !loop.held) loop.cancel = live.scheduler.after(RETRY_MILLIS, () => read(loop, undefined));
     },
   );
 }
@@ -185,7 +228,7 @@ function read<T>(loop: Loop<T>, index: number | undefined): void {
 /** The read after an answer: a blocking query at once, unless it answered at once with nothing new; else a poll. */
 function follow<T>(loop: Loop<T>, unchanged: boolean): void {
   const { indexOf, live } = loop.settings.current;
-  if (!loop.alive || live.paused) return;
+  if (!loop.alive || loop.held || live.paused) return;
   const index = loop.index;
   if (indexOf === undefined || index === null || index === 0) {
     loop.cancel = live.scheduler.after(POLL_MILLIS, () => read(loop, undefined));
@@ -218,14 +261,29 @@ export function useLiveRead<T>(
   const current = useRef<Loop<T> | null>(null);
 
   useEffect(() => {
-    const loop: Loop<T> = { alive: true, started: false, index: null, settings, last, publish: setState };
+    const loop: Loop<T> = { alive: true, held: false, started: false, index: null, settings, last, publish: setState };
     current.current = loop;
     setState({ status: 'loading', previous: last.current });
     read(loop, undefined);
+    const unhold = settings.current.live.hold({
+      release() {
+        loop.held = true;
+        loop.reading?.abort();
+        loop.cancel?.();
+        loop.cancel = undefined;
+      },
+      resume() {
+        if (!loop.alive || !loop.held) return;
+        loop.held = false;
+        // Paused before its first answer, the first read is read again: resuming reads only a loop that started.
+        if (!settings.current.live.paused || !loop.started) read(loop, undefined);
+      },
+    });
     return () => {
       loop.alive = false;
       loop.reading?.abort();
       loop.cancel?.();
+      unhold();
     };
     // `load` and `indexOf` are new functions on every render; `deps` name what they read.
   }, [...deps, attempt]);

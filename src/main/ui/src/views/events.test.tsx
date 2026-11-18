@@ -145,6 +145,26 @@ describe('Events', () => {
     expect(watches[1]?.query).toEqual({ after: cursor(1) });
   });
 
+  it('closes the watch when the page is hidden, and when it is shown from the cache reads from its cursor and follows', async () => {
+    // UI-6 Tenants, Namespaces and Audit task list, Phase 4: a page in the browser's back/forward cache must not hold
+    // its watch's connection, of the six a browser opens to the server.
+    const { api, asked, watches } = journal([eventPage([qraftEvent(1)]), eventPage([], 'complete', 1)]);
+    renderApp(api);
+    await waitFor(() => expect(watches).toHaveLength(1));
+
+    act(() => {
+      window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+    });
+
+    expect(watches[0]?.closed).toBe(true);
+    act(() => {
+      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    });
+    await waitFor(() => expect(watches).toHaveLength(2));
+    expect(asked.at(-1)).toEqual({ limit: 1000, after: cursor(1) });
+    expect(watches[1]?.query).toEqual({ after: cursor(1) });
+  });
+
   it('tries a failed watch again after a few seconds, from its cursor', async () => {
     const { api, asked, watches } = journal([eventPage([qraftEvent(1)]), eventPage([], 'complete', 1)]);
     const time = renderApp(api);
