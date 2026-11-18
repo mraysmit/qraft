@@ -646,10 +646,14 @@ end, newest first. It takes the following:
 - `limit`, 100 by default and 1,000 at most;
 - `accessor`, `requestId`, `method`, `tenant`, `namespace`, and `route` as a prefix;
 - `result`, which is `allowed`, `denied` for 403, or `failed` for 5xx;
-- `before`, an instant, to page back.
+- `before`, an instant, for only the records written before it;
+- `from`, a byte offset, to page back from where the last read stopped.
 
-A read stops after 64 MiB of the file. It answers how much it scanned and whether it
-reached the start. A lost stretch (`audit.events_lost`) and a line that is not JSON
+A read stops after 64 MiB of the file. It answers how much it scanned, whether it
+reached the start, and `Next`, the offset to send as `from` for the page before it,
+or null once the read has reached the start. A page asked by `before` alone would
+scan again what the last read covered, and could never go past 64 MiB. An offset
+past the end, as after a rotation, reads from the end. A lost stretch (`audit.events_lost`) and a line that is not JSON
 are always answered, since what they hide may have matched.
 
 Each server holds only the requests it answered, so to see a cluster's requests,
