@@ -37,6 +37,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Base64;
@@ -56,9 +58,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * administrative interface from the resources packaged in it; a server with the interface disabled, and a client, serve
  * none of its routes (design section 19.6; the interface's task list, Step 5); and the packaged server answers the
  * configuration it was started from with its secret withheld (UI-4 task list, Phase 3); and, with ACLs on, answers the
- * calls the interface makes once signed in with the management token from its file (UI-5 task list, Phase 4). Run
- * after {@code mvn install},
- * as the end-to-end stage is, against the {@code target/qraft.jar} that build packaged.
+ * calls the interface makes once signed in with the management token from its file (UI-5 task list, Phase 4), and,
+ * with an audit file, the Tenants, Namespaces and Audit pages' calls (UI-6 Tenants, Namespaces and Audit task list,
+ * Phase 4). Run after {@code mvn install}, as the end-to-end stage is, against the {@code target/qraft.jar} that build
+ * packaged.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-14
@@ -375,6 +378,142 @@ class PackagedAdminUiEndToEndTest {
         assertFalse(output.contains("sl-e2e-value") || output.contains("sl-e2e-outside") || output.contains(management)
                 || output.contains(secret), "no value and no secret reaches the server's output");
         SubprocessOutputAuditHelper.requireNoErrors("the packaged server serving sessions and locks", output);
+    }
+
+    @Test
+    void aPackagedServerWithAclsOnAndAnAuditFileAnswersTheTenancyAndAuditPagesCalls() throws Exception {
+        // UI-6 Tenants, Namespaces and Audit task list, Phase 4: what the Tenants, Namespaces and Audit pages send, with
+        // ACLs on and an audit file: a tenant and a namespace created, counted, described and deleted, the deletion
+        // removing what the count named, and the audit read finding those requests by principal, scope and result.
+        Path run = Files.createDirectories(directory.resolve("govern-run"));
+        String management = UUID.randomUUID().toString();
+        Path secretFile = run.resolve("management-token");
+        Files.writeString(secretFile, management);
+        Path auditFile = run.resolve("audit").resolve("qraft-audit.json");
+        int port = freePort();
+        server = start("server", run, serverConfig(run, port, ", \"acl\": {\"enabled\": true, \"defaultPolicy\": \"deny\","
+                + " \"initialManagementTokenFile\": " + path(secretFile) + "}, \"audit\": {\"path\": " + path(auditFile)
+                + "}"));
+        URI origin = URI.create("http://127.0.0.1:" + port);
+        awaitReady(server, origin, "/health/ready", run.resolve("server.out"));
+        Map<String, String> signedIn = Map.of("X-Qraft-Token", management);
+        String operator = awaitOk(origin, "GET", "/v1/acl/token/self", "", signedIn).path("accessorId").asText();
+        Map<String, String> inTenant = Map.of("X-Qraft-Token", management, "X-Qraft-Tenant", "gov-e2e");
+        Map<String, String> prod = Map.of("X-Qraft-Token", management, "X-Qraft-Tenant", "gov-e2e",
+                "X-Qraft-Namespace", "prod");
+
+        // Created: a tenant, with its default namespace, and a namespace in it; a second creation is a conflict.
+        String tenant = "{\"Name\":\"gov-e2e\",\"Description\":\"Governed\"}";
+        assertEquals("gov-e2e", ok(origin, "PUT", "/v1/tenant", tenant, signedIn).path("Name").asText());
+        assertEquals(409, send(origin, "PUT", "/v1/tenant", tenant, signedIn).statusCode(), "a tenant that exists");
+        assertEquals("prod", ok(origin, "PUT", "/v1/namespace",
+                "{\"Name\":\"prod\",\"Tenant\":\"gov-e2e\",\"Description\":\"production\"}", signedIn).path("Name").asText());
+
+        // Counted: one service with two instances, and two keys, one of them held by a session.
+        for (String node : List.of("gov-node-a", "gov-node-b")) {
+            Map<String, String> onNode = new HashMap<>(prod);
+            onNode.put("X-Qraft-Node", node);
+            assertTrue(ok(origin, "PUT", "/v1/catalog/register", "{\"node\":{\"address\":\"127.0.0.1\"},\"service\":"
+                    + "{\"serviceId\":\"web-" + node + "\",\"serviceName\":\"web\",\"address\":\"127.0.0.1\",\"port\":8081,"
+                    + "\"tags\":[],\"metadata\":{},\"enabled\":true}}", onNode)
+                    .path("service").path("registered").asBoolean(), node);
+        }
+        assertTrue(ok(origin, "PUT", "/v1/kv/app/config?flags=0", "gov-e2e-value", prod).asBoolean());
+        String session = ok(origin, "PUT", "/v1/session/create", "{\"Node\":\"gov-node-a\",\"Name\":\"gov-e2e\"}", prod)
+                .path("ID").asText();
+        assertTrue(ok(origin, "PUT", "/v1/kv/app/leader?flags=0&acquire=" + session, "gov-e2e-value", prod).asBoolean());
+        JsonNode counted = namespaceIn(ok(origin, "GET", "/v1/internal/ui/scopes?consistent", "", signedIn), "gov-e2e", "prod");
+        assertEquals(List.of(1, 2, 2, 1), List.of(counted.path("Services").asInt(), counted.path("Instances").asInt(),
+                counted.path("Keys").asInt(), counted.path("HeldKeys").asInt()), counted.toString());
+        assertEquals(session, counted.path("Sessions").path(0).asText(), counted.toString());
+
+        // Described.
+        assertEquals("production, renamed", ok(origin, "PUT", "/v1/namespace/prod",
+                "{\"Description\":\"production, renamed\"}", inTenant).path("Description").asText());
+        assertEquals("Governed, renamed", ok(origin, "PUT", "/v1/tenant/gov-e2e", "{\"Description\":\"Governed, renamed\"}",
+                signedIn).path("Description").asText());
+
+        // Deleted: the namespace with what was counted, its session keeping on and holding nothing there; a second
+        // deletion answers 404, a deletion already made. Then the tenant.
+        assertTrue(ok(origin, "DELETE", "/v1/namespace/prod", "", inTenant).asBoolean());
+        assertEquals(404, send(origin, "DELETE", "/v1/namespace/prod", "", inTenant).statusCode());
+        JsonNode remaining = ok(origin, "GET", "/v1/internal/ui/scopes?consistent", "", signedIn);
+        assertEquals(List.of("default"), names(tenantIn(remaining, "gov-e2e").path("Namespaces")), remaining.toString());
+        assertFalse(ok(origin, "GET", "/v1/internal/ui/locks?consistent", "", signedIn).toString().contains("gov-e2e"),
+                "no key is held in the deleted namespace");
+        assertEquals(session, ok(origin, "GET", "/v1/session/info/" + session + "?consistent", "", signedIn)
+                .path(0).path("ID").asText(), "the session keeps on");
+        assertTrue(ok(origin, "DELETE", "/v1/tenant/gov-e2e", "", signedIn).asBoolean());
+        assertEquals(404, send(origin, "DELETE", "/v1/tenant/gov-e2e", "", signedIn).statusCode());
+
+        // A refused request: a token with no policy may not read the tenants.
+        JsonNode bare = ok(origin, "PUT", "/v1/acl/token", "{\"description\":\"gov-e2e bare\"}", signedIn);
+        String bareSecret = bare.path("secretId").asText();
+        assertEquals(403, send(origin, "GET", "/v1/tenants", "", Map.of("X-Qraft-Token", bareSecret)).statusCode());
+
+        // The audit read finds those requests by principal and result, and by principal, scope and method.
+        List<JsonNode> denied = awaitAudit(origin, "accessor=" + bare.path("accessorId").asText() + "&result=denied",
+                signedIn, 1);
+        assertEquals("GET 403", denied.get(0).path("Method").asText() + " " + denied.get(0).path("Status").asInt());
+        List<JsonNode> deletions = awaitAudit(origin, "accessor=" + operator + "&tenant=gov-e2e&method=DELETE"
+                + "&route=/v1/namespace", signedIn, 2);
+        assertEquals(List.of(404, 200), deletions.stream().map(record -> record.path("Status").asInt()).toList(),
+                "the namespace's deletions, newest first");
+        List<JsonNode> writes = awaitAudit(origin, "tenant=gov-e2e&namespace=prod&route=/v1/kv", signedIn, 2);
+        assertTrue(writes.stream().allMatch(record -> record.path("AccessorId").asText().equals(operator)), writes.toString());
+        JsonNode answer = ok(origin, "GET", "/v1/internal/ui/audit?limit=1", "", signedIn);
+        assertTrue(answer.path("Configured").asBoolean());
+        assertEquals(auditFile.toString(), answer.path("File").asText());
+
+        server.destroyForcibly();
+        server.waitFor(30, TimeUnit.SECONDS);
+        String audit = Files.readString(auditFile);
+        String output = Files.readString(run.resolve("server.out"));
+        for (String written : List.of(audit, output)) {
+            assertFalse(written.contains("gov-e2e-value") || written.contains(management) || written.contains(bareSecret),
+                    "no value and no secret reaches the audit file or the server's output");
+        }
+        SubprocessOutputAuditHelper.requireNoErrors("the packaged server serving tenancy and audit", output);
+    }
+
+    /**
+     * The requests the audit read answers for {@code query}, once it answers at least {@code count} within 30 s: the
+     * audit file is written after each request is answered.
+     */
+    private List<JsonNode> awaitAudit(URI origin, String query, Map<String, String> headers, int count) throws Exception {
+        long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+        List<JsonNode> requests = List.of();
+        while (System.nanoTime() < deadline) {
+            JsonNode answer = ok(origin, "GET", "/v1/internal/ui/audit?" + query, "", headers);
+            List<JsonNode> found = new ArrayList<>();
+            answer.path("Records").forEach(record -> {
+                if (record.path("Type").asText().equals("audit.http_request")) found.add(record);
+            });
+            requests = found;
+            if (requests.size() >= count) return requests;
+            Thread.sleep(100);
+        }
+        throw new AssertionError("the audit read for " + query + " answered " + requests + ", not " + count + " requests");
+    }
+
+    private static JsonNode tenantIn(JsonNode scopes, String name) {
+        for (JsonNode tenant : scopes.path("Tenants")) {
+            if (tenant.path("Name").asText().equals(name)) return tenant;
+        }
+        throw new AssertionError("no tenant " + name + " in " + scopes);
+    }
+
+    private static JsonNode namespaceIn(JsonNode scopes, String tenant, String name) {
+        for (JsonNode namespace : tenantIn(scopes, tenant).path("Namespaces")) {
+            if (namespace.path("Name").asText().equals(name)) return namespace;
+        }
+        throw new AssertionError("no namespace " + tenant + "/" + name + " in " + scopes);
+    }
+
+    private static List<String> names(JsonNode values) {
+        List<String> names = new ArrayList<>();
+        values.forEach(value -> names.add(value.path("Name").asText()));
+        return names;
     }
 
     @Test
