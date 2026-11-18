@@ -521,6 +521,8 @@ export const AuditSchema = z.object({
   Size: index,
   Scanned: index,
   Complete: z.boolean(),
+  /** The byte offset the next page back goes on from, as `from`; null once a read has reached the file's start. */
+  Next: index.nullable(),
   Records: z.array(AuditRecordSchema),
 });
 

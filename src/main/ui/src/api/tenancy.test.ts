@@ -103,7 +103,7 @@ describe('the audit read', () => {
     Method: 'GET', Route: '/v1/acl/tokens', Status: 200, Tenant: 'default', Namespace: 'default', RequestId: 'r5' };
 
   it('sends its filters, and reads the records, lost stretches and unreadable lines', async () => {
-    const answer = { Configured: true, File: '/data/audit.json', Size: 900, Scanned: 900, Complete: true,
+    const answer = { Configured: true, File: '/data/audit.json', Size: 900, Scanned: 900, Complete: true, Next: null,
       Records: [RECORD, { Type: 'audit.events_lost' }, { Type: 'audit.unreadable_line' }] };
     const { calls, fetcher } = server(() => json(answer));
 
@@ -112,10 +112,24 @@ describe('the audit read', () => {
     expect(calls[0]?.url).toBe('/v1/internal/ui/audit?limit=100&accessor=a+2&result=denied&before=2026-11-17T10%3A00%3A06Z');
     expect(audit.data.Records).toHaveLength(3);
     expect(audit.data.Records[0]).toMatchObject({ AccessorId: 'a2', Status: 200 });
+    expect(audit.data.Next).toBeNull();
+  });
+
+  it('goes on from the offset where the last read stopped, which the answer names', async () => {
+    // The server pages by the byte its read stopped at: a time would scan again what the last read covered, and could
+    // never reach a record beyond the scan's limit.
+    const { calls, fetcher } = server(() => json({ Configured: true, File: '/data/audit.json', Size: 900, Scanned: 400,
+      Complete: false, Next: 500, Records: [RECORD] }));
+
+    const audit = await createApi('/', fetcher).audit({ accessor: 'a2', from: '900' });
+
+    expect(calls[0]?.url).toBe('/v1/internal/ui/audit?limit=100&accessor=a2&from=900');
+    expect(audit.data.Next).toBe(500);
   });
 
   it('reads a server with no audit file', async () => {
-    const { fetcher } = server(() => json({ Configured: false, File: null, Size: 0, Scanned: 0, Complete: true, Records: [] }));
+    const { fetcher } = server(() => json({ Configured: false, File: null, Size: 0, Scanned: 0, Complete: true, Next: null,
+      Records: [] }));
 
     expect((await createApi('/', fetcher).audit({})).data.Configured).toBe(false);
   });

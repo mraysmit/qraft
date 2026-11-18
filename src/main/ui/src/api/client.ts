@@ -44,6 +44,7 @@ import {
   type Scopes,
   ScopesSchema,
   type Audit,
+  AuditSchema,
   type Sessions,
   SessionsSchema,
   type Members,
@@ -369,12 +370,15 @@ export interface AuditQuery {
   tenant?: string;
   namespace?: string;
   result?: 'allowed' | 'denied' | 'failed';
-  /** An instant: the records written before it, the next page back. */
+  /** An instant: only the records written before it. */
   before?: string;
+  /** The byte offset a read goes on from back towards the file's start: the last answer's `Next`, the next page back. */
+  from?: string;
 }
 
 /** The audit read's filters in the order they are sent and written into an address. */
-export const AUDIT_FILTERS = ['accessor', 'requestId', 'method', 'route', 'tenant', 'namespace', 'result', 'before'] as const;
+export const AUDIT_FILTERS = ['accessor', 'requestId', 'method', 'route', 'tenant', 'namespace', 'result', 'before',
+  'from'] as const;
 
 /** How many records one audit read answers. */
 export const AUDIT_PAGE = 100;
@@ -656,7 +660,14 @@ export function createApi(apiBasePath: string, fetcher: typeof fetch = fetch, cr
       { Description: description }, { 'X-Qraft-Tenant': tenant }),
     deleteNamespace: (tenant, name) => write(`v1/namespace/${segment(name)}`, z.boolean(), 'DELETE', undefined,
       { 'X-Qraft-Tenant': tenant }),
-    audit: () => Promise.reject(new Error('not built')),
+    audit: (query, options = {}) => {
+      const parameters = new URLSearchParams({ limit: String(AUDIT_PAGE) });
+      for (const name of AUDIT_FILTERS) {
+        const value = query[name];
+        if (value !== undefined && value !== '') parameters.set(name, value);
+      }
+      return read(`v1/internal/ui/audit?${parameters.toString()}`, AuditSchema, {}, options.signal);
+    },
     async readiness(options = {}) {
       const path = 'health/ready';
       const response = await send(path, {}, options.signal);

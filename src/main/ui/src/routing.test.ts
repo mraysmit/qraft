@@ -206,4 +206,13 @@ describe('the Audit route', () => {
     expect(hrefOf({ view: 'audit', filter: { requestId: 'req-1', tenant: 'acme' } }, '/ui/'))
       .toBe('/ui/audit?requestId=req-1&inTenant=acme');
   });
+
+  it('keeps the offset a page goes on from, a count of bytes and nothing else', () => {
+    expect(routeOf('/ui/audit', '/ui/', '?accessor=a1&from=1024')).toEqual(
+      { view: 'audit', filter: { accessor: 'a1', from: '1024' } });
+    for (const from of ['end', '-1', '1e3', '']) {
+      expect(routeOf('/ui/audit', '/ui/', `?from=${from}`), from).toEqual({ view: 'audit', filter: {} });
+    }
+    expect(hrefOf({ view: 'audit', filter: { accessor: 'a1', from: '1024' } }, '/ui/')).toBe('/ui/audit?accessor=a1&from=1024');
+  });
 });

@@ -15,7 +15,7 @@
  */
 
 import { createContext, type CSSProperties, type MouseEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { type AuditQuery, type Consistency, DEFAULT_SCOPE, type Scope } from './api/client';
+import { AUDIT_FILTERS, type AuditQuery, type Consistency, DEFAULT_SCOPE, type Scope } from './api/client';
 import { type EventCategory, EventCategorySchema } from './api/schemas';
 
 // Each view has its own address below the interface's path, so reloading, bookmarking, sharing a link and the back
@@ -75,6 +75,7 @@ export function routeOf(pathname: string, uiPath: string, search = ''): Route {
   // last segment has a dot for a file, and a key may have either.
   if (rest === 'kv') return { view: 'kv', path: new URLSearchParams(search).get('path') ?? '' };
   if (rest === 'watches') return watchesOf(search);
+  if (rest === 'audit') return { view: 'audit', filter: auditFilterOf(search) };
   return namespaceOf(rest) ?? oneNamedOf(rest) ?? { view: 'unknown' };
 }
 
@@ -151,6 +152,36 @@ function watchesOf(search: string): Route {
   return name === null ? { view: 'watches', target } : { view: 'watches', target, name };
 }
 
+/**
+ * Each audit filter's name in an address: the scope's are `inTenant` and `inNamespace`, as `tenant` and `namespace` are
+ * the scope selector's (UI-6 Tenants, Namespaces and Audit task list, decision 9).
+ */
+const AUDIT_ADDRESS: Readonly<Record<(typeof AUDIT_FILTERS)[number], string>> = { accessor: 'accessor',
+  requestId: 'requestId', method: 'method', route: 'route', tenant: 'inTenant', namespace: 'inNamespace',
+  result: 'result', before: 'before', from: 'from' };
+
+const AUDIT_RESULTS: readonly NonNullable<AuditQuery['result']>[] = ['allowed', 'denied', 'failed'];
+
+/**
+ * The Audit page's filters from its query; a blank one, an unknown result, an offset that is not a count of bytes and an
+ * unknown parameter are none.
+ */
+function auditFilterOf(search: string): AuditQuery {
+  const query = new URLSearchParams(search);
+  const filter: AuditQuery = {};
+  for (const name of AUDIT_FILTERS) {
+    const value = query.get(AUDIT_ADDRESS[name])?.trim();
+    if (value === undefined || value === '') continue;
+    if (name === 'result') {
+      const result = AUDIT_RESULTS.find((known) => known === value);
+      if (result !== undefined) filter.result = result;
+    } else if (name !== 'from' || /^\d+$/.test(value)) {
+      filter[name] = value;
+    }
+  }
+  return filter;
+}
+
 function eventsOf(search: string): Route {
   const query = new URLSearchParams(search);
   const route: { view: 'events'; category?: EventCategory; correlation?: string } = { view: 'events' };
@@ -188,6 +219,16 @@ function viewQuery(route: Route, parameters: URLSearchParams): void {
   } else if (route.view === 'watches' && route.target !== undefined) {
     parameters.set('target', route.target);
     if (route.name !== undefined) parameters.set('name', route.name);
+  } else if (route.view === 'audit') {
+    auditQuery(route.filter, parameters);
+  }
+}
+
+/** The Audit page's filters in its address, in the order the read sends them. */
+function auditQuery(filter: AuditQuery, parameters: URLSearchParams): void {
+  for (const name of AUDIT_FILTERS) {
+    const value = filter[name];
+    if (value !== undefined && value !== '') parameters.set(AUDIT_ADDRESS[name], value);
   }
 }
 
@@ -210,11 +251,11 @@ export function hrefOf(route: Route, uiPath: string, scope: Scope = DEFAULT_SCOP
   const query = text === '' ? '' : `?${text}`;
   switch (route.view) {
     case 'services':
-    case 'audit':
     case 'unknown':
       return root + query;
     case 'tenants':
     case 'namespaces':
+    case 'audit':
       return `${root}${route.view}${query}`;
     case 'tenant':
       return `${root}tenants/${encodeURIComponent(route.name)}${query}`;

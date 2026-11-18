@@ -281,7 +281,7 @@ export function fakeApi(
     updateNamespace: (tenant, name, description) => read({ Name: name, Tenant: tenant, Description: description }, null),
     deleteNamespace: () => read(true, null),
     audit: () => read({ Configured: true, File: '/data/qraft-audit.json', Size: 0, Scanned: 0, Complete: true,
-      Records: [] }, null),
+      Next: null, Records: [] }, null),
     kvAcquire: () => read(true, null),
     kvRelease: () => read(true, null),
     locks: (filter) => read({ Held: [heldKey()].filter((held) => filter?.session === undefined
