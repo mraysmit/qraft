@@ -469,7 +469,11 @@ There are two ways onto Docker, and they build differently.
 1. `SharedDockerClusterFixture` checks that `target/qraft.jar` exists and is newer than the
    sources.
 2. It builds the `qraft-runtime:test` image once per run, with
-   `docker compose -f src/test/resources/docker-compose-build-image.yml build`.
+   `docker compose -f src/test/resources/docker-compose-build-image.yml build`. `DockerImageExtensionHelper`
+   makes the build before the tests of the first class tagged `docker`, in a class callback that no
+   `@Timeout` bounds. With Docker's build cache it takes about a second; a cache that has lost the base
+   image pulls it again, which took 73 s on 2026-11-19, more than most of a test's 90 s limit. A build
+   that fails is not tried again: every later class fails with that build's failure as its cause.
 3. Each test class starts its clusters from the compose files in `src/test/resources`,
    using the `docker/config/*-acceptance` configs, and removes them when it finishes.
 

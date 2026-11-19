@@ -794,6 +794,45 @@ Phase 3 of the key/value list: default 1,772 with every coverage gate met, end-t
 files clean (logs `logs/local-run-2026-11-08-kv-phase3/`). On the complete list, with `KvEndToEndTest` and
 `DockerKvTest`: default 1,782 with every coverage gate met, end-to-end 18 and Docker 47, with no failures, errors or skips; audit over 1,293 files: 3,479 error lines, all flagged, 2,430 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/local-run-2026-11-08-kv-final/`).
 
+## Local runs on `e954c89` and the Docker image build's time limit, 2026-11-19
+
+Jenkins does not answer from the `markr` workstation, so the three suites ran in its place, the first run of UI-6's
+second and third lists as committed. Both runs were made against Docker Desktop, on mains power, with no standby event
+from 10:55 to 12:40. A `korus-qualification` kind cluster ran beside them.
+
+**On `e954c89`**, from the clone at `C:\qx9` (logs `logs/local-run-2026-11-19-gov4/`):
+
+- **`mvn clean install`, 10:58 to 11:06:** default 2,078 with every coverage gate met, and Vitest 374, no failures,
+  errors or skips.
+- **End-to-end, 11:06 to 11:11:** 36 tests, no failures, errors or skips; Vitest skipped.
+- **Docker and `slow`, 11:11 to 11:45:** 52 tests, one error: `DockerAclTest` timed out at its 90 s limit. The runtime
+  image was built inside it, in the first call to start a cluster, and Docker's build cache had lost the base image:
+  `docker buildx history` shows the build at 0% cached, 53.6 s pulling `sapmachine:27-jre-alpine` and 7.1 s for
+  `apk add`, 73 s in all, where the builds of 2026-11-17 and 18 took 8 to 10 s and those after them 0.9 s. The test's
+  own work, from the servers' first line to its last assertion, took 14 s. `DockerAclTest` runs first in every run, so
+  it always held the build; it passed before because the build was quick.
+
+The audit read 960 files, the 25 Docker archive folders included: 1,383 error lines, of which 19 unflagged, and 933
+stack traces, of which 3 unflagged, all of them the timeout and Maven's report of it; no JVM crash file.
+
+**The fix**, test first (`DockerImageBuildTest`, `DockerImageExtensionHelperTest`, four of five red on stubs):
+`DockerImageExtensionHelper`, registered after `DockerLogExtensionHelper`, builds the image before the tests of every
+class tagged `docker`, in a class callback that JUnit's `@Timeout` does not bound. `DockerImageBuild` keeps a failed
+build and gives it to every later class as its cause; before it, a failed build left the fixture's flag unset, so the
+next class built again, against the rule that a failed build is never retried (design, section 19.6; `docs/TESTING.md`).
+
+**With the fix**, from a fresh clone at `C:\qx10` of `e954c89` with the fix copied over it (logs
+`logs/local-run-2026-11-19-img/`, which hold the red and green runs too):
+
+- **`mvn clean install`, 11:52 to 11:59:** default 2,083 with every coverage gate met, and Vitest 374, no failures,
+  errors or skips.
+- **End-to-end, 11:59 to 12:04:** 36 tests, no failures, errors or skips; Vitest skipped.
+- **Docker and `slow`, 12:04 to 12:36:** 52 tests in 32 min 33 s, no failures, errors or skips. `DockerAclTest` took
+  28.8 s, of which its test method 18.9 s: the build ran before the method.
+
+The audit read 960 files, the 25 Docker archive folders included: 1,268 error lines, all flagged, and 897 stack
+traces, none unflagged; no JVM crash file.
+
 ## Local runs for UI-6's Tenants, Namespaces and Audit, 2026-11-18
 
 Jenkins does not answer from the `markr` workstation, so the three suites ran in its place. They ran from a fresh clone

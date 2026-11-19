@@ -3095,7 +3095,9 @@ deregistration. These tests are separate from the fast default build but run in
 continuous integration with Docker available. The shared fixture builds the image
 once and never retries a failed build: a daemon that loses a snapshot its build
 cache names ("failed to prepare extraction snapshot ... parent snapshot ... does not
-exist", seen once, in Jenkins build 35) is a fault to investigate, not to retry.
+exist", seen once, in Jenkins build 35) is a fault to investigate, not to retry; every
+later class is given the first failure. The build is made before the first Docker
+class's tests, outside their time limits (`docs/TESTING.md`, "Deploying to Docker").
 
 The packaged-artifact acceptance test starts the shaded runtime JAR without a
 frontend directory on disk, fetches `index.html` and a manifest-listed hashed

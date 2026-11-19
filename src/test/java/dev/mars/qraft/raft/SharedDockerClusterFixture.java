@@ -70,7 +70,7 @@ public final class SharedDockerClusterFixture {
 
     private static final Logger logger = Logger.getLogger(SharedDockerClusterFixture.class.getName());
 
-    private static volatile boolean imageBuilt = false;
+    private static final DockerImageBuild IMAGE = new DockerImageBuild(SharedDockerClusterFixture::buildImage);
     private static ComposeContainer threeNodeCluster;
     private static final Map<ComposeContainer, List<String>> ACTIVE_CLUSTERS = new IdentityHashMap<>();
     private static final Map<String, Map<String, ContainerNetwork>> DISCONNECTED_NETWORKS =
@@ -730,11 +730,15 @@ public final class SharedDockerClusterFixture {
     }
 
     /**
-     * Packages the host-built runtime JAR as the qraft-runtime:test Docker image.
+     * Packages the host-built runtime JAR as the qraft-runtime:test Docker image, once a run. {@link
+     * DockerImageExtensionHelper} calls it before the tests of every class tagged {@code docker}, outside their time
+     * limits; a build that fails is not tried again, and every later call fails with it as its cause.
      */
-    private static synchronized void ensureImageBuilt() {
-        if (imageBuilt) return;
+    public static void ensureImageBuilt() {
+        IMAGE.ensureBuilt();
+    }
 
+    private static void buildImage() {
         Path repositoryRoot = Path.of("").toAbsolutePath();
         Path runtimeJar = repositoryRoot.resolve("target/qraft.jar");
         assertRuntimeJarIsCurrent(repositoryRoot, runtimeJar);
@@ -748,7 +752,6 @@ public final class SharedDockerClusterFixture {
 
         logger.info("Building Docker image via: " + buildComposeFile.getAbsolutePath());
         runImageBuild(buildComposeFile);
-        imageBuilt = true;
         logger.info("Docker image built successfully: qraft-runtime:test");
     }
 
