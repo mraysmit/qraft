@@ -31,7 +31,6 @@ import org.junit.jupiter.api.io.TempDir;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSocket;
 import java.io.IOException;
-import java.net.ServerSocket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -49,6 +48,7 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
+import static dev.mars.qraft.testing.TestPorts.freePort;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -93,12 +93,6 @@ class CertificateRotationEndToEndTest {
         return TlsMaterial.load(new TlsSettings("client.tls", TlsEndToEndTest.fixture("ca.pem"),
                 Optional.of(TlsEndToEndTest.fixture("client.pem")), Optional.of(TlsEndToEndTest.fixture("client.key")),
                 List.of("TLSv1.3", "TLSv1.2")));
-    }
-
-    private static int freePort() throws IOException {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        }
     }
 
     @Test
