@@ -33,7 +33,6 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.net.ServerSocket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -49,6 +48,7 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
+import static dev.mars.qraft.testing.TestPorts.freePort;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -91,12 +91,6 @@ class KubernetesAuthEndToEndTest {
         if (kubernetes != null) cleanup.run(() -> kubernetes.stop(0));
         cleanup.run(http::close);
         cleanup.rethrow();
-    }
-
-    private static int freePort() throws IOException {
-        try (ServerSocket socket = new ServerSocket(0)) {
-            return socket.getLocalPort();
-        }
     }
 
     /** A Kubernetes API whose token review authenticates {@code pod-token} as the service account billing/deployer. */
