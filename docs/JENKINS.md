@@ -671,6 +671,16 @@ Docker stages (`-DskipVitest=true`). The audit, over the console, the archived l
 test reports, 907 files, found 1,175 error lines, all flagged, and 857 stack traces, none unflagged; no
 `too_many_pings` and no JVM crash file. The logs are in `logs/jenkins/Qraft-76/`.
 
+## Build 86, 2026-11-20
+
+Build 86 ran on `8297836`, the shared port helper of 2026-11-20 with build 85's record, after Jenkins was restarted
+on the host onto the upgraded Java, `21.0.13.1+2-1-24.04.1-Ubuntu`. It passed in about 33 minutes: default 2,086 with
+every coverage gate met and Vitest 374, end-to-end 36, and Docker and `slow` 52, no failures, errors or skips; the job's
+test report counts all three stages, 2,174. The audit, over the console, the archived logs (25 Docker archive folders)
+and the test reports, 935 files, found 1,598 error lines and 1,151 stack traces, every one flagged; the 24 traces under
+`Channel Pipeline:` are each two lines below a flagged `RAFT_PEER_UNREACHABLE` from `GrpcRaftTlsTest`. No
+`too_many_pings` and no JVM crash file. The logs are in `logs/jenkins/Qraft-86/`.
+
 ## Build 85, 2026-11-20
 
 Build 85 ran on `000c02a`, the Docker image build's fix of 2026-11-19 with its records, the first Jenkins run of
@@ -828,6 +838,27 @@ Two runs of the three suites from the copy at `C:\qx7`, against Docker Desktop, 
 Phase 3 of the key/value list: default 1,772 with every coverage gate met, end-to-end and Docker 46; audit over 1,080
 files clean (logs `logs/local-run-2026-11-08-kv-phase3/`). On the complete list, with `KvEndToEndTest` and
 `DockerKvTest`: default 1,782 with every coverage gate met, end-to-end 18 and Docker 47, with no failures, errors or skips; audit over 1,293 files: 3,479 error lines, all flagged, 2,430 stack traces, none unflagged; no `too_many_pings`; no JVM crash file (logs `logs/local-run-2026-11-08-kv-final/`).
+
+## Local runs for the open items, 2026-11-20
+
+The open-items list ([`task-list-open-items-2026-11-20.md`](archive/task-list-open-items-2026-11-20.md)) ran from
+`C:\qx11`, a clone of the workspace at `8297836` with the list's files copied over it, on the `mraysmit` workstation,
+a desktop on mains power. The workspace's `src/main/ui/node_modules` was held open by another process, so `npm ci`
+could not run there (`EPERM`). Each phase closed with `mvn clean install`, and each that changed the runtime with the
+end-to-end stage; the Docker and `slow` stage ran once, over Phases 2 to 4, which change the client and the server.
+
+| Run | Default | Vitest | End-to-end | Docker and `slow` |
+|---|---|---|---|---|
+| Phase 1, hidden tabs | 2,086, every coverage gate | 379 | | |
+| Phase 2, retried requests | 2,088, every coverage gate | 379 | 36 | |
+| Phases 3 and 4, a renewal's margin and audit rotation | 2,094, every coverage gate | 379 | 36 | 52 (26 min 23 s), 25 Docker archive folders |
+
+No run had a failure, error or skip. Every audit, over the Maven output, the logs the run wrote and the test reports,
+found every error line and stack trace flagged; a simple checker meets six traces under `Channel Pipeline:` in each
+console log, the second line of gRPC's exception message, each below a flagged `RAFT_PEER_UNREACHABLE` from
+`GrpcRaftTlsTest`. Phase 2's end-to-end log holds 779 of the client's new INFO lines for a request sent to the next
+server or taken by none: 408 from one test whose server answers `held_by_test` while the publisher retries, the rest
+heartbeats and lookups around the tests' stopped servers and lost leaders. The logs are in `C:\qx11\logs\p*-*.log`.
 
 ## Local runs on `e954c89` and the Docker image build's time limit, 2026-11-19
 

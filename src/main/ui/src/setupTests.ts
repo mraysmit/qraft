@@ -31,6 +31,9 @@ configure({ asyncUtilTimeout: 15_000 });
 afterEach(() => {
   cleanup();
   document.head.querySelectorAll('style').forEach((element) => element.remove());
+  // A test that hid the tab (views/testing.ts, tabVisibility) leaves the next one a visible document, as jsdom gives.
+  Reflect.deleteProperty(document, 'visibilityState');
+  Reflect.deleteProperty(document, 'hidden');
 });
 
 // jsdom has no media queries. Ant Design's table asks for its responsive breakpoints; no query matches here.

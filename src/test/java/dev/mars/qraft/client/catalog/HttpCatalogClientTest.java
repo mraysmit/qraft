@@ -638,6 +638,117 @@ class HttpCatalogClientTest {
                 .get(10, TimeUnit.SECONDS));
     }
 
+    /**
+     * Open-items task list, decision 2: the analysis of 2026-11-13 had to infer from timings that a client had sent a
+     * request again to another server, because it logged neither that nor giving up. Each request passed over to the
+     * next server, and each that no server took, is logged at INFO with what the server answered.
+     */
+    @Test
+    void eachRequestPassedOverToTheNextServerAndEachNoServerTookIsLoggedAtInfoWithWhatTheServerAnswered()
+            throws Exception {
+        String busy = "{\"code\":\"leader_unavailable\",\"message\":\"no leader\",\"retryable\":true}";
+        URI first = start(exchange -> respond(exchange, 503, busy));
+        URI second = start(exchange -> respond(exchange, 503, busy));
+        HttpCatalogClient client = selectedClient(List.of(first, second));
+        String code = "leader_unavailable";
+
+        assertRetryLogged(() -> client.register(service()), "the registration of service payments-1", code,
+                first, second);
+        assertRetryLogged(() -> client.deregister("payments-1"), "the deregistration of service payments-1", code,
+                first, second);
+        assertRetryLogged(() -> client.registerNode(Node.of("node-a", "127.0.0.1", null, null, null)),
+                "the registration of node node-a", code, first, second);
+        assertRetryLogged(() -> client.heartbeatNode(4, "registration-1"), "the heartbeat of node node-a", code,
+                first, second);
+        assertRetryLogged(client::deregisterNode, "the deregistration of node node-a", code, first, second);
+        assertRetryLogged(() -> client.lookup(service()), "the lookup of service payments", code, first, second);
+        assertRetryLogged(() -> client.observe(observation(7)), "the observation of check payments-1/http", code,
+                first, second);
+        assertRetryLogged(client::nodeServices, "the read of node node-a's services", "HTTP 503", first, second);
+        assertRetryLogged(() -> client.resolveAcl("secret"), "a token's resolution", "HTTP 503 leader_unavailable",
+                first, second);
+        // A path's query can carry a token (?token=), so the line names the path alone.
+        assertRetryLogged(() -> client.forwardRead("/v1/catalog/nodes?index=3&token=s3cret", "r", Map.of()),
+                "the forwarded read of /v1/catalog/nodes", "HTTP 503", first, second);
+        assertRetryLogged(() -> client.forward("PUT", "/v1/kv/a?token=s3cret", new byte[0], "r", Map.of()),
+                "the forwarded PUT of /v1/kv/a", "HTTP 503", first, second);
+    }
+
+    /**
+     * Open-items task list, decision 3: an observation that must land by a time is given up on a server that has not
+     * answered in its share of the time left, so the next server is still tried in time. With the 10 s request timeout
+     * alone, the first attempt would outlast the observation's two seconds.
+     */
+    @Test
+    void anObservationThatMustLandSoonIsGivenUpOnAServerThatDoesNotAnswerInItsShareOfTheTimeLeft() throws Exception {
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        URI silent = start(exchange -> {
+            try {
+                release.await();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+            exchange.close();
+        });
+        URI accepting = start(exchange -> respond(exchange, 200,
+                "{\"sequenceNumber\":7,\"deadline\":\"2026-09-26T10:00:29.500Z\"}"));
+        HttpCatalogClient client = selectedClient(List.of(silent, accepting));
+        try {
+            ObservationOutcome outcome = client.observe(observation(7), Instant.now().plusSeconds(2))
+                    .get(5, TimeUnit.SECONDS);
+
+            assertInstanceOf(ObservationOutcome.Accepted.class, outcome);
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void anObservationWithNoTimeLeftToShareIsSentWithTheRequestTimeout() throws Exception {
+        // Once the check's time has run out, nothing is saved by giving up early: the observation starts it afresh.
+        URI accepting = start(exchange -> respond(exchange, 200,
+                "{\"sequenceNumber\":7,\"deadline\":\"2026-09-26T10:00:29.500Z\"}"));
+
+        assertInstanceOf(ObservationOutcome.Accepted.class, selectedClient(List.of(accepting))
+                .observe(observation(7), Instant.now().minusSeconds(1)).get(5, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void aRequestTheFirstServerTakesLogsNoRetry() throws Exception {
+        URI answering = start(exchange -> respond(exchange, 200, "{\"node\":\"node-a\",\"service\":{\"serviceId\":"
+                + "\"payments-1\",\"serviceName\":\"payments\",\"nodeId\":\"node-a\",\"tenantId\":\"tenant-a\","
+                + "\"namespace\":\"prod\",\"registered\":true}}"));
+        HttpCatalogClient client = selectedClient(List.of(answering, start(exchange -> respond(exchange, 503, "{}"))));
+
+        assertEquals(List.of(), infoLines(() -> client.register(service())));
+    }
+
+    private static void assertRetryLogged(java.util.concurrent.Callable<? extends CompletableFuture<?>> call,
+            String what, String answer, URI first, URI second) throws Exception {
+        assertEquals(List.of(
+                        what + " was not taken by " + first + " (" + answer + "); trying " + second,
+                        "No server took " + what + ": 2 tried, the last, " + second + ", answered " + answer),
+                infoLines(call), what);
+    }
+
+    /** The INFO lines the client logs while {@code call} runs to its end. */
+    private static List<String> infoLines(java.util.concurrent.Callable<? extends CompletableFuture<?>> call)
+            throws Exception {
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(HttpCatalogClient.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            call.call().get(10, TimeUnit.SECONDS);
+        } finally {
+            logger.detachAppender(appender);
+        }
+        return appender.list.stream().filter(event -> event.getLevel() == ch.qos.logback.classic.Level.INFO)
+                .map(ch.qos.logback.classic.spi.ILoggingEvent::getFormattedMessage).toList();
+    }
+
     private HttpCatalogClient selectedClient(List<URI> endpoints) {
         HttpCatalogClient client = new HttpCatalogClient(HttpClient.newHttpClient(), JSON, endpoints,
                 "node-a", "tenant-a", "prod", "dc-1", "eu-west", Duration.ofSeconds(10));

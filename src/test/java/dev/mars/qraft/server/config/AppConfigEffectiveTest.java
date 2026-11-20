@@ -84,7 +84,7 @@ class AppConfigEffectiveTest {
                 "server.raft.snapshot.threshold", "server.raft.io.queueSize", "server.telemetry.prometheusPort",
                 "server.shutdown.timeoutMs", "server.health.nodeTtlMs", "server.ui.path", "server.operator.token",
                 "server.acl.enabled", "server.tls.https.enabled", "server.tls.raft.verifyServerHostname",
-                "server.audit.path")) {
+                "server.audit.path", "server.audit.rotateBytes", "server.audit.maxFiles")) {
             assertTrue(keys.contains(key), key);
         }
     }

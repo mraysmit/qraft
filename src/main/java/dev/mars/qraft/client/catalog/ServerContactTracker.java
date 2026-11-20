@@ -37,5 +37,7 @@ public final class ServerContactTracker {
     }
 
     public void recordSuccessfulContact() { lastSuccessfulContact.set(clock.instant()); }
+    /** The clock contact is measured on, which is the client's. */
+    public Clock clock() { return clock; }
     public Instant lastSuccessfulContact() { return lastSuccessfulContact.get(); }
 }

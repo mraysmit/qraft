@@ -370,6 +370,17 @@ export function manualScheduler() {
   };
 }
 
+/**
+ * Hides the tab or shows it again, as a browser does when its user switches tabs or minimises the window: the document's
+ * visibility changes and it says so. jsdom's document is always visible; `setupTests.ts` makes it so again after each
+ * test.
+ */
+export function tabVisibility(state: 'hidden' | 'visible') {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state });
+  Object.defineProperty(document, 'hidden', { configurable: true, get: () => state === 'hidden' });
+  document.dispatchEvent(new Event('visibilitychange'));
+}
+
 /** The test API's sessions: one with a TTL that holds a key, and one without. */
 export const SESSION_A = '4f3c2a10-0000-4000-8000-000000000001';
 export const SESSION_B = '4f3c2a10-0000-4000-8000-000000000002';

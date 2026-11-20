@@ -634,8 +634,18 @@ method again with the new one.
 With `server.audit.path` set, each server writes one JSON line for every request it
 answers under a token: the time, the server, the token's accessor ID, the method,
 the route, the status and the request ID, never a secret. The file is best effort;
-if it cannot be written, the server warns once and goes on. Rotate it with the
-operating system's tools.
+if it cannot be written, the server warns once and goes on.
+
+Since 2026-11-20 the server rotates the file itself, as Consul's audit file sink does
+with `rotate_bytes` and `rotate_max_files`. Before a line that would take the file past
+`server.audit.rotateBytes` (24 MiB by default), it moves the file aside under its name
+and the time in UTC, as `qraft-audit-20261120T101530.000Z.json` for
+`qraft-audit.json`, and starts a new one. It keeps the newest `server.audit.maxFiles`
+moved files (15 by default; 0 keeps none) and removes the older ones. Each request the
+interface sends under a token is audited, its live reads included, so a server that
+serves the interface fills its file faster. A file that cannot be moved, as Windows
+refuses one a reader holds open, goes on taking lines and is moved at a later one; the
+server warns once. The interface's audit page reads the current file only.
 
 Since 2026-11-17 each line also names the request's `tenant` and `namespace`, the
 default ones where the request named none; a line from before has neither. The

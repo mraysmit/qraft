@@ -29,4 +29,13 @@ import java.util.concurrent.CompletableFuture;
 @FunctionalInterface
 public interface ObservationClient {
     CompletableFuture<ObservationOutcome> observe(CheckObservation observation);
+
+    /**
+     * Publishes {@code observation}, which keeps the check passing only if it lands before {@code landBy}, the time,
+     * on this client's clock, that the last accepted observation keeps the check for. A client that can try more than
+     * one server bounds each attempt so the next can still be tried in that time (open-items task list, decision 3).
+     */
+    default CompletableFuture<ObservationOutcome> observe(CheckObservation observation, java.time.Instant landBy) {
+        return observe(observation);
+    }
 }

@@ -177,8 +177,15 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
                 contactTracker.recordSuccessfulContact();
                 return CompletableFuture.completedFuture(lookup);
             }
-            return index + 1 == cycle.size() ? CompletableFuture.completedFuture(lookup)
-                    : resolveAttempt(cycle, index + 1, secret, unavailable.reason());
+            // The reason names the failure first; what follows its colon is the exception's own message.
+            String reason = unavailable.reason();
+            String answered = reason.contains(": ") ? reason.substring(0, reason.indexOf(": ")) : reason;
+            if (index + 1 == cycle.size()) {
+                logNoServerTook("a token's resolution", cycle, answered);
+                return CompletableFuture.completedFuture(lookup);
+            }
+            logPassedOver("a token's resolution", endpoint, answered, cycle.get(index + 1));
+            return resolveAttempt(cycle, index + 1, secret, unavailable.reason());
         });
     }
 
@@ -207,12 +214,12 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
 
     @Override
     public CompletableFuture<CatalogOutcome> register(ServiceDefinition service) {
-        return acrossSeeds(endpoint -> register(endpoint, service));
+        return acrossSeeds("the registration of service " + service.id(), endpoint -> register(endpoint, service));
     }
 
     @Override
     public CompletableFuture<CatalogOutcome> deregister(String serviceId) {
-        return acrossSeeds(endpoint -> deregister(endpoint, serviceId));
+        return acrossSeeds("the deregistration of service " + serviceId, endpoint -> deregister(endpoint, serviceId));
     }
 
     public CompletableFuture<CatalogOutcome> register(URI server, ServiceDefinition service) {
@@ -279,9 +286,14 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
                 contactTracker.recordSuccessfulContact();
                 return CompletableFuture.completedFuture(outcome);
             }
-            if (outcome instanceof CatalogLookupOutcome.Rejected || index + 1 == cycle.size()) {
+            if (outcome instanceof CatalogLookupOutcome.Rejected) return CompletableFuture.completedFuture(outcome);
+            String what = "the lookup of service " + service.name();
+            String answer = ((CatalogLookupOutcome.Retryable) outcome).code();
+            if (index + 1 == cycle.size()) {
+                logNoServerTook(what, cycle, answer);
                 return CompletableFuture.completedFuture(outcome);
             }
+            logPassedOver(what, endpoint, answer, cycle.get(index + 1));
             return lookupAttempt(cycle, index + 1, service);
         });
     }
@@ -344,23 +356,34 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         URI endpoint = cycle.get(index);
         HttpRequest request = withToken(request(endpoint, "/v1/catalog/node-services/" + encode(nodeId)),
                 tokens.node()).GET().build();
-        CompletableFuture<Optional<Set<String>>> answer;
+        CompletableFuture<NodeServicesAnswer> answer;
         try {
             answer = httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-                    .handle((response, failure) -> failure == null ? ownServices(response) : Optional.empty());
+                    .handle((response, failure) -> failure == null
+                            ? new NodeServicesAnswer(ownServices(response), "HTTP " + response.statusCode())
+                            : new NodeServicesAnswer(Optional.empty(), failureCode(failure)));
         } catch (RuntimeException failure) {
-            answer = CompletableFuture.completedFuture(Optional.empty());
+            answer = CompletableFuture.completedFuture(new NodeServicesAnswer(Optional.empty(), failureCode(failure)));
         }
-        return answer.thenCompose(services -> {
+        return answer.thenCompose(read -> {
+            Optional<Set<String>> services = read.services();
             if (services.isPresent()) {
                 endpoints.markSuccessful(endpoint);
                 contactTracker.recordSuccessfulContact();
                 return CompletableFuture.completedFuture(services);
             }
-            return index + 1 == cycle.size() ? CompletableFuture.completedFuture(services)
-                    : nodeServicesAttempt(cycle, index + 1);
+            String what = "the read of node " + nodeId + "'s services";
+            if (index + 1 == cycle.size()) {
+                logNoServerTook(what, cycle, read.answer());
+                return CompletableFuture.completedFuture(services);
+            }
+            logPassedOver(what, endpoint, read.answer(), cycle.get(index + 1));
+            return nodeServicesAttempt(cycle, index + 1);
         });
     }
+
+    /** One server's answer to the read of this node's services, and what it answered, for the log. */
+    private record NodeServicesAnswer(Optional<Set<String>> services, String answer) { }
 
     /** The IDs of this node's services in this client's scope, or empty when the answer does not give them. */
     private Optional<Set<String>> ownServices(HttpResponse<String> response) {
@@ -406,24 +429,35 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
                 .timeout(requestTimeout.plus(blockingWait(pathAndQuery)));
         scope.forEach(builder::setHeader);
         HttpRequest request = builder.GET().build();
-        CompletableFuture<Optional<ForwardedRead>> answer;
+        CompletableFuture<ReadAttempt> answer;
         try {
             answer = httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-                    .handle((response, failure) -> failure == null ? Optional.of(forwarded(response)) : Optional.empty());
+                    .handle((response, failure) -> failure == null
+                            ? new ReadAttempt(Optional.of(forwarded(response)), "HTTP " + response.statusCode())
+                            : new ReadAttempt(Optional.empty(), failureCode(failure)));
         } catch (RuntimeException failure) {
-            answer = CompletableFuture.completedFuture(Optional.empty());
+            answer = CompletableFuture.completedFuture(new ReadAttempt(Optional.empty(), failureCode(failure)));
         }
-        return answer.thenCompose(read -> {
+        return answer.thenCompose(attempt -> {
+            Optional<ForwardedRead> read = attempt.read();
             if (read.isPresent() && read.get().status() != 429 && read.get().status() < 500) {
                 endpoints.markSuccessful(endpoint);
                 contactTracker.recordSuccessfulContact();
                 return CompletableFuture.completedFuture(read);
             }
             Optional<ForwardedRead> latest = read.isPresent() ? read : lastAnswer;
-            return index + 1 == cycle.size() ? CompletableFuture.completedFuture(latest)
-                    : forwardAttempt(cycle, index + 1, pathAndQuery, requestId, scope, latest);
+            String what = "the forwarded read of " + pathOf(pathAndQuery);
+            if (index + 1 == cycle.size()) {
+                logNoServerTook(what, cycle, attempt.answer());
+                return CompletableFuture.completedFuture(latest);
+            }
+            logPassedOver(what, endpoint, attempt.answer(), cycle.get(index + 1));
+            return forwardAttempt(cycle, index + 1, pathAndQuery, requestId, scope, latest);
         });
     }
+
+    /** One server's answer to a forwarded read, if it gave one, and what it answered, for the log. */
+    private record ReadAttempt(Optional<ForwardedRead> read, String answer) { }
 
     private static final java.util.regex.Pattern WAIT = java.util.regex.Pattern.compile("(\\d+)(ms|s|m|h)");
 
@@ -498,12 +532,13 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         try {
             answer = httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofByteArray())
                     .handle((response, failure) -> {
-                        if (failure == null) return new Attempt(Optional.of(kept(response)), false);
-                        transportCode(request, failure);
-                        return new Attempt(Optional.empty(), read || notSent(failure));
+                        if (failure == null) {
+                            return new Attempt(Optional.of(kept(response)), false, "HTTP " + response.statusCode());
+                        }
+                        return new Attempt(Optional.empty(), read || notSent(failure), transportCode(request, failure));
                     });
         } catch (RuntimeException failure) {
-            answer = CompletableFuture.completedFuture(new Attempt(Optional.empty(), true));
+            answer = CompletableFuture.completedFuture(new Attempt(Optional.empty(), true, failureCode(failure)));
         }
         return answer.thenCompose(attempt -> {
             Optional<ForwardedResponse> response = attempt.response();
@@ -516,13 +551,18 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
                 return CompletableFuture.completedFuture(response.isPresent() ? response : lastAnswer);
             }
             Optional<ForwardedResponse> latest = response.isPresent() ? response : lastAnswer;
-            return index + 1 == cycle.size() ? CompletableFuture.completedFuture(latest)
-                    : forwardAttempt(cycle, index + 1, method, pathAndQuery, body, requestId, headers, latest);
+            String what = "the forwarded " + method + " of " + pathOf(pathAndQuery);
+            if (index + 1 == cycle.size()) {
+                logNoServerTook(what, cycle, attempt.answer());
+                return CompletableFuture.completedFuture(latest);
+            }
+            logPassedOver(what, endpoint, attempt.answer(), cycle.get(index + 1));
+            return forwardAttempt(cycle, index + 1, method, pathAndQuery, body, requestId, headers, latest);
         });
     }
 
-    /** One seed's answer, or none, and whether asking the next seed is safe. */
-    private record Attempt(Optional<ForwardedResponse> response, boolean retryable) { }
+    /** One seed's answer, or none, whether asking the next seed is safe, and what it answered, for the log. */
+    private record Attempt(Optional<ForwardedResponse> response, boolean retryable, String answer) { }
 
     /** Whether the next seed is asked after {@code response}: a busy or failed server for a read, and for a write
      *  only a busy server, or one with no leader or draining, which applied nothing. */
@@ -572,6 +612,17 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
      */
     @Override
     public CompletableFuture<ObservationOutcome> observe(CheckObservation observation) {
+        return observe(observation, null);
+    }
+
+    /**
+     * Publishes {@code observation} as {@link #observe(CheckObservation)} does, and while {@code landBy} is ahead gives
+     * each server at most its share of the time left, so a server that cannot answer in time is given up while the
+     * next can still be tried (open-items task list, decision 3). A {@code landBy} that is null or past leaves each
+     * attempt the request timeout.
+     */
+    @Override
+    public CompletableFuture<ObservationOutcome> observe(CheckObservation observation, Instant landBy) {
         ensureOpen();
         Objects.requireNonNull(observation, "observation");
         if (endpoints == null) {
@@ -589,7 +640,8 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         body.put("deregisterAfterMillis", observation.deregisterAfter().toMillis());
         try {
             return observeAttempt(endpoints.cycle(), 0, objectMapper.writeValueAsString(body),
-                    tokens.service(observation.serviceId()));
+                    tokens.service(observation.serviceId()),
+                    "the observation of check " + observation.serviceId() + "/" + observation.checkId(), landBy);
         } catch (IOException error) {
             return CompletableFuture.completedFuture(new ObservationOutcome.Retryable("request_encoding",
                     Objects.toString(error.getMessage(), error.getClass().getSimpleName()), null));
@@ -597,9 +649,10 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
     }
 
     private CompletableFuture<ObservationOutcome> observeAttempt(List<URI> cycle, int index, String body,
-                                                                 Optional<String> token) {
+                                                                 Optional<String> token, String what, Instant landBy) {
         URI endpoint = cycle.get(index);
         HttpRequest request = withToken(request(endpoint, "/v1/catalog/check/observe"), token)
+                .timeout(attemptTimeout(landBy, cycle.size() - index))
                 .header("Content-Type", "application/json")
                 .PUT(HttpRequest.BodyPublishers.ofString(body)).build();
         return sendObservation(request).thenCompose(outcome -> {
@@ -608,11 +661,28 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
                 contactTracker.recordSuccessfulContact();
                 return CompletableFuture.completedFuture(outcome);
             }
-            if (outcome instanceof ObservationOutcome.Rejected || index + 1 == cycle.size()) {
+            if (outcome instanceof ObservationOutcome.Rejected) return CompletableFuture.completedFuture(outcome);
+            String answer = ((ObservationOutcome.Retryable) outcome).code();
+            if (index + 1 == cycle.size()) {
+                logNoServerTook(what, cycle, answer);
                 return CompletableFuture.completedFuture(outcome);
             }
-            return observeAttempt(cycle, index + 1, body, token);
+            logPassedOver(what, endpoint, answer, cycle.get(index + 1));
+            return observeAttempt(cycle, index + 1, body, token, what, landBy);
         });
+    }
+
+    /**
+     * How long one of the {@code serversLeft} attempts may wait: the request timeout, or less while {@code landBy} is
+     * ahead, its share of the time left, so the attempts after it still fit.
+     */
+    private Duration attemptTimeout(Instant landBy, int serversLeft) {
+        if (landBy == null) return requestTimeout;
+        Duration left = Duration.between(contactTracker.clock().instant(), landBy);
+        if (left.isNegative() || left.isZero()) return requestTimeout;
+        Duration share = left.dividedBy(serversLeft);
+        if (share.compareTo(requestTimeout) >= 0) return requestTimeout;
+        return share.isZero() ? Duration.ofMillis(1) : share;
     }
 
     private CompletableFuture<ObservationOutcome> sendObservation(HttpRequest request) {
@@ -694,7 +764,12 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
                                                         NodeOperation operation) {
         try {
             String json = objectMapper.writeValueAsString(body);
-            return acrossSeeds(endpoint -> send(
+            String what = switch (operation) {
+                case REGISTER -> "the registration of node " + nodeId;
+                case HEARTBEAT -> "the heartbeat of node " + nodeId;
+                case DEREGISTER -> "the deregistration of node " + nodeId;
+            };
+            return acrossSeeds(what, endpoint -> send(
                     withToken(request(endpoint, path), tokens.node()).header("Content-Type", "application/json")
                             .PUT(HttpRequest.BodyPublishers.ofString(json)).build(),
                     response -> classifyNode(response, operation)));
@@ -703,17 +778,17 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
         }
     }
 
-    private CompletableFuture<CatalogOutcome> acrossSeeds(
+    private CompletableFuture<CatalogOutcome> acrossSeeds(String what,
             Function<URI, CompletableFuture<CatalogOutcome>> operation) {
         ensureOpen();
         if (endpoints == null) {
             throw new IllegalStateException("No server seeds were configured for automatic selection");
         }
         List<URI> cycle = endpoints.cycle();
-        return attempt(cycle, 0, operation);
+        return attempt(cycle, 0, what, operation);
     }
 
-    private CompletableFuture<CatalogOutcome> attempt(List<URI> cycle, int index,
+    private CompletableFuture<CatalogOutcome> attempt(List<URI> cycle, int index, String what,
             Function<URI, CompletableFuture<CatalogOutcome>> operation) {
         URI endpoint = cycle.get(index);
         return operation.apply(endpoint).thenCompose(outcome -> {
@@ -722,11 +797,41 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
                 contactTracker.recordSuccessfulContact();
                 return CompletableFuture.completedFuture(outcome);
             }
-            if (outcome instanceof CatalogOutcome.Rejected || index + 1 == cycle.size()) {
+            if (outcome instanceof CatalogOutcome.Rejected) return CompletableFuture.completedFuture(outcome);
+            String answer = ((CatalogOutcome.Retryable) outcome).code();
+            if (index + 1 == cycle.size()) {
+                logNoServerTook(what, cycle, answer);
                 return CompletableFuture.completedFuture(outcome);
             }
-            return attempt(cycle, index + 1, operation);
+            logPassedOver(what, endpoint, answer, cycle.get(index + 1));
+            return attempt(cycle, index + 1, what, operation);
         });
+    }
+
+    /*
+     * A request sent again to the next server, and one no server took, are logged at INFO (open-items task list,
+     * decision 2): the analysis of 2026-11-13 had to infer both from timings. The answer is a code, never the server's
+     * message, and a path is named without its query, which may carry a token.
+     */
+
+    private static void logPassedOver(String what, URI from, String answer, URI next) {
+        LOGGER.info("{} was not taken by {} ({}); trying {}", what, from, answer, next);
+    }
+
+    private static void logNoServerTook(String what, List<URI> cycle, String answer) {
+        LOGGER.info("No server took {}: {} tried, the last, {}, answered {}", what, cycle.size(), cycle.getLast(),
+                answer);
+    }
+
+    /** {@code pathAndQuery} without its query. */
+    private static String pathOf(String pathAndQuery) {
+        int query = pathAndQuery.indexOf('?');
+        return query < 0 ? pathAndQuery : pathAndQuery.substring(0, query);
+    }
+
+    /** The code for a request that got no answer: its timeout, or any other failure to reach the server. */
+    private static String failureCode(Throwable failure) {
+        return unwrap(failure) instanceof java.net.http.HttpTimeoutException ? "request_timeout" : "transport_error";
     }
 
     private HttpRequest.Builder request(URI server, String path) {
@@ -849,7 +954,7 @@ public final class HttpCatalogClient implements CatalogClient, ObservationClient
                 break;
             }
         }
-        return cause instanceof java.net.http.HttpTimeoutException ? "request_timeout" : "transport_error";
+        return failureCode(cause);
     }
 
     private static Throwable unwrap(Throwable failure) {

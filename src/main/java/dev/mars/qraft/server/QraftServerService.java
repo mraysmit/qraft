@@ -308,7 +308,9 @@ public class QraftServerService {
             healthServer.useEventJournal(eventJournal);
             // Its effective configuration, its secrets withheld, for the administrative interface (UI-4 list).
             healthServer.useConfiguration(config.effective());
-            this.auditSink = config.getAuditPath().map(path -> AuditFileSink.start(eventJournal, path));
+            AppConfig.AuditRotation rotation = config.getAuditRotation();
+            this.auditSink = config.getAuditPath().map(path -> AuditFileSink.start(eventJournal, path,
+                    new AuditFileSink.Rotation(rotation.rotateBytes(), rotation.maxFiles()), java.time.Clock.systemUTC()));
             // The audit read answers that file (UI-6 Tenants, Namespaces and Audit list, decision 5).
             config.getAuditPath().ifPresent(healthServer::useAuditFile);
             io.opentelemetry.api.metrics.Meter storageMeter =

@@ -122,6 +122,11 @@ public final class HealthPublisher implements CheckResultListener {
         private CheckScheduler.Cancellable retry;
         private int retryAttempt;
         private boolean forgotten;
+        /**
+         * Until when, on this client's clock, the last accepted observation keeps the check: when it was sent, and its
+         * TTL. The server counts its deadline from when it received it, so its deadline is no earlier.
+         */
+        private Instant keptUntil;
 
         private Publication(HealthCheckDefinition check) {
             this.check = check;
@@ -163,20 +168,28 @@ public final class HealthPublisher implements CheckResultListener {
             return CheckObservation.of(check, result, lastSequence);
         }
 
+        /**
+         * Sends {@code observation}, with the time it must land by while the last accepted one still keeps the check,
+         * so the client can give up a server that cannot answer in time and try the next (open-items task list,
+         * decision 3).
+         */
         private void send(CheckObservation observation) {
+            Instant sentAt = clock.instant();
+            Instant landBy = keptUntil != null && sentAt.isBefore(keptUntil) ? keptUntil : null;
             CompletableFuture<ObservationOutcome> reply;
             try {
-                reply = Objects.requireNonNull(client.observe(observation), "observation outcome");
+                reply = Objects.requireNonNull(landBy == null ? client.observe(observation)
+                        : client.observe(observation, landBy), "observation outcome");
             } catch (RuntimeException failure) {
                 reply = CompletableFuture.completedFuture(new ObservationOutcome.Retryable(
                         "client_failure", Objects.toString(failure.getMessage(), failure.toString()), null));
             }
             inFlight = reply;
-            reply.whenComplete((outcome, failure) -> completed(observation, failure == null ? outcome
+            reply.whenComplete((outcome, failure) -> completed(observation, sentAt, failure == null ? outcome
                     : new ObservationOutcome.Retryable("client_failure", failure.toString(), null)));
         }
 
-        private void completed(CheckObservation observation, ObservationOutcome outcome) {
+        private void completed(CheckObservation observation, Instant sentAt, ObservationOutcome outcome) {
             synchronized (HealthPublisher.this) {
                 inFlight = null;
                 if (forgotten) leaving.remove(this);
@@ -186,6 +199,7 @@ public final class HealthPublisher implements CheckResultListener {
                     case ObservationOutcome.Accepted ignored -> {
                         accepted = observation;
                         acceptedAt = clock.instant();
+                        keptUntil = sentAt.plus(observation.ttl());
                         if (current) unconfirmed = null;
                         retryAttempt = 0;
                     }

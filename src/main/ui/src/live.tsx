@@ -84,7 +84,9 @@ const LiveContext = createContext<Live>({ paused: false, setPaused: () => undefi
  * Live updates for the views inside it, on until paused. A page the browser keeps in its back/forward cache keeps its
  * requests open: a blocking query holds a connection for up to 30 s and a watch for good, and a browser opens six to a
  * server over HTTP/1.1, so a few such pages left the next one waiting for every read. So every live read and feed is
- * released when the page is hidden, and read again when the cache shows it.
+ * released when the page is hidden, and read again when the cache shows it. A tab its user leaves for another holds
+ * them the same way, so they are released when the tab is hidden and read again when it is shown (open-items task
+ * list, decision 1); the six connections are then shared only among the tabs in view.
  */
 export function LiveProvider({ scheduler = TIMERS, children }: { scheduler?: Scheduler | undefined; children: ReactNode }) {
   const [paused, setPaused] = useState(false);
@@ -103,11 +105,20 @@ export function LiveProvider({ scheduler = TIMERS, children }: { scheduler?: Sch
       if (!event.persisted) return;
       for (const held of holds.current) held.resume();
     };
+    // A tab its user leaves for another stays open, and is hidden rather than put into the cache.
+    const visibility = () => {
+      for (const held of holds.current) {
+        if (document.visibilityState === 'hidden') held.release();
+        else held.resume();
+      }
+    };
     window.addEventListener('pagehide', hide);
     window.addEventListener('pageshow', show);
+    document.addEventListener('visibilitychange', visibility);
     return () => {
       window.removeEventListener('pagehide', hide);
       window.removeEventListener('pageshow', show);
+      document.removeEventListener('visibilitychange', visibility);
     };
   }, []);
   const live = useMemo(() => ({ paused, setPaused, scheduler, hold }), [paused, scheduler, hold]);

@@ -20,7 +20,7 @@ import { App } from '../App';
 import type { EventQuery } from '../api/client';
 import { cursor } from '../api/fixtures';
 import type { EventPage } from '../api/schemas';
-import { BOOTSTRAP, eventPage, fakeApi, manualScheduler, qraftEvent, read, watchRecorder } from './testing';
+import { BOOTSTRAP, eventPage, fakeApi, manualScheduler, qraftEvent, read, tabVisibility, watchRecorder } from './testing';
 
 // UI-4 task list, Phase 2: the Events page, its journal labelled ephemeral (UI/UX design section 9.4), and the Events
 // tabs (decision 7), following the watch with pause, resume and resynchronization (decisions 5 and 6).
@@ -160,6 +160,21 @@ describe('Events', () => {
     act(() => {
       window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
     });
+    await waitFor(() => expect(watches).toHaveLength(2));
+    expect(asked.at(-1)).toEqual({ limit: 1000, after: cursor(1) });
+    expect(watches[1]?.query).toEqual({ after: cursor(1) });
+  });
+
+  it('closes the watch when the tab is hidden, and when it is shown reads from its cursor and follows', async () => {
+    // Open-items task list, decision 1: a hidden tab must not hold its watch's connection either.
+    const { api, asked, watches } = journal([eventPage([qraftEvent(1)]), eventPage([], 'complete', 1)]);
+    renderApp(api);
+    await waitFor(() => expect(watches).toHaveLength(1));
+
+    act(() => tabVisibility('hidden'));
+
+    expect(watches[0]?.closed).toBe(true);
+    act(() => tabVisibility('visible'));
     await waitFor(() => expect(watches).toHaveLength(2));
     expect(asked.at(-1)).toEqual({ limit: 1000, after: cursor(1) });
     expect(watches[1]?.query).toEqual({ after: cursor(1) });

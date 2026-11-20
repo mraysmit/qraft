@@ -41,4 +41,20 @@ class AppConfigAuditTest {
         assertThrows(IllegalArgumentException.class, () -> AppConfig.fromJson(
                 "{\"version\":1,\"server\":{\"audit\":{\"path\":\"a\",\"format\":\"json\"}}}"));
     }
+
+    /**
+     * Open-items task list, decision 4: the file rotates by size, as Consul's audit file sink does with
+     * {@code rotate_bytes} and {@code rotate_max_files}; the defaults are the 24 MiB and 15 files of Consul's example.
+     */
+    @Test
+    void theAuditFileRotatesAt24MiBKeepingFifteenMovedFilesUnlessConfiguredOtherwise() {
+        assertEquals(new AppConfig.AuditRotation(25_165_824, 15),
+                AppConfig.fromJson("{\"version\":1,\"server\":{}}").getAuditRotation());
+        assertEquals(new AppConfig.AuditRotation(1_048_576, 0), AppConfig.fromJson("{\"version\":1,\"server\":"
+                + "{\"audit\":{\"path\":\"a\",\"rotateBytes\":1048576,\"maxFiles\":0}}}").getAuditRotation());
+        assertThrows(IllegalArgumentException.class, () -> AppConfig.fromJson(
+                "{\"version\":1,\"server\":{\"audit\":{\"path\":\"a\",\"rotateBytes\":0}}}"));
+        assertThrows(IllegalArgumentException.class, () -> AppConfig.fromJson(
+                "{\"version\":1,\"server\":{\"audit\":{\"path\":\"a\",\"maxFiles\":-1}}}"));
+    }
 }

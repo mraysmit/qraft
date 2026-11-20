@@ -302,20 +302,56 @@ class HealthPublisherTest {
         assertTrue(stopped.isDone());
     }
 
+    /**
+     * Open-items task list, decision 3: a renewal sent with half a short TTL left could wait out one request timeout on
+     * a server that could no longer answer, and land too late (handover, 2026-11-13). The client is told when it must
+     * land: the time the accepted observation was sent, on the client's clock, and its TTL, which the server's deadline,
+     * counted from when it received the observation, cannot come before.
+     */
+    @Test
+    void anObservationIsSentWithTheTimeTheLastAcceptedOneKeepsTheCheckForWhileThatTimeIsAhead() {
+        publisher.onResult(HTTP, result(CheckStatus.PASSING, "HTTP 200"));
+        time.advance(Duration.ofSeconds(1));
+        client.accept(0);
+
+        time.advance(Duration.ofSeconds(15));
+        publisher.onResult(HTTP, result(CheckStatus.PASSING, "HTTP 200"));
+        for (int retry = 1; retry <= 4; retry++) {
+            client.retryable(retry);
+            time.advance(Duration.ofMillis(1_000L << (retry - 1)));
+        }
+
+        Instant keptUntil = START.plus(HTTP.ttl());
+        assertEquals(java.util.Arrays.asList(null, keptUntil, keptUntil, keptUntil, keptUntil, null), client.landBy(),
+                "nothing was accepted before the first, and the last is sent after the check's time has run out");
+    }
+
     private static final class ScriptedClientFixture implements ObservationClient {
         private final List<CheckObservation> sent = new CopyOnWriteArrayList<>();
+        private final List<Instant> landBy = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
         private final List<CompletableFuture<ObservationOutcome>> replies = new CopyOnWriteArrayList<>();
 
         @Override
         public CompletableFuture<ObservationOutcome> observe(CheckObservation observation) {
+            return observe(observation, null);
+        }
+
+        @Override
+        public CompletableFuture<ObservationOutcome> observe(CheckObservation observation, Instant landBy) {
             CompletableFuture<ObservationOutcome> reply = new CompletableFuture<>();
             sent.add(observation);
+            this.landBy.add(landBy);
             replies.add(reply);
             return reply;
         }
 
         List<CheckObservation> sent() {
             return sent;
+        }
+
+        /** When each observation sent had to land by, or null for one sent without. */
+        List<Instant> landBy() {
+            return landBy;
         }
 
         void accept(int index) {

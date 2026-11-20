@@ -17,7 +17,7 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { LiveProvider, PauseControl, POLL_MILLIS, RETRY_MILLIS, type LiveWait, useLiveRead } from './live';
-import { manualScheduler } from './views/testing';
+import { manualScheduler, tabVisibility } from './views/testing';
 
 // UI-4 task list, decision 5: blocking queries, polling, pause and resume, resynchronization, and retry, with time
 // driven by a scheduler the test fires, never a wall-clock wait.
@@ -220,5 +220,70 @@ describe('live reads in the back/forward cache', () => {
 
     expect(calls).toHaveLength(2);
     expect(screen.getByText('Live updates paused')).toBeInTheDocument();
+  });
+});
+
+describe('live reads in a hidden tab', () => {
+  // Open-items task list, decision 1: a tab its user leaves for another keeps its page, and its blocking queries held
+  // connections of the six a browser opens to the server over HTTP/1.1, so two tabs left on such pages starved a third.
+  it('release a blocking read when the tab is hidden, and read again at once when it is shown', async () => {
+    const { calls, load } = deferredLoad();
+    const { time, shown } = view(load, true);
+    await calls[0]?.answer({ value: 1, index: 40 });
+    const waiting = calls[1];
+
+    act(() => tabVisibility('hidden'));
+
+    expect(waiting?.wait.signal.aborted).toBe(true);
+    expect(calls).toHaveLength(2);
+    expect(time.pending).toHaveLength(0);
+    expect(shown()).toBe('value 1');
+    expect(screen.getByText('Live updates on')).toBeInTheDocument();
+
+    act(() => tabVisibility('visible'));
+
+    expect(calls).toHaveLength(3);
+    expect(calls[2]?.wait.index).toBeUndefined();
+    await calls[2]?.answer({ value: 2, index: 42 });
+    expect(shown()).toBe('value 2');
+  });
+
+  it('cancel the next poll while the tab is hidden, and poll again when it is shown', async () => {
+    const { calls, load } = deferredLoad();
+    const { time } = view(load, false);
+    await calls[0]?.answer({ value: 1, index: 40 });
+
+    act(() => tabVisibility('hidden'));
+
+    expect(time.pending).toHaveLength(0);
+    act(() => tabVisibility('visible'));
+    expect(calls).toHaveLength(2);
+  });
+
+  it('stay paused when the tab is shown while paused', async () => {
+    const { calls, load } = deferredLoad();
+    view(load, true);
+    await calls[0]?.answer({ value: 1, index: 40 });
+    fireEvent.click(screen.getByText('Pause live updates'));
+
+    act(() => tabVisibility('hidden'));
+    act(() => tabVisibility('visible'));
+
+    expect(calls).toHaveLength(2);
+    expect(screen.getByText('Live updates paused')).toBeInTheDocument();
+  });
+
+  it('read once when a page put into the cache is both hidden and shown again by each event', async () => {
+    // A browser that puts a page into its back/forward cache hides the document too, and shows it with the page.
+    const { calls, load } = deferredLoad();
+    view(load, true);
+    await calls[0]?.answer({ value: 1, index: 40 });
+
+    act(() => tabVisibility('hidden'));
+    transition('pagehide', true);
+    transition('pageshow', true);
+    act(() => tabVisibility('visible'));
+
+    expect(calls).toHaveLength(3);
   });
 });

@@ -90,8 +90,11 @@ public final class AppConfig {
     /** The {@code server} object of the document, with {@code logging.directory} beside it. */
     private record Settings(String id, Http http, int apiGrpcPort, Raft raft, String operatorToken,
                             Telemetry telemetry, Shutdown shutdown, Health health, AdminUiConfig ui,
-                            Acl acl, SecurityProfile profile, String loggingDirectory, Tls tls, String auditPath,
+                            Acl acl, SecurityProfile profile, String loggingDirectory, Tls tls, Audit audit,
                             Optional<dev.mars.qraft.common.dns.DnsSettings> dns) { }
+
+    /** {@code server.audit}: the file's path, empty for none, and when it is rotated. */
+    private record Audit(String path, AuditRotation rotation) { }
 
     /**
      * {@code server.tls}: the material, or {@code null} when the document has none, and each listener's switch
@@ -169,7 +172,16 @@ public final class AppConfig {
         rejectUnknown(server, "server", "id", "http", "apiGrpcPort",
                 "raft", "telemetry", "shutdown", "health", "ui", "operator", "acl", "security", "tls", "audit", "dns");
         JsonNode audit = optionalObject(server, "audit");
-        rejectUnknown(audit, "server.audit", "path");
+        rejectUnknown(audit, "server.audit", "path", "rotateBytes", "maxFiles");
+        // Consul's audit file sink example: 24 MiB a file and 15 files kept (open-items task list, decision 4).
+        AuditRotation auditRotation = new AuditRotation(optionalLong(audit, "rotateBytes", 25_165_824),
+                optionalInt(audit, "maxFiles", 15));
+        if (auditRotation.rotateBytes() <= 0) {
+            throw new IllegalArgumentException("server.audit.rotateBytes must be positive");
+        }
+        if (auditRotation.maxFiles() < 0) {
+            throw new IllegalArgumentException("server.audit.maxFiles must be zero or more");
+        }
         rejectUnknown(http, "server.http", "host", "port");
         rejectUnknown(raft, "server.raft", "port", "nodes", "electionTimeoutMs",
                 "heartbeatIntervalMs", "storage", "snapshot", "logHardLimit", "io", "membership");
@@ -232,7 +244,8 @@ public final class AppConfig {
                         logHardLimit, ioSettings, membershipSettings),
                 operatorToken, telemetrySettings, shutdownSettings,
                 new Health(expiryIntervalMs, nodeTtlMs, nodeReapAfterMs), adminUi, aclSettings, profile,
-                loggingDirectory, tlsSettings, optionalText(audit, "path", ""), dns), configured, source);
+                loggingDirectory, tlsSettings, new Audit(optionalText(audit, "path", ""), auditRotation), dns),
+                configured, source);
     }
 
     /** Adds to {@code keys} the key of each setting {@code node}, at {@code key}, holds. */
@@ -315,6 +328,8 @@ public final class AppConfig {
         add.accept("server.tls.raft.enabled", isRaftTlsEnabled());
         add.accept("server.tls.raft.verifyServerHostname", isRaftVerifyServerHostname());
         add.accept("server.audit.path", getAuditPath().map(Path::toString).orElse(null));
+        add.accept("server.audit.rotateBytes", getAuditRotation().rotateBytes());
+        add.accept("server.audit.maxFiles", getAuditRotation().maxFiles());
         if (settings.dns().isEmpty()) {
             add.accept("server.dns", null);
         } else {
@@ -438,7 +453,18 @@ public final class AppConfig {
     public long getNodeReapAfterMs() { return settings.health().nodeReapAfterMs(); }
     /** {@code server.audit.path}: the file audit events are written to, if any (authentication list, Phase 3). */
     public Optional<java.nio.file.Path> getAuditPath() {
-        return settings.auditPath().isEmpty() ? Optional.empty() : Optional.of(java.nio.file.Path.of(settings.auditPath()));
+        String path = settings.audit().path();
+        return path.isEmpty() ? Optional.empty() : Optional.of(java.nio.file.Path.of(path));
+    }
+
+    /**
+     * {@code server.audit.rotateBytes} and {@code server.audit.maxFiles}: the size past which the audit file is moved
+     * aside for a new one, and how many moved files are kept (open-items task list, decision 4).
+     */
+    public record AuditRotation(long rotateBytes, int maxFiles) { }
+
+    public AuditRotation getAuditRotation() {
+        return settings.audit().rotation();
     }
     public boolean isTelemetryEnabled() { return settings.telemetry().enabled(); }
     public String getOtlpEndpoint() { return settings.telemetry().otlpEndpoint(); }
