@@ -671,6 +671,41 @@ Docker stages (`-DskipVitest=true`). The audit, over the console, the archived l
 test reports, 907 files, found 1,175 error lines, all flagged, and 857 stack traces, none unflagged; no
 `too_many_pings` and no JVM crash file. The logs are in `logs/jenkins/Qraft-76/`.
 
+## Build 85, 2026-11-20
+
+Build 85 ran on `000c02a`, the Docker image build's fix of 2026-11-19 with its records, the first Jenkins run of
+UI-6's second and third lists, and failed in 32 min 5 s. The default stage passed, 2,083 with every coverage gate met
+and Vitest 374, and the Docker and `slow` stage passed 52, no failures, errors or skips. The end-to-end stage failed one
+of its 36 tests, and Jenkins failed the Docker stage's post step. The logs are in `logs/jenkins/Qraft-85/`.
+
+- **`KubernetesAuthEndToEndTest`** failed in 0.08 s: server2's API gRPC server could not bind port 35461,
+  `Address already in use`. The test chose each of its nine ports with a `freePort()` that bound port 0 and closed
+  the socket, so nothing kept the kernel from offering a port again: 35461 went first to server1's Raft port, which
+  server1 had bound at 13:15:04.828, and then to server2's API gRPC port. Fourteen more test classes had the same
+  helper, and `HealthPropagationEndToEndTest` held its sockets together, distinct within one call but not against
+  other classes. Fixed test first (two of three new tests red on a stub; the third, 200 system ports all distinct,
+  guards against a regression): `dev.mars.qraft.testing.TestPorts.freePort()` never gives out a port twice in a JVM,
+  and every one of those classes uses it. A port another process takes between the choice and the bind is not covered;
+  only a server that binds port 0 itself would be.
+- **The Docker stage's post step** did not start: the Jenkins JVM's `ProcessBuilder` failed with `Failed to exec spawn
+  helper ... Cannot run program "nohup"`, naming a JDK version mismatch among the possible reasons. The stage's own
+  `sh` step had started at 05:16 UTC and the post step failed at 05:43, so the controller's JDK, Ubuntu's
+  `21.0.13.0.3+1-1-24.04.1`, was most likely upgraded under the running Jenkins. The Docker stage's surefire reports
+  were not copied to `reports/docker`, so the job's test report counts only the default and end-to-end stages, 2,119;
+  its console, its log and its 25 Docker archive folders were archived. A restart of Jenkins on the host is the cure,
+  and the owner's to make.
+- **The audit**, over the console, the archived logs and the test reports, 871 files, found 1,767 error lines and
+  1,191 stack traces. Every one is flagged but the two causes above: the end-to-end failure and Maven's summary of it,
+  and Jenkins's own trace of the spawn failure. No `too_many_pings` and no JVM crash file. A simple checker meets 24
+  traces under `Channel Pipeline:`, the second line of gRPC's exception message, each two lines below a flagged
+  `RAFT_PEER_UNREACHABLE` from `GrpcRaftTlsTest`.
+
+The fix was run locally on 2026-11-20 from `C:\qx11`, a fresh clone of the workspace at `000c02a` with the fix copied
+over it, since the workspace's `src/main/ui/node_modules` was held open (`npm ci` failed with `EPERM`): `mvn clean
+install` 2,086 and Vitest 374, every coverage gate; end-to-end 36, `KubernetesAuthEndToEndTest` included; no
+failures, errors or skips. The audit, 678 files, found 817 error lines and 771 stack traces, all flagged, and no JVM
+crash file. The Docker stage was not run again: it passed in build 85, and the fix changes no class it runs.
+
 ## Build 84, 2026-11-15
 
 Build 84 ran on `f45bf2a`, build 83's fix with the key filter of UI-6's Key/Value list, and passed in 30 min 41 s:
