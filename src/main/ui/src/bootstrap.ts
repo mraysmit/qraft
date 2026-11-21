@@ -18,7 +18,7 @@ import { z } from 'zod';
 
 /**
  * The public settings the server renders into index.html (UiBootstrap and AdminUiHandler on the server; design
- * section 12.4.1). They hold no secret.
+ * section 13.2). They hold no secret.
  */
 export const BootstrapSchema = z.object({
   apiBasePath: z.string(),
