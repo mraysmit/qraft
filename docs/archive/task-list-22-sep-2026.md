@@ -4,7 +4,7 @@
 **Archive status:** Closed and archived on 2026-09-22.
 **Status:** Complete. All six steps implemented and verified 2026-09-22.
 **Source plan:** [`RAFTLOG_EXTERNALISATION_TDD_PLAN.md`](RAFTLOG_EXTERNALISATION_TDD_PLAN.md), Tranche 8
-**Runbook:** [`RAFT_STORAGE_OPERATIONS.md`](../RAFT_STORAGE_OPERATIONS.md)
+**Runbook:** [`RAFT_STORAGE_OPERATIONS.md`](../OPERATIONS.md)
 
 ## Completion summary
 
