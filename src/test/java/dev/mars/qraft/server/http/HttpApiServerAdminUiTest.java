@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.server.http;
 
+import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -26,6 +27,7 @@ import dev.mars.qraft.server.ui.AdminUiConfig;
 import dev.mars.qraft.server.ui.ClasspathUiAssets;
 import dev.mars.qraft.server.ui.DirectoryUiAssets;
 import dev.mars.qraft.server.ui.UiAssets;
+import dev.mars.qraft.testing.LogCapturesHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -48,6 +50,7 @@ import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -149,21 +152,57 @@ class HttpApiServerAdminUiTest {
         assertEquals(200, get("/health/live").statusCode());
     }
 
+    /**
+     * Documentation cleanup list, decision 4: the warning said the interface was read-only, which it has not been since
+     * UI-5 gave it changes, and said it was unauthenticated even with ACLs enabled. Without ACLs, anyone who reaches
+     * the server can read and change the cluster through it, and the warning says so.
+     */
     @Test
-    void anEnabledInterfaceWarnsOnceAtStartupThatItIsUnauthenticated() throws Exception {
+    void anEnabledInterfaceWithoutAclsWarnsOnceAtStartupThatAnyoneWhoReachesItCanChangeTheCluster() throws Exception {
+        List<ILoggingEvent> events = startupEvents(() -> start(new AdminUiConfig(true, "/ui/", Optional.empty()),
+                FIXTURE));
+
+        List<String> warnings = events.stream().filter(event -> event.getLevel() == Level.WARN)
+                .map(ILoggingEvent::getFormattedMessage).filter(message -> message.contains("/ui/")).toList();
+        assertEquals(1, warnings.size(), warnings.toString());
+        assertTrue(warnings.getFirst().contains("ACLs are disabled"), warnings.getFirst());
+        assertTrue(warnings.getFirst().contains("change"), warnings.getFirst());
+        assertFalse(warnings.getFirst().contains("read-only"), warnings.getFirst());
+    }
+
+    @Test
+    void anEnabledInterfaceWithAclsSaysAtInfoThatItsRequestsCarryTheCallersToken() throws Exception {
+        List<ILoggingEvent> events = startupEvents(() -> {
+            server = new HttpApiServer(0, null, null, Clock.systemUTC(),
+                    new AdminUiConfig(true, "/ui/", Optional.empty()), FIXTURE, HttpApiServer.DEFAULT_RAFT_TIMEOUT,
+                    null, new AclHttpSettings(true, temporaryDirectory,
+                            dev.mars.qraft.common.acl.AclDefaultPolicy.DENY));
+            server.start().get(10, TimeUnit.SECONDS);
+        });
+
+        List<ILoggingEvent> about = events.stream()
+                .filter(event -> event.getFormattedMessage().contains("/ui/")).toList();
+        assertEquals(List.of(Level.INFO), about.stream().map(ILoggingEvent::getLevel).toList(), about.toString());
+        assertTrue(about.getFirst().getFormattedMessage().contains("token"), about.getFirst().getFormattedMessage());
+    }
+
+    /** What the server logs while {@code start} runs. */
+    private static List<ILoggingEvent> startupEvents(ThrowingRunnable start) throws Exception {
         Logger logger = (Logger) LoggerFactory.getLogger(HttpApiServer.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
         logger.addAppender(appender);
         try {
-            start(new AdminUiConfig(true, "/ui/", Optional.empty()), FIXTURE);
+            start.run();
         } finally {
             logger.detachAppender(appender);
         }
+        return LogCapturesHelper.snapshot(appender);
+    }
 
-        assertEquals(1, appender.list.stream().filter(event ->
-                event.getFormattedMessage().contains("/ui/")
-                        && event.getFormattedMessage().contains("unauthenticated")).count());
+    @FunctionalInterface
+    private interface ThrowingRunnable {
+        void run() throws Exception;
     }
 
     @Test
@@ -289,7 +328,7 @@ class HttpApiServerAdminUiTest {
 
     @Test
     void theRootRedirectsToTheInterfaceWhenItIsEnabledAndNoOtherPathDoes() throws Exception {
-        // UI-3 task list, decision 2; design section 12.4.1 allows it.
+        // UI-3 task list, decision 2; design section 13.2 allows it.
         start(new AdminUiConfig(true, "/console/", Optional.empty()), FIXTURE);
 
         HttpResponse<String> root = get("/");
