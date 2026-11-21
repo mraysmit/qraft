@@ -18,8 +18,10 @@ package dev.mars.qraft.server.config;
 
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Tests that {@link AppConfig} takes an explicit node ID only from the document and allows a
@@ -41,6 +43,21 @@ class AppConfigNodeIdentityTest {
         } finally {
             System.clearProperty("qraft.node.id");
         }
+    }
+
+    /**
+     * Code defects list, item 15: a server finds its own Raft address under its name in {@code server.raft.nodes};
+     * one not listed there has no address to advertise and would count every listed server as a peer.
+     */
+    @Test
+    void aServerMustBeListedInItsOwnNodeList() {
+        IllegalStateException refused = assertThrows(IllegalStateException.class, () -> AppConfig.fromJson("""
+                {"version":1,"server":{"id":"c","raft":{"nodes":{"a":"a:9080","b":"b:9080"}}}}
+                """).validate());
+        assertEquals("server.id 'c' is not a key of server.raft.nodes, which lists: a, b", refused.getMessage());
+        assertDoesNotThrow(() -> AppConfig.fromJson("""
+                {"version":1,"server":{"id":"b","raft":{"nodes":{"a":"a:9080","b":"b:9080"}}}}
+                """).validate());
     }
 
     @Test
