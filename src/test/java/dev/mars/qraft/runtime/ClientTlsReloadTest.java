@@ -125,12 +125,14 @@ class ClientTlsReloadTest {
         Files.copy(fixture("client.pem"), cert, StandardCopyOption.REPLACE_EXISTING);
         Files.setLastModifiedTime(cert, FileTime.from(Instant.now().plusSeconds(60)));
         deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-        while (System.nanoTime() < deadline && log.list.stream()
+        // The client goes on logging while the test reads: each read takes a snapshot under the appender's lock.
+        while (System.nanoTime() < deadline && dev.mars.qraft.testing.LogCapturesHelper.snapshot(log).stream()
                 .noneMatch(event -> event.getFormattedMessage().startsWith("client.tls reloaded: certificate"))) {
             Thread.sleep(50);
         }
-        assertTrue(log.list.stream().anyMatch(event -> event.getFormattedMessage()
-                .startsWith("client.tls reloaded: certificate")), "the renewed certificate was reloaded: " + log.list);
+        List<ILoggingEvent> logged = dev.mars.qraft.testing.LogCapturesHelper.snapshot(log);
+        assertTrue(logged.stream().anyMatch(event -> event.getFormattedMessage()
+                .startsWith("client.tls reloaded: certificate")), "the renewed certificate was reloaded: " + logged);
 
         client.shutdown().get(10, TimeUnit.SECONDS);
         client = null;
