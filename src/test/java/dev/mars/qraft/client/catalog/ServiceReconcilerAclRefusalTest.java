@@ -21,6 +21,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import dev.mars.qraft.common.ServiceDefinition;
+import dev.mars.qraft.testing.LogCapturesHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -74,9 +75,10 @@ class ServiceReconcilerAclRefusalTest {
         reconciler.trigger().join();
 
         assertTrue(reconciler.isConverged(), "a refused sync does not hold readiness back");
-        assertTrue(captured.list.stream().anyMatch(event -> event.getLevel() == Level.WARN
+        assertTrue(LogCapturesHelper.snapshot(captured).stream().anyMatch(event -> event.getLevel() == Level.WARN
                 && event.getFormattedMessage().contains("web-1")
-                && event.getFormattedMessage().contains("permission_denied")), captured.list.toString());
+                && event.getFormattedMessage().contains("permission_denied")),
+                LogCapturesHelper.snapshot(captured).toString());
         catalog.refuseRegistration = false;
         reconciler.trigger().join();
         assertEquals(List.of("web-1", "web-1"), catalog.registrations, "tried again at the next pass");
@@ -93,8 +95,8 @@ class ServiceReconcilerAclRefusalTest {
         reconciler.trigger().join();
 
         assertEquals(List.of("planted", "planted"), catalog.deregistrations);
-        assertTrue(captured.list.stream().anyMatch(event -> event.getLevel() == Level.WARN
-                && event.getFormattedMessage().contains("planted")), captured.list.toString());
+        assertTrue(LogCapturesHelper.snapshot(captured).stream().anyMatch(event -> event.getLevel() == Level.WARN
+                && event.getFormattedMessage().contains("planted")), LogCapturesHelper.snapshot(captured).toString());
     }
 
     private static final class RefusingCatalog implements CatalogClient {
