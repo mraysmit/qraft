@@ -116,7 +116,8 @@ public final class ClientAuthorizer {
         String token = exchange.getRequestHeaders().getFirst(TOKEN_HEADER);
         if (token == null) {
             String authorization = exchange.getRequestHeaders().getFirst("Authorization");
-            if (authorization != null && authorization.startsWith(BEARER)) {
+            // The scheme in any case, as the server's API reads it (RFC 9110, section 11.1).
+            if (authorization != null && authorization.regionMatches(true, 0, BEARER, 0, BEARER.length())) {
                 token = authorization.substring(BEARER.length());
             }
         }
