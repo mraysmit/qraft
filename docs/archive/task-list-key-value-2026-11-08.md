@@ -5,7 +5,7 @@
 **Last updated:** 2026-11-08 (Phase 6 recorded, and the list complete and archived. Earlier the same day: Phases 1 to 5 built, test first, with their records in section 6. Earlier the same day: started)
 **Follows:** [`task-list-transport-security-2026-11-08.md`](task-list-transport-security-2026-11-08.md)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), section 10
-**Validation:** [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](../../docs-design/QRAFT_FEATURE_VALIDATION_2026-10-21.md), the key/value rows and item 3
+**Validation:** [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md), the key/value rows and item 3
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
 ## 1. Goal
