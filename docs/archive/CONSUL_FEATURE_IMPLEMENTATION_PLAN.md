@@ -1,5 +1,7 @@
 # Qraft Consul-Like Feature Implementation Plan
 
+**Archived:** 2026-11-21, by the documentation cleanup ([`task-list-documentation-cleanup-2026-11-21.md`](task-list-documentation-cleanup-2026-11-21.md)). Kept as a record; not updated since.
+
 ## 1. Purpose
 
 Qraft will evolve into a Consul-like distributed service with Raft-backed state, service discovery, health monitoring, client lifecycle management, sessions, and distributed locks.
@@ -329,24 +331,24 @@ Recorded 2026-10-14 against `f737d6b`, with completion and verification dated
 
 - [x] Replace the `Future`, `Promise` and `AsyncResult` wrappers with native
   Java futures (`9851987`, Jenkins build 26).
-  [CompletionsTest](../src/test/java/dev/mars/qraft/common/concurrent/CompletionsTest.java),
+  [CompletionsTest](../../src/test/java/dev/mars/qraft/common/concurrent/CompletionsTest.java),
   `RaftStorageFactoryTest` and `ClusterBootstrapTest` cover completion failures
   and the migrated boundaries.
 - [x] Replace `JavaRuntime` and `WorkerExecutor` with explicitly owned
   `RaftStateLoop` and `BlockingTaskExecutor` (`9a6fbd0`, `7a9108f`). Keep
   configured worker/queue bounds, overload rejection, caller MDC/OpenTelemetry
   propagation and restoration, and blocking-work shutdown before the state
-  loop. [BlockingTaskExecutorTest](../src/test/java/dev/mars/qraft/common/async/BlockingTaskExecutorTest.java),
-  [RaftStateLoopTest](../src/test/java/dev/mars/qraft/common/async/RaftStateLoopTest.java) and
-  [QraftServerLifecycleTest](../src/test/java/dev/mars/qraft/server/QraftServerLifecycleTest.java)
+  loop. [BlockingTaskExecutorTest](../../src/test/java/dev/mars/qraft/common/async/BlockingTaskExecutorTest.java),
+  [RaftStateLoopTest](../../src/test/java/dev/mars/qraft/common/async/RaftStateLoopTest.java) and
+  [QraftServerLifecycleTest](../../src/test/java/dev/mars/qraft/server/QraftServerLifecycleTest.java)
   cover these contracts.
 - [x] Remove `JavaTestContextHelper` and `JavaRuntimeExtensionHelper`
-  (`d876349`). [ShutdownCoordinatorTest](../src/test/java/dev/mars/qraft/server/lifecycle/ShutdownCoordinatorTest.java)
+  (`d876349`). [ShutdownCoordinatorTest](../../src/test/java/dev/mars/qraft/server/lifecycle/ShutdownCoordinatorTest.java)
   owns its loop and uses bounded future
   waits; `RaftExecutorsFixture` owns both resources for protocol tests.
 - [x] Expose nullable `fenceReason`, retain the first fencing cause and log one
   transition-fence announcement with the original stack and caller context
-  (`f737d6b`). [RaftTransitionSequencerTest](../src/test/java/dev/mars/qraft/raft/RaftTransitionSequencerTest.java),
+  (`f737d6b`). [RaftTransitionSequencerTest](../../src/test/java/dev/mars/qraft/raft/RaftTransitionSequencerTest.java),
   `RaftNodeApplyFailureTest`,
   `RaftNodeConfigurationTest`, `RaftNodeMetadataSequencingTest`,
   `HttpApiServerTest` and `DockerDurableRestartTest` cover the diagnostic and
@@ -354,15 +356,15 @@ Recorded 2026-10-14 against `f737d6b`, with completion and verification dated
 - [x] Audit native observability-container errors with explicit attribution
   and matching recovery for the previously approved Tempo startup case,
   preserving full severity and output (`f737d6b`).
-  [DockerLogCaptureTest](../src/test/java/dev/mars/qraft/testing/fault/DockerLogCaptureTest.java) and
+  [DockerLogCaptureTest](../../src/test/java/dev/mars/qraft/testing/fault/DockerLogCaptureTest.java) and
   `DockerStartCommandsTest` cover the audit; all unrelated native errors fail.
 
 The final local verification passed 960 default tests and all coverage gates,
 then 42 runtime tests on the fresh jar and rebuilt image. Five consecutive
 affected Raft/HTTP runs passed 293 tests each; the recorded final retained-log
 audit found no unflagged errors or exception headers in the accepted output.
-[TESTING.md](../docs/TESTING.md#phase-7-verification-record-2026-10-13) records
-the captures, tests and audit; [the cleanup task list](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md#phase-7-replace-the-vertx-shaped-async-layer)
+`docs/TESTING.md`, "Phase 7 verification record, 2026-10-13", as committed in `cc3b171` records
+the captures, tests and audit; [the cleanup task list](task-list-single-pom-and-quorus-removal-2026-10-21.md#phase-7-replace-the-vertx-shaped-async-layer)
 holds the TDD evidence and earlier failed-run remediation. These local results
 are separate from Jenkins build 26. No new build was run for this checklist
 update. Cluster-wide status, broader metrics, security, tenancy and the other
@@ -397,7 +399,7 @@ unchecked features below remain open.
   TCP, and TTL checks, leader-owned expiry, and automatic deregistration.
 - [x] Implement namespaces and tenancy isolation end to end: replicated tenants
   and namespaces, and scoped reads (feature validation item 6). Done 2026-11-08:
-  [`task-list-tenancy-2026-11-08.md`](../docs/archive/task-list-tenancy-2026-11-08.md); tenants are
+  [`task-list-tenancy-2026-11-08.md`](task-list-tenancy-2026-11-08.md); tenants are
   Consul's admin partitions, and a write is refused outside a tenant and namespace
   that exist.
 - [x] Add snapshots in every role, installation, restart recovery, offline
@@ -416,7 +418,7 @@ unchecked features below remain open.
 - [x] Remove the job-system concepts from the active build.
 - [x] Replace the inherited node model with a Consul-shaped node, and move the node
   routes to the catalog's write paths (2026-10-09, Phase 4 of
-  [`task-list-single-pom-and-quorus-removal-2026-10-21.md`](../docs/archive/task-list-single-pom-and-quorus-removal-2026-10-21.md)).
+  [`task-list-single-pom-and-quorus-removal-2026-10-21.md`](task-list-single-pom-and-quorus-removal-2026-10-21.md)).
   Removed with it: a node's capabilities and the command that replaced them, its
   host name and port, the job-system statuses, and the routes `/api/v1/clients*`,
   `/api/v1/info`, `/status`, and bare `/health`. A node's deregistration now
@@ -432,34 +434,34 @@ unchecked features below remain open.
   (feature validation item 2).
 - [x] Complete the key/value store: tenant and namespace scoping, indexes,
   flags, compare-and-set, and the HTTP `/v1/kv` API (phase 2; item 3). Done
-  2026-11-08: [`task-list-key-value-2026-11-08.md`](../docs/archive/task-list-key-value-2026-11-08.md); blocking
+  2026-11-08: [`task-list-key-value-2026-11-08.md`](task-list-key-value-2026-11-08.md); blocking
   queries wait for the consistency list, and acquire and release for the sessions
   list.
 - [x] Add `default`, `stale`, and `consistent` reads, and blocking queries
   (phase 6; item 4). Done 2026-11-08:
-  [`task-list-consistency-2026-11-08.md`](../docs/archive/task-list-consistency-2026-11-08.md); the default is the
+  [`task-list-consistency-2026-11-08.md`](task-list-consistency-2026-11-08.md); the default is the
   answering server's state, since the servers do not forward reads.
 - [x] Implement sessions, locks, and leader-election helpers (phase 5; item 5).
-  Done 2026-11-08: [`task-list-sessions-and-locks-2026-11-08.md`](../docs/archive/task-list-sessions-and-locks-2026-11-08.md);
+  Done 2026-11-08: [`task-list-sessions-and-locks-2026-11-08.md`](task-list-sessions-and-locks-2026-11-08.md);
   renewals are kept by the leader alone, as in Consul, and leader election is a
   documented recipe on the local API rather than a helper command.
 - [x] Add catalog, health, request, client, and session metrics, and cluster
   membership and storage status (phase 8; item 7). Done 2026-11-08:
-  [`task-list-observability-2026-11-08.md`](../docs/archive/task-list-observability-2026-11-08.md); the leader's view
+  [`task-list-observability-2026-11-08.md`](task-list-observability-2026-11-08.md); the leader's view
   of the servers is Consul's autopilot health, and a client publishes on its local
   API rather than on a telemetry port.
 - [x] Implement the bounded event journal (item 8). Done 2026-11-08, the design's
-  phases 1 to 4: [`task-list-events-2026-11-08.md`](../docs/archive/task-list-events-2026-11-08.md);
+  phases 1 to 4: [`task-list-events-2026-11-08.md`](task-list-events-2026-11-08.md);
   its HTTP query, live watch and durable sinks are left for later.
 - [x] Implement ACL tokens, policies, token validation, and audit events
   (phase 7; item 9). Tokens, policies, roles, identities and validation on servers and
   clients are done (2026-11-07, the ACL list,
-  [`task-list-acl-and-tokens-2026-11-07.md`](../docs/archive/task-list-acl-and-tokens-2026-11-07.md)),
-  and TLS on every listener, with mutual TLS on the Raft port, is built (2026-11-07, [`task-list-transport-security-2026-11-08.md`](../docs/archive/task-list-transport-security-2026-11-08.md));
+  [`task-list-acl-and-tokens-2026-11-07.md`](task-list-acl-and-tokens-2026-11-07.md)),
+  and TLS on every listener, with mutual TLS on the Raft port, is built (2026-11-07, [`task-list-transport-security-2026-11-08.md`](task-list-transport-security-2026-11-08.md));
   and the `jwt` auth method, login and audit events are built (2026-11-08,
-  [`task-list-authentication-and-audit-2026-11-08.md`](../docs/archive/task-list-authentication-and-audit-2026-11-08.md)).
+  [`task-list-authentication-and-audit-2026-11-08.md`](task-list-authentication-and-audit-2026-11-08.md)).
 - [x] Implement server membership change. Complete on 2026-10-24, when the membership list was archived with Steps 1 to 8 done (ticked 2026-11-08). Decided 2026-09-29, and was in progress
-  in [`task-list-raft-membership-changes-2026-10-24.md`](../docs/archive/task-list-raft-membership-changes-2026-10-24.md):
+  in [`task-list-raft-membership-changes-2026-10-24.md`](task-list-raft-membership-changes-2026-10-24.md):
   server IDs, the configuration in the log, non-voter promotion, joining, and
   operator list/remove are done. The Step 4 close-out gate closed on 2026-10-11
   when the owner removed the mutation requirement. Lost-quorum recovery and
@@ -475,4 +477,4 @@ unchecked features below remain open.
 - [x] Decide on and implement persisted generated node identity (item 10).
   Done 2026-10-30, in the client list's Phase 2.
 - [x] Decide on and implement DNS discovery (item 10).
-  Done 2026-11-09, in [`task-list-dns-discovery-2026-11-09.md`](../docs/archive/task-list-dns-discovery-2026-11-09.md).
+  Done 2026-11-09, in [`task-list-dns-discovery-2026-11-09.md`](task-list-dns-discovery-2026-11-09.md).
