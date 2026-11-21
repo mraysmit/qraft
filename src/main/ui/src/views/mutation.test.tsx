@@ -194,6 +194,24 @@ describe('the mutation workflow', () => {
     expect(screen.getByText('Audit events of this request')).toBeInTheDocument();
   });
 
+  // Code defects list, item 3: a server's outcome_unknown was shown as "Not applied", with Submit again, because the
+  // server marked it retryable; and any refusal the interface did not classify was offered for retry.
+  it('reads the server outcome_unknown as unknown, whatever its retryable flag says', () => {
+    for (const retryable of [true, false]) {
+      expect(outcomeOf(new ApiError('/v1/kv/a', 503, 'outcome_unknown', 'The write sent to the leader was not answered',
+        retryable, 'req-45', null))).toMatchObject({ kind: 'unknown' });
+    }
+  });
+
+  it('never reads a refusal it does not classify as retryable', () => {
+    expect(outcomeOf(new ApiError('/v1/kv/a', 405, 'method_not_allowed', 'Use PUT', false, 'req-46', null)))
+      .toMatchObject({ kind: 'validation', code: 'method_not_allowed' });
+    expect(outcomeOf(new ApiError('/v1/kv/a', 401, 'acl_disabled', 'ACLs are disabled', false, 'req-47', null)))
+      .toMatchObject({ kind: 'validation', code: 'acl_disabled' });
+    expect(outcomeOf(new ApiError('/v1/kv/a', 503, 'catalog_unavailable', 'No catalog', false, 'req-48', null)))
+      .toMatchObject({ kind: 'unknown' });
+  });
+
   it('reads a request body over the server limit as a validation refusal, which was not applied', () => {
     expect(outcomeOf(new ApiError('/v1/kv/a', 413, 'request_too_large', 'The request body is longer than 524288 bytes',
       false, 'req-44', null))).toMatchObject({ kind: 'validation', code: 'request_too_large' });
