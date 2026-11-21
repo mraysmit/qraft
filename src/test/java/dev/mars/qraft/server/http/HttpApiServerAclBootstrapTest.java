@@ -31,6 +31,7 @@ import dev.mars.qraft.state.QraftStateStore;
 import dev.mars.qraft.state.acl.AclBuiltins;
 import dev.mars.qraft.state.acl.AclSecrets;
 import dev.mars.qraft.state.acl.AclToken;
+import dev.mars.qraft.testing.LogCapturesHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -118,7 +119,7 @@ class HttpApiServerAclBootstrapTest {
             ((Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME)).detachAppender(captured);
         }
         for (String secret : secretsUsed) {
-            for (ILoggingEvent event : captured.list) {
+            for (ILoggingEvent event : LogCapturesHelper.snapshot(captured)) {
                 assertFalse(event.getFormattedMessage().contains(secret), "a log line holds a secret: " + event);
             }
         }
