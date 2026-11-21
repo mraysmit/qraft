@@ -76,6 +76,7 @@ final class AuthApiRoutes {
         String method = exchange.getRequestMethod().toUpperCase(Locale.ROOT);
         if (path.equals("/v1/acl/login") || path.equals("/v1/acl/logout")) {
             if (!server.prepareStateRequest(exchange, "POST")) return;
+            if (aclDisabled(exchange)) return;
             try {
                 if (path.equals("/v1/acl/login")) login(exchange);
                 else logout(exchange);
@@ -100,6 +101,7 @@ final class AuthApiRoutes {
             return;
         }
         if (!server.prepareStateRequest(exchange, method)) return;
+        if (aclDisabled(exchange)) return;
         AclPrincipal principal = server.principal(exchange);
         if (principal == null) return;
         boolean read = method.equals("GET");
@@ -114,6 +116,16 @@ final class AuthApiRoutes {
             server.respondError(exchange, 400, "invalid_json", "The body is not JSON: " + notJson.getOriginalMessage(),
                     false);
         }
+    }
+
+    /**
+     * Answers 401 {@code acl_disabled} when ACLs are disabled, as every other ACL route does: a method, a rule or a
+     * login means nothing on a cluster that enforces no token (code defects list, item 4).
+     */
+    private boolean aclDisabled(HttpExchange exchange) throws IOException {
+        if (server.acl.enabled()) return false;
+        server.respondError(exchange, 401, "acl_disabled", "ACL support disabled", false);
+        return true;
     }
 
     private AuthState auth() {
@@ -276,8 +288,16 @@ final class AuthApiRoutes {
 
     private void rules(HttpExchange exchange, String method, String id, boolean list) throws IOException {
         if (list) {
-            String query = exchange.getRequestURI().getQuery();
-            String only = query != null && query.startsWith("authmethod=") ? query.substring("authmethod=".length()) : null;
+            // The filter is read wherever it stands, and any other parameter refused, as the other ACL lists do (code
+            // defects list, item 11).
+            Map<String, String> query = AclApiRoutes.query(exchange);
+            for (String name : query.keySet()) {
+                if (!name.equals("authmethod")) {
+                    server.respondError(exchange, 400, "invalid_query", "Unsupported query parameter: " + name, false);
+                    return;
+                }
+            }
+            String only = query.get("authmethod");
             server.setAppliedIndex(exchange);
             server.respondJson(exchange, 200, (only == null ? auth().rules() : auth().rulesOf(only)).stream()
                     .map(AuthApiRoutes::answer).toList());
