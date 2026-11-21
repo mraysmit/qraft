@@ -5,7 +5,7 @@
 **Last updated:** 2026-11-08 (Phase 4 recorded, and the list complete and archived. Earlier the same day: Phases 1 to 3 done and recorded, decision 3 narrowed to the writes that create data, and Phase 4's tests and documents written; started the same day)
 **Follows:** [`task-list-sessions-and-locks-2026-11-08.md`](task-list-sessions-and-locks-2026-11-08.md)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), sections 7.1, 7.2 and 15
-**Validation:** [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](../../docs-design/QRAFT_FEATURE_VALIDATION_2026-10-21.md), the tenancy rows and item 6
+**Validation:** [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md), the tenancy rows and item 6
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
 ## 1. Goal
