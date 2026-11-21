@@ -70,7 +70,8 @@ public final class SharedDockerClusterFixture {
 
     private static final Logger logger = Logger.getLogger(SharedDockerClusterFixture.class.getName());
 
-    private static final DockerImageBuild IMAGE = new DockerImageBuild(SharedDockerClusterFixture::buildImage);
+    private static final DockerImageBuildHelper IMAGE =
+            new DockerImageBuildHelper(SharedDockerClusterFixture::buildImage);
     private static ComposeContainer threeNodeCluster;
     private static final Map<ComposeContainer, List<String>> ACTIVE_CLUSTERS = new IdentityHashMap<>();
     private static final Map<String, Map<String, ContainerNetwork>> DISCONNECTED_NETWORKS =
