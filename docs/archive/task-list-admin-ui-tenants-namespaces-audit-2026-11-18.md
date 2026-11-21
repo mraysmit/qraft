@@ -4,7 +4,7 @@
 **Status:** Complete and archived on 2026-11-18. Phases 0 to 2 and Phase 3's tests are in the owner's commits of 2026-11-17; Phase 3's code and Phase 4 are done, test first, and uncommitted. Locally, `mvn install`, the end-to-end and Docker stages and headless Chrome passed, with every log audited and none unflagged but a Vitest run the Jenkinsfile does not make (section 11).
 **Last updated:** 2026-11-18 (Phases 0 to 2 recorded from the commits, Phases 3 and 4 done, the list complete and archived, its links rewritten from its new place. Earlier: written on 2026-11-17, from a survey of the code with UI-6's second list in the working tree)
 **Active work:** complete on 2026-11-18
-**Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](../../docs-design/QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-6
+**Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-6
 **Source plan:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](../../docs-design/QRAFT_ADMIN_UI_UX_DESIGN.md), sections 4.3, 10.1, 10.3, 11, 12 and 13; [`task-list-tenancy-2026-11-08.md`](task-list-tenancy-2026-11-08.md); [`task-list-authentication-and-audit-2026-11-08.md`](task-list-authentication-and-audit-2026-11-08.md)
 **Predecessor:** [`task-list-admin-ui-sessions-locks-watches-2026-11-17.md`](task-list-admin-ui-sessions-locks-watches-2026-11-17.md) (UI-6, part 2)
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
