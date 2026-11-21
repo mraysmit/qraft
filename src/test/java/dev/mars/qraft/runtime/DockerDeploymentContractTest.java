@@ -148,6 +148,21 @@ class DockerDeploymentContractTest {
                 "the image copies its entrypoint from the otherwise excluded docker/ directory");
     }
 
+    /**
+     * Code defects list, item 10: every {@code mvn test} reinstalls {@code src/main/ui/node_modules} with {@code npm
+     * ci}, so the start scripts, which counted it as a production source, found the jar stale in every Docker stage and
+     * packaged it again under the Maven run testing it. The fixture's check leaves it out
+     * ({@code SharedDockerClusterFixture.newestProductionBuildInput}); the scripts must too.
+     */
+    @Test
+    void theStartScriptsJarFreshnessCheckLeavesOutTheInstalledNodeModulesAsTheFixtureDoes() throws IOException {
+        Path root = Path.of("").toAbsolutePath();
+        String shellBuild = Files.readString(root.resolve("docker/build-runtime.sh"));
+        assertTrue(shellBuild.contains("-path '*/node_modules' -prune"), shellBuild);
+        String powershellBuild = Files.readString(root.resolve("docker/build-runtime.ps1"));
+        assertTrue(powershellBuild.contains("node_modules"), powershellBuild);
+    }
+
     @Test
     void clusterLaunchersBuildTheRuntimeJarOnTheHostFirst() throws IOException {
         Path root = Path.of("").toAbsolutePath();
