@@ -28,7 +28,7 @@ import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
- * The replicated key/value state (key/value list, Phase 1; design section 10), on Consul's KV store: entries by
+ * The replicated key/value state (key/value list, Phase 1; design section 5.5), on Consul's KV store: entries by
  * tenant, namespace and key, written at the Raft index of the command that writes them. A set or a delete with a
  * compare-and-set index applies only when that index is the entry's {@code modifyIndex}, or, for 0, when the key is
  * absent. {@link #lastIndex} is the index of the last change, which a refused write or the delete of an absent key
@@ -129,12 +129,17 @@ public final class KvState {
     /**
      * Frees every key {@code session} holds, in every scope, at {@code index}: released, keeping its value, or deleted,
      * as the session's behaviour has it; each one's lock delay runs to {@code delayedUntil} when that is set.
+     *
+     * @return the keys it freed, as they were, in key order, for their events (code defects list, item 9)
      */
-    public void releaseSession(String session, boolean delete, long index, java.time.Instant delayedUntil) {
+    public List<KvEntry> releaseSession(String session, boolean delete, long index, java.time.Instant delayedUntil) {
         lock.writeLock().lock();
         try {
+            // Copied before the map changes: a TreeMap's entries are its nodes, and removing one with two children
+            // moves the next entry's key and value into it, so a held entry would then name another key.
             List<Map.Entry<Key, KvEntry>> held = entries.entrySet().stream()
-                    .filter(entry -> session.equals(entry.getValue().session())).toList();
+                    .filter(entry -> session.equals(entry.getValue().session()))
+                    .map(entry -> Map.entry(entry.getKey(), entry.getValue())).toList();
             for (Map.Entry<Key, KvEntry> entry : held) {
                 KvEntry current = entry.getValue();
                 if (delete) {
@@ -146,6 +151,7 @@ public final class KvState {
                 if (delayedUntil != null) lockDelays.put(entry.getKey(), delayedUntil);
             }
             if (!held.isEmpty()) lastIndex = index;
+            return held.stream().map(Map.Entry::getValue).toList();
         } finally {
             lock.writeLock().unlock();
         }
@@ -190,14 +196,19 @@ public final class KvState {
         }
     }
 
-    /** Deletes every key of {@code scope} that starts with {@code prefix}; the empty prefix deletes them all. */
-    public void deleteTree(KvScope scope, String prefix, long index) {
+    /**
+     * Deletes every key of {@code scope} that starts with {@code prefix}; the empty prefix deletes them all.
+     *
+     * @return whether any key was deleted
+     */
+    public boolean deleteTree(KvScope scope, String prefix, long index) {
         lock.writeLock().lock();
         try {
             List<Key> doomed = under(scope, prefix).stream()
                     .map(entry -> Key.of(scope, entry.key())).toList();
             doomed.forEach(entries::remove);
             if (!doomed.isEmpty()) lastIndex = index;
+            return !doomed.isEmpty();
         } finally {
             lock.writeLock().unlock();
         }
