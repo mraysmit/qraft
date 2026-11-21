@@ -1094,7 +1094,7 @@ errors or skips. This includes all 64 `AppConfigRaftMembershipTest` cases.
 The retained Maven, application, helper-process and Docker log audit found no
 unflagged errors or unattributed exception traces. Complete console, reports,
 coverage, archives and local audit records are retained under
-`logs/jenkins/Qraft-27/`; [JENKINS.md](../JENKINS.md#build-27-verification-2026-10-17)
+`logs/jenkins/Qraft-27/`; [JENKINS.md](JENKINS_BUILD_HISTORY_2026-10-03_to_2026-11-20.md#build-27-verification-2026-10-17)
 records the detailed totals and audit. This closes the parser slice's pending
 full verification at that commit. The uncommitted duration-boundary tests above
 were not included in build 27; their subsequent verification follows below.
@@ -1129,7 +1129,7 @@ recorded source patches to `bef4637`, without a commit or push:
   were reviewed separately with their causes and fixes, rather than accepted
   as clean runs.
 
-[JENKINS.md](../JENKINS.md#duration-boundary-replay-verification-2026-10-19)
+[JENKINS.md](JENKINS_BUILD_HISTORY_2026-10-03_to_2026-11-20.md#duration-boundary-replay-verification-2026-10-19)
 records the builds and source-patch SHA-256. Pipelines and snapshots are in
 `logs/jenkins/membership-rounds-2026-10-19/`; build 30's console, reports,
 archives, source manifest and audit are under `logs/jenkins/Qraft-30/`.
@@ -1162,7 +1162,7 @@ exception across the retained Maven, application, helper-process and container
 logs, and all seven source checksums match the local working tree. The source
 patch SHA-256 is
 `23a70bff66e1e3a3abc9f1778447e389ea8b034a6237d23ea29897727403da54`.
-See [the Jenkins wiring record](../JENKINS.md#membership-wiring-replay-verification-2026-10-19).
+See [the Jenkins wiring record](JENKINS_BUILD_HISTORY_2026-10-03_to_2026-11-20.md#membership-wiring-replay-verification-2026-10-19).
 Changes remain uncommitted; ordinary Jenkins builds still use pushed `main`.
 
 **Next task: automatic failed-voter cleanup.** Implement the contract below
@@ -1302,7 +1302,7 @@ correction, the successful focused rerun, the five consecutive affected runs
 and `mvn install` are recorded below. The owner
 stopped desktop automation and requested no further desktop control; the owner
 ran the documented visible-terminal commands in
-[TESTING.md](../TESTING.md#disruptive-server-validation), and all retained
+`docs/TESTING.md`, "Disruptive-server validation", as committed in `cc3b171`, and all retained
 output was inspected before any gate was recorded as passed. Step 8's real
 transport disruption and partition-healing scenarios remain open.
 
