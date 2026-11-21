@@ -24,6 +24,7 @@ import com.sun.net.httpserver.HttpServer;
 import dev.mars.qraft.common.Node;
 import dev.mars.qraft.client.NodeAnswerHelper;
 import dev.mars.qraft.client.catalog.HttpCatalogClient;
+import dev.mars.qraft.testing.LogCapturesHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -170,7 +171,7 @@ class RegistrationClientTest {
 
             assertFalse(client.shouldRetryRegistration());
             assertEquals(1, registrations.get());
-            assertEquals(1, appender.list.stream().filter(event ->
+            assertEquals(1, LogCapturesHelper.snapshot(appender).stream().filter(event ->
                     event.getFormattedMessage().contains("nodeName=client-1")
                             && event.getFormattedMessage().contains("invalid_registration")
                             && event.getFormattedMessage().contains("bad address")).count());
@@ -204,7 +205,7 @@ class RegistrationClientTest {
             // answer the same.
             assertTrue(client.shouldRetryRegistration());
             assertEquals(1, registrations.get());
-            assertEquals(1, appender.list.stream().filter(event ->
+            assertEquals(1, LogCapturesHelper.snapshot(appender).stream().filter(event ->
                     event.getFormattedMessage().contains("nodeName=client-1")
                             && event.getFormattedMessage().contains("node_name_reserved")
                             && event.getFormattedMessage().contains("is reserved by node")).count());
@@ -267,9 +268,10 @@ class RegistrationClientTest {
             heartbeatAnswer.set("{\"code\":\"token_not_found\",\"message\":\"ACL not found\",\"retryable\":false}");
             assertFalse(client.heartbeat(1).join());
             assertFalse(client.isRegistered(), "a client whose token is refused is not registered, so not ready");
-            assertTrue(appender.list.stream().anyMatch(event -> event.getLevel() == ch.qos.logback.classic.Level.WARN
+            assertTrue(LogCapturesHelper.snapshot(appender).stream()
+                    .anyMatch(event -> event.getLevel() == ch.qos.logback.classic.Level.WARN
                     && event.getFormattedMessage().contains("token_not_found")
-                    && event.getFormattedMessage().contains("token")), appender.list.toString());
+                    && event.getFormattedMessage().contains("token")), LogCapturesHelper.snapshot(appender).toString());
 
             // Registering again is refused for the token too, and is tried again, since the token can be replaced.
             registrationAnswer.set("{\"code\":\"permission_denied\",\"message\":\"Permission denied: token with "
