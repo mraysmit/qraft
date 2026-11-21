@@ -31,7 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests the administrative interface's bootstrap object: the public settings it names, and JSON that is safe to
- * place inside the {@code <script>} element of {@code index.html} (design section 12.4.1).
+ * place inside the {@code <script>} element of {@code index.html} (design section 13.2).
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-13
