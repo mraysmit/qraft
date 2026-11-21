@@ -34,7 +34,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
-import static dev.mars.qraft.testing.TestPorts.freePort;
+import static dev.mars.qraft.testing.TestPortsHelper.freePort;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
