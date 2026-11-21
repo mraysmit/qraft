@@ -20,6 +20,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import dev.mars.qraft.common.acl.AclDefaultPolicy;
+import dev.mars.qraft.testing.LogCapturesHelper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.LoggerFactory;
@@ -180,7 +181,7 @@ class AppConfigAclTest {
         } finally {
             logger.detachAppender(appender);
         }
-        return List.copyOf(appender.list);
+        return LogCapturesHelper.snapshot(appender);
     }
 
     private static String acl(boolean enabled, String defaultPolicy, Path file) {
