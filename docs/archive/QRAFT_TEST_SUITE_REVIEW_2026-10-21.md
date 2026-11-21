@@ -1,11 +1,13 @@
 # Qraft Test Suite Review
 
+**Archived:** 2026-11-21, by the documentation cleanup ([`task-list-documentation-cleanup-2026-11-21.md`](task-list-documentation-cleanup-2026-11-21.md)). Kept as a record; not updated since.
+
 **Date:** 2026-09-27
 **Last updated:** 2026-10-21 (dated document links refreshed and file renamed; historical findings and completion dates retained)
 **Scope:** every test source and test resource in the reactor as of 2026-09-27. At that date, the default suite
 had 738 tests; the Docker-tagged suite had 30.
 **Method:** four independent read-only reviews, one per area, against
-[`PROJECT_STANDARDS.md`](../docs/PROJECT_STANDARDS.md) section 4 and the design
+[`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md) section 4 and the design
 documents. Every finding that implies a production defect or a production
 deletion was verified against the code before inclusion.
 
@@ -194,7 +196,7 @@ with a test that failed first.
    and a four-member leader on two copies.
 
    Fixed on 2026-09-27 with `RaftNodeLeaderCommitTest`; see Step 1 of
-   [`task-list-test-suite-remediation-2026-10-21.md`](../docs/archive/task-list-test-suite-remediation-2026-10-21.md).
+   [`task-list-test-suite-remediation-2026-10-21.md`](task-list-test-suite-remediation-2026-10-21.md).
    Every existing multi-node test used three or five members, the odd sizes
    where the median is a majority.
 7. **A replica skipped a committed entry it could not apply.** When the state
