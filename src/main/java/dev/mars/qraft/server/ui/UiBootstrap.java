@@ -27,7 +27,7 @@ import java.util.Objects;
 import java.util.TreeMap;
 
 /**
- * The public runtime settings the administrative interface's {@code index.html} carries (design section 12.4.1): the
+ * The public runtime settings the administrative interface's {@code index.html} carries (design section 13.2): the
  * base path of the API it calls, its own path, the feature flags it may show, how it authenticates ({@code none}, or
  * {@code token} with ACLs enabled), and the server's security profile. It never holds a secret or a credential.
  *
