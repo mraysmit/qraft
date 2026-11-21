@@ -20,6 +20,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import dev.mars.qraft.common.ServiceDefinition;
+import dev.mars.qraft.testing.LogCapturesHelper;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
@@ -425,7 +426,7 @@ class ServiceReconcilerTest {
             assertEquals("invalid_registration", second.rejections().get("web").code());
             assertEquals("invalid_registration", third.rejections().get("web").code());
             assertEquals(List.of("web", "web"), client.registrations);
-            assertEquals(2, appender.list.stream().filter(event ->
+            assertEquals(2, LogCapturesHelper.snapshot(appender).stream().filter(event ->
                     event.getFormattedMessage().contains("serviceId=web")
                             && event.getFormattedMessage().contains("invalid_registration")
                             && event.getFormattedMessage().contains("bad address")).count());
