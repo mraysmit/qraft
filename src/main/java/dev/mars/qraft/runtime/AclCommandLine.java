@@ -40,8 +40,8 @@ import java.util.Set;
 /**
  * The {@code qraft acl} commands (ACL list, Phase 5), after Consul's {@code consul acl}: {@code bootstrap};
  * {@code token}, {@code policy} and {@code role}, each with {@code create}, {@code list}, {@code read} and
- * {@code delete}; and {@code explain}. Each calls a server's ACL API. A change goes to the leader, so its address is
- * the one to give; a read is answered by any server.
+ * {@code delete}; and {@code explain}. Each calls a server's ACL API, and any server will do: a follower forwards a
+ * change to the leader and answers a read itself.
  *
  * <p>The caller's token is {@code --token}, or the contents of {@code --token-file}, which keeps it out of the shell's
  * history and the process list, as {@code qraft operator raft} takes it; {@code bootstrap} sends none. The server's
