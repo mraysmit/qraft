@@ -25,12 +25,12 @@ package dev.mars.qraft.raft;
  * @since 2026-11-19
  * @version 1.0
  */
-final class DockerImageBuild {
+final class DockerImageBuildHelper {
     private final Runnable build;
     private boolean built;
     private Throwable failure;
 
-    DockerImageBuild(Runnable build) {
+    DockerImageBuildHelper(Runnable build) {
         this.build = build;
     }
 
