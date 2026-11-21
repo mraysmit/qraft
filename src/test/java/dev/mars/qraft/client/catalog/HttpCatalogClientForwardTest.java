@@ -106,6 +106,46 @@ class HttpCatalogClientForwardTest {
         assertEquals(0, never.get(), "a write whose outcome is unknown is not sent again");
     }
 
+    /**
+     * Code defects list, item 2: a write sent and never answered may have been applied. It was answered as no answer
+     * at all, which the client's local API turned into a retryable {@code no_server_reachable}; it is answered as the
+     * server answers such a write, {@code outcome_unknown}, not retryable, and no other server is asked.
+     */
+    @Test
+    void aWriteSentAndNeverAnsweredIsAnUnknownOutcomeThatIsNotSentElsewhere() throws Exception {
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        HttpServer silent = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        silent.createContext("/", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            try {
+                release.await();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            }
+            exchange.close();
+        });
+        silent.setExecutor(java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor());
+        silent.start();
+        servers.add(silent);
+        AtomicInteger never = new AtomicInteger();
+        client = new HttpCatalogClient(http, new ObjectMapper(), List.of(
+                URI.create("http://127.0.0.1:" + silent.getAddress().getPort()), server(200, "true", never)),
+                "node", "default", "default", "dc", "region", Duration.ofMillis(500));
+        try {
+            ForwardedResponse answer = client.forward("PUT", "/v1/kv/a", new byte[] {1}, "r-3", Map.of())
+                    .get(10, java.util.concurrent.TimeUnit.SECONDS).orElseThrow();
+
+            assertEquals(503, answer.status());
+            com.fasterxml.jackson.databind.JsonNode envelope = new ObjectMapper().readTree(answer.body());
+            assertEquals("outcome_unknown", envelope.path("code").asText(), envelope.toString());
+            assertEquals(false, envelope.path("retryable").asBoolean(true), envelope.toString());
+            assertEquals("r-3", envelope.path("requestId").asText(), envelope.toString());
+            assertEquals(0, never.get(), "a write that may have been applied is not sent to another server");
+        } finally {
+            release.countDown();
+        }
+    }
+
     @Test
     void aBlockingReadWaitsAsLongAsItAsksPlusTheRequestTimeout() throws Exception {
         // Consistency list, Phase 4: the server holds a blocking read until its wait; the client must not give up first.
