@@ -5,7 +5,7 @@
 **Last updated:** 2026-11-09 (the final run recorded, and the list complete and archived. Earlier the same day: phases 1 to 4 built)
 **Follows:** [`task-list-write-forwarding-2026-11-08.md`](task-list-write-forwarding-2026-11-08.md)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), section 13
-**Validation:** [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](../../docs-design/QRAFT_FEATURE_VALIDATION_2026-10-21.md), the DNS discovery
+**Validation:** [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md), the DNS discovery
 row and item 10
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
