@@ -22,8 +22,8 @@ import java.util.Iterator;
 import java.util.Map;
 
 /**
- * Refuses a configuration document that contains an environment-style placeholder. Qraft does not read
- * configuration from the environment (design section 16), so a {@code ${...}} in a document is a mistake:
+ * Refuses a configuration document that contains an environment-style placeholder. Qraft does not read configuration
+ * from the environment (design principle 9 and docs/CONFIGURATION.md), so a {@code ${...}} in a document is a mistake:
  * read literally it would name a host, path, or ID that does not exist, and interpolated it would reintroduce
  * environment configuration. Any string value, or any field name, containing {@code ${} is refused with its
  * JSON path. A lone {@code $} is ordinary text.
