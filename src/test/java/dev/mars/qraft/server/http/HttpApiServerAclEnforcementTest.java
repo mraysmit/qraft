@@ -46,6 +46,7 @@ import dev.mars.qraft.state.acl.AclSecrets;
 import dev.mars.qraft.state.acl.AclToken;
 import dev.mars.qraft.state.catalog.ServiceHealth;
 import dev.mars.qraft.state.catalog.ServiceInstance;
+import dev.mars.qraft.testing.LogCapturesHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -138,7 +139,7 @@ class HttpApiServerAclEnforcementTest {
             ((Logger) LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME)).detachAppender(captured);
         }
         for (String secret : secretsUsed) {
-            for (ILoggingEvent event : captured.list) {
+            for (ILoggingEvent event : LogCapturesHelper.snapshot(captured)) {
                 assertFalse(event.getFormattedMessage().contains(secret), "a log line holds a secret: " + event);
             }
         }
@@ -258,7 +259,7 @@ class HttpApiServerAclEnforcementTest {
 
         assertEquals(403, registerNode("web-1", null, reader).statusCode());
 
-        List<ILoggingEvent> refusals = captured.list.stream()
+        List<ILoggingEvent> refusals = LogCapturesHelper.snapshot(captured).stream()
                 .filter(event -> event.getFormattedMessage().contains(accessor)).toList();
         assertFalse(refusals.isEmpty(), "the refusal is logged with the accessor ID");
         for (ILoggingEvent event : refusals) {
