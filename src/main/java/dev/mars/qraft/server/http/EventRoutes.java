@@ -130,7 +130,7 @@ final class EventRoutes {
         }
         Request request;
         try {
-            request = request(exchange, journal);
+            request = request(exchange, journal, watch);
         } catch (IllegalArgumentException invalid) {
             server.respondError(exchange, 400, "invalid_query", HttpApiServer.safeMessage(invalid), false);
             return;
@@ -256,7 +256,11 @@ final class EventRoutes {
     /** A request's cursor, filter and limit. */
     record Request(EventCursor after, EventFilter filter, int limit) { }
 
-    static Request request(HttpExchange exchange, EventJournal journal) {
+    /**
+     * The request's cursor, filter and limit; {@code watch} refuses a limit, which only pages a query (code defects
+     * list, item 12).
+     */
+    static Request request(HttpExchange exchange, EventJournal journal, boolean watch) {
         Map<String, String> query = new LinkedHashMap<>();
         String raw = exchange.getRequestURI().getRawQuery();
         if (raw != null && !raw.isEmpty()) {
@@ -265,7 +269,9 @@ final class EventRoutes {
                 int equals = parameter.indexOf('=');
                 String name = URLDecoder.decode(equals < 0 ? parameter : parameter.substring(0, equals),
                         StandardCharsets.UTF_8);
-                if (!PARAMETERS.contains(name)) throw new IllegalArgumentException("Unsupported query parameter: " + name);
+                if (!PARAMETERS.contains(name) || watch && name.equals("limit")) {
+                    throw new IllegalArgumentException("Unsupported query parameter: " + name);
+                }
                 query.putIfAbsent(name, equals < 0 ? "" : URLDecoder.decode(parameter.substring(equals + 1),
                         StandardCharsets.UTF_8));
             }
@@ -291,6 +297,9 @@ final class EventRoutes {
                 throw new IllegalArgumentException("category must be system, domain, observation or audit: "
                         + query.get("category"));
             }
+        }
+        if (query.containsKey("type") && query.get("type").isEmpty()) {
+            throw new IllegalArgumentException("type must not be empty");
         }
         Set<String> types = query.containsKey("type") ? Set.of(query.get("type")) : Set.of();
         return new Request(after, new EventFilter(categories, types, named(query, "tenant"), named(query, "namespace"),
