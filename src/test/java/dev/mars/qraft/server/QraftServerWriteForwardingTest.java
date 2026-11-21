@@ -38,8 +38,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
-import static dev.mars.qraft.testing.TestPorts.freePort;
+import static dev.mars.qraft.testing.TestPortsHelper.freePort;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -106,6 +107,38 @@ class QraftServerWriteForwardingTest {
         return leader;
     }
 
+    /**
+     * Code defects list, item 8: every POST was forwarded as a write, so a follower sent the read-only token
+     * resolution, authorization and explanation to the leader, which they depend on and can lose an answer to.
+     */
+    @Test
+    void aFollowerAnswersTheReadOnlyPostRoutesItselfAndForwardsNoneOfThem() throws Exception {
+        startCluster();
+        waitUntil(() -> leader() >= 0, "a leader was elected");
+        int leader = leader();
+        int follower = (leader + 1) % 3;
+        waitUntil(() -> {
+            try {
+                return send(follower, "GET", "/raft/status", null).body().contains("\"leaderId\":\"server"
+                        + (leader + 1) + "\"");
+            } catch (Exception unanswered) {
+                return false;
+            }
+        }, "the follower knows the leader");
+        java.util.concurrent.atomic.AtomicInteger forwarded = new java.util.concurrent.atomic.AtomicInteger();
+        servers.get(follower).httpApi().orElseThrow().useWriteForwarding((to, request) -> {
+            forwarded.incrementAndGet();
+            return CompletableFuture.failedFuture(new dev.mars.qraft.raft.ForwardNotSentException("counted"));
+        });
+
+        for (String path : List.of("/v1/internal/acl/resolve", "/v1/internal/acl/authorize", "/v1/acl/explain")) {
+            HttpResponse<String> answer = send(follower, "POST", path, "{}");
+            assertFalse(answer.headers().firstValue("X-Qraft-Forwarded-To").isPresent(), path + ": " + answer.body());
+        }
+
+        assertEquals(0, forwarded.get(), "a read-only route is answered from the follower's own applied state");
+    }
+
     @Test
     void aFollowerAnswersAWriteWithTheLeadersAnswer() throws Exception {
         startCluster();
@@ -159,6 +192,8 @@ class QraftServerWriteForwardingTest {
         assertEquals(503, lost.statusCode(), lost.body());
         assertEquals("outcome_unknown", JSON.readTree(lost.body()).path("code").asText(),
                 "a write lost after it was sent may have been applied");
+        assertFalse(JSON.readTree(lost.body()).path("retryable").asBoolean(true),
+                "a write that may have been applied is not a retryable refusal (code defects list, decision 1)");
         followerApi.useWriteForwarding(servers.get(follower).forwardingTransport());
 
         int draining = (leader + 2) % 3;
@@ -223,6 +258,8 @@ class QraftServerWriteForwardingTest {
         assertEquals(503, held.statusCode(), held.body());
         assertEquals("outcome_unknown", JSON.readTree(held.body()).path("code").asText(),
                 "the write was sent, so it may have been applied");
+        assertFalse(JSON.readTree(held.body()).path("retryable").asBoolean(true),
+                "a write that may have been applied is not a retryable refusal (code defects list, decision 1)");
         long answered = answeredAt.get();
         assertTrue(answered - stopped < TimeUnit.SECONDS.toNanos(3), "answered within "
                 + TimeUnit.NANOSECONDS.toMillis(answered - stopped) + " ms of the leader stopping: a follower answers "
