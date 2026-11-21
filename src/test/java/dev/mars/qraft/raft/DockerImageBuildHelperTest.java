@@ -25,19 +25,19 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * Tests of {@link DockerImageBuild}: the runtime image is built once a run, and a build that fails is never tried
+ * Tests of {@link DockerImageBuildHelper}: the runtime image is built once a run, and a build that fails is never tried
  * again, so a daemon fault is reported to every later Docker class rather than retried away.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-19
  * @version 1.0
  */
-class DockerImageBuildTest {
+class DockerImageBuildHelperTest {
 
     @Test
     void aBuildThatSucceedsIsMadeOnceForTheWholeRun() {
         AtomicInteger builds = new AtomicInteger();
-        DockerImageBuild image = new DockerImageBuild(builds::incrementAndGet);
+        DockerImageBuildHelper image = new DockerImageBuildHelper(builds::incrementAndGet);
 
         image.ensureBuilt();
         image.ensureBuilt();
@@ -50,7 +50,7 @@ class DockerImageBuildTest {
     void aBuildThatFailsIsNeverTriedAgainAndEveryLaterCallerIsGivenTheFirstFailure() {
         AtomicInteger builds = new AtomicInteger();
         IllegalStateException failure = new IllegalStateException("the daemon lost a snapshot its build cache names");
-        DockerImageBuild image = new DockerImageBuild(() -> {
+        DockerImageBuildHelper image = new DockerImageBuildHelper(() -> {
             builds.incrementAndGet();
             throw failure;
         });
