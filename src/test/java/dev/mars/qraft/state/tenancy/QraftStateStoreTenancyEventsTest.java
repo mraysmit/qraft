@@ -19,6 +19,9 @@ package dev.mars.qraft.state.tenancy;
 import dev.mars.qraft.common.events.DomainEvent;
 import dev.mars.qraft.raft.RaftCommand;
 import dev.mars.qraft.state.QraftStateStore;
+import dev.mars.qraft.state.kv.KvCommand;
+import dev.mars.qraft.state.kv.KvEvents;
+import dev.mars.qraft.state.kv.KvScope;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -70,5 +73,32 @@ class QraftStateStoreTenancyEventsTest {
         assertEquals(in("acme", "prod", new TenancyEvents.NamespaceDeleted("acme", "prod")), deleted.getLast());
         assertEquals(in("acme", "default", new TenancyEvents.TenantDeleted("acme")),
                 apply(TenancyCommand.deleteTenant("acme")).getLast(), "after what the deletion removed");
+    }
+
+    /**
+     * Code defects list, item 9: a deletion removed a scope's keys and a tenant's namespaces with no event for them, so
+     * a watch saw only the services leave.
+     */
+    @Test
+    void aDeletionProducesTheEventsOfTheKeysAndNamespacesItRemoves() {
+        apply(TenancyCommand.createTenant("acme", ""));
+        apply(TenancyCommand.createNamespace("acme", "prod", ""));
+        apply(TenancyCommand.createNamespace("acme", "staging", ""));
+        for (String namespace : List.of("default", "prod", "staging")) {
+            apply(KvCommand.set(new KvScope("acme", namespace), "app/config", new byte[] {1}, 0, null));
+        }
+        store.recordDomainEvents(true);
+
+        assertEquals(List.of(in("acme", "prod", new KvEvents.TreeDeleted("")),
+                        in("acme", "prod", new TenancyEvents.NamespaceDeleted("acme", "prod"))),
+                apply(TenancyCommand.deleteNamespace("acme", "prod")));
+
+        List<DomainEvent> tenant = apply(TenancyCommand.deleteTenant("acme"));
+        assertEquals(java.util.Set.of(in("acme", "default", new KvEvents.TreeDeleted("")),
+                        in("acme", "staging", new KvEvents.TreeDeleted("")),
+                        in("acme", "default", new TenancyEvents.NamespaceDeleted("acme", "default")),
+                        in("acme", "staging", new TenancyEvents.NamespaceDeleted("acme", "staging"))),
+                java.util.Set.copyOf(tenant.subList(0, tenant.size() - 1)), tenant.toString());
+        assertEquals(in("acme", "default", new TenancyEvents.TenantDeleted("acme")), tenant.getLast());
     }
 }
