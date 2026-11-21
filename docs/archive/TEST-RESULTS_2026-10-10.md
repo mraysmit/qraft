@@ -1,8 +1,10 @@
 # Test results
 
+**Archived:** 2026-11-21, by the documentation cleanup ([`task-list-documentation-cleanup-2026-11-21.md`](task-list-documentation-cleanup-2026-11-21.md)). Kept as a record; not updated since.
+
 This document records what investigations made with tests have found: what was run, what it showed, and
-what it did not show. The newest entry is first. [TESTING.md](TESTING.md) says how tests are run, and
-[JENKINS.md](JENKINS.md) records the Jenkins builds.
+what it did not show. The newest entry is first. [TESTING.md](../TESTING.md) says how tests are run, and
+[JENKINS.md](../JENKINS.md) records the Jenkins builds.
 
 ## 2026-10-10: a server killed while it writes its first snapshot
 
@@ -108,7 +110,7 @@ directory is forced has no test for a later snapshot.
 - **Servers reach it together.** Every server applies the same log, so each takes its first snapshot
   within one check interval of the others. In build 8 all three began within 115 milliseconds. One power
   loss in that moment could leave more than one server refusing to start. The procedure in
-  [RAFT_STORAGE_OPERATIONS.md](RAFT_STORAGE_OPERATIONS.md) rebuilds one replica at a time from a healthy
+  [RAFT_STORAGE_OPERATIONS.md](../OPERATIONS.md) rebuilds one replica at a time from a healthy
   quorum, and stops if there is no quorum.
 - **The refusal does not protect data here.** The log is compacted only after a snapshot is published, so
   a server with a temporary file and no snapshot still has its whole log.
@@ -138,7 +140,7 @@ Changed, in the tests:
   `killedLeaderIsReplacedAndRejoinsWithCompleteCatalog`, and
   `retryAfterLeaderCrashConvergesToOneCatalogInstance` of `DockerDurableRestartTest`. Commit `122d739`.
 - Jenkins build 9 passed on that commit: 941 results, none failed, and no server refused to start.
-- [TESTING.md](TESTING.md) has the rule for new Docker tests.
+- [TESTING.md](../TESTING.md) has the rule for new Docker tests.
 
 Not changed at that point: the server. It was changed later the same day, as "The change" describes.
 
@@ -220,8 +222,8 @@ Red, green, and mutation, all on the development machine, in "The runs" below:
   nine make a test fail. A tenth, the removal of `REPLACE_EXISTING` from the move that sets the file aside,
   survived and is equivalent: beside `ATOMIC_MOVE` the JDK ignores every other option.
 
-Documents changed with it: [RAFT_STORAGE_OPERATIONS.md](RAFT_STORAGE_OPERATIONS.md), sections 14.4, 14.5,
-and 22 of the design document, the rule for Docker tests in [TESTING.md](TESTING.md), and this entry.
+Documents changed with it: [RAFT_STORAGE_OPERATIONS.md](../OPERATIONS.md), sections 14.4, 14.5,
+and 22 of the design document, the rule for Docker tests in [TESTING.md](../TESTING.md), and this entry.
 
 ### What other Raft implementations do
 
@@ -273,8 +275,8 @@ Limits of this research:
 
 ### Opinion
 
-This is the recommendation of the assistant that made the investigation, recorded on 2026-10-10 before
-the decision. The owner decided the same day to proceed, and "The change" above is the result.
+This is the investigation's recommendation, recorded on 2026-10-10 before the decision. The owner decided
+the same day to proceed, and "The change" above is the result.
 
 **Make the change, both parts together.**
 
@@ -302,7 +304,7 @@ What speaks for caution:
 
 Until it is decided, nothing is at risk that was not at risk before: the tests keep their kills out of the
 window, and an operator who meets the refusal follows "Recover a corrupt replica from peers" in
-[RAFT_STORAGE_OPERATIONS.md](RAFT_STORAGE_OPERATIONS.md).
+[RAFT_STORAGE_OPERATIONS.md](../OPERATIONS.md).
 
 ### The runs
 
