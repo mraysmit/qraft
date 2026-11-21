@@ -5,7 +5,7 @@
 **Last updated:** 2026-11-15 (Phase 3 done, the list complete and archived, its links rewritten from its new place. Earlier the same day: Phases 0 to 2 built, test first, with their records; decisions 3, 5 and 6 corrected to
 what the code does. Earlier the same day: written, at the owner's word to proceed with UI-4)
 **Active work:** complete on 2026-11-15
-**Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](../../docs-design/QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-4
+**Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-4
 **Source plan:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](../../docs-design/QRAFT_ADMIN_UI_UX_DESIGN.md), sections 4.1, 5.1, 9.1, 9.4, 9.6, 12 and 13; [`QRAFT_EVENT_ARCHITECTURE.md`](../QRAFT_EVENT_ARCHITECTURE.md); [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), section 12
 **Predecessor:** [`task-list-admin-ui-operate-2026-11-14.md`](task-list-admin-ui-operate-2026-11-14.md) (UI-3)
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
