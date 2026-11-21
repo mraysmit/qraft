@@ -21,6 +21,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import dev.mars.qraft.client.config.ClientConfiguration;
+import dev.mars.qraft.testing.LogCapturesHelper;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 
@@ -124,10 +125,10 @@ class LocalApiServerTest {
             assertEquals(InetAddress.getLoopbackAddress(), bound.getAddress(),
                     "as Consul's client_addr, the local API is reached only from the host itself");
             assertEquals(health.port(), bound.getPort());
-            assertEquals(1, appender.list.stream().filter(event -> event.getLevel() == Level.INFO
+            assertEquals(1, LogCapturesHelper.snapshot(appender).stream().filter(event -> event.getLevel() == Level.INFO
                     && event.getFormattedMessage().equals("Local API started: protocol=http, address="
                             + bound.getAddress().getHostAddress() + ":" + bound.getPort())).count(),
-                    "the startup log says where the local API listens: " + appender.list);
+                    "the startup log says where the local API listens: " + LogCapturesHelper.snapshot(appender));
         } finally {
             health.shutdown();
             logger.detachAppender(appender);
