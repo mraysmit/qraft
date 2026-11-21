@@ -102,6 +102,30 @@ class QraftStateStoreKvEventsTest {
         assertEquals(List.of(), apply(SessionCommand.destroy("s1", T0)), "a session that is gone");
     }
 
+    /**
+     * Code defects list, item 9: a session's end released or deleted its keys with no event for them; a lock held by a
+     * session that ends is released, and a key of a delete-behaviour session deleted, each with its event.
+     */
+    @Test
+    void aSessionsEndProducesTheEventsOfTheKeysItReleasesOrDeletes() {
+        apply(NodeCommand.register(Node.of("host-a", "10.0.0.1", null, null, Map.of()), T0));
+        apply(SessionCommand.create(new Session("s-release", "host-a", "r", SessionBehavior.RELEASE, Duration.ZERO,
+                Duration.ZERO, 0, T0)));
+        apply(SessionCommand.create(new Session("s-delete", "host-a", "d", SessionBehavior.DELETE, Duration.ZERO,
+                Duration.ZERO, 0, T0)));
+        apply(KvCommand.lock(ACME, "a", bytes("1"), 0, "s-release", T0));
+        apply(KvCommand.lock(ACME, "b", bytes("2"), 0, "s-delete", T0));
+        apply(KvCommand.lock(ACME, "c", bytes("3"), 0, "s-delete", T0));
+        store.recordDomainEvents(true);
+
+        assertEquals(List.of(in(new KvEvents.LockReleased("a", "s-release")),
+                        new DomainEvent(null, null, new SessionEvents.SessionDestroyed("s-release", "destroyed"))),
+                apply(SessionCommand.destroy("s-release", T0)));
+        assertEquals(List.of(in(new KvEvents.KeyDeleted("b")), in(new KvEvents.KeyDeleted("c")),
+                        new DomainEvent(null, null, new SessionEvents.SessionDestroyed("s-delete", "destroyed"))),
+                apply(SessionCommand.destroy("s-delete", T0)));
+    }
+
     /** A session's end names its cause: an API destroy, a lapsed TTL, or its node (Sessions, Locks and Watches list, decision 3). */
     @Test
     void aSessionsEndNamesItsCause() {
