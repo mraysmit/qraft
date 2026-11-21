@@ -28,6 +28,7 @@ import dev.mars.qraft.client.service.RegistrationClient;
 import dev.mars.qraft.common.Node;
 import dev.mars.qraft.common.QraftVersion;
 import dev.mars.qraft.common.ServiceDefinition;
+import dev.mars.qraft.testing.LogCapturesHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -240,7 +241,7 @@ class QraftClientTest {
 
             assertEquals(0, scheduler.pendingCount(), "no registration retry may be scheduled");
             assertEquals(1, registrations.get());
-            assertEquals(1, appender.list.stream().filter(event ->
+            assertEquals(1, LogCapturesHelper.snapshot(appender).stream().filter(event ->
                     event.getFormattedMessage().contains("nodeName=client-1")
                             && event.getFormattedMessage().contains("invalid_registration")
                             && event.getFormattedMessage().contains("bad address")).count());
@@ -687,7 +688,7 @@ class QraftClientTest {
             assertFalse(client.shutdown().get(10, TimeUnit.SECONDS),
                     "shutdown completes at its deadline while every deregistration is still held open");
             assertSame(client.shutdown(), client.shutdown());
-            assertEquals(1, appender.list.stream()
+            assertEquals(1, LogCapturesHelper.snapshot(appender).stream()
                     .filter(event -> event.getFormattedMessage().contains("shutdown incomplete"))
                     .count());
             assertFalse(client.localApi().isHealthy());
