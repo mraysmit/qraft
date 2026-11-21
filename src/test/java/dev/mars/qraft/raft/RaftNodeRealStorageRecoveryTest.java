@@ -137,7 +137,7 @@ class RaftNodeRealStorageRecoveryTest {
 
     /**
      * A crash mid-write leaves a structurally incomplete final record. Recovery repairs it and keeps
-     * every complete record before it (design section 14.5).
+     * every complete record before it (design section 10.5).
      */
     @Test
     void aTornFinalRecordIsRepairedAndEveryCompleteRecordRecovers() throws Exception {
@@ -161,7 +161,7 @@ class RaftNodeRealStorageRecoveryTest {
     /**
      * A complete record whose checksum fails is not a torn write: it may be acknowledged data. The
      * node must refuse to start and must leave the log byte for byte as it found it, rather than
-     * repair it by discarding the record (design section 14.5).
+     * repair it by discarding the record (design section 10.5).
      */
     @Test
     void aCorruptCompleteRecordFailsStartupAndLeavesTheLogUntouched() throws Exception {
