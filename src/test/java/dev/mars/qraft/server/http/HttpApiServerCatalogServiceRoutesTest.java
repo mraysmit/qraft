@@ -43,8 +43,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests the service half of the client's write protocol (Consul-style client list, Phase 1): a service is registered
- * under {@code service} in the body of {@code PUT /v1/catalog/register}, beside {@code node}, and removed with
- * {@code {"serviceId": ...}} in the body of {@code PUT /v1/catalog/deregister}, as design section 12.1.2 fixes the two
+ * under {@code service} in the body of {@code PUT /v1/catalog/register}, beside {@code node}, and removed with {@code
+ * {"serviceId": ...}} in the body of {@code PUT /v1/catalog/deregister}, as docs/HTTP_API.md, "Nodes" fixes the two
  * bodies for nodes and services together. The node routes themselves are tested in {@link HttpApiServerTest}.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
