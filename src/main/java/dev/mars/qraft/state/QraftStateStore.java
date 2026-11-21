@@ -266,8 +266,15 @@ public final class QraftStateStore implements RaftLogApplicator, dev.mars.qraft.
      */
     private void invalidateSession(String id, Instant at, long index, String reason) {
         sessions.destroy(id).ifPresent(session -> {
-            kv.releaseSession(id, session.behavior() == dev.mars.qraft.state.session.SessionBehavior.DELETE, index,
-                    session.lockDelay().isZero() ? null : at.plus(session.lockDelay()));
+            boolean delete = session.behavior() == dev.mars.qraft.state.session.SessionBehavior.DELETE;
+            // Each key the session's end frees has its event, in key order, before the session's own (code defects
+            // list, item 9).
+            for (dev.mars.qraft.state.kv.KvEntry freed : kv.releaseSession(id, delete, index,
+                    session.lockDelay().isZero() ? null : at.plus(session.lockDelay()))) {
+                event(freed.tenant(), freed.namespace(), delete
+                        ? new dev.mars.qraft.state.kv.KvEvents.KeyDeleted(freed.key())
+                        : new dev.mars.qraft.state.kv.KvEvents.LockReleased(freed.key(), id));
+            }
             metrics().sessionInvalidated(reason);
             event(null, null, new dev.mars.qraft.state.session.SessionEvents.SessionDestroyed(id, reason));
         });
@@ -296,8 +303,12 @@ public final class QraftStateStore implements RaftLogApplicator, dev.mars.qraft.
             case dev.mars.qraft.state.tenancy.TenancyCommand.DeleteTenant delete -> {
                 if (!dev.mars.qraft.state.tenancy.TenancyState.DEFAULT.equals(delete.name())
                         && tenancy.tenantExists(delete.name())) {
-                    tenancy.namespaces(delete.name()).forEach(namespace ->
-                            removeScope(delete.name(), namespace.name(), index));
+                    // Each namespace goes with its tenant, with its event (code defects list, item 9).
+                    tenancy.namespaces(delete.name()).forEach(namespace -> {
+                        removeScope(delete.name(), namespace.name(), index);
+                        event(delete.name(), namespace.name(), new dev.mars.qraft.state.tenancy.TenancyEvents
+                                .NamespaceDeleted(delete.name(), namespace.name()));
+                    });
                 }
                 yield tenancy.deleteTenant(delete.name());
             }
@@ -381,7 +392,9 @@ public final class QraftStateStore implements RaftLogApplicator, dev.mars.qraft.
                 serviceLeft(instance);
             }
         }
-        kv.deleteTree(new dev.mars.qraft.state.kv.KvScope(tenant, namespace), "", index);
+        if (kv.deleteTree(new dev.mars.qraft.state.kv.KvScope(tenant, namespace), "", index)) {
+            event(tenant, namespace, new dev.mars.qraft.state.kv.KvEvents.TreeDeleted(""));
+        }
     }
 
     private RaftCommandResult<?> applyCatalogCommand(CatalogCommand command) {
