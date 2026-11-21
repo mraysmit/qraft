@@ -5,7 +5,7 @@
 **Last updated:** 2026-11-08 (Phase 2 recorded, and the list complete and archived. Earlier the same day: Phase 1 done and recorded, and Phase 2's check and documents written; started the same day)
 **Follows:** [`task-list-authentication-and-audit-2026-11-08.md`](task-list-authentication-and-audit-2026-11-08.md)
 **Design:** [`QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md`](../../docs-design/QRAFT_DISTRIBUTED_SERVICE_PLATFORM_DESIGN.md), section 7.5
-**Validation:** [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](../../docs-design/QRAFT_FEATURE_VALIDATION_2026-10-21.md), the catalog's index row and the consistency index row
+**Validation:** [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md), the catalog's index row and the consistency index row
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
 ## 1. Goal
