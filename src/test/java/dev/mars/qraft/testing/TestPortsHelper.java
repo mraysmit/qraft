@@ -24,8 +24,8 @@ import java.util.Set;
 /**
  * Hands out ports for tests that must write a port into a configuration before the server that binds it starts.
  *
- * <p>A port is found by binding port 0 and closing the socket, so the kernel may offer it again before the server
- * binds it. Jenkins build 85 failed {@code KubernetesAuthEndToEndTest} so: port 35461 went to server1's Raft port, which
+ * <p>A port is found by binding port 0 and closing the socket, so the kernel may offer it again before the server binds
+ * it. Jenkins build 85 failed {@code KubernetesAuthEndToEndTest} so: port 35461 went to server1's Raft port, which
  * server1 had bound, and then to server2's API gRPC port. A port given out once in this JVM is therefore never given
  * out again, which covers every port a test in the same fork chose, bound or not. A port another process takes
  * between the choice and the bind is not covered; only a server that binds port 0 itself would be.
@@ -34,7 +34,7 @@ import java.util.Set;
  * @since 2026-11-20
  * @version 1.0
  */
-public final class TestPorts {
+public final class TestPortsHelper {
     /** A source of candidate ports. */
     @FunctionalInterface
     interface PortSource {
@@ -42,12 +42,12 @@ public final class TestPorts {
     }
 
     private static final int MAX_OFFERS = 100;
-    private static final TestPorts SYSTEM = new TestPorts(TestPorts::ephemeralPort);
+    private static final TestPortsHelper SYSTEM = new TestPortsHelper(TestPortsHelper::ephemeralPort);
 
     private final PortSource source;
     private final Set<Integer> issued = new HashSet<>();
 
-    TestPorts(PortSource source) {
+    TestPortsHelper(PortSource source) {
         this.source = source;
     }
 
