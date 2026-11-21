@@ -16,6 +16,7 @@
 
 package dev.mars.qraft.raft;
 
+import dev.mars.qraft.testing.LogCapturesHelper;
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
@@ -67,8 +68,8 @@ class TransitionFailureLogTest {
     void aDrainingRefusalIsLoggedAtDebugWithItsMessageAndNoStackTrace() {
         TransitionFailureLog.log(logger, FORMAT, new RaftTransitionSequencer.DrainingException(), 7L);
 
-        assertEquals(1, events.list.size());
-        ILoggingEvent event = events.list.get(0);
+        assertEquals(1, LogCapturesHelper.snapshot(events).size());
+        ILoggingEvent event = LogCapturesHelper.snapshot(events).get(0);
         assertEquals(Level.DEBUG, event.getLevel());
         assertEquals("Failed to process vote response for election term 7: Raft transition sequencer is draining",
                 event.getFormattedMessage());
@@ -80,7 +81,7 @@ class TransitionFailureLogTest {
         TransitionFailureLog.log(logger, FORMAT,
                 new CompletionException(new RaftTransitionSequencer.DrainingException()), 7L);
 
-        assertEquals(Level.DEBUG, events.list.get(0).getLevel());
+        assertEquals(Level.DEBUG, LogCapturesHelper.snapshot(events).get(0).getLevel());
     }
 
     @Test
@@ -89,7 +90,7 @@ class TransitionFailureLogTest {
 
         TransitionFailureLog.log(logger, FORMAT, failure, 7L);
 
-        ILoggingEvent event = events.list.get(0);
+        ILoggingEvent event = LogCapturesHelper.snapshot(events).get(0);
         assertEquals(Level.ERROR, event.getLevel());
         assertEquals("Failed to process vote response for election term 7: disk full", event.getFormattedMessage());
         assertNotNull(event.getThrowableProxy(), "a real failure keeps its stack trace");
@@ -102,8 +103,9 @@ class TransitionFailureLogTest {
 
         TransitionFailureLog.log(logger, FORMAT, fenced, 7L);
 
-        assertEquals(Level.ERROR, events.list.get(0).getLevel(), "a fence is a fault and stays an error");
-        assertEquals(fenced.getClass().getName(), events.list.get(0).getThrowableProxy().getClassName());
+        ILoggingEvent logged = LogCapturesHelper.snapshot(events).get(0);
+        assertEquals(Level.ERROR, logged.getLevel(), "a fence is a fault and stays an error");
+        assertEquals(fenced.getClass().getName(), logged.getThrowableProxy().getClassName());
     }
 
     @Test
@@ -111,6 +113,6 @@ class TransitionFailureLogTest {
         TransitionFailureLog.log(logger, "Snapshot failed: {}", new RaftTransitionSequencer.DrainingException());
 
         assertEquals("Snapshot failed: Raft transition sequencer is draining",
-                events.list.get(0).getFormattedMessage());
+                LogCapturesHelper.snapshot(events).get(0).getFormattedMessage());
     }
 }
