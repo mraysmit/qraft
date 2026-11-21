@@ -112,6 +112,10 @@ class HttpApiServerKubernetesLoginTest {
         kubernetes.start();
     }
 
+    @org.junit.jupiter.api.io.TempDir
+    Path aclData;
+    private String writer;
+
     private void start() throws Exception {
         runtime = RaftExecutorsFixture.create();
         QraftStateStore store = new QraftStateStore();
@@ -122,14 +126,38 @@ class HttpApiServerKubernetesLoginTest {
         node.start().get(10, TimeUnit.SECONDS);
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.sleep(10);
-        server = new HttpApiServer(0, node, store, Clock.systemUTC(), AdminUiConfig.disabled(), null);
+        // ACLs enabled: with ACLs disabled the login routes answer 401 acl_disabled. The method and its rule are
+        // written with an acl:write token; a login needs none.
+        server = new HttpApiServer(0, node, store, Clock.systemUTC(), AdminUiConfig.disabled(), null,
+                HttpApiServer.DEFAULT_RAFT_TIMEOUT, null, new AclHttpSettings(true, aclData,
+                        dev.mars.qraft.common.acl.AclDefaultPolicy.DENY));
+        writer = writerToken();
         server.start().get(10, TimeUnit.SECONDS);
     }
 
     private HttpResponse<String> send(String method, String path, Object body) throws Exception {
-        return http.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path))
-                .method(method, HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(body))).build(),
-                HttpResponse.BodyHandlers.ofString());
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path))
+                .method(method, HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(body)));
+        if (!path.equals("/v1/acl/login")) request.header("X-Qraft-Token", writer);
+        return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    /** A token with {@code acl:write}, written to the replicated state directly. */
+    private String writerToken() throws Exception {
+        String policy = java.util.UUID.randomUUID().toString();
+        submit(dev.mars.qraft.state.AclCommand.createPolicy(new dev.mars.qraft.state.acl.AclPolicy(policy,
+                "p-" + policy.substring(0, 8), "",
+                dev.mars.qraft.common.acl.AclRulesJson.parse("{\"acl\":\"write\"}"))));
+        String secret = java.util.UUID.randomUUID().toString();
+        submit(dev.mars.qraft.state.AclCommand.createToken(new dev.mars.qraft.state.acl.AclToken(
+                java.util.UUID.randomUUID().toString(), dev.mars.qraft.state.acl.AclSecrets.hash(secret), "",
+                List.of(policy), List.of(), List.of(), List.of(), java.time.Instant.now(), null, false)));
+        return secret;
+    }
+
+    private void submit(dev.mars.qraft.raft.RaftCommand command) throws Exception {
+        assertEquals(dev.mars.qraft.raft.RaftCommandResult.Success.class,
+                node.submitCommand(command).get(10, TimeUnit.SECONDS).getClass());
     }
 
     private void method(String name, String ca) throws Exception {
