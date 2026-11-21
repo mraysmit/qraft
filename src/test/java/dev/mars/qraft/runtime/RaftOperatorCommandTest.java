@@ -65,6 +65,7 @@ class RaftOperatorCommandTest {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/v1/operator/raft/configuration", exchange -> {
             requests.add(exchange.getRequestMethod() + " " + exchange.getRequestURI());
+            tokens.add(String.valueOf(exchange.getRequestHeaders().getFirst("X-Qraft-Token")));
             reply(exchange, 200, """
                     {"servers":[
                      {"serverId":"id-a","name":"a","address":"a:9080","voter":true,"leader":true},
@@ -94,6 +95,32 @@ class RaftOperatorCommandTest {
         assertEquals(List.of("Name", "ID", "Address", "State", "Voter"), List.of(lines.get(0).split("\\s+")));
         assertEquals(List.of("a", "id-a", "a:9080", "leader", "true"), List.of(lines.get(1).split("\\s+")));
         assertEquals(List.of("d", "id-d", "d:9080", "follower", "false"), List.of(lines.get(2).split("\\s+")));
+        assertEquals(List.of("null"), tokens, "without a token, no token header is sent");
+    }
+
+    /**
+     * Documentation cleanup list, decision 4: with ACLs enabled the configuration read needs {@code operator:read}, so
+     * list-peers takes a token as remove-peer does. Without one, the runbook's replacement and lost-quorum procedures
+     * could not list the servers under the production profile's {@code deny}.
+     */
+    @Test
+    void listPeersSendsTheTokenOptionOrTheTokenFromAFile() throws Exception {
+        assertEquals(0, run("raft", "list-peers", "--token", "from-the-option", "--http-addr", address()), err());
+        Path tokenFile = Files.writeString(directory.resolve("token"), "from-the-file\n");
+        assertEquals(0, run("raft", "list-peers", "--token-file", tokenFile.toString(), "--http-addr", address()),
+                err());
+
+        assertEquals(List.of("from-the-option", "from-the-file"), tokens);
+    }
+
+    @Test
+    void listPeersWithAnUnreadableTokenFileReportsItAndSendsNothing() {
+        int exit = run("raft", "list-peers", "--token-file", directory.resolve("missing").toString(),
+                "--http-addr", address());
+
+        assertEquals(1, exit);
+        assertTrue(err().contains("Could not read the token file"), err());
+        assertTrue(requests.isEmpty());
     }
 
     @Test
