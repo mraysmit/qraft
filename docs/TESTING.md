@@ -1,987 +1,359 @@
-# Running the Tests
+# Running and Auditing the Tests
+
+**Last updated:** 2026-11-21
+
+This document says how to run Qraft's tests and how to audit what they log. The rules that tests must follow are in
+[PROJECT_STANDARDS.md, section 4](PROJECT_STANDARDS.md#4-testing); the rules for an assistant working in this
+repository are in [AGENTS.md](../AGENTS.md). The Jenkins job itself is described in [JENKINS.md](JENKINS.md).
 
 ## Prerequisites
 
-- **JDK 27.** The build refuses older JDKs. Point `JAVA_HOME`, and your IDE's test runtime, at it.
-- **Maven 3.9 or newer.**
+- **JDK 27.** The enforcer refuses older JDKs. Point `JAVA_HOME`, and your IDE's test runtime, at it.
+- **Maven.**
 - **Docker**, for the Docker suite only.
-- **PowerShell 7**, for the UTF-8 log-capture commands below.
-- Optional: the **Maven daemon**, `mvnd`. It takes the same arguments as `mvn`, and keeps Maven warm between
-  runs, which saves most of the start-up cost of each small run.
-- **Network access to nodejs.org and the npm registry**, for the administrative interface (`src/main/ui`). No
-  Node installation is needed: in `generate-resources` of every build, `frontend-maven-plugin` puts the Node
-  that `pom.xml` names into `target/node` (cached in the local Maven repository after the first download), runs
-  `npm ci` on the committed lockfile, and builds into `target/generated-resources/ui`. In `test`, Vitest runs the
-  interface's tests after the Java tests; `-DskipTests` skips both. `EmbeddedUiResourcesTest` reads what that
-  build embeds, so it passes only after a Maven build, not from compiled classes alone.
+- **PowerShell 7**, for the UTF-8 log capture below. Windows PowerShell 5.1 writes UTF-16 logs.
+- Optional: the **Maven daemon**, `mvnd`, which takes the same arguments as `mvn` and keeps Maven warm between runs.
+- **Network access to nodejs.org and the npm registry**, for the administrative interface in `src/main/ui`. No Node
+  installation is needed: in `generate-resources`, `frontend-maven-plugin` installs the Node that `pom.xml` names into
+  `target/node`, runs `npm ci` on the committed lockfile, and builds into `target/generated-resources/ui`. In `test`,
+  Vitest runs the interface's tests after the Java tests. `-DskipTests` skips both; `-DskipVitest=true` skips Vitest
+  alone. `EmbeddedUiResourcesTest` reads what that build embeds, so it passes only after a Maven build.
 
-In PowerShell, quote every `-D` argument, for example `"-Dtest=RaftNodeTest"`. Otherwise PowerShell splits
-the argument at the dot.
-
-## Jenkins access
-
-- **URL:** <http://192.168.137.32:8080/>
-- **Username:** `mraysmit`
-- **API token:** stored locally in `.env/jenkins-api-token.txt`, relative to the repository root.
-
-For Jenkins API requests, use HTTP Basic authentication with the username and API token as the password.
-Read the token from the local file; keep its value out of documentation and logs.
-Authentication was verified on 2026-10-03: `GET /whoAmI/api/json` returned HTTP 200 with
-`authenticated: true`, `name: mraysmit`, and `anonymous: false`.
-
-### Run every suite on Jenkins
-
-Open the [Qraft job](http://192.168.137.32:8080/job/Qraft/) and select **Build Now**.
-The job loads the root [`Jenkinsfile`](../Jenkinsfile) and checks out its configured branch from
-`https://github.com/mraysmit/qraft.git` on the `linux` node. The Linux fixture permission fix is included
-in the published CI branch:
-
-1. Verify Git, Maven, Docker, and Docker Compose. Download a checksum-verified SapMachine JDK 27
-   into the job's `@tools` directory on its first run.
-2. Run `mvn -B --fail-at-end -Dstyle.color=never clean install`: the default tests,
-   coverage gates, and a freshly packaged runtime jar.
-3. Run the tests tagged `e2e`, with `test.excludedGroups` cleared.
-4. Run the tests tagged `docker` or `slow`, with `test.excludedGroups` cleared.
-   Together with step 3, this covers every test the default build excludes; the Docker fixtures
-   build their own image.
-
-The suites run sequentially, and concurrent Qraft builds are disabled. An end-to-end failure still
-allows the Docker suite to run, while a failed default build stops the dependent suites. Maven's exit
-code is preserved through `tee`, and the build has a one-hour timeout.
-
-Jenkins publishes the JUnit results and archives `logs/`, separate `reports/default`, `reports/e2e`,
-and `reports/docker` directories, and the default suite's JaCoCo HTML/XML reports under `coverage/`.
-It keeps 20 builds and artifacts from the last 10. Dependencies are cached in the job's `@repository`
-directory, outside the source workspace; each build starts with a fresh checkout.
-
-The job uses **Pipeline script from SCM**, **Git**, branch `*/main`, and script path `Jenkinsfile`.
-Builds are started manually; no recurring trigger is configured. See [JENKINS.md](JENKINS.md) for the
-job configuration, Linux fixture requirements, and run results. The memory corruption found in the
-Jenkins VM on 2026-10-03 is resolved: the job was recreated on the current server on
-2026-10-04, and JENKINS.md keeps the investigation as a historical record. The complete pipeline
-first passed on the current server in build 4, on 2026-10-10 (JENKINS.md, "Current server setup").
-
-## Run builds in a visible terminal, through `Tee-Object`
-
-Run every build and test command in a terminal you can watch, and pipe its output through `Tee-Object`.
-You see the progress live, and each run leaves a timestamped UTF-8 log in the
-central `logs/` directory, which git ignores. This is the same command convention
-as [PROJECT_STANDARDS.md, section 7](PROJECT_STANDARDS.md#7-standard-maven-verification-command):
-
-```powershell
-New-Item -ItemType Directory -Force .\logs | Out-Null
-mvn -B "-Dstyle.color=never" install 2>&1 | Tee-Object -FilePath ".\logs\qraft-tests-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
-$qraftBuildExitCode = $LASTEXITCODE
-if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
-```
-
-For every command below, create `logs/` first and check `$LASTEXITCODE` immediately
-after the pipeline using the final two lines above. A successful `Tee-Object`
-does not prove Maven passed. The shared Logback test configuration also writes
-`logs/qraft-maven-tests-<timestamp>.log`; that application log complements the
-captured Maven output.
-
-The terminal is the VS Code integrated terminal. An assistant must not run builds or open a console unless
-you specifically request it. It gives you the command to run in the VS Code terminal, through `Tee-Object`
-as above, and then reads the results from the log. When you do request a run, the assistant uses one
-visible console window, reuses it, and never runs a build hidden in the background.
+In PowerShell, quote every `-D` argument, for example `"-Dtest=RaftNodeTest"`; otherwise PowerShell splits the
+argument at the dot.
 
 ## The three suites
 
-| Suite | What it covers | Where | Time in tests* |
+| Suite | Selection | What it covers | Time on Jenkins |
 |---|---|---|---|
-| **Default** | Unit and in-process integration tests: Raft on manual timers, gRPC on local ports, HTTP, storage, client, and a runtime start-up test | `src/test` | about 40 s (estimate) |
-| **End-to-end** | Real server and client processes that wait out real TTLs and a real leader change | tagged `@Tag("e2e")` | about 50 s |
-| **Docker** | Real three-server clusters in containers: restarts, partitions, clients. Since 2026-10-10 also every start command of `docker/` and both observability stacks | tagged `@Tag("docker")` | about 8.5 min |
+| **Default** | everything not tagged `docker`, `slow` or `e2e` | Unit and in-process integration tests: Raft on manual timers, gRPC on local ports, HTTP, storage, client, the runtime's start-up; Vitest; the JaCoCo gates | about 3 min |
+| **End-to-end** | `@Tag("e2e")` | Real server and client processes that wait out real TTLs and real leader changes | about 1 to 3 min |
+| **Docker and slow** | `@Tag("docker")` or `@Tag("slow")` | Server clusters in containers: restarts, partitions, membership changes, clients, every start command of `docker/`, both observability stacks; and `GrpcRaftKeepaliveTest`, the one class tagged `slow` | 26 to 34 min |
 
-\* Time spent running tests, measured 2026-09-29 before the end-to-end tests were separated. Compiling
-and packaging come on top. The Docker suite's time is that of its Jenkins stage in build 19, on
-2026-10-11.
+A whole Jenkins build takes about 30 minutes. `pom.xml` sets `test.excludedGroups` to `docker,slow,e2e`, so the
+default build runs none of the tagged tests. A tagged suite needs both `-Dgroups`, which selects it, and an empty
+`-Dtest.excludedGroups=`, which lifts the default exclusion.
 
-The default build excludes the end-to-end and Docker suites, through `test.excludedGroups` in
-`pom.xml`.
+## Run every suite on Jenkins
 
-## While you work: run one test class
+The suites normally run on the [Qraft job](http://192.168.137.32:8080/job/Qraft/), which builds the pushed `main`
+branch, not a working tree. The job loads the root [`Jenkinsfile`](../Jenkinsfile) and runs these commands, in this
+order, after checking its toolchain:
 
-```powershell
-mvn -B "-Dstyle.color=never" test "-Dtest=RaftNodeMembershipTest" 2>&1 | Tee-Object -FilePath ".\logs\qraft-tests-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
+```bash
+mvn -B --fail-at-end -Dstyle.color=never -Dmaven.repo.local="$WORKSPACE@repository" clean install
+mvn -B -Dstyle.color=never -Dmaven.repo.local="$WORKSPACE@repository" test \
+    -Dgroups=e2e -Dtest.excludedGroups= -DskipVitest=true
+mvn -B -Dstyle.color=never -Dmaven.repo.local="$WORKSPACE@repository" test \
+    '-Dgroups=docker|slow' -Dtest.excludedGroups= -DskipVitest=true
 ```
 
-For more than one class:
+The first runs the default suite, Vitest and the coverage gates, and packages `target/qraft.jar`, from which the
+Docker fixtures build their image. Vitest runs in that stage only. Each command's output goes through `tee` to the
+console and to `logs/qraft-default-`, `qraft-e2e-` or `qraft-docker-<UTC timestamp>-<build>.log`, and the step exits
+with Maven's status. A failed default suite stops the build; a failed end-to-end suite still lets the Docker stage
+run. Stages, time limits, archived artifacts, and how to start a build and download its results through the API are in
+[JENKINS.md](JENKINS.md). A run is accepted only after its logs are audited: see [Auditing a run](#auditing-a-run).
 
-```powershell
-mvn -B "-Dstyle.color=never" test "-Dtest=RaftNodeMembershipTest,MembershipServiceTest" 2>&1 | Tee-Object -FilePath ".\logs\qraft-tests-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
-```
+### Jenkins access
 
-Qraft is one Maven module, so there is no `-pl` and nothing to install first.
+- **URL:** <http://192.168.137.32:8080/>
+- **User name:** `mraysmit`
+- **API token:** `.env/jenkins-api-token.txt`, relative to the repository root. `.env/` is git-ignored.
 
-### Membership configuration parsing
+API requests use HTTP Basic authentication, with the user name and the API token as the password. Read the token from
+the file inside the command; never print it or write its value into a document or a log.
 
-`AppConfigRaftMembershipTest` exercises the real JSON parser and all six
-membership getters. It covers omitted and partial settings, timing-dependent
-cleanup defaults, non-default values, zero promotion limits, positive cleanup
-limits, disabled cleanup, unknown fields, malformed types, duplicate keys and
-numeric representation bounds. Membership and cleanup must be objects when
-present; explicit null is rejected. These parser tests do not prove server
-wiring, heartbeat-round conversion or automatic removal behavior.
+## Run builds in a visible terminal, through `Tee-Object`
 
-```powershell
-mvn -B "-Dstyle.color=never" test "-Dtest=AppConfigRaftMembershipTest" 2>&1 | Tee-Object -FilePath ".\logs\qraft-membership-parser-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
-$qraftBuildExitCode = $LASTEXITCODE
-if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
-```
-
-On 2026-10-15 the initial run recorded 61 cases and 59 failures because
-`membership` was not accepted. After implementation and expanded value
-assertions, all 64 focused cases passed. The captured Maven output has no
-ERROR entry, exception trace or ANSI escape, and the application log is empty.
-The focused run reported JaCoCo execution-data/class mismatches from earlier
-builds; at that date coverage and full-suite verification remained pending. See the
-[Step 5 record](archive/task-list-raft-membership-changes-2026-10-24.md#step-5-failed-server-cleanup)
-for the retained output and the completed 2026-10-21 runtime verification below.
-
-### Membership runtime policy and failed-voter cleanup
-
-`QraftServerLifecycleTest` now starts the real server on ephemeral ports and
-checks the effective policy from its constructed Raft node, including absent
-settings, non-default settings and the largest representable durations.
-`RaftNodePromotionTest` covers overflow-safe stabilization. `RaftNodeCleanupTest`
-drives held replies and manual heartbeat rounds: grace and interval boundaries,
-contact reset, wrong/stale identities, leadership reset, minimum and quorum
-limits, frozen budget and ordering, one committed removal at a time,
-promotion-triggered cleanup, unrelated changes, rejected proposals and real-WAL
-reopening. Its deliberately ambiguous sync failure uses the existing injected
-WAL-failure fixture; its ERROR headers and traces identify that exact test.
-
-Start with these focused tests, using the usual capture and exit-code check:
-
-```powershell
-mvn -B "-Dstyle.color=never" test "-Dtest=RaftNodeCleanupTest,RaftNodePromotionTest,QraftServerLifecycleTest,AppConfigRaftMembershipTest" 2>&1 | Tee-Object -FilePath ".\logs\qraft-cleanup-focused-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
-$qraftBuildExitCode = $LASTEXITCODE
-if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
-```
-
-Run the following command separately five consecutive times before accepting
-changed membership concurrency behavior. Then run the clean default build and
-the `docker,e2e,slow` runtime gate below against its fresh artifact and image.
-Audit every retained log; an eventual pass does not erase a failed run.
-
-```powershell
-mvn -B "-Dstyle.color=never" test "-Dtest=RaftNode*Test,MembershipServiceTest,QraftServerLifecycleTest,AppConfigRaftMembershipTest" 2>&1 | Tee-Object -FilePath ".\logs\qraft-cleanup-repeat-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
-$qraftBuildExitCode = $LASTEXITCODE
-if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
-```
-
-On 2026-10-21 a clean baseline initially lost compiled classes while test
-compilation was running. VS Code was also rebuilding `target/classes` during
-that interval. With `java.autobuild.enabled` set to `false` in local workspace
-settings, the same clean build passed 1,024 tests and every coverage gate.
-Keep Maven as the sole writer of its output during verification; preserve the
-first failed capture and investigate disappearing class files rather than
-accepting a rerun alone. The dated Step 5 record holds the exact captures.
-
-**Step 5 verification, 2026-10-21.** Five consecutive affected runs passed 332
-tests each. The clean `install` passed 1,051 tests and all coverage gates; the
-fresh-image `docker,e2e,slow` gate passed 42 tests. Neither final gate had a
-failure, error or skip. Final captures are
-`logs/qraft-cleanup-final-install-2026-10-21_12-14-06-286.log` and
-`logs/qraft-cleanup-final-runtime-2026-10-21_12-17-32-605.log`.
-The final default/runtime audit covered 138 retained files, including 98 Docker
-archives, with no unflagged error or exception trace and no ANSI escape. The
-clean build had no JaCoCo mismatch warning. The jar hash was unchanged through
-the runtime gate. The task list holds the full RED/GREEN, repeat, archive and
-artifact evidence. Step 5 is complete; Step 8's expanded cleanup/replacement
-container scenarios and the remaining membership work are still open.
-
-### Disruptive-server validation
-
-`RaftNodeDisruptionTest` adds manual-timer scenarios for repeated campaigns from
-a removed voter, heartbeat renewal and exact lease expiry, stale-log refusal
-after expiry, higher-term partition healing, and isolated-leader step-down with
-failover and replacement of an uncommitted tail. Its transport gates release
-original RPCs through the existing in-memory simulator. Stickiness protects
-RequestVote during live leader contact; a genuine higher-term replication
-response still advances the term. Real transport/container validation remains
-part of membership Step 8.
-
-**Status, 2026-10-21:** the first focused run recorded 64 tests and one failure:
-the removed-server test declared an intentional peer error that never occurred.
-Removal stops replication to that server before another RPC, so the incorrect
-declaration was removed. The successful rerun and remaining gates are recorded below;
-the [Step 6 record](archive/task-list-raft-membership-changes-2026-10-24.md#step-6-protection-from-disruptive-servers)
-retains the failed capture, cause, correction and audit. The corrected focused
-run then passed all 64 tests with zero failures, errors or skips. Its Maven
-capture is `logs/qraft-disruption-focused-2026-10-21_17-43-47-201.log`; its
-application capture is `logs/qraft-maven-tests-2026-10-21_17-44-41.log`.
-Both were audited: each has 31 attributed ERROR headers, 25 attributed exception
-headers and 251 associated stack frames, with no unflagged error or exception,
-no ANSI escape and no JaCoCo mismatch. Five consecutive affected runs on
-unchanged source then each passed 64 tests (`logs/qraft-disruption-repeat-2026-10-21_18-05-05-813.log`
-to `_18-06-31-463.log`), and `mvn install` passed 1,056 tests and every
-coverage gate (`logs/qraft-tests-2026-10-21_18-07-13-319.log`). The audit of
-all 38 retained Maven, application and helper logs from those runs found 673
-ERROR headers and 650 exception headers, including duplicates, all attributed,
-with no unflagged error, exception or frame, no ANSI escape and no JaCoCo
-mismatch. Step 6 is complete. Desktop automation is disabled at the owner's
-request. Run verification in the visible VS Code integrated terminal and
-retain the output for inspection.
-
-Start with the affected election, quorum, membership and sequencing tests:
-
-```powershell
-mvn -B "-Dstyle.color=never" test "-Dtest=RaftNodeDisruptionTest,RaftNodeMembershipTest,RaftNodeCheckQuorumTest,RaftNodeCandidateTest,RaftNodeTransportGenerationTest,RaftNodeTimerSequencingTest,RaftNodeTest" 2>&1 | Tee-Object -FilePath ".\logs\qraft-disruption-focused-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
-$qraftBuildExitCode = $LASTEXITCODE
-if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
-```
-
-Investigate any failure before further verification. Once the tests pass, run
-that command separately five consecutive times on unchanged source, then run
-the standard `mvn install` command below with timestamped capture and the same
-exit-code check. Audit the retained Maven and application logs, plus any helper
-logs generated by the default suite. The intentional peer-unreachable entries
-in the new scenarios use the existing exact failure definition and name the
-responsible test. The removed-server scenario declares no error. The stale-log
-scenario's single-peer partition restricts its declaration to `c`;
-scenarios that send across both sides deliberately make all three peers
-unreachable at different phases. Unexpected errors still require remediation.
-The initial failed run does not count toward Step 6's passing gates.
-
-### Membership heartbeat-round boundaries
-
-`RaftNodePromotionTest` covers partial-round stabilization, the largest
-representable stabilization and quorum-grace durations, and election jitter
-at `Long.MAX_VALUE`. The tests drive manual heartbeats, assert membership and
-leadership through the node API, and inspect the delay requested from the
-manual scheduler. They do not wait for a wall-clock duration. The command
-helper drains the queued leadership no-op before choosing the command index
-to acknowledge, avoiding the race found in the first RED run.
-
-Run the parser and promotion tests together in the visible VS Code terminal:
+Local runs are for small checks while you work, and for the suites when Jenkins cannot be reached. Run them in a
+console you can watch, and pipe the output through `Tee-Object` into the git-ignored `logs/` directory, so each run
+leaves a timestamped UTF-8 log. The default suite, as Jenkins runs it:
 
 ```powershell
 New-Item -ItemType Directory -Force .\logs | Out-Null
-mvn -B "-Dstyle.color=never" clean test "-Dtest=AppConfigRaftMembershipTest,RaftNodePromotionTest" 2>&1 | Tee-Object -FilePath ".\logs\qraft-membership-rounds-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
+mvn -B --fail-at-end "-Dstyle.color=never" clean install 2>&1 | Tee-Object -FilePath ".\logs\qraft-default-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
 $qraftBuildExitCode = $LASTEXITCODE
 if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
 ```
 
-On 2026-10-19, Jenkins replay build 28 exposed promotion overflow and the helper
-race. After fixing the helper, build 29 ran 74 tests with exactly three RED
-assertion failures: early promotion, early quorum loss and a negative election
-delay. The production fix uses `Math.ceilDiv` and bounds jitter before addition.
-Build 30 passed five consecutive focused runs of 74 cases, then 1,028 default
-tests with every coverage gate, 10 end-to-end tests and 32 fresh-image Docker
-tests. Its retained-log audit found no unflagged errors or unattributed traces.
-See [the Jenkins replay record](JENKINS.md#duration-boundary-replay-verification-2026-10-19)
-for the source patch, artifacts and distinction between repeats and full suites.
-
-Keep failing output and audit Maven and application logs before accepting a
-RED baseline; assertion failures do not excuse unrelated errors. `clean`
-prevents stale JaCoCo data from being reused. The focused command alone still
-does not establish coverage or the full Step 5 exit gate. Runtime wiring and
-automatic cleanup remain pending at that timing-only checkpoint.
-
-### Membership policy wiring
-
-`QraftServerLifecycleTest` starts a real server from a JSON file and verifies
-all six effective membership values in the startup log, the rounded durations,
-and exclusion of the configured operator token. Its seven cases cover defaults,
-partial settings, custom enabled and disabled cleanup, timing-dependent defaults,
-exact bounds, zero promotion values and `Long.MAX_VALUE`. Each case calls the
-real HTTP liveness endpoint, awaits shutdown, and reopens the WAL directory.
-`RaftNodePromotionTest` drives manual heartbeat rounds to prove the policy
-actually controls promotion lag and stabilization. `RaftMembershipPolicyTest`
-checks invalid fields, timing relationships and safe round conversion.
-
-Run these together when verifying membership wiring:
+Check `$LASTEXITCODE` straight after every pipeline, with the last two lines above: a successful `Tee-Object` does
+not prove that Maven passed. The tagged suites take the same capture and check:
 
 ```powershell
-New-Item -ItemType Directory -Force .\logs | Out-Null
-mvn -B "-Dstyle.color=never" clean test "-Dtest=AppConfigRaftMembershipTest,RaftNodePromotionTest,QraftServerLifecycleTest,RaftMembershipPolicyTest" 2>&1 | Tee-Object -FilePath ".\logs\qraft-membership-wiring-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
-$qraftBuildExitCode = $LASTEXITCODE
-if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
+mvn -B "-Dstyle.color=never" test "-Dgroups=e2e" "-Dtest.excludedGroups=" "-DskipVitest=true" 2>&1 | Tee-Object -FilePath ".\logs\qraft-e2e-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
+mvn -B "-Dstyle.color=never" test "-Dgroups=docker,slow" "-Dtest.excludedGroups=" "-DskipVitest=true" 2>&1 | Tee-Object -FilePath ".\logs\qraft-docker-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
 ```
 
-Jenkins replay build 31 established the RED baseline: 91 cases, exactly seven
-missing-policy-log assertion failures and zero test errors. Its application log
-had no unrelated errors. The failed console and Surefire reports are retained
-as failure evidence. Automatic cleanup stays inactive in this wiring slice;
-startup reports `cleanup.active=false` explicitly.
+On Windows write `docker,slow`: `mvn.cmd` runs through `cmd.exe`, which reads `|` as a pipe. Both forms select the
+same tests.
 
-Replay build 32 passed five consecutive 115-case focused runs, 1,059 default
-tests with every coverage gate, 10 end-to-end and 32 fresh-image Docker tests.
-The retained-log audit found no unflagged errors or unattributed traces, and
-all seven source checksums matched the working tree. See
-[the wiring replay record](JENKINS.md#membership-wiring-replay-verification-2026-10-19)
-for the patch, artifacts and audit. This verifies the wiring slice; automatic
-failed-voter cleanup and the overall Step 5 exit gate remain pending.
+**Run from a copy of the tree outside the IDE's workspace.** The IDE can rewrite `target/classes` while Maven runs,
+which loses compiled classes mid-build, and the workspace's `src/main/ui/node_modules` can be held open, which makes
+`npm ci` fail with `EPERM`. A clone at a short path, reset to the committed tree with the uncommitted files copied over
+it, avoids both; `protobuf-maven-plugin` fails under a long path on Windows. Copying sources over a copy after its
+build makes them newer than its jar, and the Docker suite then refuses to run until `mvn install` packages it again.
 
-### State-loop and blocking-executor changes
+Keep Maven the only writer of `target/` during a run, and do not start a second build in the same tree while the
+Docker suite runs: it overwrites the classes and the jar under test. A laptop must stay on mains power with its lid
+open, or the machine suspends and a Docker test times out.
 
-Start with the executor, ownership and package-boundary tests:
+## While you work: focused runs
+
+One class, or several:
 
 ```powershell
-mvn -B "-Dstyle.color=never" test "-Dtest=BlockingTaskExecutorTest,RaftStateLoopTest,QraftServerLifecycleTest,PackageDependencyTest" 2>&1 | Tee-Object -FilePath ".\logs\qraft-tests-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
-$qraftBuildExitCode = $LASTEXITCODE
-if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
+mvn -B "-Dstyle.color=never" test "-Dtest=RaftNodeMembershipTest" "-DskipVitest=true" 2>&1 | Tee-Object -FilePath ".\logs\qraft-tests-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
+mvn -B "-Dstyle.color=never" test "-Dtest=RaftNodeMembershipTest,MembershipServiceTest" "-DskipVitest=true" 2>&1 | Tee-Object -FilePath ".\logs\qraft-tests-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
 ```
 
-The tests cover worker and queue bounds, overload rejection, shutdown outcomes,
-completion dispatch, timer cleanup and MDC/OpenTelemetry propagation. Protocol and
-recovery tests borrow both resources from `RaftExecutorsFixture`, which closes blocking
-work before its completion loop. Production ownership belongs to the server composition root.
+- Qraft is one Maven module: there is no `-pl` and nothing to install first.
+- `-Dtest` does not stop Vitest; `-DskipVitest=true` does. Leave it out when the change touches `src/main/ui`.
+- `-Dtest` does not lift the tag exclusion. To run a tagged class, add `"-Dgroups=<tag>"` and `"-Dtest.excludedGroups="`.
+  A pattern such as `GrpcRaft*Test` leaves out `GrpcRaftKeepaliveTest` unless `slow` is selected.
+- Add `clean` after deleting or renaming classes, so that `target/` holds none of the old ones, and when JaCoCo warns
+  that its execution data does not match the classes.
 
-`ShutdownCoordinatorTest` owns only a `RaftStateLoop`, created in `@BeforeEach`
-and stopped in `@AfterEach`. It awaits shutdown futures with bounded `get` calls
-and asserts their results or failure causes on the test thread. An incomplete
-future holds the drain phase while the test checks that work is refused; timeout
-tests use incomplete hook futures rather than artificial delays. State-loop
-teardown is awaited before the intentional-error audit closes the test's scope.
-The former `JavaTestContextHelper` and `JavaRuntimeExtensionHelper` are removed;
-tests own the required execution resources explicitly and assert completed
-future outcomes on the test thread.
+A change to concurrency or lifecycle behaviour is run repeatedly before it is complete
+([PROJECT_STANDARDS.md, section 4.4](PROJECT_STANDARDS.md#44-deterministic-tests)): run the selection several times
+in a row, each as a separate command, and keep every capture. A failed run is investigated; a later pass does not
+erase it.
 
-| Contract | Regression coverage |
+### Focused selections by area
+
+| Area | `-Dtest=` |
 |---|---|
-| Worker and queue bounds; invalid limits; rejection after stop | `BlockingTaskExecutorTest` |
-| Logging and tracing context through successful and failed work; restoration afterward | `BlockingTaskExecutorTest`, `RaftStateLoopTest` |
-| Queued cancellation; task failure retains its cause; later work still runs | Both executor test classes |
-| Graceful shutdown waits for delivered results; forced shutdown settles operations before notifying the owner | Both executor test classes |
-| Timer registration races, timer-future cancellation, periodic context and schedule cleanup | `RaftStateLoopTest` |
-| Rejected or abandoned completion dispatch cannot strand a worker result | Both executor test classes |
-| Blocking work stops before the loop; failed cleanup still releases the loop and telemetry; interrupts are preserved | `QraftServerLifecycleTest` |
-| Raft ordering, recovery and protocol behavior on the separated executors | Existing `RaftNode*Test`, `RaftTransitionSequencer*Test`, gRPC and lifecycle tests |
+| Membership settings and their wiring | `AppConfigRaftMembershipTest,RaftMembershipPolicyTest,QraftServerLifecycleTest` |
+| Promotion, failed-voter cleanup, disruptive servers | `RaftNodePromotionTest,RaftNodeCleanupTest,RaftNodeDisruptionTest,RaftNodeMembershipTest,MembershipServiceTest` |
+| Elections, quorum and Raft sequencing | `RaftNode*Test,RaftTransitionSequencer*Test` |
+| State loop, blocking executor, shutdown | `BlockingTaskExecutorTest,RaftStateLoopTest,ShutdownCoordinatorTest,QraftServerLifecycleTest` |
+| gRPC transport and bootstrap | `GrpcRaft*Test,ClusterBootstrapTest` |
+| Fencing diagnostics | `RaftTransitionSequencer*Test,RaftNodeApplyFailureTest,RaftNodeConfigurationTest,RaftNodeMetadataSequencingTest,HttpApiServerTest` |
+| Package boundaries and protocol names | `PackageDependencyTest,ProtocolPackageTest` |
+| Logging configuration and the error audit itself | `LoggingConfigurationTest,IntentionalErrorConfigurationTest,IntentionalErrorsTest,LogbackConfigurationAuditTest,DockerLogCaptureTest,SubprocessOutputAuditHelperTest` |
+| The embedded interface | `EmbeddedUiResourcesTest,HttpApiServerAdminUiTest`, after a Maven build |
 
-After the small focused run passes, run the affected concurrency and lifecycle tests
-five times consecutively, executing this same command separately each time:
+### Time limits
 
-```powershell
-mvn -B "-Dstyle.color=never" test "-Dtest=BlockingTaskExecutorTest,RaftStateLoopTest,QraftServerLifecycleTest,RaftNode*Test,RaftTransitionSequencer*Test,ShutdownCoordinatorTest,GrpcRaft*Test,ClusterBootstrapTest" 2>&1 | Tee-Object -FilePath ".\logs\qraft-executor-repeat-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
-$qraftBuildExitCode = $LASTEXITCODE
-if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
-```
+`src/test/resources/junit-platform.properties` gives every test 90 s and every lifecycle method 15 s. Vitest gives a
+test 60 s (`src/main/ui/vite.config.ts`) and Testing Library's waits 15 s (`src/main/ui/src/setupTests.ts`). The
+limits exist to report a hang, not to time a slow machine.
 
-Keep each capture. A failed
-run requires investigation; a later pass does not erase it. For the executor replacement,
-use `clean install` with the standard capture options to remove deleted runtime and test
-classes from `target/`. Then run the runtime suites below, including `slow` for Phase 7's
-full-suite exit, on a fresh image. Audit all retained output and logs under the
-intentional-error rules below. Passing assertions alone does not close the task.
+## Coverage: `mvn install`
 
-For that full runtime gate, include every default-excluded group:
+`mvn test` does not check coverage. JaCoCo instruments the tests from the start of the build, its report is written in
+`test` to `target/site/jacoco/index.html`, and its check runs in `verify`, so a change can pass `mvn test` and fail
+`mvn install`. The threshold and the classes the check leaves out are in
+[PROJECT_STANDARDS.md, section 4.6](PROJECT_STANDARDS.md#46-coverage).
 
-```powershell
-mvn -B "-Dstyle.color=never" test "-Dgroups=docker,e2e,slow" "-Dtest.excludedGroups=" 2>&1 | Tee-Object -FilePath ".\logs\qraft-tests-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
-$qraftBuildExitCode = $LASTEXITCODE
-if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
-```
-
-### Fencing diagnostics
-
-For fencing diagnostics, the focused classes are `RaftTransitionSequencerTest`,
-`RaftNodeApplyFailureTest`, `RaftNodeConfigurationTest`,
-`RaftNodeMetadataSequencingTest` and `HttpApiServerTest`. They check first-cause
-retention, one ERROR announcement with caller context, the nullable `fenceReason`
-status field for healthy, transition-fenced and startup-fenced nodes, and the
-boundary between a rejected bootstrap and uncertain bootstrap persistence.
-Repeat the affected Raft and HTTP tests five times before the final build:
-
-```powershell
-mvn -B "-Dstyle.color=never" test "-Dtest=RaftTransitionSequencer*Test,RaftNode*Test,HttpApiServer*Test" 2>&1 | Tee-Object -FilePath ".\logs\qraft-fence-repeat-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
-$qraftBuildExitCode = $LASTEXITCODE
-if ($qraftBuildExitCode -ne 0) { throw "Maven failed with exit code $qraftBuildExitCode" }
-```
-
-### Phase 7 verification record, 2026-10-13
-
-The committed executor, test-helper and fencing changes (`7a9108f`, `d876349`,
-`f737d6b`) completed their verification locally. Five consecutive affected Raft
-and HTTP runs passed 293 tests each. The final default `install` passed 960 tests
-and every coverage gate; the runtime gate passed 42 `docker,e2e,slow` tests
-against the freshly packaged jar and rebuilt image. Neither final suite had a
-failure, error or skip.
-
-Retained Maven captures are
-`logs/qraft-fence-final-install-2026-10-13_19-03-35-146.log` and
-`logs/qraft-fence-final-runtime-2026-10-13_19-04-56-948.log`. The recorded final
-audit covered 322 retained logs, including 163 Docker archives: all 2,214 ERROR
-headers and 2,846 exception headers were attributed, including one flagged
-lock-contender uncaught exception. No unflagged error or exception header
-remained. Counts include duplicate captures. Earlier failed runs are retained
-separately with their causes and fixes; passing test totals did not erase them.
-See [the Phase 7 record](archive/task-list-single-pom-and-quorus-removal-2026-10-21.md#phase-7-replace-the-vertx-shaped-async-layer)
-for TDD evidence, capture names and the native-container audit follow-up.
-These are dated results, not expected counts for future runs or Jenkins results.
-
-## Before you call a change done: `mvn install`
-
-```powershell
-mvn -B "-Dstyle.color=never" install 2>&1 | Tee-Object -FilePath ".\logs\qraft-tests-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
-```
-
-This runs the default suite, then the coverage gates: every package must keep at least 60%
-line coverage (JaCoCo). The gates run in the `verify` phase, so **`mvn test` does not check coverage**, and
-a change can pass `mvn test` but break `mvn install`. `mvn install` also packages
-`target/qraft.jar`, the executable jar the Docker suite needs.
-
-**One executable jar.** Until 2026-10-03 `qraft-controller` shaded its
-dependencies into its own jar as well. Without `clean`, that step started from the previous shaded jar and
-kept an old dependency's classes, and `qraft-runtime.jar` inherited them. The unit tests ran against the
-new version, so nothing failed: only the packaged jar, and so the Docker suite and any deployment, ran the
-old one. It was found when RaftLog went from 1.4.0 to 1.4.1. A plain `mvn install` now packages the
-versions the root POM names; `clean` is not needed after a dependency change. To check what a jar holds:
+`mvn install` also packages `target/qraft.jar`, the executable jar the Docker suite needs. To see which version of a
+dependency the jar holds:
 
 ```bash
 unzip -p target/qraft.jar META-INF/maven/io.github.mraysmit/raftlog-core/pom.properties
 ```
 
-## When the change touches the runtime: the end-to-end and Docker suites
+What a finished change needs beyond this is in
+[PROJECT_STANDARDS.md, section 7](PROJECT_STANDARDS.md#7-verification-and-completion).
 
-Run them when a change touches server or client start-up, health checks and their TTLs, ports,
-configuration files, the POM, or the Dockerfiles. They aren't needed for every change. Run them straight
-after `mvn install`, together:
+## The Docker suite
 
-```powershell
-mvn -B "-Dstyle.color=never" test "-Dgroups=docker,e2e" "-Dtest.excludedGroups=" 2>&1 | Tee-Object -FilePath ".\logs\qraft-tests-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
-```
+The Docker tests deploy themselves; nothing is deployed by hand first.
 
-Or only the end-to-end suite, which needs no Docker:
+1. `SharedDockerClusterFixture` checks that `target/qraft.jar` exists and is newer than `pom.xml` and everything under
+   `src/main`. Run `mvn install` first; `docker/build-runtime.ps1` is not needed after it.
+2. `DockerImageExtensionHelper`, registered through `META-INF/services`, builds the `qraft-runtime:test` image once per
+   run, before the first class tagged `docker`, with
+   `docker compose -f src/test/resources/docker-compose-build-image.yml build`. It runs in a class callback, which no
+   `@Timeout` bounds, so a slow build, such as one that pulls a base image the cache has lost, counts against no
+   test's limit. A build that fails is never retried: every later class fails with that failure as its cause.
+3. Each class starts its clusters from the compose files in `src/test/resources`, with the `docker/config/*-acceptance`
+   configurations, and removes them when it finishes.
 
-```powershell
-mvn -B "-Dstyle.color=never" test "-Dgroups=e2e" "-Dtest.excludedGroups=" 2>&1 | Tee-Object -FilePath ".\logs\qraft-tests-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
-```
-
-- Docker must be running. The suite builds the `qraft-runtime:test` image once, from
-  `target/qraft.jar`, and refuses a jar older than the sources. So run `mvn install`
-  first. `docker/build-runtime.ps1` (or `.sh`) only packages that jar, so you don't need it after
-  `mvn install`.
-- Both options are needed: `-Dgroups` selects the suites, and the empty `-Dtest.excludedGroups=` lifts
-  the default exclusion.
-- Don't run another Maven build in the same working tree while the Docker suite runs. It overwrites the
-  classes and jar under test.
-
-## Deploying to Docker
-
-There are two ways onto Docker, and they build differently.
-
-**1. The Docker tests deploy themselves.** You never deploy by hand before running them. After `mvn install`:
-
-1. `SharedDockerClusterFixture` checks that `target/qraft.jar` exists and is newer than the
-   sources.
-2. It builds the `qraft-runtime:test` image once per run, with
-   `docker compose -f src/test/resources/docker-compose-build-image.yml build`. `DockerImageExtensionHelper`
-   makes the build before the tests of the first class tagged `docker`, in a class callback that no
-   `@Timeout` bounds. With Docker's build cache it takes about a second; a cache that has lost the base
-   image pulls it again, which took 73 s on 2026-11-19, more than most of a test's 90 s limit. A build
-   that fails is not tried again: every later class fails with that build's failure as its cause.
-3. Each test class starts its clusters from the compose files in `src/test/resources`,
-   using the `docker/config/*-acceptance` configs, and removes them when it finishes.
-
-**2. A cluster you start by hand**, to try something out or watch it run. Run these from `docker/`:
-
-```powershell
-.\start.ps1 cluster                # one server with a client: http://localhost:8080
-.\start.ps1 multinode              # three servers: http://localhost:8081-8083 (compose/docker-compose-cluster.yml)
-.\start-quick.ps1 cluster 3node    # the same three servers
-.\start-quick.ps1 cluster 5node    # five servers:  http://localhost:8081-8085 (compose/docker-compose-5node.yml)
-.\start.ps1 status                 # the running Qraft containers
-.\start.ps1 stop                   # stop every cluster either script started
-```
-
-Only one cluster runs at a time: they share container names, so stop one before starting another.
-Each `cluster` or `multinode` command first runs `docker/build-runtime.ps1`. It packages the runtime
-jar with `package -DskipTests` when the POM or a production source is newer than the jar, and does
-nothing when the jar is current. The command then starts the containers with
-`docker compose ... up -d --build` and returns. `--build` rebuilds the images from that jar; without
-it, `up` keeps an image that already exists, and until 2026-10-27 the commands ran whatever build
-first created their images. Follow a cluster's logs with
-`docker compose -f compose/<file>.yml logs -f`. `start.sh` and `start-quick.sh` are the shell
-equivalents.
-
-`DockerStartCommandsTest`, in the Docker suite, runs every one of these commands and those of
-`start-observability`: the shell scripts on Linux, and so on Jenkins, and the PowerShell scripts on
-Windows. It runs them in a Compose project of its own, `qraft-start-commands`, with
-`PUBLISHED_PORT=0`, so it publishes on free host ports and removes only its own containers and
-volumes. It fails while a cluster started by hand is running, because the container names are
-taken.
-
-**The whole process for a runtime change:**
-
-1. `mvn install`, which runs the default suite and the coverage gates, and packages the runtime jar.
-2. `mvn test "-Dgroups=docker,e2e" "-Dtest.excludedGroups="`, the
-   end-to-end and Docker suites, which build their own image from that jar.
-3. Optional: `docker\start.ps1 multinode`, to watch a hand-started cluster. Straight after step 1 the
-   jar is current, so it starts the containers without packaging again.
-
-## Mutation testing with PIT
-
-A passing suite shows that the code works. It does not show that the tests would notice if a safety
-check were lost: the suite passes just as well when no test reaches the check. Mutation testing asks
-that question. [PIT](https://pitest.org) is the tool.
-
-**On ice since 2026-10-11, at the owner's decision.** PIT is configured and has passed its dry runs.
-An earlier whole-class analysis was aborted after two hours without a report; its
-history is recorded in [JENKINS.md](JENKINS.md#current-server-setup-2026-10-04).
-No further mutant is to be run against a test until the owner asks. The owner sees no
-value in it for now: Qraft's test coverage is high, and its tests are written test-first. Do not run
-it, extend it, or propose it. What follows describes the configuration as it was left.
-
-In Qraft, PIT is a targeted audit of the Raft-membership implementation. It is not a mutation test of
-the whole application.
-
-At a glance:
-
-| | |
-|---|---|
-| Maven profiles | `mutation-testing`, with one batch profile, `pit-batch-01` to `pit-batch-05`, in `pom.xml` |
-| Command | `mvn "-Pmutation-testing,pit-batch-01" test-compile org.pitest:pitest-maven:mutationCoverage` |
-| Dry run | the same command with `"-Dpit.dryRun=true"` |
-| On Jenkins | the `Qraft` job with `MUTATION_TESTING` set to `dry-run` or `run`, and `MUTATION_BATCH` set to the batch |
-| Class mutated | `MembershipService`, in `dev.mars.qraft.raft`: 39 mutants, in five batches of at most ten |
-| Report | `target/pit-reports/index.html`; on Jenkins, `reports/pit/` in the build's artifacts |
-| Part of a normal build | No. Nothing runs it unless the profiles and the goal are named |
-
-### What PIT does
-
-```text
-Compile Qraft and its tests
-        ↓
-Run the eligible JUnit tests for coverage
-        ↓
-Generate mutations in the configured Raft class
-        ↓
-Select the tests that cover each changed instruction
-        ↓
-Run those tests against each mutant
-        ↓
-Write HTML and XML reports
-```
-
-A **mutant** is the compiled production code with one small change. Suppose `RaftNode` holds a check
-like this:
-
-```java
-if (!configuration.isVoter(serverId)) {
-    return;
-}
-```
-
-PIT may generate the mutant in which the condition is reversed:
-
-```java
-if (configuration.isVoter(serverId)) {
-    return;
-}
-```
-
-PIT makes the change in memory, in a worker JVM. The source and the compiled files on disk are not
-modified, and no copy of the code is kept. It runs the tests that execute that instruction, the fastest
-first, and gives the mutant one of these results:
-
-- `KILLED`: a test failed. The tests tell the correct rule from the mutated one.
-- `SURVIVED`: every covering test passed. The suite does not tell the two apart.
-- `NO_COVERAGE`: no test executed the instruction.
-- `TIMED_OUT`: the mutant made a test run past its time limit, as an endless loop does. PIT ends it.
-
-**PIT is a diagnostic, not a score to reach.** Good tests kill most mutants, and that result is the
-evidence that they are good. A surviving mutant is a prompt to look at that line, not an instruction to
-write a test. Some survivors are equivalent, which means the change makes no difference that anything
-could observe, and some guard nothing that matters. Each survivor is read and judged, and the judgement
-is recorded.
-
-### What is mutated, and with which tests
-
-Mutation testing is too expensive for a normal build, so PIT has a Maven profile of its own,
-`mutation-testing`, in `pom.xml`, and is bound to no phase. The profile's `<configuration>` holds
-everything.
-
-**PIT runs one batch of at most ten mutants at a time.** A run of unknown length is not started: the
-smallest batch is run and measured first, and the next step is estimated from that measurement, not
-guessed.
-
-It mutates one class, `MembershipService`, which has 39 mutants. PIT can leave methods out, but it
-cannot name the methods to keep, and it cannot be told to take ten mutants and then the next ten. So a
-batch is the class without the methods of the other batches, and where one method has more than ten
-mutants, with one kind of mutation. Each batch is a profile that names the methods it leaves out and
-its mutators:
-
-| Batch | Profile | What it mutates | Mutants |
-|---|---|---|---:|
-| 01 | `pit-batch-01` | `join`, its two lambdas, the constructor, and `response` | 9 |
-| 02 | `pit-batch-02` | `forward`, its lambda, and `outcome` | 7 |
-| 03 | `pit-batch-03` | the lambdas of `outcome` and of `remove` | 10 |
-| 04 | `pit-batch-04` | `remove`: its conditions reversed | 7 |
-| 05 | `pit-batch-05` | `remove`: its return values replaced | 6 |
-
-The sizes are from a dry run of each batch on 2026-10-11. A batch's fixed cost is the coverage pass,
-about one minute, which runs the whole default suite once. A mutant that a test fails on at once costs
-far less than a second. One that makes a test hang costs most of a minute, until PIT's timeout ends it.
-
-**`RaftNode` is not mutated.** On 2026-10-11 it was run whole with two other classes, 1,187 mutants,
-and aborted after two hours with no report. A mutant that removes a step from Raft code often makes a
-test wait for something that never comes, not fail, and PIT ended 160 such mutants in those two hours.
-At that rate the run takes days. It is not to be proposed again as a whole.
-
-PIT also does not mutate `ClusterBootstrap`, Raft storage and snapshots, the gRPC transport, replicated
-state, the server's HTTP API, the client, or the runtime.
-
-There is no `targetTests`: PIT makes a coverage pass and finds which tests reach each mutant.
-`excludedGroups` keeps out the `docker`, `slow`, and `e2e` tests. PIT may run one test many times, so
-tests that start containers or wait out real time would make a run too long. What is left is the
-default suite.
-
-The check of intentional errors stays on. A mutant that makes a test log an undeclared error fails that
-test, and so is killed. That is meant: in Qraft, "no error without a flag" is part of what a test
-observes.
-
-The rest of the configuration: `toString`, `equals`, and `hashCode` are never mutated; four threads
-work at once; and a test on a mutant may take 1.5 times its normal time plus 4 seconds before PIT ends
-it. `withHistory` is not set: PIT 1.30.0 refuses it without a separate history plugin, which the
-open-source release does not include.
-
-### Running it
-
-A PIT run goes to Jenkins: start the `Qraft` job with `MUTATION_TESTING` set to `dry-run` or `run` and
-`MUTATION_BATCH` set to the batch, `01` to `05`. The job then runs PIT on that batch instead of the
-three suites and archives the report under `reports/pit/`. The stage has a limit of 20 minutes: a batch
-that runs longer has gone wrong and is stopped.
-
-The commands it runs are these. Run by hand, they follow the rule above: in a terminal you can watch,
-through `Tee-Object`, with `$LASTEXITCODE` checked at once.
-
-A dry run compiles the code, discovers the tests, collects coverage, and generates the batch's mutants.
-It does not run tests against them. It shows that the configuration works and how many mutants the
-batch holds:
-
-```powershell
-mvn -B "-Dstyle.color=never" "-Pmutation-testing,pit-batch-01" "-Dpit.dryRun=true" test-compile org.pitest:pitest-maven:mutationCoverage 2>&1 | Tee-Object -FilePath ".\logs\qraft-pit-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
-$qraftBuildExitCode = $LASTEXITCODE
-```
-
-The analysis of the batch:
-
-```powershell
-mvn -B "-Dstyle.color=never" "-Pmutation-testing,pit-batch-01" test-compile org.pitest:pitest-maven:mutationCoverage 2>&1 | Tee-Object -FilePath ".\logs\qraft-pit-$(Get-Date -Format 'yyyy-MM-dd_HH-mm-ss-fff').log"
-$qraftBuildExitCode = $LASTEXITCODE
-```
-
-### The report, and what fails a run
-
-PIT writes `target/pit-reports/index.html` and `target/pit-reports/mutations.xml`. The HTML report
-opens on `MembershipService` and shows, for each mutated line of the batch, the
-mutation PIT applied, whether it was killed and by which test, and whether it survived or had no
-coverage. The XML file is for a program, and is what Jenkins archives beside it.
-
-No threshold is set, so a surviving mutant does not fail a run, and neither does a low score. A run
-still fails on an error in PIT's configuration, on a test that fails or crashes in the coverage pass,
-and on an error while PIT runs.
-
-The order of work:
-
-1. Run batch 01 on Jenkins and measure it.
-2. Review its surviving and uncovered mutants, and record for each whether it is a real gap, an
-   equivalent mutant, or a change that does not matter.
-3. Only then run the next batch, with its time estimated from the batches before.
+`DockerStartCommandsTest` runs every start command of `docker/` and of `start-observability`: the shell scripts on
+Linux and the PowerShell scripts on Windows. It uses a Compose project of its own, `qraft-start-commands`, with
+`PUBLISHED_PORT=0`, so it publishes on free host ports and removes only its own containers and volumes. It fails while
+a cluster started by hand is running, because the container names are taken. Stop such a cluster first; the start
+commands themselves are in [docker/README.md](../docker/README.md).
 
 ## Making runs faster
 
-- Name only the classes you need (`-Dtest`) while you work, and keep `mvn install` for
-  the end.
+- Name only the classes you need with `-Dtest` while you work, and leave the suites to Jenkins.
 - Use `mvnd` in place of `mvn` for repeated small runs.
-- Surefire runs the test classes one after another in one JVM. `-DforkCount=2` runs them in two
-  JVMs. It is not the default, because it has not been tried on this suite yet: the in-memory Raft
-  simulator keeps static state, which is safe across JVMs but not across threads.
+- Surefire runs the test classes one after another in one forked JVM. `-DforkCount=2` would run two JVMs at once, but
+  it is not used: `TestPortsHelper.freePort()` keeps ports unique only within one JVM, so two forks can hand out the same
+  port.
+- On Windows, Docker Desktop reserves runs of ports for one protocol
+  (`netsh int ipv4 show excludedportrange protocol=tcp`, and `protocol=udp`); a bind inside one fails as
+  `Address already in use`.
 
-## Results
+## Results and logs
 
-- Test results: `target/surefire-reports/`. One XML and one text file per class, with the time
-  each class took.
-- Coverage: `target/site/jacoco/index.html`, written by `mvn install`.
-- What an investigation with tests found, and what it did not: [TEST-RESULTS.md](TEST-RESULTS.md).
+| Where | What |
+|---|---|
+| `target/surefire-reports/` | One XML and one text file per class, with its time; a `*.dumpstream` file when a forked JVM corrupted its channel to Surefire |
+| `target/site/jacoco/index.html` | The coverage report, written in `test` |
+| `logs/qraft-maven-tests-<timestamp>.log` | The application log of a test JVM, from `src/test/resources/logback-test.xml`. Each JVM writes its own file, named for the second it started, so a helper JVM on the test classpath writes one too |
+| `logs/docker/<TestClass>/` | One archive per container or helper process of a Docker class, audited and flagged at class teardown |
+| `logs/phase3-runtime-process-<mode>-<id>/` | The console and file logs of the fresh server and client JVMs that `RuntimeLoggingTest` starts with the production Logback configuration |
+| `logs/qraft-<suite>-<timestamp>.log` | A captured Maven output: locally through `Tee-Object`; on Jenkins `qraft-default`, `qraft-e2e` and `qraft-docker-<timestamp>-<build>.log` |
+
+Nothing trims `logs/` on a workstation. To compare two captures, use `git diff --no-index <older> <newer>`;
+timestamps, UUIDs, temporary paths, ports and election timing differ between runs, so normalise them, or compare the
+Surefire XML where an exact comparison matters.
 
 ## Intentional error flags and log auditing
 
-Every error caused deliberately by a test must carry an explicit flag naming the failure and the test
-responsible. Every other error requires remediation. A successful Maven exit code or passing assertions
-alone do not establish that the logs are acceptable.
-
-The flags preserve the event's ERROR severity, message, diagnostic fields, and stack trace. They do not
-filter, suppress, or downgrade the event. A flag on an exception header applies to its following stack
-trace; individual frames and `Caused by:` lines are retained without repeating the flag on each line.
+Every error a test causes on purpose carries a flag that names the failure and the test responsible. Every other error
+is a defect to investigate and fix. A passing test and a zero exit code do not show that the logs are acceptable.
 
 | Flag | Meaning | Attribution |
 |---|---|---|
-| `*** INTENTIONAL ERROR: <entry>, caused by <test> ***` | The test deliberately arranged a condition that makes production code report an error. | Usually `TestClass#testMethod`; Docker capture uses the test class. |
-| `*** INJECTED FAILURE: <entry>, injected by <test> ***` | The test supplied an explicitly marked failure through `InjectedFaultFixture`. | The running test that owns the logging scope. |
+| `*** INTENTIONAL ERROR: <entry>, caused by <test> ***` | The test arranged a condition that makes production code report an error. | `TestClass#testMethod`; a Docker archive names the test class. |
+| `*** INJECTED FAILURE: <entry>, injected by <test> ***` | The test supplied a failure through `InjectedFaultFixture`. | The running test that owns the logging scope. |
 
-The following extracts come from the verified 2026-10-08 run. Filenames and line numbers identify the
-local, git-ignored logs; the extracts are included here so the examples remain available without those files.
+A flag keeps the event's level, message, fields and stack trace. It filters, suppresses and downgrades nothing. A flag
+on an exception header covers the stack trace that follows it; frames and `Caused by:` lines do not repeat it.
+
+### The machinery
+
+All of it is in `dev.mars.qraft.testing.fault`, under `src/test/java`.
+
+- **`IntentionalErrorFixture`** lists every error the suite causes on purpose, and nowhere else. An intentional-error
+  entry names the exact logger, level and full message pattern and, where the message alone is too broad, the
+  exception the event carries, as the first line of its trace reads. `GRPC_ANSWER_TO_KILLED_PEER`, for example,
+  accepts Netty's stream-error warning only with `Http2Exception$StreamException: Stream closed before write could
+  take place`.
+- **`IntentionalErrorsHelper`** declares an expected error inside the current test's scope, before the test causes it:
+  `expect(error)` needs at least one occurrence, `expect(error, times)` exactly that many, and
+  `expect(RAFT_PEER_UNREACHABLE, peer)` accepts the failure only for the named peer. A missing occurrence, or a count
+  outside its bounds, fails the audit. `expectPeerShutdownDuringCleanup(peer)` declares, just before teardown closes a
+  peer, the peer-unreachable errors that closing it may cause; it allows zero, and those errors never count towards a
+  test's functional expectations.
+- **`IntentionalErrorExtensionHelper`** opens a scope around each test, its teardown included, and one around each
+  class. JUnit registers it for every test through `META-INF/services`, with
+  `junit.jupiter.extensions.autodetection.enabled=true` in `junit-platform.properties`.
+- **`IntentionalErrorCheckHelper`** is a Logback appender on the root logger that writes nothing and records each
+  undeclared ERROR, and each event that carries an undeclared exception at any level. The extension refuses a test
+  runtime in which it is not attached to the root logger.
+- **`IntentionalErrorLabelHelper`** is the `%intentional` conversion word of `logback-test.xml`, which writes the flag
+  after the level.
+- **`LogbackConfigurationAuditHelper`** rejects a Logback configuration that could drop an error: a filter, a turbo
+  filter, an include, a discarding asynchronous appender, or a prudent file appender. `IntentionalErrorConfigurationTest`
+  applies it to `logback-test.xml`, and `LoggingConfigurationTest` to the production `logback.xml`.
+
+A test or class fails for an undeclared error or an unmet count even when its assertions pass. Errors logged outside
+any test's scope are checked when the class closes.
 
 ### Declared intentional errors
 
-The definitions in
-[`IntentionalErrorFixture`](../src/test/java/dev/mars/qraft/testing/fault/IntentionalErrorFixture.java)
-specify the exact logger, level, and complete message pattern. Where the message alone is too broad, a
-definition also names the exception the event carries, as the first line of its trace reads
-(`class: message`): `GRPC_ANSWER_TO_KILLED_PEER` accepts Netty's `Stream Error` warning only with
-`Http2Exception$StreamException: Stream closed before write could take place`, and any other stream error
-stays undeclared. An event without an exception, as the Docker capture reprints one, is matched on its
-message. A test declares its expected error with
-`IntentionalErrorsHelper.expect` before causing it. The declaration belongs to the current test's scope;
-it does not permit matching errors everywhere in the suite.
-
-The default declaration requires at least one occurrence. `expect(error, times)` requires exactly that
-many. Missing occurrences or counts outside the declared bounds fail the audit. Leader-loss tests use
-`expect(RAFT_PEER_UNREACHABLE, formerLeader)` to accept RPC failures only for the deliberately stopped peer.
-A different peer, logger, level, or message remains unexpected.
-
-Cluster teardown also deliberately closes peers while a surviving leader may still contact them.
-`IntentionalErrorsHelper.expectPeerShutdownDuringCleanup(peer)` declares that specific peer immediately
-before its runtime is closed, after the functional assertions. It permits zero occurrences because cleanup
-does not guarantee an RPC is in flight. Only the same exact peer-unreachable logger, level, and message
-signatures match; earlier errors, other peers, and subsequent tests remain unaccepted. Once cleanup is
-declared for that peer, its matching failures never count toward functional expectations, whether the
-expectation names that same peer, another peer, or no peer, and whether its count is exact or at least once.
-Retry cleanup uses the same close path as final teardown and removes successfully closed runtimes from
-the cleanup registry. No allowance is added for the last live cluster peer or a runtime already closed.
-
-Source: `logs/qraft-tagged-2026-10-08_13-13-20-497.log`, line 5373. The stopped peer is `node-c`:
+A declared error, as the console shows it:
 
 ```text
-13:21:09.381 [qraft-state-loop] ERROR *** INTENTIONAL ERROR: RAFT_PEER_UNREACHABLE, caused by HealthPropagationEndToEndTest#aRenewalHeldPastItsDeadlineAcrossALeaderChangeLandsInsideTheNewLeadersGraceSoTheCheckNeverExpires *** dev.mars.qraft.controller.raft.RaftNode [node-b] [LEADER/2] [bbc5514d-31cd-4743-83f5-0d3639e0fd7d] [AppendEntries] - Raft peer node-c became unreachable during AppendEntries
+12:00:00.000 [qraft-state-loop] ERROR *** INTENTIONAL ERROR: RAFT_PEER_UNREACHABLE, caused by GrpcRaftTlsTest#aServerWithACertificateFromAnotherCaTakesNoPart *** dev.mars.qraft.raft.RaftNode [node1] [FOLLOWER/0] - Failed to retrieve pre-vote from node2
+io.grpc.StatusRuntimeException: UNAVAILABLE: io exception
+Channel Pipeline: [SslHandler#0, ProtocolNegotiators$ClientTlsHandler#0, WriteBufferingAndExceptionHandler#0, DefaultChannelPipeline$TailContext#0]
+	at io.grpc.Status.asRuntimeException(Status.java:532)
 ```
+
+The exception's message is two lines long: `Channel Pipeline: ...` is its second line, not a new event.
 
 ### Injected failures
 
-`InjectedFaultFixture` names an injected-failure entry in the same definitions. The logging helpers
-recognise that marker in the logged exception itself, its causes, or its suppressed-exception chain.
-Recognition is automatic; a test can additionally declare an expected count with `expect`.
-
-Source: `logs/qraft-default-2026-10-08_13-11-50-284.log`, lines 2323-2325:
+`InjectedFaultFixture` is an exception that names an injected-failure entry. The helpers recognise it in the logged
+exception, its causes or its suppressed exceptions, with no declaration needed; `expect` can add an exact count. The
+flag sits on the event's header, and the `InjectedFaultFixture` line below it belongs to that event:
 
 ```text
-13:12:37.820 [main] ERROR *** INJECTED FAILURE: SHUTDOWN_HOOK_FAILURE, injected by TimeoutHandlingTests#synchronousCriticalHookFailureIsReportedAsynchronously *** d.m.q.controller.lifecycle.ShutdownCoordinator - Critical shutdown hook 'node-stop' failed with InjectedFaultFixture
+12:00:00.000 [main] ERROR *** INJECTED FAILURE: SHUTDOWN_HOOK_FAILURE, injected by TimeoutHandlingTests#synchronousCriticalHookFailureIsReportedAsynchronously *** d.m.qraft.server.lifecycle.ShutdownCoordinator - Critical shutdown hook 'node-stop' failed with InjectedFaultFixture
 dev.mars.qraft.testing.fault.InjectedFaultFixture: node stop failed before returning
-	at dev.mars.qraft.controller.lifecycle.ShutdownCoordinatorTest$TimeoutHandlingTests.synchronousCriticalHookFailureIsReportedAsynchronously(ShutdownCoordinatorTest.java:311)
+	at dev.mars.qraft.server.lifecycle.ShutdownCoordinatorTest$TimeoutHandlingTests.synchronousCriticalHookFailureIsReportedAsynchronously(ShutdownCoordinatorTest.java:318)
 ```
 
 ### Helper subprocesses
 
-A separate JVM must establish its own scope with `IntentionalErrorsHelper.inSubprocess`, unless it never
-returns (see the end of this section). Its body must
-return through the audit before calling `System.exit`; otherwise its errors and expectation counts would
-go unchecked. `DirectoryLockProcessFixture` receives the calling test's name and an `owner` or `contender`
-role. Only the contender declares exactly one `WAL_DIRECTORY_ALREADY_LOCKED` error. The parent test checks
-the contender's exit code `73` and the flagged error, and checks that the owner remains healthy and exits
-successfully. An audit failure cannot pass merely because the contender exited unsuccessfully.
+A helper JVM that returns opens its own scope with `IntentionalErrorsHelper.inSubprocess(owner, body)` and returns
+through the audit before it calls `System.exit`. `DirectoryLockProcessFixture` takes the calling test's name and an
+`owner` or `contender` role; only the contender declares exactly one `WAL_DIRECTORY_ALREADY_LOCKED`, and it exits with
+code `73` once its audit passes. The parent test checks that exit code, the flagged error, and the owner's success, so
+an audit failure cannot pass as the contender's expected failure.
 
-Source: `logs/qraft-maven-tests-2026-10-08_13-13-09.log`, line 3:
-
-```text
-2026-10-08 13:13:09.328 [wal-executor] ERROR *** INTENTIONAL ERROR: WAL_DIRECTORY_ALREADY_LOCKED, caused by RaftStorageProcessLockTest#secondJvmCannotOpenDirectoryWhileOwnerRemainsHealthy/contender *** dev.mars.raftlog.storage.FileRaftStorage - Cannot acquire exclusive lock at C:\Users\markr\AppData\Local\Temp\junit-709376945766950860\raft.lock: another process holds the lock
-```
-
-A helper JVM that never returns cannot audit itself: a crash writer halts at its checkpoint, and
-`CrashedClientExpiryEndToEndTest` kills its client. Its parent test audits it instead. Once the JVM has ended,
-the test passes its complete console output to `SubprocessOutputAuditHelper.requireNoErrors`. An ERROR line,
-a Logback status error, or an uncaught exception in that output fails the calling test, and the failure
-quotes each error with its stack trace. These JVMs declare no intentional error, so a flag does not excuse
-one. The three crash-writer recovery tests call it when their writer exits, and
-`CrashedClientExpiryEndToEndTest` calls it in its teardown. Such a JVM also writes its own
-`logs/qraft-maven-tests-<timestamp>.log`, which the review of retained logs covers.
+A helper JVM that never returns cannot audit itself: a crash writer halts at its checkpoint, and some end-to-end tests
+kill the runtime they started. Once it has ended, its parent test passes its whole console output to
+`SubprocessOutputAuditHelper.requireNoErrors`, which fails the test on any ERROR line, Logback status error or uncaught
+exception, quoting each with its trace. These JVMs declare no error, so a flag does not excuse one. The callers are the
+crash-writer tests `RaftNodeRealStorageRecoveryTest`, `RaftNodeRealSnapshotRecoveryTest`,
+`RaftNodeInstalledSnapshotRealRecoveryTest` and `OfflineRecoveryProcessTest`, and the end-to-end tests
+`ClientLeaveEndToEndTest`, `CrashedClientExpiryEndToEndTest`, `WipedClientDirectoryEndToEndTest` and
+`PackagedAdminUiEndToEndTest`.
 
 ### Docker archives and uncaught exceptions
 
-Docker test classes declare their expected errors with `@ExpectedDockerErrorsHelper`. At class teardown,
-`DockerLogExtensionHelper` audits captured output against those declarations. Matching entries are
-flagged in `logs/docker/<TestClass>/`, retaining their original timestamps and stack traces. Recognised
-ERROR messages are also replayed into the main test log with class-level attribution. The replay's
-timestamp and `[main]` thread describe the audit reprinting the message, rather than the original event.
+A Docker class declares its expected errors with the annotation `@ExpectedDockerErrorsHelper({...})`. At class
+teardown, `DockerLogExtensionHelper` has `DockerLogCaptureHelper` audit every captured container and helper output
+against those declarations and write it to `logs/docker/<TestClass>/`, with each matching line flagged and its
+original timestamp and trace kept. A recognised error is also replayed into the main test log with the class as its
+attribution; the replay's timestamp and `[main]` thread are those of the audit, not of the event. The audit fails the
+class on any of these:
 
-An uncaught container exception is a separate audit check. It is flagged only when it matches a declared
-rethrow signature and the exact failure message of a recognised error from the same container or helper
-process. The ERROR may follow the rethrow when Docker merges stdout and stderr, or have been drained
-in an earlier capture of that same source. The current class must still declare that error; an error from
-another source cannot excuse the rethrow. For the lock conflict, matching requires the expected `CompletionException` and
-`FileRaftStorage$StorageException` types and the same directory and failure message. Cleanup INFO messages
-between the original error and the rethrow do not prevent the match. Compose and timestamp prefixes
-on uncaught headers are preserved and audited. A missing matching error, different
-directory or cause, undeclared exception, or malformed uncaught-exception header fails the audit and is
-archived without an intentional flag. The recognised rethrow is not replayed as a second ERROR event.
+1. **An undeclared or unparseable ERROR line.**
+2. **An uncaught exception** (`Exception in thread ...`) that does not match a declared rethrow signature together
+   with the same failure, logged earlier by the same container or process and declared by the same class. The
+   lock-conflict signature of `SERVER_STORAGE_ALREADY_LOCKED` requires the `CompletionException` and
+   `FileRaftStorage$StorageException` types, the same directory and the same message. Docker merges stdout and
+   stderr, so frames after an uncaught exception belong to it, and the recognised rethrow is not replayed a second
+   time.
+3. **An event below ERROR followed by stack-trace lines**, unless a definition names it at its own level. The one such
+   definition is `RAFT_PEER_NAME_UNRESOLVED`, gRPC's WARN for a name lookup of a killed or disconnected peer;
+   `DockerLogCaptureTest` checks that every class declaring `RAFT_PEER_UNREACHABLE` declares it too.
+4. **A command's error line.** A command run once from the image, such as `operator raft remove-peer`, writes a refusal
+   as `Error <status>: <code>: <message>`, with no logger or level. Such a line is audited as an ERROR of
+   `dev.mars.qraft.runtime.RaftOperatorCommand`; `RAFT_OPERATOR_TOKEN_REFUSED` and `RAFT_OPERATOR_CHANGE_IN_PROGRESS`
+   are its definitions.
+5. **A native log error** of the observability programs: `level=error` or `level=fatal`, a tab-delimited error level,
+   or an `error=` or `err=` field at any level (`err=null`, which Loki writes when there is none, is not an error). Two
+   definitions exist. `TEMPO_METRICS_WAL_STARTUP` is Tempo's `error tailing WAL` race at start-up, accepted once per
+   source and only with a later `Done replaying WAL` for the same tenant, remote name and endpoint.
+   `GRAFANA_SQLITE_LOCK_RETRY` is Grafana's INFO-level `database is locked` retry, which `DockerStartCommandsTest`
+   declares. `DockerStartCommandsTest` also checks the stacks' live output before it stops them.
 
-An event below ERROR that carries a stack trace is a third audit check. A definition names its own
-level, so a class can declare such an event. The audit then flags it like a declared ERROR and replays
-it into the main test log at its own level. Any other event below ERROR that is followed by stack-trace
-lines fails the audit and is archived without a flag. An event below ERROR without a stack trace is not
-checked.
-
-The one definition of this kind is `RAFT_PEER_NAME_UNRESOLVED`. A server whose peer the test has killed
-or disconnected can no longer resolve that peer's name, and gRPC reports each failed lookup as a WARN
-whose message holds the lookup's stack trace. The definition names the gRPC logger, the WARN level, and
-the whole first line, with the same host in the channel, the description, and the exception. Every
-Docker class that declares `RAFT_PEER_UNREACHABLE` declares it too, and a test checks that.
-
-Docker merges stderr into stdout, so an event can land inside an uncaught exception's trace. Frames that
-follow an uncaught exception therefore belong to that exception, which has its own check above.
-
-A command line's error output is a fourth check, added on 2026-11-06. A command run once from the image, such
-as `operator raft remove-peer`, writes a refusal as `Error <status>: <code>: <message>` with no logger and no
-level, so the upper-case `ERROR` checks missed it. Every captured line that starts with `Error` is now audited
-as an ERROR of `dev.mars.qraft.runtime.RaftOperatorCommand`: it fails the audit unless it matches a declaration
-exactly, and a match is flagged and replayed like a declared event. There are two definitions:
-`RAFT_OPERATOR_TOKEN_REFUSED`, which `DockerServerReplacementTest` declares for its removal with a wrong
-operator token, and `RAFT_OPERATOR_CHANGE_IN_PROGRESS`, which `DockerMembershipResizeTest` declares for the
-refusal one of its two simultaneous removals may meet before it is repeated. The Phase 3 run of 2026-11-05
-held the first line unflagged, found by an audit that matched error text in any case; the run of 2026-11-06
-was the first to meet the second, and failed its audit until it was declared.
-
-The observability programs use native log formats. `DockerLogCaptureHelper` checks their
-`level=error`/`level=fatal` and tab-delimited error levels during archive auditing;
-`DockerStartCommandsTest` also checks live output before stopping them. Their errors fail the test.
-The one previously approved startup allowance is declared as `TEMPO_METRICS_WAL_STARTUP`:
-Tempo's exact `msg="error tailing WAL" err="failed to find segment for index"` signature.
-It must occur only once per captured source, with "Done replaying WAL" later in the same output
-for the same tenant, remote name and endpoint. Missing, earlier or mismatched recovery, repeated
-errors, and every other native error fail. The archive flags this event explicitly with its
-definition and Docker test class, preserving its original error level and line, and replays it
-into the Maven/application log with the same attribution. Tempo 2.3.1 starts the remote watcher
-before opening its metrics WAL; the first span can expose this startup race.
-
-An error carried in a field below error level is a fifth check, added on 2026-11-07. Grafana logs a retried
-transaction at INFO with `error="database is locked"`, which none of the level checks saw. A container line with
-an `error=` or `err=` field is now audited whole, under `grafana.` and its `logger` field, at the level of its
-`level` field, and fails unless it matches a declaration; `err=null`, which Loki writes when there is none, is not
-an error. One definition exists, `GRAFANA_SQLITE_LOCK_RETRY`, which `DockerStartCommandsTest` declares: its
-observability start stops the stack as soon as it answers, while Grafana's startup writers still contend for its
-SQLite store, and Jenkins build 64 showed four retries. WAL mode was tried in that build and did not stop them,
-since SQLite still allows one writer, so it was removed again. The flag goes after the line's `level` field.
-
-### A warning of a library, caused on purpose inside the test JVM
-
-A definition can also name a library's logger and a level below ERROR for an event inside the test JVM.
-`GRPC_CONNECTION_ACCEPTED_AS_SERVER_STOPS` is Netty's WARN "Failed to initialize a channel", which
-carries an `IllegalReferenceCountException`. A gRPC server that is stopping releases its shared
-resources and then marks itself terminated, and a connection that a worker thread prepares between
-those two steps is closed with this warning. One test of `GrpcRaftServerTest` places a connection
-exactly there and declares the warning once. Any other test that logs it has a defect in its teardown:
-see the rule on gRPC connections below.
-
-Source: `logs/docker/DockerDurableRestartTest/lock-contender.log`, lines 82 and 95-97. These are nonadjacent
-extracts; intervening cleanup messages and the first error's trace are omitted:
+An archived lock conflict, from `logs/docker/DockerDurableRestartTest/lock-contender.log`:
 
 ```text
-2026-10-08 05:18:17.122 [wal-executor] ERROR *** INTENTIONAL ERROR: CONTROLLER_STORAGE_ALREADY_LOCKED, caused by DockerDurableRestartTest *** d.mars.qraft.controller.QraftControllerService - Failed to initialize Raft storage: Cannot acquire exclusive lock on WAL directory: /app/data. Another process may be using this storage.
-Exception in thread "main" *** INTENTIONAL ERROR: CONTROLLER_STORAGE_ALREADY_LOCKED, caused by DockerDurableRestartTest *** java.util.concurrent.CompletionException: dev.mars.raftlog.storage.FileRaftStorage$StorageException: Cannot acquire exclusive lock on WAL directory: /app/data. Another process may be using this storage.
+12:00:00.000 [wal-executor] ERROR *** INTENTIONAL ERROR: SERVER_STORAGE_ALREADY_LOCKED, caused by DockerDurableRestartTest *** dev.mars.qraft.server.QraftServerService - Failed to initialize Raft storage: Cannot acquire exclusive lock on WAL directory: /app/data. Another process may be using this storage.
+Exception in thread "main" *** INTENTIONAL ERROR: SERVER_STORAGE_ALREADY_LOCKED, caused by DockerDurableRestartTest *** java.util.concurrent.CompletionException: dev.mars.raftlog.storage.FileRaftStorage$StorageException: Cannot acquire exclusive lock on WAL directory: /app/data. Another process may be using this storage.
 	at java.base/java.util.concurrent.CompletableFuture.wrapInCompletionException(Unknown Source)
-	at java.base/java.util.concurrent.CompletableFuture.encodeThrowable(Unknown Source)
 ```
 
-The corresponding replay appears in `logs/qraft-tagged-2026-10-08_13-13-20-497.log`, line 983:
+### A library's warning inside the test JVM
 
-```text
-13:19:54.442 [main] ERROR *** INTENTIONAL ERROR: CONTROLLER_STORAGE_ALREADY_LOCKED, caused by DockerDurableRestartTest *** d.mars.qraft.controller.QraftControllerService - Failed to initialize Raft storage: Cannot acquire exclusive lock on WAL directory: /app/data. Another process may be using this storage.
-```
+A definition can name a library's logger and a level below ERROR. `GRPC_CONNECTION_ACCEPTED_AS_SERVER_STOPS` is Netty's
+WARN `Failed to initialize a channel`, with an `IllegalReferenceCountException`: a stopping gRPC server releases its
+resources and then marks itself terminated, and a connection prepared between the two is closed with this warning.
+One test of `GrpcRaftServerTest` places a connection there and declares it once; in any other test it is a teardown
+defect ([PROJECT_STANDARDS.md, section 4.3](PROJECT_STANDARDS.md#43-test-isolation)).
 
-### What makes verification fail
+### Auditing a run
 
-The JUnit extension opens a scope around each test, including its teardown, and an enclosing scope around
-each test class. The Logback check records undeclared ERROR events and events carrying an undeclared
-exception at any level. Problems logged outside a scope are also checked when a class closes. The extension
-fails the test or class for those problems or unmet expected counts, even if its normal assertions passed.
-It also refuses a test runtime without the required started logging check attached to the root logger.
-Docker auditing separately rejects undeclared or unparseable ERROR entries, unmatched uncaught exceptions,
-and undeclared events below ERROR that carry a stack trace.
+No audit checker is committed. Whoever accepts a run reads its logs to these rules:
 
-Review the captured Maven output, application logs, subprocess logs, and Docker archives. Check that error
-headers carry the expected flag and identify the responsible test, and that their messages and traces
-describe the failure the test deliberately caused. Every unflagged error requires investigation and
-remediation; declaring a broad expectation merely to make an unrelated failure pass is not acceptable.
+- **What to read:** the captured Maven output of every suite, every `logs/qraft-maven-tests-*.log` the run wrote, the
+  helper-JVM folders, every archive under `logs/docker/`, and the Surefire reports. For a Jenkins build, download its
+  artifacts first ([JENKINS.md](JENKINS.md)).
+- **What counts:** every line holding the word `error` or `fatal`, in any case, and every stack trace, at any level.
+  Each must carry a flag, or sit under an event whose header carries one.
+- **Known lines under a flagged header:** the second line of gRPC's two-line exception message, `Channel Pipeline:
+  ...`; and the `InjectedFaultFixture` line of an injected failure, whose flag is on the line before.
+- **Crash files:** look for `hs_err_pid*`, `replay_pid*` and `*.dumpstream`. Any one is a defect.
+- **Totals:** Surefire counts a class whose log audit fails at class close as one more test, beside its methods.
 
-The earlier 2026-10-08 verification, from which the extracts above were taken, ran 845 default tests and
-31 tagged tests with no failures, errors, or skips;
-coverage checks passed. Reviewing 80 log files found 543 flagged ERROR entries, 322 exception headers
-belonging to flagged events, and one flagged uncaught exception, with no unflagged errors or exceptions.
-The ERROR count includes duplicate copies across console captures, application logs, and Docker archives;
-it is not a count of unique failures. These figures describe that run, not fixed expectations for future runs.
+Check that each flag names the responsible test, and that its message and trace describe the failure that test caused.
+An unflagged error is investigated and fixed. It is not dismissed as noise, filtered, lowered in severity, or covered
+by a broader declaration. When evidence shows that a test causes it on purpose, give it its own definition and
+declaration, then audit the run again.
 
-Phase 3's first Raft/state slice verification on 2026-10-08 passed 854 default tests, all coverage gates, and all 31 tagged
-tests on a fresh runtime image. Its captures are `qraft-phase3-final-clean-2026-10-08_16-03-01-464.log` and
-`qraft-phase3-final-tagged-2026-10-08_16-04-37-245.log`. Reading all 80 logs from that verification window
-found 581 flagged ERROR headers, 357 exception headers belonging to flagged events, one flagged uncaught
-rethrow, and zero unflagged errors or exceptions. Earlier failed runs remain as evidence of the defects
-remediated during verification; their failures are recorded in the Phase 3 implementation task list.
+## Mutation testing with PIT
 
-The subsequent shutdown/audit defect follow-up passed 75 focused tests and two further runs of all 29
-concurrency tests. Its clean build passed 863 default tests and all coverage gates; its fresh-image
-`docker,e2e,slow` run passed 31 tagged tests, for 894 tests with zero failures, errors, or skips.
-Captures: `qraft-review-default-2026-10-08_17-35-33-237.log` and
-`qraft-review-tagged-2026-10-08_17-37-10-226.log`. All 86 logs written during that successful verification
-window were audited: 567 flagged ERROR headers, 377 exception headers under flagged events, one flagged
-uncaught rethrow, and zero unflagged errors or exceptions. The focused RED run is retained separately as
-diagnostic evidence of the defects; it is not counted as successful verification.
-
-## Phase 3 package and startup contracts
-
-- `PackageDependencyTest` scans compiled production references in the six final package trees:
-  `common`, `client`, `server`, `raft`, `state`, and `runtime`. Compiled mutation fixtures
-  prove that both Raft and State dependencies on server HTTP fail, alongside other forbidden edges.
-- `ProtocolPackageTest` checks generated Java ownership and unchanged `qraft.raft.RaftService` /
-  `qraft.api.DistributedStateService` names. `LegacyCatalogFixtureTest` retains immutable command
-  and snapshot bytes and hashes.
-- `RuntimeLoggingTest` starts each real mode in a fresh JVM through
-  `RuntimeLoggingProcessFixture`, using production Logback. It checks the configured directory
-  and mode filenames from the first configuration event: `qraft-server.log/json` or
-  `qraft-client.log/json`. Child console and file logs are retained under
-  `logs/phase3-runtime-process-<mode>-<id>/` and reprinted in the Maven capture.
-- `LoggingConfigurationTest` checks UTF-8, available appenders, no settings that drop errors,
-  and compressed rolling files under `archive/`.
-- `TelemetryConfigTest` exercises the real enabled SDK, disabled telemetry, and resource cleanup
-  after Prometheus binding or global SDK registration fails.
-- `DockerDeploymentContractTest` covers server DNS/configuration/dashboard names, dynamic fixture
-  service names, launcher dispatch, and the client's `client` / `servers`
-  configuration objects. Its Docker-tagged contract validates every maintained Compose model.
-- Historical log extracts above retain their original package/class names. Current production
-  classes use the final packages; the intentional-error flag format and attribution rules are unchanged.
-
-Whole Phase 3 verification completed on 2026-10-08: 876 default tests with all coverage gates and
-32 fresh-image `docker,e2e,slow` tests passed, with zero failures, errors, or skips. A separate 47-test
-lifecycle/concurrency repeat also passed. Final captures are
-`logs/qraft-phase3-verified-default-2026-10-08_19-28-47-852.log` and
-`logs/qraft-phase3-verified-tagged-2026-10-08_19-30-33-972.log`; the repeat is
-`logs/qraft-phase3-complete-repeat-2026-10-08_19-15-23-119.log`.
-Actual Surefire XML is retained in `logs/phase3-final-evidence/default/` and `tagged/`, independently
-confirming 908 tests in 139 distinct classes. Preserve separate copies because later suites can
-overwrite reports for a class with both default and tagged cases.
-
-The final successful-window audit covered 87 retained Maven, application, subprocess, and Docker logs:
-449 explicitly flagged ERROR headers, 301 exception headers attributed to flagged events, one flagged
-uncaught rethrow, and zero unflagged errors or exceptions. Counts include duplicate captures. Both
-fresh-JVM JSON logs were also parsed: 54 events with no ERROR or stack trace. The earlier failed Docker
-run revealed two migrated logger signatures still naming the old server logger. After failing
-regressions, the definitions now use `QraftServerService.class.getName()` with their existing exact
-message patterns and severity; all nine durable-restart cases and their log audit passed in the final run.
-
-## Rules for tests
-
-- **Every error must be explicitly flagged intentional.** The logging audit fails on an undeclared ERROR
-  or an event carrying an undeclared exception, even when the test assertions pass. Every other error
-  requires remediation. See [Intentional error flags and log auditing](#intentional-error-flags-and-log-auditing)
-  for declarations, subprocess and Docker requirements, log extracts, and audit checks.
-- **No Mockito.** Use real objects, or small hand-written fakes such as `HeldRaftTransportFixture`.
-- **No flaky tests.** A test that fails only sometimes is a defect. Find the race, check whether production
-  code has it too, and make the test deterministic.
-- **A Docker test that kills a server and starts it again waits for first snapshots first.** Call
-  `DockerHealthApiHelper.awaitFirstSnapshotOnEveryServer` before the kill. A server killed while it
-  writes its first snapshot restarts from its log, and one killed later restarts from its snapshot. The
-  wait keeps every run on the second path, so a test does not take one or the other by timing. The first
-  path has its own tests, which place the kill exactly ([TEST-RESULTS.md](TEST-RESULTS.md)).
-- **A test that stops a gRPC server has no connection half made.** A call that fails before it is
-  sent, such as one with a deadline already passed, still makes its channel start connecting. Stopping
-  the server while it accepts that connection can log Netty's "Failed to initialize a channel". Wait
-  until the channel is ready before the test can end, as `GrpcRaftServerTest.startServerAndConnect`
-  does, or complete a call.
-- **Raft timing uses manual timers** (`ManualRaftClusterFixture`, `ManualRaftTimersHelper`). A test fires an election or
-  heartbeat itself, and doesn't wait for one on the clock.
-- **Real-time waits are rare and bounded.** They belong only to the runtime end-to-end tests and the
-  Docker suite, which wait out real TTLs and elections. Everywhere else, a wait's bound exists only to
-  report a hang.
+PIT is shelved at the owner's decision: do not run, extend or propose it. Its configuration stays in `pom.xml`
+(profiles `mutation-testing` and `pit-batch-01` to `pit-batch-05`) and in the Jenkinsfile's `MUTATION_TESTING`
+parameter, which stays `off`.
