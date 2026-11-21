@@ -306,7 +306,7 @@ class RaftNodeOutboundSnapshotGenerationTest {
     /**
      * Re-elects the node in a later term and waits until the new leadership's no-op has committed, so no
      * replication of it can move the peer's indexes during the test. The entries the peer rejected are
-     * uncommitted, so a new leader always appends that no-op (design section 14.3).
+     * uncommitted, so a new leader always appends that no-op (design section 10.3).
      *
      * @return the peer's next index, which a fresh leadership sets just past its log
      */
