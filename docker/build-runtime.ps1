@@ -6,11 +6,13 @@ $pom = Join-Path $repositoryRoot "pom.xml"
 $artifact = Join-Path $repositoryRoot "target/qraft.jar"
 
 # A JAR newer than the POM and every production source is current. Packaging again would rewrite target/
-# under a Maven build that is running in this tree.
+# under a Maven build that is running in this tree. The interface's node_modules is not a source: every mvn test
+# installs it again from its lockfile, which is the source, as SharedDockerClusterFixture also counts it.
 if (Test-Path -LiteralPath $artifact -PathType Leaf) {
     $built = (Get-Item -LiteralPath $artifact).LastWriteTimeUtc
     $inputs = @(Get-Item -LiteralPath $pom) +
-        @(Get-ChildItem -LiteralPath (Join-Path $repositoryRoot "src/main") -Recurse -File)
+        @(Get-ChildItem -LiteralPath (Join-Path $repositoryRoot "src/main") -Recurse -File |
+            Where-Object { $_.FullName -notmatch '[\\/]node_modules[\\/]' })
     if (-not ($inputs | Where-Object { $_.LastWriteTimeUtc -gt $built } | Select-Object -First 1)) {
         Write-Host "Host-built artifact is current: $artifact" -ForegroundColor Cyan
         return
