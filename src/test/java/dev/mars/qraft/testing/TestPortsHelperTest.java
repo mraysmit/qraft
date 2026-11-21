@@ -29,20 +29,20 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Tests {@link TestPorts}. Jenkins build 85 failed {@code KubernetesAuthEndToEndTest} when the kernel offered port
- * 35461 for server2's API gRPC port after the test had already given it to server1's Raft port, which server1 had
+ * Tests {@link TestPortsHelper}. Jenkins build 85 failed {@code KubernetesAuthEndToEndTest} when the kernel offered
+ * port 35461 for server2's API gRPC port after the test had already given it to server1's Raft port, which server1 had
  * bound by then.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-20
  * @version 1.0
  */
-class TestPortsTest {
+class TestPortsHelperTest {
 
     @Test
     void aPortTheSourceOffersAgainIsSkippedForTheNextOne() throws IOException {
         Iterator<Integer> offers = List.of(35461, 35461, 39659).iterator();
-        TestPorts ports = new TestPorts(offers::next);
+        TestPortsHelper ports = new TestPortsHelper(offers::next);
 
         assertEquals(35461, ports.next());
         assertEquals(39659, ports.next());
@@ -50,7 +50,7 @@ class TestPortsTest {
 
     @Test
     void aSourceThatOffersOnlyPortsAlreadyGivenOutIsRefusedRatherThanAskedForever() throws IOException {
-        TestPorts ports = new TestPorts(() -> 35461);
+        TestPortsHelper ports = new TestPortsHelper(() -> 35461);
         ports.next();
 
         IOException refused = assertThrows(IOException.class, ports::next);
@@ -60,6 +60,6 @@ class TestPortsTest {
     @Test
     void theSystemsPortsAreAllDistinct() throws IOException {
         Set<Integer> seen = new HashSet<>();
-        for (int i = 0; i < 200; i++) assertTrue(seen.add(TestPorts.freePort()), "port given out twice");
+        for (int i = 0; i < 200; i++) assertTrue(seen.add(TestPortsHelper.freePort()), "port given out twice");
     }
 }
