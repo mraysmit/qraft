@@ -5,7 +5,7 @@
 **Last updated:** 2026-11-08 (the final run recorded, and the list complete and archived. Earlier the same day: Phases 1 to 4 done and recorded; started the same day)
 **Follows:** [`task-list-observability-2026-11-08.md`](task-list-observability-2026-11-08.md)
 **Design:** [`QRAFT_EVENT_ARCHITECTURE.md`](../QRAFT_EVENT_ARCHITECTURE.md), phases 1 to 4 of section 15
-**Validation:** [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](../../docs-design/QRAFT_FEATURE_VALIDATION_2026-10-21.md), the event journal row and item 8
+**Validation:** [`QRAFT_FEATURE_VALIDATION_2026-10-21.md`](QRAFT_FEATURE_VALIDATION_2026-10-21.md), the event journal row and item 8
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
 
 ## 1. Goal
