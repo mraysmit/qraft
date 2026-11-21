@@ -539,9 +539,10 @@ class AdminUiDataContractTest {
             JsonNode events = read(api, "v1/operator/events?session=" + holder, false, management).path("events");
             List<String> types = new java.util.ArrayList<>();
             events.forEach(event -> types.add(event.path("type").asText()));
-            assertEquals(List.of("session.created", "lock.acquired", "session.destroyed"), types);
-            fields(events.get(2).path("event"), "session event", Map.of("id", Type.TEXT, "reason", Type.TEXT));
-            assertEquals("destroyed", events.get(2).path("event").path("reason").asText());
+            // The destroyed session's lock is released, and says so (code defects list, item 9).
+            assertEquals(List.of("session.created", "lock.acquired", "lock.released", "session.destroyed"), types);
+            fields(events.get(3).path("event"), "session event", Map.of("id", Type.TEXT, "reason", Type.TEXT));
+            assertEquals("destroyed", events.get(3).path("event").path("reason").asText());
         } finally {
             timers.shutdownNow();
         }
