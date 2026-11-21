@@ -771,7 +771,7 @@ final class AclApiRoutes {
         return false;
     }
 
-    private static Map<String, String> query(HttpExchange exchange) {
+    static Map<String, String> query(HttpExchange exchange) {
         String raw = exchange.getRequestURI().getRawQuery();
         Map<String, String> query = new LinkedHashMap<>();
         if (raw == null || raw.isEmpty()) return query;
