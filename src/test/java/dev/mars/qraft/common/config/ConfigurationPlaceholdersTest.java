@@ -25,9 +25,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
- * Tests that a configuration document containing an environment-style placeholder is rejected rather than
- * read literally or interpolated (design section 16). A {@code ${...}} anywhere in a string value, or in a
- * field name such as a free-form node ID, is rejected with its JSON path; a lone {@code $} is ordinary text.
+ * Tests that a configuration document containing an environment-style placeholder is rejected rather than read
+ * literally or interpolated (design principle 9 and docs/CONFIGURATION.md). A {@code ${...}} anywhere in a string
+ * value, or in a field name such as a free-form node ID, is rejected with its JSON path; a lone {@code $} is ordinary
+ * text.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-09-28
