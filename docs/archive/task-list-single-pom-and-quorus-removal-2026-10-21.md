@@ -1893,7 +1893,7 @@ open which a later one closes.
 
   **The window itself, tested 2026-10-10 at the user's request** ("The race
   condition is worrying"), and written up in
-  [`docs/TEST-RESULTS.md`](../TEST-RESULTS.md). `RaftNodeRealSnapshotRecoveryTest` has seven new
+  [`docs/TEST-RESULTS.md`](TEST-RESULTS_2026-10-10.md). `RaftNodeRealSnapshotRecoveryTest` has seven new
   tests, named `firstSnapshotCrash...`. Each halts a helper JVM at one point
   of a node's first snapshot, with real storage, and restarts the node on
   what is left. That is a kill at that exact point, every time. Every point
@@ -3082,8 +3082,8 @@ Relative file and heading links were checked, and historical records kept
 dated. No build or test was rerun for these documentation changes.
 
 **Feature/checklist records completed 2026-10-14 against `f737d6b`.**
-[The feature validation](../../docs-design/QRAFT_FEATURE_VALIDATION_2026-10-21.md) and
-[the Consul plan](../../docs-design/CONSUL_FEATURE_IMPLEMENTATION_PLAN.md) now record the native
+[The feature validation](QRAFT_FEATURE_VALIDATION_2026-10-21.md) and
+[the Consul plan](CONSUL_FEATURE_IMPLEMENTATION_PLAN.md) now record the native
 future and executor migration, test-helper removal, fenced-node diagnostics and
 native-container audit follow-up, with existing regression tests and dated
 verification evidence. Both correct the stale outstanding mutation gate for
