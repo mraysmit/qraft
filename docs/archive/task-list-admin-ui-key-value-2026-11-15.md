@@ -4,7 +4,7 @@
 **Status:** Complete and archived on 2026-11-15. Phases 0 to 3 are done, test first; Phase 0's key filter is in `3a82654` and `f45bf2a`, which Jenkins build 84 passed with a clean audit, and the rest is uncommitted. `mvn install`, the end-to-end stage and headless Chrome passed in the check copy with every log audited, none unflagged.
 **Last updated:** 2026-11-15 (Phases 2 and 3 done, the list complete and archived, its links rewritten from its new place. Earlier the same day: Phase 1 done, its install clean, and Phase 2's changes built test first. Earlier the same day: Phase 0 done, its install clean; Phase 1 steps 1 and 2 done, and decision 3's address moved to the query. Earlier the same day: Phase 0 steps 3 and 4 done, the contract and the documents. Earlier the same day: step 2 done: the value limit already existed, and decision 7 is corrected. Earlier the same day: step 1 done, the key filter; started)
 **Active work:** complete on 2026-11-15
-**Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](../../docs-design/QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-6
+**Implementation plan:** [`QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md`](QRAFT_ADMIN_UI_IMPLEMENTATION_PLAN.md), increment UI-6
 **Source plan:** [`QRAFT_ADMIN_UI_UX_DESIGN.md`](../../docs-design/QRAFT_ADMIN_UI_UX_DESIGN.md), sections 4.3, 7.1, 11 and 12; [`task-list-key-value-2026-11-08.md`](task-list-key-value-2026-11-08.md)
 **Predecessor:** [`task-list-admin-ui-access-mutations-2026-11-15.md`](task-list-admin-ui-access-mutations-2026-11-15.md) (UI-5)
 **Standards:** [`PROJECT_STANDARDS.md`](../PROJECT_STANDARDS.md)
