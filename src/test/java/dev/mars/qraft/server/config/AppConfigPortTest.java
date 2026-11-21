@@ -19,6 +19,7 @@ package dev.mars.qraft.server.config;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -68,6 +69,36 @@ class AppConfigPortTest {
         assertThrows(IllegalStateException.class, () -> validate("""
                 {"version":1,"server":{"id":"solo","http":{"port":8080},"apiGrpcPort":8080,"raft":{"port":0}}}
                 """));
+    }
+
+    /**
+     * Code defects list, item 15: the Prometheus listener, while telemetry is on, and the DNS listener, which serves
+     * TCP as well as UDP, take part in the clash check, and the refusal names the two settings.
+     */
+    @Test
+    void thePrometheusAndDnsPortsClashWithTheOthers() {
+        IllegalStateException prometheus = assertThrows(IllegalStateException.class, () -> validate("""
+                {"version":1,"server":{"id":"solo","http":{"port":9464},"telemetry":{"prometheusPort":9464}}}
+                """));
+        assertEquals("server.http.port and server.telemetry.prometheusPort are both 9464: each listener needs its "
+                + "own port", prometheus.getMessage());
+        assertValid("""
+                {"version":1,"server":{"id":"solo","http":{"port":9464},
+                 "telemetry":{"enabled":false,"prometheusPort":9464}}}
+                """);
+        IllegalStateException dns = assertThrows(IllegalStateException.class, () -> validate("""
+                {"version":1,"server":{"id":"solo","raft":{"port":8600},"dns":{"port":8600}}}
+                """));
+        assertEquals("server.raft.port and server.dns.port are both 8600: each listener needs its own port",
+                dns.getMessage());
+        IllegalStateException grpc = assertThrows(IllegalStateException.class, () -> validate("""
+                {"version":1,"server":{"id":"solo","apiGrpcPort":8600,"dns":{"port":8600}}}
+                """));
+        assertEquals("server.apiGrpcPort and server.dns.port are both 8600: each listener needs its own port",
+                grpc.getMessage());
+        assertValid("""
+                {"version":1,"server":{"id":"solo","http":{"port":0},"dns":{"port":0}}}
+                """);
     }
 
     @Test
