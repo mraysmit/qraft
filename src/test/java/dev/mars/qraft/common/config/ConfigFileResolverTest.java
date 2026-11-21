@@ -64,8 +64,9 @@ class ConfigFileResolverTest {
                 new String[]{"--config", " "}, "server", null, path -> false));
         assertThrows(IllegalArgumentException.class, () -> ConfigFileResolver.resolve(
                 new String[0], "server", " ", path -> false));
-        assertThrows(IllegalArgumentException.class, () -> ConfigFileResolver.resolve(
-                new String[]{"unexpected"}, "server", null, path -> false));
+        assertEquals("Usage: qraft server [--config <path>]", assertThrows(IllegalArgumentException.class,
+                () -> ConfigFileResolver.resolve(new String[]{"unexpected"}, "server", null, path -> false))
+                .getMessage(), "the command is qraft and the mode its first word (code defects list, item 15)");
         assertThrows(IllegalArgumentException.class, () -> ConfigFileResolver.resolve(
                 new String[0], "server", null, path -> false));
     }
