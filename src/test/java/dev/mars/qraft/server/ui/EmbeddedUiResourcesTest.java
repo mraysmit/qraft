@@ -32,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests what the build embeds for the administrative interface, read through the classloader as the server reads it
- * (task list, Step 3; design section 12.4.1): {@code index.html} and Vite's {@code asset-manifest.json} below
+ * (task list, Step 3; design section 13.2): {@code index.html} and Vite's {@code asset-manifest.json} below
  * {@code META-INF/qraft/ui/}, every file the manifest lists below {@code assets/}, and no source map. The index links
  * its entry relative to the page, which the server's {@code <base>} resolves below whatever path is configured, and
  * holds no inline script, which the content security policy would refuse.
