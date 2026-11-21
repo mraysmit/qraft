@@ -30,6 +30,7 @@ import dev.mars.qraft.common.ServiceDefinition;
 import dev.mars.qraft.common.http.JsonApi;
 import dev.mars.qraft.testing.fault.IntentionalErrorFixture;
 import dev.mars.qraft.testing.fault.IntentionalErrorsHelper;
+import dev.mars.qraft.testing.LogCapturesHelper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -512,7 +513,7 @@ class LocalRegistrationRoutesTest {
             Files.delete(temporary);
         }
 
-        ILoggingEvent logged = appender.list.getFirst();
+        ILoggingEvent logged = LogCapturesHelper.snapshot(appender).getFirst();
         assertEquals(Level.ERROR, logged.getLevel(), logged.getFormattedMessage());
         assertTrue(logged.getThrowableProxy() != null, "the failure's stack trace is kept");
     }
