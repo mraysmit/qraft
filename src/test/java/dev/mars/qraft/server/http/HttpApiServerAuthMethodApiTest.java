@@ -87,7 +87,24 @@ class HttpApiServerAuthMethodApiTest {
         }
     }
 
+    /** A token with {@code acl:write} that {@link #send} carries when a request names none. */
+    private String writer;
+
+    /**
+     * ACLs enabled, and every request sent with an {@code acl:write} token unless it names one: with ACLs disabled the
+     * routes answer 401 {@code acl_disabled}.
+     */
+    private void startWriting() throws Exception {
+        start(true);
+        writer = token("{\"acl\":\"write\"}");
+    }
+
     private void start(boolean acl) throws Exception {
+        start(acl ? new AclHttpSettings(true, dataRoot.resolve("server"), AclDefaultPolicy.DENY)
+                : AclHttpSettings.disabled());
+    }
+
+    private void start(AclHttpSettings acl) throws Exception {
         runtime = RaftExecutorsFixture.create();
         QraftStateStore store = new QraftStateStore();
         node = RaftNode.builder().stateLoop(runtime.stateLoop()).blockingTasks(runtime.blockingTasks())
@@ -98,9 +115,7 @@ class HttpApiServerAuthMethodApiTest {
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
         while (!node.isLeader() && System.nanoTime() < deadline) Thread.sleep(10);
         server = new HttpApiServer(0, node, store, Clock.systemUTC(), AdminUiConfig.disabled(), null,
-                HttpApiServer.DEFAULT_RAFT_TIMEOUT, null, acl
-                ? new AclHttpSettings(true, dataRoot.resolve("server"), AclDefaultPolicy.DENY)
-                : AclHttpSettings.disabled());
+                HttpApiServer.DEFAULT_RAFT_TIMEOUT, null, acl);
         server.start().get(10, TimeUnit.SECONDS);
     }
 
@@ -117,6 +132,7 @@ class HttpApiServerAuthMethodApiTest {
                 .method(method, body == null ? HttpRequest.BodyPublishers.noBody()
                         : HttpRequest.BodyPublishers.ofString(body));
         for (int i = 0; i < headers.length; i += 2) request.header(headers[i], headers[i + 1]);
+        if (writer != null && !List.of(headers).contains("X-Qraft-Token")) request.header("X-Qraft-Token", writer);
         return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
     }
 
@@ -144,7 +160,7 @@ class HttpApiServerAuthMethodApiTest {
 
     @Test
     void aKubernetesMethodIsWrittenAndReadWithoutItsReviewerToken() throws Exception {
-        start(false);
+        startWriting();
         String ca = java.nio.file.Files.readString(Path.of(getClass().getResource("/tls/ca.pem").toURI()));
         java.util.Map<String, String> config = java.util.Map.of("host", "https://kubernetes.default.svc", "caCert", ca,
                 "serviceAccountJwt", "reviewer-secret");
@@ -172,7 +188,7 @@ class HttpApiServerAuthMethodApiTest {
 
     @Test
     void methodsAndRulesAreWrittenReadListedAndDeleted() throws Exception {
-        start(false);
+        startWriting();
         String key = publicKeyPem();
 
         JsonNode created = ok(send("PUT", "/v1/acl/auth-method", methodBody("workloads", key)));
@@ -196,9 +212,30 @@ class HttpApiServerAuthMethodApiTest {
         refused(send("GET", "/v1/acl/binding-rule/" + id, null), 404, "binding_rule_not_found");
     }
 
+    /**
+     * Code defects list, item 11: the list read its filter only as the query's first parameter and ignored any other,
+     * so {@code ?stale&authmethod=x} listed every rule; as the other ACL lists, it takes its filter anywhere and
+     * refuses what it does not take.
+     */
+    @Test
+    void theRuleListTakesItsFilterAnywhereInTheQueryAndRefusesAnythingElse() throws Exception {
+        startWriting();
+        String key = publicKeyPem();
+        ok(send("PUT", "/v1/acl/auth-method", methodBody("workloads", key)));
+        ok(send("PUT", "/v1/acl/auth-method", methodBody("others", key)));
+        String rule = "{\"authMethod\":\"%s\",\"bindType\":\"service\",\"bindName\":\"x\"}";
+        String id = ok(send("PUT", "/v1/acl/binding-rule", rule.formatted("workloads"))).path("id").asText();
+        ok(send("PUT", "/v1/acl/binding-rule", rule.formatted("others")));
+
+        assertEquals(List.of(id), names(ok(send("GET", "/v1/acl/binding-rules?authmethod=workloads", null)), "id"));
+        refused(send("GET", "/v1/acl/binding-rules?stale&authmethod=workloads", null), 400, "invalid_query");
+        refused(send("GET", "/v1/acl/binding-rules?limit=5", null), 400, "invalid_query");
+        assertEquals(2, ok(send("GET", "/v1/acl/binding-rules", null)).size());
+    }
+
     @Test
     void whatCannotBeWrittenIsRefused() throws Exception {
-        start(false);
+        startWriting();
         String key = publicKeyPem();
         ok(send("PUT", "/v1/acl/auth-method", methodBody("workloads", key)));
 
@@ -214,6 +251,27 @@ class HttpApiServerAuthMethodApiTest {
         refused(send("PUT", "/v1/acl/binding-rule", "{\"authMethod\":\"workloads\",\"bindType\":\"group\","
                 + "\"bindName\":\"x\"}"), 400, "invalid_binding_rule");
         refused(send("DELETE", "/v1/acl/auth-method/absent", null), 404, "auth_method_not_found");
+    }
+
+    /**
+     * Code defects list, item 4: with ACLs disabled every other ACL route answers 401 {@code acl_disabled}, but these
+     * answered, and a login minted a token on a cluster that enforces none.
+     */
+    @Test
+    void withAclsDisabledEveryAuthMethodBindingRuleLoginAndLogoutRouteAnswersAclDisabled() throws Exception {
+        start(false);
+        String key = publicKeyPem();
+
+        refused(send("PUT", "/v1/acl/auth-method", methodBody("workloads", key)), 401, "acl_disabled");
+        refused(send("GET", "/v1/acl/auth-methods", null), 401, "acl_disabled");
+        refused(send("GET", "/v1/acl/auth-method/workloads", null), 401, "acl_disabled");
+        refused(send("DELETE", "/v1/acl/auth-method/workloads", null), 401, "acl_disabled");
+        refused(send("PUT", "/v1/acl/binding-rule", "{\"authMethod\":\"workloads\",\"bindType\":\"service\","
+                + "\"bindName\":\"x\"}"), 401, "acl_disabled");
+        refused(send("GET", "/v1/acl/binding-rules", null), 401, "acl_disabled");
+        refused(send("POST", "/v1/acl/login", "{\"authMethod\":\"workloads\",\"bearerToken\":\"jwt\"}"), 401,
+                "acl_disabled");
+        refused(send("POST", "/v1/acl/logout", null, "X-Qraft-Token", "secret"), 401, "acl_disabled");
     }
 
     @Test
