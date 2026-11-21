@@ -289,7 +289,8 @@ public class QraftServerService {
             GrpcServiceServer externalApiServer = new GrpcServiceServer(blockingTasks, apiGrpcPort, grpcTls,
                     AclGrpcGuard.guard(distributedStateService, aclResolver));
             this.apiGrpcServer = Optional.of(externalApiServer);
-            HttpApiServer healthServer = new HttpApiServer(config.getHttpPort(), node, stateMachine, Clock.systemUTC(),
+            HttpApiServer healthServer = new HttpApiServer(config.getHttpHost(), config.getHttpPort(), node,
+                    stateMachine, Clock.systemUTC(),
                     config.getAdminUi(), UiAssets.forConfig(config.getAdminUi()), HttpApiServer.DEFAULT_RAFT_TIMEOUT,
                     membership, new AclHttpSettings(config.isAclEnabled(), Path.of(config.getRaftStoragePath()),
                             config.getAclDefaultPolicy().orElse(null),
@@ -397,17 +398,6 @@ public class QraftServerService {
     }
 
     /**
-     * Configures the shutdown coordinator with graceful shutdown hooks.
-     * 
-     * <p>Shutdown sequence:
-     * <ol>
-    *   <li>DRAIN: No-op in gRPC core mode</li>
-     *   <li>AWAIT: Wait for any active operations to complete</li>
-    *   <li>STOP_SERVICES: Stop Raft node, gRPC server</li>
-     *   <li>CLOSE_RESOURCES: Close storage and other resources</li>
-     * </ol>
-     */
-    /**
      * Until the node has a configuration with its advertised address, attempts to bootstrap or rejoin at once and every
      * {@value #BOOTSTRAP_RETRY_MS} ms, one attempt at a time. It stops once the node is configured, whether this
      * server bootstrapped it or a leader of an existing cluster replicated it.
@@ -434,12 +424,27 @@ public class QraftServerService {
         attempt.accept(0L);
     }
 
+    /**
+     * Configures the shutdown coordinator's hooks, phase by phase:
+     * <ol>
+     *   <li>DRAIN: the HTTP API takes no new work, so readiness reports {@code draining} and a load balancer moves
+     *       callers away, and new writes are answered 503 {@code draining} (code defects list, item 7);</li>
+     *   <li>AWAIT_COMPLETION: nothing; no server-managed work remains after draining;</li>
+     *   <li>STOP_SERVICES: the expiry and token threads, the gRPC and HTTP listeners, then the Raft node,
+     *       critically;</li>
+     *   <li>CLOSE_RESOURCES: nothing; the Raft node's stop closes its storage.</li>
+     * </ol>
+     */
     private void setupShutdownCoordinator() {
         long drainTimeoutMs = config.getShutdownDrainTimeoutMs();
         long shutdownTimeoutMs = config.getShutdownTimeoutMs();
-        
+
         ShutdownCoordinator coordinator = new ShutdownCoordinator(runtime, drainTimeoutMs, shutdownTimeoutMs);
         this.shutdownCoordinator = Optional.of(coordinator);
+
+        // Phase 1: DRAIN - the HTTP API stops taking new work.
+        coordinator.onDrain("http-drain", () -> httpApiServer.map(HttpApiServer::enterDrainMode)
+                .orElseGet(QraftServerService::nothingToStop));
         
         // Phase 2: AWAIT_COMPLETION - no server-managed work remains after draining.
         
