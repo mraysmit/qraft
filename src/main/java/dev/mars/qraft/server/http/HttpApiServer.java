@@ -113,6 +113,12 @@ public final class HttpApiServer implements AutoCloseable {
     static final String FORWARDED_BY = "X-Qraft-Forwarded-By";
     static final String FORWARDED_TO = "X-Qraft-Forwarded-To";
     private static final Set<String> WRITE_METHODS = Set.of("PUT", "POST", "DELETE", "PATCH");
+    /**
+     * POST routes that read: each is answered from this server's applied state, never forwarded as a write
+     * (code defects list, item 8).
+     */
+    private static final Set<String> READ_ONLY_POSTS = Set.of("/v1/internal/acl/resolve",
+            "/v1/internal/acl/authorize", "/v1/acl/explain");
     private final ExecutorService executor;
     final ObjectMapper objectMapper = new ObjectMapper()
             .findAndRegisterModules()
@@ -316,6 +322,16 @@ public final class HttpApiServer implements AutoCloseable {
     public HttpApiServer(int port, RaftNode raftNode, QraftStateStore stateStore, Clock clock,
                          AdminUiConfig ui, UiAssets assets, Duration raftTimeout, MembershipService membership,
                          AclHttpSettings acl, Optional<ServerTls> tls, SecurityProfile profile) throws IOException {
+        this(null, port, raftNode, stateStore, clock, ui, assets, raftTimeout, membership, acl, tls, profile);
+    }
+
+    /**
+     * @param host {@code server.http.host}, the address the listener binds; {@code null}, blank or {@code 0.0.0.0}
+     *             binds every interface, IPv4 and IPv6 (code defects list, item 6)
+     */
+    public HttpApiServer(String host, int port, RaftNode raftNode, QraftStateStore stateStore, Clock clock,
+                         AdminUiConfig ui, UiAssets assets, Duration raftTimeout, MembershipService membership,
+                         AclHttpSettings acl, Optional<ServerTls> tls, SecurityProfile profile) throws IOException {
         this.profile = Objects.requireNonNull(profile, "profile");
         this.tls = Objects.requireNonNull(tls, "tls");
         this.acl = Objects.requireNonNull(acl, "acl");
@@ -335,7 +351,8 @@ public final class HttpApiServer implements AutoCloseable {
         // Without a state store every route that takes a token answers that the catalog is unavailable.
         this.resolver = acl.enabled() && stateStore != null
                 ? AclResolver.enabled(acl.defaultPolicy(), stateStore.getAcl(), clock) : AclResolver.disabled();
-        this.server = tls.isPresent() ? httpsServer(port, tls.get()) : HttpServer.create(new InetSocketAddress(port), 0);
+        InetSocketAddress listen = bindAddress(host, port);
+        this.server = tls.isPresent() ? httpsServer(listen, tls.get()) : HttpServer.create(listen, 0);
         this.executor = Executors.newVirtualThreadPerTaskExecutor();
         server.setExecutor(executor);
         context("/", requestAware(this::noRoute));
@@ -427,9 +444,14 @@ public final class HttpApiServer implements AutoCloseable {
 
     public CompletableFuture<Void> start() {
         server.start();
-        if (adminUi.enabled()) {
-            LOG.warn("Administrative interface enabled at {} and unauthenticated: it is read-only and serves only "
-                    + "data the public API already exposes", adminUi.path());
+        // The interface makes changes since UI-5. With ACLs its requests carry and are checked against the caller's
+        // token; without them, anyone who reaches the server can use it (documentation cleanup list, decision 4).
+        if (adminUi.enabled() && acl.enabled()) {
+            LOG.info("Administrative interface enabled at {}: each of its requests carries the signed-in caller's "
+                    + "token, and ACLs decide what it may read and change", adminUi.path());
+        } else if (adminUi.enabled()) {
+            LOG.warn("Administrative interface enabled at {} while ACLs are disabled: anyone who can reach this "
+                    + "server can read and change the cluster through it", adminUi.path());
         }
         return CompletableFuture.completedFuture(null);
     }
@@ -447,9 +469,15 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     public boolean isDraining() { return draining.get(); }
+    /** Where the listener binds: every interface for no host, a blank one or {@code 0.0.0.0}; else that host. */
+    private static InetSocketAddress bindAddress(String host, int port) {
+        if (host == null || host.isBlank() || host.equals("0.0.0.0")) return new InetSocketAddress(port);
+        return new InetSocketAddress(host, port);
+    }
+
     /** An HTTPS listener with {@code tls}'s material, which refuses plain HTTP (decision 2). */
-    private static HttpServer httpsServer(int port, ServerTls tls) throws IOException {
-        HttpsServer https = HttpsServer.create(new InetSocketAddress(port), 0);
+    private static HttpServer httpsServer(InetSocketAddress listen, ServerTls tls) throws IOException {
+        HttpsServer https = HttpsServer.create(listen, 0);
         https.setHttpsConfigurator(new HttpsConfigurator(tls.material().serverContext()) {
             @Override
             public void configure(HttpsParameters parameters) {
@@ -531,6 +559,7 @@ public final class HttpApiServer implements AutoCloseable {
             respondError(exchange, 405, "method_not_allowed", "Method not allowed", false);
             return;
         }
+        if (refusedForItsQuery(exchange)) return;
         AclPrincipal principal = principal(exchange);
         if (principal == null || refused(exchange, principal, OPERATOR_READ)) return;
         if (raftNode == null) {
@@ -613,11 +642,6 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     /**
-     * The membership as this server sees it (UI-3 task list, decision 5): on the leader each server's progress and the
-     * quorum; on any other server the configuration it holds, labelled a follower's view, with the leader it knows and
-     * null progress. It needs {@code operator:read}, as the autopilot read does.
-     */
-    /**
      * {@code GET /v1/operator/configuration}: this server's effective configuration, its secrets withheld, each setting
      * with its source, and since no setting changes while the server runs, each taking a restart to change.
      */
@@ -657,6 +681,11 @@ public final class HttpApiServer implements AutoCloseable {
         respondJson(exchange, 200, answer);
     }
 
+    /**
+     * The membership as this server sees it (UI-3 task list, decision 5): on the leader each server's progress and the
+     * quorum; on any other server the configuration it holds, labelled a follower's view, with the leader it knows and
+     * null progress. It needs {@code operator:read}, as the autopilot read does.
+     */
     private void raftMembers(HttpExchange exchange) throws IOException {
         if (!prepareStateRequest(exchange, "GET") || refusedForItsQuery(exchange)) return;
         AclPrincipal principal = principal(exchange);
@@ -753,7 +782,7 @@ public final class HttpApiServer implements AutoCloseable {
      * does; with them disabled it is open, like {@code /raft/status}.
      */
     private void raftConfiguration(HttpExchange exchange) throws IOException {
-        if (!prepareStateRequest(exchange, "GET")) return;
+        if (!prepareStateRequest(exchange, "GET") || refusedForItsQuery(exchange)) return;
         AclPrincipal principal = principal(exchange);
         if (principal == null || refused(exchange, principal, OPERATOR_READ)) return;
         Optional<RaftConfiguration> configuration = raftNode.getConfiguration();
@@ -959,6 +988,12 @@ public final class HttpApiServer implements AutoCloseable {
                 && refused(exchange, principal, serviceWrite(replaced.get()));
     }
 
+    /** A management token file is configured and no token in the applied state has its secret's hash. */
+    private boolean managementTokenPending() {
+        String hash = acl.managementSecretHash();
+        return hash != null && stateStore.getAcl().tokens().stream().noneMatch(t -> t.secretHash().equals(hash));
+    }
+
     /**
      * Creates the first management token, after Consul's {@code PUT /v1/acl/bootstrap} (ACL list, proposal 12). It
      * needs no token, and works once: afterwards it answers 403 {@code permission_denied}, naming the reset index. An
@@ -968,12 +1003,6 @@ public final class HttpApiServer implements AutoCloseable {
      * in this answer only, the server keeps its hash, and neither the body nor the secret is logged. With ACLs
      * disabled it answers 401 {@code acl_disabled}, as Consul's ACL endpoints do.
      */
-    /** A management token file is configured and no token in the applied state has its secret's hash. */
-    private boolean managementTokenPending() {
-        String hash = acl.managementSecretHash();
-        return hash != null && stateStore.getAcl().tokens().stream().noneMatch(t -> t.secretHash().equals(hash));
-    }
-
     private void bootstrapAcl(HttpExchange exchange) throws IOException {
         if (!prepareStateRequest(exchange, "PUT")) return;
         if (!acl.enabled()) {
@@ -1309,7 +1338,7 @@ public final class HttpApiServer implements AutoCloseable {
     }
 
     /**
-     * The five health states the interface's reads name (platform design section 7.6), in the order the summary
+     * The five health states the interface's reads name (platform design section 5.4), in the order the summary
      * gives them. {@code FAILING} is kept only so an older snapshot loads, and is counted as {@code CRITICAL}, as the
      * aggregate of an instance's checks counts it.
      */
@@ -1768,7 +1797,9 @@ public final class HttpApiServer implements AutoCloseable {
             }
             Map<String, Object> details = leaderId == null || leaderId.isBlank()
                     ? Map.of() : Map.of("leaderId", leaderId);
-            respondError(exchange, 503, "outcome_unknown", safeMessage(cause), true, details);
+            // It may have been applied, so it is not a retryable refusal (design section 9.1): a caller reads the
+            // state or replays an idempotent request.
+            respondError(exchange, 503, "outcome_unknown", safeMessage(cause), false, details);
             return;
         }
         if (leaderId == null || leaderId.isBlank()) {
@@ -1914,6 +1945,7 @@ public final class HttpApiServer implements AutoCloseable {
         if (forwarder == null || raftNode == null || draining.get()) return false;
         String method = exchange.getRequestMethod().toUpperCase(java.util.Locale.ROOT);
         if (!WRITE_METHODS.contains(method) || raftNode.isLeader()) return false;
+        if (READ_ONLY_POSTS.contains(exchange.getRequestURI().getPath())) return false;
         if (exchange.getRequestHeaders().containsKey(FORWARDED_BY)) {
             respondError(exchange, 503, "leader_unavailable", "A write forwarded by "
                     + exchange.getRequestHeaders().getFirst(FORWARDED_BY) + " reached " + raftNode.getNodeId()
@@ -1973,7 +2005,7 @@ public final class HttpApiServer implements AutoCloseable {
                 exchange.getResponseHeaders().set("X-Qraft-Leader-Id", leader);
                 respondError(exchange, 503, "outcome_unknown", "The write sent to the leader " + leader
                         + " was not answered before this server stopped following it, and may have been applied",
-                        true, Map.of("leaderId", leader));
+                        false, Map.of("leaderId", leader));
                 return true;
             }
             answer = forward.get();
@@ -1981,7 +2013,7 @@ public final class HttpApiServer implements AutoCloseable {
             Thread.currentThread().interrupt();
             exchange.getResponseHeaders().set("X-Qraft-Leader-Id", leader);
             respondError(exchange, 503, "outcome_unknown", "The write sent to the leader " + leader
-                    + " was interrupted, and may have been applied", true, Map.of("leaderId", leader));
+                    + " was interrupted, and may have been applied", false, Map.of("leaderId", leader));
             return true;
         } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException failed) {
             Throwable cause = failed.getCause() == null ? failed : failed.getCause();
@@ -1995,7 +2027,7 @@ public final class HttpApiServer implements AutoCloseable {
                 // Sent, and perhaps applied, as a commit that times out on the leader may be.
                 LOG.info("A write forwarded to the leader {} was not answered: {}", leader, safeMessage(cause));
                 respondError(exchange, 503, "outcome_unknown", "The write sent to the leader " + leader
-                        + " was not answered, and may have been applied: " + safeMessage(cause), true,
+                        + " was not answered, and may have been applied: " + safeMessage(cause), false,
                         Map.of("leaderId", leader));
             }
             return true;
@@ -2102,7 +2134,7 @@ public final class HttpApiServer implements AutoCloseable {
             body.transferTo(java.io.OutputStream.nullOutputStream());
         }
         if (adminUi.enabled() && "/".equals(exchange.getRequestURI().getPath())) {
-            // The origin's root opens the interface when it is enabled (design section 12.4.1; UI-3 task list,
+            // The origin's root opens the interface when it is enabled (design section 13.2; UI-3 task list,
             // decision 2). Only a read is redirected.
             String method = exchange.getRequestMethod();
             if ("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method)) {
