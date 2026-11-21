@@ -21,7 +21,7 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * One session (sessions list, Phase 1; design section 11), as Consul's: an ID, the node it is bound to, a name, what
+ * One session (sessions list, Phase 1; design section 5.6), as Consul's: an ID, the node it is bound to, a name, what
  * becomes of its keys when it is invalidated, its TTL, which zero means it has none, and the lock delay its keys keep
  * after it is invalidated.
  *
