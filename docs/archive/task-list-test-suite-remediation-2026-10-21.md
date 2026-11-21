@@ -3,7 +3,7 @@
 **Date:** 2026-09-27
 **Last updated:** 2026-10-21 (dated document links refreshed and file renamed; historical findings and completion dates retained)
 **Active work:** None. Steps 1 to 8 are complete. Archived 2026-10-02 with the user's agreement.
-**Source review:** [`QRAFT_TEST_SUITE_REVIEW_2026-10-21.md`](../../docs-design/QRAFT_TEST_SUITE_REVIEW_2026-10-21.md), sections 3 to 7
+**Source review:** [`QRAFT_TEST_SUITE_REVIEW_2026-10-21.md`](QRAFT_TEST_SUITE_REVIEW_2026-10-21.md), sections 3 to 7
 **Predecessor, run alongside:** [`task-list-platform-hygiene-and-readiness-2026-10-21.md`](task-list-platform-hygiene-and-readiness-2026-10-21.md), archived 2026-09-28
 **Successor:** [`task-list-raft-membership-changes-2026-10-24.md`](task-list-raft-membership-changes-2026-10-24.md)
 **Paused:** [`task-list-embedded-admin-interface-2026-11-14.md`](task-list-embedded-admin-interface-2026-11-14.md), after its Step 1
