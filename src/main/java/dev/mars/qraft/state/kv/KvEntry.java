@@ -20,7 +20,7 @@ import java.util.Arrays;
 import java.util.Objects;
 
 /**
- * One key/value entry (key/value list, Phase 1; design section 10), as Consul's KV store keeps it.
+ * One key/value entry (key/value list, Phase 1; design section 5.5), as Consul's KV store keeps it.
  *
  * @param tenant      the entry's tenant
  * @param namespace   the entry's namespace
