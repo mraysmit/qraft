@@ -46,7 +46,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.jar.JarFile;
 import java.util.stream.Stream;
 
-import static dev.mars.qraft.testing.TestPorts.freePort;
+import static dev.mars.qraft.testing.TestPortsHelper.freePort;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -56,12 +56,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * The shaded runtime JAR, started with {@code java -jar} from a directory that holds only its configuration, serves the
  * administrative interface from the resources packaged in it; a server with the interface disabled, and a client, serve
- * none of its routes (design section 19.6; the interface's task list, Step 5); and the packaged server answers the
- * configuration it was started from with its secret withheld (UI-4 task list, Phase 3); and, with ACLs on, answers the
- * calls the interface makes once signed in with the management token from its file (UI-5 task list, Phase 4), and,
- * with an audit file, the Tenants, Namespaces and Audit pages' calls (UI-6 Tenants, Namespaces and Audit task list,
- * Phase 4). Run after {@code mvn install}, as the end-to-end stage is, against the {@code target/qraft.jar} that build
- * packaged.
+ * none of its routes (docs/TESTING.md, "The Docker suite"; the interface's task list, Step 5); and the packaged server
+ * answers the configuration it was started from with its secret withheld (UI-4 task list, Phase 3); and, with ACLs on,
+ * answers the calls the interface makes once signed in with the management token from its file (UI-5 task list, Phase
+ * 4), and, with an audit file, the Tenants, Namespaces and Audit pages' calls (UI-6 Tenants, Namespaces and Audit task
+ * list, Phase 4). Run after {@code mvn install}, as the end-to-end stage is, against the {@code target/qraft.jar} that
+ * build packaged.
  *
  * @author Mark Andrew Ray-Smith Cityline Ltd
  * @since 2026-11-14
